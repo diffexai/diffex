@@ -1,10 +1,11 @@
-> pi can create TUI components. Ask it to build one for your use case.
+> Diffex can create TUI components.
+> Ask it to build one for your use case.
 
 # TUI Components
 
 Extensions and custom tools can render custom TUI components for interactive user interfaces. This page covers the component system and available building blocks.
 
-**Source:** [`@earendil-works/pi-tui`](https://github.com/earendil-works/pi-mono/tree/main/packages/tui)
+**Source:** [`@earendil-works/pi-tui`](https://github.com/diffexai/diffex/tree/main/packages/tui)
 
 ## Component Interface
 
@@ -761,7 +762,7 @@ ctx.ui.setStatus("my-ext", undefined);
 
 ### Pattern 4b: Working Indicator Customization
 
-Customize the inline working indicator shown while pi is streaming a response.
+Customize the inline working indicator shown while Diffex is streaming a response.
 
 ```typescript
 // Static indicator
@@ -781,7 +782,7 @@ ctx.ui.setWorkingIndicator({
 // Hide the indicator entirely
 ctx.ui.setWorkingIndicator({ frames: [] });
 
-// Restore pi's default spinner
+// Restore Diffex's default spinner
 ctx.ui.setWorkingIndicator();
 ```
 

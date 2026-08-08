@@ -16,7 +16,7 @@ const BRAILLE_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", 
 function getBaseTitle(pi: ExtensionAPI): string {
 	const cwd = path.basename(process.cwd());
 	const session = pi.getSessionName();
-	return session ? `π - ${session} - ${cwd}` : `π - ${cwd}`;
+	return session ? `Diffex - ${session} - ${cwd}` : `Diffex - ${cwd}`;
 }
 
 export default function (pi: ExtensionAPI) {
@@ -38,7 +38,7 @@ export default function (pi: ExtensionAPI) {
 			const frame = BRAILLE_FRAMES[frameIndex % BRAILLE_FRAMES.length];
 			const cwd = path.basename(process.cwd());
 			const session = pi.getSessionName();
-			const title = session ? `${frame} π - ${session} - ${cwd}` : `${frame} π - ${cwd}`;
+			const title = session ? `${frame} Diffex - ${session} - ${cwd}` : `${frame} Diffex - ${cwd}`;
 			ctx.ui.setTitle(title);
 			frameIndex++;
 		}, 80);

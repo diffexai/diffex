@@ -1,6 +1,6 @@
 # Sessions
 
-Pi saves conversations as sessions so you can continue work, branch from earlier turns, and revisit previous paths.
+Diffex saves conversations as sessions so you can continue work, branch from earlier turns, and revisit previous paths.
 
 ## Session Storage
 
@@ -32,7 +32,7 @@ For the JSONL file format and SessionManager API, see [Session Format](session-f
 | `/clone` | Duplicate the current active branch into a new session |
 | `/compact [prompt]` | Summarize older context; see [Compaction](compaction.md) |
 | `/export [file]` | Export session to HTML |
-| `/share` | Upload as private GitHub gist with shareable HTML link |
+| `/share` | Upload as a private GitHub Gist and return its URL |
 
 ## Resuming and Deleting Sessions
 
@@ -47,7 +47,7 @@ In the picker you can:
 - rename with Ctrl+R
 - delete with Ctrl+D, then confirm
 
-When available, pi uses the `trash` CLI for deletion instead of permanently removing files.
+When available, Diffex uses the `trash` CLI for deletion instead of permanently removing files.
 
 ## Naming Sessions
 
@@ -128,7 +128,8 @@ Use `/tree` when you want to keep alternatives together. Use `/fork` or `/clone`
 
 ## Branch Summaries
 
-When `/tree` switches away from one branch to another, pi can summarize the abandoned branch and attach that summary at the new position. This preserves important context from the path you left without replaying the whole branch.
+When `/tree` switches away from one branch to another, Diffex can summarize the abandoned branch and attach that summary at the new position.
+This preserves important context from the path you left without replaying the whole branch.
 
 When prompted, choose one of:
 

@@ -45,7 +45,9 @@
 
 ## Git
 
-Multiple pi sessions may be running in this cwd at the same time, each modifying different files. Git operations that touch unstaged, staged, or untracked files outside your own changes will stomp on other sessions' work. Follow these rules:
+Multiple Diffex sessions may be running in this cwd at the same time, each modifying different files.
+Git operations that touch unstaged, staged, or untracked files outside your own changes will stomp on other sessions' work.
+Follow these rules:
 
 Committing:
 
@@ -89,7 +91,7 @@ When closing issues via commit:
 
 - Include `fixes #<number>` or `closes #<number>` in the message so merging auto-closes the issue. For multiple issues, repeat the keyword per issue (`closes #1, closes #2`); a shared keyword (`closes #1, #2`) only closes the first.
 
-## Testing pi Interactive Mode with tmux
+## Testing Diffex Interactive Mode with tmux
 
 Run the TUI in a controlled terminal (from the repo root):
 
@@ -115,8 +117,8 @@ Rules:
 
 Attribution:
 
-- Internal (from issues): `Fixed foo bar ([#123](https://github.com/earendil-works/pi-mono/issues/123))`
-- External contributions: `Added feature X ([#456](https://github.com/earendil-works/pi-mono/pull/456) by [@username](https://github.com/username))`
+- Internal (from issues): `Fixed foo bar ([#123](https://github.com/diffexai/diffex/issues/123))`
+- External contributions: `Added feature X ([#456](https://github.com/diffexai/diffex/pull/456) by [@username](https://github.com/username))`
 
 ## Releasing
 
@@ -154,9 +156,14 @@ Attribution:
 
    The release script bumps all package versions, updates changelogs, regenerates release artifacts, runs `npm run check`, commits `Release vX.Y.Z`, tags `vX.Y.Z`, adds fresh `## [Unreleased]` changelog sections, commits `Add [Unreleased] section for next cycle`, then pushes `main` and the tag. Do not rerun the release script after a tag was pushed.
 
-4. **CI verifies and announces the npm release**: pushing the `vX.Y.Z` tag triggers `.github/workflows/build-binaries.yml`. The `publish-npm` job uses npm trusted publishing through GitHub Actions OIDC with environment `npm-publish`; no local `npm publish`, `npm whoami`, OTP, or WebAuthn flow is required. After publishing, `announce-pi-dev-release` verifies every public workspace package resolves at the exact release version and that its npm tarball is available, then writes the verified release marker to R2. `pi.dev/api/latest-version` reads that marker; it must never announce a release from npm before this job succeeds.
+4. **CI publishes npm packages and the GitHub release**: pushing the `vX.Y.Z` tag triggers `.github/workflows/build-binaries.yml`.
+   The `publish-npm` job uses npm trusted publishing through GitHub Actions OIDC with environment `npm-publish`; no local `npm publish`, `npm whoami`, OTP, or WebAuthn flow is required.
+   After npm publication succeeds, the workflow publishes the staged GitHub release and its binary assets.
 
-5. **If CI publish or announcement fails**: inspect the failed job. The publish helper is idempotent and skips package versions already present on npm; the announcement job rechecks availability before updating the R2 marker. Rerun the failed job or workflow after fixing CI or transient npm issues. Do not rerun `npm run release:patch` or `npm run release:minor` for the same version.
+5. **If CI publication fails**: inspect the failed job.
+   The publish helper is idempotent and skips package versions already present on npm.
+   Rerun the failed job or workflow after fixing CI or transient npm issues.
+   Do not rerun `npm run release:patch` or `npm run release:minor` for the same version.
 
 ## User Override
 

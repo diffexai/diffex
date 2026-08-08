@@ -1,5 +1,5 @@
 /**
- * Syncs pi theme with macOS system appearance (dark/light mode).
+ * Syncs the Diffex theme with macOS system appearance (dark/light mode).
  *
  * Usage:
  *   pi -e examples/extensions/mac-system-theme.ts

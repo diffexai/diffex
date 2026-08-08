@@ -5,13 +5,13 @@
  *
  * Test with: npx tsx src/cli-new.ts [args...]
  */
-import { APP_NAME } from "./config.ts";
+import { APP_TITLE } from "./config.ts";
 import { configureHttpDispatcher } from "./core/http-dispatcher.ts";
 import { main } from "./main.ts";
 
-process.title = APP_NAME;
+process.title = APP_TITLE;
 process.env.PI_CODING_AGENT = "true";
-process.env.AI_AGENT = "pi";
+process.env.AI_AGENT = "diffex";
 process.emitWarning = (() => {}) as typeof process.emitWarning;
 
 // Configure undici's global dispatcher before provider SDKs issue requests.

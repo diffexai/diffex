@@ -56,7 +56,7 @@ export async function recordEvalSessionArtifact(
 	const session = run.artifacts?.[PI_SESSION_SNAPSHOT_ARTIFACT];
 	if (session === undefined) return;
 	if (typeof runId !== "string" || typeof session !== "string") {
-		throw new TypeError("Pi eval session artifact metadata is invalid.");
+		throw new TypeError("Diffex eval session artifact metadata is invalid.");
 	}
 	await recordArtifact(task, {
 		type: "@earendil-works/pi-evals:session",

@@ -111,7 +111,7 @@ export function hasAuthForProvider(provider: string): boolean {
 	return provider in storage;
 }
 
-/** Path to the real pi agent config directory */
+/** Path to the real Diffex config directory */
 export const PI_AGENT_DIR = join(homedir(), ".pi", "agent");
 
 /**

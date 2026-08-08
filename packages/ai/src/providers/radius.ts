@@ -3,7 +3,6 @@ import { envApiKeyAuth, lazyOAuth } from "../auth/helpers.ts";
 import { loadRadiusOAuth } from "../auth/oauth/load.ts";
 import type { Provider } from "../models.ts";
 import {
-	DEFAULT_RADIUS_GATEWAY,
 	getRadiusModels,
 	getRadiusModelsFromConfig,
 	loadRadiusGatewayConfig,
@@ -13,14 +12,14 @@ import {
 export interface RadiusProviderOptions {
 	id?: string;
 	name?: string;
-	gateway?: string;
+	gateway: string;
 }
 
 /** Radius gateway provider with a persisted, dynamically refreshed catalog. */
-export function radiusProvider(options: RadiusProviderOptions = {}): Provider<"pi-messages"> {
+export function radiusProvider(options: RadiusProviderOptions): Provider<"pi-messages"> {
 	const id = options.id ?? "radius";
 	const name = options.name ?? "Radius";
-	const gateway = normalizeRadiusGatewayUrl(options.gateway ?? DEFAULT_RADIUS_GATEWAY);
+	const gateway = normalizeRadiusGatewayUrl(options.gateway);
 	let models = getRadiusModels(id, undefined);
 	const streams = piMessagesApi();
 

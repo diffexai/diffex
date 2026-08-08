@@ -23,7 +23,7 @@ The harness executes runs against one session. The session holds four kinds of s
 ## 1. Goals
 
 - **Durable runs.** An accepted prompt is a durable operation. After a crash, a new process restores the session. It resumes the run from the last safe boundary. Every state that a crash can produce is recoverable.
-- **Lanes.** A session hosts one or more lanes. A lane is a named position in the conversation tree. Each lane runs at most one operation at a time. Lanes run in parallel. A run and its queued messages belong to the lane that accepted them. Example: a Slack channel is a session; each thread is a lane. Interactive pi uses one lane and does not show the concept in its UI. Extensions get the full harness API, including lanes. Example: a subagent tool runs on a second lane of its parent's session.
+- **Lanes.** A session hosts one or more lanes. A lane is a named position in the conversation tree. Each lane runs at most one operation at a time. Lanes run in parallel. A run and its queued messages belong to the lane that accepted them. Example: a Slack channel is a session; each thread is a lane. Interactive Diffex uses one lane and does not show the concept in its UI. Extensions get the full harness API, including lanes. Example: a subagent tool runs on a second lane of its parent's session.
 - **No partial outcomes.** A crash inside any operation — run, compaction, navigation — leaves one of two states: the operation has not happened, or recovery can complete it. Nothing in between is observable.
 - **Harness API.** Events observe execution and cannot change it. Hooks intercept execution and can change it: context, requests, tools, run boundaries. Extensions build on events and hooks.
 - **Deterministic stepping.** Every effect — durable write, provider request, tool execution, hook, timer — crosses one injected boundary. In `drive: "manual"` the harness parks before each effect and a test drives it call by call: stop at any boundary, inject input, or close and reopen to simulate a crash. Production and tests run the same procedures; the drive mode only controls the boundary (section 15).
@@ -456,7 +456,10 @@ function isRecoverableLength(message: AssistantMessage, desiredMaxOutput: number
 }
 ```
 
-`desiredMaxOutput` is the caller-supplied `maxTokens` when set, else `model.maxTokens` — the intended limit **before** any context clamping. The value actually sent can never be the reference: some providers reject an explicit output cap outright (the OpenAI Codex backend returns HTTP 400 for `max_output_tokens`), and Pi clamps others to the remaining context. This covers a context-clamped request that returns 16 reasoning tokens against a 128k intent (recover), a Xiaomi/Qwen-style `length` with zero output (recover), and an explicit 1,024 cap fully used (genuine stop) — with no context-percentage heuristics. Overflow-form errors — a provider rejection matching the overflow patterns, or a silent success whose prompt exceeds the window — classify the same way and take the same path.
+`desiredMaxOutput` is the caller-supplied `maxTokens` when set, else `model.maxTokens`, the intended limit **before** any context clamping.
+The value actually sent can never be the reference: some providers reject an explicit output cap outright (the OpenAI Codex backend returns HTTP 400 for `max_output_tokens`), and Diffex clamps others to the remaining context.
+This covers a context-clamped request that returns 16 reasoning tokens against a 128k intent (recover), a Xiaomi/Qwen-style `length` with zero output (recover), and an explicit 1,024 cap fully used (genuine stop), with no context-percentage heuristics.
+Overflow-form errors, either a provider rejection matching the overflow patterns or a silent success whose prompt exceeds the window, classify the same way and take the same path.
 
 A recoverable response is **discarded**: like a retryable error, it never becomes an entry, so nothing has to be scrubbed from context on retry, live or after a crash. Its provisioned result id stays unfulfilled; its cost is already durable in the `usage` record written when the request settled (section 5).
 
@@ -1063,7 +1066,7 @@ interface SuspendedOperation {
 ### Examples
 
 ```ts
-// Interactive pi. suspended has 0 or 1 entries, always "main".
+// Interactive Diffex. suspended has 0 or 1 entries, always "main".
 const { harness, suspended } = await AgentHarness.create({ session, models, model });
 for (const s of suspended) await (await harness.lane(s.lane))!.resume();
 await harness.prompt("fix the bug");
@@ -2751,13 +2754,23 @@ repo.create({ id?, parentSessionId? }): Promise<Session>;
 
 ## 18. Telemetry
 
-Telemetry uses explicit context propagation. Core code does not use `AsyncLocalStorage`, global current-span state, or runtime-specific context APIs: pi runs in Node, Bun, browsers, and workers, so no runtime's ambient-context mechanism can be the core abstraction. An adapter may use ambient context internally — for example, an OpenTelemetry adapter may activate its native child context so HTTP auto-instrumentation attaches correctly — but pi always passes the parent explicitly.
+Telemetry uses explicit context propagation.
+Core code does not use `AsyncLocalStorage`, global current-span state, or runtime-specific context APIs: Diffex runs in Node, Bun, browsers, and workers, so no runtime's ambient-context mechanism can be the core abstraction.
+An adapter may use ambient context internally, for example by activating its native child context so HTTP auto-instrumentation attaches correctly, but Diffex always passes the parent explicitly.
 
-Pi ships no exporter and requires no backend-specific telemetry implementation. It does ship `InMemoryTelemetryContext` as the deterministic backend-neutral reference implementation; applications may use it for process-local capture or supply a `TelemetryContext` adapter that bridges spans into OTel, Sentry, logs, or another backend. The adapter is trusted to obey the callback contract below. It owns backend ids and native context objects; core never carries trace-id plumbing.
+Diffex ships no exporter and requires no backend-specific telemetry implementation.
+It does ship `InMemoryTelemetryContext` as the deterministic backend-neutral reference implementation; applications may use it for process-local capture or supply a `TelemetryContext` adapter that bridges spans into OTel, Sentry, logs, or another backend.
+The adapter is trusted to obey the callback contract below.
+It owns backend ids and native context objects; core never carries trace-id plumbing.
 
 ### Package ownership
 
-The generic contract, schema-definition machinery, shared no-op, and in-memory reference implementation live under `packages/telemetry/src/` and are exported from `@earendil-works/pi-telemetry`. The runner-independent conformance cases live under `packages/telemetry/src/testing/` and are exported from `@earendil-works/pi-telemetry/testing`. Pi-ai imports only `TelemetryContext` for request options; it owns no span schema or helper and emits no telemetry itself. `packages/agent/src/harness/telemetry.ts` owns both `AI_TELEMETRY_SCHEMA` / `startAiSpan()` and `HARNESS_TELEMETRY_SCHEMA` / `startHarnessSpan()`, plus the readonly `AGENT_TELEMETRY_SCHEMAS` tuple that composes their typed vocabularies without merging their schema data or versions. The agent package root re-exports those domain schemas, helpers, tuple, and the generic telemetry surface. There is one generic contract and one domain-schema owner.
+The generic contract, schema-definition machinery, shared no-op, and in-memory reference implementation live under `packages/telemetry/src/` and are exported from `@earendil-works/pi-telemetry`.
+The runner-independent conformance cases live under `packages/telemetry/src/testing/` and are exported from `@earendil-works/pi-telemetry/testing`.
+The AI package imports only `TelemetryContext` for request options; it owns no span schema or helper and emits no telemetry itself.
+`packages/agent/src/harness/telemetry.ts` owns both `AI_TELEMETRY_SCHEMA` / `startAiSpan()` and `HARNESS_TELEMETRY_SCHEMA` / `startHarnessSpan()`, plus the readonly `AGENT_TELEMETRY_SCHEMAS` tuple that composes their typed vocabularies without merging their schema data or versions.
+The agent package root re-exports those domain schemas, helpers, tuple, and the generic telemetry surface.
+There is one generic contract and one domain-schema owner.
 
 `AgentHarnessOptions.telemetryContext` defaults to the no-op context, and the agent-side request wrapper emits `pi.ai.request` through the agent-owned AI schema.
 
@@ -2828,7 +2841,9 @@ A `TelemetrySpan` is also the explicit child `TelemetryContext`. Passing the cal
 
 ### Typed schema
 
-The low-level adapter accepts the open `SpanAttributes` bag. Pi instrumentation never constructs untyped span names or attribute bags directly. The agent package exports the two plain, serializable domain schema objects and their typed helpers for that purpose.
+The low-level adapter accepts the open `SpanAttributes` bag.
+Diffex instrumentation never constructs untyped span names or attribute bags directly.
+The agent package exports the two plain, serializable domain schema objects and their typed helpers for that purpose.
 
 ```ts
 type TelemetryAttributeType =
@@ -2870,7 +2885,7 @@ type TelemetryParentDefinition =
 interface TelemetrySpanDefinition {
   description: string;
   /** Exhaustive allowed-parent rule. "external" means a caller-owned span
-      outside the pi schemas. */
+      outside the compatibility schemas. */
   parents: TelemetryParentDefinition;
   startAttributes: Record<string, TelemetryStartAttributeDefinition>;
   /** Completion enrichment only. Every end attribute is optional; startSpan()
@@ -2919,7 +2934,8 @@ The following tables are normative input to the schema objects. `!` means a requ
 
 #### AI request schema
 
-`AI_TELEMETRY_SCHEMA` declares no pi-written span events and one span. Its parent rule is `{ kind: "any" }`:
+`AI_TELEMETRY_SCHEMA` declares no Diffex-written span events and one span.
+Its parent rule is `{ kind: "any" }`:
 
 | span | allowed parents | status |
 |---|---|---|
@@ -2973,7 +2989,8 @@ The three operation spans share `pi.session.id` (string, required, high cardinal
 
 The parent column maps directly to `TelemetryParentDefinition`: “root or application span” is `root_or_external`; “root or the current scope” and “root or any caller span” are `any`; every finite pi span list uses `spans` with exactly those names. `pi.harness.tool` wraps phase 2 (`executeTool`) only and settles before `after_tool` finalization: `pi.tool.is_error` describes the raw execution result, there is no final `terminate` attribute, and blocked or invalid calls that never execute emit no tool span. Live execution supplies the active turn id and parents the span to `pi.harness.turn`; reconciliation has no durable turn id, omits it, and parents the span directly to the resumed `pi.harness.run` invocation. The `pi.hook.name` values array is exactly `before_run`, `before_resume`, `before_run_end`, `transform_context`, `before_request`, `before_payload`, `after_response`, `before_tool`, `after_tool`, `before_compaction`, and `before_navigation`. The `pi.event.type` values array contains every `type` discriminant in the section 10 catalog and no others. `pi.harness.hook` describes one registered handler invocation, so isolated handler failures have their own status without failing the enclosing run. `pi.harness.event_handler` does the same for passive listener failures. The harness schema declares no span events initially.
 
-Dynamic identifiers and names are attributes, never span names. The schema definitions are the exhaustive vocabulary pi instrumentation may emit.
+Dynamic identifiers and names are attributes, never span names.
+The schema definitions are the exhaustive vocabulary Diffex instrumentation may emit.
 
 The agent package exports both schemas, `AGENT_TELEMETRY_SCHEMAS`, each span-name union, per-name start/end/combined attribute types, event types, discriminated span unions, and typed `startAiSpan()` / `startHarnessSpan()` helpers. The telemetry package exports `createTypedSpanStarter()` and `TypedSpanStarter`; callers can bind the agent tuple when one scope needs both AI-request and harness spans. Every typed starter or domain helper accepts only that span's start attributes; its callback receives a schema-scoped view of the live span whose `setAttributes()` accepts only that span's optional end attributes and whose `addEvent()` accepts only declared event names and attributes. Individual calls reject missing required attributes, duplicate composed span names, unknown attributes, type mismatches, and invalid closed-set values at compile time. TypeScript does not try to prove that any end setter ran; `startSpan()` always owns automatic settlement. The scoped view erases to the generic `TelemetrySpan`; production performs no schema validation.
 
@@ -3272,11 +3289,12 @@ I0, I1, and I2 may proceed independently. I3 → I4 → I5 is serial and begins 
 - [x] **I0 — telemetry contracts, typed schemas, and no-op context.** Dependencies: none.
   - Primary files: `packages/telemetry/src/index.ts`, `packages/telemetry/src/memory.ts`, `packages/telemetry/src/testing/`, and focused tests; pi-ai request-option types/propagation and focused tests; `packages/agent/src/harness/telemetry.ts`, `packages/agent/src/index.ts`, focused tests, package scripts, `packages/agent/scripts/generate-telemetry-docs.ts`, and generated `packages/agent/docs/telemetry-schema.md`. Do not edit `agent-harness.ts`; its canonical context type is landed, while H0 owns option renaming/defaulting/storage and execution threading after convergence.
   - In telemetry, implement the one canonical section 18 callback-based `TelemetryContext` / `TelemetrySpan` contract, shared no-op context, deterministic in-memory reference adapter, runner-independent adapter conformance cases, serializable `defineTelemetrySchema()` machinery, and `createTypedSpanStarter(context, schemas)` composition with child-bound starters.
-  - In pi-ai, add optional `telemetryContext` to `ProviderRequestOptions` so every stream, deferred, and image option inherits it; provider, `Models`, `ImagesModels`, direct dispatch, and simple-option conversion preserve it. Pi-ai owns no domain schema or helper.
+  - In the AI package, add optional `telemetryContext` to `ProviderRequestOptions` so every stream, deferred, and image option inherits it; provider, `Models`, `ImagesModels`, direct dispatch, and simple-option conversion preserve it.
+    The AI package owns no domain schema or helper.
   - In agent, define the complete normative `AI_TELEMETRY_SCHEMA` and `HARNESS_TELEMETRY_SCHEMA`, their inferred types, the readonly `AGENT_TELEMETRY_SCHEMAS` composition tuple, and typed `startAiSpan()` / `startHarnessSpan()` helpers. Export both schemas, the tuple, and helpers, and re-export the generic telemetry surface from the agent package root. Do not duplicate the generic contract and do not adopt OTel or another external semantic convention.
-  - Generate the combined repository-only Markdown reference from the runtime schema values with the named agent package scripts. Production helpers perform no runtime schema validation; schemas compile-time-check each pi-written start/end/event call and remain importable as machine-readable data.
+  - Generate the combined repository-only Markdown reference from the runtime schema values with the named agent package scripts. Production helpers perform no runtime schema validation; schemas compile-time-check each Diffex-written start/end/event call and remain importable as machine-readable data.
   - Wire telemetry before pi-ai in workspace, local-release, publish, profiling, and coding-agent binary build order; add source-test aliases and refresh workspace/generated dependency locks.
-  - Landed coverage: focused tests exercise no-op synchronous admission, returned-value and sync/async rejection preservation, explicit no-op child propagation, one shared frozen inert span with no payload inspection, exact start/optional-end inference, multi-schema vocabulary composition, child-starter parent propagation, rejection of duplicate span names and missing, unknown, empty-schema, and invalid closed-set attributes, absence of declared span events, schema JSON serialization, the in-memory reference against every exported adapter conformance case, option propagation across provider/`Models` stream and deferred dispatch, direct and `ImagesModels` image dispatch, built-in simple-option conversion, and generated-document freshness. O2 will use the reference adapter to test pi's runtime status and nesting behavior with captured spans.
+  - Landed coverage: focused tests exercise no-op synchronous admission, returned-value and sync/async rejection preservation, explicit no-op child propagation, one shared frozen inert span with no payload inspection, exact start/optional-end inference, multi-schema vocabulary composition, child-starter parent propagation, rejection of duplicate span names and missing, unknown, empty-schema, and invalid closed-set attributes, absence of declared span events, schema JSON serialization, the in-memory reference against every exported adapter conformance case, option propagation across provider/`Models` stream and deferred dispatch, direct and `ImagesModels` image dispatch, built-in simple-option conversion, and generated-document freshness. O2 will use the reference adapter to test Diffex runtime status and nesting behavior with captured spans.
 - [ ] **I1 — hook registry and runner.** Dependencies: none.
   - Primary files: `packages/agent/src/harness/hooks.ts`, `packages/agent/test/harness/hooks.test.ts`.
   - Implement typed registration, stable-id validation, ordered aggregation, error isolation, fail-closed `before_tool`, and per-id resume data handling.

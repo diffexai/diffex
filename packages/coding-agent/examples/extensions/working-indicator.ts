@@ -2,7 +2,7 @@
  * Working Indicator Extension
  *
  * Demonstrates `ctx.ui.setWorkingIndicator()` for customizing the inline
- * working indicator shown while pi is streaming a response.
+ * working indicator shown while Diffex is streaming a response.
  *
  * Usage:
  *   pi --extension examples/extensions/working-indicator.ts
@@ -13,7 +13,7 @@
  *   /working-indicator pulse     Use a custom animated indicator
  *   /working-indicator none      Hide the indicator entirely
  *   /working-indicator spinner   Restore an animated spinner
- *   /working-indicator reset     Restore pi's default spinner
+ *   /working-indicator reset     Restore Diffex's default spinner
  */
 
 import type { ExtensionAPI, ExtensionContext, WorkingIndicatorOptions } from "@earendil-works/pi-coding-agent";
@@ -79,7 +79,7 @@ function describeMode(mode: WorkingIndicatorMode): string {
 		case "spinner":
 			return "custom spinner";
 		case "default":
-			return "pi default spinner";
+			return "Diffex default spinner";
 	}
 }
 

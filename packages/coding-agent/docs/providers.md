@@ -1,6 +1,8 @@
 # Providers
 
-Pi supports subscription-based providers via OAuth and API key providers via environment variables or auth file. Built-in catalogs ship with pi; configured providers may refresh newer catalogs and cache them in `~/.pi/agent/models-store.json` for offline use.
+Diffex supports subscription-based providers via OAuth and API-key providers via environment variables or the auth file.
+Static model catalogs ship with built-in providers.
+Configured custom providers may refresh their own catalogs and cache them in `~/.pi/agent/models-store.json` for offline use.
 
 ## Table of Contents
 
@@ -21,7 +23,6 @@ Use `/login` in interactive mode, then select a provider:
 - GitHub Copilot
 - xAI (Grok/X subscription)
 - OpenRouter (OAuth-minted API key billed from OpenRouter credits)
-- Radius
 
 Use `/logout` to clear credentials. Tokens are stored in `~/.pi/agent/auth.json` and auto-refresh when expired. OpenRouter instead mints a user-controlled API key that does not expire automatically.
 
@@ -50,10 +51,6 @@ Anthropic subscription auth is active for Claude Pro/Max accounts. Third-party h
 - The authorization creates a user-controlled OpenRouter API key billed from your OpenRouter credits
 - On remote/headless machines (e.g. over SSH) the browser cannot reach the loopback callback; paste the final redirect URL (or the authorization code) into the login prompt instead
 - `OPENROUTER_API_KEY` remains available through **Use an API key**
-
-### Radius
-
-Radius is a dynamic `pi-messages` gateway. `/login radius` stores OAuth tokens in `auth.json`; the gateway catalog is refreshed independently and cached in `models-store.json`. Custom Radius gateways can be declared in `models.json` with `"oauth": "radius"` and a gateway `baseUrl`.
 
 ## API Keys
 
@@ -88,7 +85,6 @@ pi
 | ZAI Coding Plan (China) | `ZAI_CODING_CN_API_KEY` | `zai-coding-cn` |
 | OpenCode Zen | `OPENCODE_API_KEY` | `opencode` |
 | OpenCode Go | `OPENCODE_API_KEY` | `opencode-go` |
-| Radius | `RADIUS_API_KEY` | `radius` |
 | Hugging Face | `HF_TOKEN` | `huggingface` |
 | Fireworks | `FIREWORKS_API_KEY` | `fireworks` |
 | Together AI | `TOGETHER_API_KEY` | `together` |
@@ -104,7 +100,7 @@ pi
 | Xiaomi MiMo Token Plan (Amsterdam) | `XIAOMI_TOKEN_PLAN_AMS_API_KEY` | `xiaomi-token-plan-ams` |
 | Xiaomi MiMo Token Plan (Singapore) | `XIAOMI_TOKEN_PLAN_SGP_API_KEY` | `xiaomi-token-plan-sgp` |
 
-Reference for environment variables and `auth.json` keys: [`const envMap`](https://github.com/earendil-works/pi-mono/blob/main/packages/ai/src/env-api-keys.ts) in [`packages/ai/src/env-api-keys.ts`](https://github.com/earendil-works/pi-mono/blob/main/packages/ai/src/env-api-keys.ts).
+Reference for environment variables and `auth.json` keys: [`const envMap`](https://github.com/diffexai/diffex/blob/main/packages/ai/src/env-api-keys.ts) in [`packages/ai/src/env-api-keys.ts`](https://github.com/diffexai/diffex/blob/main/packages/ai/src/env-api-keys.ts).
 
 #### Auth File
 
@@ -154,7 +150,7 @@ API key credentials can also include provider-scoped environment values. These v
 }
 ```
 
-Use this when pi should use different provider settings than the project shell environment.
+Use this when Diffex should use different provider settings than the project shell environment.
 
 ### Key Resolution
 
@@ -269,7 +265,8 @@ AI Gateway authentication uses `CLOUDFLARE_API_KEY` as `cf-aig-authorization`. U
 | Stored BYOK | Cloudflare token only | Cloudflare injects provider keys stored in the AI Gateway dashboard |
 | Inline BYOK | Cloudflare token plus upstream `Authorization` header | The request supplies the upstream provider key |
 
-For normal pi usage, prefer unified billing or stored BYOK. Inline BYOK requires configuring an additional upstream `Authorization` header for the Cloudflare AI Gateway provider, for example via a `models.json` provider/model override.
+For normal Diffex usage, prefer unified billing or stored BYOK.
+Inline BYOK requires configuring an additional upstream `Authorization` header for the Cloudflare AI Gateway provider, for example via a `models.json` provider/model override.
 
 ### Cloudflare Workers AI
 
@@ -281,7 +278,7 @@ export CLOUDFLARE_ACCOUNT_ID=...
 pi --provider cloudflare-workers-ai --model "@cf/moonshotai/kimi-k2.6"
 ```
 
-Pi automatically sets `x-session-affinity` for [prefix caching](https://developers.cloudflare.com/workers-ai/features/prompt-caching/) discounts.
+Diffex automatically sets `x-session-affinity` for [prefix caching](https://developers.cloudflare.com/workers-ai/features/prompt-caching/) discounts.
 
 ### Google Vertex AI
 
@@ -297,7 +294,8 @@ Or set `GOOGLE_APPLICATION_CREDENTIALS` to a service account key file.
 
 ## llama.cpp
 
-Pi supports the llama.cpp router server. Configure it with `/login llama.cpp`, manage loaded models with `/llama`, and select a loaded model with `/model`.
+Diffex supports the llama.cpp router server.
+Configure it with `/login llama.cpp`, manage loaded models with `/llama`, and select a loaded model with `/model`.
 
 See [llama.cpp](llama-cpp.md) for server setup, model directory layout, environment variables, and command usage.
 
@@ -306,6 +304,9 @@ See [llama.cpp](llama-cpp.md) for server setup, model directory layout, environm
 **Via models.json:** Add Ollama, LM Studio, vLLM, or any provider that speaks a supported API (OpenAI Completions, OpenAI Responses, Anthropic Messages, Google Generative AI). See [models.md](models.md).
 
 **Via extensions:** For providers that need custom API implementations or OAuth flows, create an extension. See [custom-provider.md](custom-provider.md) and [examples/extensions/custom-provider-gitlab-duo](../examples/extensions/custom-provider-gitlab-duo/).
+
+Radius is supported only as a custom `pi-messages` provider declared in `models.json` with an explicit `baseUrl` and `"oauth": "radius"`.
+Diffex does not provide a default Radius gateway or a built-in `/login radius` entry.
 
 ## Resolution Order
 

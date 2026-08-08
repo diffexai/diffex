@@ -12,7 +12,7 @@
           "path": "quickstart.md"
         },
         {
-          "title": "Using Pi",
+          "title": "Using Diffex",
           "path": "usage.md"
         },
         {
@@ -65,7 +65,7 @@
           "path": "themes.md"
         },
         {
-          "title": "Pi Packages",
+          "title": "Diffex Packages",
           "path": "packages.md"
         },
         {

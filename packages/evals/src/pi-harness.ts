@@ -175,7 +175,7 @@ async function runPiCodingAgent<TOutput extends JsonValue>(
 					await evalSession.reload();
 				}
 			}
-			if (response === undefined) throw new Error("Pi eval input must include at least one prompt step.");
+			if (response === undefined) throw new Error("Diffex eval input must include at least one prompt step.");
 			const output = "output" in options ? await options.output({ response, session: evalSession }) : response;
 			const stats = evalSession.getSessionStats();
 			const hasPricing = [model.cost, ...(model.cost.tiers ?? [])].some(

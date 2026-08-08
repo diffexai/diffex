@@ -1,8 +1,10 @@
-> pi can help you use the SDK. Ask it to build an integration for your use case.
+> Diffex can help you use the SDK.
+> Ask it to build an integration for your use case.
 
 # SDK
 
-The SDK provides programmatic access to pi's agent capabilities. Use it to embed pi in other applications, build custom interfaces, or integrate with automated workflows.
+The SDK provides programmatic access to Diffex's agent capabilities.
+Use it to embed Diffex in other applications, build custom interfaces, or integrate with automated workflows.
 
 **Example use cases:**
 - Build a custom UI (web, desktop, mobile)
@@ -469,14 +471,17 @@ const { session } = await createAgentSession({
 });
 ```
 
-`login()`, `logout()`, `setRuntimeApiKey()`, and `removeRuntimeApiKey()` resolve after the affected provider's cached/built-in catalog, composition, and availability snapshot are locally consistent. They do not wait for remote catalog freshness. If credentials were committed but local synchronization fails, they reject with the exported `CredentialSynchronizationError`; inspect its `providerId`, `operation`, `credential`, and `cause` fields instead of retrying the credential mutation blindly.
+`login()`, `logout()`, `setRuntimeApiKey()`, and `removeRuntimeApiKey()` resolve after the affected provider's static or cached catalog, composition, and availability snapshot are locally consistent.
+They do not wait for a configured custom provider's remote catalog freshness.
+If credentials were committed but local synchronization fails, they reject with the exported `CredentialSynchronizationError`; inspect its `providerId`, `operation`, `credential`, and `cause` fields instead of retrying the credential mutation blindly.
 
-Public model/auth operations and `ModelRuntime.create({ signal })` accept optional abort signals and are unbounded when omitted. SDK applications own deadline policy for remote catalog freshness:
+Public model/auth operations and `ModelRuntime.create({ signal })` accept optional abort signals and are unbounded when omitted.
+SDK applications own deadline policy for configured custom provider catalog refreshes:
 
 ```typescript
 const signal = AbortSignal.timeout(15_000);
 const result = await modelRuntime.refresh({
-  providers: ["anthropic"],
+  providers: ["my-provider"],
   signal,
 });
 if (result.aborted) console.warn("Catalog refresh timed out; using cached models");
@@ -516,7 +521,7 @@ Specify which built-in tools to enable:
 - `noTools: "builtin"` disables default built-ins while keeping extension and custom tools enabled
 - `excludeTools` disables specific built-in, extension, or custom tool names after any `tools` allowlist is applied
 
-The `edit` tool returns `details.diff` for Pi's TUI display and `details.patch` as a standard unified patch for SDK consumers.
+The `edit` tool returns `details.diff` for Diffex's TUI display and `details.patch` as a standard unified patch for SDK consumers.
 
 ```typescript
 import { createAgentSession } from "@earendil-works/pi-coding-agent";

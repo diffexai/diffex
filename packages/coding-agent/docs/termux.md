@@ -1,6 +1,6 @@
 # Termux (Android) Setup
 
-Pi runs on Android via [Termux](https://termux.dev/), a terminal emulator and Linux environment for Android.
+Diffex runs on Android via [Termux](https://termux.dev/), a terminal emulator and Linux environment for Android.
 
 ## Prerequisites
 
@@ -16,13 +16,13 @@ pkg update && pkg upgrade
 # Install dependencies
 pkg install nodejs termux-api git
 
-# Install pi
+# Install Diffex
 npm install -g --ignore-scripts @earendil-works/pi-coding-agent
 
 # Create config directory
 mkdir -p ~/.pi/agent
 
-# Run pi
+# Run Diffex
 pi
 ```
 

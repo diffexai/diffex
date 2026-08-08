@@ -26,7 +26,7 @@ Read more at [diffex.ai](https://diffex.ai/) and in the [Diffex white paper](htt
 
 ## Fork Status
 
-Diffex is a fork of the [Pi Agent Harness](https://github.com/earendil-works/pi), whose documentation is available at [pi.dev](https://pi.dev).
+Diffex is a fork of the [Pi Agent Harness](https://github.com/earendil-works/pi).
 The fork currently retains the upstream `@earendil-works/pi-*` package names and `pi` executable while Diffex-specific packaging evolves.
 Use `./diffex-test.sh` to run the Diffex-branded coding agent directly from this repository.
 

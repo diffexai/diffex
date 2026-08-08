@@ -336,7 +336,7 @@ export interface ExtensionContext {
 	abort(): void;
 	/** Whether there are queued messages waiting */
 	hasPendingMessages(): boolean;
-	/** Gracefully shutdown pi and exit. Available in all contexts. */
+	/** Gracefully shut down Diffex and exit. Available in all contexts. */
 	shutdown(): void;
 	/** Get current context usage for the active model. */
 	getContextUsage(): ContextUsage | undefined;
@@ -704,7 +704,7 @@ export interface BeforeAgentStartEvent {
 	images?: ImageContent[];
 	/** The fully assembled system prompt string. */
 	systemPrompt: string;
-	/** Structured options used to build the system prompt. Extensions can inspect this to understand what Pi loaded without re-discovering resources. */
+	/** Structured options used to build the system prompt. Extensions can inspect this to understand what Diffex loaded without rediscovering resources. */
 	systemPromptOptions: BuildSystemPromptOptions;
 }
 
@@ -1288,7 +1288,7 @@ export interface ExtensionAPI {
 	/** Register a custom renderer for CustomMessageEntry. */
 	registerMessageRenderer<T = unknown>(customType: string, renderer: MessageRenderer<T>): void;
 
-	/** Register a transformer for user and assistant Markdown before Pi renders it in the interactive transcript. */
+	/** Register a transformer for user and assistant Markdown before Diffex renders it in the interactive transcript. */
 	registerMarkdownTransformer(transformer: MarkdownTransformer): void;
 
 	/** Register a custom renderer for CustomEntry. Custom entries do not participate in LLM context. */
@@ -1498,7 +1498,7 @@ export interface ProviderModelConfig {
 	baseUrl?: string;
 	/** Whether the model supports extended thinking. */
 	reasoning: boolean;
-	/** Maps pi thinking levels to provider/model-specific values; null marks a level unsupported. */
+	/** Maps Diffex thinking levels to provider/model-specific values; null marks a level unsupported. */
 	thinkingLevelMap?: Model<Api>["thinkingLevelMap"];
 	/** Supported input types. */
 	input: ("text" | "image")[];

@@ -1,5 +1,4 @@
 import { Container, getKeybindings, Spacer, Text } from "@earendil-works/pi-tui";
-import { APP_NAME } from "../../../config.ts";
 import { type TerminalTheme, theme } from "../theme/theme.ts";
 import { DIFFEX_LOGO_ART } from "./diffex-welcome.ts";
 import { DynamicBorder } from "./dynamic-border.ts";
@@ -51,7 +50,7 @@ export class FirstTimeSetupComponent extends Container {
 		this.addChild(new Spacer(1));
 		this.addChild(new Text(theme.fg("accent", DIFFEX_LOGO_ART.join("\n")), 1, 0));
 		this.addChild(new Spacer(1));
-		this.addChild(new Text(theme.fg("accent", theme.bold(`Welcome to Diffex, powered by ${APP_NAME}.`)), 1, 0));
+		this.addChild(new Text(theme.fg("accent", theme.bold("Welcome to Diffex.")), 1, 0));
 		this.addChild(new Spacer(1));
 
 		if (this.step === "theme") {
@@ -68,7 +67,7 @@ export class FirstTimeSetupComponent extends Container {
 				new Text(
 					theme.fg(
 						"muted",
-						"Opting in stores a tracking identifier in settings.json and enables anonymous\nusage analytics. This helps us to better debug, reproduce, and resolve issues\nand bugs within Pi. You can observe what is shared using /privacy and make\nchanges anytime in settings.json.",
+						"Opting in stores a tracking identifier in settings.json and enables anonymous\nusage analytics. This helps us to better debug, reproduce, and resolve issues\nand bugs within Diffex. You can observe what is shared using /privacy and make\nchanges anytime in settings.json.",
 					),
 					1,
 					0,

@@ -1,6 +1,7 @@
 # Windows Setup
 
-Pi requires a bash shell on Windows. Checked locations (in order):
+Diffex requires a bash shell on Windows.
+Locations are checked in this order:
 
 1. Custom path from `~/.pi/agent/settings.json`
 2. Git Bash (`C:\Program Files\Git\bin\bash.exe`)

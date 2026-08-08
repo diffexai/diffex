@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Build pi binaries for all platforms locally.
+# Build Diffex binaries for all platforms locally.
 # Mirrors .github/workflows/build-binaries.yml
 #
 # Usage:
@@ -171,7 +171,7 @@ for platform in "${PLATFORMS[@]}"; do
     # worker must be present in the compiled executable.
     #
     # Disable cwd bunfig.toml autoload so project preload scripts cannot crash the
-    # standalone binary before pi starts (see #7684).
+    # standalone binary before Diffex starts (see #7684).
     if [[ "$platform" == windows-* ]]; then
         bun build --compile --no-compile-autoload-bunfig --target="$bun_target" ./dist/bun/cli.js ./src/utils/image-resize-worker.ts --outfile "$OUTPUT_DIR/$platform/pi.exe"
     else

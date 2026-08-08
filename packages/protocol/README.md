@@ -1,6 +1,6 @@
 # @earendil-works/pi-protocol
 
-Runtime-neutral schemas, types, CBOR encoding, and byte-stream framing for the experimental pi protocol.
+Runtime-neutral schemas, types, CBOR encoding, and byte-stream framing for the experimental Diffex protocol.
 
 Protocol version `1` uses binary messages with this wire layout:
 

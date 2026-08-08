@@ -1,8 +1,6 @@
 import type { OAuthCredential } from "../auth/types.ts";
 import type { Model, ThinkingLevelMap } from "../types.ts";
 
-export const DEFAULT_RADIUS_GATEWAY = "https://radius.pi.dev";
-
 export type RadiusGatewayModel = {
 	id: string;
 	name: string;

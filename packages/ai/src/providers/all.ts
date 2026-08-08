@@ -118,7 +118,6 @@ export function builtinProviders(): Provider[] {
 		qwenTokenPlanProvider(),
 		qwenTokenPlanCnProvider(),
 		qwenTokenPlanIndividualProvider(),
-		radiusProvider(),
 		togetherProvider(),
 		vercelAIGatewayProvider(),
 		xaiProvider(),

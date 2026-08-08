@@ -1,7 +1,7 @@
 /**
  * pi-messages API implementation.
  *
- * Streams pi's own message protocol directly to a backend: the request is a
+ * Streams Diffex's message protocol directly to a backend: the request is a
  * single POST of `{ model, context, options }` to `<baseUrl>/messages`, the
  * response is an SSE stream of serialized assistant-message events plus a
  * terminal `done`/`error` event. This is the wire protocol spoken by the

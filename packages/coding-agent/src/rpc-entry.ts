@@ -1,11 +1,11 @@
 #!/usr/bin/env node
-import { APP_NAME } from "./config.ts";
+import { APP_TITLE } from "./config.ts";
 import { configureHttpDispatcher } from "./core/http-dispatcher.ts";
 import { main } from "./main.ts";
 
-process.title = `${APP_NAME}-rpc`;
+process.title = `${APP_TITLE}-rpc`;
 process.env.PI_CODING_AGENT = "true";
-process.env.AI_AGENT = "pi";
+process.env.AI_AGENT = "diffex";
 process.emitWarning = (() => {}) as typeof process.emitWarning;
 
 configureHttpDispatcher();

@@ -74,6 +74,27 @@ describe("OpenAI Codex OAuth", () => {
 		vi.useRealTimers();
 	});
 
+	it("identifies Diffex as the browser authorization originator", async () => {
+		let authorizationUrl: string | undefined;
+
+		await expect(
+			openaiCodexOAuth.login({
+				signal: neverAbortedSignal,
+				prompt: async (prompt) => {
+					if (prompt.type === "select") return "browser";
+					if (prompt.type === "manual_code") return "";
+					throw new Error(`Unexpected prompt: ${prompt.type}`);
+				},
+				notify: (event) => {
+					if (event.type === "auth_url") authorizationUrl = event.url;
+				},
+			}),
+		).rejects.toThrow("Missing authorization code");
+
+		expect(authorizationUrl).toBeDefined();
+		expect(new URL(authorizationUrl!).searchParams.get("originator")).toBe("diffex");
+	});
+
 	it("logs in with the OpenAI Codex device code flow", async () => {
 		vi.useFakeTimers();
 		const startTime = new Date("2026-05-20T00:00:00Z");
