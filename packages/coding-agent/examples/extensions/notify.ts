@@ -48,8 +48,8 @@ function notify(title: string, body: string): void {
 	}
 }
 
-export default function (pi: ExtensionAPI) {
-	pi.on("agent_end", async () => {
+export default function (diffex: ExtensionAPI) {
+	diffex.on("agent_end", async () => {
 		notify("Diffex", "Ready for input");
 	});
 }

@@ -9,7 +9,7 @@
  * Also re-sends unresolved conflicts from a previous incomplete merge.
  *
  * Start Diffex with this extension:
- *   pi -e ./examples/extensions/git-merge-and-resolve.ts
+ *   diffex -e ./examples/extensions/git-merge-and-resolve.ts
  */
 import { createReadStream } from "node:fs";
 import { join } from "node:path";
@@ -24,8 +24,8 @@ interface ConflictBlock {
 }
 
 /** Parse conflict markers from working tree files with unmerged paths. */
-async function findConflicts(pi: ExtensionAPI, cwd: string): Promise<ConflictBlock[]> {
-	const { stdout, code } = await pi.exec("git", ["diff", "--name-only", "--diff-filter=U"]);
+async function findConflicts(diffex: ExtensionAPI, cwd: string): Promise<ConflictBlock[]> {
+	const { stdout, code } = await diffex.exec("git", ["diff", "--name-only", "--diff-filter=U"]);
 	if (code !== 0 || !stdout.trim()) return [];
 
 	const blocks: ConflictBlock[] = [];
@@ -70,21 +70,21 @@ function formatConflicts(ref: string, blocks: ConflictBlock[]): string {
 	return lines.join("\n");
 }
 
-export default function (pi: ExtensionAPI) {
-	pi.on("agent_end", async (_event, ctx) => {
-		const { code: revParseCode } = await pi.exec("git", ["rev-parse", "--git-dir"]);
+export default function (diffex: ExtensionAPI) {
+	diffex.on("agent_end", async (_event, ctx) => {
+		const { code: revParseCode } = await diffex.exec("git", ["rev-parse", "--git-dir"]);
 		if (revParseCode !== 0) return;
 
 		let ref = "MERGE_HEAD";
 
 		// If not already in a merge, attempt one
-		const { code: mergeHeadCode } = await pi.exec("git", ["rev-parse", "MERGE_HEAD"]);
+		const { code: mergeHeadCode } = await diffex.exec("git", ["rev-parse", "MERGE_HEAD"]);
 		if (mergeHeadCode !== 0) {
 			// Only attempt a new merge if the working tree is clean
-			const { stdout: status } = await pi.exec("git", ["status", "--porcelain"]);
+			const { stdout: status } = await diffex.exec("git", ["status", "--porcelain"]);
 			if (status.trim()) return;
 
-			const { stdout: upstream, code: upstreamCode } = await pi.exec("git", [
+			const { stdout: upstream, code: upstreamCode } = await diffex.exec("git", [
 				"rev-parse",
 				"--abbrev-ref",
 				"--symbolic-full-name",
@@ -96,20 +96,20 @@ export default function (pi: ExtensionAPI) {
 			const remote = ref.split("/")[0];
 			ctx.ui.notify(`git-merge-and-resolve: fetching ${remote}, merging ${ref}`, "info");
 
-			const { code: fetchCode, stderr: fetchErr } = await pi.exec("git", ["fetch", remote]);
+			const { code: fetchCode, stderr: fetchErr } = await diffex.exec("git", ["fetch", remote]);
 			if (fetchCode !== 0) {
 				ctx.ui.notify(`git-merge-and-resolve: fetch failed: ${fetchErr.trim()}`, "warning");
 				return;
 			}
 
-			const { code: mergeCode } = await pi.exec("git", ["merge", "--no-ff", ref]);
+			const { code: mergeCode } = await diffex.exec("git", ["merge", "--no-ff", ref]);
 			if (mergeCode === 0) return;
 		}
 
 		// Either we just merged with conflicts, or we were already in an unfinished merge
-		const conflicts = await findConflicts(pi, ctx.cwd);
+		const conflicts = await findConflicts(diffex, ctx.cwd);
 		if (conflicts.length === 0) return;
 
-		pi.sendUserMessage(formatConflicts(ref, conflicts), { deliverAs: "followUp" });
+		diffex.sendUserMessage(formatConflicts(ref, conflicts), { deliverAs: "followUp" });
 	});
 }

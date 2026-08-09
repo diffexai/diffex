@@ -25,7 +25,7 @@ async function resolveServerUrl(
 	return configured ? normalizeLlamaServerUrl(configured) : undefined;
 }
 
-function toPiModel(model: LlamaModelInfo, serverUrl: string): Model<"openai-completions"> {
+function toDiffexModel(model: LlamaModelInfo, serverUrl: string): Model<"openai-completions"> {
 	const reportedContextWindow = model.meta?.n_ctx ?? model.meta?.n_ctx_train;
 	const contextWindow = reportedContextWindow && reportedContextWindow > 0 ? reportedContextWindow : 128000;
 	return {
@@ -59,7 +59,9 @@ export function createLlamaProvider(): LlamaProviderController {
 	let models: readonly Model<"openai-completions">[] = [];
 
 	const setCatalog = (catalog: readonly LlamaModelInfo[], serverUrl: string): void => {
-		models = catalog.filter((model) => model.status.value === "loaded").map((model) => toPiModel(model, serverUrl));
+		models = catalog
+			.filter((model) => model.status.value === "loaded")
+			.map((model) => toDiffexModel(model, serverUrl));
 	};
 
 	const provider: Provider<"openai-completions"> = {
@@ -134,7 +136,7 @@ export function createLlamaProvider(): LlamaProviderController {
 			if (context.signal.aborted) return;
 			const refreshed = catalog
 				.filter((model) => model.status.value === "loaded")
-				.map((model) => toPiModel(model, serverUrl));
+				.map((model) => toDiffexModel(model, serverUrl));
 			await context.publish({
 				persist: { models: refreshed, checkedAt: Date.now() },
 				update: () => {

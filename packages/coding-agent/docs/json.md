@@ -1,7 +1,7 @@
 # JSON Event Stream Mode
 
 ```bash
-pi --mode json "Your prompt"
+diffex --mode json "Your prompt"
 ```
 
 Outputs all session events as JSON lines to stdout. Useful for integrating Diffex into other tools or custom UIs.
@@ -87,5 +87,5 @@ the final authoritative message.
 ## Example
 
 ```bash
-pi --mode json "List files" 2>/dev/null | jq -c 'select(.type == "message_end")'
+diffex --mode json "List files" 2>/dev/null | jq -c 'select(.type == "message_end")'
 ```

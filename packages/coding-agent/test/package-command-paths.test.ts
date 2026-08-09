@@ -19,7 +19,7 @@ describe("package commands", () => {
 	let packageDir: string;
 	let originalCwd: string;
 	let originalAgentDir: string | undefined;
-	let originalPiPackageDir: string | undefined;
+	let originalDiffexPackageDir: string | undefined;
 	let originalPath: string | undefined;
 	let originalExitCode: typeof process.exitCode;
 	let originalExecPath: string;
@@ -53,7 +53,7 @@ describe("package commands", () => {
 
 	beforeEach(() => {
 		allowNetwork();
-		tempDir = join(tmpdir(), `pi-package-commands-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+		tempDir = join(tmpdir(), `diffex-package-commands-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 		agentDir = join(tempDir, "agent");
 		projectDir = join(tempDir, "project");
 		packageDir = join(tempDir, "local-package");
@@ -63,7 +63,7 @@ describe("package commands", () => {
 
 		originalCwd = process.cwd();
 		originalAgentDir = process.env[ENV_AGENT_DIR];
-		originalPiPackageDir = process.env.DIFFEX_PACKAGE_DIR;
+		originalDiffexPackageDir = process.env.DIFFEX_PACKAGE_DIR;
 		originalPath = process.env.PATH;
 		originalExitCode = process.exitCode;
 		originalExecPath = process.execPath;
@@ -90,10 +90,10 @@ describe("package commands", () => {
 		} else {
 			process.env[ENV_AGENT_DIR] = originalAgentDir;
 		}
-		if (originalPiPackageDir === undefined) {
+		if (originalDiffexPackageDir === undefined) {
 			delete process.env.DIFFEX_PACKAGE_DIR;
 		} else {
-			process.env.DIFFEX_PACKAGE_DIR = originalPiPackageDir;
+			process.env.DIFFEX_PACKAGE_DIR = originalDiffexPackageDir;
 		}
 		if (originalPath === undefined) {
 			delete process.env.PATH;
@@ -526,7 +526,7 @@ describe("package commands", () => {
 	it("uses the update check version for forced self updates even when current", async () => {
 		const globalPrefix = join(tempDir, "global-prefix");
 		const projectPrefix = join(tempDir, "project-prefix");
-		const selfPackageDir = join(globalPrefix, "lib", "node_modules", "@earendil-works", "pi-coding-agent");
+		const selfPackageDir = join(globalPrefix, "lib", "node_modules", "@earendil-works", "diffex-coding-agent");
 		const fakeNpmPath = join(tempDir, "fake-npm.cjs");
 		const recordPath = join(tempDir, "self-update.json");
 		mkdirSync(selfPackageDir, { recursive: true });
@@ -675,7 +675,7 @@ else {
 
 	it("prints a pnpm metadata hint when self-update fails", async () => {
 		const globalRoot = join(tempDir, "pnpm", "global", "v11");
-		const selfPackageDir = join(globalRoot, "node_modules", "@earendil-works", "pi-coding-agent");
+		const selfPackageDir = join(globalRoot, "node_modules", "@earendil-works", "diffex-coding-agent");
 		const fakeBinDir = join(tempDir, "bin");
 		const fakePnpmPath = join(fakeBinDir, process.platform === "win32" ? "pnpm.cmd" : "pnpm");
 		mkdirSync(selfPackageDir, { recursive: true });
@@ -760,7 +760,7 @@ if(args.includes("install")) process.exit(23);
 			expect(process.exitCode).toBe(1);
 			const stdout = logSpy.mock.calls.map(([message]) => String(message)).join("\n");
 			const stderr = errorSpy.mock.calls.map(([message]) => String(message)).join("\n");
-			expect(stdout).not.toContain(`Updated pi`);
+			expect(stdout).not.toContain(`Updated diffex`);
 			expect(stderr).toContain("exited with code 23");
 			const recordedCalls = JSON.parse(readFileSync(recordPath, "utf-8")) as string[][];
 			expect(recordedCalls).toEqual([
@@ -786,7 +786,7 @@ if(args.includes("install")) process.exit(23);
 			const stderr = errorSpy.mock.calls.map(([message]) => String(message)).join("\n");
 			const stdout = logSpy.mock.calls.map(([message]) => String(message)).join("\n");
 			expect(stderr).toContain("Did you mean npm:pi-formatter?");
-			expect(stdout).not.toContain("Updated pi-formatter");
+			expect(stdout).not.toContain("Updated diffex-formatter");
 			expect(process.exitCode).toBe(1);
 
 			const settings = JSON.parse(readFileSync(settingsPath, "utf-8")) as { packages?: string[] };

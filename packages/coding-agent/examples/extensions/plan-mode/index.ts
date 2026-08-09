@@ -44,13 +44,13 @@ function getTextContent(message: AssistantMessage): string {
 		.join("\n");
 }
 
-export default function planModeExtension(pi: ExtensionAPI): void {
+export default function planModeExtension(diffex: ExtensionAPI): void {
 	let planModeEnabled = false;
 	let executionMode = false;
 	let todoItems: TodoItem[] = [];
 	let toolsBeforePlanMode: string[] | undefined;
 
-	pi.registerFlag("plan", {
+	diffex.registerFlag("plan", {
 		description: "Start in plan mode (read-only exploration)",
 		type: "boolean",
 		default: false,
@@ -103,18 +103,18 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 
 	function enablePlanModeTools(): void {
 		if (toolsBeforePlanMode === undefined) {
-			toolsBeforePlanMode = pi.getActiveTools();
+			toolsBeforePlanMode = diffex.getActiveTools();
 		}
-		pi.setActiveTools(getPlanModeTools(toolsBeforePlanMode));
+		diffex.setActiveTools(getPlanModeTools(toolsBeforePlanMode));
 	}
 
 	function restoreNormalModeTools(): void {
-		pi.setActiveTools(toolsBeforePlanMode ?? getNormalModeTools(pi.getActiveTools()));
+		diffex.setActiveTools(toolsBeforePlanMode ?? getNormalModeTools(diffex.getActiveTools()));
 		toolsBeforePlanMode = undefined;
 	}
 
 	function persistState(): void {
-		pi.appendEntry("plan-mode", {
+		diffex.appendEntry("plan-mode", {
 			enabled: planModeEnabled,
 			todos: todoItems,
 			executing: executionMode,
@@ -138,12 +138,12 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 		persistState();
 	}
 
-	pi.registerCommand("plan", {
+	diffex.registerCommand("plan", {
 		description: "Toggle plan mode (read-only exploration)",
 		handler: async (_args, ctx) => togglePlanMode(ctx),
 	});
 
-	pi.registerCommand("todos", {
+	diffex.registerCommand("todos", {
 		description: "Show current plan todo list",
 		handler: async (_args, ctx) => {
 			if (todoItems.length === 0) {
@@ -155,13 +155,13 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 		},
 	});
 
-	pi.registerShortcut(Key.ctrlAlt("p"), {
+	diffex.registerShortcut(Key.ctrlAlt("p"), {
 		description: "Toggle plan mode",
 		handler: async (ctx) => togglePlanMode(ctx),
 	});
 
 	// Block destructive bash commands in plan mode
-	pi.on("tool_call", async (event) => {
+	diffex.on("tool_call", async (event) => {
 		if (!planModeEnabled || event.toolName !== "bash") return;
 
 		const command = event.input.command as string;
@@ -174,7 +174,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 	});
 
 	// Filter out stale plan mode context when not in plan mode
-	pi.on("context", async (event) => {
+	diffex.on("context", async (event) => {
 		if (planModeEnabled) return;
 
 		return {
@@ -198,7 +198,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 	});
 
 	// Inject plan/execution context before agent starts
-	pi.on("before_agent_start", async () => {
+	diffex.on("before_agent_start", async () => {
 		if (planModeEnabled) {
 			return {
 				message: {
@@ -247,7 +247,7 @@ After completing a step, include a [DONE:n] tag in your response.`,
 	});
 
 	// Track progress after each turn
-	pi.on("turn_end", async (event, ctx) => {
+	diffex.on("turn_end", async (event, ctx) => {
 		if (!executionMode || todoItems.length === 0) return;
 		if (!isAssistantMessage(event.message)) return;
 
@@ -259,12 +259,12 @@ After completing a step, include a [DONE:n] tag in your response.`,
 	});
 
 	// Handle plan completion and plan mode UI
-	pi.on("agent_end", async (event, ctx) => {
+	diffex.on("agent_end", async (event, ctx) => {
 		// Check if execution is complete
 		if (executionMode && todoItems.length > 0) {
 			if (todoItems.every((t) => t.completed)) {
 				const completedList = todoItems.map((t) => `~~${t.text}~~`).join("\n");
-				pi.sendMessage(
+				diffex.sendMessage(
 					{ customType: "plan-complete", content: `**Plan Complete!** ✓\n\n${completedList}`, display: true },
 					{ triggerTurn: false },
 				);
@@ -322,23 +322,23 @@ ${remainingList}
 
 Start with: ${firstTodoItem.text}
 After completing a step, include a [DONE:n] tag in your response.`;
-			pi.sendMessage(planTodoListMessage, { deliverAs: "followUp" });
-			pi.sendMessage(
+			diffex.sendMessage(planTodoListMessage, { deliverAs: "followUp" });
+			diffex.sendMessage(
 				{ customType: "plan-mode-execute", content: execMessage, display: true },
 				{ triggerTurn: true, deliverAs: "followUp" },
 			);
 		} else if (choice === "Refine the plan") {
 			const refinement = await ctx.ui.editor("Refine the plan:", "");
 			if (refinement?.trim()) {
-				pi.sendMessage(planTodoListMessage, { deliverAs: "followUp" });
-				pi.sendUserMessage(refinement.trim(), { deliverAs: "followUp" });
+				diffex.sendMessage(planTodoListMessage, { deliverAs: "followUp" });
+				diffex.sendUserMessage(refinement.trim(), { deliverAs: "followUp" });
 			}
 		}
 	});
 
 	// Restore state on session start/resume
-	pi.on("session_start", async (_event, ctx) => {
-		if (pi.getFlag("plan") === true) {
+	diffex.on("session_start", async (_event, ctx) => {
+		if (diffex.getFlag("plan") === true) {
 			planModeEnabled = true;
 		}
 

@@ -60,6 +60,6 @@ const structuredOutputTool = defineTool({
 	},
 });
 
-export default function (pi: ExtensionAPI) {
-	pi.registerTool(structuredOutputTool);
+export default function (diffex: ExtensionAPI) {
+	diffex.registerTool(structuredOutputTool);
 }

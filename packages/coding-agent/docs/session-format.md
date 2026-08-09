@@ -69,7 +69,7 @@ interface ToolCall {
 }
 ```
 
-### Base Message Types (from pi-ai)
+### Base Message Types (from diffex-ai)
 
 ```typescript
 interface UserMessage {
@@ -117,9 +117,9 @@ interface Usage {
 }
 ```
 
-The exported pi-ai `StopReason` type also includes `"pending"`, but that value is reserved for partial messages in streaming events. Terminal `done`/`error` messages replace it with a completion reason before Diffex persists the assistant message, so `"pending"` should never appear in session JSONL.
+The exported diffex-ai `StopReason` type also includes `"pending"`, but that value is reserved for partial messages in streaming events. Terminal `done`/`error` messages replace it with a completion reason before Diffex persists the assistant message, so `"pending"` should never appear in session JSONL.
 
-### Extended Message Types (from pi-coding-agent)
+### Extended Message Types (from diffex-coding-agent)
 
 ```typescript
 interface BashExecutionMessage {
@@ -268,7 +268,7 @@ Extension state persistence. Does NOT participate in LLM context.
 {"type":"custom","id":"h8i9j0k1","parentId":"g7h8i9j0","timestamp":"2024-12-03T14:20:00.000Z","customType":"my-extension","data":{"count":42}}
 ```
 
-Use `customType` to identify your extension's entries on reload. Interactive mode can render custom entries via `pi.registerEntryRenderer(customType, renderer)`, but they still do not participate in LLM context.
+Use `customType` to identify your extension's entries on reload. Interactive mode can render custom entries via `diffex.registerEntryRenderer(customType, renderer)`, but they still do not participate in LLM context.
 
 ### CustomMessageEntry
 
@@ -295,7 +295,7 @@ Set `label` to `undefined` to clear a label.
 
 ### SessionInfoEntry
 
-Session metadata (e.g., user-defined display name). Set via `/name`, `--name` / `-n`, or `pi.setSessionName()` in extensions.
+Session metadata (e.g., user-defined display name). Set via `/name`, `--name` / `-n`, or `diffex.setSessionName()` in extensions.
 
 ```json
 {"type":"session_info","id":"k1l2m3n4","parentId":"j0k1l2m3","timestamp":"2024-12-03T14:35:00.000Z","name":"Refactor auth module"}

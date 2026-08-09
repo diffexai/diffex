@@ -381,7 +381,7 @@ Header names are merged case-insensitively. Explicit headers override auth/model
 
 ### Credential Store
 
-Stored credentials (API keys entered interactively, OAuth tokens) live in a `CredentialStore` — one type-tagged credential per provider. pi-ai ships an in-memory default; apps inject persistent storage:
+Stored credentials (API keys entered interactively, OAuth tokens) live in a `CredentialStore` — one type-tagged credential per provider. diffex-ai ships an in-memory default; apps inject persistent storage:
 
 ```typescript
 import { createModels, type CredentialStore } from '@earendil-works/diffex-ai';

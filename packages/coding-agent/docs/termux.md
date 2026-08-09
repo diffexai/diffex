@@ -23,7 +23,7 @@ npm install -g --ignore-scripts @earendil-works/diffex-coding-agent
 mkdir -p ~/.diffex/agent
 
 # Run Diffex
-pi
+diffex
 ```
 
 ## Clipboard Support

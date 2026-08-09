@@ -10,7 +10,7 @@ Diffex loads prompt templates from:
 
 - Global: `~/.diffex/agent/prompts/*.md`
 - Project: `.diffex/prompts/*.md` (only after the project is trusted)
-- Packages: `prompts/` directories or `pi.prompts` entries in `package.json`
+- Packages: `prompts/` directories or `diffex.prompts` entries in `package.json`
 - Settings: `prompts` array with files or directories
 - CLI: `--prompt-template <path>` (repeatable)
 

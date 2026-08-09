@@ -10,10 +10,10 @@ import { VERSION } from "@earendil-works/diffex-coding-agent";
 
 // --- DIFFEX MASCOT ---
 // Based on the Diffex agent character
-function getPiMascot(theme: Theme): string[] {
+function getDiffexMascot(theme: Theme): string[] {
 	// --- COLORS ---
 	// 3b1b Blue: R=80, G=180, B=230
-	const piBlue = (text: string) => theme.fg("accent", text);
+	const diffexBlue = (text: string) => theme.fg("accent", text);
 	const white = (text: string) => text; // Use plain white (or theme.fg("text", text))
 	const black = (text: string) => theme.fg("dim", text); // Use dim for contrast
 
@@ -33,25 +33,25 @@ function getPiMascot(theme: Theme): string[] {
 
 	// 3. Line 2: The Wide Top Bar (The "Overhang")
 	// 14 blocks wide for that serif-style roof
-	const lineBar = `  ${piBlue(BLOCK.repeat(14))}`;
+	const lineBar = `  ${diffexBlue(BLOCK.repeat(14))}`;
 
 	// 4. Lines 3-6: The Legs
 	// Indented 5 spaces relative to the very left edge
 	// Leg width: 2 blocks | Gap: 4 blocks
-	const lineLeg = `     ${piBlue(BLOCK.repeat(2))}    ${piBlue(BLOCK.repeat(2))}`;
+	const lineLeg = `     ${diffexBlue(BLOCK.repeat(2))}    ${diffexBlue(BLOCK.repeat(2))}`;
 
 	// --- ASSEMBLY ---
 	return ["", lineEyes, lineBar, lineLeg, lineLeg, lineLeg, lineLeg, ""];
 }
 
-export default function (pi: ExtensionAPI) {
+export default function (diffex: ExtensionAPI) {
 	// Set custom header immediately on load (if UI is available)
-	pi.on("session_start", async (_event, ctx) => {
+	diffex.on("session_start", async (_event, ctx) => {
 		if (ctx.mode === "tui") {
 			ctx.ui.setHeader((_tui, theme) => {
 				return {
 					render(_width: number): string[] {
-						const mascotLines = getPiMascot(theme);
+						const mascotLines = getDiffexMascot(theme);
 						// Add a subtitle with hint
 						const subtitle = `${theme.fg("muted", "   shitty coding agent")}${theme.fg("dim", ` v${VERSION}`)}`;
 						return [...mascotLines, subtitle];
@@ -63,7 +63,7 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	// Command to restore built-in header
-	pi.registerCommand("builtin-header", {
+	diffex.registerCommand("builtin-header", {
 		description: "Restore built-in header with keybinding hints",
 		handler: async (_args, ctx) => {
 			ctx.ui.setHeader(undefined);

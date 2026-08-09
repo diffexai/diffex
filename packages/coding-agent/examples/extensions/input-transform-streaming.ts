@@ -9,14 +9,14 @@
  * exec call is skipped so the correction reaches the model without delay.
  *
  * Start Diffex with this extension:
- *   pi -e ./examples/extensions/input-transform-streaming.ts
+ *   diffex -e ./examples/extensions/input-transform-streaming.ts
  */
 import type { ExtensionAPI } from "@earendil-works/diffex-coding-agent";
 
 const TRIGGER = /\b(changes?|diff|modified)\b/i;
 
-export default function (pi: ExtensionAPI) {
-	pi.on("input", async (event) => {
+export default function (diffex: ExtensionAPI) {
+	diffex.on("input", async (event) => {
 		// During steering, skip the exec call — corrections should be fast
 		if (event.streamingBehavior === "steer") {
 			return { action: "continue" };
@@ -26,7 +26,7 @@ export default function (pi: ExtensionAPI) {
 			return { action: "continue" };
 		}
 
-		const { stdout, code } = await pi.exec("git", ["diff", "--stat"]);
+		const { stdout, code } = await diffex.exec("git", ["diff", "--stat"]);
 		if (code !== 0 || !stdout.trim()) {
 			return { action: "continue" };
 		}

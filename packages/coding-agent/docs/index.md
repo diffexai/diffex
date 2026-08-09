@@ -23,7 +23,7 @@ For pnpm, Yarn, or Bun installs, use the matching global remove command: `pnpm r
 Then run it in a project directory:
 
 ```bash
-pi
+diffex
 ```
 
 Authenticate with `/login` for subscription providers, or set an API key such as `ANTHROPIC_API_KEY` before starting Diffex.

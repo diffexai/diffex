@@ -77,12 +77,12 @@ Configure delivery in [Settings](settings.md) with `steeringMode` and `followUpM
 Sessions are saved automatically to `~/.diffex/agent/sessions/`, organized by working directory.
 
 ```bash
-pi -c                  # Continue most recent session
-pi -r                  # Browse and select a session
-pi --no-session        # Ephemeral mode; do not save
-pi --name "my task"    # Set session display name at startup
-pi --session <path|id> # Use a specific session file or session ID
-pi --fork <path|id>    # Fork a session into a new session file
+diffex -c                  # Continue most recent session
+diffex -r                  # Browse and select a session
+diffex --no-session        # Ephemeral mode; do not save
+diffex --name "my task"    # Set session display name at startup
+diffex --session <path|id> # Use a specific session file or session ID
+diffex --fork <path|id>    # Fork a session into a new session file
 ```
 
 Useful session commands:
@@ -126,7 +126,7 @@ Non-interactive modes (`-p`, `--mode json`, and `--mode rpc`) do not show a trus
 
 If no extension or saved decision applies, `defaultProjectTrust` controls the fallback behavior. Set it to `"ask"`, `"always"`, or `"never"` in `~/.diffex/agent/settings.json`, or change it with `/settings`.
 
-`pi config` and package commands use the same project trust flow, except `pi update` never prompts. Pass `--approve` to trust project-local settings for one command or `--no-approve` to ignore them.
+`diffex config` and package commands use the same project trust flow, except `diffex update` never prompts. Pass `--approve` to trust project-local settings for one command or `--no-approve` to ignore them.
 
 Use `/trust` in interactive mode to save a project trust decision for future sessions, including trust for the immediate parent folder. It writes `~/.diffex/agent/trust.json` only; the current session is not reloaded, so restart Diffex for changes to take effect.
 
@@ -143,26 +143,26 @@ If you use Diffex for open source work and want to publish sessions for model, p
 ## CLI Reference
 
 ```bash
-pi [options] [@files...] [messages...]
+diffex [options] [@files...] [messages...]
 ```
 
 ### Package Commands
 
 ```bash
-pi install <source> [-l]     # Install package, -l for project-local
-pi remove <source> [-l]      # Remove package
-pi uninstall <source> [-l]   # Alias for remove
-pi update [source|self|pi]   # Update Diffex only, or one package source
-pi update --all              # Update Diffex and packages; reconcile pinned git refs
-pi update --extensions       # Update packages only; reconcile pinned git refs
-pi update --models           # Refresh model catalogs only
-pi update --self             # Update Diffex only
-pi update --extension <src>  # Update one package
-pi list                      # List installed packages
-pi config                    # Enable/disable package resources
+diffex install <source> [-l]     # Install package, -l for project-local
+diffex remove <source> [-l]      # Remove package
+diffex uninstall <source> [-l]   # Alias for remove
+diffex update [source|self|diffex]   # Update Diffex only, or one package source
+diffex update --all              # Update Diffex and packages; reconcile pinned git refs
+diffex update --extensions       # Update packages only; reconcile pinned git refs
+diffex update --models           # Refresh model catalogs only
+diffex update --self             # Update Diffex only
+diffex update --extension <src>  # Update one package
+diffex list                      # List installed packages
+diffex config                    # Enable/disable package resources
 ```
 
-These commands manage Diffex packages and `pi update` can update the Diffex CLI installation. To uninstall Diffex itself, see [Quickstart](quickstart.md#uninstall). `pi config` and project package commands accept `--approve`/`--no-approve` to trust or ignore project-local settings for one command. `pi update` never prompts for project trust.
+These commands manage Diffex packages and `diffex update` can update the Diffex CLI installation. To uninstall Diffex itself, see [Quickstart](quickstart.md#uninstall). `diffex config` and project package commands accept `--approve`/`--no-approve` to trust or ignore project-local settings for one command. `diffex update` never prompts for project trust.
 
 See [Diffex Packages](packages.md) for package sources and security notes.
 
@@ -179,7 +179,7 @@ See [Diffex Packages](packages.md) for package sources and security notes.
 In print mode, Diffex also reads piped stdin and merges it into the initial prompt:
 
 ```bash
-cat README.md | pi -p "Summarize this text"
+cat README.md | diffex -p "Summarize this text"
 ```
 
 ### Model Options
@@ -233,7 +233,7 @@ Built-in tools: `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`.
 Combine `--no-*` with explicit flags to load exactly what you need, ignoring settings. Example:
 
 ```bash
-pi --no-extensions -e ./my-extension.ts
+diffex --no-extensions -e ./my-extension.ts
 ```
 
 ### Other Options
@@ -258,43 +258,43 @@ Set **TUI mode** in `/settings` to switch between `regular` and `fullscreen` imm
 Prefix files with `@` to include them in the message:
 
 ```bash
-pi @prompt.md "Answer this"
-pi -p @screenshot.png "What's in this image?"
-pi @code.ts @test.ts "Review these files"
+diffex @prompt.md "Answer this"
+diffex -p @screenshot.png "What's in this image?"
+diffex @code.ts @test.ts "Review these files"
 ```
 
 ### Examples
 
 ```bash
 # Interactive with initial prompt
-pi "List all .ts files in src/"
+diffex "List all .ts files in src/"
 
 # Non-interactive
-pi -p "Summarize this codebase"
+diffex -p "Summarize this codebase"
 
 # Non-interactive with piped stdin
-cat README.md | pi -p "Summarize this text"
+cat README.md | diffex -p "Summarize this text"
 
 # Named one-shot session
-pi --name "release audit" -p "Audit this repository"
+diffex --name "release audit" -p "Audit this repository"
 
 # Different model
-pi --provider openai --model gpt-4o "Help me refactor"
+diffex --provider openai --model gpt-4o "Help me refactor"
 
 # Model with provider prefix
-pi --model openai/gpt-4o "Help me refactor"
+diffex --model openai/gpt-4o "Help me refactor"
 
 # Model with thinking level shorthand
-pi --model sonnet:high "Solve this complex problem"
+diffex --model sonnet:high "Solve this complex problem"
 
 # Limit model cycling
-pi --models "claude-*,gpt-4o"
+diffex --models "claude-*,gpt-4o"
 
 # Read-only mode
-pi --tools read,grep,find,ls -p "Review the code"
+diffex --tools read,grep,find,ls -p "Review the code"
 
 # Disable one extension or built-in tool while keeping the rest available
-pi --exclude-tools ask_question
+diffex --exclude-tools ask_question
 ```
 
 ## Design Principles

@@ -33,7 +33,7 @@ Run from the project you want mounted:
 
 ```bash
 cd /path/to/project
-pi -e ~/.diffex/agent/extensions/gondolin
+diffex -e ~/.diffex/agent/extensions/gondolin
 ```
 
 The extension mounts the host cwd at `/workspace` in the VM and overrides `read`, `write`, `edit`, `bash`, `grep`, `find`, and `ls`.
@@ -57,19 +57,19 @@ RUN apt-get update \
 RUN npm install -g --ignore-scripts @earendil-works/diffex-coding-agent
 
 WORKDIR /workspace
-ENTRYPOINT ["pi"]
+ENTRYPOINT ["diffex"]
 ```
 
 Build and run:
 
 ```bash
-docker build -t pi-sandbox -f Dockerfile.diffex .
+docker build -t diffex-sandbox -f Dockerfile.diffex .
 
 docker run --rm -it \
   -e ANTHROPIC_API_KEY \
   -v "$PWD:/workspace" \
-  -v pi-agent-home:/root/.diffex/agent \
-  pi-sandbox
+  -v diffex-agent-home:/root/.diffex/agent \
+  diffex-sandbox
 ```
 
 The `-v "$PWD:/workspace"` mounts your current directory into the container at /workspace such that reads and writes in `/workspace` inside Docker directly affect your host files, like in the Gondolin example.
@@ -92,7 +92,7 @@ openshell gateway select <name>
 Launch Diffex inside an OpenShell sandbox:
 
 ```bash
-openshell sandbox create --name pi-sandbox --from pi -- pi
+openshell sandbox create --name diffex-sandbox --from diffex -- diffex
 ```
 
 In this pattern, the whole Diffex process runs inside the sandbox.
@@ -102,8 +102,8 @@ If the gateway is remote, project files are not bind-mounted from the host, mean
 Clone the repository inside the sandbox or use OpenShell file transfer commands:
 
 ```bash
-openshell sandbox upload pi-sandbox ./repo /workspace
-openshell sandbox download pi-sandbox /workspace/repo ./repo-out
+openshell sandbox upload diffex-sandbox ./repo /workspace
+openshell sandbox download diffex-sandbox /workspace/repo ./repo-out
 ```
 
 OpenShell providers can keep raw model API keys outside the sandbox.

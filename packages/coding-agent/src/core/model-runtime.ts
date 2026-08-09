@@ -126,7 +126,7 @@ function mergeHeaders(
 	return merged;
 }
 
-/** Configured pi-ai Models collection used by coding-agent and SDK consumers. */
+/** Configured Diffex AI Models collection used by coding-agent and SDK consumers. */
 export class ModelRuntime implements Models {
 	private readonly models: MutableModels;
 	private readonly credentials: RuntimeCredentials;
@@ -700,7 +700,7 @@ export class ModelRuntime implements Models {
 			...options,
 			allowNetwork: options.allowNetwork ?? this.modelNetworkEnabled,
 		};
-		// Published pi-ai builds before ModelsStore returned void and accepted a provider ID.
+		// Published Diffex AI builds before ModelsStore returned void and accepted a provider ID.
 		// The fallback keeps source-mode CLI tests working without rebuilding workspace dependencies.
 		const result = ((await this.models.refresh(refreshOptions)) as ModelsRefreshResult | undefined) ?? {
 			aborted: refreshOptions.signal?.aborted ?? false,

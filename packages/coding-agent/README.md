@@ -72,13 +72,13 @@ Authenticate with an API key:
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
-pi
+diffex
 ```
 
 Or use your existing subscription:
 
 ```bash
-pi
+diffex
 /login  # Then select provider
 ```
 
@@ -90,7 +90,7 @@ Then just talk to Diffex. By default, Diffex gives the model four tools: `read`,
 
 ## Providers & Models
 
-For each built-in provider, Diffex maintains a list of tool-capable models. Configured provider catalogs refresh automatically; run `pi update --models` to force an immediate refresh. Authenticate via subscription (`/login`) or API key, then select any model from that provider via `/model` (or Ctrl+L).
+For each built-in provider, Diffex maintains a list of tool-capable models. Configured provider catalogs refresh automatically; run `diffex update --models` to force an immediate refresh. Authenticate via subscription (`/login`) or API key, then select any model from that provider via `/model` (or Ctrl+L).
 
 **Subscriptions:**
 - Anthropic Claude Pro/Max
@@ -236,12 +236,12 @@ Sessions are stored as JSONL files with a tree structure. Each entry has an `id`
 Sessions auto-save to `~/.diffex/agent/sessions/` organized by working directory.
 
 ```bash
-pi -c                  # Continue most recent session
-pi -r                  # Browse and select from past sessions
-pi --no-session        # Ephemeral mode (don't save)
-pi --name "my task"    # Set session display name at startup
-pi --session <path|id> # Use specific session file or ID
-pi --fork <path|id>    # Fork specific session file or ID into a new session
+diffex -c                  # Continue most recent session
+diffex -r                  # Browse and select from past sessions
+diffex --no-session        # Ephemeral mode (don't save)
+diffex --name "my task"    # Set session display name at startup
+diffex --session <path|id> # Use specific session file or ID
+diffex --fork <path|id>    # Fork specific session file or ID into a new session
 ```
 
 Use `/session` in interactive mode to see the current session ID before reusing it with `--session <id>` or `--fork <id>`.
@@ -296,7 +296,7 @@ Non-interactive modes (`-p`, `--mode json`, and `--mode rpc`) do not show a trus
 
 If no extension or saved decision applies, `defaultProjectTrust` controls the fallback behavior. Set it to `"ask"`, `"always"`, or `"never"` in `~/.diffex/agent/settings.json`, or change it with `/settings`.
 
-`pi config` and package commands use the same project trust flow, except `pi update` never prompts. Pass `--approve` to trust project-local settings for one command or `--no-approve` to ignore them.
+`diffex config` and package commands use the same project trust flow, except `diffex update` never prompts. Pass `--approve` to trust project-local settings for one command or `--no-approve` to ignore them.
 
 Use `/trust` in interactive mode to save a project trust decision for future sessions, including trust for the immediate parent folder. It writes `~/.diffex/agent/trust.json` only; the current session is not reloaded, so restart Diffex for changes to take effect.
 
@@ -367,14 +367,14 @@ Place in `~/.diffex/agent/skills/`, `~/.agents/skills/`, `.diffex/skills/`, or `
 TypeScript modules that extend Diffex with custom tools, commands, keyboard shortcuts, event handlers, and UI components.
 
 ```typescript
-export default function (pi: ExtensionAPI) {
-  pi.registerTool({ name: "deploy", ... });
-  pi.registerCommand("stats", { ... });
-  pi.on("tool_call", async (event, ctx) => { ... });
+export default function (diffex: ExtensionAPI) {
+  diffex.registerTool({ name: "deploy", ... });
+  diffex.registerCommand("stats", { ... });
+  diffex.on("tool_call", async (event, ctx) => { ... });
 }
 ```
 
-The default export can also be `async`. Diffex waits for async extension factories before startup continues, which is useful for one-time initialization such as fetching remote model lists before calling `pi.registerProvider()`.
+The default export can also be `async`. Diffex waits for async extension factories before startup continues, which is useful for one-time initialization such as fetching remote model lists before calling `diffex.registerProvider()`.
 
 **What's possible:**
 - Custom tools (or replace built-in tools entirely)
@@ -400,43 +400,43 @@ Place in `~/.diffex/agent/themes/`, `.diffex/themes/`, or a [Diffex package](#di
 
 ### Diffex Packages
 
-Bundle and share extensions, skills, prompts, and themes via npm or git. Find packages on [npmjs.com](https://www.npmjs.com/search?q=keywords%3Api-package) or the [upstream Discord](https://discord.com/channels/1456806362351669492/1457744485428629628).
+Bundle and share extensions, skills, prompts, and themes via npm or git. Find packages on [npmjs.com](https://www.npmjs.com/search?q=keywords%3Adiffex-package) or the [upstream Discord](https://discord.com/channels/1456806362351669492/1457744485428629628).
 
 > **Security:** Diffex packages run with full system access. Extensions execute arbitrary code, and skills can instruct the model to perform any action including running executables. Review source code before installing third-party packages.
 
 ```bash
-pi install npm:@foo/diffex-tools
-pi install npm:@foo/diffex-tools@1.2.3  # pinned version
-pi install git:github.com/user/repo
-pi install git:github.com/user/repo@v1  # tag or commit
-pi install git:git@github.com:user/repo
-pi install git:git@github.com:user/repo@v1  # tag or commit
-pi install https://github.com/user/repo
-pi install https://github.com/user/repo@v1      # tag or commit
-pi install ssh://git@github.com/user/repo
-pi install ssh://git@github.com/user/repo@v1    # tag or commit
-pi remove npm:@foo/diffex-tools
-pi uninstall npm:@foo/diffex-tools      # alias for remove
-pi list
-pi update                               # update Diffex only
-pi update --all                         # update Diffex and packages
-pi update --extensions                  # update packages only
-pi update --models                      # refresh model catalogs only
-pi update --self                        # update Diffex only
-pi update --self --force                # reinstall Diffex even if current
-pi update npm:@foo/diffex-tools         # update one package
-pi config                               # enable/disable extensions, skills, prompts, themes
+diffex install npm:@foo/diffex-tools
+diffex install npm:@foo/diffex-tools@1.2.3  # pinned version
+diffex install git:github.com/user/repo
+diffex install git:github.com/user/repo@v1  # tag or commit
+diffex install git:git@github.com:user/repo
+diffex install git:git@github.com:user/repo@v1  # tag or commit
+diffex install https://github.com/user/repo
+diffex install https://github.com/user/repo@v1      # tag or commit
+diffex install ssh://git@github.com/user/repo
+diffex install ssh://git@github.com/user/repo@v1    # tag or commit
+diffex remove npm:@foo/diffex-tools
+diffex uninstall npm:@foo/diffex-tools      # alias for remove
+diffex list
+diffex update                               # update Diffex only
+diffex update --all                         # update Diffex and packages
+diffex update --extensions                  # update packages only
+diffex update --models                      # refresh model catalogs only
+diffex update --self                        # update Diffex only
+diffex update --self --force                # reinstall Diffex even if current
+diffex update npm:@foo/diffex-tools         # update one package
+diffex config                               # enable/disable extensions, skills, prompts, themes
 ```
 
-Packages install to `~/.diffex/agent/git/` (git) or `~/.diffex/agent/npm/` (npm). Use `-l` for project-local installs (`.diffex/git/`, `.diffex/npm/`). Git `@ref` values are pinned tags or commits; pinned packages are skipped by `pi update --extensions` and `pi update --all`, so use `pi install git:host/user/repo@new-ref` to move an existing package to a new ref. Git packages install dependencies with `npm install --omit=dev` by default, so runtime deps must be listed under `dependencies`; when `npmCommand` is configured, git packages use plain `install` for compatibility with wrappers. If you use a Node version manager and want package installs to reuse a stable npm context, set `npmCommand` in `settings.json`, for example `["mise", "exec", "node@20", "--", "npm"]`.
+Packages install to `~/.diffex/agent/git/` (git) or `~/.diffex/agent/npm/` (npm). Use `-l` for project-local installs (`.diffex/git/`, `.diffex/npm/`). Git `@ref` values are pinned tags or commits; pinned packages are skipped by `diffex update --extensions` and `diffex update --all`, so use `diffex install git:host/user/repo@new-ref` to move an existing package to a new ref. Git packages install dependencies with `npm install --omit=dev` by default, so runtime deps must be listed under `dependencies`; when `npmCommand` is configured, git packages use plain `install` for compatibility with wrappers. If you use a Node version manager and want package installs to reuse a stable npm context, set `npmCommand` in `settings.json`, for example `["mise", "exec", "node@20", "--", "npm"]`.
 
-Create a package by adding the compatibility `pi` key to `package.json`:
+Create a package by adding the compatibility `diffex` key to `package.json`:
 
 ```json
 {
   "name": "my-diffex-package",
-  "keywords": ["pi-package"],
-  "pi": {
+  "keywords": ["diffex-package"],
+  "diffex": {
     "extensions": ["./extensions"],
     "skills": ["./skills"],
     "prompts": ["./prompts"],
@@ -445,7 +445,7 @@ Create a package by adding the compatibility `pi` key to `package.json`:
 }
 ```
 
-Without a `pi` manifest, Diffex auto-discovers from conventional directories (`extensions/`, `skills/`, `prompts/`, `themes/`).
+Without a `diffex` manifest, Diffex auto-discovers from conventional directories (`extensions/`, `skills/`, `prompts/`, `themes/`).
 
 See [docs/packages.md](docs/packages.md).
 
@@ -476,7 +476,7 @@ See [docs/sdk.md](docs/sdk.md) and [examples/sdk/](examples/sdk/).
 For non-Node.js integrations, use RPC mode over stdin/stdout:
 
 ```bash
-pi --mode rpc
+diffex --mode rpc
 ```
 
 RPC mode uses strict LF-delimited JSONL framing. Clients must split records on `\n` only. Do not use generic line readers like Node `readline`, which also split on Unicode separators inside JSON payloads.
@@ -508,27 +508,27 @@ Read the [blog post](https://mariozechner.at/posts/2025-11-30-pi-coding-agent/) 
 ## CLI Reference
 
 ```bash
-pi [options] [@files...] [messages...]
+diffex [options] [@files...] [messages...]
 ```
 
 ### Package Commands
 
 ```bash
-pi install <source> [-l]     # Install package, -l for project-local
-pi remove <source> [-l]      # Remove package
-pi uninstall <source> [-l]   # Alias for remove
-pi update [source|self|pi]   # Update Diffex only, or one package source
-pi update --all              # Update Diffex and packages
-pi update --extensions       # Update packages only
-pi update --models           # Refresh model catalogs only
-pi update --self             # Update Diffex only
-pi update --self --force     # Reinstall Diffex even if current
-pi update --extension <src>  # Update one package
-pi list                      # List installed packages
-pi config                    # Enable/disable package resources
+diffex install <source> [-l]     # Install package, -l for project-local
+diffex remove <source> [-l]      # Remove package
+diffex uninstall <source> [-l]   # Alias for remove
+diffex update [source|self|diffex]   # Update Diffex only, or one package source
+diffex update --all              # Update Diffex and packages
+diffex update --extensions       # Update packages only
+diffex update --models           # Refresh model catalogs only
+diffex update --self             # Update Diffex only
+diffex update --self --force     # Reinstall Diffex even if current
+diffex update --extension <src>  # Update one package
+diffex list                      # List installed packages
+diffex config                    # Enable/disable package resources
 ```
 
-`pi config` and project package commands accept `--approve`/`--no-approve` to trust or ignore project-local settings for one command. `pi update` never prompts for project trust.
+`diffex config` and project package commands accept `--approve`/`--no-approve` to trust or ignore project-local settings for one command. `diffex update` never prompts for project trust.
 
 ### Modes
 
@@ -543,7 +543,7 @@ pi config                    # Enable/disable package resources
 In print mode, Diffex also reads piped stdin and merges it into the initial prompt:
 
 ```bash
-cat README.md | pi -p "Summarize this text"
+cat README.md | diffex -p "Summarize this text"
 ```
 
 ### Model Options
@@ -614,53 +614,53 @@ Combine `--no-*` with explicit flags to load exactly what you need, ignoring set
 Prefix files with `@` to include in the message:
 
 ```bash
-pi @prompt.md "Answer this"
-pi -p @screenshot.png "What's in this image?"
-pi @code.ts @test.ts "Review these files"
+diffex @prompt.md "Answer this"
+diffex -p @screenshot.png "What's in this image?"
+diffex @code.ts @test.ts "Review these files"
 ```
 
 ### Examples
 
 ```bash
 # Interactive with initial prompt
-pi "List all .ts files in src/"
+diffex "List all .ts files in src/"
 
 # Non-interactive
-pi -p "Summarize this codebase"
+diffex -p "Summarize this codebase"
 
 # Non-interactive with piped stdin
-cat README.md | pi -p "Summarize this text"
+cat README.md | diffex -p "Summarize this text"
 
 # Named one-shot session
-pi --name "release audit" -p "Audit this repository"
+diffex --name "release audit" -p "Audit this repository"
 
 # Different model
-pi --provider openai --model gpt-4o "Help me refactor"
+diffex --provider openai --model gpt-4o "Help me refactor"
 
 # Model with provider prefix (no --provider needed)
-pi --model openai/gpt-4o "Help me refactor"
+diffex --model openai/gpt-4o "Help me refactor"
 
 # Model with thinking level shorthand
-pi --model sonnet:high "Solve this complex problem"
+diffex --model sonnet:high "Solve this complex problem"
 
 # Limit model cycling
-pi --models "claude-*,gpt-4o"
+diffex --models "claude-*,gpt-4o"
 
 # Read-only mode
-pi --tools read,grep,find,ls -p "Review the code"
+diffex --tools read,grep,find,ls -p "Review the code"
 
 # Disable one extension or built-in tool while keeping the rest available
-pi --exclude-tools ask_question
+diffex --exclude-tools ask_question
 
 # High thinking level
-pi --thinking high "Solve this complex problem"
+diffex --thinking high "Solve this complex problem"
 ```
 
 ### Environment Variables
 
 | Variable | Description |
 |----------|-------------|
-| `AI_AGENT` | Set to the compatibility identifier `pi` by the CLI and RPC entry points so generic tooling can attribute child processes to Diffex |
+| `AI_AGENT` | Set to the compatibility identifier `diffex` by the CLI and RPC entry points so generic tooling can attribute child processes to Diffex |
 | `DIFFEX_CODING_AGENT` | Set to `true` by the CLI and RPC entry points so child processes can detect that they run inside Diffex |
 | `DIFFEX_CODING_AGENT_DIR` | Override config directory (default: `~/.diffex/agent`) |
 | `DIFFEX_CODING_AGENT_SESSION_DIR` | Override session storage directory (overridden by `--session-dir`) |

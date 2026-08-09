@@ -2,7 +2,7 @@
  * Syncs the Diffex theme with macOS system appearance (dark/light mode).
  *
  * Usage:
- *   pi -e examples/extensions/mac-system-theme.ts
+ *   diffex -e examples/extensions/mac-system-theme.ts
  */
 
 import { exec } from "node:child_process";
@@ -22,10 +22,10 @@ async function isDarkMode(): Promise<boolean> {
 	}
 }
 
-export default function (pi: ExtensionAPI) {
+export default function (diffex: ExtensionAPI) {
 	let intervalId: ReturnType<typeof setInterval> | null = null;
 
-	pi.on("session_start", async (_event, ctx) => {
+	diffex.on("session_start", async (_event, ctx) => {
 		let currentTheme = (await isDarkMode()) ? "dark" : "light";
 		ctx.ui.setTheme(currentTheme);
 
@@ -38,7 +38,7 @@ export default function (pi: ExtensionAPI) {
 		}, 2000);
 	});
 
-	pi.on("session_shutdown", () => {
+	diffex.on("session_shutdown", () => {
 		if (intervalId) {
 			clearInterval(intervalId);
 			intervalId = null;

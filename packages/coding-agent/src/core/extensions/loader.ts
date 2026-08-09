@@ -7,13 +7,13 @@ import * as fs from "node:fs";
 import { createRequire } from "node:module";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import * as _bundledPiAgentCore from "@earendil-works/diffex-agent-core";
+import * as _bundledDiffexAgentCore from "@earendil-works/diffex-agent-core";
 import type { Provider } from "@earendil-works/diffex-ai";
-import * as _bundledPiAiCompat from "@earendil-works/diffex-ai/compat";
-import * as _bundledPiAiOauth from "@earendil-works/diffex-ai/oauth";
-import * as _bundledPiAiProviders from "@earendil-works/diffex-ai/providers/all";
+import * as _bundledDiffexAiCompat from "@earendil-works/diffex-ai/compat";
+import * as _bundledDiffexAiOauth from "@earendil-works/diffex-ai/oauth";
+import * as _bundledDiffexAiProviders from "@earendil-works/diffex-ai/providers/all";
 import type { KeyId } from "@earendil-works/diffex-tui";
-import * as _bundledPiTui from "@earendil-works/diffex-tui";
+import * as _bundledDiffexTui from "@earendil-works/diffex-tui";
 import { createJiti } from "jiti/static";
 // Static imports of packages that extensions may use.
 // These MUST be static so Bun bundles them into the compiled binary.
@@ -24,7 +24,7 @@ import * as _bundledTypeboxValue from "typebox/value";
 import { CONFIG_DIR_NAME, getAgentDir, isBunBinary } from "../../config.ts";
 // NOTE: This import works because loader.ts exports are NOT re-exported from index.ts,
 // avoiding a circular dependency. Extensions can import from @earendil-works/diffex-coding-agent.
-import * as _bundledPiCodingAgent from "../../index.ts";
+import * as _bundledDiffexCodingAgent from "../../index.ts";
 import { resolvePath } from "../../utils/paths.ts";
 import { readDiffexManifest } from "../diffex-manifest.ts";
 import { createEventBus, type EventBus } from "../event-bus.ts";
@@ -54,23 +54,23 @@ const VIRTUAL_MODULES: Record<string, unknown> = {
 	"@sinclair/typebox": _bundledTypebox,
 	"@sinclair/typebox/compile": _bundledTypeboxCompile,
 	"@sinclair/typebox/value": _bundledTypeboxValue,
-	"@earendil-works/diffex-agent-core": _bundledPiAgentCore,
-	"@earendil-works/diffex-tui": _bundledPiTui,
-	// Extensions resolve the pi-ai root to the compat entrypoint (a strict
+	"@earendil-works/diffex-agent-core": _bundledDiffexAgentCore,
+	"@earendil-works/diffex-tui": _bundledDiffexTui,
+	// Extensions resolve the Diffex AI root to the compat entrypoint (a strict
 	// superset of the core entrypoint): existing extensions using the old
 	// global API keep working at runtime until compat is removed.
-	"@earendil-works/diffex-ai": _bundledPiAiCompat,
-	"@earendil-works/diffex-ai/compat": _bundledPiAiCompat,
-	"@earendil-works/diffex-ai/oauth": _bundledPiAiOauth,
-	"@earendil-works/diffex-ai/providers/all": _bundledPiAiProviders,
-	"@earendil-works/diffex-coding-agent": _bundledPiCodingAgent,
-	"@mariozechner/pi-agent-core": _bundledPiAgentCore,
-	"@mariozechner/pi-tui": _bundledPiTui,
-	"@mariozechner/pi-ai": _bundledPiAiCompat,
-	"@mariozechner/pi-ai/compat": _bundledPiAiCompat,
-	"@mariozechner/pi-ai/oauth": _bundledPiAiOauth,
-	"@mariozechner/pi-ai/providers/all": _bundledPiAiProviders,
-	"@mariozechner/pi-coding-agent": _bundledPiCodingAgent,
+	"@earendil-works/diffex-ai": _bundledDiffexAiCompat,
+	"@earendil-works/diffex-ai/compat": _bundledDiffexAiCompat,
+	"@earendil-works/diffex-ai/oauth": _bundledDiffexAiOauth,
+	"@earendil-works/diffex-ai/providers/all": _bundledDiffexAiProviders,
+	"@earendil-works/diffex-coding-agent": _bundledDiffexCodingAgent,
+	"@mariozechner/pi-agent-core": _bundledDiffexAgentCore,
+	"@mariozechner/pi-tui": _bundledDiffexTui,
+	"@mariozechner/pi-ai": _bundledDiffexAiCompat,
+	"@mariozechner/pi-ai/compat": _bundledDiffexAiCompat,
+	"@mariozechner/pi-ai/oauth": _bundledDiffexAiOauth,
+	"@mariozechner/pi-ai/providers/all": _bundledDiffexAiProviders,
+	"@mariozechner/pi-coding-agent": _bundledDiffexCodingAgent,
 };
 
 const require = createRequire(import.meta.url);
@@ -102,34 +102,34 @@ function getAliases(): Record<string, string> {
 		return fileURLToPath(import.meta.resolve(specifier));
 	};
 
-	const piCodingAgentEntry = packageIndex;
-	const piAgentCoreEntry = resolveWorkspaceOrImport("agent/dist/index.js", "@earendil-works/diffex-agent-core");
-	const piTuiEntry = resolveWorkspaceOrImport("tui/dist/index.js", "@earendil-works/diffex-tui");
-	// Extensions resolve the pi-ai root to the compat entrypoint (a strict
+	const diffexCodingAgentEntry = packageIndex;
+	const diffexAgentCoreEntry = resolveWorkspaceOrImport("agent/dist/index.js", "@earendil-works/diffex-agent-core");
+	const diffexTuiEntry = resolveWorkspaceOrImport("tui/dist/index.js", "@earendil-works/diffex-tui");
+	// Extensions resolve the Diffex AI root to the compat entrypoint (a strict
 	// superset of the core entrypoint): existing extensions using the old
 	// global API keep working at runtime until compat is removed.
-	const piAiCompatEntry = resolveWorkspaceOrImport("ai/dist/compat.js", "@earendil-works/diffex-ai/compat");
-	const piAiOauthEntry = resolveWorkspaceOrImport("ai/dist/oauth.js", "@earendil-works/diffex-ai/oauth");
-	const piAiProvidersEntry = resolveWorkspaceOrImport(
+	const diffexAiCompatEntry = resolveWorkspaceOrImport("ai/dist/compat.js", "@earendil-works/diffex-ai/compat");
+	const diffexAiOauthEntry = resolveWorkspaceOrImport("ai/dist/oauth.js", "@earendil-works/diffex-ai/oauth");
+	const diffexAiProvidersEntry = resolveWorkspaceOrImport(
 		"ai/dist/providers/all.js",
 		"@earendil-works/diffex-ai/providers/all",
 	);
 
 	_aliases = {
-		"@earendil-works/diffex-coding-agent": piCodingAgentEntry,
-		"@earendil-works/diffex-agent-core": piAgentCoreEntry,
-		"@earendil-works/diffex-tui": piTuiEntry,
-		"@earendil-works/diffex-ai/providers/all": piAiProvidersEntry,
-		"@earendil-works/diffex-ai/compat": piAiCompatEntry,
-		"@earendil-works/diffex-ai/oauth": piAiOauthEntry,
-		"@earendil-works/diffex-ai": piAiCompatEntry,
-		"@mariozechner/pi-coding-agent": piCodingAgentEntry,
-		"@mariozechner/pi-agent-core": piAgentCoreEntry,
-		"@mariozechner/pi-tui": piTuiEntry,
-		"@mariozechner/pi-ai/providers/all": piAiProvidersEntry,
-		"@mariozechner/pi-ai/compat": piAiCompatEntry,
-		"@mariozechner/pi-ai/oauth": piAiOauthEntry,
-		"@mariozechner/pi-ai": piAiCompatEntry,
+		"@earendil-works/diffex-coding-agent": diffexCodingAgentEntry,
+		"@earendil-works/diffex-agent-core": diffexAgentCoreEntry,
+		"@earendil-works/diffex-tui": diffexTuiEntry,
+		"@earendil-works/diffex-ai/providers/all": diffexAiProvidersEntry,
+		"@earendil-works/diffex-ai/compat": diffexAiCompatEntry,
+		"@earendil-works/diffex-ai/oauth": diffexAiOauthEntry,
+		"@earendil-works/diffex-ai": diffexAiCompatEntry,
+		"@mariozechner/pi-coding-agent": diffexCodingAgentEntry,
+		"@mariozechner/pi-agent-core": diffexAgentCoreEntry,
+		"@mariozechner/pi-tui": diffexTuiEntry,
+		"@mariozechner/pi-ai/providers/all": diffexAiProvidersEntry,
+		"@mariozechner/pi-ai/compat": diffexAiCompatEntry,
+		"@mariozechner/pi-ai/oauth": diffexAiOauthEntry,
+		"@mariozechner/pi-ai": diffexAiCompatEntry,
 		typebox: typeboxEntry,
 		"typebox/compile": typeboxCompileEntry,
 		"typebox/value": typeboxValueEntry,
@@ -207,7 +207,7 @@ export function createExtensionRuntime(): ExtensionRuntime {
 			if (state.staleMessage) return;
 			state.staleMessage =
 				message ??
-				"This extension ctx is stale after session replacement or reload. Do not use a captured pi or command ctx after ctx.newSession(), ctx.fork(), ctx.switchSession(), or ctx.reload(). For newSession, fork, and switchSession, move post-replacement work into withSession and use the ctx passed to withSession. For reload, do not use the old ctx after await ctx.reload().";
+				"This extension ctx is stale after session replacement or reload. Do not use a captured Diffex API or command ctx after ctx.newSession(), ctx.fork(), ctx.switchSession(), or ctx.reload(). For newSession, fork, and switchSession, move post-replacement work into withSession and use the ctx passed to withSession. For reload, do not use the old ctx after await ctx.reload().";
 			for (const unsubscribe of eventBusUnsubscribers) unsubscribe();
 			eventBusUnsubscribers.clear();
 		},

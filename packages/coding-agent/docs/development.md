@@ -25,8 +25,8 @@ Configure via `package.json`:
 
 ```json
 {
-  "piConfig": {
-    "name": "pi",
+  "diffexConfig": {
+    "name": "diffex",
     "configDir": ".diffex"
   }
 }
@@ -48,7 +48,7 @@ Never use `__dirname` directly for package assets.
 
 ## Debug Command
 
-`/debug` (hidden) writes to `~/.diffex/agent/pi-debug.log`:
+`/debug` (hidden) writes to `~/.diffex/agent/diffex-debug.log`:
 - Rendered TUI lines with ANSI codes
 - Last messages sent to the LLM
 
