@@ -43,7 +43,7 @@
 # The session runs in a high-entropy checkout directory so the recorded cwd is
 # a unique string. Import the session into a local checkout with the
 # /ir extension command (.pi/extensions/import-repro.ts):
-#   pi "/ir <gist-id | gist-url | pi.dev/session URL>"
+#   pi "/ir <gist-id | gist-url | legacy-session-viewer-url>"
 
 name: Issue Analysis
 
@@ -566,7 +566,7 @@ jobs:
             const gistId = response.data.id;
             core.setOutput('url', gistUrl);
             core.setOutput('id', gistId);
-            core.setOutput('share_url', `https://pi.dev/session/#${gistId}`);
+            core.setOutput('share_url', gistUrl);
 
       - name: Comment with session import instructions
         if: always() && steps.run_pi.outcome == 'success' && steps.gist.outcome == 'success'
@@ -616,15 +616,13 @@ jobs:
               return `${lastText.slice(0, maxLength)}\n\n_[truncated]_`;
             }
 
-            const gistUrl = process.env.GIST_URL;
             const gistId = process.env.GIST_ID;
-            const shareUrl = process.env.SHARE_URL;
+            const shareUrl = process.env.SHARE_URL || process.env.GIST_URL;
             const lastAgentMessage = extractLastAgentMessage(process.env.SESSION_JSONL);
             const body = [
               'Pi issue analysis finished.',
               '',
-              `Share URL: ${shareUrl}`,
-              `Gist: ${gistUrl}`,
+              `Session Gist: ${shareUrl}`,
               '',
               'Continue locally from a checkout with:',
               '',
@@ -656,12 +654,10 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         with:
           script: |
+            const shareUrl = process.env.SHARE_URL || process.env.GIST_URL;
             const lines = ['Pi issue analysis failed; no analysis was produced.', '', `Run: ${process.env.RUN_URL}`];
-            if (process.env.SHARE_URL) {
-              lines.push(`Partial session: ${process.env.SHARE_URL}`);
-            }
-            if (process.env.GIST_URL) {
-              lines.push(`Gist: ${process.env.GIST_URL}`);
+            if (shareUrl) {
+              lines.push(`Partial session Gist: ${shareUrl}`);
             }
 
             await github.rest.issues.createComment({

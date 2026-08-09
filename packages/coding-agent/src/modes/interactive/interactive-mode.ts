@@ -5934,7 +5934,10 @@ export class InteractiveMode {
 
 			// Create the preview URL
 			const previewUrl = getShareViewerUrl(gistId);
-			this.showStatus(`Share URL: ${previewUrl}\nGist: ${gistUrl}`);
+			const directGistUrl = `https://gist.github.com/${gistId}`;
+			this.showStatus(
+				previewUrl === directGistUrl ? `Gist: ${gistUrl}` : `Share URL: ${previewUrl}\nGist: ${gistUrl}`,
+			);
 		} catch (error: unknown) {
 			if (!loader.signal.aborted) {
 				restoreEditor();

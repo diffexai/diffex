@@ -6,12 +6,14 @@ import {
 	detectInstallMethod,
 	getSelfUpdateCommand,
 	getSelfUpdateUnavailableInstruction,
+	getShareViewerUrl,
 	getUpdateInstruction,
 } from "../src/config.ts";
 
 const execPathDescriptor = Object.getOwnPropertyDescriptor(process, "execPath");
 const originalPath = process.env.PATH;
 const originalPiPackageDir = process.env.PI_PACKAGE_DIR;
+const originalPiShareViewerUrl = process.env.PI_SHARE_VIEWER_URL;
 const originalArgv1 = process.argv[1];
 let tempDir: string | undefined;
 
@@ -35,6 +37,11 @@ afterEach(() => {
 		delete process.env.PI_PACKAGE_DIR;
 	} else {
 		process.env.PI_PACKAGE_DIR = originalPiPackageDir;
+	}
+	if (originalPiShareViewerUrl === undefined) {
+		delete process.env.PI_SHARE_VIEWER_URL;
+	} else {
+		process.env.PI_SHARE_VIEWER_URL = originalPiShareViewerUrl;
 	}
 	if (originalArgv1 === undefined) {
 		process.argv.splice(1, 1);
@@ -144,6 +151,20 @@ function createFakeBunScript(bunBin: string): string {
 	const escapedBunBin = bunBin.replaceAll("'", "'\\''");
 	return `#!/bin/sh\nif [ "$1" = "pm" ] && [ "$2" = "bin" ] && [ "$3" = "-g" ]; then\n\tprintf '%s\\n' '${escapedBunBin}'\n\texit 0\nfi\nexit 1\n`;
 }
+
+describe("getShareViewerUrl", () => {
+	test("uses a direct GitHub Gist URL by default", () => {
+		delete process.env.PI_SHARE_VIEWER_URL;
+
+		expect(getShareViewerUrl("abc123")).toBe("https://gist.github.com/abc123");
+	});
+
+	test("preserves custom share viewers", () => {
+		process.env.PI_SHARE_VIEWER_URL = "https://viewer.example/session/";
+
+		expect(getShareViewerUrl("abc123")).toBe("https://viewer.example/session/#abc123");
+	});
+});
 
 describe("detectInstallMethod", () => {
 	test("detects pnpm from Windows .pnpm install paths", () => {

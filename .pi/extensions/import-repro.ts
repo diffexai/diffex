@@ -9,7 +9,7 @@
  * Usage:
  *   /ir b4d100022aefb12f25dd2d8485e0a82a
  *   /ir https://gist.github.com/mitsuhiko/b4d100022aefb12f25dd2d8485e0a82a
- *   /ir https://pi.dev/session/#b4d100022aefb12f25dd2d8485e0a82a
+ *   /ir <legacy-session-viewer-url>
  *   /ir https://github.com/earendil-works/pi/issues/123
  *
  *   pi "/ir <gist-id>"
@@ -74,7 +74,9 @@ function parseRef(
 
 	if (GIST_ID_RE.test(ref)) return { type: "gist", id: ref };
 
-	throw new Error(`expected a gist ID, gist URL, pi.dev share URL, issue URL, .html file, or .jsonl file: ${ref}`);
+	throw new Error(
+		`expected a gist ID, Gist URL, legacy session-viewer URL, issue URL, .html file, or .jsonl file: ${ref}`,
+	);
 }
 
 function parseSessionJsonl(raw: string): { header: SessionHeader; jsonl: string } {
@@ -282,11 +284,12 @@ async function fetchGistSession(gistId: string): Promise<{ header: SessionHeader
 
 export default function (pi: ExtensionAPI) {
 	pi.registerCommand("ir", {
-		description: "Import a CI issue-analysis session from a gist ID, share URL, or issue URL and switch to it",
+		description:
+			"Import a CI issue-analysis session from a gist ID, Gist URL, legacy session-viewer URL, or issue URL and switch to it",
 		handler: async (args: string, ctx: ExtensionCommandContext) => {
 			const ref = args.trim();
 			if (!ref) {
-				ctx.ui.notify("Usage: /ir <gist-id | gist-url | pi.dev/session URL | issue URL>", "error");
+				ctx.ui.notify("Usage: /ir <gist-id | gist-url | legacy-session-viewer-url | issue-url>", "error");
 				return;
 			}
 
