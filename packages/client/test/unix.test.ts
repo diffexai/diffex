@@ -1,6 +1,5 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { createServer, type Server, type Socket } from "node:net";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
 	ClientMessageDecoder,
@@ -45,7 +44,7 @@ test("rejects invalid Unix transport options", () => {
 
 describe.runIf(process.platform !== "win32")("Unix-domain sockets", () => {
 	test("DiffexClient exchanges fragmented framed messages over a real Unix socket", async () => {
-		const directory = await mkdtemp(join(tmpdir(), "diffex-client-"));
+		const directory = await mkdtemp(join("/tmp", "diffex-client-"));
 		const socketPath = join(directory, "diffex.sock");
 		const sockets = new Set<Socket>();
 		const server = createServer((socket) => {
@@ -92,7 +91,7 @@ describe.runIf(process.platform !== "win32")("Unix-domain sockets", () => {
 	});
 
 	test("bounds pending writes, preserves order, and reports remote end once", async () => {
-		const directory = await mkdtemp(join(tmpdir(), "diffex-client-"));
+		const directory = await mkdtemp(join("/tmp", "diffex-client-"));
 		const socketPath = join(directory, "diffex.sock");
 		const sockets = new Set<Socket>();
 		const first = new Uint8Array(2 * 1024 * 1024).fill(1);
@@ -165,7 +164,7 @@ describe.runIf(process.platform !== "win32")("Unix-domain sockets", () => {
 	});
 
 	test("DiffexClient rejects a truncated final frame from a real Unix socket", async () => {
-		const directory = await mkdtemp(join(tmpdir(), "diffex-client-"));
+		const directory = await mkdtemp(join("/tmp", "diffex-client-"));
 		const socketPath = join(directory, "diffex.sock");
 		const sockets = new Set<Socket>();
 		const server = createServer((socket) => {
@@ -206,7 +205,7 @@ describe.runIf(process.platform !== "win32")("Unix-domain sockets", () => {
 	});
 
 	test("rejects connection errors", async () => {
-		const directory = await mkdtemp(join(tmpdir(), "diffex-client-"));
+		const directory = await mkdtemp(join("/tmp", "diffex-client-"));
 		const missingPath = join(directory, "missing.sock");
 		try {
 			await expect(

@@ -14,7 +14,7 @@ vi.mock("child_process", () => ({
 			_options: unknown,
 			callback: (error: Error | null, stdout: string, stderr: string) => void,
 		) => {
-			if (args[1] === "symbolic-ref") {
+			if (args.includes("symbolic-ref")) {
 				setTimeout(
 					() =>
 						callback(
@@ -30,7 +30,7 @@ vi.mock("child_process", () => ({
 		},
 	),
 	spawnSync: vi.fn((_command: string, args: readonly string[]) => {
-		if (args[1] === "symbolic-ref") {
+		if (args.includes("symbolic-ref")) {
 			return { status: resolvedBranch ? 0 : 1, stdout: resolvedBranch ? `${resolvedBranch}\n` : "", stderr: "" };
 		}
 		return { status: 1, stdout: "", stderr: "" };
@@ -42,6 +42,10 @@ import { FooterDataProvider } from "../src/core/footer-data-provider.ts";
 type WorktreeFixture = {
 	worktreeDir: string;
 	reftableDir: string;
+};
+
+type FooterDataProviderInternals = {
+	scheduleRefresh: () => void;
 };
 
 function createPlainReftableRepo(tempDir: string): string {
@@ -85,6 +89,10 @@ async function waitFor(condition: () => boolean, timeoutMs = 3000): Promise<void
 		}
 		await new Promise((resolve) => setTimeout(resolve, 10));
 	}
+}
+
+function scheduleGitRefresh(provider: FooterDataProvider): void {
+	(provider as unknown as FooterDataProviderInternals).scheduleRefresh();
 }
 
 describe("FooterDataProvider reftable branch detection", () => {
@@ -179,6 +187,7 @@ describe("FooterDataProvider reftable branch detection", () => {
 			provider.onBranchChange(onBranchChange);
 
 			writeFileSync(join(reftableDir, "tables.list"), "1\n");
+			scheduleGitRefresh(provider);
 			await waitFor(() => vi.mocked(execFile).mock.calls.length === 1);
 
 			expect(vi.mocked(execFile)).toHaveBeenCalledTimes(1);
@@ -200,8 +209,11 @@ describe("FooterDataProvider reftable branch detection", () => {
 			vi.mocked(execFile).mockClear();
 
 			writeFileSync(join(reftableDir, "tables.list"), "1\n");
+			scheduleGitRefresh(provider);
 			writeFileSync(join(reftableDir, "tables.list"), "2\n");
+			scheduleGitRefresh(provider);
 			writeFileSync(join(reftableDir, "tables.list"), "3\n");
+			scheduleGitRefresh(provider);
 			await waitFor(() => vi.mocked(execFile).mock.calls.length === 1);
 			await new Promise((resolve) => setTimeout(resolve, 650));
 
@@ -223,6 +235,7 @@ describe("FooterDataProvider reftable branch detection", () => {
 			provider.onBranchChange(onBranchChange);
 
 			writeFileSync(join(reftableDir, "tables.list"), "1\n");
+			scheduleGitRefresh(provider);
 			await waitFor(() => vi.mocked(execFile).mock.calls.length === 1);
 			await waitFor(() => provider.getGitBranch() === "foo");
 

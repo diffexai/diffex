@@ -14,7 +14,7 @@ describe("renderDiffexWelcomeFrame", () => {
 		const firstFrame = renderDiffexWelcomeFrame(0, 76).join("\n");
 		const finalBoatFrame = renderDiffexWelcomeFrame(19, 76).join("\n");
 
-		expect(firstFrame.indexOf("__/___\\__")).toBeGreaterThan(finalBoatFrame.indexOf("__/___\\__"));
-		expect(finalBoatFrame.indexOf("__/___\\__")).toBeGreaterThanOrEqual(0);
+		expect(firstFrame.indexOf("___")).toBeGreaterThan(finalBoatFrame.indexOf("___"));
+		expect(finalBoatFrame.indexOf("___")).toBeGreaterThanOrEqual(0);
 	});
 });

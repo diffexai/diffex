@@ -60,7 +60,7 @@ describe("Radius provider", () => {
 		});
 
 		const model = runtime.getModel(RADIUS_PROVIDER_ID, "auto");
-		expect(model).toMatchObject({ api: "pi-messages", baseUrl: "https://radius.example.com/v1" });
+		expect(model).toMatchObject({ api: "diffex-messages", baseUrl: "https://radius.example.com/v1" });
 		expect(runtime.getProvider(RADIUS_PROVIDER_ID)?.name).toBe("Radius");
 		expect(runtime.hasConfiguredAuth(RADIUS_PROVIDER_ID)).toBe(true);
 	});
@@ -150,7 +150,7 @@ describe("Radius provider", () => {
 		});
 
 		expect(runtime.getModel("radius-dev", "auto")).toMatchObject({
-			api: "pi-messages",
+			api: "diffex-messages",
 			baseUrl: "http://localhost:8788/v1",
 		});
 		expect(runtime.getProvider("radius-dev")?.name).toBe("Radius (dev)");
