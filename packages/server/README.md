@@ -28,7 +28,7 @@ const service: DiffexServerService = {
 };
 
 const server = createUnixServer(service, {
-	path: "/tmp/diffex/server.sock",
+  path: "/tmp/diffex/server.sock",
 });
 await server.start();
 ```
