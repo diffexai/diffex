@@ -902,7 +902,7 @@ export class SessionManager {
 			if (this.fileEntries.length === 0) {
 				const explicitPath = this.sessionFile;
 				if (statSync(explicitPath).size > 0) {
-					throw new Error(`Session file is not a valid pi session: ${explicitPath}`);
+					throw new Error(`Session file is not a valid Diffex session: ${explicitPath}`);
 				}
 				this.newSession();
 				this.sessionFile = explicitPath;

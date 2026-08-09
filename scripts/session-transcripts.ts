@@ -134,7 +134,7 @@ function runSubagent(prompt: string, cwd: string): Promise<{ success: boolean }>
 		});
 
 		child.on("error", (err) => {
-			console.error(chalk.red(`  Failed to spawn pi: ${err.message}`));
+			console.error(chalk.red(`  Failed to start Diffex: ${err.message}`));
 			resolve({ success: false });
 		});
 	});
@@ -243,7 +243,7 @@ async function main() {
 	console.log(`\nCreated ${outputFiles.length} transcript file(s) in ${outputDir}`);
 
 	if (!analyzeFlag) {
-		console.log("\nRun with --analyze to spawn pi subagents for pattern analysis.");
+		console.log("\nRun with --analyze to spawn Diffex subagents for pattern analysis.");
 		return;
 	}
 
