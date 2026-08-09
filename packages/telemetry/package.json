@@ -1,6 +1,6 @@
 {
 	"name": "@earendil-works/diffex-telemetry",
-	"version": "0.84.0",
+	"version": "0.2.0",
 	"description": "Vendor-neutral telemetry contracts and typed schema utilities for Diffex",
 	"type": "module",
 	"main": "./dist/index.js",

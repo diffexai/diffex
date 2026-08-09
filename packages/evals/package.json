@@ -1,6 +1,6 @@
 {
 	"name": "@earendil-works/diffex-evals",
-	"version": "0.84.0",
+	"version": "0.2.0",
 	"private": true,
 	"type": "module",
 	"scripts": {
@@ -9,8 +9,8 @@
 		"test": "vitest run --config vitest.test.config.ts"
 	},
 	"devDependencies": {
-		"@earendil-works/diffex-ai": "^0.84.0",
-		"@earendil-works/diffex-coding-agent": "^0.84.0",
+		"@earendil-works/diffex-ai": "^0.2.0",
+		"@earendil-works/diffex-coding-agent": "^0.2.0",
 		"@types/node": "24.12.4",
 		"shx": "0.4.0",
 		"typescript": "5.9.3",

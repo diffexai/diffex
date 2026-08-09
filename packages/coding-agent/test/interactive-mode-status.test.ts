@@ -1,5 +1,6 @@
 import { homedir } from "node:os";
 import * as path from "node:path";
+import type { AgentMessage } from "@earendil-works/diffex-agent-core";
 import { type AutocompleteProvider, CombinedAutocompleteProvider } from "@earendil-works/diffex-tui";
 import { beforeAll, describe, expect, test, vi } from "vitest";
 import { type Component, Container, type Focusable, type TUI } from "../../tui/src/tui.ts";
@@ -8,7 +9,7 @@ import { VirtualTerminal } from "../../tui/test/virtual-terminal.ts";
 import type { AutocompleteProviderFactory } from "../src/core/extensions/types.ts";
 import type { SourceInfo } from "../src/core/source-info.ts";
 import type { AuthSelectorProvider } from "../src/modes/interactive/components/oauth-selector.ts";
-import { InteractiveMode } from "../src/modes/interactive/interactive-mode.ts";
+import { formatResponseUsageSummary, InteractiveMode } from "../src/modes/interactive/interactive-mode.ts";
 import { initTheme } from "../src/modes/interactive/theme/theme.ts";
 
 function renderLastLine(container: Container, width = 120): string {
@@ -115,6 +116,94 @@ describe("InteractiveMode.showStatus", () => {
 		// adds spacer + text
 		expect(fakeThis.chatContainer.children).toHaveLength(5);
 		expect(renderLastLine(fakeThis.chatContainer)).toContain("STATUS_TWO");
+	});
+});
+
+describe("formatResponseUsageSummary", () => {
+	test("formats assistant input and output usage with elapsed work time", () => {
+		const messages = [
+			{
+				role: "assistant",
+				usage: {
+					input: 1200,
+					output: 34,
+					cacheRead: 0,
+					cacheWrite: 0,
+					totalTokens: 1234,
+					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+				},
+			},
+		] as AgentMessage[];
+
+		expect(formatResponseUsageSummary(messages, 1250)).toBe(
+			"input tokens: 1,200 • output tokens: 34 • worked for 1.3s",
+		);
+	});
+
+	test("does not emit a summary when there are no output tokens", () => {
+		const messages = [
+			{
+				role: "assistant",
+				usage: {
+					input: 12,
+					output: 0,
+					cacheRead: 0,
+					cacheWrite: 0,
+					totalTokens: 12,
+					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+				},
+			},
+		] as AgentMessage[];
+
+		expect(formatResponseUsageSummary(messages, 1000)).toBeUndefined();
+	});
+});
+
+describe("InteractiveMode.handleEvent response usage summary", () => {
+	test("shows input, output, and worked-for status on agent end", async () => {
+		const nowSpy = vi.spyOn(Date, "now").mockReturnValue(2250);
+		try {
+			const fakeThis: any = {
+				isInitialized: true,
+				footer: { invalidate: vi.fn() },
+				settingsManager: { getShowTerminalProgress: vi.fn(() => false) },
+				ui: {
+					terminal: { setProgress: vi.fn() },
+					requestRender: vi.fn(),
+				},
+				clearStatusIndicator: vi.fn(),
+				streamingComponent: undefined,
+				chatContainer: { removeChild: vi.fn() },
+				pendingTools: new Map(),
+				agentResponseStartMs: 1000,
+				showStatus: vi.fn(),
+			};
+			const messages = [
+				{
+					role: "assistant",
+					usage: {
+						input: 12,
+						output: 34,
+						cacheRead: 0,
+						cacheWrite: 0,
+						totalTokens: 46,
+						cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+					},
+				},
+			] as AgentMessage[];
+
+			await (InteractiveMode as any).prototype.handleEvent.call(fakeThis, {
+				type: "agent_end",
+				messages,
+				willRetry: false,
+			});
+
+			expect(fakeThis.showStatus).toHaveBeenCalledWith("input tokens: 12 • output tokens: 34 • worked for 1.3s");
+			expect(fakeThis.agentResponseStartMs).toBeUndefined();
+			expect(fakeThis.ui.requestRender).toHaveBeenCalled();
+		} finally {
+			nowSpy.mockRestore();
+		}
 	});
 });
 
@@ -678,10 +767,12 @@ describe("InteractiveMode.showLoadedResources", () => {
 		];
 	}
 
-	test("shows a compact resource listing by default", () => {
+	test("does not show resource listings by default", () => {
 		const fakeThis = createShowLoadedResourcesThis({
 			quietStartup: false,
+			contextFiles: [{ path: "/tmp/project/AGENTS.md" }],
 			skills: [{ filePath: "/tmp/skill/SKILL.md", name: "commit" }],
+			extensions: [{ path: "/tmp/extensions/answer.ts" }],
 		});
 
 		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
@@ -689,9 +780,9 @@ describe("InteractiveMode.showLoadedResources", () => {
 		});
 
 		const output = renderAll(fakeThis.loadedResourcesContainer);
-		expect(output).toContain("[Skills]");
-		expect(output).toContain("commit");
-		expect(output).not.toContain("resource-list");
+		expect(output).not.toContain("[Context]");
+		expect(output).not.toContain("[Skills]");
+		expect(output).not.toContain("[Extensions]");
 	});
 
 	test("shows full resource listing when expanded", () => {
@@ -702,7 +793,7 @@ describe("InteractiveMode.showLoadedResources", () => {
 		});
 
 		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
-			force: false,
+			force: true,
 		});
 
 		const output = renderAll(fakeThis.loadedResourcesContainer);
@@ -736,7 +827,7 @@ describe("InteractiveMode.showLoadedResources", () => {
 		});
 
 		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
-			force: false,
+			force: true,
 		});
 
 		const output = renderAll(fakeThis.loadedResourcesContainer);
@@ -753,7 +844,7 @@ describe("InteractiveMode.showLoadedResources", () => {
 		});
 
 		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
-			force: false,
+			force: true,
 		});
 
 		expect(normalizeRenderedOutput(fakeThis.loadedResourcesContainer)).toMatchInlineSnapshot(`
@@ -799,7 +890,7 @@ describe("InteractiveMode.showLoadedResources", () => {
 		});
 
 		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
-			force: false,
+			force: true,
 		});
 
 		expect(normalizeRenderedOutput(fakeThis.loadedResourcesContainer)).toMatchInlineSnapshot(`
@@ -827,7 +918,7 @@ describe("InteractiveMode.showLoadedResources", () => {
 		});
 
 		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
-			force: false,
+			force: true,
 		});
 
 		expect(normalizeRenderedOutput(fakeThis.loadedResourcesContainer)).toMatchInlineSnapshot(`
@@ -855,7 +946,7 @@ describe("InteractiveMode.showLoadedResources", () => {
 		});
 
 		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
-			force: false,
+			force: true,
 		});
 
 		expect(normalizeRenderedOutput(fakeThis.loadedResourcesContainer)).toMatchInlineSnapshot(`
@@ -892,7 +983,7 @@ describe("InteractiveMode.showLoadedResources", () => {
 		});
 
 		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
-			force: false,
+			force: true,
 		});
 
 		expect(normalizeRenderedOutput(fakeThis.loadedResourcesContainer)).toMatchInlineSnapshot(`
@@ -929,7 +1020,7 @@ describe("InteractiveMode.showLoadedResources", () => {
 		});
 
 		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
-			force: false,
+			force: true,
 		});
 
 		expect(normalizeRenderedOutput(fakeThis.loadedResourcesContainer)).toMatchInlineSnapshot(`
@@ -966,7 +1057,7 @@ describe("InteractiveMode.showLoadedResources", () => {
 		});
 
 		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
-			force: false,
+			force: true,
 		});
 
 		expect(normalizeRenderedOutput(fakeThis.loadedResourcesContainer)).toMatchInlineSnapshot(`
@@ -994,7 +1085,7 @@ describe("InteractiveMode.showLoadedResources", () => {
 		});
 
 		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
-			force: false,
+			force: true,
 		});
 
 		expect(normalizeRenderedOutput(fakeThis.loadedResourcesContainer)).toMatchInlineSnapshot(`
@@ -1025,7 +1116,7 @@ describe("InteractiveMode.showLoadedResources", () => {
 		});
 
 		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
-			force: false,
+			force: true,
 		});
 
 		expect(normalizeRenderedOutput(fakeThis.loadedResourcesContainer)).toMatchInlineSnapshot(`
@@ -1062,7 +1153,7 @@ describe("InteractiveMode.showLoadedResources", () => {
 		});
 
 		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
-			force: false,
+			force: true,
 		});
 
 		expect(normalizeRenderedOutput(fakeThis.loadedResourcesContainer)).toMatchInlineSnapshot(`
@@ -1102,7 +1193,7 @@ describe("InteractiveMode.showLoadedResources", () => {
 		});
 
 		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
-			force: false,
+			force: true,
 		});
 
 		expect(normalizeRenderedOutput(fakeThis.loadedResourcesContainer)).toMatchInlineSnapshot(`
@@ -1119,7 +1210,7 @@ describe("InteractiveMode.showLoadedResources", () => {
 		});
 
 		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
-			force: false,
+			force: true,
 		});
 
 		expect(normalizeRenderedOutput(fakeThis.loadedResourcesContainer)).toMatchInlineSnapshot(`
@@ -1153,7 +1244,7 @@ describe("InteractiveMode.showLoadedResources", () => {
 		});
 
 		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
-			force: false,
+			force: true,
 		});
 
 		const output = renderAll(fakeThis.loadedResourcesContainer).replace(/\\/g, "/");
@@ -1173,7 +1264,7 @@ describe("InteractiveMode.showLoadedResources", () => {
 		});
 
 		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
-			force: false,
+			force: true,
 		});
 
 		const output = renderAll(fakeThis.loadedResourcesContainer).replace(/\\/g, "/");
@@ -1195,7 +1286,7 @@ describe("InteractiveMode.showLoadedResources", () => {
 		});
 
 		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
-			force: false,
+			force: true,
 		});
 
 		const output = renderAll(fakeThis.loadedResourcesContainer).replace(/\\/g, "/");

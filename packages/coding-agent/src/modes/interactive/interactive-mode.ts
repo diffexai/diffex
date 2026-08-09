@@ -383,6 +383,23 @@ export function createInteractiveTuiReference(getTui: () => TUI): TUI {
 	});
 }
 
+export function formatResponseUsageSummary(messages: AgentMessage[], elapsedMs: number): string | undefined {
+	if (elapsedMs <= 0) return undefined;
+
+	let input = 0;
+	let output = 0;
+	for (const message of messages) {
+		if (message.role !== "assistant") continue;
+		input += message.usage.input || 0;
+		output += message.usage.output || 0;
+	}
+
+	if (output <= 0) return undefined;
+
+	const workedFor = `${(elapsedMs / 1000).toFixed(1)}s`;
+	return `input tokens: ${input.toLocaleString()} • output tokens: ${output.toLocaleString()} • worked for ${workedFor}`;
+}
+
 export class InteractiveMode {
 	private runtimeHost: AgentSessionRuntime;
 	private renderer: TuiMainScreen | TuiAltScreen;
@@ -427,6 +444,7 @@ export class InteractiveMode {
 	private changelogMarkdown: string | undefined = undefined;
 	private startupNoticesShown = false;
 	private anthropicSubscriptionWarningShown = false;
+	private agentResponseStartMs: number | undefined = undefined;
 
 	// Status line tracking (for mutating immediately-sequential status updates)
 	private lastStatusSpacer: Spacer | undefined = undefined;
@@ -570,7 +588,6 @@ export class InteractiveMode {
 		this.editorContainer.addChild(this.editor as Component);
 		this.footerDataProvider = new FooterDataProvider(this.sessionManager.getCwd());
 		this.footer = new FooterComponent(this.session, this.footerDataProvider);
-		this.footer.setAutoCompactEnabled(this.session.autoCompactionEnabled);
 		this.footerContainer = new Container();
 		this.footerContainer.addChild(this.footer);
 
@@ -941,11 +958,8 @@ export class InteractiveMode {
 				rawKeyHint("!", "bash"),
 				hint("app.tools.expand", "more"),
 			].join(theme.fg("muted", " · "));
-			const compactOnboarding = theme.fg(
-				"dim",
-				`Press ${keyText("app.tools.expand")} to show full startup help and loaded resources.`,
-			);
-			const onboarding = theme.fg("dim", "Ask Diffex how to use or extend the agent.");
+			const compactOnboarding = theme.fg("dim", `Press ${keyText("app.tools.expand")} to show full startup help.`);
+			const onboarding = theme.fg("dim", "Ask Diffex how to use the agent.");
 			this.builtInHeader = new DiffexWelcomeHeader(
 				this.ui,
 				() => `${logo}\n${compactInstructions}\n${compactOnboarding}\n\n${onboarding}`,
@@ -1603,7 +1617,7 @@ export class InteractiveMode {
 		// Resource rendering is idempotent; chat clears no longer clear this separate container.
 		this.loadedResourcesContainer.clear();
 
-		const showListing = options?.force || this.options.verbose || !this.settingsManager.getQuietStartup();
+		const showListing = options?.force || this.options.verbose;
 		const showDiagnostics = showListing || options?.showDiagnosticsWhenQuiet === true;
 		if (!showListing && !showDiagnostics) {
 			return;
@@ -1896,7 +1910,6 @@ export class InteractiveMode {
 		configureHttpDispatcher(this.settingsManager.getHttpIdleTimeoutMs());
 		this.applyFullscreenScrollbarSetting();
 		this.footer.setSession(this.session);
-		this.footer.setAutoCompactEnabled(this.session.autoCompactionEnabled);
 		this.footerDataProvider.setCwd(this.sessionManager.getCwd());
 		this.hideThinkingBlock = this.settingsManager.getHideThinkingBlock();
 		this.outputPad = this.settingsManager.getOutputPad();
@@ -3068,6 +3081,7 @@ export class InteractiveMode {
 
 		switch (event.type) {
 			case "agent_start":
+				this.agentResponseStartMs = Date.now();
 				this.pendingTools.clear();
 				if (this.settingsManager.getShowTerminalProgress()) {
 					this.ui.terminal.setProgress(true);
@@ -3270,6 +3284,13 @@ export class InteractiveMode {
 					this.chatContainer.removeChild(this.streamingComponent);
 					this.streamingComponent = undefined;
 					this.streamingMessage = undefined;
+				}
+				if (this.agentResponseStartMs !== undefined) {
+					const summary = formatResponseUsageSummary(event.messages, Date.now() - this.agentResponseStartMs);
+					this.agentResponseStartMs = undefined;
+					if (summary) {
+						this.showStatus(summary);
+					}
 				}
 				this.pendingTools.clear();
 
@@ -4412,7 +4433,6 @@ export class InteractiveMode {
 				{
 					onAutoCompactChange: (enabled) => {
 						this.session.setAutoCompactionEnabled(enabled);
-						this.footer.setAutoCompactEnabled(enabled);
 					},
 					onShowImagesChange: (enabled) => {
 						this.settingsManager.setShowImages(enabled);

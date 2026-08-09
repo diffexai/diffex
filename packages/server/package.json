@@ -1,6 +1,6 @@
 {
 	"name": "@earendil-works/diffex-server",
-	"version": "0.84.0",
+	"version": "0.2.0",
 	"description": "Experimental server package for Diffex",
 	"type": "module",
 	"main": "./dist/index.js",
@@ -47,8 +47,8 @@
 		"node": ">=22.19.0"
 	},
 	"dependencies": {
-		"@earendil-works/diffex-ai": "^0.84.0",
-		"@earendil-works/diffex-protocol": "^0.84.0"
+		"@earendil-works/diffex-ai": "^0.2.0",
+		"@earendil-works/diffex-protocol": "^0.2.0"
 	},
 	"devDependencies": {
 		"shx": "0.4.0",
