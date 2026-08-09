@@ -380,7 +380,7 @@ import {
 } from '@earendil-works/diffex-agent-core';
 ```
 
-The compatibility schemas use the established `pi.ai.*`, `pi.harness.*`, and `pi.session.*` names. Adapters may translate them to backend conventions without changing the emitted vocabulary.
+The compatibility schemas use the established `diffex.ai.*`, `diffex.harness.*`, and `diffex.session.*` names. Adapters may translate them to backend conventions without changing the emitted vocabulary.
 
 ## Security and Portability
 
