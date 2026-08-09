@@ -35,7 +35,7 @@ The harness executes runs against one session. The session holds four kinds of s
 ## Non-goals
 
 - **Exactly-once hook side effects.** A hook result becomes durable when the record or entry that consumes it commits. A crash before that commit can run the hook again (section 11 replay table). Side effects a hook makes on its own are invisible to the harness: HTTP calls, file writes. A hook that needs crash-safe external effects must be idempotent, for example keyed by operation id.
-- **Provider stream resumption.** Partial streams are never persisted. An interrupted streaming request is retried or abandoned. Deferred requests are different and in scope: the provider returns a handle at once and serves the result later (e.g. `background: true` on a Responses API, batch APIs). diffex-ai returns an assistant message with stop reason `deferred` that carries the handle; it is persisted like any assistant message. Redeeming the handle appends a normal assistant message. Recovery sees the unredeemed handle and fetches instead of paying for a new request.
+- **Provider stream resumption.** Partial streams are never persisted. An interrupted streaming request is retried or abandoned. Deferred requests are different and in scope: the provider returns a handle at once and serves the result later (e.g. `background: true` on a Responses API, batch APIs). pi-ai returns an assistant message with stop reason `deferred` that carries the handle; it is persisted like any assistant message. Redeeming the handle appends a normal assistant message. Recovery sees the unredeemed handle and fetches instead of paying for a new request.
 - **Multiple writers.** Two processes on one session are out of scope. The serving layer routes all traffic for a session to the process that holds its harness. Lanes cover the workloads that look like multi-writer: parallel threads over shared history.
 - **Replication.** A session lives in one place. Coordination-free sync of diverging copies is a different design. Nothing forecloses it later.
 - **Coding-agent migration.** Migrating coding-agent to `AgentHarness` is out of scope. Compatibility means the new JSONL repository can read supported coding-agent v3 files.
@@ -2614,7 +2614,7 @@ Notes:
 - An aborted assistant message (`stopReason: "aborted"`) skips tool execution; `abortPath()` owns the synthetic results.
 - A crash between the navigation move and its summary entry loses the in-memory summary text; recovery regenerates it under the same attempt cap. A hook-supplied summary lost in that window is regenerated rather than re-asked: the hook's decline authority ended at the move.
 
-## 16. diffex-ai: deferred requests
+## 16. pi-ai: deferred requests
 
 Everything is per-request; batch APIs can implement the same shape through a custom provider.
 
@@ -2655,7 +2655,7 @@ interface AssistantMessage {
 // part of this interface.
 interface ProviderRequestOptions<TModel = Model<Api>> {
   signal?: AbortSignal;
-  /** Explicit parent for this logical diffex-ai operation. Inherited by stream,
+  /** Explicit parent for this logical pi-ai operation. Inherited by stream,
       simple-stream, deferred fetch/cancel, and image options. */
   telemetryContext?: TelemetryContext;
   apiKey?: string;
@@ -2702,7 +2702,7 @@ export interface ProviderStreams {
 
 `ProviderRequestOptions.telemetryContext` is inherited by `StreamOptions`, `SimpleStreamOptions`, `DeferredFetchOptions`, `DeferredCancelOptions`, and `ImagesOptions`; provider, `Models`, `ImagesModels`, and direct stream/image dispatch preserve it unchanged. `buildBaseOptions()` also preserves it when built-in `streamSimple()` implementations convert to provider-specific stream options.
 
-`pending` is internal to a mutable live-stream message. Request-wrapper results use `SettledAssistantMessage`; harness-written entries, durable usage records, and settled `diffex.ai.request` spans cannot contain `pending`. Telemetry normalizes terminal `toolUse` to `tool_use`.
+`pending` is internal to a mutable live-stream message. Request-wrapper results use `SettledAssistantMessage`; harness-written entries, durable usage records, and settled `pi.ai.request` spans cannot contain `pending`. Telemetry normalizes terminal `toolUse` to `tool_use`.
 
 The harness uses the authenticated `Models` dispatch surface rather than talking to a provider object directly:
 
@@ -2743,7 +2743,7 @@ repo.create({ id?, parentSessionId? }): Promise<Session>;
 - Entries only. JSONL copies them without `lane`, then writes the final lane pointers. No records, no queues: a fork starts idle, every lane question answers "no open operation". No records also means no ledger: a fork's token and cost statistics start at zero — cost belongs to the session that incurred it; entry usage snapshots still display. Its `messageCount` is initialized from all copied message entries.
 - Lanes: `scope: "branch"` → the fork has only `main`, at the fork point. `scope: "tree"` → every lane name and leaf pointer is copied. No operation logs or queues are copied either way, so every forked lane is idle.
 - Facts: `scope: "tree"` copies all; `scope: "branch"` copies the name always, labels only when their target entry was copied.
-- The fork point may be any message entry. A copy whose tip sits mid-tool-batch is still promptable: diffex-ai's transformMessages inserts synthetic empty results for orphaned tool calls at request build time.
+- The fork point may be any message entry. A copy whose tip sits mid-tool-batch is still promptable: pi-ai's transformMessages inserts synthetic empty results for orphaned tool calls at request build time.
 - The source is untouched; copying while it runs reads the committed prefix.
 - Linkage is `parentSessionId`, set by `fork()` and settable on `create()` — the basis for subagent parent/child tracking and export bundles.
 - A subagent tool derives its child session id deterministically from its invocation (`f(parentSessionId, toolCallId)`): a safe replay reattaches to the same child instead of spawning a twin, and the child stays discoverable from the parent even when a crash swallowed the tool result.
@@ -2757,11 +2757,11 @@ Diffex ships no exporter and requires no backend-specific telemetry implementati
 
 ### Package ownership
 
-The generic contract, schema-definition machinery, shared no-op, and in-memory reference implementation live under `packages/telemetry/src/` and are exported from `@earendil-works/diffex-telemetry`. The runner-independent conformance cases live under `packages/telemetry/src/testing/` and are exported from `@earendil-works/diffex-telemetry/testing`. Diffex-ai imports only `TelemetryContext` for request options; it owns no span schema or helper and emits no telemetry itself. `packages/agent/src/harness/telemetry.ts` owns both `AI_TELEMETRY_SCHEMA` / `startAiSpan()` and `HARNESS_TELEMETRY_SCHEMA` / `startHarnessSpan()`, plus the readonly `AGENT_TELEMETRY_SCHEMAS` tuple that composes their typed vocabularies without merging their schema data or versions. The agent package root re-exports those domain schemas, helpers, tuple, and the generic telemetry surface. There is one generic contract and one domain-schema owner.
+The generic contract, schema-definition machinery, shared no-op, and in-memory reference implementation live under `packages/telemetry/src/` and are exported from `@earendil-works/diffex-telemetry`. The runner-independent conformance cases live under `packages/telemetry/src/testing/` and are exported from `@earendil-works/diffex-telemetry/testing`. Pi-ai imports only `TelemetryContext` for request options; it owns no span schema or helper and emits no telemetry itself. `packages/agent/src/harness/telemetry.ts` owns both `AI_TELEMETRY_SCHEMA` / `startAiSpan()` and `HARNESS_TELEMETRY_SCHEMA` / `startHarnessSpan()`, plus the readonly `AGENT_TELEMETRY_SCHEMAS` tuple that composes their typed vocabularies without merging their schema data or versions. The agent package root re-exports those domain schemas, helpers, tuple, and the generic telemetry surface. There is one generic contract and one domain-schema owner.
 
-`AgentHarnessOptions.telemetryContext` defaults to the no-op context, and the agent-side request wrapper emits `diffex.ai.request` through the agent-owned AI schema.
+`AgentHarnessOptions.telemetryContext` defaults to the no-op context, and the agent-side request wrapper emits `pi.ai.request` through the agent-owned AI schema.
 
-Both schemas are Diffex-owned. Span names use the `diffex.ai.*`, `diffex.harness.*`, and `diffex.session.*` families; attributes use the same Diffex-owned `diffex.*` vocabulary and do not adopt an external semantic-convention namespace. Adapters translate them when useful; the emitted Diffex vocabulary remains stable regardless of backend convention churn.
+Both schemas are Diffex-owned. Span names use the `pi.ai.*`, `pi.harness.*`, and `pi.session.*` families; attributes use the same Diffex-owned `pi.*` vocabulary and do not adopt an external semantic-convention namespace. Adapters translate them when useful; the emitted Diffex vocabulary remains stable regardless of backend convention churn.
 
 ### Context contract
 
@@ -2905,10 +2905,10 @@ const startSpan = createTypedSpanStarter(
   AGENT_TELEMETRY_SCHEMAS,
 );
 
-await startSpan("diffex.harness.step", stepAttributes, async (stepSpan, startChildSpan) => {
-  stepSpan.setAttributes({ "diffex.step.outcome": "succeeded" });
-  return startChildSpan("diffex.ai.request", requestAttributes, async (requestSpan) => {
-    requestSpan.setAttributes({ "diffex.ai.response.stop_reason": "stop" });
+await startSpan("pi.harness.step", stepAttributes, async (stepSpan, startChildSpan) => {
+  stepSpan.setAttributes({ "pi.step.outcome": "succeeded" });
+  return startChildSpan("pi.ai.request", requestAttributes, async (requestSpan) => {
+    requestSpan.setAttributes({ "pi.ai.response.stop_reason": "stop" });
   });
 });
 ```
@@ -2923,55 +2923,55 @@ The following tables are normative input to the schema objects. `!` means a requ
 
 | span | allowed parents | status |
 |---|---|---|
-| `diffex.ai.request` | root or any caller span | error on throw/reject or a returned result with stop reason `error`; `aborted` and `deferred` are normal outcomes |
+| `pi.ai.request` | root or any caller span | error on throw/reject or a returned result with stop reason `error`; `aborted` and `deferred` are normal outcomes |
 
-| `diffex.ai.request` start attribute | type | requirement | values / meaning |
+| `pi.ai.request` start attribute | type | requirement | values / meaning |
 |---|---|---|---|
-| `diffex.ai.operation` | string | ! | `stream`, `fetch_deferred`, `cancel_deferred`, `generate_images` |
-| `diffex.ai.provider` | string | ! | selected provider id |
-| `diffex.ai.model` | string | ! | requested model id |
-| `diffex.ai.api` | string | ! | provider API id |
-| `diffex.ai.streaming` | boolean | ! | whether this operation returns a stream |
-| `diffex.ai.deferred` | boolean | ? | whether the operation requests or participates in deferred execution |
+| `pi.ai.operation` | string | ! | `stream`, `fetch_deferred`, `cancel_deferred`, `generate_images` |
+| `pi.ai.provider` | string | ! | selected provider id |
+| `pi.ai.model` | string | ! | requested model id |
+| `pi.ai.api` | string | ! | provider API id |
+| `pi.ai.streaming` | boolean | ! | whether this operation returns a stream |
+| `pi.ai.deferred` | boolean | ? | whether the operation requests or participates in deferred execution |
 
-| `diffex.ai.request` end attribute | type | values / meaning |
+| `pi.ai.request` end attribute | type | values / meaning |
 |---|---|---|
-| `diffex.ai.response.model` | string | concrete response model, when reported |
-| `diffex.ai.response.id` | string | provider response id; high cardinality |
-| `diffex.ai.response.stop_reason` | string | `stop`, `length`, `tool_use`, `error`, `aborted`, `deferred`; terminal `toolUse` normalizes to `tool_use`, and `pending` is never recorded |
-| `diffex.ai.http.status_code` | number | final HTTP status when exposed by the provider path |
-| `diffex.ai.usage.input_tokens` | number | reported input tokens |
-| `diffex.ai.usage.output_tokens` | number | reported output tokens |
-| `diffex.ai.usage.cache_read_tokens` | number | reported cache-read tokens |
-| `diffex.ai.usage.cache_write_tokens` | number | reported cache-write tokens |
-| `diffex.ai.usage.reasoning_tokens` | number | reported reasoning subset of output |
-| `diffex.ai.usage.total_tokens` | number | reported total tokens |
-| `diffex.ai.usage.cost` | number | reported total cost |
-| `diffex.ai.stream.chunk_count` | number | number of streamed update chunks, without chunk content |
-| `diffex.ai.stream.time_to_first_chunk_ms` | number | elapsed milliseconds to first update chunk |
-| `diffex.ai.error.type` | string | low-cardinality provider or transport error class |
+| `pi.ai.response.model` | string | concrete response model, when reported |
+| `pi.ai.response.id` | string | provider response id; high cardinality |
+| `pi.ai.response.stop_reason` | string | `stop`, `length`, `tool_use`, `error`, `aborted`, `deferred`; terminal `toolUse` normalizes to `tool_use`, and `pending` is never recorded |
+| `pi.ai.http.status_code` | number | final HTTP status when exposed by the provider path |
+| `pi.ai.usage.input_tokens` | number | reported input tokens |
+| `pi.ai.usage.output_tokens` | number | reported output tokens |
+| `pi.ai.usage.cache_read_tokens` | number | reported cache-read tokens |
+| `pi.ai.usage.cache_write_tokens` | number | reported cache-write tokens |
+| `pi.ai.usage.reasoning_tokens` | number | reported reasoning subset of output |
+| `pi.ai.usage.total_tokens` | number | reported total tokens |
+| `pi.ai.usage.cost` | number | reported total cost |
+| `pi.ai.stream.chunk_count` | number | number of streamed update chunks, without chunk content |
+| `pi.ai.stream.time_to_first_chunk_ms` | number | elapsed milliseconds to first update chunk |
+| `pi.ai.error.type` | string | low-cardinality provider or transport error class |
 
 The schema declares no per-chunk telemetry event. The assistant stream carries live deltas while telemetry records only aggregate chunk count and first-chunk latency. Default telemetry never contains request or response content.
 
 #### Harness schema
 
-The three operation spans share `diffex.session.id` (string, required, high cardinality), `diffex.lane.name` (string, required, high cardinality), `diffex.operation.id` (string, required, high cardinality), and `diffex.operation.recovery` (boolean, required). Each also requires `diffex.operation.kind` with only the literal matching that span. Operation error status may add optional end attributes `diffex.error.code` and `diffex.error.type`, both low-cardinality strings; free-form error messages are status diagnostics, not schema attributes.
+The three operation spans share `pi.session.id` (string, required, high cardinality), `pi.lane.name` (string, required, high cardinality), `pi.operation.id` (string, required, high cardinality), and `pi.operation.recovery` (boolean, required). Each also requires `pi.operation.kind` with only the literal matching that span. Operation error status may add optional end attributes `pi.error.code` and `pi.error.type`, both low-cardinality strings; free-form error messages are status diagnostics, not schema attributes.
 
 | span | allowed parents | start attributes | optional end attributes | explicit error status |
 |---|---|---|---|---|
-| `diffex.harness.run` | root or application span | common operation attributes plus `diffex.operation.kind`: `run` | `diffex.operation.outcome`: `completed`, `aborted`, `failed`, `suspended` | outcome `failed` |
-| `diffex.harness.compaction` | root or application span | common operation attributes plus `diffex.operation.kind`: `compaction` | `diffex.operation.outcome`: `completed`, `declined`, `aborted`, `failed` | outcome `failed` |
-| `diffex.harness.navigation` | root or application span | common operation attributes plus `diffex.operation.kind`: `navigation` | `diffex.operation.outcome`: `completed`, `declined`, `aborted`, `failed` | outcome `failed` |
-| `diffex.harness.checkpoint` | `diffex.harness.run` | `diffex.lane.name`!, `diffex.operation.id`!, `diffex.checkpoint.kind`!: `normal`, `failure_drain`, `abort_reconcile` | none | only throw/reject |
-| `diffex.harness.turn` | `diffex.harness.run` | `diffex.lane.name`!, `diffex.operation.id`!, `diffex.turn.id`! string, high cardinality | none | only throw/reject |
-| `diffex.harness.step` | `diffex.harness.turn`, `diffex.harness.checkpoint`, `diffex.harness.compaction`, or `diffex.harness.navigation` | `diffex.lane.name`!, `diffex.operation.id`!, `diffex.step.kind`!: `assistant`, `compaction`, `branch_summary`; `diffex.step.attempt`! number; `diffex.compaction.reason`?: `manual`, `threshold`, `overflow` | `diffex.step.outcome`: `succeeded`, `retry`, `failed`, `aborted`, `deferred`, `overflow` | outcome `retry` or `failed` |
-| `diffex.harness.tool` | `diffex.harness.turn` for live work or `diffex.harness.run` for reconciliation | `diffex.lane.name`!, `diffex.operation.id`!, `diffex.turn.id`? string high-cardinality, `diffex.tool.name`! string, `diffex.tool.call_id`! string high-cardinality, `diffex.tool.replay`!: `never`, `safe`; `diffex.tool.recovery`! boolean | `diffex.tool.is_error` boolean for the raw phase-2 execution result | `diffex.tool.is_error: true` |
-| `diffex.harness.hook` | root or the current harness/AI scope | `diffex.lane.name`!, `diffex.operation.id`? string high-cardinality, `diffex.hook.name`! string with values from `HookName`, `diffex.hook.registration_id`? string | `diffex.hook.outcome`: `completed`, `skipped`, `blocked`, `failed` | handler throw, including fail-closed `before_tool` |
-| `diffex.harness.sleep` | `diffex.harness.step` or `diffex.harness.run` | `diffex.operation.id`!, `diffex.sleep.delay_ms`! number | `diffex.sleep.outcome`: `elapsed`, `aborted` | only throw/reject |
-| `diffex.harness.event_handler` | root or the scope emitting the event | `diffex.event.type`! low-cardinality string with the section 10 event discriminants, `diffex.lane.name`? string high-cardinality | none | listener throw; the event system catches it after the span rejects |
-| `diffex.session.write` | root or the current harness scope | `diffex.lane.name`!, `diffex.operation.id`? string high-cardinality, `diffex.session.mutation`!: `entry`, `record`, `lane`, `fact`; `diffex.session.item_type`? string | `diffex.session.seq` number when the committed API exposes it | storage rejection |
+| `pi.harness.run` | root or application span | common operation attributes plus `pi.operation.kind`: `run` | `pi.operation.outcome`: `completed`, `aborted`, `failed`, `suspended` | outcome `failed` |
+| `pi.harness.compaction` | root or application span | common operation attributes plus `pi.operation.kind`: `compaction` | `pi.operation.outcome`: `completed`, `declined`, `aborted`, `failed` | outcome `failed` |
+| `pi.harness.navigation` | root or application span | common operation attributes plus `pi.operation.kind`: `navigation` | `pi.operation.outcome`: `completed`, `declined`, `aborted`, `failed` | outcome `failed` |
+| `pi.harness.checkpoint` | `pi.harness.run` | `pi.lane.name`!, `pi.operation.id`!, `pi.checkpoint.kind`!: `normal`, `failure_drain`, `abort_reconcile` | none | only throw/reject |
+| `pi.harness.turn` | `pi.harness.run` | `pi.lane.name`!, `pi.operation.id`!, `pi.turn.id`! string, high cardinality | none | only throw/reject |
+| `pi.harness.step` | `pi.harness.turn`, `pi.harness.checkpoint`, `pi.harness.compaction`, or `pi.harness.navigation` | `pi.lane.name`!, `pi.operation.id`!, `pi.step.kind`!: `assistant`, `compaction`, `branch_summary`; `pi.step.attempt`! number; `pi.compaction.reason`?: `manual`, `threshold`, `overflow` | `pi.step.outcome`: `succeeded`, `retry`, `failed`, `aborted`, `deferred`, `overflow` | outcome `retry` or `failed` |
+| `pi.harness.tool` | `pi.harness.turn` for live work or `pi.harness.run` for reconciliation | `pi.lane.name`!, `pi.operation.id`!, `pi.turn.id`? string high-cardinality, `pi.tool.name`! string, `pi.tool.call_id`! string high-cardinality, `pi.tool.replay`!: `never`, `safe`; `pi.tool.recovery`! boolean | `pi.tool.is_error` boolean for the raw phase-2 execution result | `pi.tool.is_error: true` |
+| `pi.harness.hook` | root or the current harness/AI scope | `pi.lane.name`!, `pi.operation.id`? string high-cardinality, `pi.hook.name`! string with values from `HookName`, `pi.hook.registration_id`? string | `pi.hook.outcome`: `completed`, `skipped`, `blocked`, `failed` | handler throw, including fail-closed `before_tool` |
+| `pi.harness.sleep` | `pi.harness.step` or `pi.harness.run` | `pi.operation.id`!, `pi.sleep.delay_ms`! number | `pi.sleep.outcome`: `elapsed`, `aborted` | only throw/reject |
+| `pi.harness.event_handler` | root or the scope emitting the event | `pi.event.type`! low-cardinality string with the section 10 event discriminants, `pi.lane.name`? string high-cardinality | none | listener throw; the event system catches it after the span rejects |
+| `pi.session.write` | root or the current harness scope | `pi.lane.name`!, `pi.operation.id`? string high-cardinality, `pi.session.mutation`!: `entry`, `record`, `lane`, `fact`; `pi.session.item_type`? string | `pi.session.seq` number when the committed API exposes it | storage rejection |
 
-The parent column maps directly to `TelemetryParentDefinition`: “root or application span” is `root_or_external`; “root or the current scope” and “root or any caller span” are `any`; every finite Diffex span list uses `spans` with exactly those names. `diffex.harness.tool` wraps phase 2 (`executeTool`) only and settles before `after_tool` finalization: `diffex.tool.is_error` describes the raw execution result, there is no final `terminate` attribute, and blocked or invalid calls that never execute emit no tool span. Live execution supplies the active turn id and parents the span to `diffex.harness.turn`; reconciliation has no durable turn id, omits it, and parents the span directly to the resumed `diffex.harness.run` invocation. The `diffex.hook.name` values array is exactly `before_run`, `before_resume`, `before_run_end`, `transform_context`, `before_request`, `before_payload`, `after_response`, `before_tool`, `after_tool`, `before_compaction`, and `before_navigation`. The `diffex.event.type` values array contains every `type` discriminant in the section 10 catalog and no others. `diffex.harness.hook` describes one registered handler invocation, so isolated handler failures have their own status without failing the enclosing run. `diffex.harness.event_handler` does the same for passive listener failures. The harness schema declares no span events initially.
+The parent column maps directly to `TelemetryParentDefinition`: “root or application span” is `root_or_external`; “root or the current scope” and “root or any caller span” are `any`; every finite Diffex span list uses `spans` with exactly those names. `pi.harness.tool` wraps phase 2 (`executeTool`) only and settles before `after_tool` finalization: `pi.tool.is_error` describes the raw execution result, there is no final `terminate` attribute, and blocked or invalid calls that never execute emit no tool span. Live execution supplies the active turn id and parents the span to `pi.harness.turn`; reconciliation has no durable turn id, omits it, and parents the span directly to the resumed `pi.harness.run` invocation. The `pi.hook.name` values array is exactly `before_run`, `before_resume`, `before_run_end`, `transform_context`, `before_request`, `before_payload`, `after_response`, `before_tool`, `after_tool`, `before_compaction`, and `before_navigation`. The `pi.event.type` values array contains every `type` discriminant in the section 10 catalog and no others. `pi.harness.hook` describes one registered handler invocation, so isolated handler failures have their own status without failing the enclosing run. `pi.harness.event_handler` does the same for passive listener failures. The harness schema declares no span events initially.
 
 Dynamic identifiers and names are attributes, never span names. The schema definitions are the exhaustive vocabulary Diffex instrumentation may emit.
 
@@ -2991,12 +2991,12 @@ async function assistantAttempt(
 ): Promise<SettledAssistantMessage> {
   return startHarnessSpan(
     turnContext,
-    "diffex.harness.step",
+    "pi.harness.step",
     {
-      "diffex.lane.name": state.lane,
-      "diffex.operation.id": op.id,
-      "diffex.step.kind": "assistant",
-      "diffex.step.attempt": attempt,
+      "pi.lane.name": state.lane,
+      "pi.operation.id": op.id,
+      "pi.step.kind": "assistant",
+      "pi.step.attempt": attempt,
     },
     async (stepContext) => {
       await fx.appendRecord(
@@ -3014,18 +3014,18 @@ async function assistantAttempt(
 }
 ```
 
-Section 14's `streamAssistant()` is the logical model-request wrapper. It starts `diffex.ai.request` with `startAiSpan()`, passes that callback span as `ProviderRequestOptions.telemetryContext` through `Models`, records only schema-declared aggregate response fields, and returns the same assistant message. `Effects.executeTool()` similarly wraps only phase 2 in `diffex.harness.tool`; hook and event runners follow the same explicit-parent pattern.
+Section 14's `streamAssistant()` is the logical model-request wrapper. It starts `pi.ai.request` with `startAiSpan()`, passes that callback span as `ProviderRequestOptions.telemetryContext` through `Models`, records only schema-declared aggregate response fields, and returns the same assistant message. `Effects.executeTool()` similarly wraps only phase 2 in `pi.harness.tool`; hook and event runners follow the same explicit-parent pattern.
 
 | owner / method | target telemetry |
 |---|---|
-| operation dispatcher | `diffex.harness.run`, `diffex.harness.compaction`, or `diffex.harness.navigation` |
-| checkpoint / turn / step procedure scopes | corresponding `diffex.harness.*` scope span |
-| `appendEntry`, `appendRecord`, `moveLane`, `setFact`, and a conditional commit that writes | `diffex.session.write`; a conditional no-write result emits no write span |
-| `streamAssistant`, `fetchDeferred`, `cancelDeferred` | `diffex.ai.request` with the matching `diffex.ai.operation` |
-| `executeTool` | `diffex.harness.tool` |
-| `runHook` | one `diffex.harness.hook` per registered handler |
-| `sleep` | `diffex.harness.sleep` |
-| passive event delivery | one `diffex.harness.event_handler` per listener |
+| operation dispatcher | `pi.harness.run`, `pi.harness.compaction`, or `pi.harness.navigation` |
+| checkpoint / turn / step procedure scopes | corresponding `pi.harness.*` scope span |
+| `appendEntry`, `appendRecord`, `moveLane`, `setFact`, and a conditional commit that writes | `pi.session.write`; a conditional no-write result emits no write span |
+| `streamAssistant`, `fetchDeferred`, `cancelDeferred` | `pi.ai.request` with the matching `pi.ai.operation` |
+| `executeTool` | `pi.harness.tool` |
+| `runHook` | one `pi.harness.hook` per registered handler |
+| `sleep` | `pi.harness.sleep` |
+| passive event delivery | one `pi.harness.event_handler` per listener |
 
 A context object and adapter-native span are process-local capabilities. Neither is persisted in a record, entry, snapshot, event, or deferred handle.
 
@@ -3043,23 +3043,23 @@ If an outcome attribute is set, run spans never use `declined`; that value exist
 The span tree follows execution scopes:
 
 ```text
-diffex.harness.run
-├─ diffex.harness.checkpoint
-│  └─ diffex.harness.step          compaction, attempt
-├─ diffex.harness.turn
-│  ├─ diffex.harness.step          assistant, attempt
-│  │  ├─ diffex.ai.request         provider, model, stop reason
-│  │  └─ diffex.harness.sleep      retry delay
-│  └─ diffex.harness.tool          tool name, call id, replay
-├─ diffex.harness.hook
-├─ diffex.harness.event_handler
-└─ diffex.session.write            entry/record/lane/fact
+pi.harness.run
+├─ pi.harness.checkpoint
+│  └─ pi.harness.step          compaction, attempt
+├─ pi.harness.turn
+│  ├─ pi.harness.step          assistant, attempt
+│  │  ├─ pi.ai.request         provider, model, stop reason
+│  │  └─ pi.harness.sleep      retry delay
+│  └─ pi.harness.tool          tool name, call id, replay
+├─ pi.harness.hook
+├─ pi.harness.event_handler
+└─ pi.session.write            entry/record/lane/fact
 
-diffex.harness.compaction          manual operation
-diffex.harness.navigation
+pi.harness.compaction          manual operation
+pi.harness.navigation
 ```
 
-The procedure layer owns operation, checkpoint, turn, and step scopes. `Effects` owns session writes, phase-2 tool execution, hooks, and sleep. The request-dispatch wrapper around `Models` owns `diffex.ai.request`; passive event delivery owns handler spans. Each owner receives its parent context explicitly.
+The procedure layer owns operation, checkpoint, turn, and step scopes. `Effects` owns session writes, phase-2 tool execution, hooks, and sleep. The request-dispatch wrapper around `Models` owns `pi.ai.request`; passive event delivery owns handler spans. Each owner receives its parent context explicitly.
 
 ### Safety and testing
 
@@ -3270,12 +3270,12 @@ These packages own `packages/agent/src/harness/session/jsonl/**`, the concrete `
 I0, I1, and I2 may proceed independently. I3 → I4 → I5 is serial and begins after R2 fixes the `LaneState` shape. These packages use separate modules with focused unit tests; I5 remains primitive-only and does not edit `agent-harness.ts`.
 
 - [x] **I0 — telemetry contracts, typed schemas, and no-op context.** Dependencies: none.
-  - Primary files: `packages/telemetry/src/index.ts`, `packages/telemetry/src/memory.ts`, `packages/telemetry/src/testing/`, and focused tests; diffex-ai request-option types/propagation and focused tests; `packages/agent/src/harness/telemetry.ts`, `packages/agent/src/index.ts`, focused tests, package scripts, `packages/agent/scripts/generate-telemetry-docs.ts`, and generated `packages/agent/docs/telemetry-schema.md`. Do not edit `agent-harness.ts`; its canonical context type is landed, while H0 owns option renaming/defaulting/storage and execution threading after convergence.
+  - Primary files: `packages/telemetry/src/index.ts`, `packages/telemetry/src/memory.ts`, `packages/telemetry/src/testing/`, and focused tests; pi-ai request-option types/propagation and focused tests; `packages/agent/src/harness/telemetry.ts`, `packages/agent/src/index.ts`, focused tests, package scripts, `packages/agent/scripts/generate-telemetry-docs.ts`, and generated `packages/agent/docs/telemetry-schema.md`. Do not edit `agent-harness.ts`; its canonical context type is landed, while H0 owns option renaming/defaulting/storage and execution threading after convergence.
   - In telemetry, implement the one canonical section 18 callback-based `TelemetryContext` / `TelemetrySpan` contract, shared no-op context, deterministic in-memory reference adapter, runner-independent adapter conformance cases, serializable `defineTelemetrySchema()` machinery, and `createTypedSpanStarter(context, schemas)` composition with child-bound starters.
-  - In diffex-ai, add optional `telemetryContext` to `ProviderRequestOptions` so every stream, deferred, and image option inherits it; provider, `Models`, `ImagesModels`, direct dispatch, and simple-option conversion preserve it. Diffex-ai owns no domain schema or helper.
+  - In pi-ai, add optional `telemetryContext` to `ProviderRequestOptions` so every stream, deferred, and image option inherits it; provider, `Models`, `ImagesModels`, direct dispatch, and simple-option conversion preserve it. Pi-ai owns no domain schema or helper.
   - In agent, define the complete normative `AI_TELEMETRY_SCHEMA` and `HARNESS_TELEMETRY_SCHEMA`, their inferred types, the readonly `AGENT_TELEMETRY_SCHEMAS` composition tuple, and typed `startAiSpan()` / `startHarnessSpan()` helpers. Export both schemas, the tuple, and helpers, and re-export the generic telemetry surface from the agent package root. Do not duplicate the generic contract and do not adopt OTel or another external semantic convention.
   - Generate the combined repository-only Markdown reference from the runtime schema values with the named agent package scripts. Production helpers perform no runtime schema validation; schemas compile-time-check each Diffex-written start/end/event call and remain importable as machine-readable data.
-  - Wire telemetry before diffex-ai in workspace, local-release, publish, profiling, and coding-agent binary build order; add source-test aliases and refresh workspace/generated dependency locks.
+  - Wire telemetry before pi-ai in workspace, local-release, publish, profiling, and coding-agent binary build order; add source-test aliases and refresh workspace/generated dependency locks.
   - Landed coverage: focused tests exercise no-op synchronous admission, returned-value and sync/async rejection preservation, explicit no-op child propagation, one shared frozen inert span with no payload inspection, exact start/optional-end inference, multi-schema vocabulary composition, child-starter parent propagation, rejection of duplicate span names and missing, unknown, empty-schema, and invalid closed-set attributes, absence of declared span events, schema JSON serialization, the in-memory reference against every exported adapter conformance case, option propagation across provider/`Models` stream and deferred dispatch, direct and `ImagesModels` image dispatch, built-in simple-option conversion, and generated-document freshness. O2 will use the reference adapter to test Diffex's runtime status and nesting behavior with captured spans.
 - [ ] **I1 — hook registry and runner.** Dependencies: none.
   - Primary files: `packages/agent/src/harness/hooks.ts`, `packages/agent/test/harness/hooks.test.ts`.
@@ -3344,7 +3344,7 @@ H0 converges restore and primitives into `agent-harness.ts`. H0–H8 then merge 
   - Consume R2's X1–X5 reduced state and reconcile it; replay only when persisted and current declarations are safe, preserve ordinals, and handle truncated batches without execution. Do not duplicate reducer logic.
   - Acceptance: complete tool crash matrix, changed replay declarations, parallel-prefix crashes, and idempotent second recovery.
 - [ ] **H8 — deferred provider redemption.** Dependencies: H7.
-  - Integrate the already-landed diffex-ai deferred APIs: suspend, pending re-park, ready continuation, terminal/rejected fetch failure, handle mismatch, and best-effort cancellation.
+  - Integrate the already-landed pi-ai deferred APIs: suspend, pending re-park, ready continuation, terminal/rejected fetch failure, handle mismatch, and best-effort cancellation.
   - Select and document whether `resume()` uses a non-zero `fetchDeferred` wait or checks once and re-parks immediately.
   - Acceptance: one fetch per resume; pending writes nothing except reported usage; terminal errors never start replacement requests.
 

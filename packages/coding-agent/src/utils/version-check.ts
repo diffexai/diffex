@@ -1,11 +1,11 @@
 import { compare, valid } from "semver";
+import { getDiffexUserAgent } from "./diffex-user-agent.ts";
 import { fetchWithRetry } from "./management-http.ts";
-import { getPiUserAgent } from "./pi-user-agent.ts";
 
 const LATEST_VERSION_URL = "https://pi.dev/api/latest-version";
 const DEFAULT_VERSION_CHECK_TIMEOUT_MS = 10000;
 
-export interface LatestPiRelease {
+export interface LatestDiffexRelease {
 	version: string;
 	packageName?: string;
 	note?: string;
@@ -48,17 +48,17 @@ export function isNewerPackageVersion(candidateVersion: string, currentVersion: 
 	return candidateVersion.trim() !== currentVersion.trim();
 }
 
-export async function getLatestPiRelease(
+export async function getLatestDiffexRelease(
 	currentVersion: string,
 	options: { timeoutMs?: number; retry?: boolean } = {},
-): Promise<LatestPiRelease | undefined> {
+): Promise<LatestDiffexRelease | undefined> {
 	if (process.env.DIFFEX_OFFLINE) return undefined;
 
 	const response = await fetchWithRetry(
 		LATEST_VERSION_URL,
 		{
 			headers: {
-				"User-Agent": getPiUserAgent(currentVersion),
+				"User-Agent": getDiffexUserAgent(currentVersion),
 				accept: "application/json",
 			},
 		},
@@ -87,18 +87,18 @@ export async function getLatestPiRelease(
 	};
 }
 
-export async function getLatestPiVersion(
+export async function getLatestDiffexVersion(
 	currentVersion: string,
 	options: { timeoutMs?: number; retry?: boolean } = {},
 ): Promise<string | undefined> {
-	return (await getLatestPiRelease(currentVersion, options))?.version;
+	return (await getLatestDiffexRelease(currentVersion, options))?.version;
 }
 
-export async function checkForNewPiVersion(currentVersion: string): Promise<LatestPiRelease | undefined> {
+export async function checkForNewDiffexVersion(currentVersion: string): Promise<LatestDiffexRelease | undefined> {
 	if (process.env.DIFFEX_SKIP_VERSION_CHECK) return undefined;
 
 	try {
-		const latestRelease = await getLatestPiRelease(currentVersion);
+		const latestRelease = await getLatestDiffexRelease(currentVersion);
 		if (latestRelease && isNewerPackageVersion(latestRelease.version, currentVersion)) {
 			return latestRelease;
 		}

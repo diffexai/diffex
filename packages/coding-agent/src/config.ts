@@ -464,13 +464,13 @@ export function getBundledInteractiveAssetPath(name: string): string {
 }
 
 // =============================================================================
-// App Config (from package.json piConfig)
+// App Config (from package.json diffexConfig)
 // =============================================================================
 
 interface PackageJson {
 	name?: string;
 	version?: string;
-	piConfig?: {
+	diffexConfig?: {
 		name?: string;
 		configDir?: string;
 	};
@@ -484,11 +484,11 @@ try {
 	if (err.code !== "ENOENT") throw e;
 }
 
-const piConfigName: string | undefined = pkg.piConfig?.name;
-export const PACKAGE_NAME: string = pkg.name || "@earendil-works/pi-coding-agent";
-export const APP_NAME: string = piConfigName || "pi";
-export const APP_TITLE: string = piConfigName ? APP_NAME : "Diffex";
-export const CONFIG_DIR_NAME: string = pkg.piConfig?.configDir || ".diffex";
+const diffexConfigName: string | undefined = pkg.diffexConfig?.name;
+export const PACKAGE_NAME: string = pkg.name || "@earendil-works/diffex-coding-agent";
+export const APP_NAME: string = diffexConfigName || "diffex";
+export const APP_TITLE: string = diffexConfigName ? APP_NAME : "Diffex";
+export const CONFIG_DIR_NAME: string = pkg.diffexConfig?.configDir || ".diffex";
 export const VERSION: string = pkg.version || "0.0.0";
 
 export const ENV_AGENT_DIR = "DIFFEX_CODING_AGENT_DIR";

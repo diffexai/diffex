@@ -6,7 +6,7 @@
 
 Schema version: 1
 
-### `diffex.ai.request`
+### `pi.ai.request`
 
 One logical request to an AI provider
 
@@ -18,12 +18,12 @@ One logical request to an AI provider
 
 | Name | Type | Required | Values | Notes | Description |
 |---|---|---:|---|---|---|
-| `diffex.ai.operation` | `string` | yes | stream, fetch_deferred, cancel_deferred, generate_images |  | Logical provider operation |
-| `diffex.ai.provider` | `string` | yes |  |  | Selected provider id |
-| `diffex.ai.model` | `string` | yes |  |  | Requested model id |
-| `diffex.ai.api` | `string` | yes |  |  | Provider API id |
-| `diffex.ai.streaming` | `boolean` | yes |  |  | Whether this operation returns a stream |
-| `diffex.ai.deferred` | `boolean` | no |  |  | Whether the operation requests or participates in deferred execution |
+| `pi.ai.operation` | `string` | yes | stream, fetch_deferred, cancel_deferred, generate_images |  | Logical provider operation |
+| `pi.ai.provider` | `string` | yes |  |  | Selected provider id |
+| `pi.ai.model` | `string` | yes |  |  | Requested model id |
+| `pi.ai.api` | `string` | yes |  |  | Provider API id |
+| `pi.ai.streaming` | `boolean` | yes |  |  | Whether this operation returns a stream |
+| `pi.ai.deferred` | `boolean` | no |  |  | Whether the operation requests or participates in deferred execution |
 
 #### End attributes
 
@@ -31,20 +31,20 @@ All end attributes are optional completion enrichment.
 
 | Name | Type | Values | Notes | Description |
 |---|---|---|---|---|
-| `diffex.ai.response.model` | `string` |  |  | Concrete response model |
-| `diffex.ai.response.id` | `string` |  | high cardinality | Provider response id |
-| `diffex.ai.response.stop_reason` | `string` | stop, length, tool_use, error, aborted, deferred |  | Normalized terminal response reason |
-| `diffex.ai.http.status_code` | `number` |  |  | Final HTTP status |
-| `diffex.ai.usage.input_tokens` | `number` |  |  | Reported input tokens |
-| `diffex.ai.usage.output_tokens` | `number` |  |  | Reported output tokens |
-| `diffex.ai.usage.cache_read_tokens` | `number` |  |  | Reported cache-read tokens |
-| `diffex.ai.usage.cache_write_tokens` | `number` |  |  | Reported cache-write tokens |
-| `diffex.ai.usage.reasoning_tokens` | `number` |  |  | Reported reasoning tokens |
-| `diffex.ai.usage.total_tokens` | `number` |  |  | Reported total tokens |
-| `diffex.ai.usage.cost` | `number` |  |  | Reported total cost |
-| `diffex.ai.stream.chunk_count` | `number` |  |  | Streamed update chunk count |
-| `diffex.ai.stream.time_to_first_chunk_ms` | `number` |  |  | Elapsed milliseconds to first update chunk |
-| `diffex.ai.error.type` | `string` |  | low cardinality | Provider or transport error class |
+| `pi.ai.response.model` | `string` |  |  | Concrete response model |
+| `pi.ai.response.id` | `string` |  | high cardinality | Provider response id |
+| `pi.ai.response.stop_reason` | `string` | stop, length, tool_use, error, aborted, deferred |  | Normalized terminal response reason |
+| `pi.ai.http.status_code` | `number` |  |  | Final HTTP status |
+| `pi.ai.usage.input_tokens` | `number` |  |  | Reported input tokens |
+| `pi.ai.usage.output_tokens` | `number` |  |  | Reported output tokens |
+| `pi.ai.usage.cache_read_tokens` | `number` |  |  | Reported cache-read tokens |
+| `pi.ai.usage.cache_write_tokens` | `number` |  |  | Reported cache-write tokens |
+| `pi.ai.usage.reasoning_tokens` | `number` |  |  | Reported reasoning tokens |
+| `pi.ai.usage.total_tokens` | `number` |  |  | Reported total tokens |
+| `pi.ai.usage.cost` | `number` |  |  | Reported total cost |
+| `pi.ai.stream.chunk_count` | `number` |  |  | Streamed update chunk count |
+| `pi.ai.stream.time_to_first_chunk_ms` | `number` |  |  | Elapsed milliseconds to first update chunk |
+| `pi.ai.error.type` | `string` |  | low cardinality | Provider or transport error class |
 
 #### Events
 
@@ -54,7 +54,7 @@ No declared span events.
 
 Schema version: 1
 
-### `diffex.harness.run`
+### `pi.harness.run`
 
 One admitted in-process run invocation
 
@@ -66,11 +66,11 @@ One admitted in-process run invocation
 
 | Name | Type | Required | Values | Notes | Description |
 |---|---|---:|---|---|---|
-| `diffex.session.id` | `string` | yes |  | high cardinality | Session id |
-| `diffex.lane.name` | `string` | yes |  | high cardinality | Lane name |
-| `diffex.operation.id` | `string` | yes |  | high cardinality | Durable operation id |
-| `diffex.operation.recovery` | `boolean` | yes |  |  | Whether this invocation resumes durable work |
-| `diffex.operation.kind` | `string` | yes | run |  | Run operation kind |
+| `pi.session.id` | `string` | yes |  | high cardinality | Session id |
+| `pi.lane.name` | `string` | yes |  | high cardinality | Lane name |
+| `pi.operation.id` | `string` | yes |  | high cardinality | Durable operation id |
+| `pi.operation.recovery` | `boolean` | yes |  |  | Whether this invocation resumes durable work |
+| `pi.operation.kind` | `string` | yes | run |  | Run operation kind |
 
 #### End attributes
 
@@ -78,15 +78,15 @@ All end attributes are optional completion enrichment.
 
 | Name | Type | Values | Notes | Description |
 |---|---|---|---|---|
-| `diffex.operation.outcome` | `string` | completed, aborted, failed, suspended |  | Run invocation outcome |
-| `diffex.error.code` | `string` |  | low cardinality | Stable operation error code |
-| `diffex.error.type` | `string` |  | low cardinality | Low-cardinality operation error class |
+| `pi.operation.outcome` | `string` | completed, aborted, failed, suspended |  | Run invocation outcome |
+| `pi.error.code` | `string` |  | low cardinality | Stable operation error code |
+| `pi.error.type` | `string` |  | low cardinality | Low-cardinality operation error class |
 
 #### Events
 
 No declared span events.
 
-### `diffex.harness.compaction`
+### `pi.harness.compaction`
 
 One admitted in-process manual compaction invocation
 
@@ -98,11 +98,11 @@ One admitted in-process manual compaction invocation
 
 | Name | Type | Required | Values | Notes | Description |
 |---|---|---:|---|---|---|
-| `diffex.session.id` | `string` | yes |  | high cardinality | Session id |
-| `diffex.lane.name` | `string` | yes |  | high cardinality | Lane name |
-| `diffex.operation.id` | `string` | yes |  | high cardinality | Durable operation id |
-| `diffex.operation.recovery` | `boolean` | yes |  |  | Whether this invocation resumes durable work |
-| `diffex.operation.kind` | `string` | yes | compaction |  | Compaction operation kind |
+| `pi.session.id` | `string` | yes |  | high cardinality | Session id |
+| `pi.lane.name` | `string` | yes |  | high cardinality | Lane name |
+| `pi.operation.id` | `string` | yes |  | high cardinality | Durable operation id |
+| `pi.operation.recovery` | `boolean` | yes |  |  | Whether this invocation resumes durable work |
+| `pi.operation.kind` | `string` | yes | compaction |  | Compaction operation kind |
 
 #### End attributes
 
@@ -110,15 +110,15 @@ All end attributes are optional completion enrichment.
 
 | Name | Type | Values | Notes | Description |
 |---|---|---|---|---|
-| `diffex.operation.outcome` | `string` | completed, declined, aborted, failed |  | Compaction invocation outcome |
-| `diffex.error.code` | `string` |  | low cardinality | Stable operation error code |
-| `diffex.error.type` | `string` |  | low cardinality | Low-cardinality operation error class |
+| `pi.operation.outcome` | `string` | completed, declined, aborted, failed |  | Compaction invocation outcome |
+| `pi.error.code` | `string` |  | low cardinality | Stable operation error code |
+| `pi.error.type` | `string` |  | low cardinality | Low-cardinality operation error class |
 
 #### Events
 
 No declared span events.
 
-### `diffex.harness.navigation`
+### `pi.harness.navigation`
 
 One admitted in-process navigation invocation
 
@@ -130,11 +130,11 @@ One admitted in-process navigation invocation
 
 | Name | Type | Required | Values | Notes | Description |
 |---|---|---:|---|---|---|
-| `diffex.session.id` | `string` | yes |  | high cardinality | Session id |
-| `diffex.lane.name` | `string` | yes |  | high cardinality | Lane name |
-| `diffex.operation.id` | `string` | yes |  | high cardinality | Durable operation id |
-| `diffex.operation.recovery` | `boolean` | yes |  |  | Whether this invocation resumes durable work |
-| `diffex.operation.kind` | `string` | yes | navigation |  | Navigation operation kind |
+| `pi.session.id` | `string` | yes |  | high cardinality | Session id |
+| `pi.lane.name` | `string` | yes |  | high cardinality | Lane name |
+| `pi.operation.id` | `string` | yes |  | high cardinality | Durable operation id |
+| `pi.operation.recovery` | `boolean` | yes |  |  | Whether this invocation resumes durable work |
+| `pi.operation.kind` | `string` | yes | navigation |  | Navigation operation kind |
 
 #### End attributes
 
@@ -142,19 +142,19 @@ All end attributes are optional completion enrichment.
 
 | Name | Type | Values | Notes | Description |
 |---|---|---|---|---|
-| `diffex.operation.outcome` | `string` | completed, declined, aborted, failed |  | Navigation invocation outcome |
-| `diffex.error.code` | `string` |  | low cardinality | Stable operation error code |
-| `diffex.error.type` | `string` |  | low cardinality | Low-cardinality operation error class |
+| `pi.operation.outcome` | `string` | completed, declined, aborted, failed |  | Navigation invocation outcome |
+| `pi.error.code` | `string` |  | low cardinality | Stable operation error code |
+| `pi.error.type` | `string` |  | low cardinality | Low-cardinality operation error class |
 
 #### Events
 
 No declared span events.
 
-### `diffex.harness.checkpoint`
+### `pi.harness.checkpoint`
 
 One run checkpoint
 
-- Parents: `diffex.harness.run`
+- Parents: `pi.harness.run`
 - Default status: `ok`
 - Error when: Checkpoint work throws
 
@@ -162,9 +162,9 @@ One run checkpoint
 
 | Name | Type | Required | Values | Notes | Description |
 |---|---|---:|---|---|---|
-| `diffex.lane.name` | `string` | yes |  | high cardinality | Lane name |
-| `diffex.operation.id` | `string` | yes |  | high cardinality | Durable operation id |
-| `diffex.checkpoint.kind` | `string` | yes | normal, failure_drain, abort_reconcile |  | Checkpoint purpose |
+| `pi.lane.name` | `string` | yes |  | high cardinality | Lane name |
+| `pi.operation.id` | `string` | yes |  | high cardinality | Durable operation id |
+| `pi.checkpoint.kind` | `string` | yes | normal, failure_drain, abort_reconcile |  | Checkpoint purpose |
 
 #### End attributes
 
@@ -178,11 +178,11 @@ All end attributes are optional completion enrichment.
 
 No declared span events.
 
-### `diffex.harness.turn`
+### `pi.harness.turn`
 
 One assistant response and its tool batch
 
-- Parents: `diffex.harness.run`
+- Parents: `pi.harness.run`
 - Default status: `ok`
 - Error when: Turn work throws
 
@@ -190,9 +190,9 @@ One assistant response and its tool batch
 
 | Name | Type | Required | Values | Notes | Description |
 |---|---|---:|---|---|---|
-| `diffex.lane.name` | `string` | yes |  | high cardinality | Lane name |
-| `diffex.operation.id` | `string` | yes |  | high cardinality | Durable operation id |
-| `diffex.turn.id` | `string` | yes |  | high cardinality | Invocation-local turn id |
+| `pi.lane.name` | `string` | yes |  | high cardinality | Lane name |
+| `pi.operation.id` | `string` | yes |  | high cardinality | Durable operation id |
+| `pi.turn.id` | `string` | yes |  | high cardinality | Invocation-local turn id |
 
 #### End attributes
 
@@ -206,11 +206,11 @@ All end attributes are optional completion enrichment.
 
 No declared span events.
 
-### `diffex.harness.step`
+### `pi.harness.step`
 
 One durable retry attempt
 
-- Parents: `diffex.harness.turn`, `diffex.harness.checkpoint`, `diffex.harness.compaction`, `diffex.harness.navigation`
+- Parents: `pi.harness.turn`, `pi.harness.checkpoint`, `pi.harness.compaction`, `pi.harness.navigation`
 - Default status: `ok`
 - Error when: The attempt retries, fails, or throws
 
@@ -218,11 +218,11 @@ One durable retry attempt
 
 | Name | Type | Required | Values | Notes | Description |
 |---|---|---:|---|---|---|
-| `diffex.lane.name` | `string` | yes |  | high cardinality | Lane name |
-| `diffex.operation.id` | `string` | yes |  | high cardinality | Durable operation id |
-| `diffex.step.kind` | `string` | yes | assistant, compaction, branch_summary |  | Retryable step kind |
-| `diffex.step.attempt` | `number` | yes |  |  | One-based durable attempt number |
-| `diffex.compaction.reason` | `string` | no | manual, threshold, overflow |  | Compaction trigger |
+| `pi.lane.name` | `string` | yes |  | high cardinality | Lane name |
+| `pi.operation.id` | `string` | yes |  | high cardinality | Durable operation id |
+| `pi.step.kind` | `string` | yes | assistant, compaction, branch_summary |  | Retryable step kind |
+| `pi.step.attempt` | `number` | yes |  |  | One-based durable attempt number |
+| `pi.compaction.reason` | `string` | no | manual, threshold, overflow |  | Compaction trigger |
 
 #### End attributes
 
@@ -230,17 +230,17 @@ All end attributes are optional completion enrichment.
 
 | Name | Type | Values | Notes | Description |
 |---|---|---|---|---|
-| `diffex.step.outcome` | `string` | succeeded, retry, failed, aborted, deferred, overflow |  | Attempt outcome |
+| `pi.step.outcome` | `string` | succeeded, retry, failed, aborted, deferred, overflow |  | Attempt outcome |
 
 #### Events
 
 No declared span events.
 
-### `diffex.harness.tool`
+### `pi.harness.tool`
 
 One raw phase-2 tool execution
 
-- Parents: `diffex.harness.turn`, `diffex.harness.run`
+- Parents: `pi.harness.turn`, `pi.harness.run`
 - Default status: `ok`
 - Error when: Raw phase-2 execution returns an error
 
@@ -248,13 +248,13 @@ One raw phase-2 tool execution
 
 | Name | Type | Required | Values | Notes | Description |
 |---|---|---:|---|---|---|
-| `diffex.lane.name` | `string` | yes |  | high cardinality | Lane name |
-| `diffex.operation.id` | `string` | yes |  | high cardinality | Durable operation id |
-| `diffex.turn.id` | `string` | no |  | high cardinality | Invocation-local live turn id |
-| `diffex.tool.name` | `string` | yes |  |  | Tool name |
-| `diffex.tool.call_id` | `string` | yes |  | high cardinality | Tool call id |
-| `diffex.tool.replay` | `string` | yes | never, safe |  | Declared replay policy |
-| `diffex.tool.recovery` | `boolean` | yes |  |  | Whether this is recovery execution |
+| `pi.lane.name` | `string` | yes |  | high cardinality | Lane name |
+| `pi.operation.id` | `string` | yes |  | high cardinality | Durable operation id |
+| `pi.turn.id` | `string` | no |  | high cardinality | Invocation-local live turn id |
+| `pi.tool.name` | `string` | yes |  |  | Tool name |
+| `pi.tool.call_id` | `string` | yes |  | high cardinality | Tool call id |
+| `pi.tool.replay` | `string` | yes | never, safe |  | Declared replay policy |
+| `pi.tool.recovery` | `boolean` | yes |  |  | Whether this is recovery execution |
 
 #### End attributes
 
@@ -262,13 +262,13 @@ All end attributes are optional completion enrichment.
 
 | Name | Type | Values | Notes | Description |
 |---|---|---|---|---|
-| `diffex.tool.is_error` | `boolean` |  |  | Whether raw phase-2 execution returned an error |
+| `pi.tool.is_error` | `boolean` |  |  | Whether raw phase-2 execution returned an error |
 
 #### Events
 
 No declared span events.
 
-### `diffex.harness.hook`
+### `pi.harness.hook`
 
 One registered hook handler invocation
 
@@ -280,10 +280,10 @@ One registered hook handler invocation
 
 | Name | Type | Required | Values | Notes | Description |
 |---|---|---:|---|---|---|
-| `diffex.lane.name` | `string` | yes |  | high cardinality | Lane name |
-| `diffex.operation.id` | `string` | no |  | high cardinality | Durable operation id when accepted |
-| `diffex.hook.name` | `string` | yes | before_run, before_resume, before_run_end, transform_context, before_request, before_payload, after_response, before_tool, after_tool, before_compaction, before_navigation |  | Hook name |
-| `diffex.hook.registration_id` | `string` | no |  |  | Stable hook registration id |
+| `pi.lane.name` | `string` | yes |  | high cardinality | Lane name |
+| `pi.operation.id` | `string` | no |  | high cardinality | Durable operation id when accepted |
+| `pi.hook.name` | `string` | yes | before_run, before_resume, before_run_end, transform_context, before_request, before_payload, after_response, before_tool, after_tool, before_compaction, before_navigation |  | Hook name |
+| `pi.hook.registration_id` | `string` | no |  |  | Stable hook registration id |
 
 #### End attributes
 
@@ -291,17 +291,17 @@ All end attributes are optional completion enrichment.
 
 | Name | Type | Values | Notes | Description |
 |---|---|---|---|---|
-| `diffex.hook.outcome` | `string` | completed, skipped, blocked, failed |  | Handler outcome |
+| `pi.hook.outcome` | `string` | completed, skipped, blocked, failed |  | Handler outcome |
 
 #### Events
 
 No declared span events.
 
-### `diffex.harness.sleep`
+### `pi.harness.sleep`
 
 One retry delay
 
-- Parents: `diffex.harness.step`, `diffex.harness.run`
+- Parents: `pi.harness.step`, `pi.harness.run`
 - Default status: `ok`
 - Error when: Sleep work throws
 
@@ -309,8 +309,8 @@ One retry delay
 
 | Name | Type | Required | Values | Notes | Description |
 |---|---|---:|---|---|---|
-| `diffex.operation.id` | `string` | yes |  | high cardinality | Durable operation id |
-| `diffex.sleep.delay_ms` | `number` | yes |  |  | Requested delay in milliseconds |
+| `pi.operation.id` | `string` | yes |  | high cardinality | Durable operation id |
+| `pi.sleep.delay_ms` | `number` | yes |  |  | Requested delay in milliseconds |
 
 #### End attributes
 
@@ -318,13 +318,13 @@ All end attributes are optional completion enrichment.
 
 | Name | Type | Values | Notes | Description |
 |---|---|---|---|---|
-| `diffex.sleep.outcome` | `string` | elapsed, aborted |  | Delay outcome |
+| `pi.sleep.outcome` | `string` | elapsed, aborted |  | Delay outcome |
 
 #### Events
 
 No declared span events.
 
-### `diffex.harness.event_handler`
+### `pi.harness.event_handler`
 
 One passive event listener invocation
 
@@ -336,8 +336,8 @@ One passive event listener invocation
 
 | Name | Type | Required | Values | Notes | Description |
 |---|---|---:|---|---|---|
-| `diffex.event.type` | `string` | yes | run_start, run_resume, run_suspend, run_abort, run_end, fault, handler_error, turn_start, turn_end, retry_scheduled, retry_start, retry_end, message_start, message_update, message_end, tool_start, tool_update, tool_end, entry_added, write_pending, queue_update, fact_update, config_update, compaction_start, compaction_end, navigation_start, navigation_end, lane_created, usage | low cardinality | Delivered harness event type |
-| `diffex.lane.name` | `string` | no |  | high cardinality | Lane name for lane-scoped events |
+| `pi.event.type` | `string` | yes | run_start, run_resume, run_suspend, run_abort, run_end, fault, handler_error, turn_start, turn_end, retry_scheduled, retry_start, retry_end, message_start, message_update, message_end, tool_start, tool_update, tool_end, entry_added, write_pending, queue_update, fact_update, config_update, compaction_start, compaction_end, navigation_start, navigation_end, lane_created, usage | low cardinality | Delivered harness event type |
+| `pi.lane.name` | `string` | no |  | high cardinality | Lane name for lane-scoped events |
 
 #### End attributes
 
@@ -351,7 +351,7 @@ All end attributes are optional completion enrichment.
 
 No declared span events.
 
-### `diffex.session.write`
+### `pi.session.write`
 
 One committed session mutation
 
@@ -363,10 +363,10 @@ One committed session mutation
 
 | Name | Type | Required | Values | Notes | Description |
 |---|---|---:|---|---|---|
-| `diffex.lane.name` | `string` | yes |  | high cardinality | Lane name |
-| `diffex.operation.id` | `string` | no |  | high cardinality | Durable operation id when accepted |
-| `diffex.session.mutation` | `string` | yes | entry, record, lane, fact |  | Session mutation kind |
-| `diffex.session.item_type` | `string` | no |  |  | Entry, record, lane, or fact subtype |
+| `pi.lane.name` | `string` | yes |  | high cardinality | Lane name |
+| `pi.operation.id` | `string` | no |  | high cardinality | Durable operation id when accepted |
+| `pi.session.mutation` | `string` | yes | entry, record, lane, fact |  | Session mutation kind |
+| `pi.session.item_type` | `string` | no |  |  | Entry, record, lane, or fact subtype |
 
 #### End attributes
 
@@ -374,7 +374,7 @@ All end attributes are optional completion enrichment.
 
 | Name | Type | Values | Notes | Description |
 |---|---|---|---|---|
-| `diffex.session.seq` | `number` |  |  | Committed session sequence when exposed |
+| `pi.session.seq` | `number` |  |  | Committed session sequence when exposed |
 
 #### Events
 

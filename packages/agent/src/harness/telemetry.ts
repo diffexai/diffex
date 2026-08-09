@@ -42,71 +42,71 @@ export type {
 export const AI_TELEMETRY_SCHEMA = {
 	version: 1,
 	spans: {
-		"diffex.ai.request": {
+		"pi.ai.request": {
 			description: "One logical request to an AI provider",
 			parents: { kind: "any" },
 			startAttributes: {
-				"diffex.ai.operation": {
+				"pi.ai.operation": {
 					type: "string",
 					required: true,
 					values: ["stream", "fetch_deferred", "cancel_deferred", "generate_images"],
 					description: "Logical provider operation",
 				},
-				"diffex.ai.provider": {
+				"pi.ai.provider": {
 					type: "string",
 					required: true,
 					description: "Selected provider id",
 				},
-				"diffex.ai.model": {
+				"pi.ai.model": {
 					type: "string",
 					required: true,
 					description: "Requested model id",
 				},
-				"diffex.ai.api": {
+				"pi.ai.api": {
 					type: "string",
 					required: true,
 					description: "Provider API id",
 				},
-				"diffex.ai.streaming": {
+				"pi.ai.streaming": {
 					type: "boolean",
 					required: true,
 					description: "Whether this operation returns a stream",
 				},
-				"diffex.ai.deferred": {
+				"pi.ai.deferred": {
 					type: "boolean",
 					required: false,
 					description: "Whether the operation requests or participates in deferred execution",
 				},
 			},
 			endAttributes: {
-				"diffex.ai.response.model": { type: "string", description: "Concrete response model" },
-				"diffex.ai.response.id": {
+				"pi.ai.response.model": { type: "string", description: "Concrete response model" },
+				"pi.ai.response.id": {
 					type: "string",
 					cardinality: "high",
 					description: "Provider response id",
 				},
-				"diffex.ai.response.stop_reason": {
+				"pi.ai.response.stop_reason": {
 					type: "string",
 					values: ["stop", "length", "tool_use", "error", "aborted", "deferred"],
 					description: "Normalized terminal response reason",
 				},
-				"diffex.ai.http.status_code": { type: "number", description: "Final HTTP status" },
-				"diffex.ai.usage.input_tokens": { type: "number", description: "Reported input tokens" },
-				"diffex.ai.usage.output_tokens": { type: "number", description: "Reported output tokens" },
-				"diffex.ai.usage.cache_read_tokens": { type: "number", description: "Reported cache-read tokens" },
-				"diffex.ai.usage.cache_write_tokens": {
+				"pi.ai.http.status_code": { type: "number", description: "Final HTTP status" },
+				"pi.ai.usage.input_tokens": { type: "number", description: "Reported input tokens" },
+				"pi.ai.usage.output_tokens": { type: "number", description: "Reported output tokens" },
+				"pi.ai.usage.cache_read_tokens": { type: "number", description: "Reported cache-read tokens" },
+				"pi.ai.usage.cache_write_tokens": {
 					type: "number",
 					description: "Reported cache-write tokens",
 				},
-				"diffex.ai.usage.reasoning_tokens": { type: "number", description: "Reported reasoning tokens" },
-				"diffex.ai.usage.total_tokens": { type: "number", description: "Reported total tokens" },
-				"diffex.ai.usage.cost": { type: "number", description: "Reported total cost" },
-				"diffex.ai.stream.chunk_count": { type: "number", description: "Streamed update chunk count" },
-				"diffex.ai.stream.time_to_first_chunk_ms": {
+				"pi.ai.usage.reasoning_tokens": { type: "number", description: "Reported reasoning tokens" },
+				"pi.ai.usage.total_tokens": { type: "number", description: "Reported total tokens" },
+				"pi.ai.usage.cost": { type: "number", description: "Reported total cost" },
+				"pi.ai.stream.chunk_count": { type: "number", description: "Streamed update chunk count" },
+				"pi.ai.stream.time_to_first_chunk_ms": {
 					type: "number",
 					description: "Elapsed milliseconds to first update chunk",
 				},
-				"diffex.ai.error.type": {
+				"pi.ai.error.type": {
 					type: "string",
 					cardinality: "low",
 					description: "Provider or transport error class",
@@ -191,25 +191,25 @@ const EVENT_TYPES = [
 ] as const;
 
 const operationStartAttributes = {
-	"diffex.session.id": {
+	"pi.session.id": {
 		type: "string",
 		required: true,
 		cardinality: "high",
 		description: "Session id",
 	},
-	"diffex.lane.name": {
+	"pi.lane.name": {
 		type: "string",
 		required: true,
 		cardinality: "high",
 		description: "Lane name",
 	},
-	"diffex.operation.id": {
+	"pi.operation.id": {
 		type: "string",
 		required: true,
 		cardinality: "high",
 		description: "Durable operation id",
 	},
-	"diffex.operation.recovery": {
+	"pi.operation.recovery": {
 		type: "boolean",
 		required: true,
 		description: "Whether this invocation resumes durable work",
@@ -217,12 +217,12 @@ const operationStartAttributes = {
 } as const;
 
 const operationErrorAttributes = {
-	"diffex.error.code": {
+	"pi.error.code": {
 		type: "string",
 		cardinality: "low",
 		description: "Stable operation error code",
 	},
-	"diffex.error.type": {
+	"pi.error.type": {
 		type: "string",
 		cardinality: "low",
 		description: "Low-cardinality operation error class",
@@ -232,12 +232,12 @@ const operationErrorAttributes = {
 export const HARNESS_TELEMETRY_SCHEMA = {
 	version: 1,
 	spans: {
-		"diffex.harness.run": {
+		"pi.harness.run": {
 			description: "One admitted in-process run invocation",
 			parents: { kind: "root_or_external" },
 			startAttributes: {
 				...operationStartAttributes,
-				"diffex.operation.kind": {
+				"pi.operation.kind": {
 					type: "string",
 					required: true,
 					values: ["run"],
@@ -245,7 +245,7 @@ export const HARNESS_TELEMETRY_SCHEMA = {
 				},
 			},
 			endAttributes: {
-				"diffex.operation.outcome": {
+				"pi.operation.outcome": {
 					type: "string",
 					values: ["completed", "aborted", "failed", "suspended"],
 					description: "Run invocation outcome",
@@ -254,12 +254,12 @@ export const HARNESS_TELEMETRY_SCHEMA = {
 			},
 			status: { default: "ok", errorWhen: "The run fails or throws" },
 		},
-		"diffex.harness.compaction": {
+		"pi.harness.compaction": {
 			description: "One admitted in-process manual compaction invocation",
 			parents: { kind: "root_or_external" },
 			startAttributes: {
 				...operationStartAttributes,
-				"diffex.operation.kind": {
+				"pi.operation.kind": {
 					type: "string",
 					required: true,
 					values: ["compaction"],
@@ -267,7 +267,7 @@ export const HARNESS_TELEMETRY_SCHEMA = {
 				},
 			},
 			endAttributes: {
-				"diffex.operation.outcome": {
+				"pi.operation.outcome": {
 					type: "string",
 					values: ["completed", "declined", "aborted", "failed"],
 					description: "Compaction invocation outcome",
@@ -276,12 +276,12 @@ export const HARNESS_TELEMETRY_SCHEMA = {
 			},
 			status: { default: "ok", errorWhen: "The compaction fails or throws" },
 		},
-		"diffex.harness.navigation": {
+		"pi.harness.navigation": {
 			description: "One admitted in-process navigation invocation",
 			parents: { kind: "root_or_external" },
 			startAttributes: {
 				...operationStartAttributes,
-				"diffex.operation.kind": {
+				"pi.operation.kind": {
 					type: "string",
 					required: true,
 					values: ["navigation"],
@@ -289,7 +289,7 @@ export const HARNESS_TELEMETRY_SCHEMA = {
 				},
 			},
 			endAttributes: {
-				"diffex.operation.outcome": {
+				"pi.operation.outcome": {
 					type: "string",
 					values: ["completed", "declined", "aborted", "failed"],
 					description: "Navigation invocation outcome",
@@ -298,23 +298,23 @@ export const HARNESS_TELEMETRY_SCHEMA = {
 			},
 			status: { default: "ok", errorWhen: "The navigation fails or throws" },
 		},
-		"diffex.harness.checkpoint": {
+		"pi.harness.checkpoint": {
 			description: "One run checkpoint",
-			parents: { kind: "spans", spans: ["diffex.harness.run"] },
+			parents: { kind: "spans", spans: ["pi.harness.run"] },
 			startAttributes: {
-				"diffex.lane.name": {
+				"pi.lane.name": {
 					type: "string",
 					required: true,
 					cardinality: "high",
 					description: "Lane name",
 				},
-				"diffex.operation.id": {
+				"pi.operation.id": {
 					type: "string",
 					required: true,
 					cardinality: "high",
 					description: "Durable operation id",
 				},
-				"diffex.checkpoint.kind": {
+				"pi.checkpoint.kind": {
 					type: "string",
 					required: true,
 					values: ["normal", "failure_drain", "abort_reconcile"],
@@ -324,23 +324,23 @@ export const HARNESS_TELEMETRY_SCHEMA = {
 			endAttributes: {},
 			status: { default: "ok", errorWhen: "Checkpoint work throws" },
 		},
-		"diffex.harness.turn": {
+		"pi.harness.turn": {
 			description: "One assistant response and its tool batch",
-			parents: { kind: "spans", spans: ["diffex.harness.run"] },
+			parents: { kind: "spans", spans: ["pi.harness.run"] },
 			startAttributes: {
-				"diffex.lane.name": {
+				"pi.lane.name": {
 					type: "string",
 					required: true,
 					cardinality: "high",
 					description: "Lane name",
 				},
-				"diffex.operation.id": {
+				"pi.operation.id": {
 					type: "string",
 					required: true,
 					cardinality: "high",
 					description: "Durable operation id",
 				},
-				"diffex.turn.id": {
+				"pi.turn.id": {
 					type: "string",
 					required: true,
 					cardinality: "high",
@@ -350,42 +350,37 @@ export const HARNESS_TELEMETRY_SCHEMA = {
 			endAttributes: {},
 			status: { default: "ok", errorWhen: "Turn work throws" },
 		},
-		"diffex.harness.step": {
+		"pi.harness.step": {
 			description: "One durable retry attempt",
 			parents: {
 				kind: "spans",
-				spans: [
-					"diffex.harness.turn",
-					"diffex.harness.checkpoint",
-					"diffex.harness.compaction",
-					"diffex.harness.navigation",
-				],
+				spans: ["pi.harness.turn", "pi.harness.checkpoint", "pi.harness.compaction", "pi.harness.navigation"],
 			},
 			startAttributes: {
-				"diffex.lane.name": {
+				"pi.lane.name": {
 					type: "string",
 					required: true,
 					cardinality: "high",
 					description: "Lane name",
 				},
-				"diffex.operation.id": {
+				"pi.operation.id": {
 					type: "string",
 					required: true,
 					cardinality: "high",
 					description: "Durable operation id",
 				},
-				"diffex.step.kind": {
+				"pi.step.kind": {
 					type: "string",
 					required: true,
 					values: ["assistant", "compaction", "branch_summary"],
 					description: "Retryable step kind",
 				},
-				"diffex.step.attempt": {
+				"pi.step.attempt": {
 					type: "number",
 					required: true,
 					description: "One-based durable attempt number",
 				},
-				"diffex.compaction.reason": {
+				"pi.compaction.reason": {
 					type: "string",
 					required: false,
 					values: ["manual", "threshold", "overflow"],
@@ -393,7 +388,7 @@ export const HARNESS_TELEMETRY_SCHEMA = {
 				},
 			},
 			endAttributes: {
-				"diffex.step.outcome": {
+				"pi.step.outcome": {
 					type: "string",
 					values: ["succeeded", "retry", "failed", "aborted", "deferred", "overflow"],
 					description: "Attempt outcome",
@@ -401,89 +396,89 @@ export const HARNESS_TELEMETRY_SCHEMA = {
 			},
 			status: { default: "ok", errorWhen: "The attempt retries, fails, or throws" },
 		},
-		"diffex.harness.tool": {
+		"pi.harness.tool": {
 			description: "One raw phase-2 tool execution",
-			parents: { kind: "spans", spans: ["diffex.harness.turn", "diffex.harness.run"] },
+			parents: { kind: "spans", spans: ["pi.harness.turn", "pi.harness.run"] },
 			startAttributes: {
-				"diffex.lane.name": {
+				"pi.lane.name": {
 					type: "string",
 					required: true,
 					cardinality: "high",
 					description: "Lane name",
 				},
-				"diffex.operation.id": {
+				"pi.operation.id": {
 					type: "string",
 					required: true,
 					cardinality: "high",
 					description: "Durable operation id",
 				},
-				"diffex.turn.id": {
+				"pi.turn.id": {
 					type: "string",
 					required: false,
 					cardinality: "high",
 					description: "Invocation-local live turn id",
 				},
-				"diffex.tool.name": {
+				"pi.tool.name": {
 					type: "string",
 					required: true,
 					description: "Tool name",
 				},
-				"diffex.tool.call_id": {
+				"pi.tool.call_id": {
 					type: "string",
 					required: true,
 					cardinality: "high",
 					description: "Tool call id",
 				},
-				"diffex.tool.replay": {
+				"pi.tool.replay": {
 					type: "string",
 					required: true,
 					values: ["never", "safe"],
 					description: "Declared replay policy",
 				},
-				"diffex.tool.recovery": {
+				"pi.tool.recovery": {
 					type: "boolean",
 					required: true,
 					description: "Whether this is recovery execution",
 				},
 			},
 			endAttributes: {
-				"diffex.tool.is_error": {
+				"pi.tool.is_error": {
 					type: "boolean",
 					description: "Whether raw phase-2 execution returned an error",
 				},
 			},
 			status: { default: "ok", errorWhen: "Raw phase-2 execution returns an error" },
 		},
-		"diffex.harness.hook": {
+		"pi.harness.hook": {
 			description: "One registered hook handler invocation",
 			parents: { kind: "any" },
 			startAttributes: {
-				"diffex.lane.name": {
+				"pi.lane.name": {
 					type: "string",
 					required: true,
 					cardinality: "high",
 					description: "Lane name",
 				},
-				"diffex.operation.id": {
+				"pi.operation.id": {
 					type: "string",
 					required: false,
 					cardinality: "high",
 					description: "Durable operation id when accepted",
 				},
-				"diffex.hook.name": {
+				"pi.hook.name": {
 					type: "string",
 					required: true,
 					values: HOOK_NAMES,
 					description: "Hook name",
 				},
-				"diffex.hook.registration_id": {
+				"pi.hook.registration_id": {
 					type: "string",
 					required: false,
 					description: "Stable hook registration id",
 				},
 			},
 			endAttributes: {
-				"diffex.hook.outcome": {
+				"pi.hook.outcome": {
 					type: "string",
 					values: ["completed", "skipped", "blocked", "failed"],
 					description: "Handler outcome",
@@ -491,24 +486,24 @@ export const HARNESS_TELEMETRY_SCHEMA = {
 			},
 			status: { default: "ok", errorWhen: "The handler throws" },
 		},
-		"diffex.harness.sleep": {
+		"pi.harness.sleep": {
 			description: "One retry delay",
-			parents: { kind: "spans", spans: ["diffex.harness.step", "diffex.harness.run"] },
+			parents: { kind: "spans", spans: ["pi.harness.step", "pi.harness.run"] },
 			startAttributes: {
-				"diffex.operation.id": {
+				"pi.operation.id": {
 					type: "string",
 					required: true,
 					cardinality: "high",
 					description: "Durable operation id",
 				},
-				"diffex.sleep.delay_ms": {
+				"pi.sleep.delay_ms": {
 					type: "number",
 					required: true,
 					description: "Requested delay in milliseconds",
 				},
 			},
 			endAttributes: {
-				"diffex.sleep.outcome": {
+				"pi.sleep.outcome": {
 					type: "string",
 					values: ["elapsed", "aborted"],
 					description: "Delay outcome",
@@ -516,18 +511,18 @@ export const HARNESS_TELEMETRY_SCHEMA = {
 			},
 			status: { default: "ok", errorWhen: "Sleep work throws" },
 		},
-		"diffex.harness.event_handler": {
+		"pi.harness.event_handler": {
 			description: "One passive event listener invocation",
 			parents: { kind: "any" },
 			startAttributes: {
-				"diffex.event.type": {
+				"pi.event.type": {
 					type: "string",
 					required: true,
 					cardinality: "low",
 					values: EVENT_TYPES,
 					description: "Delivered harness event type",
 				},
-				"diffex.lane.name": {
+				"pi.lane.name": {
 					type: "string",
 					required: false,
 					cardinality: "high",
@@ -537,36 +532,36 @@ export const HARNESS_TELEMETRY_SCHEMA = {
 			endAttributes: {},
 			status: { default: "ok", errorWhen: "The listener throws" },
 		},
-		"diffex.session.write": {
+		"pi.session.write": {
 			description: "One committed session mutation",
 			parents: { kind: "any" },
 			startAttributes: {
-				"diffex.lane.name": {
+				"pi.lane.name": {
 					type: "string",
 					required: true,
 					cardinality: "high",
 					description: "Lane name",
 				},
-				"diffex.operation.id": {
+				"pi.operation.id": {
 					type: "string",
 					required: false,
 					cardinality: "high",
 					description: "Durable operation id when accepted",
 				},
-				"diffex.session.mutation": {
+				"pi.session.mutation": {
 					type: "string",
 					required: true,
 					values: ["entry", "record", "lane", "fact"],
 					description: "Session mutation kind",
 				},
-				"diffex.session.item_type": {
+				"pi.session.item_type": {
 					type: "string",
 					required: false,
 					description: "Entry, record, lane, or fact subtype",
 				},
 			},
 			endAttributes: {
-				"diffex.session.seq": {
+				"pi.session.seq": {
 					type: "number",
 					description: "Committed session sequence when exposed",
 				},

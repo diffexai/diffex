@@ -1,7 +1,7 @@
 import type { Api, Model, ModelsStoreEntry, Provider } from "@earendil-works/diffex-ai";
 import { VERSION } from "../config.ts";
+import { getDiffexUserAgent } from "../utils/diffex-user-agent.ts";
 import { fetchWithRetry } from "../utils/management-http.ts";
-import { getPiUserAgent } from "../utils/pi-user-agent.ts";
 
 const DEFAULT_CATALOG_BASE_URL = "https://pi.dev";
 export const REMOTE_CATALOG_REFRESH_INTERVAL_MS = 4 * 60 * 60 * 1000;
@@ -81,7 +81,7 @@ export function withRemoteCatalog(
 			const response = await fetchWithRetry(url, {
 				headers: {
 					accept: "application/json",
-					"User-Agent": getPiUserAgent(VERSION),
+					"User-Agent": getDiffexUserAgent(VERSION),
 					...(validator ? { "if-none-match": validator } : {}),
 				},
 				signal: context.signal,
