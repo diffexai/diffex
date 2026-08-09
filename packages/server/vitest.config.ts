@@ -9,7 +9,6 @@ export default defineConfig({
 	},
 	resolve: {
 		alias: {
-			"@earendil-works/diffex-ai": fileURLToPath(new URL("../ai/src/index.ts", import.meta.url)),
 			"@earendil-works/diffex-protocol": fileURLToPath(new URL("../protocol/src/index.ts", import.meta.url)),
 		},
 	},
