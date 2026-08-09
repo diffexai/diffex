@@ -1,0 +1,91 @@
+name: Issue
+description: Report a bug, request a capability, or propose repository work.
+title: "[Issue]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for opening an issue.
+        For sensitive reports, avoid posting secrets or private deployment details and contact the maintainers through the repository or the contact paths on [diffex.ai](https://diffex.ai/).
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Issue type
+      description: Choose the smallest category that describes the request.
+      options:
+        - Bug report
+        - Feature request
+        - Documentation
+        - Refactor or maintenance
+        - Question
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      description: Pick the closest package, workflow, or repository area.
+      options:
+        - coding-agent
+        - agent
+        - ai
+        - tui
+        - protocol, client, or server
+        - telemetry
+        - session-backends
+        - evals
+        - Documentation
+        - CI or repository maintenance
+        - Multiple areas
+        - Unsure
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or goal
+      description: Describe the current problem, gap, or outcome you want.
+      placeholder: |
+        What happened, what is missing, or what should become possible?
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence and reproduction
+      description: |
+        For bug reports, specify the exact commands, steps, and conditions needed to reproduce the problem.
+        Include relevant logs, screenshots, or traces after removing credentials and other sensitive data.
+        If this is not a bug report, write "N/A".
+      placeholder: |
+        Steps to reproduce:
+        1. Run ...
+        2. Open ...
+        3. Observe ...
+
+        Logs, screenshots, or traces:
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected outcome
+      description: Describe the behavior, documentation, or repository state that would resolve this issue.
+    validations:
+      required: true
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Additional context
+      description: Note package boundaries, dependency effects, validation needs, related issues, or other useful context.
+    validations:
+      required: false
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-submission checks
+      options:
+        - label: I searched existing issues before opening this one.
+          required: true
+        - label: I did not include secrets, credentials, or private deployment details.
+          required: true

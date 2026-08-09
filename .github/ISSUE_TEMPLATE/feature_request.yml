@@ -1,0 +1,91 @@
+name: Feature request
+description: Propose a new capability or an improvement to existing behavior.
+title: "[Feature]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve Diffex.
+        Describe the user need and desired outcome before proposing implementation details.
+        Do not include secrets, credentials, or private deployment details.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or opportunity
+      description: Explain who is affected, what they are trying to accomplish, and why the current behavior is insufficient.
+      placeholder: |
+        As a ..., I need ..., because ...
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: Describe the user-visible behavior or capability you want.
+      placeholder: What should become possible?
+    validations:
+      required: true
+  - type: textarea
+    id: success_criteria
+    attributes:
+      label: Success criteria
+      description: List observable conditions that would make this request complete.
+      placeholder: |
+        - A user can ...
+        - The system preserves ...
+        - Tests demonstrate ...
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      description: Pick the closest package, workflow, or repository area.
+      options:
+        - coding-agent
+        - agent
+        - ai
+        - tui
+        - protocol, client, or server
+        - telemetry
+        - session-backends
+        - evals
+        - Documentation
+        - CI or repository maintenance
+        - Multiple areas
+        - Unsure
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed approach
+      description: Share an implementation idea, API sketch, or interaction flow if you have one.
+      placeholder: Optional implementation details or examples.
+    validations:
+      required: false
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Describe workarounds or other approaches you considered and their limitations.
+    validations:
+      required: false
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Add related issues, screenshots, traces, package-boundary considerations, or other useful context.
+    validations:
+      required: false
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-submission checks
+      options:
+        - label: I searched existing issues and did not find a duplicate request.
+          required: true
+        - label: I described the need and desired outcome, not only a preferred implementation.
+          required: true
+        - label: I did not include secrets, credentials, or private deployment details.
+          required: true
