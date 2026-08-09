@@ -116,7 +116,10 @@ describe("experimental CLI commands", () => {
 		[["--listen", "/tmp/diffex.sock"], 'Invalid --listen address "/tmp/diffex.sock"'],
 		[["--listen", "ws://localhost:8080"], 'Unsupported --listen transport "ws:"'],
 		[["--listen", "unix://relative.sock"], "Unix transport address must not include an authority"],
-		[["--listen", "unix:///tmp/diffex.sock?wrong=value"], 'Invalid --listen address "unix:///tmp/diffex.sock?wrong=value"'],
+		[
+			["--listen", "unix:///tmp/diffex.sock?wrong=value"],
+			'Invalid --listen address "unix:///tmp/diffex.sock?wrong=value"',
+		],
 		[["--listen", "unix:///tmp/diffex.sock#fragment"], 'Invalid --listen address "unix:///tmp/diffex.sock#fragment"'],
 		[["--listen", "unix:/tmp/diffex.sock"], 'Invalid --listen address "unix:/tmp/diffex.sock"'],
 		[["--listen", "unix:///tmp/%00diffex.sock"], 'Invalid --listen address "unix:///tmp/%00diffex.sock"'],
