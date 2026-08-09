@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
-import { type PiMessagesOptions, stream, streamSimple } from "../src/api/pi-messages.ts";
+import { type DiffexMessagesOptions, stream, streamSimple } from "../src/api/diffex-messages.ts";
 import type { Api, AssistantMessageEvent, Context, Model, StopReason } from "../src/types.ts";
 
 type RecordedRequest = {
@@ -65,11 +65,11 @@ async function startServer(options: ResponderOptions): Promise<{ baseUrl: string
 	return { baseUrl: `http://127.0.0.1:${address.port}/v1`, requests };
 }
 
-function createModel(baseUrl: string): Model<"pi-messages"> {
+function createModel(baseUrl: string): Model<"diffex-messages"> {
 	return {
 		id: "auto",
 		name: "Radius Auto",
-		api: "pi-messages",
+		api: "diffex-messages",
 		provider: "radius",
 		baseUrl,
 		reasoning: false,
@@ -93,7 +93,7 @@ const usage = {
 	cost: { input: 0.1, output: 0.2, cacheRead: 0, cacheWrite: 0, total: 0.3 },
 };
 
-describe("pi-messages", () => {
+describe("diffex-messages", () => {
 	it("streams text and tool calls and resolves the terminal message", async () => {
 		const { baseUrl, requests } = await startServer({
 			events: [
@@ -165,7 +165,7 @@ describe("pi-messages", () => {
 		const model = createModel(baseUrl);
 
 		let observedHeaders: Record<string, string> | undefined;
-		const options: PiMessagesOptions = {
+		const options: DiffexMessagesOptions = {
 			apiKey: "test-key",
 			debug: true,
 			onResponse: (response) => {
@@ -192,7 +192,7 @@ describe("pi-messages", () => {
 		expect(message.errorMessage).toContain("401");
 		expect(message.errorMessage).toContain("Token expired");
 		expect(message.errorMessage).toContain("unauthorized");
-		expect(message.diagnostics?.[0]?.type).toBe("pi_messages_response_failure");
+		expect(message.diagnostics?.[0]?.type).toBe("diffex_messages_response_failure");
 		expect(message.diagnostics?.[0]?.details?.status).toBe(401);
 	});
 
@@ -235,14 +235,14 @@ describe("pi-messages", () => {
 	});
 });
 
-describe("pi-messages api registration", () => {
+describe("diffex-messages api registration", () => {
 	it("is registered as a builtin api provider", async () => {
 		const { getApiProvider } = await import("../src/compat.ts");
-		expect(getApiProvider("pi-messages")).toBeDefined();
+		expect(getApiProvider("diffex-messages")).toBeDefined();
 	});
 
 	it("is a known api usable on models", () => {
-		const api: Api = "pi-messages";
-		expect(api).toBe("pi-messages");
+		const api: Api = "diffex-messages";
+		expect(api).toBe("diffex-messages");
 	});
 });

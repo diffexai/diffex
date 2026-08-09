@@ -1,7 +1,7 @@
 /**
  * Radius gateway OAuth flow.
  *
- * Radius is a pi-messages gateway. OAuth client APIs live on the configured
+ * Radius is a diffex-messages gateway. OAuth client APIs live on the configured
  * gateway; only the interactive browser authorization endpoint is discovered.
  * Model catalog loading is owned by the Radius provider.
  *

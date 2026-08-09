@@ -1,4 +1,4 @@
-import { piMessagesApi } from "../api/pi-messages.lazy.ts";
+import { diffexMessagesApi } from "../api/diffex-messages.lazy.ts";
 import { envApiKeyAuth, lazyOAuth } from "../auth/helpers.ts";
 import { loadRadiusOAuth } from "../auth/oauth/load.ts";
 import type { Provider } from "../models.ts";
@@ -17,12 +17,12 @@ export interface RadiusProviderOptions {
 }
 
 /** Radius gateway provider with a persisted, dynamically refreshed catalog. */
-export function radiusProvider(options: RadiusProviderOptions = {}): Provider<"pi-messages"> {
+export function radiusProvider(options: RadiusProviderOptions = {}): Provider<"diffex-messages"> {
 	const id = options.id ?? "radius";
 	const name = options.name ?? "Radius";
 	const gateway = normalizeRadiusGatewayUrl(options.gateway ?? DEFAULT_RADIUS_GATEWAY);
 	let models = getRadiusModels(id, undefined);
-	const streams = piMessagesApi();
+	const streams = diffexMessagesApi();
 
 	return {
 		id,
