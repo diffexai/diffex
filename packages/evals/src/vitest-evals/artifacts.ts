@@ -10,12 +10,12 @@ import {
 } from "vitest";
 import type { HarnessRun } from "vitest-evals/harness";
 
-export const DIFFEX_SESSION_SNAPSHOT_ARTIFACT = "piSessionJsonl";
+export const DIFFEX_SESSION_SNAPSHOT_ARTIFACT = "diffexSessionJsonl";
 
-const evalSessionArtifactKey = Symbol("pi-evals-session-artifact");
-const evalSourceArtifactKey = Symbol("pi-evals-source-artifact");
+const evalSessionArtifactKey = Symbol("diffex-evals-session-artifact");
+const evalSourceArtifactKey = Symbol("diffex-evals-source-artifact");
 
-interface PiSessionAttachment extends TestAttachment {
+interface DiffexSessionAttachment extends TestAttachment {
 	name: "session.jsonl";
 	contentType: "application/jsonl";
 	body: string;
@@ -29,10 +29,10 @@ export interface SourceAttachment extends TestAttachment {
 	bodyEncoding: "utf-8";
 }
 
-interface PiSessionArtifact extends TestArtifactBase {
+interface DiffexSessionArtifact extends TestArtifactBase {
 	type: "@earendil-works/diffex-evals:session";
 	runId: string;
-	attachments: [PiSessionAttachment] | [];
+	attachments: [DiffexSessionAttachment] | [];
 }
 
 interface SourceArtifact extends TestArtifactBase {
@@ -43,7 +43,7 @@ interface SourceArtifact extends TestArtifactBase {
 
 declare module "vitest" {
 	interface TestArtifactRegistry {
-		[evalSessionArtifactKey]: PiSessionArtifact;
+		[evalSessionArtifactKey]: DiffexSessionArtifact;
 		[evalSourceArtifactKey]: SourceArtifact;
 	}
 }
@@ -56,7 +56,7 @@ export async function recordEvalSessionArtifact(
 	const session = run.artifacts?.[DIFFEX_SESSION_SNAPSHOT_ARTIFACT];
 	if (session === undefined) return;
 	if (typeof runId !== "string" || typeof session !== "string") {
-		throw new TypeError("Pi eval session artifact metadata is invalid.");
+		throw new TypeError("Diffex eval session artifact metadata is invalid.");
 	}
 	await recordArtifact(task, {
 		type: "@earendil-works/diffex-evals:session",

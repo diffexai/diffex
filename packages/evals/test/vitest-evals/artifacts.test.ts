@@ -11,7 +11,7 @@ import {
 it("records session and source artifacts against the explicit test task", async ({ task }) => {
 	const runId = "run-1";
 	await recordEvalSessionArtifact(task, {
-		artifacts: { runId, piSessionJsonl: '{"type":"session"}\n' },
+		artifacts: { runId, diffexSessionJsonl: '{"type":"session"}\n' },
 	});
 	await recordEvalSourceArtifact(task, runId, {
 		name: "hello.ts",
@@ -51,7 +51,7 @@ it("records session and source artifacts against the explicit test task", async 
 });
 
 it("persists and selects attachments belonging to the reported run", async () => {
-	const root = await mkdtemp(join(tmpdir(), "pi-eval-artifact-report-test-"));
+	const root = await mkdtemp(join(tmpdir(), "diffex-eval-artifact-report-test-"));
 	try {
 		const references = await persistEvalArtifactReferences(
 			[

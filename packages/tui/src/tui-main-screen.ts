@@ -253,7 +253,7 @@ export class TuiMainScreen extends TuiBase implements TUI {
 		const debugRedraw = process.env.DIFFEX_DEBUG_REDRAW === "1";
 		const logRedraw = (reason: string): void => {
 			if (!debugRedraw) return;
-			const logPath = path.join(this.logDirectory, "pi-debug.log");
+			const logPath = path.join(this.logDirectory, "diffex-debug.log");
 			const msg = `[${new Date().toISOString()}] fullRender: ${reason} (prev=${this.previousLines.length}, new=${newLines.length}, height=${height})\n`;
 			fs.mkdirSync(path.dirname(logPath), { recursive: true });
 			fs.appendFileSync(logPath, msg);
@@ -446,7 +446,7 @@ export class TuiMainScreen extends TuiBase implements TUI {
 			buffer += "\x1b[2K"; // Clear current line
 			if (!isImage && visibleWidth(line) > width) {
 				// Log all lines to crash file for debugging
-				const crashLogPath = path.join(this.logDirectory, "pi-crash.log");
+				const crashLogPath = path.join(this.logDirectory, "diffex-crash.log");
 				const crashData = [
 					`Crash at ${new Date().toISOString()}`,
 					`Terminal width: ${width}`,

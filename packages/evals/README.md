@@ -36,15 +36,15 @@ output.
 ## Writing evals
 
 Follow [`vitest-evals`](https://github.com/getsentry/vitest-evals) for general suite, judge, assertion, and normalized
-trace guidance. Diffex-specific evals use `createPiCodingAgentHarness(...)` from `src/pi-harness.ts`, with one harness bound
+trace guidance. Diffex-specific evals use `createDiffexCodingAgentHarness(...)` from `src/diffex-harness.ts`, with one harness bound
 to each `describeEval(...)` suite:
 
 ```ts
 import { expect } from "vitest";
 import { describeEval } from "vitest-evals";
-import { createPiCodingAgentHarness } from "./pi-harness.ts";
+import { createDiffexCodingAgentHarness } from "./diffex-harness.ts";
 
-const harness = createPiCodingAgentHarness({ noTools: "all" });
+const harness = createDiffexCodingAgentHarness({ noTools: "all" });
 
 describeEval("Diffex smoke", { harness }, (it) => {
 	it("answers a factual question", async ({ run }) => {
@@ -56,7 +56,7 @@ describeEval("Diffex smoke", { harness }, (it) => {
 
 ### Configuring the Diffex harness
 
-`createPiCodingAgentHarness(...)` accepts:
+`createDiffexCodingAgentHarness(...)` accepts:
 
 - `name`: stable harness identity used by reports and comparisons.
 - `model`: optional `{ provider, id }` selection. It overrides the runner's default model.
@@ -67,7 +67,7 @@ describeEval("Diffex smoke", { harness }, (it) => {
 An explicitly selected model makes model-comparison harnesses independent of the runner default:
 
 ```ts
-const harness = createPiCodingAgentHarness({
+const harness = createDiffexCodingAgentHarness({
 	name: "claude-opus-4-6",
 	model: { provider: "anthropic", id: "claude-opus-4-6" },
 });
@@ -89,7 +89,7 @@ const result = await run([
 Use `output` to expose scenario-specific, JSON-safe behavior without adding that behavior to the generic Diffex adapter:
 
 ```ts
-const harness = createPiCodingAgentHarness({
+const harness = createDiffexCodingAgentHarness({
 	output: ({ response, session }) => ({
 		response,
 		activeTools: session.getActiveToolNames(),

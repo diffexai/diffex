@@ -25,28 +25,28 @@ import {
 } from "vitest-evals/harness";
 import { DIFFEX_SESSION_SNAPSHOT_ARTIFACT } from "./vitest-evals/artifacts.ts";
 
-export type PiCodingAgentInput = string | Array<{ type: "prompt"; content: string } | { type: "reload" }>;
+export type DiffexCodingAgentInput = string | Array<{ type: "prompt"; content: string } | { type: "reload" }>;
 
-type PiCodingAgentModelSelection = {
+type DiffexCodingAgentModelSelection = {
 	provider: string;
 	id: string;
 };
 
-type PiCodingAgentHarnessOptions = {
+type DiffexCodingAgentHarnessOptions = {
 	name?: string;
-	model?: PiCodingAgentModelSelection;
+	model?: DiffexCodingAgentModelSelection;
 	noTools?: CreateAgentSessionOptions["noTools"];
 	transformSystemPrompt?: (defaultPrompt: string) => string;
 };
 
-type PiCodingAgentHarnessWithOutput<TOutput extends JsonValue> = PiCodingAgentHarnessOptions & {
+type DiffexCodingAgentHarnessWithOutput<TOutput extends JsonValue> = DiffexCodingAgentHarnessOptions & {
 	output: (args: { response: string; session: AgentSession }) => TOutput | Promise<TOutput>;
 };
 
 export function resolveModelSelection(
-	explicitModel: PiCodingAgentModelSelection | undefined,
+	explicitModel: DiffexCodingAgentModelSelection | undefined,
 	environment: { DIFFEX_PROVIDER?: string; DIFFEX_MODEL?: string } = process.env,
-): PiCodingAgentModelSelection {
+): DiffexCodingAgentModelSelection {
 	const provider = (explicitModel?.provider ?? environment.DIFFEX_PROVIDER)?.trim();
 	const id = (explicitModel?.id ?? environment.DIFFEX_MODEL)?.trim();
 	if (!provider || !id) {
@@ -106,11 +106,11 @@ async function promptAgent(session: AgentSession, input: string, signal: AbortSi
 	return output;
 }
 
-async function runPiCodingAgent<TOutput extends JsonValue>(
-	input: PiCodingAgentInput,
+async function runDiffexCodingAgent<TOutput extends JsonValue>(
+	input: DiffexCodingAgentInput,
 	signal: AbortSignal | undefined,
 	setArtifact: HarnessContext["setArtifact"],
-	options: PiCodingAgentHarnessOptions | PiCodingAgentHarnessWithOutput<TOutput>,
+	options: DiffexCodingAgentHarnessOptions | DiffexCodingAgentHarnessWithOutput<TOutput>,
 ): Promise<SimpleHarnessResult<string | TOutput>> {
 	const startedAt = performance.now();
 	signal?.throwIfAborted();
@@ -119,7 +119,7 @@ async function runPiCodingAgent<TOutput extends JsonValue>(
 	const model = modelRuntime.getModel(selection.provider, selection.id);
 	if (!model) throw new Error(`Eval model not found: ${selection.provider}/${selection.id}`);
 
-	const root = await mkdtemp(join(tmpdir(), "pi-eval-"));
+	const root = await mkdtemp(join(tmpdir(), "diffex-eval-"));
 	const cwd = join(root, "workspace");
 	const agentDir = join(root, "agent");
 	let transformedSystemPrompt: string | undefined;
@@ -175,7 +175,7 @@ async function runPiCodingAgent<TOutput extends JsonValue>(
 					await evalSession.reload();
 				}
 			}
-			if (response === undefined) throw new Error("Pi eval input must include at least one prompt step.");
+			if (response === undefined) throw new Error("Diffex eval input must include at least one prompt step.");
 			const output = "output" in options ? await options.output({ response, session: evalSession }) : response;
 			const stats = evalSession.getSessionStats();
 			const hasPricing = [model.cost, ...(model.cost.tiers ?? [])].some(
@@ -243,15 +243,17 @@ async function runPiCodingAgent<TOutput extends JsonValue>(
 	};
 }
 
-export function createPiCodingAgentHarness<TOutput extends JsonValue>(
-	options: PiCodingAgentHarnessWithOutput<TOutput>,
-): Harness<PiCodingAgentInput, TOutput>;
-export function createPiCodingAgentHarness(options?: PiCodingAgentHarnessOptions): Harness<PiCodingAgentInput, string>;
-export function createPiCodingAgentHarness<TOutput extends JsonValue>(
-	options: PiCodingAgentHarnessOptions | PiCodingAgentHarnessWithOutput<TOutput> = {},
+export function createDiffexCodingAgentHarness<TOutput extends JsonValue>(
+	options: DiffexCodingAgentHarnessWithOutput<TOutput>,
+): Harness<DiffexCodingAgentInput, TOutput>;
+export function createDiffexCodingAgentHarness(
+	options?: DiffexCodingAgentHarnessOptions,
+): Harness<DiffexCodingAgentInput, string>;
+export function createDiffexCodingAgentHarness<TOutput extends JsonValue>(
+	options: DiffexCodingAgentHarnessOptions | DiffexCodingAgentHarnessWithOutput<TOutput> = {},
 ) {
-	return createHarness<PiCodingAgentInput, string | TOutput>({
-		name: options.name ?? "pi-coding-agent",
-		run: ({ input, signal, setArtifact }) => runPiCodingAgent(input, signal, setArtifact, options),
+	return createHarness<DiffexCodingAgentInput, string | TOutput>({
+		name: options.name ?? "diffex-coding-agent",
+		run: ({ input, signal, setArtifact }) => runDiffexCodingAgent(input, signal, setArtifact, options),
 	});
 }
