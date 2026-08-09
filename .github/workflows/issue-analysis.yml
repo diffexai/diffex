@@ -11,7 +11,7 @@
 #
 # Setup required before this works:
 #   1. Create a `diffex-analyze` GitHub environment on the repo and add a
-#      `DIFFEX_AUTH_JSON` secret containing the contents of a pi auth.json
+#      `DIFFEX_AUTH_JSON` secret containing the contents of a Diffex auth.json
 #      (~/.diffex/agent/auth.json).
 #   2. Create the `diffex-analyze` label.
 #   3. Add a repository secret `EARENDIL_ORG_READ_TOKEN` with permission to
@@ -43,7 +43,7 @@
 # The session runs in a high-entropy checkout directory so the recorded cwd is
 # a unique string. Import the session into a local checkout with the
 # /ir extension command (.diffex/extensions/import-repro.ts):
-#   pi "/ir <gist-id | gist-url | legacy-session-viewer-url>"
+#   diffex "/ir <gist-id | gist-url | legacy-session-viewer-url>"
 
 name: Issue Analysis
 
@@ -258,7 +258,7 @@ jobs:
     environment: diffex-analyze
     timeout-minutes: 45
     concurrency:
-      group: issue-analysis-pi-auth
+      group: issue-analysis-diffex-auth
       cancel-in-progress: false
     env:
       ISSUE_ANALYSIS_MODEL: openai-codex/gpt-5.5
@@ -352,8 +352,8 @@ jobs:
               fs.chmodSync(authPath, 0o600);
             }
 
-      - name: Run pi /is
-        id: run_pi
+      - name: Run Diffex /is
+        id: run_diffex
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           DIFFEX_CODING_AGENT_DIR: ${{ runner.temp }}/diffex-agent
@@ -412,7 +412,7 @@ jobs:
             await new Promise((resolve) => output.end(resolve));
 
             if (exitCode !== 0) {
-              throw new Error(`pi /is failed with exit code ${exitCode}`);
+              throw new Error(`Diffex /is failed with exit code ${exitCode}`);
             }
 
       - name: Persist refreshed auth.json
@@ -569,7 +569,7 @@ jobs:
             core.setOutput('share_url', gistUrl);
 
       - name: Comment with session import instructions
-        if: always() && steps.run_pi.outcome == 'success' && steps.gist.outcome == 'success'
+        if: always() && steps.run_diffex.outcome == 'success' && steps.gist.outcome == 'success'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           GIST_URL: ${{ steps.gist.outputs.url }}
@@ -627,7 +627,7 @@ jobs:
               'Continue locally from a checkout with:',
               '',
               '```sh',
-              `pi "/ir ${gistId}"`,
+              `diffex "/ir ${gistId}"`,
               '```',
               '',
               '<details>',
@@ -646,7 +646,7 @@ jobs:
             });
 
       - name: Comment on analysis failure
-        if: always() && steps.run_pi.outcome == 'failure'
+        if: always() && steps.run_diffex.outcome == 'failure'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           GIST_URL: ${{ steps.gist.outputs.url }}
