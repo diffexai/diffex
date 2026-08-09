@@ -28,13 +28,13 @@ packages/ai/src/providers/.model-generation-*/
 .npm/
 coverage/
 .nyc_output/
-.pi_config/
+.diffex_config/
 tui-debug.log
 compaction-results/
 .opencode/
 syntax.jsonl
 out.jsonl
-pi-*.html
+diffex-*.html
 out.html
 packages/coding-agent/binaries/
 todo.md
