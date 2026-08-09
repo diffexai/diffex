@@ -1,5 +1,5 @@
 {
-	"name": "@earendil-works/pi-server",
+	"name": "@earendil-works/diffex-server",
 	"version": "0.84.0",
 	"description": "Experimental server package for Diffex",
 	"type": "module",
@@ -33,7 +33,7 @@
 		"prepublishOnly": "npm run clean && npm run build"
 	},
 	"keywords": [
-		"pi",
+		"diffex",
 		"server"
 	],
 	"author": "Earendil Works",
@@ -47,8 +47,8 @@
 		"node": ">=22.19.0"
 	},
 	"dependencies": {
-		"@earendil-works/pi-ai": "^0.84.0",
-		"@earendil-works/pi-protocol": "^0.84.0"
+		"@earendil-works/diffex-ai": "^0.84.0",
+		"@earendil-works/diffex-protocol": "^0.84.0"
 	},
 	"devDependencies": {
 		"shx": "0.4.0",

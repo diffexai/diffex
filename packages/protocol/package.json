@@ -1,5 +1,5 @@
 {
-	"name": "@earendil-works/pi-protocol",
+	"name": "@earendil-works/diffex-protocol",
 	"version": "0.84.0",
 	"description": "Transport-neutral CBOR protocol for remote Diffex sessions",
 	"type": "module",
@@ -22,7 +22,7 @@
 		"prepublishOnly": "npm run clean && npm run build"
 	},
 	"keywords": [
-		"pi",
+		"diffex",
 		"protocol",
 		"cbor",
 		"binary",

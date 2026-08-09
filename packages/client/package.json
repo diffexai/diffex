@@ -1,5 +1,5 @@
 {
-	"name": "@earendil-works/pi-client",
+	"name": "@earendil-works/diffex-client",
 	"version": "0.84.0",
 	"description": "Transport-neutral client for remote Diffex sessions over framed CBOR bytes",
 	"type": "module",
@@ -30,7 +30,7 @@
 		"prepublishOnly": "npm run clean && npm run build"
 	},
 	"keywords": [
-		"pi",
+		"diffex",
 		"client",
 		"protocol",
 		"cbor",
@@ -47,7 +47,7 @@
 		"node": ">=22.19.0"
 	},
 	"dependencies": {
-		"@earendil-works/pi-protocol": "^0.84.0"
+		"@earendil-works/diffex-protocol": "^0.84.0"
 	},
 	"devDependencies": {
 		"shx": "0.4.0",

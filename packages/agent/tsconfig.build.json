@@ -3,9 +3,9 @@
 	"compilerOptions": {
 		"outDir": "./dist",
 		"paths": {
-			"@earendil-works/pi-telemetry": ["../telemetry/dist/index.d.ts"],
-			"@earendil-works/pi-ai": ["../ai/dist/index.d.ts"],
-			"@earendil-works/pi-ai/*": ["../ai/dist/*.d.ts", "../ai/dist/providers/*.d.ts"]
+			"@earendil-works/diffex-telemetry": ["../telemetry/dist/index.d.ts"],
+			"@earendil-works/diffex-ai": ["../ai/dist/index.d.ts"],
+			"@earendil-works/diffex-ai/*": ["../ai/dist/*.d.ts", "../ai/dist/providers/*.d.ts"]
 		},
 		"rootDir": "./src"
 	},

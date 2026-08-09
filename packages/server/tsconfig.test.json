@@ -6,7 +6,7 @@
 		"moduleResolution": "NodeNext",
 		"types": ["node", "vitest"],
 		"paths": {
-			"@earendil-works/pi-protocol": ["../protocol/src/index.ts"]
+			"@earendil-works/diffex-protocol": ["../protocol/src/index.ts"]
 		}
 	},
 	"include": ["src/**/*.ts", "test/**/*.ts"]

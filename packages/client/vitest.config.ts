@@ -9,7 +9,7 @@ export default defineConfig({
 	},
 	resolve: {
 		alias: {
-			"@earendil-works/pi-protocol": fileURLToPath(new URL("../protocol/src/index.ts", import.meta.url)),
+			"@earendil-works/diffex-protocol": fileURLToPath(new URL("../protocol/src/index.ts", import.meta.url)),
 		},
 	},
 });

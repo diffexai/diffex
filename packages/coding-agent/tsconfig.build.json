@@ -3,14 +3,14 @@
 	"compilerOptions": {
 		"outDir": "./dist",
 		"paths": {
-			"@earendil-works/pi-agent-core": ["../agent/dist/index.d.ts"],
-			"@earendil-works/pi-agent-core/*": ["../agent/dist/*.d.ts"],
-			"@earendil-works/pi-ai": ["../ai/dist/index.d.ts"],
-			"@earendil-works/pi-ai/*": ["../ai/dist/*.d.ts", "../ai/dist/providers/*.d.ts"],
-			"@earendil-works/pi-client": ["../client/dist/index.d.ts"],
-			"@earendil-works/pi-protocol": ["../protocol/dist/index.d.ts"],
-			"@earendil-works/pi-tui": ["../tui/dist/index.d.ts"],
-			"@earendil-works/pi-tui/*": ["../tui/dist/*.d.ts", "../tui/dist/components/*.d.ts"]
+			"@earendil-works/diffex-agent-core": ["../agent/dist/index.d.ts"],
+			"@earendil-works/diffex-agent-core/*": ["../agent/dist/*.d.ts"],
+			"@earendil-works/diffex-ai": ["../ai/dist/index.d.ts"],
+			"@earendil-works/diffex-ai/*": ["../ai/dist/*.d.ts", "../ai/dist/providers/*.d.ts"],
+			"@earendil-works/diffex-client": ["../client/dist/index.d.ts"],
+			"@earendil-works/diffex-protocol": ["../protocol/dist/index.d.ts"],
+			"@earendil-works/diffex-tui": ["../tui/dist/index.d.ts"],
+			"@earendil-works/diffex-tui/*": ["../tui/dist/*.d.ts", "../tui/dist/components/*.d.ts"]
 		},
 		"rootDir": "./src"
 	},

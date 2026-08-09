@@ -16,17 +16,17 @@ export const workspaceSourcePaths = {
 export default defineConfig({
 	resolve: {
 		alias: [
-			{ find: /^@earendil-works\/pi-telemetry$/, replacement: workspaceSourcePaths.telemetryIndex },
-			{ find: /^@earendil-works\/pi-telemetry\/testing$/, replacement: workspaceSourcePaths.telemetryTesting },
-			{ find: /^@earendil-works\/pi-ai$/, replacement: workspaceSourcePaths.aiIndex },
-			{ find: /^@earendil-works\/pi-ai\/compat$/, replacement: workspaceSourcePaths.aiCompat },
-			{ find: /^@earendil-works\/pi-ai\/oauth$/, replacement: workspaceSourcePaths.aiOAuth },
+			{ find: /^@earendil-works\/diffex-telemetry$/, replacement: workspaceSourcePaths.telemetryIndex },
+			{ find: /^@earendil-works\/diffex-telemetry\/testing$/, replacement: workspaceSourcePaths.telemetryTesting },
+			{ find: /^@earendil-works\/diffex-ai$/, replacement: workspaceSourcePaths.aiIndex },
+			{ find: /^@earendil-works\/diffex-ai\/compat$/, replacement: workspaceSourcePaths.aiCompat },
+			{ find: /^@earendil-works\/diffex-ai\/oauth$/, replacement: workspaceSourcePaths.aiOAuth },
 			{
-				find: /^@earendil-works\/pi-ai\/providers\/(.+)$/,
+				find: /^@earendil-works\/diffex-ai\/providers\/(.+)$/,
 				replacement: `${workspaceSourcePaths.aiProviders}/$1.ts`,
 			},
-			{ find: /^@earendil-works\/pi-agent-core$/, replacement: workspaceSourcePaths.agentIndex },
-			{ find: /^@earendil-works\/pi-tui$/, replacement: workspaceSourcePaths.tuiIndex },
+			{ find: /^@earendil-works\/diffex-agent-core$/, replacement: workspaceSourcePaths.agentIndex },
+			{ find: /^@earendil-works\/diffex-tui$/, replacement: workspaceSourcePaths.tuiIndex },
 		],
 	},
 });
