@@ -881,7 +881,7 @@ Emitted when one low-level agent run completes. Contains all messages generated 
 
 ### agent_settled
 
-Emitted after the full session-level run settles. At this point Pi will not continue automatically through retry, compaction retry, or queued follow-up messages.
+Emitted after the full session-level run settles. At this point Diffex will not continue automatically through retry, compaction retry, or queued follow-up messages.
 
 ```json
 {"type": "agent_settled"}
@@ -1292,7 +1292,7 @@ Set the terminal window/tab title. Fire-and-forget.
   "type": "extension_ui_request",
   "id": "uuid-8",
   "method": "setTitle",
-  "title": "pi - my project"
+  "title": "Diffex - my project"
 }
 ```
 

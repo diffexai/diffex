@@ -1,6 +1,6 @@
 # Termux (Android) Setup
 
-Pi runs on Android via [Termux](https://termux.dev/), a terminal emulator and Linux environment for Android.
+Diffex runs on Android via [Termux](https://termux.dev/), a terminal emulator and Linux environment for Android.
 
 ## Prerequisites
 

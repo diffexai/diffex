@@ -1,14 +1,14 @@
-> pi can help you create pi packages. Ask it to bundle your extensions, skills, prompt templates, or themes.
+> Diffex can help you create Diffex packages. Ask it to bundle your extensions, skills, prompt templates, or themes.
 
-# Pi Packages
+# Diffex Packages
 
-Pi packages bundle extensions, skills, prompt templates, and themes so you can share them through npm or git. A package can declare resources in `package.json` under the `pi` key, or use conventional directories.
+Diffex packages bundle extensions, skills, prompt templates, and themes so you can share them through npm or git. A package can declare resources in `package.json` under the compatibility `pi` key, or use conventional directories.
 
 ## Table of Contents
 
 - [Install and Manage](#install-and-manage)
 - [Package Sources](#package-sources)
-- [Creating a Pi Package](#creating-a-pi-package)
+- [Creating a Diffex Package](#creating-a-diffex-package)
 - [Package Structure](#package-structure)
 - [Dependencies](#dependencies)
 - [Package Filtering](#package-filtering)
@@ -17,7 +17,7 @@ Pi packages bundle extensions, skills, prompt templates, and themes so you can s
 
 ## Install and Manage
 
-> **Security:** Pi packages run with full system access. Extensions execute arbitrary code, and skills can instruct the model to perform any action including running executables. Review source code before installing third-party packages.
+> **Security:** Diffex packages run with full system access. Extensions execute arbitrary code, and skills can instruct the model to perform any action including running executables. Review source code before installing third-party packages.
 
 ```bash
 pi install npm:@foo/bar@1.0.0
@@ -28,19 +28,19 @@ pi install ./relative/path/to/package
 
 pi remove npm:@foo/bar
 pi list                     # show installed packages from settings
-pi update                   # update pi only
-pi update --all             # update pi, update packages, and reconcile pinned git refs
+pi update                   # update Diffex only
+pi update --all             # update Diffex, update packages, and reconcile pinned git refs
 pi update --extensions      # update packages and reconcile pinned git refs only
 pi update --models          # refresh model catalogs only
-pi update --self            # update pi only
-pi update --self --force    # reinstall pi even if current
+pi update --self            # update Diffex only
+pi update --self --force    # reinstall Diffex even if current
 pi update npm:@foo/bar      # update one package
 pi update --extension npm:@foo/bar
 ```
 
-These commands manage pi packages and `pi update` can update the pi CLI installation. To uninstall pi itself, see [Quickstart](quickstart.md#uninstall).
+These commands manage Diffex packages and `pi update` can update the Diffex CLI installation. To uninstall Diffex itself, see [Quickstart](quickstart.md#uninstall).
 
-By default, `install` and `remove` write to user settings (`~/.pi/agent/settings.json`). Use `-l` to write to project settings (`.pi/settings.json`) instead. Project settings can be shared with your team, and pi installs any missing packages automatically on startup after the project is trusted.
+By default, `install` and `remove` write to user settings (`~/.pi/agent/settings.json`). Use `-l` to write to project settings (`.pi/settings.json`) instead. Project settings can be shared with your team, and Diffex installs any missing packages automatically on startup after the project is trusted.
 
 To try a package without installing it, use `--extension` or `-e`. This installs to a temporary directory for the current run only:
 
@@ -51,7 +51,7 @@ pi -e git:github.com/user/repo
 
 ## Package Sources
 
-Pi accepts three source types in settings and `pi install`.
+Diffex accepts three source types in settings and `pi install`.
 
 ### npm
 
@@ -90,7 +90,7 @@ ssh://git@github.com/user/repo@v1
 - Refs are pinned tags or commits. `pi update --extensions` and `pi update --all` do not move them to newer refs, but they do reconcile an existing clone to the configured ref.
 - Use `pi install git:host/user/repo@new-ref` to update settings and move an existing package to a new pinned ref.
 - Cloned to `~/.pi/agent/git/<host>/<path>` (global) or `.pi/git/<host>/<path>` (project).
-- When reconciliation changes the checkout, pi resets and cleans the clone, then runs `npm install` if `package.json` exists.
+- When reconciliation changes the checkout, Diffex resets and cleans the clone, then runs `npm install` if `package.json` exists.
 
 **SSH examples:**
 ```bash
@@ -111,9 +111,9 @@ pi install git:git@github.com:user/repo@v1.0.0
 ./relative/path/to/package
 ```
 
-Local paths point to files or directories on disk and are added to settings without copying. Relative paths are resolved against the settings file they appear in. If the path is a file, it loads as a single extension. If it is a directory, pi loads resources using package rules.
+Local paths point to files or directories on disk and are added to settings without copying. Relative paths are resolved against the settings file they appear in. If the path is a file, it loads as a single extension. If it is a directory, Diffex loads resources using package rules.
 
-## Creating a Pi Package
+## Creating a Diffex Package
 
 Add a `pi` manifest to `package.json` or use conventional directories. Include the `pi-package` keyword for discoverability.
 
@@ -132,9 +132,9 @@ Add a `pi` manifest to `package.json` or use conventional directories. Include t
 
 Paths are relative to the package root. Arrays support glob patterns and `!exclusions`.
 
-### Gallery Metadata
+### Package Discovery Metadata
 
-The [package gallery](https://pi.dev/packages) displays packages tagged with `pi-package`. Add `video` or `image` fields to show a preview:
+Include the `pi-package` keyword so Diffex packages are discoverable through [npm search](https://www.npmjs.com/search?q=keywords%3Api-package). For compatibility with upstream package indexes, packages can also include optional `video` or `image` preview metadata:
 
 ```json
 {
@@ -148,16 +148,16 @@ The [package gallery](https://pi.dev/packages) displays packages tagged with `pi
 }
 ```
 
-- **video**: MP4 only. On desktop, autoplays on hover. Clicking opens a fullscreen player.
-- **image**: PNG, JPEG, GIF, or WebP. Displayed as a static preview.
+- **video**: MP4 preview URL.
+- **image**: PNG, JPEG, GIF, or WebP preview URL.
 
-If both are set, video takes precedence.
+If both are set, upstream package indexes prefer the video.
 
 ## Package Structure
 
 ### Convention Directories
 
-If no `pi` manifest is present, pi auto-discovers resources from these directories:
+If no `pi` manifest is present, Diffex auto-discovers resources from these directories:
 
 - `extensions/` loads `.ts` and `.js` files
 - `skills/` recursively finds `SKILL.md` folders and loads top-level `.md` files as skills
@@ -166,11 +166,11 @@ If no `pi` manifest is present, pi auto-discovers resources from these directori
 
 ## Dependencies
 
-Third party runtime dependencies belong in `dependencies` in `package.json`. Dependencies that do not register extensions, skills, prompt templates, or themes also belong in `dependencies`. When pi installs a package from npm or git, it runs `npm install`, so those dependencies are installed automatically.
+Third party runtime dependencies belong in `dependencies` in `package.json`. Dependencies that do not register extensions, skills, prompt templates, or themes also belong in `dependencies`. When Diffex installs a package from npm or git, it runs `npm install`, so those dependencies are installed automatically.
 
-Pi bundles core packages for extensions and skills. If you import any of these, list them in `peerDependencies` with a `"*"` range and do not bundle them: `@earendil-works/pi-ai`, `@earendil-works/pi-agent-core`, `@earendil-works/pi-coding-agent`, `@earendil-works/pi-tui`, `typebox`.
+Diffex bundles core packages for extensions and skills. If you import any of these, list them in `peerDependencies` with a `"*"` range and do not bundle them: `@earendil-works/pi-ai`, `@earendil-works/pi-agent-core`, `@earendil-works/pi-coding-agent`, `@earendil-works/pi-tui`, `typebox`.
 
-Other pi packages must be bundled in your tarball. Add them to `dependencies` and `bundledDependencies`, then reference their resources through `node_modules/` paths. Pi loads packages with separate module roots, so separate installs do not collide or share modules.
+Other Diffex packages must be bundled in your tarball. Add them to `dependencies` and `bundledDependencies`, then reference their resources through `node_modules/` paths. Diffex loads packages with separate module roots, so separate installs do not collide or share modules.
 
 Example:
 

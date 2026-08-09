@@ -1,6 +1,6 @@
 # Containerization
 
-Pi runs with all permissions by default, but in some cases, you will want to have more control over what directories Pi can write to and which accesses it has.
+Diffex runs with all permissions by default, but in some cases, you will want to have more control over what directories Diffex can write to and which accesses it has.
 
 There are two general options. You can either
 1. run the whole `pi` process inside an isolated environment, or
@@ -108,4 +108,4 @@ openshell sandbox download pi-sandbox /workspace/repo ./repo-out
 
 OpenShell providers can keep raw model API keys outside the sandbox.
 When inference routing is configured, code inside the sandbox can call `https://inference.local`, and the gateway injects the configured provider credentials upstream.
-Configure Pi to use the corresponding OpenAI-compatible or Anthropic-compatible endpoint if you want model traffic to use this route.
+Configure Diffex to use the corresponding OpenAI-compatible or Anthropic-compatible endpoint if you want model traffic to use this route.

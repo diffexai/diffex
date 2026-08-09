@@ -1,20 +1,20 @@
 # Environment Variables
 
-Pi uses environment variables in three ways:
+Diffex uses environment variables in three ways:
 
-- Variables such as `PI_OFFLINE` configure the Pi process.
-- Pi sets `PI_CODING_AGENT` so child processes can detect that they run inside Pi.
+- Variables such as `PI_OFFLINE` configure the Diffex process.
+- Diffex sets `PI_CODING_AGENT` so child processes can detect that they run inside Diffex.
 - Commands run by the LLM-callable bash tool receive `PI_*` variables describing the current session.
 
 Provider API-key variables are documented separately in [Providers](providers.md#environment-variables-or-auth-file).
 
 ## Process Marker
 
-The CLI and RPC entry points set `PI_CODING_AGENT=true`. Child processes inherit it and can use it to detect that they run inside Pi. It is not session-specific and is not set automatically when Pi is embedded through the SDK.
+The CLI and RPC entry points set `PI_CODING_AGENT=true`. Child processes inherit it and can use it to detect that they run inside Diffex. It is not session-specific and is not set automatically when Diffex is embedded through the SDK.
 
 ## Bash Tool Session Environment
 
-Commands run by the bash tool receive the current Pi session state:
+Commands run by the bash tool receive the current Diffex session state:
 
 | Variable | Description |
 |----------|-------------|
@@ -24,7 +24,7 @@ Commands run by the bash tool receive the current Pi session state:
 | `PI_MODEL` | Currently selected model ID |
 | `PI_REASONING_LEVEL` | Current effective reasoning level: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max` |
 
-The values are resolved when each command starts. Switching models or changing the reasoning level therefore affects the next bash command without restarting Pi. `PI_PROVIDER` and `PI_MODEL` identify the selected Pi model, not a different upstream model that a router may choose internally.
+The values are resolved when each command starts. Switching models or changing the reasoning level therefore affects the next bash command without restarting Diffex. `PI_PROVIDER` and `PI_MODEL` identify the selected Diffex model, not a different upstream model that a router may choose internally.
 
 When asked which model or provider is running, inspect these variables instead of inferring the answer from the system prompt:
 
@@ -45,7 +45,7 @@ These variables are injected into the LLM-callable bash tool. They are not injec
 
 ### Custom Bash Tools
 
-Bash tools created with `createBashTool()` expose the session environment by default when registered with Pi. Injection happens before `spawnHook`, so a hook receives the variables in `ctx.env`:
+Bash tools created with `createBashTool()` expose the session environment by default when registered with Diffex. Injection happens before `spawnHook`, so a hook receives the variables in `ctx.env`:
 
 ```typescript
 const bashTool = createBashTool(cwd, {
@@ -65,11 +65,11 @@ const bashTool = createBashTool(cwd, {
 });
 ```
 
-When disabled, Pi removes inherited values for these variables so nested Pi processes do not expose stale parent-session metadata.
+When disabled, Diffex removes inherited values for these variables so nested Diffex processes do not expose stale parent-session metadata.
 
-## Pi Process Configuration
+## Diffex Process Configuration
 
-These variables are read by Pi itself:
+These variables are read by Diffex itself:
 
 | Variable | Description |
 |----------|-------------|
@@ -77,7 +77,7 @@ These variables are read by Pi itself:
 | `PI_CODING_AGENT_SESSION_DIR` | Override session storage; overridden by `--session-dir` |
 | `PI_PACKAGE_DIR` | Override the package directory, useful for Nix/Guix store paths |
 | `PI_OFFLINE` | Disable startup network operations, including update checks, package updates, and install/update telemetry |
-| `PI_SKIP_VERSION_CHECK` | Disable the `pi.dev` latest-version request |
+| `PI_SKIP_VERSION_CHECK` | Disable the upstream compatibility release check |
 | `PI_TELEMETRY` | Override install/update telemetry and provider attribution headers: `1`/`true`/`yes` or `0`/`false`/`no` |
 | `PI_CACHE_RETENTION` | Set to `long` for extended provider prompt caching where supported |
 | `PI_SHARE_VIEWER_URL` | Override the base URL used by `/share` |
