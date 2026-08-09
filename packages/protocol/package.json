@@ -1,7 +1,7 @@
 {
 	"name": "@earendil-works/pi-protocol",
 	"version": "0.84.0",
-	"description": "Transport-neutral CBOR protocol for remote pi sessions",
+	"description": "Transport-neutral CBOR protocol for remote Diffex sessions",
 	"type": "module",
 	"main": "./dist/index.js",
 	"types": "./dist/index.d.ts",
@@ -32,7 +32,7 @@
 	"license": "MIT",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/earendil-works/pi.git",
+		"url": "git+https://github.com/diffexai/diffex.git",
 		"directory": "packages/protocol"
 	},
 	"engines": {

@@ -1,6 +1,6 @@
 # @earendil-works/pi-client
 
-Transport-neutral client for remote pi sessions. `PiClient` exchanges length-prefixed CBOR messages through a small `ByteTransport` interface. The package has no Node-specific imports.
+Transport-neutral client for remote Diffex sessions. `PiClient` exchanges length-prefixed CBOR messages through a small `ByteTransport` interface. The package has no Node-specific imports.
 
 ```ts
 import { PiClient, type ByteTransportFactory } from "@earendil-works/pi-client";
