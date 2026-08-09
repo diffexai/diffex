@@ -1032,7 +1032,7 @@ export class InteractiveMode {
 			})
 			.finally(() => {
 				// On Windows, npm can overwrite the shared console title while checking
-				// extension package versions. Restore Pi's title after the startup check.
+				// extension package versions. Restore Diffex's title after the startup check.
 				if (process.platform === "win32" && this.isInitialized) {
 					this.updateTerminalTitle();
 				}
@@ -3891,7 +3891,7 @@ export class InteractiveMode {
 
 		// Restore the terminal before the process dies on any uncaught throw.
 		// Without this, an unhandled exception from extension code (or anywhere
-		// in pi) leaves the terminal in raw mode with no cursor.
+		// in Diffex) leaves the terminal in raw mode with no cursor.
 		const uncaughtExceptionHandler = (error: Error) => this.uncaughtCrash(error);
 		process.prependListener("uncaughtException", uncaughtExceptionHandler);
 		this.signalCleanupHandlers.push(() => process.off("uncaughtException", uncaughtExceptionHandler));

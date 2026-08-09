@@ -16,13 +16,13 @@ pkg update && pkg upgrade
 # Install dependencies
 pkg install nodejs termux-api git
 
-# Install pi
+# Install Diffex
 npm install -g --ignore-scripts @earendil-works/pi-coding-agent
 
 # Create config directory
 mkdir -p ~/.diffex/agent
 
-# Run pi
+# Run Diffex
 pi
 ```
 

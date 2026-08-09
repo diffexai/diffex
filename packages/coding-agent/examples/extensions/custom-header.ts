@@ -2,14 +2,14 @@
  * Custom Header Extension
  *
  * Demonstrates ctx.ui.setHeader() for replacing the built-in header
- * (logo + keybinding hints) with a custom component showing the pi mascot.
+ * (logo + keybinding hints) with a custom component showing the Diffex mascot.
  */
 
 import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
 import { VERSION } from "@earendil-works/pi-coding-agent";
 
-// --- PI MASCOT ---
-// Based on pi_mascot.ts - the pi agent character
+// --- DIFFEX MASCOT ---
+// Based on the Diffex agent character
 function getPiMascot(theme: Theme): string[] {
 	// --- COLORS ---
 	// 3b1b Blue: R=80, G=180, B=230

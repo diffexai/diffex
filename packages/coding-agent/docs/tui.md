@@ -781,7 +781,7 @@ ctx.ui.setWorkingIndicator({
 // Hide the indicator entirely
 ctx.ui.setWorkingIndicator({ frames: [] });
 
-// Restore pi's default spinner
+// Restore Diffex's default spinner
 ctx.ui.setWorkingIndicator();
 ```
 

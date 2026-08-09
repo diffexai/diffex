@@ -1,7 +1,7 @@
 /**
  * Subagent Tool - Delegate tasks to specialized agents
  *
- * Spawns a separate `pi` process for each subagent invocation,
+ * Spawns a separate Diffex process for each subagent invocation,
  * giving it an isolated context window.
  *
  * Supports three modes:

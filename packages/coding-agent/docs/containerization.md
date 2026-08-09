@@ -3,23 +3,23 @@
 Diffex runs with all permissions by default, but in some cases, you will want to have more control over what directories Diffex can write to and which accesses it has.
 
 There are two general options. You can either
-1. run the whole `pi` process inside an isolated environment, or
-2. run `pi` on the host and route tool execution into an isolated environment.
+1. run the whole Diffex process inside an isolated environment, or
+2. run Diffex on the host and route tool execution into an isolated environment.
 
 ## Choose a pattern
 
 | Pattern | What is isolated | Best for | Notes |
 | --- | --- | --- | --- |
 | Gondolin extension | Built-in tools and `!` commands | Local micro-VM isolation while keeping auth on host | See [`examples/extensions/gondolin/`](../examples/extensions/gondolin/). |
-| Plain Docker | Whole `pi` process in a local container | Simple local isolation | Provider API keys enter the container. |
-| OpenShell | Whole `pi` process in a policy-controlled sandbox | Local or remote managed sandbox | Requires an OpenShell gateway |
+| Plain Docker | Whole Diffex process in a local container | Simple local isolation | Provider API keys enter the container. |
+| OpenShell | Whole Diffex process in a policy-controlled sandbox | Local or remote managed sandbox | Requires an OpenShell gateway |
 
-Extensions run wherever the `pi` process runs. If you run host `pi` with a tool-routing extension, other custom extension tools still run on the host unless they also delegate their operations.
+Extensions run wherever Diffex runs. If you run Diffex on the host with a tool-routing extension, other custom extension tools still run on the host unless they also delegate their operations.
 
 ## Gondolin
 
 [Gondolin](https://github.com/earendil-works/gondolin) is a local Linux micro-VM.
-Use the [example extension](../examples/extensions/gondolin) when you want `pi` on the host but all built-in tools routed into the VM.
+Use the [example extension](../examples/extensions/gondolin) when you want Diffex on the host but all built-in tools routed into the VM.
 
 Setup:
 
@@ -44,7 +44,7 @@ Requirements: Node.js >= 23.6.0 for `@earendil-works/gondolin`, plus QEMU (requi
 
 ## Plain Docker
 
-Run the whole `pi` process in Docker when you want the simplest local container boundary.
+Run the whole Diffex process in Docker when you want the simplest local container boundary.
 
 `Dockerfile.diffex`:
 
@@ -89,13 +89,13 @@ openshell gateway add <gateway-url> --name <name>
 openshell gateway select <name>
 ```
 
-Launch `pi` inside an OpenShell sandbox:
+Launch Diffex inside an OpenShell sandbox:
 
 ```bash
 openshell sandbox create --name pi-sandbox --from pi -- pi
 ```
 
-In this pattern, the whole `pi` process runs inside the sandbox.
+In this pattern, the whole Diffex process runs inside the sandbox.
 Built-in tools, `!` commands, and extension tools execute inside the OpenShell boundary.
 
 If the gateway is remote, project files are not bind-mounted from the host, meaning writes in the sandbox are not reflected on your machine.

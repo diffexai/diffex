@@ -129,7 +129,7 @@ export interface Settings {
 	markdown?: MarkdownSettings;
 	warnings?: WarningSettings;
 	sessionDir?: string; // Custom session storage directory (same format as --session-dir CLI flag)
-	httpProxy?: string; // Proxy URL applied as HTTP_PROXY and HTTPS_PROXY for Pi-managed HTTP clients
+	httpProxy?: string; // Proxy URL applied as HTTP_PROXY and HTTPS_PROXY for Diffex-managed HTTP clients
 	httpIdleTimeoutMs?: number; // HTTP header/body idle timeout in milliseconds; 0 disables it
 	websocketConnectTimeoutMs?: number; // WebSocket connect/open handshake timeout in milliseconds; 0 disables it
 	tuiMode?: TuiMode; // default: "regular"

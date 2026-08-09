@@ -864,7 +864,7 @@ pi.on("user_bash", (event, ctx) => {
   // Option 1: Provide custom operations (e.g., SSH)
   return { operations: remoteBashOps };
 
-  // Option 2: Wrap pi's built-in local bash backend
+  // Option 2: Wrap Diffex's built-in local bash backend
   const local = createLocalBashOperations();
   return {
     operations: {

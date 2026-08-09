@@ -79,9 +79,9 @@ export interface BashOperations {
 }
 
 /**
- * Create bash operations using pi's built-in local shell execution backend.
+ * Create bash operations using Diffex's built-in local shell execution backend.
  *
- * This is useful for extensions that intercept user_bash and still want pi's
+ * This is useful for extensions that intercept user_bash and still want Diffex's
  * standard local shell behavior while wrapping or rewriting commands.
  */
 export function createLocalBashOperations(options?: { shellPath?: string }): BashOperations {
@@ -195,7 +195,7 @@ export interface BashToolOptions {
 	commandPrefix?: string;
 	/** Optional explicit shell path from settings */
 	shellPath?: string;
-	/** Expose current Pi session metadata as DIFFEX_* environment variables. Default: true */
+	/** Expose current Diffex session metadata as DIFFEX_* environment variables. Default: true */
 	exposeSessionEnvironment?: boolean;
 	/** Hook to adjust command, cwd, or env before execution */
 	spawnHook?: BashSpawnHook;

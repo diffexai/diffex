@@ -107,7 +107,7 @@ async function clearStartupTui(ui: TUI): Promise<void> {
 
 /**
  * First-time setup runs when all of these hold:
- * - this is the official Pi distribution (not a fork/rebrand)
+ * - this is the official Diffex distribution (not a fork/rebrand)
  * - experimental features are enabled (DIFFEX_EXPERIMENTAL=1)
  * - the default agent directory is used (no custom agent dir override)
  * - setup was not completed before (settings.json does not exist)
