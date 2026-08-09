@@ -4,7 +4,7 @@ import {
 	PROTOCOL_VERSION,
 	type ServerSnapshot,
 	type SessionMetadata,
-} from "@earendil-works/pi-protocol";
+} from "@earendil-works/diffex-protocol";
 import type { ConnectionState } from "./connection.ts";
 import type { PiServerService } from "./types.ts";
 

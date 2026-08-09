@@ -5,7 +5,7 @@
 </p>
 <p align="center">
   <a href="https://discord.com/invite/3cU7Bz4UPx"><img alt="Upstream Discord" src="https://img.shields.io/badge/discord-upstream-5865F2?style=flat-square&logo=discord&logoColor=white" /></a>
-  <a href="https://www.npmjs.com/package/@earendil-works/pi-coding-agent"><img alt="npm" src="https://img.shields.io/npm/v/@earendil-works/pi-coding-agent?style=flat-square" /></a>
+  <a href="https://www.npmjs.com/package/@earendil-works/diffex-coding-agent"><img alt="npm" src="https://img.shields.io/npm/v/@earendil-works/diffex-coding-agent?style=flat-square" /></a>
 </p>
 
 > New issues and PRs from new contributors are auto-closed by default. Maintainers review auto-closed issues daily. See [CONTRIBUTING.md](../../CONTRIBUTING.md).
@@ -63,7 +63,7 @@ Example upstream `pi-mono` work sessions are published here:
 ## Quick Start
 
 ```bash
-npm install -g --ignore-scripts @earendil-works/pi-coding-agent
+npm install -g --ignore-scripts @earendil-works/diffex-coding-agent
 ```
 
 `--ignore-scripts` disables dependency lifecycle scripts during install. Diffex does not require install scripts for normal npm installs.
@@ -456,7 +456,7 @@ See [docs/packages.md](docs/packages.md).
 ### SDK
 
 ```typescript
-import { createAgentSession, ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
+import { createAgentSession, ModelRuntime, SessionManager } from "@earendil-works/diffex-coding-agent";
 
 const modelRuntime = await ModelRuntime.create();
 const { session } = await createAgentSession({
@@ -695,9 +695,9 @@ MIT
 
 ## See Also
 
-- [@earendil-works/pi-ai](https://www.npmjs.com/package/@earendil-works/pi-ai): Core LLM toolkit
-- [@earendil-works/pi-agent-core](https://www.npmjs.com/package/@earendil-works/pi-agent-core): Agent framework
-- [@earendil-works/pi-tui](https://www.npmjs.com/package/@earendil-works/pi-tui): Terminal UI components
+- [@earendil-works/diffex-ai](https://www.npmjs.com/package/@earendil-works/diffex-ai): Core LLM toolkit
+- [@earendil-works/diffex-agent-core](https://www.npmjs.com/package/@earendil-works/diffex-agent-core): Agent framework
+- [@earendil-works/diffex-tui](https://www.npmjs.com/package/@earendil-works/diffex-tui): Terminal UI components
 
 <p align="center">
   The upstream project's domain was graciously donated by

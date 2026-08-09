@@ -5,8 +5,8 @@
  * (logo + keybinding hints) with a custom component showing the Diffex mascot.
  */
 
-import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
-import { VERSION } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, Theme } from "@earendil-works/diffex-coding-agent";
+import { VERSION } from "@earendil-works/diffex-coding-agent";
 
 // --- DIFFEX MASCOT ---
 // Based on the Diffex agent character

@@ -7,7 +7,7 @@ Diffex is a minimal terminal coding harness. It is designed to stay small at the
 Install Diffex with npm:
 
 ```bash
-npm install -g --ignore-scripts @earendil-works/pi-coding-agent
+npm install -g --ignore-scripts @earendil-works/diffex-coding-agent
 ```
 
 `--ignore-scripts` disables dependency lifecycle scripts during install. Diffex does not require install scripts for normal npm installs.
@@ -15,10 +15,10 @@ npm install -g --ignore-scripts @earendil-works/pi-coding-agent
 To uninstall Diffex, use the matching package manager. For npm installs:
 
 ```bash
-npm uninstall -g @earendil-works/pi-coding-agent
+npm uninstall -g @earendil-works/diffex-coding-agent
 ```
 
-For pnpm, Yarn, or Bun installs, use the matching global remove command: `pnpm remove -g @earendil-works/pi-coding-agent`, `yarn global remove @earendil-works/pi-coding-agent`, or `bun uninstall -g @earendil-works/pi-coding-agent`.
+For pnpm, Yarn, or Bun installs, use the matching global remove command: `pnpm remove -g @earendil-works/diffex-coding-agent`, `yarn global remove @earendil-works/diffex-coding-agent`, or `bun uninstall -g @earendil-works/diffex-coding-agent`.
 
 Then run it in a project directory:
 

@@ -1,4 +1,4 @@
-import { Container, getKeybindings, Spacer, Text } from "@earendil-works/pi-tui";
+import { Container, getKeybindings, Spacer, Text } from "@earendil-works/diffex-tui";
 import { type TerminalTheme, theme } from "../theme/theme.ts";
 import { DIFFEX_LOGO_ART } from "./diffex-welcome.ts";
 import { DynamicBorder } from "./dynamic-border.ts";

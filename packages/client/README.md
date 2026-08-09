@@ -1,9 +1,9 @@
-# @earendil-works/pi-client
+# @earendil-works/diffex-client
 
 Transport-neutral client for remote Diffex sessions. `PiClient` exchanges length-prefixed CBOR messages through a small `ByteTransport` interface. The package has no Node-specific imports.
 
 ```ts
-import { PiClient, type ByteTransportFactory } from "@earendil-works/pi-client";
+import { PiClient, type ByteTransportFactory } from "@earendil-works/diffex-client";
 
 const transportFactory: ByteTransportFactory = async (handlers) => {
   // Connect using WebSocket, Unix socket, or another ordered byte transport.
@@ -46,8 +46,8 @@ Subscriber exceptions are isolated from protocol state. Set `onListenerError` in
 Node.js and Bun consumers can use the separately exported Unix-domain socket transport:
 
 ```ts
-import { PiClient } from "@earendil-works/pi-client";
-import { createUnixTransportFactory } from "@earendil-works/pi-client/unix";
+import { PiClient } from "@earendil-works/diffex-client";
+import { createUnixTransportFactory } from "@earendil-works/diffex-client/unix";
 
 const client = new PiClient({
   transportFactory: createUnixTransportFactory({
@@ -60,4 +60,4 @@ await client.connect();
 
 `maxPendingBytes` bounds queued outbound data. It defaults to four times the protocol frame limit. The transport preserves send order and waits for socket backpressure before resolving each send.
 
-The `@earendil-works/pi-client` root remains transport- and runtime-neutral. Importing the Node-compatible transport requires the explicit `@earendil-works/pi-client/unix` subpath.
+The `@earendil-works/diffex-client` root remains transport- and runtime-neutral. Importing the Node-compatible transport requires the explicit `@earendil-works/diffex-client/unix` subpath.

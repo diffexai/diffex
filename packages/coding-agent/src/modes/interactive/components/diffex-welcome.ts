@@ -1,4 +1,4 @@
-import { type Component, Text, type TUI, visibleWidth } from "@earendil-works/pi-tui";
+import { type Component, Text, type TUI, visibleWidth } from "@earendil-works/diffex-tui";
 import { theme } from "../theme/theme.ts";
 
 export const DIFFEX_LOGO_ART = [

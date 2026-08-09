@@ -14,7 +14,7 @@ import {
 	type ServerHello,
 	type ServerHelloError,
 	type ServerMessage,
-} from "@earendil-works/pi-protocol";
+} from "@earendil-works/diffex-protocol";
 import {
 	type ByteConnection,
 	type ByteConnectionHandler,

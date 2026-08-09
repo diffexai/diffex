@@ -1,4 +1,4 @@
-# @earendil-works/pi-protocol
+# @earendil-works/diffex-protocol
 
 Runtime-neutral schemas, types, CBOR encoding, and byte-stream framing for the experimental Diffex protocol.
 
@@ -21,7 +21,7 @@ import {
   createServerMessageDecoder,
   encodeClientMessage,
   type ClientHello,
-} from "@earendil-works/pi-protocol";
+} from "@earendil-works/diffex-protocol";
 
 const hello: ClientHello = {
   type: "hello",

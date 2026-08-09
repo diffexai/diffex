@@ -5,7 +5,7 @@
  * from cwd and ~/.diffex/agent. Model chosen from settings or first available.
  */
 
-import { createAgentSession } from "@earendil-works/pi-coding-agent";
+import { createAgentSession } from "@earendil-works/diffex-coding-agent";
 
 const { session } = await createAgentSession();
 

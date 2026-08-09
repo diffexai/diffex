@@ -6,7 +6,7 @@ import type {
 	SessionSnapshot,
 	ThinkingLevel,
 	TranscriptProgress,
-} from "@earendil-works/pi-protocol";
+} from "@earendil-works/diffex-protocol";
 import { PiServerError } from "../errors.ts";
 import type {
 	CreateSessionOptions,
