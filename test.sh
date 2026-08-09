@@ -4,7 +4,7 @@ set -euo pipefail
 # Isolate user resources, credentials, temporary files, and tool configuration.
 temp_parent="${TMPDIR:-/tmp}"
 temp_parent="${temp_parent%/}"
-test_root="$(mktemp -d "$temp_parent/pi-test.XXXXXX")"
+test_root="$(mktemp -d "$temp_parent/diffex-test.XXXXXX")"
 git_askpass="$(type -P false)"
 readonly temp_parent test_root git_askpass
 
@@ -18,7 +18,7 @@ cleanup() {
 	trap - EXIT
 
 	case "$test_root" in
-		"$temp_parent"/pi-test.*)
+		"$temp_parent"/diffex-test.*)
 			if [[ -d "$test_root" && ! -L "$test_root" && -f "$test_root/.diffex-test-owned" ]]; then
 				rm -rf -- "$test_root"
 			else
