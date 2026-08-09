@@ -620,7 +620,7 @@ jobs:
             const shareUrl = process.env.SHARE_URL || process.env.GIST_URL;
             const lastAgentMessage = extractLastAgentMessage(process.env.SESSION_JSONL);
             const body = [
-              'Pi issue analysis finished.',
+              'Diffex issue analysis finished.',
               '',
               `Session Gist: ${shareUrl}`,
               '',
@@ -655,7 +655,7 @@ jobs:
         with:
           script: |
             const shareUrl = process.env.SHARE_URL || process.env.GIST_URL;
-            const lines = ['Pi issue analysis failed; no analysis was produced.', '', `Run: ${process.env.RUN_URL}`];
+            const lines = ['Diffex issue analysis failed; no analysis was produced.', '', `Run: ${process.env.RUN_URL}`];
             if (shareUrl) {
               lines.push(`Partial session Gist: ${shareUrl}`);
             }
