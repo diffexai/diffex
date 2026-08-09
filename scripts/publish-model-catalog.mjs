@@ -17,7 +17,7 @@ const CATALOG_SCHEMA_VERSION = 1;
 const CATALOG_PREFIX = `models/v${CATALOG_SCHEMA_VERSION}`;
 const CATALOG_INDEX_KEY = `${CATALOG_PREFIX}/index.json`;
 // Bump this only when generated model metadata requires behavior unavailable in older Diffex clients.
-const MINIMUM_PI_VERSION = "0.80.7";
+const MINIMUM_DIFFEX_VERSION = "0.80.7";
 const JSON_CONTENT_TYPE = "application/json; charset=utf-8";
 const IMMUTABLE_CACHE_CONTROL = "public, max-age=31536000, immutable";
 const INDEX_CACHE_CONTROL = "no-store";
@@ -201,7 +201,7 @@ function validateIndex(index) {
 			typeof catalog !== "object" ||
 			catalog === null ||
 			Array.isArray(catalog) ||
-			typeof catalog.minimumPiVersion !== "string" ||
+			typeof catalog.minimumDiffexVersion !== "string" ||
 			typeof catalog.revision !== "string"
 		) {
 			throw new Error(`Existing ${CATALOG_INDEX_KEY} contains an invalid catalog entry`);
@@ -210,7 +210,7 @@ function validateIndex(index) {
 	return index;
 }
 
-function comparePiVersions(left, right) {
+function compareDiffexVersions(left, right) {
 	const leftParts = left.split(".").map(Number);
 	const rightParts = right.split(".").map(Number);
 	for (let index = 0; index < Math.max(leftParts.length, rightParts.length); index++) {
@@ -222,7 +222,7 @@ function comparePiVersions(left, right) {
 
 function buildIndex(existingIndex, publication) {
 	const entry = {
-		minimumPiVersion: MINIMUM_PI_VERSION,
+		minimumDiffexVersion: MINIMUM_DIFFEX_VERSION,
 		revision: publication.revision,
 		sourceCommit: publication.sourceCommit,
 		publishedAt: new Date().toISOString(),
@@ -230,9 +230,9 @@ function buildIndex(existingIndex, publication) {
 		modelCount: publication.modelCount,
 	};
 	const catalogs = (existingIndex?.catalogs || [])
-		.filter((catalog) => catalog.minimumPiVersion !== MINIMUM_PI_VERSION)
+		.filter((catalog) => catalog.minimumDiffexVersion !== MINIMUM_DIFFEX_VERSION)
 		.concat(entry)
-		.sort((left, right) => comparePiVersions(left.minimumPiVersion, right.minimumPiVersion));
+		.sort((left, right) => compareDiffexVersions(left.minimumDiffexVersion, right.minimumDiffexVersion));
 	return {
 		schemaVersion: CATALOG_SCHEMA_VERSION,
 		defaultRevision: publication.revision,
@@ -246,7 +246,7 @@ async function main() {
 	const bundle = validateBundle(inputDir);
 	const publication = {
 		schemaVersion: CATALOG_SCHEMA_VERSION,
-		minimumPiVersion: MINIMUM_PI_VERSION,
+		minimumDiffexVersion: MINIMUM_DIFFEX_VERSION,
 		revision: bundle.revision,
 		sourceCommit: options.sourceCommit || gitSourceCommit(),
 		providerCount: bundle.providerCount,
@@ -260,13 +260,13 @@ async function main() {
 		return;
 	}
 
-	const temporaryDir = mkdtempSync(join(tmpdir(), "pi-model-catalog-"));
+	const temporaryDir = mkdtempSync(join(tmpdir(), "diffex-model-catalog-"));
 	try {
 		const currentIndexPath = join(temporaryDir, "index-current.json");
 		const hasCurrentIndex = downloadIndex(options.bucket, options.endpoint, currentIndexPath);
 		const currentIndex = hasCurrentIndex ? validateIndex(readJson(currentIndexPath)) : undefined;
 		const currentEntry = currentIndex?.catalogs.find(
-			(catalog) => catalog.minimumPiVersion === MINIMUM_PI_VERSION,
+			(catalog) => catalog.minimumDiffexVersion === MINIMUM_DIFFEX_VERSION,
 		);
 		if (currentIndex?.defaultRevision === bundle.revision && currentEntry?.revision === bundle.revision) {
 			console.log(`Model catalog ${bundle.revision} is already current; no objects uploaded.`);
