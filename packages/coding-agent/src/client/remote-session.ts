@@ -1,7 +1,7 @@
 import type {
 	ConnectionState,
 	ConnectionStateChange,
-	PiClient,
+	DiffexClient,
 	SessionLease,
 	Unsubscribe,
 } from "@earendil-works/diffex-client";
@@ -64,7 +64,7 @@ async function settleRemoteSessionDisposal(cleanup: readonly Promise<void>[]): P
 }
 
 export class RemoteSession {
-	readonly #client: PiClient;
+	readonly #client: DiffexClient;
 	readonly #onListenerError: ((error: Error) => void) | undefined;
 	#lifecycle: RemoteSessionLifecycle = { status: "unbound" };
 	#handle: SessionLease | undefined;
@@ -80,7 +80,7 @@ export class RemoteSession {
 		this.#resolveDisposeSignal = resolve;
 	});
 
-	private constructor(client: PiClient, options: RemoteSessionOptions = {}) {
+	private constructor(client: DiffexClient, options: RemoteSessionOptions = {}) {
 		this.#client = client;
 		this.#onListenerError = options.onListenerError;
 	}
@@ -137,7 +137,11 @@ export class RemoteSession {
 		return this.#client.onConnectionStateChange(listener);
 	}
 
-	static async open(client: PiClient, sessionId: string, options: RemoteSessionOptions = {}): Promise<RemoteSession> {
+	static async open(
+		client: DiffexClient,
+		sessionId: string,
+		options: RemoteSessionOptions = {},
+	): Promise<RemoteSession> {
 		const session = new RemoteSession(client, options);
 		try {
 			await session.open(sessionId);
@@ -154,7 +158,7 @@ export class RemoteSession {
 	}
 
 	static async create(
-		client: PiClient,
+		client: DiffexClient,
 		createOptions: CreateRemoteSessionOptions,
 		options: RemoteSessionOptions = {},
 	): Promise<RemoteSession> {

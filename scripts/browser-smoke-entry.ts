@@ -1,4 +1,4 @@
-import { PiClient } from "@earendil-works/diffex-client";
+import { DiffexClient } from "@earendil-works/diffex-client";
 import { createAssistantMessageEventStream, Type } from "@earendil-works/diffex-ai";
 import { complete, getModel, getProviders, streamSimple } from "@earendil-works/diffex-ai/compat";
 import {
@@ -60,7 +60,7 @@ console.log(
 	new FileError("not_found", "missing").code,
 	toError("boom").message,
 	typeof streamProxy,
-	typeof PiClient,
+	typeof DiffexClient,
 	PROTOCOL_VERSION,
 	decodeCbor(encodeCbor({ browser: true })),
 );

@@ -1,4 +1,4 @@
-import { type ByteTransport, type ByteTransportHandlers, PiClient } from "@earendil-works/diffex-client";
+import { type ByteTransport, type ByteTransportHandlers, DiffexClient } from "@earendil-works/diffex-client";
 import {
 	type ClientMessage,
 	ClientMessageDecoder,
@@ -73,8 +73,8 @@ export function sessionSnapshot(id: string, overrides: Partial<SessionSnapshot> 
 	};
 }
 
-export async function connectClient(server: MemoryServer): Promise<PiClient> {
-	const client = new PiClient({ transportFactory: (handlers) => server.connect(handlers) });
+export async function connectClient(server: MemoryServer): Promise<DiffexClient> {
+	const client = new DiffexClient({ transportFactory: (handlers) => server.connect(handlers) });
 	server.onMessage((message) => {
 		if (message.type !== "hello") return;
 		server.send({
@@ -97,7 +97,7 @@ export function collectRequests(server: MemoryServer): RequestEnvelope[] {
 }
 
 export async function openRemoteSession(
-	client: PiClient,
+	client: DiffexClient,
 	server: MemoryServer,
 	snapshot: SessionSnapshot,
 	options?: RemoteSessionOptions,
