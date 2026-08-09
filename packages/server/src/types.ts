@@ -8,11 +8,11 @@ import type {
 	ThinkingLevel,
 	TranscriptProgress,
 } from "@earendil-works/diffex-protocol";
-import type { PiServerError } from "./errors.ts";
-import type { PiServerListener } from "./listener.ts";
+import type { DiffexServerError } from "./errors.ts";
+import type { DiffexServerListener } from "./listener.ts";
 
-export interface PiServerOptions {
-	listeners: readonly PiServerListener[];
+export interface DiffexServerOptions {
+	listeners: readonly DiffexServerListener[];
 	maxFrameLength?: number;
 	handshakeTimeoutMs?: number;
 	serverId?: string;
@@ -25,7 +25,7 @@ export type PromptInput = Omit<Extract<Command, { command: "prompt" }>, "command
 export type SteerInput = Omit<Extract<Command, { command: "steer" }>, "command" | "sessionId">;
 
 export interface CreateSessionOptions {
-	/** A collision-resistant ID assigned by PiServer. The service must persist this exact ID. */
+	/** A collision-resistant ID assigned by DiffexServer. The service must persist this exact ID. */
 	id: string;
 	cwd?: string;
 	name?: string;
@@ -33,13 +33,13 @@ export interface CreateSessionOptions {
 	thinkingLevel?: ThinkingLevel;
 }
 
-export type PiSessionRuntimeEvent =
+export type DiffexSessionRuntimeEvent =
 	| { type: "snapshot" }
 	| { type: "progress"; progress: TranscriptProgress }
-	| { type: "error"; error: PiServerError };
+	| { type: "error"; error: DiffexServerError };
 
 /** One acquired durable session. Conflicting operations must reject rather than queue. */
-export interface PiSessionRuntime {
+export interface DiffexSessionRuntime {
 	snapshot(): MaybePromise<SessionSnapshot>;
 	getPhase(): SessionPhase;
 	prompt(input: PromptInput): Promise<void>;
@@ -47,17 +47,17 @@ export interface PiSessionRuntime {
 	abort(): Promise<void>;
 	setModel(model: ModelRef): Promise<void>;
 	setThinking(thinkingLevel: ThinkingLevel): Promise<void>;
-	subscribe(listener: (event: PiSessionRuntimeEvent) => void): () => void;
+	subscribe(listener: (event: DiffexSessionRuntimeEvent) => void): () => void;
 	dispose(): Promise<void>;
 }
 
 /** Service boundary for durable sessions and exclusively acquired runtimes. */
-export interface PiServerService {
+export interface DiffexServerService {
 	listSessions(): Promise<SessionMetadata[]>;
 	listModels(): Promise<ModelMetadata[]>;
-	createSession(options: CreateSessionOptions): Promise<PiSessionRuntime>;
-	openSession(sessionId: string): Promise<PiSessionRuntime>;
+	createSession(options: CreateSessionOptions): Promise<DiffexSessionRuntime>;
+	openSession(sessionId: string): Promise<DiffexSessionRuntime>;
 }
 
-export type SessionRuntime = PiSessionRuntime;
-export type SessionRuntimeEvent = PiSessionRuntimeEvent;
+export type SessionRuntime = DiffexSessionRuntime;
+export type SessionRuntimeEvent = DiffexSessionRuntimeEvent;

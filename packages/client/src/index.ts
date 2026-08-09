@@ -1,18 +1,18 @@
-export { PiClient } from "./client.ts";
+export { DiffexClient } from "./client.ts";
 export {
-	PiClientDisposedError,
-	PiDisconnectedError,
-	PiServerError,
-	PiSessionDetachedError,
-	PiSessionOwnershipError,
+	DiffexClientDisposedError,
+	DiffexDisconnectedError,
+	DiffexServerError,
+	DiffexSessionDetachedError,
+	DiffexSessionOwnershipError,
 } from "./errors.ts";
-export type { AcquireSessionOptions, PiSessionHandle, SessionLease, SessionLeaseMode } from "./session-handle.ts";
+export type { AcquireSessionOptions, DiffexSessionHandle, SessionLease, SessionLeaseMode } from "./session-handle.ts";
 export type { ByteTransport, ByteTransportFactory, ByteTransportHandlers } from "./transport.ts";
 export type {
 	ConnectionState,
 	ConnectionStateChange,
 	CreateSessionOptions,
+	DiffexClientOptions,
 	ListenerErrorHandler,
-	PiClientOptions,
 	Unsubscribe,
 } from "./types.ts";

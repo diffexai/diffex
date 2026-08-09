@@ -1,9 +1,9 @@
 import { describe, expect, test } from "vitest";
 import type { ByteConnectionAcceptor } from "../src/connection.ts";
-import type { PiServerListener } from "../src/listener.ts";
+import type { DiffexServerListener } from "../src/listener.ts";
 import { createTestServer } from "../src/testing/index.ts";
 
-class TestListener implements PiServerListener {
+class TestListener implements DiffexServerListener {
 	address: string | undefined;
 	accept?: ByteConnectionAcceptor;
 	startCount = 0;
@@ -27,7 +27,7 @@ class TestListener implements PiServerListener {
 	}
 }
 
-describe("PiServer listener composition", () => {
+describe("DiffexServer listener composition", () => {
 	test("starts and closes every configured listener", async () => {
 		const first = new TestListener("first");
 		const second = new TestListener("second");

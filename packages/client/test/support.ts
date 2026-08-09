@@ -8,8 +8,8 @@ import {
 	type ServerSnapshot,
 	type SessionSnapshot,
 } from "@earendil-works/diffex-protocol";
-import type { ByteTransport, ByteTransportHandlers, PiSessionHandle } from "../src/index.ts";
-import { PiClient } from "../src/index.ts";
+import type { ByteTransport, ByteTransportHandlers, DiffexSessionHandle } from "../src/index.ts";
+import { DiffexClient } from "../src/index.ts";
 
 export class MemoryByteServer {
 	private handlers: ByteTransportHandlers | undefined;
@@ -104,13 +104,13 @@ export function sessionSnapshot(id: string, overrides: Partial<SessionSnapshot> 
 	};
 }
 
-export function createClient(server: MemoryByteServer): PiClient {
-	return new PiClient({
+export function createClient(server: MemoryByteServer): DiffexClient {
+	return new DiffexClient({
 		transportFactory: (handlers) => server.connect(handlers),
 	});
 }
 
-export async function connectClient(server: MemoryByteServer): Promise<PiClient> {
+export async function connectClient(server: MemoryByteServer): Promise<DiffexClient> {
 	const client = createClient(server);
 	server.onMessage((message) => {
 		if (message.type === "hello") {
@@ -135,10 +135,10 @@ export function collectRequests(server: MemoryByteServer): RequestEnvelope[] {
 }
 
 export async function attachSession(
-	client: PiClient,
+	client: DiffexClient,
 	server: MemoryByteServer,
 	snapshot: SessionSnapshot,
-): Promise<PiSessionHandle> {
+): Promise<DiffexSessionHandle> {
 	const requests = collectRequests(server);
 	const attaching = client.attachSession(snapshot.id);
 	const request = requests.find((candidate) => candidate.request.command === "attach");

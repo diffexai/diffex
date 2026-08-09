@@ -1,21 +1,21 @@
-import { PiServer } from "../server.ts";
-import type { PiServerOptions, PiServerService } from "../types.ts";
+import { DiffexServer } from "../server.ts";
+import type { DiffexServerOptions, DiffexServerService } from "../types.ts";
 import { TestServerService } from "./service.ts";
 
-export interface TestServerOptions extends PiServerOptions {
-	service?: PiServerService;
+export interface TestServerOptions extends DiffexServerOptions {
+	service?: DiffexServerService;
 }
 
 export interface TestServer {
-	server: PiServer;
-	service: PiServerService;
+	server: DiffexServer;
+	service: DiffexServerService;
 }
 
-/** Create an unstarted PiServer with deterministic defaults for transport conformance tests. */
+/** Create an unstarted DiffexServer with deterministic defaults for transport conformance tests. */
 export function createTestServer(options: TestServerOptions): TestServer {
 	const service = options.service ?? new TestServerService();
 	return {
-		server: new PiServer(service, {
+		server: new DiffexServer(service, {
 			listeners: options.listeners,
 			maxFrameLength: options.maxFrameLength,
 			handshakeTimeoutMs: options.handshakeTimeoutMs,

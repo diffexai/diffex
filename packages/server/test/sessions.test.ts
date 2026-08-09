@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ModelMetadata, SessionSnapshot, TranscriptProgress } from "@earendil-works/diffex-protocol";
 import { afterEach, describe, expect, test } from "vitest";
-import type { CreateSessionOptions, PiServer, PiSessionRuntime } from "../src/index.ts";
+import type { CreateSessionOptions, DiffexServer, DiffexSessionRuntime } from "../src/index.ts";
 import {
 	connectUnixTestClient,
 	Deferred,
@@ -39,7 +39,7 @@ class OrderedSnapshotService extends MemoryService {
 	}
 }
 
-const servers = new Set<PiServer>();
+const servers = new Set<DiffexServer>();
 const clients = new Set<Client>();
 const tempDirectories = new Set<string>();
 
@@ -55,7 +55,7 @@ async function startServer(service = new MemoryService(), options: Partial<UnixS
 	return { server, service };
 }
 
-async function connect(server: PiServer): Promise<Client> {
+async function connect(server: DiffexServer): Promise<Client> {
 	const client = await connectUnixTestClient(server.addresses[0]!);
 	clients.add(client);
 	return client;
@@ -76,7 +76,7 @@ afterEach(async () => {
 	tempDirectories.clear();
 });
 
-describe("PiServer Unix integration", () => {
+describe("DiffexServer Unix integration", () => {
 	test("serializes server snapshot revisions", async () => {
 		const service = new OrderedSnapshotService();
 		const { server } = await startServer(service);
@@ -177,7 +177,7 @@ describe("PiServer Unix integration", () => {
 				updatedAt: 1,
 				parentSessionId: "parent-1",
 				sessionName: "Live name",
-				cwd: "/tmp/pi-server-conformance",
+				cwd: "/tmp/diffex-server-conformance",
 			},
 		]);
 	});
@@ -271,7 +271,7 @@ describe("PiServer Unix integration", () => {
 				createdAt: 1,
 				updatedAt: 1,
 				sessionName: "Session session-1",
-				cwd: "/tmp/pi-server-conformance",
+				cwd: "/tmp/diffex-server-conformance",
 			},
 		]);
 		await attach(second, "session-1");
@@ -401,7 +401,7 @@ describe("PiServer Unix integration", () => {
 
 	test("rejects and disposes a service runtime with the wrong server-assigned ID", async () => {
 		class WrongIdService extends MemoryService {
-			override async createSession(options: CreateSessionOptions): Promise<PiSessionRuntime> {
+			override async createSession(options: CreateSessionOptions): Promise<DiffexSessionRuntime> {
 				return super.createSession({ ...options, id: "wrong-id" });
 			}
 		}

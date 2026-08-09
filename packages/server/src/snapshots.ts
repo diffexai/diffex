@@ -6,11 +6,11 @@ import {
 	type SessionMetadata,
 } from "@earendil-works/diffex-protocol";
 import type { ConnectionState } from "./connection.ts";
-import type { PiServerService } from "./types.ts";
+import type { DiffexServerService } from "./types.ts";
 
 interface ServerSnapshotPublisherOptions {
 	serverId: string;
-	service: PiServerService;
+	service: DiffexServerService;
 	connections: Set<ConnectionState>;
 	isClosing: () => boolean;
 	listSessions: () => Promise<SessionMetadata[]>;

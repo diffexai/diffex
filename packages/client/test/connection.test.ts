@@ -8,7 +8,7 @@ import {
 	type ServerSnapshot,
 } from "@earendil-works/diffex-protocol";
 import { describe, expect, test } from "vitest";
-import { type ByteTransportFactory, PiClient, PiDisconnectedError } from "../src/index.ts";
+import { type ByteTransportFactory, DiffexClient, DiffexDisconnectedError } from "../src/index.ts";
 import {
 	attachSession,
 	baseServerSnapshot,
@@ -18,7 +18,7 @@ import {
 	sessionSnapshot,
 } from "./support.ts";
 
-describe("PiClient", () => {
+describe("DiffexClient", () => {
 	test("sends a framed version before accepting a fragmented server hello", async () => {
 		const server = new MemoryByteServer();
 		const received: ClientMessage[] = [];
@@ -46,7 +46,7 @@ describe("PiClient", () => {
 	test("rejects server data delivered before sending the client hello", async () => {
 		let closeCount = 0;
 		let sendCount = 0;
-		const client = new PiClient({
+		const client = new DiffexClient({
 			transportFactory: (handlers) => {
 				handlers.onData(
 					encodeServerMessage({
@@ -110,7 +110,7 @@ describe("PiClient", () => {
 				});
 			}
 		});
-		const client = new PiClient({
+		const client = new DiffexClient({
 			transportFactory: (handlers) => server.connect(handlers),
 			onListenerError: (error) => listenerErrors.push(error),
 		});
@@ -137,7 +137,7 @@ describe("PiClient", () => {
 		const client = createClient(server);
 		client.subscribe(() => client.disconnect());
 
-		await expect(client.connect()).rejects.toBeInstanceOf(PiDisconnectedError);
+		await expect(client.connect()).rejects.toBeInstanceOf(DiffexDisconnectedError);
 		expect(client.connectionState).toBe("disconnected");
 		expect(server.clientCloseCount).toBe(1);
 	});
@@ -157,7 +157,7 @@ describe("PiClient", () => {
 				});
 			});
 		}
-		const client = new PiClient({
+		const client = new DiffexClient({
 			transportFactory: (handlers) => (connection++ === 0 ? first : second).connect(handlers),
 		});
 		let reconnect: Promise<ServerSnapshot> | undefined;
@@ -169,7 +169,7 @@ describe("PiClient", () => {
 			reconnect = client.reconnect();
 		});
 
-		await expect(client.connect()).rejects.toBeInstanceOf(PiDisconnectedError);
+		await expect(client.connect()).rejects.toBeInstanceOf(DiffexDisconnectedError);
 		expect(reconnect).toBeDefined();
 		await expect(reconnect).resolves.toMatchObject({ revision: 2 });
 		expect(client.connectionState).toBe("connected");
@@ -187,7 +187,7 @@ describe("PiClient", () => {
 		const client = createClient(server);
 
 		await expect(client.connect()).rejects.toMatchObject({
-			name: "PiServerError",
+			name: "DiffexServerError",
 			code: "version",
 			message: "Unsupported protocol version",
 		});
@@ -213,13 +213,13 @@ describe("PiClient", () => {
 		}
 		const transportFactory: ByteTransportFactory = (handlers) =>
 			(connection++ === 0 ? first : second).connect(handlers);
-		const client = new PiClient({ transportFactory });
+		const client = new DiffexClient({ transportFactory });
 		const states: string[] = [];
 		client.onConnectionStateChange(({ state }) => states.push(state));
 		await client.connect();
 		const pending = client.listSessions();
 		first.close();
-		await expect(pending).rejects.toBeInstanceOf(PiDisconnectedError);
+		await expect(pending).rejects.toBeInstanceOf(DiffexDisconnectedError);
 		expect(client.connectionState).toBe("disconnected");
 
 		await expect(client.reconnect()).resolves.toMatchObject({ revision: 2 });
@@ -242,7 +242,7 @@ describe("PiClient", () => {
 				});
 			});
 		}
-		const client = new PiClient({
+		const client = new DiffexClient({
 			transportFactory: (handlers) => (connection++ === 0 ? first : second).connect(handlers),
 		});
 		await client.connect();
@@ -263,7 +263,7 @@ describe("PiClient", () => {
 		const pending = client.listSessions();
 		server.error(new Error("read failed"));
 
-		await expect(pending).rejects.toMatchObject({ name: "PiDisconnectedError", message: "read failed" });
+		await expect(pending).rejects.toMatchObject({ name: "DiffexDisconnectedError", message: "read failed" });
 		expect(client.connectionState).toBe("disconnected");
 	});
 
@@ -279,7 +279,7 @@ describe("PiClient", () => {
 				});
 			}
 		});
-		const client = new PiClient({
+		const client = new DiffexClient({
 			maxFrameLength: 512,
 			transportFactory: (handlers) => server.connect(handlers),
 		});
@@ -318,7 +318,7 @@ describe("PiClient", () => {
 		const server = new MemoryByteServer();
 		expect(
 			() =>
-				new PiClient({
+				new DiffexClient({
 					maxFrameLength: 0x1_0000_0000,
 					transportFactory: (handlers) => server.connect(handlers),
 				}),

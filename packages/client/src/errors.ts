@@ -1,47 +1,47 @@
 import type { JsonValue, ProtocolError, ProtocolErrorCode } from "@earendil-works/diffex-protocol";
 
-export class PiServerError extends Error {
+export class DiffexServerError extends Error {
 	readonly code: ProtocolErrorCode;
 	readonly details: JsonValue | undefined;
 
 	constructor(error: ProtocolError) {
 		super(error.message);
-		this.name = "PiServerError";
+		this.name = "DiffexServerError";
 		this.code = error.code;
 		this.details = error.details;
 	}
 }
 
-export class PiDisconnectedError extends Error {
+export class DiffexDisconnectedError extends Error {
 	constructor(message = "Diffex client is disconnected") {
 		super(message);
-		this.name = "PiDisconnectedError";
+		this.name = "DiffexDisconnectedError";
 	}
 }
 
-export class PiClientDisposedError extends Error {
+export class DiffexClientDisposedError extends Error {
 	constructor() {
 		super("Diffex client is disposed");
-		this.name = "PiClientDisposedError";
+		this.name = "DiffexClientDisposedError";
 	}
 }
 
-export class PiSessionOwnershipError extends Error {
+export class DiffexSessionOwnershipError extends Error {
 	readonly sessionId: string;
 
 	constructor(sessionId: string, message: string) {
 		super(message);
-		this.name = "PiSessionOwnershipError";
+		this.name = "DiffexSessionOwnershipError";
 		this.sessionId = sessionId;
 	}
 }
 
-export class PiSessionDetachedError extends Error {
+export class DiffexSessionDetachedError extends Error {
 	readonly sessionId: string;
 
 	constructor(sessionId: string) {
 		super(`Session ${sessionId} is not attached`);
-		this.name = "PiSessionDetachedError";
+		this.name = "DiffexSessionDetachedError";
 		this.sessionId = sessionId;
 	}
 }
@@ -50,7 +50,7 @@ export function toError(error: unknown): Error {
 	return error instanceof Error ? error : new Error(String(error));
 }
 
-export function toDisconnectedError(error: unknown): PiDisconnectedError {
+export function toDisconnectedError(error: unknown): DiffexDisconnectedError {
 	const cause = toError(error);
-	return cause instanceof PiDisconnectedError ? cause : new PiDisconnectedError(cause.message);
+	return cause instanceof DiffexDisconnectedError ? cause : new DiffexDisconnectedError(cause.message);
 }
