@@ -10,20 +10,20 @@ import {
 } from "../command-options.ts";
 import type { TransportAddress } from "../transport-address.ts";
 
-export interface PiCommand {
-	readonly command: "pi";
+export interface DiffexCommand {
+	readonly command: "diffex";
 	readonly auth?: AuthInput;
 	readonly options: Args;
 	readonly listen?: readonly TransportAddress[];
 }
 
-export interface PiCommandContext {
-	runPi(command: PiCommand): void | Promise<void>;
+export interface DiffexCommandContext {
+	runDiffex(command: DiffexCommand): void | Promise<void>;
 }
 
 const listenOption = transportOption("--listen");
 
-export const piCommand = new Command<PiCommand, PiCommandContext>("pi")
+export const diffexCommand = new Command<DiffexCommand, DiffexCommandContext>("diffex")
 	.option(listenOption)
 	.option(authTokenOption)
 	.option(authTokenFileOption)
@@ -37,11 +37,11 @@ export const piCommand = new Command<PiCommand, PiCommandContext>("pi")
 		return {
 			ok: true,
 			command: {
-				command: "pi",
+				command: "diffex",
 				options,
 				...(auth === undefined ? {} : { auth }),
 				...(listen.length === 0 ? {} : { listen }),
 			},
 		};
 	})
-	.action((command, context) => context.runPi(command));
+	.action((command, context) => context.runDiffex(command));

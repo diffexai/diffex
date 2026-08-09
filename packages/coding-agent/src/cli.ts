@@ -11,7 +11,7 @@ import { main } from "./main.ts";
 
 process.title = APP_NAME;
 process.env.DIFFEX_CODING_AGENT = "true";
-process.env.AI_AGENT = "pi";
+process.env.AI_AGENT = "diffex";
 process.emitWarning = (() => {}) as typeof process.emitWarning;
 
 // Configure undici's global dispatcher before provider SDKs issue requests.
