@@ -52,7 +52,7 @@ function createPromptTool(name: string, promptSnippet?: string, promptGuidelines
 const defaultPromptTools = [
 	createPromptTool("read", "Read file contents", ["Use read to examine files instead of cat or sed."]),
 	createPromptTool("bash", "Execute bash commands (ls, grep, find, etc.)", [
-		"You can inspect PI_* environment variables for current model and session details.",
+		"You can inspect DIFFEX_* environment variables for current model and session details.",
 	]),
 	createPromptTool("edit", "Edit files", ["Edit carefully."]),
 	createPromptTool("write", "Create or overwrite files", ["Use write only for new files or complete rewrites."]),
@@ -96,9 +96,9 @@ describe("coding-agent Harness construction", () => {
 		expect(prompt).toContain("- read: Read file contents");
 		expect(prompt).toContain("- bash: Execute bash commands (ls, grep, find, etc.)");
 		expect(prompt).toContain("Use read to examine files instead of cat or sed.");
-		expect(prompt).toContain("You can inspect PI_* environment variables for current model and session details.");
+		expect(prompt).toContain("You can inspect DIFFEX_* environment variables for current model and session details.");
 		expect(prompt.indexOf("Use read to examine files")).toBeLessThan(
-			prompt.indexOf("You can inspect PI_* environment variables"),
+			prompt.indexOf("You can inspect DIFFEX_* environment variables"),
 		);
 	});
 
@@ -134,7 +134,7 @@ describe("coding-agent Harness construction", () => {
 		const session = new Session(new InMemorySessionStorage({ id: "session-file-harness", createdAt: 1 }));
 		const env = new CapturingExecutionEnv({
 			cwd: process.cwd(),
-			shellEnv: { PI_SESSION_FILE: "/stale/parent.jsonl", PI_CODING_AGENT: "true" },
+			shellEnv: { DIFFEX_SESSION_FILE: "/stale/parent.jsonl", DIFFEX_CODING_AGENT: "true" },
 		});
 		const created = await createCodingAgentHarness({
 			session,
@@ -149,15 +149,15 @@ describe("coding-agent Harness construction", () => {
 			if (!bash) throw new Error("Expected the default bash tool");
 
 			const result = await bash.execute("bash-call", {
-				command: `printf '%s' "$PI_SESSION_ID|$PI_SESSION_FILE|$PI_PROVIDER|$PI_MODEL|$PI_REASONING_LEVEL|$PI_CODING_AGENT"`,
+				command: `printf '%s' "$DIFFEX_SESSION_ID|$DIFFEX_SESSION_FILE|$DIFFEX_PROVIDER|$DIFFEX_MODEL|$DIFFEX_REASONING_LEVEL|$DIFFEX_CODING_AGENT"`,
 			});
 
 			expect(env.executionOverrides).toEqual({
-				PI_SESSION_ID: "session-file-harness",
-				PI_SESSION_FILE: "/sessions/current.jsonl",
-				PI_PROVIDER: "google",
-				PI_MODEL: "gemini-2.5-flash",
-				PI_REASONING_LEVEL: "high",
+				DIFFEX_SESSION_ID: "session-file-harness",
+				DIFFEX_SESSION_FILE: "/sessions/current.jsonl",
+				DIFFEX_PROVIDER: "google",
+				DIFFEX_MODEL: "gemini-2.5-flash",
+				DIFFEX_REASONING_LEVEL: "high",
 			});
 			expect(result.content).toEqual([
 				{
@@ -175,7 +175,7 @@ describe("coding-agent Harness construction", () => {
 		const session = new Session(new InMemorySessionStorage({ id: "dynamic-bash-session", createdAt: 1 }));
 		const env = new CapturingExecutionEnv({
 			cwd: process.cwd(),
-			shellEnv: { PI_SESSION_FILE: "/stale/parent.jsonl", PI_CODING_AGENT: "true" },
+			shellEnv: { DIFFEX_SESSION_FILE: "/stale/parent.jsonl", DIFFEX_CODING_AGENT: "true" },
 		});
 		const created = await createCodingAgentHarness({
 			session,
@@ -191,18 +191,18 @@ describe("coding-agent Harness construction", () => {
 			if (!bash) throw new Error("Expected the default bash tool");
 
 			const result = await bash.execute("bash-call", {
-				command: `printf '%s:%s' "\${PI_SESSION_FILE+x}" "$PI_SESSION_ID|$PI_PROVIDER|$PI_MODEL|$PI_REASONING_LEVEL|$PI_CODING_AGENT"`,
+				command: `printf '%s:%s' "\${DIFFEX_SESSION_FILE+x}" "$DIFFEX_SESSION_ID|$DIFFEX_PROVIDER|$DIFFEX_MODEL|$DIFFEX_REASONING_LEVEL|$DIFFEX_CODING_AGENT"`,
 			});
 
 			expect(env.executionOverrides).toEqual({
-				PI_SESSION_ID: "dynamic-bash-session",
-				PI_SESSION_FILE: "",
-				PI_PROVIDER: "anthropic",
-				PI_MODEL: "claude-sonnet-4-5",
-				PI_REASONING_LEVEL: "low",
+				DIFFEX_SESSION_ID: "dynamic-bash-session",
+				DIFFEX_SESSION_FILE: "",
+				DIFFEX_PROVIDER: "anthropic",
+				DIFFEX_MODEL: "claude-sonnet-4-5",
+				DIFFEX_REASONING_LEVEL: "low",
 			});
-			expect(Object.hasOwn(env.executionOverrides ?? {}, "PI_SESSION_FILE")).toBe(true);
-			expect(env.executionOverrides?.PI_SESSION_FILE).toBe("");
+			expect(Object.hasOwn(env.executionOverrides ?? {}, "DIFFEX_SESSION_FILE")).toBe(true);
+			expect(env.executionOverrides?.DIFFEX_SESSION_FILE).toBe("");
 			expect(result.content).toEqual([
 				{
 					type: "text",
@@ -290,7 +290,7 @@ describe("coding-agent Harness construction", () => {
 		[
 			"bash",
 			"Execute bash commands (ls, grep, find, etc.)",
-			"You can inspect PI_* environment variables for current model and session details.",
+			"You can inspect DIFFEX_* environment variables for current model and session details.",
 		],
 		["read", "Read file contents", "Use read to examine files instead of cat or sed."],
 		[
@@ -342,7 +342,7 @@ describe("coding-agent Harness construction", () => {
 		expect(prompt).toContain("- write: Create or overwrite files");
 		expect(prompt).toContain("- read: Read file contents");
 		expect(prompt).not.toContain("- bash:");
-		expect(prompt).not.toContain("You can inspect PI_* environment variables");
+		expect(prompt).not.toContain("You can inspect DIFFEX_* environment variables");
 		expect(prompt).toContain('<project_instructions path="/workspace/AGENTS.md">');
 		expect(prompt).toContain("<name>review</name>");
 		expect(prompt.indexOf("Use write only for new files or complete rewrites.")).toBeLessThan(

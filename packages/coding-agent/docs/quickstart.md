@@ -30,7 +30,7 @@ yarn global remove @earendil-works/pi-coding-agent
 bun uninstall -g @earendil-works/pi-coding-agent
 ```
 
-Uninstalling Diffex leaves settings, credentials, sessions, and installed Diffex packages in `~/.pi/agent/`.
+Uninstalling Diffex leaves settings, credentials, sessions, and installed Diffex packages in `~/.diffex/agent/`.
 
 Then start Diffex in the project directory you want it to work on:
 
@@ -62,7 +62,7 @@ export ANTHROPIC_API_KEY=sk-ant-...
 pi
 ```
 
-You can also run `/login` and select an API-key provider to store the key in `~/.pi/agent/auth.json`.
+You can also run `/login` and select an API-key provider to store the key in `~/.diffex/agent/auth.json`.
 
 See [Providers](providers.md) for all supported providers, environment variables, and cloud-provider setup.
 
@@ -97,7 +97,7 @@ Diffex loads context files at startup. Add an `AGENTS.md` file to tell it how to
 
 Diffex loads:
 
-- `~/.pi/agent/AGENTS.md` for global instructions
+- `~/.diffex/agent/AGENTS.md` for global instructions
 - `AGENTS.md` or `CLAUDE.md` from parent directories and the current directory
 
 If a directory contains `AGENTS.override.md`, Diffex loads it instead of `AGENTS.md` or `CLAUDE.md` from that directory.

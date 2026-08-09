@@ -4,7 +4,7 @@ Diffex saves conversations as sessions so you can continue work, branch from ear
 
 ## Session Storage
 
-Sessions auto-save to `~/.pi/agent/sessions/`, organized by working directory. Each session is a JSONL file with a tree structure.
+Sessions auto-save to `~/.diffex/agent/sessions/`, organized by working directory. Each session is a JSONL file with a tree structure.
 
 ```bash
 pi -c                  # Continue most recent session

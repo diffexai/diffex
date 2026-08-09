@@ -173,7 +173,7 @@ function getCwdRewriteVariants(sourceCwd: string): string[] {
 
 function getCiWorkdirName(sourceCwd: string): string | undefined {
 	const name = getPathTailName(sourceCwd);
-	return /^pi-ci-[0-9a-f]{32}$/i.test(name) ? name : undefined;
+	return /^diffex-ci-[0-9a-f]{32}$/i.test(name) ? name : undefined;
 }
 
 function detectSessionPlatform(cwd: string): SessionPlatform {

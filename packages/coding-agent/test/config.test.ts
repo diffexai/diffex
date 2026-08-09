@@ -1,9 +1,13 @@
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
-import { tmpdir } from "os";
+import { homedir, tmpdir } from "os";
 import { delimiter, join } from "path";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, it, test, vi } from "vitest";
 import {
+	CONFIG_DIR_NAME,
 	detectInstallMethod,
+	ENV_AGENT_DIR,
+	ENV_SESSION_DIR,
+	getAgentDir,
 	getSelfUpdateCommand,
 	getSelfUpdateUnavailableInstruction,
 	getShareViewerUrl,
@@ -12,8 +16,8 @@ import {
 
 const execPathDescriptor = Object.getOwnPropertyDescriptor(process, "execPath");
 const originalPath = process.env.PATH;
-const originalPiPackageDir = process.env.PI_PACKAGE_DIR;
-const originalPiShareViewerUrl = process.env.PI_SHARE_VIEWER_URL;
+const originalPiPackageDir = process.env.DIFFEX_PACKAGE_DIR;
+const originalPiShareViewerUrl = process.env.DIFFEX_SHARE_VIEWER_URL;
 const originalArgv1 = process.argv[1];
 let tempDir: string | undefined;
 
@@ -34,14 +38,14 @@ afterEach(() => {
 		process.env.PATH = originalPath;
 	}
 	if (originalPiPackageDir === undefined) {
-		delete process.env.PI_PACKAGE_DIR;
+		delete process.env.DIFFEX_PACKAGE_DIR;
 	} else {
-		process.env.PI_PACKAGE_DIR = originalPiPackageDir;
+		process.env.DIFFEX_PACKAGE_DIR = originalPiPackageDir;
 	}
 	if (originalPiShareViewerUrl === undefined) {
-		delete process.env.PI_SHARE_VIEWER_URL;
+		delete process.env.DIFFEX_SHARE_VIEWER_URL;
 	} else {
-		process.env.PI_SHARE_VIEWER_URL = originalPiShareViewerUrl;
+		process.env.DIFFEX_SHARE_VIEWER_URL = originalPiShareViewerUrl;
 	}
 	if (originalArgv1 === undefined) {
 		process.argv.splice(1, 1);
@@ -62,7 +66,7 @@ function createNpmPrefixInstall(template = "pi-prefix-"): { prefix: string; pack
 	const packageDir = join(scopeDir, "pi-coding-agent");
 	mkdirSync(packageDir, { recursive: true });
 	tempDir = prefix;
-	process.env.PI_PACKAGE_DIR = packageDir;
+	process.env.DIFFEX_PACKAGE_DIR = packageDir;
 	setExecPath(join(packageDir, "dist", "cli.js"));
 	return { prefix, packageDir };
 }
@@ -78,7 +82,7 @@ function createPnpmGlobalInstall(): { root: string; packageDir: string } {
 	chmodSync(join(binDir, process.platform === "win32" ? "pnpm.cmd" : "pnpm"), 0o755);
 	tempDir = temp;
 	process.env.PATH = `${binDir}${delimiter}${originalPath ?? ""}`;
-	process.env.PI_PACKAGE_DIR = packageDir;
+	process.env.DIFFEX_PACKAGE_DIR = packageDir;
 	setExecPath(
 		join(
 			root,
@@ -105,7 +109,7 @@ function createYarnGlobalInstall(): { globalDir: string; packageDir: string } {
 	chmodSync(join(binDir, process.platform === "win32" ? "yarn.cmd" : "yarn"), 0o755);
 	tempDir = temp;
 	process.env.PATH = `${binDir}${delimiter}${originalPath ?? ""}`;
-	process.env.PI_PACKAGE_DIR = packageDir;
+	process.env.DIFFEX_PACKAGE_DIR = packageDir;
 	setExecPath(join(globalDir, ".yarn", "@mariozechner", "pi-coding-agent", "dist", "cli.js"));
 	return { globalDir, packageDir };
 }
@@ -123,7 +127,7 @@ function createBunGlobalInstall(): { packageDir: string } {
 	chmodSync(join(bunBin, process.platform === "win32" ? "bun.cmd" : "bun"), 0o755);
 	tempDir = temp;
 	process.env.PATH = `${bunBin}${delimiter}${originalPath ?? ""}`;
-	process.env.PI_PACKAGE_DIR = packageDir;
+	process.env.DIFFEX_PACKAGE_DIR = packageDir;
 	setExecPath(join(packageDir, "dist", "cli.js"));
 	return { packageDir };
 }
@@ -154,15 +158,36 @@ function createFakeBunScript(bunBin: string): string {
 
 describe("getShareViewerUrl", () => {
 	test("uses a direct GitHub Gist URL by default", () => {
-		delete process.env.PI_SHARE_VIEWER_URL;
+		delete process.env.DIFFEX_SHARE_VIEWER_URL;
 
 		expect(getShareViewerUrl("abc123")).toBe("https://gist.github.com/abc123");
 	});
 
 	test("preserves custom share viewers", () => {
-		process.env.PI_SHARE_VIEWER_URL = "https://viewer.example/session/";
+		process.env.DIFFEX_SHARE_VIEWER_URL = "https://viewer.example/session/";
 
 		expect(getShareViewerUrl("abc123")).toBe("https://viewer.example/session/#abc123");
+	});
+});
+
+describe("Diffex configuration namespace", () => {
+	afterEach(() => {
+		vi.unstubAllEnvs();
+	});
+
+	it("uses Diffex names and paths by default", () => {
+		vi.stubEnv(ENV_AGENT_DIR, "");
+
+		expect(CONFIG_DIR_NAME).toBe(".diffex");
+		expect(ENV_AGENT_DIR).toBe("DIFFEX_CODING_AGENT_DIR");
+		expect(ENV_SESSION_DIR).toBe("DIFFEX_CODING_AGENT_SESSION_DIR");
+		expect(getAgentDir()).toBe(join(homedir(), ".diffex", "agent"));
+	});
+
+	it("honors the Diffex agent directory override", () => {
+		vi.stubEnv("DIFFEX_CODING_AGENT_DIR", "/tmp/diffex-agent");
+
+		expect(getAgentDir()).toBe("/tmp/diffex-agent");
 	});
 });
 
@@ -304,7 +329,7 @@ describe("detectInstallMethod", () => {
 
 	test("does not infer Windows npm custom prefixes from package paths", () => {
 		const packageDir = "C:\\Users\\Admin\\npm prefix\\node_modules\\@earendil-works\\pi-coding-agent";
-		process.env.PI_PACKAGE_DIR = packageDir;
+		process.env.DIFFEX_PACKAGE_DIR = packageDir;
 		setExecPath(`${packageDir}\\dist\\cli.js`);
 
 		expect(detectInstallMethod()).toBe("npm");
@@ -381,7 +406,7 @@ describe("detectInstallMethod", () => {
 		chmodSync(join(binDir, process.platform === "win32" ? "pnpm.cmd" : "pnpm"), 0o755);
 		tempDir = temp;
 		process.env.PATH = `${binDir}${delimiter}${originalPath ?? ""}`;
-		process.env.PI_PACKAGE_DIR = storePackageDir;
+		process.env.DIFFEX_PACKAGE_DIR = storePackageDir;
 		process.argv[1] = join(globalPackageDir, "dist", "cli.js");
 		setExecPath(join(storePackageDir, "dist", "cli.js"));
 

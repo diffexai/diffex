@@ -32,7 +32,7 @@ type InteractiveModePrototype = {
 };
 
 const interactiveModePrototype = InteractiveMode.prototype as unknown as InteractiveModePrototype;
-const originalPiShareViewerUrl = process.env.PI_SHARE_VIEWER_URL;
+const originalPiShareViewerUrl = process.env.DIFFEX_SHARE_VIEWER_URL;
 
 function mockSuccessfulGistCreation(gistUrl: string): void {
 	childProcessMocks.spawnSync.mockReturnValue({ status: 0 });
@@ -73,16 +73,16 @@ function createContext(): {
 
 describe("InteractiveMode /share", () => {
 	beforeEach(() => {
-		delete process.env.PI_SHARE_VIEWER_URL;
+		delete process.env.DIFFEX_SHARE_VIEWER_URL;
 		childProcessMocks.spawn.mockReset();
 		childProcessMocks.spawnSync.mockReset();
 	});
 
 	afterEach(() => {
 		if (originalPiShareViewerUrl === undefined) {
-			delete process.env.PI_SHARE_VIEWER_URL;
+			delete process.env.DIFFEX_SHARE_VIEWER_URL;
 		} else {
-			process.env.PI_SHARE_VIEWER_URL = originalPiShareViewerUrl;
+			process.env.DIFFEX_SHARE_VIEWER_URL = originalPiShareViewerUrl;
 		}
 	});
 
@@ -106,7 +106,7 @@ describe("InteractiveMode /share", () => {
 	});
 
 	it("shows both the custom viewer and source Gist", async () => {
-		process.env.PI_SHARE_VIEWER_URL = "https://viewer.example/session/";
+		process.env.DIFFEX_SHARE_VIEWER_URL = "https://viewer.example/session/";
 		const gistUrl = "https://gist.github.com/example/abc123";
 		mockSuccessfulGistCreation(gistUrl);
 		const { context, showError, showStatus } = createContext();

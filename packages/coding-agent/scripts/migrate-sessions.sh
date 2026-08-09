@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 #
-# Migrate sessions from ~/.pi/agent/*.jsonl to proper session directories.
+# Migrate sessions from ~/.diffex/agent/*.jsonl to proper session directories.
 # This fixes sessions created by the bug in v0.30.0 where sessions were
-# saved to ~/.pi/agent/ instead of ~/.pi/agent/sessions/<encoded-cwd>/.
+# saved to ~/.diffex/agent/ instead of ~/.diffex/agent/sessions/<encoded-cwd>/.
 #
 # Usage: ./migrate-sessions.sh [--dry-run]
 #
 
 set -e
 
-AGENT_DIR="${PI_AGENT_DIR:-$HOME/.pi/agent}"
+AGENT_DIR="${DIFFEX_AGENT_DIR:-$HOME/.diffex/agent}"
 DRY_RUN=false
 
 if [[ "$1" == "--dry-run" ]]; then
