@@ -30,6 +30,7 @@ Use `/trust` in interactive mode to save a project trust decision for future ses
 | `defaultProvider` | string | - | Default provider (e.g., `"anthropic"`, `"openai"`) |
 | `defaultModel` | string | - | Default model ID |
 | `defaultProfile` | string | automatic | Task profile ID or path to pin; omit or use `"auto"` for intent routing |
+| `routerModel` | string | cheapest sibling | Model used to classify each prompt, as `provider/model`; omit or use `"auto"` to pick automatically |
 | `defaultThinkingLevel` | string | - | `"off"`, `"minimal"`, `"low"`, `"medium"`, `"high"`, `"xhigh"`, `"max"` |
 | `hideThinkingBlock` | boolean | `false` | Hide thinking blocks in output |
 | `showCacheMissNotices` | boolean | `false` | Show transcript notices for significant prompt-cache misses |

@@ -92,6 +92,7 @@ export interface Settings {
 	defaultProvider?: string;
 	defaultModel?: string;
 	defaultProfile?: string; // Optional pinned profile ID or path; undefined enables automatic intent routing
+	routerModel?: string; // Model used for task-profile routing ("provider/model"); undefined picks a cheap sibling of the session model
 	defaultThinkingLevel?: ThinkingLevel;
 	transport?: TransportSetting; // default: "auto"
 	steeringMode?: "all" | "one-at-a-time";
@@ -691,6 +692,17 @@ export class SettingsManager {
 	getDefaultProfile(): string | undefined {
 		const profile = this.settings.defaultProfile;
 		return profile && profile !== "auto" ? profile : undefined;
+	}
+
+	getRouterModel(): string | undefined {
+		const routerModel = this.settings.routerModel?.trim();
+		return routerModel && routerModel !== "auto" ? routerModel : undefined;
+	}
+
+	setRouterModel(routerModel: string | undefined): void {
+		this.globalSettings.routerModel = routerModel && routerModel !== "auto" ? routerModel : undefined;
+		this.markModified("routerModel");
+		this.save();
 	}
 
 	setDefaultProvider(provider: string): void {

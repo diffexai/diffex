@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { Api, Model } from "@earendil-works/pi-ai";
 import { stripFrontmatter } from "../utils/frontmatter.ts";
 import { resolvePath } from "../utils/paths.ts";
 import type { AgentSession, PromptOptions } from "./agent-session.ts";
@@ -112,6 +113,8 @@ function extractUserMessageText(content: string | Array<{ type: string; text?: s
 const ROUTING_CONTEXT_MAX_CHARS = 6_000;
 const ROUTING_HANDOFF_MAX_CHARS = 2_000;
 const ROUTING_TIMEOUT_MS = 15_000;
+/** The router prompt bounds user text at 8k and recent context at 12k characters, plus candidates. */
+const MIN_ROUTER_CONTEXT_WINDOW = 32_000;
 const BUILTIN_SLASH_COMMAND_NAMES = new Set(BUILTIN_SLASH_COMMANDS.map((command) => command.name));
 
 /**
@@ -676,11 +679,43 @@ export class AgentSessionRuntime {
 		return { cancelled: false };
 	}
 
+	/**
+	 * Pick the model used to classify the task before each prompt.
+	 *
+	 * Routing runs on every prompt, so it should not cost a full turn on the main model. Preference
+	 * order is the configured `routerModel`, then the cheapest sibling from the same provider and API
+	 * with enough context for the router prompt, then the session model.
+	 */
+	private resolveProfileRouterModel(sessionModel: Model<Api>): Model<Api> {
+		const configured = this.services.settingsManager.getRouterModel();
+		if (configured) {
+			const [provider, ...rest] = configured.split("/");
+			const id = rest.join("/") || provider;
+			const match = this.session.modelRuntime
+				.getModels(rest.length > 0 ? provider : undefined)
+				.find((candidate) => candidate.id === id);
+			if (match) return match;
+		}
+		const sessionInputCost = sessionModel.cost?.input;
+		const cheapest = this.session.modelRuntime
+			.getModels(sessionModel.provider)
+			.filter(
+				(candidate) =>
+					candidate.api === sessionModel.api &&
+					(candidate.contextWindow ?? 0) >= MIN_ROUTER_CONTEXT_WINDOW &&
+					typeof candidate.cost?.input === "number" &&
+					(sessionInputCost === undefined || candidate.cost.input < sessionInputCost),
+			)
+			.sort((left, right) => (left.cost?.input ?? 0) - (right.cost?.input ?? 0))[0];
+		return cheapest ?? sessionModel;
+	}
+
 	private async completeProfileRoute(routerPrompt: string): Promise<string> {
-		const model = this.session.model;
-		if (!model) {
+		const sessionModel = this.session.model;
+		if (!sessionModel) {
 			throw new Error("No model is selected for task profile routing");
 		}
+		const model = this.resolveProfileRouterModel(sessionModel);
 		const response = await this.session.modelRuntime.completeSimple(
 			model,
 			{
