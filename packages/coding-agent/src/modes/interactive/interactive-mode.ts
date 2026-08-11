@@ -926,7 +926,7 @@ export class InteractiveMode {
 
 		// Add header with keybindings from config (unless silenced)
 		if (this.options.verbose || !this.settingsManager.getQuietStartup()) {
-			const logo = theme.bold(theme.fg("border", "Diffex")) + theme.fg("dim", ` v${this.version}`);
+			const logo = theme.bold(theme.fg("mdLink", "Diffex")) + theme.fg("dim", ` v${this.version}`);
 			const projectDirectory = theme.fg(
 				"dim",
 				formatCwdForFooter(this.sessionManager.getCwd(), process.env.HOME || process.env.USERPROFILE),
