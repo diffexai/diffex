@@ -91,6 +91,13 @@ A package can expose profiles with its `pi.profiles` field:
 Use `defaultProfile` in `settings.json` to pin a default profile by ID or path.
 Omit `defaultProfile`, or set it to `"auto"`, to keep automatic routing enabled.
 
+### Routing cost
+
+Routing classifies every prompt, so it runs on a small model rather than the session model.
+By default Diffex picks the cheapest model from the same provider and API that still has enough context for the router prompt, and falls back to the session model when there is no cheaper sibling.
+Set `routerModel` in `settings.json` to `"provider/model"` to choose one explicitly, or `"auto"` to restore automatic selection.
+Pinning a profile disables routing entirely, so no classification request is made.
+
 ## User instructions
 
 `AGENTS.md` is the user-controlled instruction layer for global and repository guidance.
