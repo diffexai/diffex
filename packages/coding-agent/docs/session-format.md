@@ -200,6 +200,15 @@ For sessions with a parent (created via `/fork`, `/clone`, or `newSession({ pare
 {"type":"session","version":3,"id":"uuid","timestamp":"2024-12-03T14:00:00.000Z","cwd":"/path/to/project","parentSession":"/path/to/original/session.jsonl"}
 ```
 
+Sessions can also persist the selected task profile and routing mode:
+
+```json
+{"type":"session","version":3,"id":"uuid","timestamp":"2024-12-03T14:00:00.000Z","cwd":"/path/to/project","profile":{"id":"research","hash":"sha256","routing":"auto"}}
+```
+
+The profile metadata contains the profile `id`, its content `hash`, and an `auto` or `pinned` routing mode.
+Non-built-in profiles also record `source`, which is the manifest path used to restore the same profile.
+
 ### SessionMessageEntry
 
 A message in the conversation. The `message` field contains an `AgentMessage`.
@@ -400,6 +409,7 @@ Key methods for working with sessions programmatically.
 
 ### Instance Methods - Session Management
 - `newSession(options?)` - Start a new session (options: `{ parentSession?: string }`)
+- `setProfileMetadata(profile)` - Persist the active task profile and routing mode in the session header
 - `setSessionFile(path)` - Switch to a different session file
 - `createBranchedSession(leafId)` - Extract branch to new session file
 

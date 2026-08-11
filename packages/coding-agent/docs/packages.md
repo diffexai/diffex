@@ -1,8 +1,10 @@
-> Diffex can help you create Diffex packages. Ask it to bundle your extensions, skills, prompt templates, or themes.
+> Diffex can help you create Diffex packages.
+> Ask it to bundle your task profiles, extensions, skills, prompt templates, or themes.
 
 # Diffex Packages
 
-Diffex packages bundle extensions, skills, prompt templates, and themes so you can share them through npm or git. A package can declare resources in `package.json` under the compatibility `pi` key, or use conventional directories.
+Diffex packages bundle task profiles, extensions, skills, prompt templates, and themes so you can share them through npm or git.
+A package can declare resources in `package.json` under the compatibility `pi` key, or use conventional directories.
 
 ## Table of Contents
 
@@ -125,7 +127,8 @@ Add a `pi` manifest to `package.json` or use conventional directories. Include t
     "extensions": ["./extensions"],
     "skills": ["./skills"],
     "prompts": ["./prompts"],
-    "themes": ["./themes"]
+    "themes": ["./themes"],
+    "profiles": ["./profiles"]
   }
 }
 ```
@@ -163,10 +166,13 @@ If no `pi` manifest is present, Diffex auto-discovers resources from these direc
 - `skills/` recursively finds `SKILL.md` folders and loads top-level `.md` files as skills
 - `prompts/` loads `.md` files
 - `themes/` loads `.json` files
+- `profiles/` recursively finds `profile.json` manifests
 
 ## Dependencies
 
-Third party runtime dependencies belong in `dependencies` in `package.json`. Dependencies that do not register extensions, skills, prompt templates, or themes also belong in `dependencies`. When Diffex installs a package from npm or git, it runs `npm install`, so those dependencies are installed automatically.
+Third party runtime dependencies belong in `dependencies` in `package.json`.
+Dependencies that do not register profiles, extensions, skills, prompt templates, or themes also belong in `dependencies`.
+When Diffex installs a package from npm or git, it runs `npm install`, so those dependencies are installed automatically.
 
 Diffex bundles core packages for extensions and skills. If you import any of these, list them in `peerDependencies` with a `"*"` range and do not bundle them: `@earendil-works/pi-ai`, `@earendil-works/pi-agent-core`, `@earendil-works/pi-coding-agent`, `@earendil-works/pi-tui`, `typebox`.
 
@@ -200,7 +206,8 @@ Filter what a package loads using the object form in settings:
       "extensions": ["extensions/*.ts", "!extensions/legacy.ts"],
       "skills": [],
       "prompts": ["prompts/review.md"],
-      "themes": ["+themes/legacy.json"]
+      "themes": ["+themes/legacy.json"],
+      "profiles": ["profiles/research/profile.json"]
     }
   ]
 }
@@ -217,7 +224,9 @@ Filter what a package loads using the object form in settings:
 
 ## Enable and Disable Resources
 
-Use `pi config` to enable or disable extensions, skills, prompt templates, and themes from installed packages and local directories. `pi config` starts in global settings (`~/.pi/agent/settings.json`); press Tab to switch between global and project-local modes. Use `pi config -l` to start in project overrides (`.pi/settings.json`) with inherited global resources dimmed.
+Use `pi config` to enable or disable task profiles, extensions, skills, prompt templates, and themes from installed packages and local directories.
+`pi config` starts in global settings (`~/.pi/agent/settings.json`); press Tab to switch between global and project-local modes.
+Use `pi config -l` to start in project overrides (`.pi/settings.json`) with inherited global resources dimmed.
 
 ## Scope and Deduplication
 
