@@ -20,6 +20,7 @@ import type {
 	LoadExtensionsResult,
 } from "../src/core/extensions/index.ts";
 import { createExtensionRuntime, loadExtensionFromFactory } from "../src/core/extensions/loader.ts";
+import { loadTaskProfiles } from "../src/core/profiles.ts";
 import type { ResourceLoader } from "../src/core/resource-loader.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
 import { SettingsManager } from "../src/core/settings-manager.ts";
@@ -216,13 +217,19 @@ export function createTestResourceLoader(options: CreateTestResourceLoaderOption
 		errors: [],
 		runtime: createExtensionRuntime(),
 	};
+	const profiles = loadTaskProfiles();
+	const activeProfile = profiles.registry.get("coding");
+	if (!activeProfile) throw new Error("Built-in coding task profile is unavailable");
 
 	return {
 		getExtensions: () => extensionsResult,
 		getSkills: () => ({ skills: [], diagnostics: [] }),
 		getPrompts: () => ({ prompts: [], diagnostics: [] }),
 		getThemes: () => ({ themes: [], diagnostics: [] }),
+		getProfiles: () => profiles,
+		getActiveProfile: () => activeProfile,
 		getAgentsFiles: () => ({ agentsFiles: [] }),
+		getEvolvedNotes: () => ({ evolvedNotes: [], diagnostics: [] }),
 		getSystemPrompt: () => undefined,
 		getSystemPromptSource: () => undefined,
 		getAppendSystemPrompt: () => [],

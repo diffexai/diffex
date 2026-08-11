@@ -32,8 +32,8 @@ const TRUST_REQUIRING_PROJECT_CONFIG_RESOURCES = [
 	"skills",
 	"prompts",
 	"themes",
-	"SYSTEM.md",
-	"APPEND_SYSTEM.md",
+	"profiles",
+	"EVOLVED.md",
 ] as const;
 
 function normalizeCwd(cwd: string): string {

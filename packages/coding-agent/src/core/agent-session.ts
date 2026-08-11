@@ -14,7 +14,7 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { basename, dirname } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import type {
 	Agent,
 	AgentEvent,
@@ -46,6 +46,7 @@ import {
 	resetApiProviders,
 	streamSimple,
 } from "@earendil-works/pi-ai/compat";
+import { CONFIG_DIR_NAME } from "../config.ts";
 import { getThemeByName, theme } from "../modes/interactive/theme/theme.ts";
 import { stripFrontmatter } from "../utils/frontmatter.ts";
 import { resolvePath } from "../utils/paths.ts";
@@ -65,6 +66,7 @@ import {
 	shouldCompact,
 } from "./compaction/index.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
+import { evolvedPromptIncludesNote } from "./evolved.ts";
 import { exportSessionToHtml, type ToolHtmlRenderer } from "./export-html/index.ts";
 import { createToolHtmlRenderer } from "./export-html/tool-renderer.ts";
 import {
@@ -83,6 +85,7 @@ import {
 	type SessionBeforeTreeResult,
 	type SessionStartEvent,
 	type ShutdownHandler,
+	type ToolCallEventResult,
 	type ToolDefinition,
 	type ToolExecutionEndEvent,
 	type ToolExecutionStartEvent,
@@ -99,6 +102,13 @@ import { ModelRegistry } from "./model-registry.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.ts";
 import type { ResourceExtensionPaths, ResourceLoader } from "./resource-loader.ts";
+import {
+	findSelfEvolutionPolicyViolation,
+	restoreSelfEvolutionProtection,
+	type SelfEvolutionProtectionOptions,
+	type SelfEvolutionRestoreResult,
+	snapshotSelfEvolutionProtection,
+} from "./self-evolution-policy.ts";
 import type { BranchSummaryEntry, CompactionEntry, SessionEntry, SessionManager } from "./session-manager.ts";
 import { CURRENT_SESSION_VERSION, getLatestCompactionEntry, type SessionHeader } from "./session-manager.ts";
 import type { SettingsManager } from "./settings-manager.ts";
@@ -214,6 +224,18 @@ export interface AgentSessionConfig {
 	allowedToolNames?: string[];
 	/** Optional denylist of tool names. When provided, these tool names are not exposed. */
 	excludedToolNames?: string[];
+	/** Built-in tool names that the active task profile does not permit. Custom overrides remain eligible. */
+	excludedBuiltinToolNames?: string[];
+	/** Additional exact files protected from model-initiated mutation. */
+	selfEvolutionProtectedPaths?: string[];
+	/** Profile roots protected recursively, including unauthorized new entries. */
+	selfEvolutionProtectedRoots?: string[];
+	/** Durable location for rejected post-tool versions before protected state is restored. */
+	selfEvolutionQuarantineDir?: string;
+	/** Exact EVOLVED paths eligible for the validated evolve tool's selected scope. */
+	selfEvolutionEvolvedPaths?: { globalPath: string; projectPath?: string };
+	/** Exact built-in evolve definition eligible for the selected EVOLVED path exemption. */
+	selfEvolutionEvolveTool?: ToolDefinition;
 	/**
 	 * Override base tools (useful for custom runtimes).
 	 *
@@ -351,6 +373,13 @@ export class AgentSession {
 	private _initialActiveToolNames?: string[];
 	private _allowedToolNames?: Set<string>;
 	private _excludedToolNames?: Set<string>;
+	private _excludedBuiltinToolNames?: Set<string>;
+	private _selfEvolutionProtectedPaths: string[];
+	private _selfEvolutionProtectedRoots: string[];
+	private _selfEvolutionQuarantineDir?: string;
+	private _selfEvolutionEvolvedPaths?: { globalPath: string; projectPath?: string };
+	private _selfEvolutionEvolveTool?: ToolDefinition;
+	private _selfEvolutionExecutionQueue: Promise<void> = Promise.resolve();
 	private _baseToolsOverride?: Record<string, AgentTool>;
 	private _sessionStartEvent: SessionStartEvent;
 	private _extensionUIContext?: ExtensionUIContext;
@@ -387,6 +416,14 @@ export class AgentSession {
 		this._initialActiveToolNames = config.initialActiveToolNames;
 		this._allowedToolNames = config.allowedToolNames ? new Set(config.allowedToolNames) : undefined;
 		this._excludedToolNames = config.excludedToolNames ? new Set(config.excludedToolNames) : undefined;
+		this._excludedBuiltinToolNames = config.excludedBuiltinToolNames
+			? new Set(config.excludedBuiltinToolNames)
+			: undefined;
+		this._selfEvolutionProtectedPaths = config.selfEvolutionProtectedPaths ?? [];
+		this._selfEvolutionProtectedRoots = config.selfEvolutionProtectedRoots ?? [];
+		this._selfEvolutionQuarantineDir = config.selfEvolutionQuarantineDir;
+		this._selfEvolutionEvolvedPaths = config.selfEvolutionEvolvedPaths;
+		this._selfEvolutionEvolveTool = config.selfEvolutionEvolveTool;
 		this._baseToolsOverride = config.baseToolsOverride;
 		this._sessionStartEvent = config.sessionStartEvent ?? { type: "session_start", reason: "startup" };
 
@@ -468,6 +505,113 @@ export class AgentSession {
 		}
 	}
 
+	private _getSelfEvolutionProtectionOptions(allowedMutationPath?: string): SelfEvolutionProtectionOptions {
+		const profilePaths: string[] = [];
+		const profileRoots = new Set(this._selfEvolutionProtectedRoots);
+		for (const profile of this._resourceLoader.getProfiles().profiles) {
+			for (const path of [profile.source.path, profile.source.promptPath]) {
+				if (!path || path.startsWith("<")) continue;
+				profilePaths.push(path);
+				let current = dirname(path);
+				while (true) {
+					if (basename(current) === "profiles") {
+						profileRoots.add(current);
+						break;
+					}
+					const parent = dirname(current);
+					if (parent === current) break;
+					current = parent;
+				}
+			}
+		}
+
+		const protectedPaths = [
+			...this._selfEvolutionProtectedPaths,
+			...[this._selfEvolutionEvolvedPaths?.globalPath, this._selfEvolutionEvolvedPaths?.projectPath].filter(
+				(path): path is string => path !== undefined,
+			),
+			join(this._cwd, CONFIG_DIR_NAME, "EVOLVED.md"),
+			...this._resourceLoader.getAgentsFiles().agentsFiles.map(({ path }) => path),
+			...this._resourceLoader.getEvolvedNotes().evolvedNotes.map(({ path }) => path),
+			...[
+				this._resourceLoader.getSystemPromptSource()?.path,
+				...this._resourceLoader.getAppendSystemPromptSources().map(({ path }) => path),
+			].filter((path): path is string => path !== undefined),
+			...profilePaths,
+		];
+		const allowedPath = allowedMutationPath ? resolve(this._cwd, allowedMutationPath) : undefined;
+		return {
+			cwd: this._cwd,
+			protectedPaths: [...new Set(protectedPaths)].filter(
+				(path) => !allowedPath || resolve(this._cwd, path) !== allowedPath,
+			),
+			protectedRoots: [...profileRoots],
+			quarantineDir: this._selfEvolutionQuarantineDir,
+			allowedMutationPath: allowedPath,
+		};
+	}
+
+	private _allowedEvolveMutationPath(params: unknown): string | undefined {
+		if (!params || typeof params !== "object" || !("scope" in params)) return undefined;
+		if (params.scope === "global") return this._selfEvolutionEvolvedPaths?.globalPath;
+		if (params.scope === "project") return this._selfEvolutionEvolvedPaths?.projectPath;
+		return undefined;
+	}
+
+	private _selfEvolutionPolicyError(restoration: SelfEvolutionRestoreResult): string | undefined {
+		if (!restoration.quarantinePath && restoration.errors.length === 0) return undefined;
+		const recovery = restoration.quarantinePath
+			? ` Rejected post-tool state was preserved at ${restoration.quarantinePath}.`
+			: "";
+		if (restoration.errors.length > 0) {
+			return `A model tool changed protected instruction or profile state, and recovery was incomplete. ${restoration.errors.map(({ reason }) => reason).join(" ")}${recovery}`;
+		}
+		return `A model tool changed protected instruction or profile state. The changes were restored.${recovery}`;
+	}
+
+	private async _executeWithSelfEvolutionProtection<T>(
+		allowEvolvedMutation: boolean,
+		params: unknown,
+		execute: () => Promise<T>,
+	): Promise<T> {
+		const previousExecution = this._selfEvolutionExecutionQueue;
+		let releaseExecution = () => {};
+		this._selfEvolutionExecutionQueue = new Promise<void>((resolve) => {
+			releaseExecution = resolve;
+		});
+		await previousExecution;
+		try {
+			const allowedMutationPath = allowEvolvedMutation ? this._allowedEvolveMutationPath(params) : undefined;
+			const snapshot = snapshotSelfEvolutionProtection(this._getSelfEvolutionProtectionOptions(allowedMutationPath));
+			let outcome: { result: T } | { error: unknown };
+			try {
+				outcome = { result: await execute() };
+			} catch (error) {
+				outcome = { error };
+			}
+			const policyError = this._selfEvolutionPolicyError(restoreSelfEvolutionProtection(snapshot));
+			if (policyError) throw new Error(policyError);
+			if ("error" in outcome) throw outcome.error;
+			return outcome.result;
+		} finally {
+			releaseExecution();
+		}
+	}
+
+	private _wrapToolWithSelfEvolutionProtection(tool: AgentTool, allowEvolvedMutation: boolean): AgentTool {
+		return {
+			...tool,
+			// Agent-core runs the entire beforeToolCall -> execute -> afterToolCall lifecycle sequentially
+			// when any call in a batch is sequential. This prevents one hook snapshot from observing or
+			// restoring another call's in-flight protected mutation. The queue also covers direct executes.
+			executionMode: "sequential",
+			execute: async (toolCallId, params, signal, onUpdate) =>
+				await this._executeWithSelfEvolutionProtection(allowEvolvedMutation, params, () =>
+					tool.execute(toolCallId, params, signal, onUpdate),
+				),
+		};
+	}
+
 	/**
 	 * Install tool hooks once on the Agent instance.
 	 *
@@ -479,29 +623,46 @@ export class AgentSession {
 	private _installAgentToolHooks(): void {
 		this.agent.beforeToolCall = async ({ toolCall, args }) => {
 			const runner = this._extensionRunner;
-			if (!runner.hasHandlers("tool_call")) {
-				return undefined;
+			const protectionOptions = this._getSelfEvolutionProtectionOptions();
+			const hookSnapshot = snapshotSelfEvolutionProtection(protectionOptions);
+			let extensionResult: ToolCallEventResult | undefined;
+			let extensionError: unknown;
+			if (runner.hasHandlers("tool_call")) {
+				try {
+					extensionResult = await runner.emitToolCall({
+						type: "tool_call",
+						toolName: toolCall.name,
+						toolCallId: toolCall.id,
+						input: args as Record<string, unknown>,
+					});
+				} catch (err) {
+					extensionError = err;
+				}
+			}
+			const hookPolicyError = this._selfEvolutionPolicyError(restoreSelfEvolutionProtection(hookSnapshot));
+			if (hookPolicyError) return { block: true, reason: hookPolicyError };
+			if (extensionError instanceof Error) throw extensionError;
+			if (extensionError !== undefined) {
+				throw new Error(`Extension failed, blocking execution: ${String(extensionError)}`);
+			}
+			if (extensionResult?.block) {
+				return extensionResult;
 			}
 
-			try {
-				return await runner.emitToolCall({
-					type: "tool_call",
-					toolName: toolCall.name,
-					toolCallId: toolCall.id,
-					input: args as Record<string, unknown>,
-				});
-			} catch (err) {
-				if (err instanceof Error) {
-					throw err;
-				}
-				throw new Error(`Extension failed, blocking execution: ${String(err)}`);
-			}
+			const violation = findSelfEvolutionPolicyViolation(toolCall.name, args as Record<string, unknown>, {
+				...protectionOptions,
+			});
+			return violation ? { block: true, reason: violation.reason } : extensionResult;
 		};
 
 		this.agent.afterToolCall = async ({ toolCall, args, result, isError }) => {
 			const runner = this._extensionRunner;
-			const hookResult = runner.hasHandlers("tool_result")
-				? await runner.emitToolResult({
+			const hookSnapshot = snapshotSelfEvolutionProtection(this._getSelfEvolutionProtectionOptions());
+			let hookResult: Awaited<ReturnType<ExtensionRunner["emitToolResult"]>> | undefined;
+			let hookError: unknown;
+			if (runner.hasHandlers("tool_result")) {
+				try {
+					hookResult = await runner.emitToolResult({
 						type: "tool_result",
 						toolName: toolCall.name,
 						toolCallId: toolCall.id,
@@ -510,8 +671,14 @@ export class AgentSession {
 						details: result.details,
 						isError,
 						usage: result.usage,
-					})
-				: undefined;
+					});
+				} catch (error) {
+					hookError = error;
+				}
+			}
+			const hookPolicyError = this._selfEvolutionPolicyError(restoreSelfEvolutionProtection(hookSnapshot));
+			if (hookPolicyError) throw new Error(hookPolicyError);
+			if (hookError !== undefined) throw hookError;
 
 			const content = hookResult?.content ?? result.content ?? [];
 			// Runs after the extension hook so images injected or replaced by extensions are normalized too.
@@ -930,7 +1097,10 @@ export class AgentSession {
 		const validToolNames: string[] = [];
 		for (const name of toolNames) {
 			const tool = this._toolRegistry.get(name);
-			if (tool) {
+			const definition = this._toolDefinitions.get(name);
+			const isExcludedBuiltin =
+				definition?.sourceInfo.source === "builtin" && this._excludedBuiltinToolNames?.has(name);
+			if (tool && !isExcludedBuiltin) {
 				tools.push(tool);
 				validToolNames.push(name);
 			}
@@ -1042,11 +1212,22 @@ export class AgentSession {
 			loaderAppendSystemPrompt.length > 0 ? loaderAppendSystemPrompt.join("\n\n") : undefined;
 		const loadedSkills = this._resourceLoader.getSkills().skills;
 		const loadedContextFiles = this._resourceLoader.getAgentsFiles().agentsFiles;
+		const activeProfile = this._resourceLoader.getActiveProfile();
+		const evolvedNotes = this._resourceLoader
+			.getEvolvedNotes()
+			.evolvedNotes.filter(
+				(note) => note.profileId === activeProfile.id || note.profileId === "*" || note.profileId === "all",
+			)
+			.filter(
+				(note) => activeProfile.origin !== "generated" || !evolvedPromptIncludesNote(activeProfile.prompt, note),
+			);
 
 		this._baseSystemPromptOptions = {
 			cwd: this._cwd,
+			profile: activeProfile,
 			skills: loadedSkills,
 			contextFiles: loadedContextFiles,
+			evolvedNotes,
 			customPrompt: loaderSystemPrompt,
 			appendSystemPrompt,
 			selectedTools: validToolNames,
@@ -1054,6 +1235,12 @@ export class AgentSession {
 			promptGuidelines,
 		};
 		return buildSystemPrompt(this._baseSystemPromptOptions);
+	}
+
+	private _compactionInstructions(customInstructions?: string): string {
+		const profileInstructions = this._resourceLoader.getActiveProfile().compactionInstructions.trim();
+		const custom = customInstructions?.trim();
+		return custom ? `${profileInstructions}\n\nAdditional user instructions:\n${custom}` : profileInstructions;
 	}
 
 	// =========================================================================
@@ -1791,6 +1978,7 @@ export class AgentSession {
 		await this.abort();
 		this._compactionAbortController = new AbortController();
 		this._emit({ type: "compaction_start", reason: "manual" });
+		const effectiveCustomInstructions = this._compactionInstructions(customInstructions);
 
 		try {
 			if (!this.model) {
@@ -1820,7 +2008,7 @@ export class AgentSession {
 					type: "session_before_compact",
 					preparation,
 					branchEntries: pathEntries,
-					customInstructions,
+					customInstructions: effectiveCustomInstructions,
 					reason: "manual",
 					willRetry: false,
 					signal: this._compactionAbortController.signal,
@@ -1856,7 +2044,7 @@ export class AgentSession {
 					requestModel,
 					apiKey,
 					headers,
-					customInstructions,
+					effectiveCustomInstructions,
 					this._compactionAbortController.signal,
 					this.thinkingLevel,
 					this.agent.streamFunction,
@@ -2057,6 +2245,7 @@ export class AgentSession {
 	 */
 	private async _runAutoCompaction(reason: "overflow" | "threshold", willRetry: boolean): Promise<boolean> {
 		const settings = this.settingsManager.getCompactionSettings();
+		const effectiveCustomInstructions = this._compactionInstructions();
 		let started = false;
 
 		try {
@@ -2085,7 +2274,7 @@ export class AgentSession {
 					type: "session_before_compact",
 					preparation,
 					branchEntries: pathEntries,
-					customInstructions: undefined,
+					customInstructions: effectiveCustomInstructions,
 					reason,
 					willRetry,
 					signal: this._autoCompactionAbortController.signal,
@@ -2128,7 +2317,7 @@ export class AgentSession {
 					requestModel,
 					apiKey,
 					headers,
-					undefined,
+					effectiveCustomInstructions,
 					this._autoCompactionAbortController.signal,
 					this.thinkingLevel,
 					this.agent.streamFunction,
@@ -2526,7 +2715,15 @@ export class AgentSession {
 		for (const tool of wrappedExtensionTools as AgentTool[]) {
 			toolRegistry.set(tool.name, tool);
 		}
-		this._toolRegistry = toolRegistry;
+		this._toolRegistry = new Map(
+			[...toolRegistry].map(([name, tool]) => [
+				name,
+				this._wrapToolWithSelfEvolutionProtection(
+					tool,
+					definitionRegistry.get(name)?.definition === this._selfEvolutionEvolveTool,
+				),
+			]),
+		);
 
 		const nextActiveToolNames = (
 			options?.activeToolNames ? [...options.activeToolNames] : [...previousActiveToolNames]
@@ -2570,7 +2767,7 @@ export class AgentSession {
 				)
 			: createAllToolDefinitions(this._cwd, {
 					read: { autoResizeImages },
-					bash: { commandPrefix: shellCommandPrefix, shellPath },
+					bash: { commandPrefix: shellCommandPrefix, shellPath, terminateDescendantsOnExit: true },
 				});
 
 		this._baseToolDefinitions = new Map(
@@ -2935,7 +3132,7 @@ export class AgentSession {
 		);
 
 		// Prepare event data - mutable so extensions can override
-		let customInstructions = options.customInstructions;
+		let customInstructions = this._compactionInstructions(options.customInstructions);
 		let replaceInstructions = options.replaceInstructions;
 		let label = options.label;
 
@@ -3262,6 +3459,7 @@ export class AgentSession {
 			id: this.sessionManager.getSessionId(),
 			timestamp: new Date().toISOString(),
 			cwd: this.sessionManager.getCwd(),
+			profile: this.sessionManager.getHeader()?.profile,
 		};
 
 		const branchEntries = this.sessionManager.getBranch();

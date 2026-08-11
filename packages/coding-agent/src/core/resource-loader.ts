@@ -10,6 +10,12 @@ export type { ResourceCollision, ResourceDiagnostic } from "./diagnostics.ts";
 import { canonicalizePath, isLocalPath, resolvePath } from "../utils/paths.ts";
 import { createEventBus, type EventBus } from "./event-bus.ts";
 import {
+	type EvolvedDiagnostic,
+	initializeEvolvedFiles,
+	loadEvolvedNotes as loadStoredEvolvedNotes,
+	type EvolvedNote as StoredEvolvedNote,
+} from "./evolved.ts";
+import {
 	clearExtensionCache,
 	createExtensionRuntime,
 	loadExtensionFromFactory,
@@ -18,6 +24,14 @@ import {
 import type { Extension, ExtensionRuntime, InlineExtension, LoadExtensionsResult } from "./extensions/types.ts";
 import { findGitPaths } from "./footer-data-provider.ts";
 import { DefaultPackageManager, type PathMetadata, type ResolvedResource } from "./package-manager.ts";
+import {
+	BOOTSTRAP_TASK_PROFILE_ID,
+	loadTaskProfiles,
+	type ResolvedTaskProfile,
+	resolveTaskProfileSelection,
+	type TaskProfileLoadInput,
+	type TaskProfileLoadResult,
+} from "./profiles.ts";
 import type { PromptTemplate } from "./prompt-templates.ts";
 import { loadPromptTemplates } from "./prompt-templates.ts";
 import { SettingsManager } from "./settings-manager.ts";
@@ -41,13 +55,22 @@ export interface ResourceLoader {
 	getSkills(): { skills: Skill[]; diagnostics: ResourceDiagnostic[] };
 	getPrompts(): { prompts: PromptTemplate[]; diagnostics: ResourceDiagnostic[] };
 	getThemes(): { themes: Theme[]; diagnostics: ResourceDiagnostic[] };
+	getProfiles(): TaskProfileLoadResult;
+	getActiveProfile(): ResolvedTaskProfile;
 	getAgentsFiles(): { agentsFiles: Array<{ path: string; content: string }> };
+	getEvolvedNotes(): { evolvedNotes: EvolvedNote[]; diagnostics: readonly EvolvedDiagnostic[] };
 	getSystemPrompt(): string | undefined;
 	getSystemPromptSource(): { path: string } | undefined;
 	getAppendSystemPrompt(): string[];
 	getAppendSystemPromptSources(): Array<{ path: string }>;
 	extendResources(paths: ResourceExtensionPaths): void;
 	reload(options?: ResourceLoaderReloadOptions): Promise<void>;
+}
+
+export interface EvolvedNote extends StoredEvolvedNote {
+	path: string;
+	truncated: boolean;
+	sourceInfo: SourceInfo;
 }
 
 function resolvePromptInput(input: string | undefined, description: string): string | undefined {
@@ -67,8 +90,7 @@ function resolvePromptInput(input: string | undefined, description: string): str
 	return input;
 }
 
-function loadContextFileFromDir(dir: string): { path: string; content: string } | null {
-	const candidates = ["AGENTS.override.md", "AGENTS.md", "AGENTS.MD", "CLAUDE.md", "CLAUDE.MD"];
+function loadContextFileFromDir(dir: string, candidates: readonly string[]): { path: string; content: string } | null {
 	for (const filename of candidates) {
 		const filePath = join(dir, filename);
 		if (existsSync(filePath)) {
@@ -97,7 +119,7 @@ function loadContextFileFromDir(dir: string): { path: string; content: string } 
  * file's `gitdir:` target in realpath form while cwd may still be symlinked
  * (macOS `/tmp` -> `/private/tmp`).
  */
-function findShadowedContextFile(cwd: string): string | undefined {
+function findShadowedContextFile(cwd: string, contextFileNames: readonly string[]): string | undefined {
 	const gitPaths = findGitPaths(cwd);
 	if (!gitPaths) return undefined;
 	const commonGitDir = canonicalizePath(gitPaths.commonGitDir);
@@ -111,21 +133,29 @@ function findShadowedContextFile(cwd: string): string | undefined {
 	// `proj/main`) it is just the directory holding `.bare`, which tracks nothing; a
 	// submodule's gitdir has no `commondir`, so it lands under `.git/modules`.
 	if (canonicalizePath(join(mainRepoRoot, ".git")) !== commonGitDir) return undefined;
-	const worktreeContextFile = loadContextFileFromDir(worktreeRoot);
+	const worktreeContextFile = loadContextFileFromDir(worktreeRoot, contextFileNames);
 	return worktreeContextFile ? join(mainRepoRoot, basename(worktreeContextFile.path)) : undefined;
 }
 
 export function loadProjectContextFiles(options: {
 	cwd: string;
 	agentDir: string;
+	contextFileNames?: readonly string[];
 }): Array<{ path: string; content: string }> {
 	const resolvedCwd = resolvePath(options.cwd);
 	const resolvedAgentDir = resolvePath(options.agentDir);
 
 	const contextFiles: Array<{ path: string; content: string }> = [];
 	const seenPaths = new Set<string>();
+	const contextFileNames = options.contextFileNames ?? [
+		"AGENTS.override.md",
+		"AGENTS.md",
+		"AGENTS.MD",
+		"CLAUDE.md",
+		"CLAUDE.MD",
+	];
 
-	const globalContext = loadContextFileFromDir(resolvedAgentDir);
+	const globalContext = loadContextFileFromDir(resolvedAgentDir, contextFileNames);
 	if (globalContext) {
 		contextFiles.push(globalContext);
 		seenPaths.add(globalContext.path);
@@ -133,11 +163,11 @@ export function loadProjectContextFiles(options: {
 
 	const ancestorContextFiles: Array<{ path: string; content: string }> = [];
 
-	const shadowedContextFile = findShadowedContextFile(resolvedCwd);
+	const shadowedContextFile = findShadowedContextFile(resolvedCwd, contextFileNames);
 	let currentDir = resolvedCwd;
 
 	while (true) {
-		const contextFile = loadContextFileFromDir(currentDir);
+		const contextFile = loadContextFileFromDir(currentDir, contextFileNames);
 		const isShadowed =
 			shadowedContextFile !== undefined && canonicalizePath(contextFile?.path ?? "") === shadowedContextFile;
 		if (contextFile && !isShadowed && !seenPaths.has(contextFile.path)) {
@@ -164,6 +194,9 @@ export interface DefaultResourceLoaderOptions {
 	additionalSkillPaths?: string[];
 	additionalPromptTemplatePaths?: string[];
 	additionalThemePaths?: string[];
+	additionalProfilePaths?: string[];
+	generatedProfiles?: ResolvedTaskProfile[];
+	profile?: string;
 	extensionFactories?: InlineExtension[];
 	noExtensions?: boolean;
 	noSkills?: boolean;
@@ -202,6 +235,9 @@ export class DefaultResourceLoader implements ResourceLoader {
 	private additionalSkillPaths: string[];
 	private additionalPromptTemplatePaths: string[];
 	private additionalThemePaths: string[];
+	private additionalProfilePaths: string[];
+	private generatedProfiles: ResolvedTaskProfile[];
+	private selectedProfile?: string;
 	private extensionFactories: InlineExtension[];
 	private noExtensions: boolean;
 	private noSkills: boolean;
@@ -236,7 +272,11 @@ export class DefaultResourceLoader implements ResourceLoader {
 	private promptDiagnostics: ResourceDiagnostic[];
 	private themes: Theme[];
 	private themeDiagnostics: ResourceDiagnostic[];
+	private profilesResult: TaskProfileLoadResult;
+	private activeProfile?: ResolvedTaskProfile;
 	private agentsFiles: Array<{ path: string; content: string }>;
+	private evolvedNotes: EvolvedNote[];
+	private evolvedDiagnostics: readonly EvolvedDiagnostic[];
 	private systemPrompt?: string;
 	private systemPromptSourcePath?: string;
 	private appendSystemPrompt: string[];
@@ -264,6 +304,9 @@ export class DefaultResourceLoader implements ResourceLoader {
 		this.additionalSkillPaths = options.additionalSkillPaths ?? [];
 		this.additionalPromptTemplatePaths = options.additionalPromptTemplatePaths ?? [];
 		this.additionalThemePaths = options.additionalThemePaths ?? [];
+		this.additionalProfilePaths = options.additionalProfilePaths ?? [];
+		this.generatedProfiles = options.generatedProfiles ?? [];
+		this.selectedProfile = options.profile;
 		this.extensionFactories = options.extensionFactories ?? [];
 		this.noExtensions = options.noExtensions ?? false;
 		this.noSkills = options.noSkills ?? false;
@@ -287,7 +330,10 @@ export class DefaultResourceLoader implements ResourceLoader {
 		this.promptDiagnostics = [];
 		this.themes = [];
 		this.themeDiagnostics = [];
+		this.profilesResult = loadTaskProfiles();
 		this.agentsFiles = [];
+		this.evolvedNotes = [];
+		this.evolvedDiagnostics = [];
 		this.appendSystemPrompt = [];
 		this.appendSystemPromptSourcePaths = [];
 		this.lastSkillPaths = [];
@@ -316,8 +362,23 @@ export class DefaultResourceLoader implements ResourceLoader {
 		return { themes: this.themes, diagnostics: this.themeDiagnostics };
 	}
 
+	getProfiles(): TaskProfileLoadResult {
+		return this.profilesResult;
+	}
+
+	getActiveProfile(): ResolvedTaskProfile {
+		if (!this.activeProfile) {
+			throw new Error("Task profiles have not been resolved. Call reload() before accessing the active profile.");
+		}
+		return this.activeProfile;
+	}
+
 	getAgentsFiles(): { agentsFiles: Array<{ path: string; content: string }> } {
 		return { agentsFiles: this.agentsFiles };
+	}
+
+	getEvolvedNotes(): { evolvedNotes: EvolvedNote[]; diagnostics: readonly EvolvedDiagnostic[] } {
+		return { evolvedNotes: this.evolvedNotes, diagnostics: this.evolvedDiagnostics };
 	}
 
 	getSystemPrompt(): string | undefined {
@@ -428,6 +489,7 @@ export class DefaultResourceLoader implements ResourceLoader {
 		const enabledSkillResources = getEnabledResources(resolvedPaths.skills);
 		const enabledPrompts = getEnabledPaths(resolvedPaths.prompts);
 		const enabledThemes = getEnabledPaths(resolvedPaths.themes);
+		const enabledProfileResources = getEnabledResources(resolvedPaths.profiles);
 
 		const enabledSkills = enabledSkillResources.map((resource) => this.mapSkillPath(resource, metadataByPath));
 
@@ -447,6 +509,52 @@ export class DefaultResourceLoader implements ResourceLoader {
 		const cliEnabledSkills = getEnabledPaths(cliExtensionPaths.skills);
 		const cliEnabledPrompts = getEnabledPaths(cliExtensionPaths.prompts);
 		const cliEnabledThemes = getEnabledPaths(cliExtensionPaths.themes);
+		const cliEnabledProfileResources = getEnabledResources(cliExtensionPaths.profiles);
+
+		const configuredProfileInputs: TaskProfileLoadInput[] = [
+			...this.generatedProfiles.map((profile) => ({ profile })),
+			...this.additionalProfilePaths.map((path) => ({
+				path: this.resolveResourcePath(path),
+				origin: this.profileOriginForPath(path),
+				sourceLabel: "cli",
+			})),
+			...cliEnabledProfileResources.map((resource) => this.mapProfileInput(resource)),
+			...enabledProfileResources.map((resource) => this.mapProfileInput(resource)),
+		];
+		const configuredSelection = this.selectedProfile ?? this.settingsManager.getDefaultProfile();
+		if (configuredSelection && configuredSelection !== "auto") {
+			const selectedPath = this.resolveResourcePath(configuredSelection);
+			if (existsSync(selectedPath)) {
+				configuredProfileInputs.unshift({
+					path: selectedPath,
+					origin: this.profileOriginForPath(selectedPath),
+					sourceLabel: "selected",
+				});
+			}
+		}
+		const loadedProfiles = loadTaskProfiles(configuredProfileInputs);
+		const selectedProfile = resolveTaskProfileSelection(configuredSelection, {
+			registry: loadedProfiles.registry,
+			cwd: this.cwd,
+			pathOrigin: "user",
+		});
+		this.profilesResult = {
+			registry: selectedProfile.registry,
+			profiles: selectedProfile.registry.list(),
+			diagnostics: selectedProfile.diagnostics,
+		};
+		this.activeProfile =
+			selectedProfile.profile ?? selectedProfile.registry.get(BOOTSTRAP_TASK_PROFILE_ID) ?? undefined;
+		if (!this.activeProfile) {
+			const details = selectedProfile.diagnostics.map((diagnostic) => diagnostic.message).join("; ");
+			const suffix = details.length > 0 ? `: ${details}` : "";
+			throw new Error(`Unable to resolve task profile ${JSON.stringify(configuredSelection ?? "auto")}${suffix}`);
+		}
+		if (configuredSelection && configuredSelection !== "auto" && !selectedProfile.profile) {
+			const details = selectedProfile.diagnostics.map((diagnostic) => diagnostic.message).join("; ");
+			const suffix = details.length > 0 ? `: ${details}` : "";
+			throw new Error(`Unable to resolve task profile ${JSON.stringify(configuredSelection)}${suffix}`);
+		}
 
 		const extensionPaths = this.noExtensions
 			? cliEnabledExtensions
@@ -517,22 +625,22 @@ export class DefaultResourceLoader implements ResourceLoader {
 				: loadProjectContextFiles({
 						cwd: this.cwd,
 						agentDir: this.agentDir,
+						contextFileNames: this.activeProfile.context.fileNames,
 					}),
 		};
 		const resolvedAgentsFiles = this.agentsFilesOverride ? this.agentsFilesOverride(agentsFiles) : agentsFiles;
 		this.agentsFiles = resolvedAgentsFiles.agentsFiles;
+		const evolved = this.loadEvolvedNotes();
+		this.evolvedNotes = evolved.evolvedNotes;
+		this.evolvedDiagnostics = evolved.diagnostics;
 
-		const systemPromptSource = this.systemPromptSource ?? this.discoverSystemPromptFile();
+		const systemPromptSource = this.systemPromptSource;
 		const baseSystemPrompt = resolvePromptInput(systemPromptSource, "system prompt");
 		this.systemPrompt = this.systemPromptOverride ? this.systemPromptOverride(baseSystemPrompt) : baseSystemPrompt;
 		this.systemPromptSourcePath =
 			systemPromptSource && existsSync(systemPromptSource) ? resolvePath(systemPromptSource) : undefined;
 
-		let appendSources = this.appendSystemPromptSource;
-		if (!appendSources) {
-			const discoveredAppendSystemPromptFile = this.discoverAppendSystemPromptFile();
-			appendSources = discoveredAppendSystemPromptFile ? [discoveredAppendSystemPromptFile] : [];
-		}
+		const appendSources = this.appendSystemPromptSource ?? [];
 		const baseAppend = appendSources
 			.map((s) => resolvePromptInput(s, "append system prompt"))
 			.filter((s): s is string => s !== undefined);
@@ -652,6 +760,20 @@ export class DefaultResourceLoader implements ResourceLoader {
 			return skillFile;
 		}
 		return resource.path;
+	}
+
+	private mapProfileInput(resource: ResolvedResource): TaskProfileLoadInput {
+		return {
+			path: resource.path,
+			origin: resource.metadata.origin === "package" ? "package" : this.profileOriginForPath(resource.path),
+			sourceLabel: resource.metadata.source,
+		};
+	}
+
+	private profileOriginForPath(path: string): "user" | "generated" {
+		const resolvedPath = canonicalizePath(this.resolveResourcePath(path));
+		const generatedRoot = canonicalizePath(join(this.agentDir, "profiles", "generated"));
+		return this.isUnderPath(resolvedPath, generatedRoot) ? "generated" : "user";
 	}
 
 	private normalizeExtensionPaths(
@@ -1019,32 +1141,52 @@ export class DefaultResourceLoader implements ResourceLoader {
 		return { themes: Array.from(seen.values()), diagnostics };
 	}
 
-	private discoverSystemPromptFile(): string | undefined {
-		const projectPath = join(this.cwd, CONFIG_DIR_NAME, "SYSTEM.md");
-		if (this.settingsManager.isProjectTrusted() && existsSync(projectPath)) {
-			return projectPath;
+	private loadEvolvedNotes(): { evolvedNotes: EvolvedNote[]; diagnostics: readonly EvolvedDiagnostic[] } {
+		const maxBytes = 20_000;
+		const projectTrusted = this.settingsManager.isProjectTrusted();
+		try {
+			initializeEvolvedFiles({ agentDir: this.agentDir, cwd: this.cwd, projectTrusted });
+		} catch (error) {
+			const message = error instanceof Error ? error.message : "failed to initialize EVOLVED.md";
+			const projectPath = join(this.cwd, CONFIG_DIR_NAME, "EVOLVED.md");
+			const path = message.includes(projectPath) ? projectPath : join(this.agentDir, "EVOLVED.md");
+			return {
+				evolvedNotes: [],
+				diagnostics: [{ type: "error", message, path }],
+			};
 		}
-
-		const globalPath = join(this.agentDir, "SYSTEM.md");
-		if (existsSync(globalPath)) {
-			return globalPath;
+		const loaded = loadStoredEvolvedNotes({
+			agentDir: this.agentDir,
+			cwd: this.cwd,
+			projectTrusted,
+			maxBytes,
+		});
+		const truncatedSources = new Set<string>();
+		for (const path of [loaded.paths.globalPath, loaded.paths.projectPath]) {
+			if (!path || !existsSync(path)) continue;
+			try {
+				if (statSync(path).size > maxBytes) truncatedSources.add(path);
+			} catch {}
 		}
-
-		return undefined;
-	}
-
-	private discoverAppendSystemPromptFile(): string | undefined {
-		const projectPath = join(this.cwd, CONFIG_DIR_NAME, "APPEND_SYSTEM.md");
-		if (this.settingsManager.isProjectTrusted() && existsSync(projectPath)) {
-			return projectPath;
-		}
-
-		const globalPath = join(this.agentDir, "APPEND_SYSTEM.md");
-		if (existsSync(globalPath)) {
-			return globalPath;
-		}
-
-		return undefined;
+		const markedSources = new Set<string>();
+		const evolvedNotes = loaded.notes.map((note): EvolvedNote => {
+			const scope = loaded.paths.projectPath === note.sourcePath ? "project" : "user";
+			const truncated = truncatedSources.has(note.sourcePath) && !markedSources.has(note.sourcePath);
+			if (truncated) markedSources.add(note.sourcePath);
+			return {
+				...note,
+				path: note.sourcePath,
+				truncated,
+				sourceInfo: {
+					path: note.sourcePath,
+					source: "local",
+					scope,
+					origin: "top-level",
+					baseDir: scope === "project" ? join(this.cwd, CONFIG_DIR_NAME) : this.agentDir,
+				},
+			};
+		});
+		return { evolvedNotes, diagnostics: loaded.diagnostics };
 	}
 
 	private isUnderPath(target: string, root: string): boolean {

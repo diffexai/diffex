@@ -17,6 +17,14 @@ export {
 	type EditToolInput,
 	type EditToolOptions,
 } from "./edit.ts";
+export {
+	createEvolveTool,
+	createEvolveToolDefinition,
+	type EvolveToolDetails,
+	type EvolveToolInput,
+	type EvolveToolOptions,
+	evolveToolSystemPromptContribution,
+} from "./evolve.ts";
 export { withFileMutationQueue } from "./file-mutation-queue.ts";
 export {
 	createFindTool,

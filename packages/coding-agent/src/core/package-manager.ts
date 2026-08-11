@@ -72,6 +72,7 @@ export interface ResolvedPaths {
 	skills: ResolvedResource[];
 	prompts: ResolvedResource[];
 	themes: ResolvedResource[];
+	profiles: ResolvedResource[];
 }
 
 export type MissingSourceAction = "install" | "skip" | "error";
@@ -161,6 +162,7 @@ interface ResourceAccumulator {
 	skills: Map<string, { metadata: PathMetadata; enabled: boolean }>;
 	prompts: Map<string, { metadata: PathMetadata; enabled: boolean }>;
 	themes: Map<string, { metadata: PathMetadata; enabled: boolean }>;
+	profiles: Map<string, { metadata: PathMetadata; enabled: boolean }>;
 }
 
 /**
@@ -187,17 +189,19 @@ interface PackageFilter {
 	skills?: string[];
 	prompts?: string[];
 	themes?: string[];
+	profiles?: string[];
 }
 
-type ResourceType = "extensions" | "skills" | "prompts" | "themes";
+type ResourceType = "extensions" | "skills" | "prompts" | "themes" | "profiles";
 
-const RESOURCE_TYPES: ResourceType[] = ["extensions", "skills", "prompts", "themes"];
+const RESOURCE_TYPES: ResourceType[] = ["extensions", "skills", "prompts", "themes", "profiles"];
 
 const FILE_PATTERNS: Record<ResourceType, RegExp> = {
 	extensions: /\.(ts|js)$/,
 	skills: /\.md$/,
 	prompts: /\.md$/,
 	themes: /\.json$/,
+	profiles: /^profile\.json$/,
 };
 
 const IGNORE_FILE_NAMES = [".gitignore", ".ignore", ".fdignore"];
@@ -418,6 +422,63 @@ function collectAutoSkillEntries(dir: string, mode: SkillDiscoveryMode): string[
 	return collectSkillEntries(dir, mode);
 }
 
+function collectProfileEntries(dir: string, ignoreMatcher?: IgnoreMatcher, rootDir?: string): string[] {
+	const entries: string[] = [];
+	if (!existsSync(dir)) return entries;
+
+	const root = rootDir ?? dir;
+	const ig = ignoreMatcher ?? ignore();
+	addIgnoreRules(ig, dir, root);
+
+	try {
+		const dirEntries = readdirSync(dir, { withFileTypes: true }).sort((left, right) =>
+			left.name < right.name ? -1 : left.name > right.name ? 1 : 0,
+		);
+		const profileEntry = dirEntries.find((entry) => entry.name === "profile.json");
+		if (profileEntry) {
+			const profilePath = join(dir, profileEntry.name);
+			let isFile = profileEntry.isFile();
+			if (profileEntry.isSymbolicLink()) {
+				try {
+					isFile = statSync(profilePath).isFile();
+				} catch {
+					isFile = false;
+				}
+			}
+
+			const relPath = toPosixPath(relative(root, profilePath));
+			if (isFile && !ig.ignores(relPath)) {
+				return [profilePath];
+			}
+		}
+
+		for (const entry of dirEntries) {
+			if (entry.name.startsWith(".")) continue;
+			if (entry.name === "node_modules") continue;
+
+			const fullPath = join(dir, entry.name);
+			let isDir = entry.isDirectory();
+			if (entry.isSymbolicLink()) {
+				try {
+					isDir = statSync(fullPath).isDirectory();
+				} catch {
+					continue;
+				}
+			}
+
+			if (!isDir) continue;
+			const relPath = toPosixPath(relative(root, fullPath));
+			if (ig.ignores(`${relPath}/`)) continue;
+
+			entries.push(...collectProfileEntries(fullPath, ig, root));
+		}
+	} catch {
+		// Ignore errors
+	}
+
+	return entries;
+}
+
 function findGitRepoRoot(startDir: string): string | null {
 	let dir = resolve(startDir);
 	while (true) {
@@ -619,6 +680,9 @@ function collectResourceFiles(dir: string, resourceType: ResourceType): string[]
 	if (resourceType === "skills") {
 		return collectSkillEntries(dir, "pi");
 	}
+	if (resourceType === "profiles") {
+		return collectProfileEntries(dir);
+	}
 	if (resourceType === "extensions") {
 		return collectAutoExtensionEntries(dir);
 	}
@@ -629,11 +693,11 @@ function matchesAnyPattern(filePath: string, patterns: string[], baseDir: string
 	const rel = toPosixPath(relative(baseDir, filePath));
 	const name = basename(filePath);
 	const filePathPosix = toPosixPath(filePath);
-	const isSkillFile = name === "SKILL.md";
-	const parentDir = isSkillFile ? dirname(filePath) : undefined;
-	const parentRel = isSkillFile ? toPosixPath(relative(baseDir, parentDir!)) : undefined;
-	const parentName = isSkillFile ? basename(parentDir!) : undefined;
-	const parentDirPosix = isSkillFile ? toPosixPath(parentDir!) : undefined;
+	const isDirectoryResource = name === "SKILL.md" || name === "profile.json";
+	const parentDir = isDirectoryResource ? dirname(filePath) : undefined;
+	const parentRel = isDirectoryResource ? toPosixPath(relative(baseDir, parentDir!)) : undefined;
+	const parentName = isDirectoryResource ? basename(parentDir!) : undefined;
+	const parentDirPosix = isDirectoryResource ? toPosixPath(parentDir!) : undefined;
 
 	return patterns.some((pattern) => {
 		const normalizedPattern = toPosixPath(pattern);
@@ -644,7 +708,7 @@ function matchesAnyPattern(filePath: string, patterns: string[], baseDir: string
 		) {
 			return true;
 		}
-		if (!isSkillFile) return false;
+		if (!isDirectoryResource) return false;
 		return (
 			minimatch(parentRel!, normalizedPattern) ||
 			minimatch(parentName!, normalizedPattern) ||
@@ -663,17 +727,17 @@ function matchesAnyExactPattern(filePath: string, patterns: string[], baseDir: s
 	const rel = toPosixPath(relative(baseDir, filePath));
 	const name = basename(filePath);
 	const filePathPosix = toPosixPath(filePath);
-	const isSkillFile = name === "SKILL.md";
-	const parentDir = isSkillFile ? dirname(filePath) : undefined;
-	const parentRel = isSkillFile ? toPosixPath(relative(baseDir, parentDir!)) : undefined;
-	const parentDirPosix = isSkillFile ? toPosixPath(parentDir!) : undefined;
+	const isDirectoryResource = name === "SKILL.md" || name === "profile.json";
+	const parentDir = isDirectoryResource ? dirname(filePath) : undefined;
+	const parentRel = isDirectoryResource ? toPosixPath(relative(baseDir, parentDir!)) : undefined;
+	const parentDirPosix = isDirectoryResource ? toPosixPath(parentDir!) : undefined;
 
 	return patterns.some((pattern) => {
 		const normalized = normalizeExactPattern(pattern);
 		if (normalized === rel || normalized === filePathPosix) {
 			return true;
 		}
-		if (!isSkillFile) return false;
+		if (!isDirectoryResource) return false;
 		return normalized === parentRel || normalized === parentDirPosix;
 	});
 }
@@ -2352,12 +2416,14 @@ export class DefaultPackageManager implements PackageManager {
 			skills: (globalSettings.skills ?? []) as string[],
 			prompts: (globalSettings.prompts ?? []) as string[],
 			themes: (globalSettings.themes ?? []) as string[],
+			profiles: (globalSettings.profiles ?? []) as string[],
 		};
 		const projectOverrides = {
 			extensions: (projectSettings.extensions ?? []) as string[],
 			skills: (projectSettings.skills ?? []) as string[],
 			prompts: (projectSettings.prompts ?? []) as string[],
 			themes: (projectSettings.themes ?? []) as string[],
+			profiles: (projectSettings.profiles ?? []) as string[],
 		};
 
 		const userDirs = {
@@ -2365,12 +2431,14 @@ export class DefaultPackageManager implements PackageManager {
 			skills: join(globalBaseDir, "skills"),
 			prompts: join(globalBaseDir, "prompts"),
 			themes: join(globalBaseDir, "themes"),
+			profiles: join(globalBaseDir, "profiles"),
 		};
 		const projectDirs = {
 			extensions: join(projectBaseDir, "extensions"),
 			skills: join(projectBaseDir, "skills"),
 			prompts: join(projectBaseDir, "prompts"),
 			themes: join(projectBaseDir, "themes"),
+			profiles: join(projectBaseDir, "profiles"),
 		};
 		const userAgentsSkillsDir = join(getHomeDir(), ".agents", "skills");
 		const projectTrusted = this.settingsManager.isProjectTrusted();
@@ -2443,6 +2511,13 @@ export class DefaultPackageManager implements PackageManager {
 				projectOverrides.themes,
 				projectBaseDir,
 			);
+			addResources(
+				"profiles",
+				collectProfileEntries(projectDirs.profiles),
+				projectMetadata,
+				projectOverrides.profiles,
+				projectBaseDir,
+			);
 		}
 
 		// User extensions from ~/.pi/agent/
@@ -2491,6 +2566,13 @@ export class DefaultPackageManager implements PackageManager {
 			userOverrides.themes,
 			globalBaseDir,
 		);
+		addResources(
+			"profiles",
+			collectProfileEntries(userDirs.profiles),
+			userMetadata,
+			userOverrides.profiles,
+			globalBaseDir,
+		);
 	}
 
 	private collectFilesFromPaths(paths: string[], resourceType: ResourceType): string[] {
@@ -2501,7 +2583,9 @@ export class DefaultPackageManager implements PackageManager {
 			try {
 				const stats = statSync(p);
 				if (stats.isFile()) {
-					files.push(p);
+					if (resourceType !== "profiles" || basename(p) === "profile.json") {
+						files.push(p);
+					}
 				} else if (stats.isDirectory()) {
 					files.push(...collectResourceFiles(p, resourceType));
 				}
@@ -2525,6 +2609,8 @@ export class DefaultPackageManager implements PackageManager {
 				return accumulator.prompts;
 			case "themes":
 				return accumulator.themes;
+			case "profiles":
+				return accumulator.profiles;
 			default:
 				throw new Error(`Unknown resource type: ${resourceType}`);
 		}
@@ -2548,6 +2634,7 @@ export class DefaultPackageManager implements PackageManager {
 			skills: new Map(),
 			prompts: new Map(),
 			themes: new Map(),
+			profiles: new Map(),
 		};
 	}
 
@@ -2576,6 +2663,7 @@ export class DefaultPackageManager implements PackageManager {
 			skills: mapToResolved(accumulator.skills),
 			prompts: mapToResolved(accumulator.prompts),
 			themes: mapToResolved(accumulator.themes),
+			profiles: mapToResolved(accumulator.profiles),
 		};
 	}
 

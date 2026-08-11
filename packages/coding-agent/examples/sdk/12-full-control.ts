@@ -8,6 +8,7 @@ import { getModel } from "@earendil-works/pi-ai/compat";
 import {
 	createAgentSession,
 	createExtensionRuntime,
+	loadTaskProfiles,
 	ModelRuntime,
 	type ResourceLoader,
 	SessionManager,
@@ -32,13 +33,19 @@ const settingsManager = SettingsManager.inMemory({
 });
 
 const cwd = process.cwd();
+const profiles = loadTaskProfiles();
+const activeProfile = profiles.registry.get("coding");
+if (!activeProfile) throw new Error("Built-in coding task profile is unavailable");
 
 const resourceLoader: ResourceLoader = {
 	getExtensions: () => ({ extensions: [], errors: [], runtime: createExtensionRuntime() }),
 	getSkills: () => ({ skills: [], diagnostics: [] }),
 	getPrompts: () => ({ prompts: [], diagnostics: [] }),
 	getThemes: () => ({ themes: [], diagnostics: [] }),
+	getProfiles: () => profiles,
+	getActiveProfile: () => activeProfile,
 	getAgentsFiles: () => ({ agentsFiles: [] }),
+	getEvolvedNotes: () => ({ evolvedNotes: [], diagnostics: [] }),
 	getSystemPrompt: () => `You are a minimal assistant.
 Available: read, bash. Be concise.`,
 	getSystemPromptSource: () => undefined,

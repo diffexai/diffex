@@ -1,32 +1,34 @@
 import { join } from "node:path";
 import { Agent, type AgentMessage, setDefaultStreamFn, type ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { clampThinkingLevel, type Message, type Model, streamSimple } from "@earendil-works/pi-ai/compat";
-import { getAgentDir } from "../config.ts";
+import { CONFIG_DIR_NAME, getAgentDir } from "../config.ts";
 import { resolvePath } from "../utils/paths.ts";
 import { AgentSession } from "./agent-session.ts";
 import { formatNoModelsAvailableMessage } from "./auth-guidance.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
+import { appendEvolvedNote } from "./evolved.ts";
 import type { ExtensionRunner, LoadExtensionsResult, SessionStartEvent, ToolDefinition } from "./extensions/index.ts";
 import { convertToLlm } from "./messages.ts";
 import { findInitialModel } from "./model-resolver.ts";
 import { ModelRuntime } from "./model-runtime.ts";
+import type { ResolvedTaskProfile } from "./profiles.ts";
 import { mergeProviderAttributionHeaders } from "./provider-attribution.ts";
 import type { ResourceLoader } from "./resource-loader.ts";
 import { DefaultResourceLoader } from "./resource-loader.ts";
-import { getDefaultSessionDir, SessionManager } from "./session-manager.ts";
+import { getDefaultSessionDir, SessionManager, type SessionProfileMetadata } from "./session-manager.ts";
 import { SettingsManager } from "./settings-manager.ts";
 import { time } from "./timings.ts";
 import {
 	createBashTool,
 	createCodingTools,
 	createEditTool,
+	createEvolveToolDefinition,
 	createFindTool,
 	createGrepTool,
 	createLsTool,
 	createReadOnlyTools,
 	createReadTool,
 	createWriteTool,
-	type ToolName,
 	withFileMutationQueue,
 } from "./tools/index.ts";
 
@@ -51,6 +53,13 @@ export interface CreateAgentSessionOptions {
 	/** Models available for cycling (Ctrl+P in interactive mode) */
 	scopedModels?: Array<{ model: Model<any>; thinkingLevel?: ThinkingLevel }>;
 
+	/** Task profile ID/path. Use "auto" for the neutral bootstrap profile. */
+	profile?: string;
+	/** Whether a host should continue automatic task routing for this session. */
+	profileRouting?: "auto" | "pinned";
+	/** Generated profiles that must be available before their package path is rediscovered. */
+	generatedProfiles?: ResolvedTaskProfile[];
+
 	/**
 	 * Optional default tool suppression mode when no explicit allowlist is provided.
 	 *
@@ -62,8 +71,8 @@ export interface CreateAgentSessionOptions {
 	/**
 	 * Optional allowlist of tool names.
 	 *
-	 * When omitted, pi enables the default built-in tools (read, bash, edit, write)
-	 * and leaves extension/custom tools enabled unless `noTools` changes that default.
+	 * When omitted, pi enables the active profile's default tools and leaves
+	 * extension/custom tools enabled unless `noTools` changes that default.
 	 * When provided, only the listed tool names are enabled.
 	 */
 	tools?: string[];
@@ -177,11 +186,43 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 
 	const settingsManager = options.settingsManager ?? SettingsManager.create(cwd, agentDir);
 	const sessionManager = options.sessionManager ?? SessionManager.create(cwd, getDefaultSessionDir(cwd, agentDir));
+	const storedProfile = sessionManager.getHeader()?.profile;
+	const settingsProfile = settingsManager.getDefaultProfile();
+	const selectedProfile = options.profile ?? storedProfile?.source ?? storedProfile?.id ?? settingsProfile;
 
 	if (!resourceLoader) {
-		resourceLoader = new DefaultResourceLoader({ cwd, agentDir, settingsManager });
+		resourceLoader = new DefaultResourceLoader({
+			cwd,
+			agentDir,
+			settingsManager,
+			profile: selectedProfile,
+			generatedProfiles: options.generatedProfiles,
+		});
 		await resourceLoader.reload();
 		time("resourceLoader.reload");
+	}
+	const activeProfile = resourceLoader.getActiveProfile();
+	const profileRouting =
+		options.profileRouting ??
+		(options.profile !== undefined
+			? options.profile === "auto"
+				? "auto"
+				: "pinned"
+			: (storedProfile?.routing ??
+				(settingsProfile === undefined || settingsProfile === "auto" ? "auto" : "pinned")));
+	const profileMetadata: SessionProfileMetadata = {
+		id: activeProfile.id,
+		hash: activeProfile.hash,
+		...(activeProfile.origin === "builtin" ? {} : { source: activeProfile.source.path }),
+		routing: profileRouting,
+	};
+	if (
+		storedProfile?.id !== profileMetadata.id ||
+		storedProfile.hash !== profileMetadata.hash ||
+		storedProfile.source !== profileMetadata.source ||
+		storedProfile.routing !== profileMetadata.routing
+	) {
+		sessionManager.setProfileMetadata(profileMetadata);
 	}
 
 	// Check if session has existing data to restore
@@ -242,13 +283,47 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		thinkingLevel = clampThinkingLevel(model, thinkingLevel) as ThinkingLevel;
 	}
 
-	const defaultActiveToolNames: ToolName[] = ["read", "bash", "edit", "write"];
-	const allowedToolNames = options.tools ?? (options.noTools === "all" ? [] : undefined);
+	const defaultActiveToolNames = activeProfile.tools.default;
+	const profileRequiredToolNames = activeProfile.tools.required;
+	const allowedToolNames = options.tools
+		? [...new Set([...options.tools, ...profileRequiredToolNames])]
+		: options.noTools === "all"
+			? []
+			: undefined;
 	const excludedToolNames = options.excludeTools;
-	const excludedToolNameSet = excludedToolNames ? new Set(excludedToolNames) : undefined;
+	const excludedBuiltinToolNameSet = new Set(activeProfile.tools.denied);
 	const initialActiveToolNames: string[] = (
-		options.tools ? [...options.tools] : options.noTools ? [] : defaultActiveToolNames
-	).filter((name) => !excludedToolNameSet?.has(name));
+		options.tools
+			? [...new Set([...options.tools, ...profileRequiredToolNames])]
+			: options.noTools
+				? []
+				: [...new Set([...defaultActiveToolNames, ...profileRequiredToolNames])]
+	).filter((name) => !excludedBuiltinToolNameSet.has(name) && !excludedToolNames?.includes(name));
+	const shouldRegisterEvolve =
+		(options.tools === undefined && options.noTools === undefined) ||
+		options.tools?.includes("evolve") === true ||
+		(options.tools !== undefined && profileRequiredToolNames.includes("evolve"));
+	const evolveToolDefinition = shouldRegisterEvolve
+		? createEvolveToolDefinition({
+				appendNote: async (input) => {
+					const note = appendEvolvedNote({
+						agentDir,
+						cwd,
+						projectTrusted: settingsManager.isProjectTrusted(),
+						scope: input.scope,
+						profileId: activeProfile.id,
+						category: input.category,
+						provenance: `session:${sessionManager.getSessionId()}`,
+						content: input.evidence ? `${input.note}\n\nEvidence: ${input.evidence}` : input.note,
+					});
+					return { path: note.sourcePath };
+				},
+			})
+		: undefined;
+	const customTools = [
+		...(options.customTools ?? []).filter((tool) => tool.name !== "evolve"),
+		...(evolveToolDefinition ? [evolveToolDefinition] : []),
+	];
 
 	let agent: Agent;
 
@@ -380,11 +455,25 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		cwd,
 		scopedModels: options.scopedModels,
 		resourceLoader,
-		customTools: options.customTools,
+		customTools,
 		modelRuntime,
 		initialActiveToolNames,
 		allowedToolNames,
 		excludedToolNames,
+		excludedBuiltinToolNames: activeProfile.tools.denied,
+		selfEvolutionProtectedPaths: [
+			join(agentDir, "EVOLVED.md"),
+			...["AGENTS.override.md", "AGENTS.md", "AGENTS.MD", "CLAUDE.md", "CLAUDE.MD"].map((fileName) =>
+				join(agentDir, fileName),
+			),
+		],
+		selfEvolutionProtectedRoots: [join(agentDir, "profiles"), join(cwd, CONFIG_DIR_NAME, "profiles")],
+		selfEvolutionQuarantineDir: join(agentDir, "quarantine", "self-evolution"),
+		selfEvolutionEvolvedPaths: {
+			globalPath: join(agentDir, "EVOLVED.md"),
+			...(settingsManager.isProjectTrusted() ? { projectPath: join(cwd, CONFIG_DIR_NAME, "EVOLVED.md") } : {}),
+		},
+		selfEvolutionEvolveTool: evolveToolDefinition,
 		extensionRunnerRef,
 		sessionStartEvent: options.sessionStartEvent,
 	});

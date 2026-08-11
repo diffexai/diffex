@@ -36,11 +36,22 @@ export interface SessionHeader {
 	timestamp: string;
 	cwd: string;
 	parentSession?: string;
+	profile?: SessionProfileMetadata;
+}
+
+export interface SessionProfileMetadata {
+	id: string;
+	hash: string;
+	/** Filesystem source for custom or generated profiles. Built-in profiles omit this. */
+	source?: string;
+	/** Automatic routing remains enabled unless the profile was explicitly pinned. */
+	routing: "auto" | "pinned";
 }
 
 export interface NewSessionOptions {
 	id?: string;
 	parentSession?: string;
+	profile?: SessionProfileMetadata;
 }
 
 export interface SessionEntryBase {
@@ -940,6 +951,7 @@ export class SessionManager {
 			timestamp,
 			cwd: this.cwd,
 			parentSession: options?.parentSession,
+			profile: options?.profile,
 		};
 		this.fileEntries = [header];
 		this.byId.clear();
@@ -1294,6 +1306,21 @@ export class SessionManager {
 	}
 
 	/**
+	 * Attach the active task profile before the first assistant response persists the session.
+	 * Existing persisted sessions are rewritten so explicit profile changes remain resumable.
+	 */
+	setProfileMetadata(profile: SessionProfileMetadata): void {
+		const header = this.getHeader();
+		if (!header) {
+			throw new Error("Cannot attach task profile metadata without a session header");
+		}
+		header.profile = { ...profile };
+		if (this.flushed) {
+			this._rewriteFile();
+		}
+	}
+
+	/**
 	 * Get all session entries (excludes header). Returns a shallow copy.
 	 * The session is append-only: use appendXXX() to add entries, branch() to
 	 * change the leaf pointer. Entries cannot be modified or deleted.
@@ -1439,6 +1466,7 @@ export class SessionManager {
 			timestamp,
 			cwd: this.cwd,
 			parentSession: this.persist ? previousSessionFile : undefined,
+			profile: this.getHeader()?.profile,
 		};
 
 		// Collect labels for entries in the path
@@ -1616,6 +1644,7 @@ export class SessionManager {
 			timestamp,
 			cwd: resolvedTargetCwd,
 			parentSession: resolvedSourcePath,
+			profile: sourceHeader.profile,
 		};
 		writeFileSync(newSessionFile, `${JSON.stringify(newHeader)}\n`, { flag: "wx" });
 

@@ -138,6 +138,7 @@ describe("SettingsManager", () => {
 							source: "npm:shitty-extensions",
 							extensions: ["extensions/oracle.ts"],
 							skills: [],
+							profiles: ["profiles/research"],
 						},
 					],
 				}),
@@ -152,7 +153,81 @@ describe("SettingsManager", () => {
 				source: "npm:shitty-extensions",
 				extensions: ["extensions/oracle.ts"],
 				skills: [],
+				profiles: ["profiles/research"],
 			});
+		});
+	});
+
+	describe("profiles", () => {
+		it("uses automatic routing when no default profile is configured", () => {
+			const manager = SettingsManager.create(projectDir, agentDir);
+
+			expect(manager.getDefaultProfile()).toBeUndefined();
+		});
+
+		it("reads a project default profile over the global default", () => {
+			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ defaultProfile: "research" }));
+			writeFileSync(join(projectDir, ".pi", "settings.json"), JSON.stringify({ defaultProfile: "finance" }));
+
+			const manager = SettingsManager.create(projectDir, agentDir);
+
+			expect(manager.getDefaultProfile()).toBe("finance");
+		});
+
+		it("persists the global default profile", async () => {
+			const manager = SettingsManager.create(projectDir, agentDir);
+
+			manager.setDefaultProfile("healthcare");
+			await manager.flush();
+
+			expect(manager.getDefaultProfile()).toBe("healthcare");
+			expect(JSON.parse(readFileSync(join(agentDir, "settings.json"), "utf-8")).defaultProfile).toBe("healthcare");
+		});
+
+		it("clears a pinned default to restore automatic routing", async () => {
+			const manager = SettingsManager.create(projectDir, agentDir);
+
+			manager.setDefaultProfile("healthcare");
+			manager.setDefaultProfile(undefined);
+			await manager.flush();
+
+			expect(manager.getDefaultProfile()).toBeUndefined();
+			expect(JSON.parse(readFileSync(join(agentDir, "settings.json"), "utf-8"))).not.toHaveProperty(
+				"defaultProfile",
+			);
+		});
+
+		it("treats a stored auto value as no pinned default", () => {
+			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ defaultProfile: "auto" }));
+
+			const manager = SettingsManager.create(projectDir, agentDir);
+
+			expect(manager.getDefaultProfile()).toBeUndefined();
+		});
+
+		it("merges global and project profile paths with project precedence", () => {
+			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ profiles: ["/global/profiles"] }));
+			writeFileSync(join(projectDir, ".pi", "settings.json"), JSON.stringify({ profiles: ["./profiles"] }));
+
+			const manager = SettingsManager.create(projectDir, agentDir);
+
+			expect(manager.getProfilePaths()).toEqual(["./profiles"]);
+		});
+
+		it("persists global and project profile paths", async () => {
+			const manager = SettingsManager.create(projectDir, agentDir);
+
+			manager.setProfilePaths(["/global/profiles"]);
+			manager.setProjectProfilePaths(["./profiles"]);
+			await manager.flush();
+
+			expect(JSON.parse(readFileSync(join(agentDir, "settings.json"), "utf-8")).profiles).toEqual([
+				"/global/profiles",
+			]);
+			expect(JSON.parse(readFileSync(join(projectDir, ".pi", "settings.json"), "utf-8")).profiles).toEqual([
+				"./profiles",
+			]);
+			expect(manager.getProfilePaths()).toEqual(["./profiles"]);
 		});
 	});
 
