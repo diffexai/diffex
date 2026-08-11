@@ -160,16 +160,16 @@ describe("FooterComponent width handling", () => {
 		});
 		const footer = new FooterComponent(session, createFooterData(1));
 
-		const statsLine = stripAnsi(footer.render(120)[1]);
+		const statsLine = stripAnsi(footer.render(120)[0]);
 		expect(statsLine).toBe("gpt-5.5 medium • Context 12.3% used • 200k window");
 	});
 
-	it("keeps the project directory on the first footer line", () => {
+	it("does not show the project directory in the footer", () => {
 		const session = createSession({
 			sessionName: "work",
 		});
 		const footer = new FooterComponent(session, createFooterData(1));
 
-		expect(stripAnsi(footer.render(120)[0])).toContain("/tmp/project (main) • work");
+		expect(stripAnsi(footer.render(120).join("\n"))).not.toContain("/tmp/project");
 	});
 });

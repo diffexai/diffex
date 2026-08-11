@@ -125,8 +125,8 @@ import { EarendilAnnouncementComponent } from "./components/earendil-announcemen
 import { ExtensionEditorComponent } from "./components/extension-editor.ts";
 import { ExtensionInputComponent } from "./components/extension-input.ts";
 import { ExtensionSelectorComponent } from "./components/extension-selector.ts";
-import { FooterComponent, formatTokens } from "./components/footer.ts";
-import { formatKeyText, keyDisplayText, keyHint, keyText, rawKeyHint } from "./components/keybinding-hints.ts";
+import { FooterComponent, formatCwdForFooter, formatTokens } from "./components/footer.ts";
+import { formatKeyText, keyDisplayText, keyText } from "./components/keybinding-hints.ts";
 import { LoginDialogComponent } from "./components/login-dialog.ts";
 import { createMermaidMarkdownTransformer } from "./components/mermaid.ts";
 import { ModelSelectorComponent } from "./components/model-selector.ts";
@@ -264,6 +264,7 @@ type LoginProviderCompletionOption = {
 };
 
 const AUTH_TYPE_ORDER = { oauth: 0, api_key: 1 } satisfies Record<AuthSelectorProvider["authType"], number>;
+const DIFFEX_UPDATE_AVAILABLE_NOTIFICATION_ENABLED = false;
 
 function createFuzzyAutocompleteItems<T>(
 	items: T[],
@@ -925,45 +926,17 @@ export class InteractiveMode {
 
 		// Add header with keybindings from config (unless silenced)
 		if (this.options.verbose || !this.settingsManager.getQuietStartup()) {
-			const logo = theme.bold(theme.fg("accent", "Diffex")) + theme.fg("dim", ` v${this.version}`);
-
-			// Build startup instructions using keybinding hint helpers
-			const hint = (keybinding: AppKeybinding, description: string) => keyHint(keybinding, description);
-
-			const expandedInstructions = [
-				hint("app.interrupt", "to interrupt"),
-				hint("app.clear", "to clear"),
-				rawKeyHint(`${keyText("app.clear")} twice`, "to exit"),
-				hint("app.exit", "to exit (empty)"),
-				hint("app.suspend", "to suspend"),
-				keyHint("tui.editor.deleteToLineEnd", "to delete to end"),
-				hint("app.thinking.cycle", "to cycle thinking level"),
-				rawKeyHint(`${keyText("app.model.cycleForward")}/${keyText("app.model.cycleBackward")}`, "to cycle models"),
-				hint("app.model.select", "to select model"),
-				hint("app.tools.expand", "to expand tools"),
-				hint("app.thinking.toggle", "to expand thinking"),
-				hint("app.editor.external", "for external editor"),
-				rawKeyHint("/", "for commands"),
-				rawKeyHint("!", "to run bash"),
-				rawKeyHint("!!", "to run bash (no context)"),
-				hint("app.message.followUp", "to queue follow-up"),
-				hint("app.message.dequeue", "to edit all queued messages"),
-				hint("app.clipboard.pasteImage", "to paste image (with text fallback)"),
-				rawKeyHint("drop files", "to attach"),
-			].join("\n");
-			const compactInstructions = [
-				hint("app.interrupt", "interrupt"),
-				rawKeyHint(`${keyText("app.clear")}/${keyText("app.exit")}`, "clear/exit"),
-				rawKeyHint("/", "commands"),
-				rawKeyHint("!", "bash"),
-				hint("app.tools.expand", "more"),
-			].join(theme.fg("muted", " · "));
-			const compactOnboarding = theme.fg("dim", `Press ${keyText("app.tools.expand")} to show full startup help.`);
-			const onboarding = theme.fg("dim", "Ask Diffex how to use the agent.");
+			const logo = theme.bold(theme.fg("border", "Diffex")) + theme.fg("dim", ` v${this.version}`);
+			const projectDirectory = theme.fg(
+				"dim",
+				formatCwdForFooter(this.sessionManager.getCwd(), process.env.HOME || process.env.USERPROFILE),
+			);
+			const onboarding = theme.fg("muted", "Ask Diffex to do something for you.");
+			const headerDetails = `${logo}\n${projectDirectory}\n${onboarding}`;
 			this.builtInHeader = new DiffexWelcomeHeader(
 				this.ui,
-				() => `${logo}\n${compactInstructions}\n${compactOnboarding}\n\n${onboarding}`,
-				() => `${logo}\n${expandedInstructions}\n\n${onboarding}`,
+				() => headerDetails,
+				() => headerDetails,
 				this.getStartupExpansionState(),
 			);
 
@@ -1032,7 +1005,7 @@ export class InteractiveMode {
 
 		// Start version check asynchronously
 		checkForNewDiffexVersion(this.version).then((newRelease) => {
-			if (newRelease) {
+			if (newRelease && DIFFEX_UPDATE_AVAILABLE_NOTIFICATION_ENABLED) {
 				this.showNewVersionNotification(newRelease);
 			}
 		});

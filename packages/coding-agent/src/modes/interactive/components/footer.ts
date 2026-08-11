@@ -42,8 +42,8 @@ export function formatCwdForFooter(cwd: string, home: string | undefined): strin
 }
 
 /**
- * Footer component that shows pwd, model, thinking, and context usage.
- * Gets context usage from the session, and git branch and extension statuses from provider.
+ * Footer component that shows model, thinking, and context usage.
+ * Gets context usage from the session and extension statuses from provider.
  */
 export class FooterComponent implements Component {
 	private session: AgentSession;
@@ -84,21 +84,6 @@ export class FooterComponent implements Component {
 		const contextPercentValue = contextUsage?.percent ?? 0;
 		const contextPercent = contextUsage?.percent !== null ? contextPercentValue.toFixed(1) : "?";
 
-		// Replace home directory with ~
-		let pwd = formatCwdForFooter(this.session.sessionManager.getCwd(), process.env.HOME || process.env.USERPROFILE);
-
-		// Add git branch if available
-		const branch = this.footerData.getGitBranch();
-		if (branch) {
-			pwd = `${pwd} (${branch})`;
-		}
-
-		// Add session name if set
-		const sessionName = this.session.sessionManager.getSessionName();
-		if (sessionName) {
-			pwd = `${pwd} • ${sessionName}`;
-		}
-
 		// Colorize context percentage based on usage
 		let contextPercentStr: string;
 		const contextPercentDisplay = `Context ${contextPercent}% used`;
@@ -119,8 +104,7 @@ export class FooterComponent implements Component {
 			statsLine = truncateToWidth(statsLine, width, "...");
 		}
 
-		const pwdLine = truncateToWidth(theme.fg("dim", pwd), width, theme.fg("dim", "..."));
-		const lines = [pwdLine, theme.fg("dim", statsLine)];
+		const lines = [theme.fg("dim", statsLine)];
 
 		// Add extension statuses on a single line, sorted by key alphabetically
 		const extensionStatuses = this.footerData.getExtensionStatuses();

@@ -109,7 +109,7 @@ export class DiffexWelcomeHeader implements Component {
 			const clipped = line.slice(0, contentWidth);
 			return (
 				" ".repeat(padding) +
-				theme.fg("accent", clipped) +
+				theme.fg("border", clipped) +
 				" ".repeat(Math.max(0, width - padding - visibleWidth(clipped)))
 			);
 		});
