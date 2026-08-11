@@ -91,6 +91,12 @@ function getPromptResponses(outputLines: string[], id: string): ParsedOutputLine
 	);
 }
 
+function getCommandResponses(outputLines: string[], id: string, command: string): ParsedOutputLine[] {
+	return parseOutputLines(outputLines).filter(
+		(record) => record.id === id && record.type === "response" && record.command === command,
+	);
+}
+
 function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -143,8 +149,16 @@ async function createRuntimeHost(options: { withAuth: boolean; responseDelayMs: 
 		resourceLoader: createTestResourceLoader(),
 	});
 
+	const runtimePrompt = vi.fn(async (text: string, promptOptions?: Parameters<AgentSession["prompt"]>[1]) => {
+		await session.prompt(text, promptOptions);
+		return {
+			routing: promptOptions?.streamingBehavior ? ("switched" as const) : ("stayed" as const),
+			activeProfileId: promptOptions?.streamingBehavior ? "routed-profile" : "general",
+		};
+	});
 	const runtimeHost = {
 		session,
+		prompt: runtimePrompt,
 		newSession: vi.fn(async () => ({ cancelled: true })),
 		switchSession: vi.fn(async () => ({ cancelled: true })),
 		fork: vi.fn(async () => ({ cancelled: true, selectedText: "" })),
@@ -172,6 +186,7 @@ async function createRuntimeHost(options: { withAuth: boolean; responseDelayMs: 
 
 async function startRpcMode(options: { withAuth: boolean; responseDelayMs: number; model?: Model<any> }): Promise<{
 	lineHandler: (line: string) => void;
+	runtimeHost: AgentSessionRuntime;
 	cleanup: () => Promise<void>;
 }> {
 	rpcIo.outputLines = [];
@@ -181,7 +196,7 @@ async function startRpcMode(options: { withAuth: boolean; responseDelayMs: numbe
 	void runRpcMode(runtimeHost);
 	await vi.waitFor(() => expect(rpcIo.lineHandler).toBeDefined());
 
-	return { lineHandler: rpcIo.lineHandler!, cleanup };
+	return { lineHandler: rpcIo.lineHandler!, runtimeHost, cleanup };
 }
 
 describe("RPC prompt response semantics", () => {
@@ -281,6 +296,48 @@ describe("RPC prompt response semantics", () => {
 			});
 
 			await sleep(150);
+		} finally {
+			await cleanup();
+		}
+	});
+
+	it.each([
+		["steer", "steer"],
+		["follow_up", "followUp"],
+	] as const)("routes a distinct %s command during streaming and delivers it once", async (command, behavior) => {
+		const { lineHandler, runtimeHost, cleanup } = await startRpcMode({ withAuth: true, responseDelayMs: 500 });
+
+		try {
+			lineHandler(JSON.stringify({ id: `${command}-start`, type: "prompt", message: "Start coding" }));
+			await vi.waitFor(() => expect(runtimeHost.session.isStreaming).toBe(true));
+			vi.mocked(runtimeHost.prompt).mockClear();
+			rpcIo.outputLines = [];
+
+			const message = `Start a separate ${command} finance task`;
+			lineHandler(JSON.stringify({ id: `${command}-1`, type: command, message }));
+
+			await vi.waitFor(() => {
+				const responses = getCommandResponses(rpcIo.outputLines, `${command}-1`, command);
+				expect(responses).toHaveLength(1);
+				expect(responses[0]).toMatchObject({
+					id: `${command}-1`,
+					type: "response",
+					command,
+					success: true,
+				});
+			});
+			expect(runtimeHost.prompt).toHaveBeenCalledTimes(1);
+			expect(runtimeHost.prompt).toHaveBeenCalledWith(message, {
+				images: undefined,
+				streamingBehavior: behavior,
+				source: "rpc",
+				preflightResult: expect.any(Function),
+			});
+			const delivered = [
+				...runtimeHost.session.getSteeringMessages(),
+				...runtimeHost.session.getFollowUpMessages(),
+			].filter((queued) => queued === message);
+			expect(delivered).toHaveLength(1);
 		} finally {
 			await cleanup();
 		}
