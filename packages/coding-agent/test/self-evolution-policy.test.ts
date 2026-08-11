@@ -61,4 +61,40 @@ describe("self-evolution policy", () => {
 			findSelfEvolutionPolicyViolation("bash", { command: "rg TODO .pi/EVOLVED.md" }, { cwd, protectedPaths }),
 		).toBeUndefined();
 	});
+
+	it("allows read-only commands that name a protected file while redirecting elsewhere", () => {
+		expect(
+			findSelfEvolutionPolicyViolation(
+				"bash",
+				{ command: 'grep -rn "CLAUDE.md" src > /tmp/out' },
+				{ cwd, protectedPaths },
+			),
+		).toBeUndefined();
+		expect(
+			findSelfEvolutionPolicyViolation("bash", { command: "cat AGENTS.md > /dev/null" }, { cwd, protectedPaths }),
+		).toBeUndefined();
+	});
+
+	it("still blocks redirects whose target is the protected file", () => {
+		expect(
+			findSelfEvolutionPolicyViolation("bash", { command: "echo x >> AGENTS.md" }, { cwd, protectedPaths })?.path,
+		).toBe("/workspace/project/AGENTS.md");
+	});
+
+	it("only protects instruction file names that could be loaded for this session", () => {
+		// cwd, its ancestors, and the project config directory are in scope.
+		expect(findSelfEvolutionPolicyViolation("write", { path: "AGENTS.md" }, { cwd, protectedPaths: [] })?.path).toBe(
+			"/workspace/project/AGENTS.md",
+		);
+		expect(
+			findSelfEvolutionPolicyViolation("write", { path: "/workspace/CLAUDE.md" }, { cwd, protectedPaths: [] })?.path,
+		).toBe("/workspace/CLAUDE.md");
+		expect(
+			findSelfEvolutionPolicyViolation("write", { path: ".pi/EVOLVED.md" }, { cwd, protectedPaths: [] })?.path,
+		).toBe("/workspace/project/.pi/EVOLVED.md");
+		// A same-named file in a subdirectory is not loaded, so scaffolding it stays allowed.
+		expect(
+			findSelfEvolutionPolicyViolation("write", { path: "packages/new-pkg/AGENTS.md" }, { cwd, protectedPaths: [] }),
+		).toBeUndefined();
+	});
 });
