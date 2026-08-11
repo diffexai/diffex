@@ -78,7 +78,7 @@
 		"thinkingOff": "darkGray",
 		"thinkingMinimal": "#6e6e6e",
 		"thinkingLow": "#5f87af",
-		"thinkingMedium": "#81a2be",
+		"thinkingMedium": "startupIntroAccent",
 		"thinkingHigh": "#b294bb",
 		"thinkingXhigh": "#d183e8",
 		"thinkingMax": "#ff5fff",

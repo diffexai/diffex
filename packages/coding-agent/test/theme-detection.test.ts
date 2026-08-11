@@ -193,6 +193,7 @@ describe("editor autocomplete theme", () => {
 
 		expect(theme.getFgAnsi("startupIntroText")).toBe("\x1b[38;2;205;214;244m");
 		expect(theme.getFgAnsi("startupIntroAccent")).toBe("\x1b[38;2;137;180;250m");
+		expect(theme.getFgAnsi("thinkingMedium")).toBe(theme.getFgAnsi("startupIntroAccent"));
 		expect(getEditorTheme().selectList.selectedText("command")).toBe(
 			`${theme.getFgAnsi("autocompleteSelected")}command\x1b[39m`,
 		);
