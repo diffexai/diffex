@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import { APP_TITLE } from "../src/config.ts";
 import { BUILTIN_TASK_PROFILES } from "../src/core/profiles.ts";
 import { buildSystemPrompt, buildSystemPromptWithProvenance } from "../src/core/system-prompt.ts";
 
@@ -55,7 +56,7 @@ describe("buildSystemPrompt", () => {
 			});
 
 			expect(prompt).toContain(
-				"- When reading Pi docs or examples, resolve docs/... under Additional docs and examples/... under Examples, not the current working directory",
+				`- When reading ${APP_TITLE} docs or examples, resolve docs/... under Additional docs and examples/... under Examples, not the current working directory`,
 			);
 			expect(prompt).toContain("environment variables (docs/environment-variables.md)");
 		});
