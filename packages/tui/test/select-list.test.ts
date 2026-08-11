@@ -126,4 +126,15 @@ describe("SelectList", () => {
 		assert.equal(rendered.length, 5);
 		assert.ok(!rendered.join("\n").includes("(1/8)"));
 	});
+
+	it("uses a bracket selected prefix without a dash", () => {
+		const list = new SelectList([{ value: "command", label: "command" }], 5, {
+			...testTheme,
+			selectedPrefix: (text: string) => `[${text}]`,
+			selectedText: (text: string) => `{${text}}`,
+		});
+		const rendered = list.render(80);
+
+		assert.equal(rendered[0], "[> ]{command}");
+	});
 });

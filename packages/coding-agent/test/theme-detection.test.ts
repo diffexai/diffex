@@ -182,7 +182,7 @@ describe("editor autocomplete theme", () => {
 		initTheme("dark", false);
 
 		expect(getEditorTheme().selectList.selectedText("command")).toBe(`${theme.getFgAnsi("mdLink")}command\x1b[39m`);
-		expect(getEditorTheme().selectList.selectedPrefix("-> ")).toBe(`${theme.getFgAnsi("mdLink")}-> \x1b[39m`);
+		expect(getEditorTheme().selectList.selectedPrefix("> ")).toBe(`${theme.getFgAnsi("mdLink")}> \x1b[39m`);
 		expect(getSelectListTheme().selectedText("command")).toBe(`${theme.getFgAnsi("accent")}command\x1b[39m`);
 	});
 });

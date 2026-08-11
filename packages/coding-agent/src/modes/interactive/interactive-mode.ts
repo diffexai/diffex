@@ -99,7 +99,13 @@ import { isInstallTelemetryEnabled } from "../../core/telemetry.ts";
 import type { TruncationResult } from "../../core/tools/truncate.ts";
 import { hasTrustRequiringProjectResources, ProjectTrustStore } from "../../core/trust-manager.ts";
 import { getUsageCostBreakdown } from "../../core/usage-totals.ts";
-import { getChangelogPath, getNewEntries, normalizeChangelogLinks, parseChangelog } from "../../utils/changelog.ts";
+import {
+	getChangelogPath,
+	getNewEntries,
+	getStartupChangelogPreviewLines,
+	normalizeChangelogLinks,
+	parseChangelog,
+} from "../../utils/changelog.ts";
 import { copyToClipboard, readClipboardText } from "../../utils/clipboard.ts";
 import { extensionForImageMimeType, readClipboardImage } from "../../utils/clipboard-image.ts";
 import { getDiffexUserAgent } from "../../utils/diffex-user-agent.ts";
@@ -932,7 +938,8 @@ export class InteractiveMode {
 				formatCwdForFooter(this.sessionManager.getCwd(), process.env.HOME || process.env.USERPROFILE),
 			);
 			const onboarding = theme.fg("muted", "Ask Diffex to do something for you.");
-			const headerDetails = `${logo}\n${projectDirectory}\n${onboarding}`;
+			const headerLines = [logo, projectDirectory, ...this.getStartupWhatsNewLines(), onboarding];
+			const headerDetails = headerLines.join("\n");
 			this.builtInHeader = new DiffexWelcomeHeader(
 				this.ui,
 				() => headerDetails,
@@ -1146,6 +1153,23 @@ export class InteractiveMode {
 		}
 
 		return undefined;
+	}
+
+	private getStartupWhatsNewLines(): string[] {
+		const previewLines = getStartupChangelogPreviewLines(getChangelogPath());
+		if (previewLines.length === 0) {
+			return [];
+		}
+
+		return [
+			"",
+			theme.bold(theme.fg("accent", "What's new")),
+			...previewLines.map((line) => theme.fg("dim", line)),
+			theme.fg("muted", "Use ") +
+				theme.bold(theme.fg("accent", "/changelog")) +
+				theme.fg("muted", " to see the full changelog."),
+			"",
+		];
 	}
 
 	/**

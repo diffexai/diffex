@@ -5,6 +5,8 @@ import { truncateToWidth, visibleWidth } from "../utils.ts";
 const DEFAULT_PRIMARY_COLUMN_WIDTH = 32;
 const PRIMARY_COLUMN_GAP = 2;
 const MIN_DESCRIPTION_WIDTH = 10;
+const SELECTED_PREFIX = "> ";
+const UNSELECTED_PREFIX = "  ";
 
 const normalizeToSingleLine = (text: string): string => text.replace(/[\r\n]+/g, " ").trim();
 const clamp = (value: number, min: number, max: number): number => Math.max(min, Math.min(value, max));
@@ -136,7 +138,7 @@ export class SelectList implements Component {
 		descriptionSingleLine: string | undefined,
 		primaryColumnWidth: number,
 	): string {
-		const prefix = isSelected ? "→ " : "  ";
+		const prefix = isSelected ? SELECTED_PREFIX : UNSELECTED_PREFIX;
 		const prefixWidth = visibleWidth(prefix);
 
 		if (descriptionSingleLine && width > 40) {
@@ -151,7 +153,10 @@ export class SelectList implements Component {
 			if (remainingWidth > MIN_DESCRIPTION_WIDTH) {
 				const truncatedDesc = truncateToWidth(descriptionSingleLine, remainingWidth, "");
 				if (isSelected) {
-					return this.theme.selectedText(`${prefix}${truncatedValue}${spacing}${truncatedDesc}`);
+					return (
+						this.theme.selectedPrefix(prefix) +
+						this.theme.selectedText(`${truncatedValue}${spacing}${truncatedDesc}`)
+					);
 				}
 
 				const descText = this.theme.description(spacing + truncatedDesc);
@@ -162,7 +167,7 @@ export class SelectList implements Component {
 		const maxWidth = width - prefixWidth - 2;
 		const truncatedValue = this.truncatePrimary(item, isSelected, maxWidth, maxWidth);
 		if (isSelected) {
-			return this.theme.selectedText(`${prefix}${truncatedValue}`);
+			return this.theme.selectedPrefix(prefix) + this.theme.selectedText(truncatedValue);
 		}
 
 		return prefix + truncatedValue;

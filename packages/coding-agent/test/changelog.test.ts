@@ -1,5 +1,9 @@
 import { describe, expect, test } from "vitest";
-import { type ChangelogEntry, normalizeChangelogLinks } from "../src/utils/changelog.ts";
+import {
+	type ChangelogEntry,
+	formatStartupChangelogPreviewLines,
+	normalizeChangelogLinks,
+} from "../src/utils/changelog.ts";
 
 const entry: ChangelogEntry = {
 	major: 0,
@@ -45,5 +49,34 @@ describe("normalizeChangelogLinks", () => {
 				"[Local anchor](#settings)",
 			].join("\n"),
 		);
+	});
+});
+
+describe("formatStartupChangelogPreviewLines", () => {
+	test("extracts top changelog bullets and truncates them for startup", () => {
+		const markdown = [
+			"# Changelog",
+			"",
+			"## [Unreleased]",
+			"",
+			"### Added",
+			"",
+			"- Added `diffex auth check` provider/model auth preflight with optional credential output.",
+			"- Added [Session export](docs/export.md) for saved transcripts.",
+			"",
+			"```",
+			"- Ignored code fence bullet",
+			"```",
+			"",
+			"### Fixed",
+			"",
+			"- Fixed **startup notices** wrapping in narrow terminals.",
+		].join("\n");
+
+		expect(formatStartupChangelogPreviewLines(markdown, { maxLines: 3, maxWidth: 44 })).toEqual([
+			"- Added diffex auth check provider/model ...",
+			"- Added Session export for saved transcri...",
+			"- Fixed startup notices wrapping in narro...",
+		]);
 	});
 });

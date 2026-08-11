@@ -1,4 +1,5 @@
 import path from "node:path";
+import { visibleWidth } from "@earendil-works/diffex-tui";
 import { existsSync, readFileSync } from "fs";
 
 export interface ChangelogEntry {
@@ -13,6 +14,17 @@ const CHANGELOG_LINK_BASE_PATH = "packages/coding-agent";
 const LEGACY_REPO_RE = /^https:\/\/github\.com\/(?:badlogic|earendil-works)\/pi-mono(?=\/|$)/;
 const URL_SCHEME_RE = /^[a-z][a-z0-9+.-]*:/i;
 const INLINE_MARKDOWN_LINK_RE = /(!?\[[^\]\n]+\]\()([^\s)]+)((?:\s+[^)]*)?\))/g;
+const STARTUP_PREVIEW_BULLET_RE = /^\s*-\s+(.+?)\s*$/;
+const STARTUP_PREVIEW_CODE_FENCE_RE = /^\s*```/;
+const STARTUP_PREVIEW_LINK_RE = /!?\[([^\]\n]+)\]\([^\n)]*\)/g;
+const DEFAULT_STARTUP_PREVIEW_LINES = 4;
+const DEFAULT_STARTUP_PREVIEW_WIDTH = 76;
+const startupPreviewSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+
+export interface StartupChangelogPreviewOptions {
+	maxLines?: number;
+	maxWidth?: number;
+}
 
 function entryVersion(entry: ChangelogEntry): string {
 	return `${entry.major}.${entry.minor}.${entry.patch}`;
@@ -102,6 +114,99 @@ export function normalizeChangelogLinks(markdown: string, version: string | Chan
 	return markdown.replace(INLINE_MARKDOWN_LINK_RE, (_match, prefix, target, suffix) => {
 		return `${prefix}${normalizeChangelogLinkTarget(target, tag)}${suffix}`;
 	});
+}
+
+function normalizeStartupPreviewText(text: string): string {
+	return text
+		.replace(STARTUP_PREVIEW_LINK_RE, "$1")
+		.replace(/\*\*([^*\n]+)\*\*/g, "$1")
+		.replace(/`([^`\n]+)`/g, "$1")
+		.replace(/\\([[\]()_*`])/g, "$1")
+		.replace(/\s+/g, " ")
+		.trim();
+}
+
+function truncateStartupPreviewLine(line: string, maxWidth: number): string {
+	if (visibleWidth(line) <= maxWidth) {
+		return line;
+	}
+
+	const ellipsis = "...";
+	const ellipsisWidth = visibleWidth(ellipsis);
+	if (ellipsisWidth >= maxWidth) {
+		return ellipsis.slice(0, maxWidth);
+	}
+
+	const targetWidth = maxWidth - ellipsisWidth;
+	let truncated = "";
+	let width = 0;
+	for (const { segment } of startupPreviewSegmenter.segment(line)) {
+		const nextWidth = visibleWidth(segment);
+		if (width + nextWidth > targetWidth) {
+			break;
+		}
+		truncated += segment;
+		width += nextWidth;
+	}
+
+	return `${truncated}${ellipsis}`;
+}
+
+export function formatStartupChangelogPreviewLines(
+	markdown: string,
+	options: StartupChangelogPreviewOptions = {},
+): string[] {
+	const maxLines = Math.max(0, Math.floor(options.maxLines ?? DEFAULT_STARTUP_PREVIEW_LINES));
+	const maxWidth = Math.max(0, Math.floor(options.maxWidth ?? DEFAULT_STARTUP_PREVIEW_WIDTH));
+	if (maxLines === 0 || maxWidth === 0) {
+		return [];
+	}
+
+	const previewLines: string[] = [];
+	let inCodeFence = false;
+
+	for (const line of markdown.split("\n")) {
+		if (STARTUP_PREVIEW_CODE_FENCE_RE.test(line)) {
+			inCodeFence = !inCodeFence;
+			continue;
+		}
+		if (inCodeFence) {
+			continue;
+		}
+
+		const match = STARTUP_PREVIEW_BULLET_RE.exec(line);
+		if (!match) {
+			continue;
+		}
+
+		const normalizedText = normalizeStartupPreviewText(match[1]);
+		if (!normalizedText) {
+			continue;
+		}
+
+		previewLines.push(truncateStartupPreviewLine(`- ${normalizedText}`, maxWidth));
+		if (previewLines.length >= maxLines) {
+			break;
+		}
+	}
+
+	return previewLines;
+}
+
+export function getStartupChangelogPreviewLines(
+	changelogPath: string,
+	options: StartupChangelogPreviewOptions = {},
+): string[] {
+	if (!existsSync(changelogPath)) {
+		return [];
+	}
+
+	try {
+		return formatStartupChangelogPreviewLines(readFileSync(changelogPath, "utf-8"), options);
+	} catch (error) {
+		console.error(`Warning: Could not parse startup changelog preview: ${error}`);
+		return [];
+	}
 }
 
 /**
