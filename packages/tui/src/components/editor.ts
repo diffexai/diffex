@@ -233,6 +233,8 @@ export interface EditorTheme {
 export interface EditorOptions {
 	paddingX?: number;
 	autocompleteMaxVisible?: number;
+	placeholder?: string;
+	placeholderStyle?: (text: string) => string;
 }
 
 const SLASH_COMMAND_SELECT_LIST_LAYOUT: SelectListLayoutOptions = {
@@ -280,6 +282,8 @@ export class Editor implements Component, Focusable {
 	protected tui: TUI;
 	private theme: EditorTheme;
 	private paddingX: number = 0;
+	private placeholder: string = "";
+	private placeholderStyle: (text: string) => string = (text) => text;
 
 	// Store last render width for cursor navigation
 	private lastWidth: number = 80;
@@ -350,6 +354,8 @@ export class Editor implements Component, Focusable {
 		this.paddingX = Number.isFinite(paddingX) ? Math.max(0, Math.floor(paddingX)) : 0;
 		const maxVisible = options.autocompleteMaxVisible ?? 5;
 		this.autocompleteMaxVisible = Number.isFinite(maxVisible) ? Math.max(3, Math.min(20, Math.floor(maxVisible))) : 5;
+		this.placeholder = options.placeholder ?? "";
+		this.placeholderStyle = options.placeholderStyle ?? ((text) => text);
 	}
 
 	/** Set of currently valid paste IDs, for marker-aware segmentation. */
@@ -390,6 +396,11 @@ export class Editor implements Component, Focusable {
 		this.cancelAutocomplete();
 		this.autocompleteProvider = provider;
 		this.setAutocompleteTriggerCharacters(provider.triggerCharacters ?? []);
+	}
+
+	setPlaceholder(placeholder?: string): void {
+		this.placeholder = placeholder ?? "";
+		this.tui.requestRender();
 	}
 
 	/**
@@ -540,9 +551,16 @@ export class Editor implements Component, Focusable {
 			let displayText = layoutLine.text;
 			let lineVisibleWidth = visibleWidth(layoutLine.text);
 			let cursorInPadding = false;
+			const shouldShowPlaceholder =
+				this.isEditorEmpty() && layoutLine.hasCursor && this.placeholder.length > 0 && !this.autocompleteState;
 
+			if (shouldShowPlaceholder) {
+				const marker = emitCursorMarker ? CURSOR_MARKER : "";
+				displayText = marker + this.placeholderStyle(sliceByColumn(this.placeholder, 0, contentWidth, true));
+				lineVisibleWidth = visibleWidth(displayText);
+			}
 			// Add cursor if this line has it
-			if (layoutLine.hasCursor && layoutLine.cursorPos !== undefined) {
+			else if (layoutLine.hasCursor && layoutLine.cursorPos !== undefined) {
 				const before = displayText.slice(0, layoutLine.cursorPos);
 				const after = displayText.slice(layoutLine.cursorPos);
 

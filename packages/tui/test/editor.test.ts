@@ -725,6 +725,26 @@ describe("Editor component", () => {
 		});
 	});
 
+	describe("Placeholder", () => {
+		it("renders placeholder text only while the editor is empty", () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme, {
+				placeholder: "Ask Diffex to do something for you.",
+				placeholderStyle: (text) => `[${text}]`,
+			});
+
+			assert.strictEqual(editor.getText(), "");
+			assert.ok(
+				stripVTControlCharacters(editor.render(80).join("\n")).includes("Ask Diffex to do something for you."),
+			);
+
+			editor.handleInput("x");
+
+			const rendered = stripVTControlCharacters(editor.render(80).join("\n"));
+			assert.ok(!rendered.includes("Ask Diffex to do something for you."));
+			assert.strictEqual(editor.getText(), "x");
+		});
+	});
+
 	describe("Grapheme-aware text wrapping", () => {
 		it("wraps lines correctly when text contains wide emojis", () => {
 			const editor = new Editor(createTestTUI(), defaultEditorTheme);

@@ -589,6 +589,8 @@ export class InteractiveMode {
 		this.defaultEditor = new CustomEditor(this.ui, getEditorTheme(), this.keybindings, {
 			paddingX: editorPaddingX,
 			autocompleteMaxVisible,
+			placeholder: "Ask Diffex to do something for you.",
+			placeholderStyle: (text) => theme.fg("muted", text),
 		});
 		this.editor = this.defaultEditor;
 		this.editorContainer = new Container();
@@ -937,8 +939,7 @@ export class InteractiveMode {
 				"dim",
 				formatCwdForFooter(this.sessionManager.getCwd(), process.env.HOME || process.env.USERPROFILE),
 			);
-			const onboarding = theme.fg("muted", "Ask Diffex to do something for you.");
-			const headerLines = [logo, projectDirectory, ...this.getStartupWhatsNewLines(), onboarding];
+			const headerLines = [logo, projectDirectory, ...this.getStartupWhatsNewLines()];
 			const headerDetails = headerLines.join("\n");
 			this.builtInHeader = new DiffexWelcomeHeader(
 				this.ui,
@@ -1163,10 +1164,10 @@ export class InteractiveMode {
 
 		return [
 			"",
-			theme.bold(theme.fg("accent", "What's new")),
+			theme.bold(theme.fg("text", "What's new")),
 			...previewLines.map((line) => theme.fg("dim", line)),
 			theme.fg("muted", "Use ") +
-				theme.bold(theme.fg("accent", "/changelog")) +
+				theme.bold(theme.fg("text", "/changelog")) +
 				theme.fg("muted", " to see the full changelog."),
 			"",
 		];
