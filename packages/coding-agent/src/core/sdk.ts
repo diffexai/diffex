@@ -101,6 +101,8 @@ export interface CreateAgentSessionResult {
 	extensionsResult: LoadExtensionsResult;
 	/** Warning if session was restored with a different model than saved */
 	modelFallbackMessage?: string;
+	/** Warning if the active task profile denied tools that the caller explicitly requested */
+	deniedToolsMessage?: string;
 }
 
 // Re-exports
@@ -291,7 +293,18 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			? []
 			: undefined;
 	const excludedToolNames = options.excludeTools;
-	const excludedBuiltinToolNameSet = new Set(activeProfile.tools.denied);
+	// A profile's denied list is a ceiling, not a default: a high-stakes profile must not gain a tool
+	// just because a caller asked for it. Requested-but-denied tools are reported rather than dropped
+	// silently, so `--tools read,bash` under a bash-denying profile is not a mystery.
+	const profileDeniedToolNames = activeProfile.tools.denied;
+	const excludedBuiltinToolNameSet = new Set(profileDeniedToolNames);
+	const deniedRequestedToolNames = (options.tools ?? []).filter((name) => excludedBuiltinToolNameSet.has(name));
+	const deniedToolsMessage =
+		deniedRequestedToolNames.length > 0
+			? `Task profile "${activeProfile.id}" denies ${deniedRequestedToolNames.join(", ")}. ${
+					deniedRequestedToolNames.length === 1 ? "That tool was" : "Those tools were"
+				} not enabled. Pin a profile that allows it with --profile.`
+			: undefined;
 	const initialActiveToolNames: string[] = (
 		options.tools
 			? [...new Set([...options.tools, ...profileRequiredToolNames])]
@@ -460,7 +473,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		initialActiveToolNames,
 		allowedToolNames,
 		excludedToolNames,
-		excludedBuiltinToolNames: activeProfile.tools.denied,
+		excludedBuiltinToolNames: profileDeniedToolNames,
 		selfEvolutionProtectedPaths: [
 			join(agentDir, "EVOLVED.md"),
 			...["AGENTS.override.md", "AGENTS.md", "AGENTS.MD", "CLAUDE.md", "CLAUDE.MD"].map((fileName) =>
@@ -483,5 +496,6 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		session,
 		extensionsResult,
 		modelFallbackMessage,
+		deniedToolsMessage,
 	};
 }

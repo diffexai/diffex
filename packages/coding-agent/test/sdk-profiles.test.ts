@@ -43,6 +43,40 @@ describe("createAgentSession task profiles", () => {
 		session.dispose();
 	});
 
+	it("reports requested tools that the active profile denies instead of dropping them silently", async () => {
+		const model = getModel("anthropic", "claude-sonnet-4-5");
+		expect(model).toBeTruthy();
+		const { session, deniedToolsMessage } = await createAgentSession({
+			cwd,
+			agentDir,
+			model: model!,
+			tools: ["read", "bash"],
+			sessionManager: SessionManager.inMemory(cwd),
+		});
+
+		expect(session.agent.state.tools.map(({ name }) => name)).toEqual(["read"]);
+		expect(deniedToolsMessage).toContain("bash");
+		expect(deniedToolsMessage).toContain("general");
+
+		session.dispose();
+	});
+
+	it("does not report denied tools when the allowlist is satisfiable", async () => {
+		const model = getModel("anthropic", "claude-sonnet-4-5");
+		expect(model).toBeTruthy();
+		const { session, deniedToolsMessage } = await createAgentSession({
+			cwd,
+			agentDir,
+			model: model!,
+			tools: ["read"],
+			sessionManager: SessionManager.inMemory(cwd),
+		});
+
+		expect(deniedToolsMessage).toBeUndefined();
+
+		session.dispose();
+	});
+
 	it("uses the selected profile for prompt, tools, metadata, and evolution", async () => {
 		const model = getModel("anthropic", "claude-sonnet-4-5");
 		expect(model).toBeTruthy();

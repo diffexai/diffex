@@ -392,6 +392,9 @@ export class AgentSessionRuntime {
 		this._session = result.session;
 		this._services = result.services;
 		this._diagnostics = [...result.diagnostics, ...this.replacementDiagnostics];
+		if (result.deniedToolsMessage) {
+			this._diagnostics.push({ type: "warning", message: result.deniedToolsMessage });
+		}
 		this.replacementDiagnostics = [];
 		this._modelFallbackMessage = result.modelFallbackMessage;
 		this._profileRouting = result.session.sessionManager.getHeader()?.profile?.routing ?? profileRouting ?? "auto";
@@ -906,11 +909,14 @@ export async function createAgentSessionRuntime(
 		profileRouting: requestedRouting,
 	});
 	const profileRouting = result.session.sessionManager.getHeader()?.profile?.routing ?? requestedRouting ?? "auto";
+	const diagnostics = result.deniedToolsMessage
+		? [...result.diagnostics, { type: "warning" as const, message: result.deniedToolsMessage }]
+		: result.diagnostics;
 	return new AgentSessionRuntime(
 		result.session,
 		result.services,
 		createRuntime,
-		result.diagnostics,
+		diagnostics,
 		result.modelFallbackMessage,
 		profileRouting,
 	);
