@@ -21,6 +21,8 @@ export interface SelfEvolutionProtectionOptions {
 	protectedRoots?: readonly string[];
 	quarantineDir?: string;
 	allowedMutationPath?: string;
+	/** Project config directory name used to scope implicitly protected file names. Default: ".pi". */
+	configDirName?: string;
 }
 
 export interface SelfEvolutionPolicyViolation {
@@ -67,8 +69,12 @@ const USER_CONTROLLED_FILE_NAMES = new Set([
 	"EVOLVED.md",
 ]);
 
+/**
+ * Programs that can rewrite a file given to them, including interpreters that can be handed inline
+ * code. Output redirection is handled separately, per path, by `commandRedirectsToPath`.
+ */
 const MUTATING_SHELL_COMMAND =
-	/(?:^|[;&|]\s*)(?:command\s+|sudo\s+)*(?:apply_patch|bash|chmod|chown|cp|dd|git\s+[^;&|]*(?:apply|checkout|clean|reset|restore)|install|ln|mv|node|perl|php|powershell|pwsh|python(?:3)?|rm|ruby|sed\s+[^;&|]*-[^;&|\s]*i|sh|tee|touch|truncate|zsh)\b|(?:^|[^<])>{1,2}(?!>)/i;
+	/(?:^|[;&|]\s*)(?:command\s+|sudo\s+)*(?:apply_patch|bash|chmod|chown|cp|dd|git\s+[^;&|]*(?:apply|checkout|clean|reset|restore)|install|ln|mv|node|perl|php|powershell|pwsh|python(?:3)?|rm|ruby|sed\s+[^;&|]*-[^;&|\s]*i|sh|tee|touch|truncate|zsh)\b/i;
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {
 	return error instanceof Error && "code" in error;
@@ -485,22 +491,58 @@ function normalizePath(path: string, cwd: string): string {
 	}
 }
 
-function getProtectedPath(path: string, options: SelfEvolutionProtectionOptions): string | undefined {
-	const candidate = normalizePath(path, options.cwd);
-	if (USER_CONTROLLED_FILE_NAMES.has(basename(candidate))) {
-		return candidate;
-	}
-	return options.protectedPaths.find((protectedPath) => normalizePath(protectedPath, options.cwd) === candidate);
+/**
+ * Whether an implicitly protected file name at this location could supply instructions to a session
+ * rooted at `cwd`: the working directory itself, any ancestor of it, or the project config directory.
+ *
+ * Scoping matters because the file names are generic. Without it, writing an unrelated
+ * `packages/new-pkg/AGENTS.md` inside the repository would be refused even though nothing loads it.
+ */
+function isInstructionScope(candidate: string, options: SelfEvolutionProtectionOptions): boolean {
+	const cwd = resolve(options.cwd);
+	const directory = dirname(candidate);
+	if (isPathInside(directory, cwd)) return true;
+	return directory === join(cwd, options.configDirName ?? ".pi");
 }
 
-function commandReferencesPath(command: string, protectedPath: string, cwd: string): boolean {
+function getProtectedPath(path: string, options: SelfEvolutionProtectionOptions): string | undefined {
+	const candidate = normalizePath(path, options.cwd);
+	const explicitPath = options.protectedPaths.find(
+		(protectedPath) => normalizePath(protectedPath, options.cwd) === candidate,
+	);
+	if (explicitPath) return explicitPath;
+	if (USER_CONTROLLED_FILE_NAMES.has(basename(candidate)) && isInstructionScope(candidate, options)) {
+		return candidate;
+	}
+	return undefined;
+}
+
+function pathAliases(protectedPath: string, cwd: string): string[] {
 	const normalizedPath = normalizePath(protectedPath, cwd);
 	const relativePath = relative(cwd, normalizedPath);
 	const aliases = new Set([normalizedPath, relativePath, `./${relativePath}`]);
 	if (dirname(normalizedPath) === resolve(cwd) || USER_CONTROLLED_FILE_NAMES.has(basename(normalizedPath))) {
 		aliases.add(basename(normalizedPath));
 	}
-	return [...aliases].some((alias) => alias.length > 0 && command.includes(alias));
+	return [...aliases].filter((alias) => alias.length > 0);
+}
+
+function commandReferencesPath(command: string, protectedPath: string, cwd: string): boolean {
+	return pathAliases(protectedPath, cwd).some((alias) => command.includes(alias));
+}
+
+/**
+ * Whether the command redirects output into the protected path itself.
+ *
+ * Checked per path rather than treating any `>` in the command as mutating, so a read-only command
+ * that merely mentions a protected file while redirecting elsewhere is not refused. For example
+ * `grep -rn "CLAUDE.md" src > /tmp/out` writes only to /tmp/out.
+ */
+function commandRedirectsToPath(command: string, protectedPath: string, cwd: string): boolean {
+	return pathAliases(protectedPath, cwd).some((alias) => {
+		const escaped = alias.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+		return new RegExp(`>{1,2}\\s*['"]?${escaped}`).test(command);
+	});
 }
 
 /**
@@ -534,14 +576,21 @@ export function findSelfEvolutionPolicyViolation(
 		return undefined;
 	}
 	const command = input.command;
-	if (typeof command !== "string" || !MUTATING_SHELL_COMMAND.test(command)) {
+	if (typeof command !== "string") {
 		return undefined;
 	}
-	const protectedPath =
-		options.protectedPaths.find((path) => commandReferencesPath(command, path, options.cwd)) ??
-		[...USER_CONTROLLED_FILE_NAMES]
-			.filter((fileName) => command.includes(fileName))
-			.map((fileName) => resolve(options.cwd, fileName))[0];
+	const candidatePaths = [
+		...options.protectedPaths,
+		...[...USER_CONTROLLED_FILE_NAMES].map((fileName) => resolve(options.cwd, fileName)),
+	];
+	// A command is refused when it runs a file-mutating program while naming a protected path, or when
+	// it redirects output straight into one. Both halves must involve the same protected path.
+	const runsMutatingProgram = MUTATING_SHELL_COMMAND.test(command);
+	const protectedPath = candidatePaths.find(
+		(path) =>
+			commandRedirectsToPath(command, path, options.cwd) ||
+			(runsMutatingProgram && commandReferencesPath(command, path, options.cwd)),
+	);
 	if (!protectedPath) {
 		return undefined;
 	}
