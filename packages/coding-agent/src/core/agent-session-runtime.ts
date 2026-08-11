@@ -409,7 +409,7 @@ export class AgentSessionRuntime {
  * Create the initial runtime from a runtime factory and initial session target.
  *
  * The same factory is stored on the returned AgentSessionRuntime and reused for
- * later /new, /resume, /fork, and import flows.
+ * later /clear, /resume, /fork, and import flows.
  */
 export async function createAgentSessionRuntime(
 	createRuntime: CreateAgentSessionRuntimeFactory,

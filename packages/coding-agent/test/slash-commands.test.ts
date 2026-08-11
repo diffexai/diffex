@@ -1,0 +1,13 @@
+import { describe, expect, it } from "vitest";
+import { BUILTIN_SLASH_COMMANDS } from "../src/core/slash-commands.ts";
+
+describe("BUILTIN_SLASH_COMMANDS", () => {
+	it("uses /clear and /exit for session control commands", () => {
+		const commandNames = BUILTIN_SLASH_COMMANDS.map((command) => command.name);
+
+		expect(commandNames).toContain("clear");
+		expect(commandNames).toContain("exit");
+		expect(commandNames).not.toContain("new");
+		expect(commandNames).not.toContain("quit");
+	});
+});

@@ -13,7 +13,7 @@ import { InteractiveMode } from "../../../src/modes/interactive/interactive-mode
 // (runtimeHost.dispose) BEFORE touching the terminal. Extension teardown such
 // as removing a socket does not write to the tty, so it must not be skipped if
 // a later terminal-restore write fails on a dead or stalled terminal. The
-// interactive quit path (Ctrl+D, /quit) keeps the opposite order to preserve
+// interactive quit path (Ctrl+D, /exit) keeps the opposite order to preserve
 // the final TUI frame.
 
 type ShutdownThis = {
