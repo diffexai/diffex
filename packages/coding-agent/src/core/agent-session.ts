@@ -116,7 +116,7 @@ import type { SlashCommandInfo } from "./slash-commands.ts";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.ts";
 import { type BuildSystemPromptOptions, buildSystemPrompt } from "./system-prompt.ts";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts";
-import { createAllToolDefinitions } from "./tools/index.ts";
+import { createAllToolDefinitions, readOnlyToolNames } from "./tools/index.ts";
 import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapper.ts";
 import { addUsageToTotals, createUsageTotals } from "./usage-totals.ts";
 
@@ -380,6 +380,7 @@ export class AgentSession {
 	private _selfEvolutionEvolvedPaths?: { globalPath: string; projectPath?: string };
 	private _selfEvolutionEvolveTool?: ToolDefinition;
 	private _selfEvolutionExecutionQueue: Promise<void> = Promise.resolve();
+	private _unprotectedReadOnlyToolNames: ReadonlySet<string> = new Set();
 	private _baseToolsOverride?: Record<string, AgentTool>;
 	private _sessionStartEvent: SessionStartEvent;
 	private _extensionUIContext?: ExtensionUIContext;
@@ -624,7 +625,11 @@ export class AgentSession {
 		this.agent.beforeToolCall = async ({ toolCall, args }) => {
 			const runner = this._extensionRunner;
 			const protectionOptions = this._getSelfEvolutionProtectionOptions();
-			const hookSnapshot = snapshotSelfEvolutionProtection(protectionOptions);
+			// Read-only built-ins run unprotected and in parallel, so snapshotting around their hooks
+			// would only add cost. Extension hooks that mutate protected state are still caught on the
+			// protected tools in the same batch, which always execute sequentially.
+			const skipHookProtection = this._unprotectedReadOnlyToolNames.has(toolCall.name);
+			const hookSnapshot = skipHookProtection ? undefined : snapshotSelfEvolutionProtection(protectionOptions);
 			let extensionResult: ToolCallEventResult | undefined;
 			let extensionError: unknown;
 			if (runner.hasHandlers("tool_call")) {
@@ -639,7 +644,9 @@ export class AgentSession {
 					extensionError = err;
 				}
 			}
-			const hookPolicyError = this._selfEvolutionPolicyError(restoreSelfEvolutionProtection(hookSnapshot));
+			const hookPolicyError = hookSnapshot
+				? this._selfEvolutionPolicyError(restoreSelfEvolutionProtection(hookSnapshot))
+				: undefined;
 			if (hookPolicyError) return { block: true, reason: hookPolicyError };
 			if (extensionError instanceof Error) throw extensionError;
 			if (extensionError !== undefined) {
@@ -657,7 +664,9 @@ export class AgentSession {
 
 		this.agent.afterToolCall = async ({ toolCall, args, result, isError }) => {
 			const runner = this._extensionRunner;
-			const hookSnapshot = snapshotSelfEvolutionProtection(this._getSelfEvolutionProtectionOptions());
+			const hookSnapshot = this._unprotectedReadOnlyToolNames.has(toolCall.name)
+				? undefined
+				: snapshotSelfEvolutionProtection(this._getSelfEvolutionProtectionOptions());
 			let hookResult: Awaited<ReturnType<ExtensionRunner["emitToolResult"]>> | undefined;
 			let hookError: unknown;
 			if (runner.hasHandlers("tool_result")) {
@@ -676,7 +685,9 @@ export class AgentSession {
 					hookError = error;
 				}
 			}
-			const hookPolicyError = this._selfEvolutionPolicyError(restoreSelfEvolutionProtection(hookSnapshot));
+			const hookPolicyError = hookSnapshot
+				? this._selfEvolutionPolicyError(restoreSelfEvolutionProtection(hookSnapshot))
+				: undefined;
 			if (hookPolicyError) throw new Error(hookPolicyError);
 			if (hookError !== undefined) throw hookError;
 
@@ -2712,16 +2723,28 @@ export class AgentSession {
 		);
 
 		const toolRegistry = new Map(wrappedBuiltInTools.map((tool) => [tool.name, tool]));
+		const overriddenBuiltinNames = new Set<string>();
 		for (const tool of wrappedExtensionTools as AgentTool[]) {
+			if (toolRegistry.has(tool.name)) overriddenBuiltinNames.add(tool.name);
 			toolRegistry.set(tool.name, tool);
 		}
+		// Read-only built-ins cannot reach protected state, so they skip snapshot/restore and stay
+		// eligible for parallel execution. An extension that replaces one of those names is unknown
+		// code and is still protected.
+		const isUnprotectedReadOnlyBuiltin = (name: string): boolean =>
+			readOnlyToolNames.has(name as never) && !overriddenBuiltinNames.has(name);
+		this._unprotectedReadOnlyToolNames = new Set(
+			[...toolRegistry.keys()].filter((name) => isUnprotectedReadOnlyBuiltin(name)),
+		);
 		this._toolRegistry = new Map(
 			[...toolRegistry].map(([name, tool]) => [
 				name,
-				this._wrapToolWithSelfEvolutionProtection(
-					tool,
-					definitionRegistry.get(name)?.definition === this._selfEvolutionEvolveTool,
-				),
+				isUnprotectedReadOnlyBuiltin(name)
+					? tool
+					: this._wrapToolWithSelfEvolutionProtection(
+							tool,
+							definitionRegistry.get(name)?.definition === this._selfEvolutionEvolveTool,
+						),
 			]),
 		);
 
