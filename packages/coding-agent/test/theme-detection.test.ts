@@ -4,10 +4,14 @@ import {
 	detectTerminalBackgroundFromEnv,
 	detectTerminalBackgroundTheme,
 	detectTerminalThemeForAuto,
+	getEditorTheme,
+	getSelectListTheme,
 	getThemeByName,
 	getThemeForRgbColor,
+	initTheme,
 	parseAutoThemeSetting,
 	resolveThemeSetting,
+	theme,
 } from "../src/modes/interactive/theme/theme.ts";
 
 afterEach(() => {
@@ -170,5 +174,15 @@ describe("theme setting helpers", () => {
 		expect(resolveThemeSetting("light/dark", "light")).toBe("light");
 		expect(resolveThemeSetting("light/dark", "dark")).toBe("dark");
 		expect(resolveThemeSetting("light/dark/extra", "dark")).toBeUndefined();
+	});
+});
+
+describe("editor autocomplete theme", () => {
+	it("uses link blue for slash-command selection without changing generic selectors", () => {
+		initTheme("dark", false);
+
+		expect(getEditorTheme().selectList.selectedText("command")).toBe(`${theme.getFgAnsi("mdLink")}command\x1b[39m`);
+		expect(getEditorTheme().selectList.selectedPrefix("-> ")).toBe(`${theme.getFgAnsi("mdLink")}-> \x1b[39m`);
+		expect(getSelectListTheme().selectedText("command")).toBe(`${theme.getFgAnsi("accent")}command\x1b[39m`);
 	});
 });

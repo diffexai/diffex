@@ -1299,9 +1299,14 @@ export function getSelectListTheme(): SelectListTheme {
 }
 
 export function getEditorTheme(): EditorTheme {
+	const selectList = getSelectListTheme();
 	return {
 		borderColor: (text: string) => theme.fg("borderMuted", text),
-		selectList: getSelectListTheme(),
+		selectList: {
+			...selectList,
+			selectedPrefix: (text: string) => theme.fg("mdLink", text),
+			selectedText: (text: string) => theme.fg("mdLink", text),
+		},
 	};
 }
 
