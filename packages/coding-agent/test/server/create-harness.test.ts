@@ -343,7 +343,8 @@ describe("coding-agent Harness construction", () => {
 		expect(prompt).toContain("- read: Read file contents");
 		expect(prompt).not.toContain("- bash:");
 		expect(prompt).not.toContain("You can inspect PI_* environment variables");
-		expect(prompt).toContain('<project_instructions path="/workspace/AGENTS.md">');
+		expect(prompt).toContain('<user_instructions label="User instructions">');
+		expect(prompt).toContain("/workspace/AGENTS.md");
 		expect(prompt).toContain("<name>review</name>");
 		expect(prompt.indexOf("Use write only for new files or complete rewrites.")).toBeLessThan(
 			prompt.indexOf("Use read to examine files instead of cat or sed."),
