@@ -5,6 +5,9 @@ type SubmitContext = {
 	defaultEditor: { onSubmit?: (text: string) => void };
 	editor: {
 		addToHistory?: (text: string) => void;
+		getExpandedText?: () => string;
+		getText: () => string;
+		onSubmit?: (text: string) => void;
 		setText: (text: string) => void;
 	};
 	session: {
@@ -14,6 +17,9 @@ type SubmitContext = {
 		prompt: (text: string, options?: unknown) => Promise<void>;
 	};
 	flushPendingBashComponents: () => void;
+	promptUser: (text: string, options?: unknown) => Promise<void>;
+	updatePendingMessagesDisplay: () => void;
+	ui: { requestRender: () => void };
 	onInputCallback?: (text: string) => void;
 	pendingUserInputs: string[];
 };
@@ -26,6 +32,7 @@ type InputContext = {
 type InteractiveModePrivate = {
 	setupEditorSubmitHandler(this: SubmitContext): void;
 	getUserInput(this: InputContext): Promise<string>;
+	handleFollowUp(this: SubmitContext): Promise<void>;
 };
 
 const interactiveModePrototype = InteractiveMode.prototype as unknown as InteractiveModePrivate;
@@ -35,6 +42,7 @@ function createSubmitContext(): SubmitContext {
 		defaultEditor: {},
 		editor: {
 			addToHistory: vi.fn(),
+			getText: vi.fn(() => ""),
 			setText: vi.fn(),
 		},
 		session: {
@@ -44,6 +52,9 @@ function createSubmitContext(): SubmitContext {
 			prompt: vi.fn(async () => {}),
 		},
 		flushPendingBashComponents: vi.fn(),
+		promptUser: vi.fn(async () => {}),
+		updatePendingMessagesDisplay: vi.fn(),
+		ui: { requestRender: vi.fn() },
 		pendingUserInputs: [],
 	};
 }
@@ -68,5 +79,27 @@ describe("InteractiveMode startup input", () => {
 		await expect(interactiveModePrototype.getUserInput.call(context)).resolves.toBe("queued prompt");
 		expect(context.onInputCallback).toBeUndefined();
 		expect(context.pendingUserInputs).toEqual([]);
+	});
+
+	it("routes streaming steer submissions through the runtime host", async () => {
+		const context = createSubmitContext();
+		context.session.isStreaming = true;
+		interactiveModePrototype.setupEditorSubmitHandler.call(context);
+
+		await context.defaultEditor.onSubmit?.("separate finance task");
+
+		expect(context.promptUser).toHaveBeenCalledWith("separate finance task", { streamingBehavior: "steer" });
+		expect(context.session.prompt).not.toHaveBeenCalled();
+	});
+
+	it("routes streaming follow-up submissions through the runtime host", async () => {
+		const context = createSubmitContext();
+		context.session.isStreaming = true;
+		context.editor.getText = vi.fn(() => "separate legal task");
+
+		await interactiveModePrototype.handleFollowUp.call(context);
+
+		expect(context.promptUser).toHaveBeenCalledWith("separate legal task", { streamingBehavior: "followUp" });
+		expect(context.session.prompt).not.toHaveBeenCalled();
 	});
 });

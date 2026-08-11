@@ -382,6 +382,33 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 	await rebindSession();
 	registerSignalHandlers();
 
+	const dispatchPromptCommand = (
+		id: string | undefined,
+		command: "prompt" | "steer" | "follow_up",
+		message: string,
+		images: Extract<RpcCommand, { type: "prompt" }>["images"],
+		streamingBehavior?: "steer" | "followUp",
+	): void => {
+		let preflightSucceeded = false;
+		void runtimeHost
+			.prompt(message, {
+				images,
+				streamingBehavior,
+				source: "rpc",
+				preflightResult: (didSucceed) => {
+					if (didSucceed && !preflightSucceeded) {
+						preflightSucceeded = true;
+						output(success(id, command));
+					}
+				},
+			})
+			.catch((promptError) => {
+				if (!preflightSucceeded) {
+					output(error(id, command, promptError instanceof Error ? promptError.message : String(promptError)));
+				}
+			});
+	};
+
 	// Handle a single command
 	const handleCommand = async (command: RpcCommand): Promise<RpcResponse | undefined> => {
 		const id = command.id;
@@ -394,35 +421,18 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 			case "prompt": {
 				// Start prompt handling immediately, but emit the authoritative response only after
 				// prompt preflight succeeds. Queued and immediately handled prompts also count as success.
-				let preflightSucceeded = false;
-				void session
-					.prompt(command.message, {
-						images: command.images,
-						streamingBehavior: command.streamingBehavior,
-						source: "rpc",
-						preflightResult: (didSucceed) => {
-							if (didSucceed) {
-								preflightSucceeded = true;
-								output(success(id, "prompt"));
-							}
-						},
-					})
-					.catch((e) => {
-						if (!preflightSucceeded) {
-							output(error(id, "prompt", e.message));
-						}
-					});
+				dispatchPromptCommand(id, "prompt", command.message, command.images, command.streamingBehavior);
 				return undefined;
 			}
 
 			case "steer": {
-				await session.steer(command.message, command.images);
-				return success(id, "steer");
+				dispatchPromptCommand(id, "steer", command.message, command.images, "steer");
+				return undefined;
 			}
 
 			case "follow_up": {
-				await session.followUp(command.message, command.images);
-				return success(id, "follow_up");
+				dispatchPromptCommand(id, "follow_up", command.message, command.images, "followUp");
+				return undefined;
 			}
 
 			case "abort": {

@@ -33,7 +33,11 @@ import { createProjectTrustContext } from "./cli/project-trust.ts";
 import { selectSession } from "./cli/session-picker.ts";
 import { shouldRunFirstTimeSetup, showFirstTimeSetup, showStartupSelector } from "./cli/startup-ui.ts";
 import { APP_NAME, ENV_SESSION_DIR, expandTildePath, getAgentDir, getPackageDir, VERSION } from "./config.ts";
-import { type CreateAgentSessionRuntimeFactory, createAgentSessionRuntime } from "./core/agent-session-runtime.ts";
+import {
+	type CreateAgentSessionRuntimeFactory,
+	createAgentSessionRuntime,
+	resolveProfileRoutingMode,
+} from "./core/agent-session-runtime.ts";
 import {
 	type AgentSessionRuntimeDiagnostic,
 	createAgentSessionFromServices,
@@ -552,6 +556,13 @@ function resolveCliPaths(cwd: string, paths: string[] | undefined): string[] | u
 	return paths?.map((value) => (isLocalPath(value) ? resolvePath(value, cwd) : value));
 }
 
+function resolveCliProfile(cwd: string, profile: string | undefined): string | undefined {
+	if (!profile || profile === "auto" || /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(profile)) {
+		return profile;
+	}
+	return resolvePath(profile, cwd, { trim: true });
+}
+
 async function promptForMissingSessionCwd(
 	issue: SessionCwdIssue,
 	settingsManager: SettingsManager,
@@ -712,10 +723,14 @@ export async function main(args: string[], options?: MainOptions) {
 	const resolvedSkillPaths = resolveCliPaths(cwd, parsed.skills);
 	const resolvedPromptTemplatePaths = resolveCliPaths(cwd, parsed.promptTemplates);
 	const resolvedThemePaths = resolveCliPaths(cwd, parsed.themes);
+	const resolvedProfile = resolveCliProfile(cwd, parsed.profile);
 	const createRuntime: CreateAgentSessionRuntimeFactory = async ({
 		cwd,
 		agentDir,
 		sessionManager,
+		profile,
+		profileRouting,
+		generatedProfiles,
 		sessionStartEvent,
 		projectTrustContext,
 	}) => {
@@ -766,6 +781,8 @@ export async function main(args: string[], options?: MainOptions) {
 				additionalSkillPaths: resolvedSkillPaths,
 				additionalPromptTemplatePaths: resolvedPromptTemplatePaths,
 				additionalThemePaths: resolvedThemePaths,
+				profile,
+				generatedProfiles,
 				noExtensions: parsed.noExtensions,
 				noSkills: parsed.noSkills,
 				noPromptTemplates: parsed.noPromptTemplates,
@@ -777,6 +794,8 @@ export async function main(args: string[], options?: MainOptions) {
 			},
 		});
 		const { settingsManager, modelRuntime, resourceLoader } = services;
+		const settingsProfile = settingsManager.getDefaultProfile();
+		const effectiveProfileRouting = resolveProfileRoutingMode(profile, profileRouting, settingsProfile);
 		const diagnostics: AgentSessionRuntimeDiagnostic[] = [
 			...projectTrustDiagnostics,
 			...services.diagnostics,
@@ -784,6 +803,14 @@ export async function main(args: string[], options?: MainOptions) {
 			...resourceLoader.getExtensions().errors.map(({ path, error }) => ({
 				type: "error" as const,
 				message: `Failed to load extension "${path}": ${error}`,
+			})),
+			...resourceLoader.getProfiles().diagnostics.map((diagnostic) => ({
+				type: diagnostic.type === "error" ? ("error" as const) : ("warning" as const),
+				message: `${diagnostic.message}${diagnostic.path ? ` (${diagnostic.path})` : ""}`,
+			})),
+			...resourceLoader.getEvolvedNotes().diagnostics.map((diagnostic) => ({
+				type: diagnostic.type,
+				message: `${diagnostic.message} (${diagnostic.path})`,
 			})),
 		];
 
@@ -823,6 +850,7 @@ export async function main(args: string[], options?: MainOptions) {
 			model: sessionOptions.model,
 			thinkingLevel: sessionOptions.thinkingLevel,
 			scopedModels: sessionOptions.scopedModels,
+			profileRouting: effectiveProfileRouting,
 			tools: sessionOptions.tools,
 			excludeTools: sessionOptions.excludeTools,
 			noTools: sessionOptions.noTools,
@@ -844,6 +872,8 @@ export async function main(args: string[], options?: MainOptions) {
 		cwd: sessionManager.getCwd(),
 		agentDir,
 		sessionManager,
+		profile: resolvedProfile,
+		profileRouting: resolvedProfile === undefined ? undefined : resolvedProfile === "auto" ? "auto" : "pinned",
 	});
 	time("createAgentSessionRuntime");
 	const { services, session, modelFallbackMessage } = runtime;

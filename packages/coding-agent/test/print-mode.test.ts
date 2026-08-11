@@ -17,12 +17,13 @@ type FakeSession = {
 	extensionRunner: FakeExtensionRunner;
 	bindExtensions: ReturnType<typeof vi.fn>;
 	subscribe: ReturnType<typeof vi.fn>;
-	prompt: ReturnType<typeof vi.fn>;
+	prompt: ReturnType<typeof vi.fn<(text: string, options?: unknown) => Promise<void>>>;
 	reload: ReturnType<typeof vi.fn>;
 };
 
 type FakeRuntimeHost = {
 	session: FakeSession;
+	prompt: ReturnType<typeof vi.fn<(text: string, options?: unknown) => Promise<void>>>;
 	newSession: ReturnType<typeof vi.fn>;
 	fork: ReturnType<typeof vi.fn>;
 	switchSession: ReturnType<typeof vi.fn>;
@@ -76,6 +77,13 @@ function createRuntimeHost(assistantMessage: AssistantMessage): FakeRuntimeHost 
 
 	return {
 		session,
+		prompt: vi.fn(async (text: string, options?: unknown) => {
+			if (options === undefined) {
+				await session.prompt(text);
+			} else {
+				await session.prompt(text, options);
+			}
+		}),
 		newSession: vi.fn(async () => undefined),
 		fork: vi.fn(async () => ({ selectedText: "" })),
 		switchSession: vi.fn(async () => undefined),
