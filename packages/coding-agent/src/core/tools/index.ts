@@ -90,6 +90,11 @@ export type Tool = AgentTool<any>;
 export type ToolDef = ToolDefinition<any, any>;
 export type ToolName = "read" | "bash" | "edit" | "write" | "grep" | "find" | "ls";
 export const allToolNames: Set<ToolName> = new Set(["read", "bash", "edit", "write", "grep", "find", "ls"]);
+/**
+ * Built-in tools that cannot mutate the filesystem. They are exempt from self-evolution
+ * snapshot/restore, which keeps them eligible for parallel execution.
+ */
+export const readOnlyToolNames: ReadonlySet<ToolName> = new Set(["read", "grep", "find", "ls"]);
 
 export interface ToolsOptions {
 	read?: ReadToolOptions;

@@ -476,10 +476,14 @@ describe("AgentSession concurrent prompt guard", () => {
 		await session.prompt("hi");
 		await session.agent.waitForIdle();
 
-		expect(snapshots).toEqual([
-			["user", "assistant"],
-			["user", "assistant"],
-		]);
+		// The regression this guards is a tool_call hook observing a session that is still missing the
+		// assistant message that requested the call. Custom tools run under self-evolution protection and
+		// therefore execute sequentially, so the second hook additionally sees the first tool result.
+		expect(snapshots).toHaveLength(2);
+		for (const snapshot of snapshots) {
+			expect(snapshot.slice(0, 2)).toEqual(["user", "assistant"]);
+		}
+		expect(snapshots[1]?.slice(2)).toEqual(["toolResult"]);
 	});
 
 	it("should persist message_end events in order with slow extension handlers", async () => {
