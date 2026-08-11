@@ -255,34 +255,44 @@ Summary of that exploration:
 
 `;
 
-const BRANCH_SUMMARY_PROMPT = `Create a structured summary of this conversation branch for context when returning later.
+const BRANCH_SUMMARY_PROMPT = `Create a structured context checkpoint for this conversation branch so another LLM can resume the work later.
 
 Use this EXACT format:
 
-## Goal
-[What was the user trying to accomplish in this branch?]
+## Objective
+[What outcome was the user trying to achieve in this branch?]
 
-## Constraints & Preferences
-- [Any constraints, preferences, or requirements mentioned]
+## Requirements & Preferences
+- [Requirements, constraints, preferences, or success criteria stated by the user]
 - [Or "(none)" if none were mentioned]
 
-## Progress
-### Done
-- [x] [Completed tasks/changes]
+## Current State
+### Completed
+- [x] [Completed work and established outcomes]
 
 ### In Progress
 - [ ] [Work that was started but not finished]
 
 ### Blocked
-- [Issues preventing progress, if any]
+- [Issues preventing progress, or "(none)"]
 
 ## Key Decisions
 - **[Decision]**: [Brief rationale]
 
+## Sources, Evidence & Artifacts
+- [Important documents, links, datasets, calculations, files, outputs, or other artifacts]
+- [Or "(none)" if not applicable]
+
+## Open Questions & Uncertainty
+- [Unresolved questions, assumptions, risks, or uncertainty]
+- [Or "(none)" if not applicable]
+
 ## Next Steps
 1. [What should happen next to continue this work]
 
-Keep each section concise. Preserve exact file paths, function names, and error messages.`;
+Keep each section concise.
+Preserve exact names, identifiers, citations, calculations, artifact locations, quoted requirements, and error text when they matter.
+Include file and tool details only when the branch actually used them.`;
 
 /**
  * Generate a summary of abandoned branch entries.
