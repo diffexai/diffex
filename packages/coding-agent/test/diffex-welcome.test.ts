@@ -11,10 +11,14 @@ describe("renderDiffexWelcomeFrame", () => {
 	});
 
 	test("moves the boat from the center toward the logo position", () => {
-		const firstFrame = renderDiffexWelcomeFrame(0, 76).join("\n");
-		const finalBoatFrame = renderDiffexWelcomeFrame(19, 76).join("\n");
+		const firstFrame = renderDiffexWelcomeFrame(0, 76);
+		const finalBoatFrame = renderDiffexWelcomeFrame(19, 76);
+		const firstBoatColumn = Math.min(...firstFrame.map((line) => line.search(/\S/)).filter((column) => column >= 0));
+		const finalBoatColumn = Math.min(
+			...finalBoatFrame.map((line) => line.search(/\S/)).filter((column) => column >= 0),
+		);
 
-		expect(firstFrame.indexOf("__/___\\__")).toBeGreaterThan(finalBoatFrame.indexOf("__/___\\__"));
-		expect(finalBoatFrame.indexOf("__/___\\__")).toBeGreaterThanOrEqual(0);
+		expect(firstBoatColumn).toBeGreaterThan(finalBoatColumn);
+		expect(finalBoatColumn).toBe(0);
 	});
 });
