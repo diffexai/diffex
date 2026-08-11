@@ -1,5 +1,9 @@
 import { describe, expect, test } from "vitest";
-import { bashToolSystemPromptContribution, createBashToolDefinition } from "../src/core/tools/bash.ts";
+import {
+	bashBackgroundGuidelines,
+	bashToolSystemPromptContribution,
+	createBashToolDefinition,
+} from "../src/core/tools/bash.ts";
 import { createEditToolDefinition, editToolSystemPromptContribution } from "../src/core/tools/edit.ts";
 import { createFindToolDefinition, findToolSystemPromptContribution } from "../src/core/tools/find.ts";
 import { createGrepToolDefinition, grepToolSystemPromptContribution } from "../src/core/tools/grep.ts";
@@ -31,6 +35,8 @@ describe("built-in tool system prompt contributions", () => {
 	test("keeps bash session-environment guidance conditional", () => {
 		const definition = createBashToolDefinition("/workspace", { exposeSessionEnvironment: false });
 
-		expect(definition.promptGuidelines).toBeUndefined();
+		// Background guidance describes the tool itself, so it stays regardless of session metadata.
+		expect(definition.promptGuidelines).toEqual([...bashBackgroundGuidelines]);
+		expect(definition.promptGuidelines?.join("\n")).not.toContain("PI_*");
 	});
 });

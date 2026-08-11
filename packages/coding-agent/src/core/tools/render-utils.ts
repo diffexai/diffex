@@ -22,6 +22,23 @@ export function linkPath(styledText: string, rawPath: string, cwd: string): stri
 	return hyperlink(styledText, pathToFileURL(absolutePath).href);
 }
 
+// Trailing punctuation is excluded so a URL at the end of a sentence still resolves.
+const URL_PATTERN = /https?:\/\/[^\s<>"'`\]]*[^\s<>"'`\].,;:!?)]/g;
+
+/** Extract http(s) URLs from command output, in first-seen order and de-duplicated. */
+export function findUrls(text: string): string[] {
+	return [...new Set(text.match(URL_PATTERN) ?? [])];
+}
+
+/**
+ * Make http(s) URLs in terminal output clickable so a dev server address opens in the real browser.
+ * Returns the text unchanged when the terminal does not advertise hyperlink support.
+ */
+export function linkifyUrls(text: string): string {
+	if (!getCapabilities().hyperlinks) return text;
+	return text.replace(URL_PATTERN, (url) => hyperlink(url, url));
+}
+
 export function str(value: unknown): string | null {
 	if (typeof value === "string") return value;
 	if (value == null) return "";

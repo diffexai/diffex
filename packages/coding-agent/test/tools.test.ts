@@ -471,6 +471,56 @@ describe("Coding Agent Tools", () => {
 		});
 	});
 
+	describe("bash background processes", () => {
+		it("keeps a backgrounded process running after the tool call returns", async () => {
+			const ops = createLocalBashOperations({ terminateDescendantsOnExit: true });
+			const marker = join(tmpdir(), `pi-bg-alive-${Date.now()}`);
+			const result = await ops.exec(
+				`echo "Local:   http://localhost:4321/"; (sleep 1; touch ${marker}); sleep 20`,
+				tmpdir(),
+				{ onData: () => {}, background: true },
+			);
+
+			expect(result.backgrounded).toBe(true);
+			expect(result.pid).toBeTypeOf("number");
+
+			await new Promise((resolve) => setTimeout(resolve, 2000));
+			expect(existsSync(marker)).toBe(true);
+
+			if (result.pid) shellModule.killProcessTree(result.pid);
+			rmSync(marker, { force: true });
+		});
+
+		it("still reaps delayed descendants of an ordinary foreground command", async () => {
+			const ops = createLocalBashOperations({ terminateDescendantsOnExit: true });
+			const marker = join(tmpdir(), `pi-bg-reaped-${Date.now()}`);
+			await ops.exec(`(sleep 1; touch ${marker}) & echo started`, tmpdir(), { onData: () => {} });
+
+			await new Promise((resolve) => setTimeout(resolve, 2000));
+			expect(existsSync(marker)).toBe(false);
+		});
+
+		it("reports a backgrounded process and its URL through the tool", async () => {
+			const tool = createBashTool(tmpdir());
+			const result = await tool.execute("bg-call", {
+				command: 'echo "Local:   http://localhost:4322/"; sleep 20',
+				background: true,
+			});
+			const text = getTextOutput(result);
+
+			expect(text).toContain("Still running in the background");
+			expect(text).toContain("http://localhost:4322/");
+		});
+
+		it("returns normally when a backgrounded command exits during startup", async () => {
+			const ops = createLocalBashOperations({ terminateDescendantsOnExit: true });
+			const result = await ops.exec("echo done", tmpdir(), { onData: () => {}, background: true });
+
+			expect(result.backgrounded).toBeUndefined();
+			expect(result.exitCode).toBe(0);
+		});
+	});
+
 	describe("bash tool", () => {
 		it("should execute simple commands", async () => {
 			const result = await bashTool.execute("test-call-8", { command: "echo 'test output'" });

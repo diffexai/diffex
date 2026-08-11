@@ -17,12 +17,14 @@ import {
 } from "../../utils/shell.ts";
 import type { ExtensionContext, ToolDefinition, ToolRenderResultOptions } from "../extensions/types.ts";
 import { OutputAccumulator } from "./output-accumulator.ts";
-import { getTextOutput, invalidArgText, str } from "./render-utils.ts";
+import { findUrls, getTextOutput, invalidArgText, linkifyUrls, str } from "./render-utils.ts";
 import { wrapToolDefinition } from "./tool-definition-wrapper.ts";
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, type TruncationResult } from "./truncate.ts";
 
 const MAX_TIMEOUT_MS = 2_147_483_647;
 const MAX_TIMEOUT_SECONDS = MAX_TIMEOUT_MS / 1000;
+/** How long a backgrounded command is watched so its startup banner (and URL) is captured. */
+const BACKGROUND_STARTUP_GRACE_MS = 2_000;
 
 function resolveTimeoutMs(timeout: number | undefined): number | undefined {
 	if (timeout === undefined) return undefined;
@@ -40,11 +42,26 @@ function resolveTimeoutMs(timeout: number | undefined): number | undefined {
 const bashSchema = Type.Object({
 	command: Type.String({ description: "Bash command to execute" }),
 	timeout: Type.Optional(Type.Number({ description: "Timeout in seconds (optional, no default timeout)" })),
+	background: Type.Optional(
+		Type.Boolean({
+			description:
+				"Start a long-running process (dev server, watcher) and return once it is up instead of waiting for it to exit. It keeps running for later commands and is stopped when the session ends. Do not use it to background ordinary commands.",
+		}),
+	),
 });
+
+/** Guidance that only applies when PI_* session metadata is exposed to the shell. */
+const bashSessionEnvironmentGuideline =
+	"You can inspect PI_* environment variables for current model and session details.";
+
+export const bashBackgroundGuidelines = [
+	"Start dev servers, watchers, and other long-running processes with background: true instead of a trailing &, which does not survive the command.",
+	"Report the URL a backgrounded server prints so the user can open it.",
+] as const;
 
 export const bashToolSystemPromptContribution = {
 	snippet: "Execute bash commands (ls, grep, find, etc.)",
-	guidelines: ["You can inspect PI_* environment variables for current model and session details."],
+	guidelines: [bashSessionEnvironmentGuideline, ...bashBackgroundGuidelines],
 } as const;
 
 export type BashToolInput = Static<typeof bashSchema>;
@@ -74,8 +91,14 @@ export interface BashOperations {
 			signal?: AbortSignal;
 			timeout?: number;
 			env?: NodeJS.ProcessEnv;
+			/**
+			 * Start a long-lived process (dev server, watcher) and return once it is up instead of
+			 * waiting for it to exit. Backgrounded processes survive the tool call and are terminated
+			 * when the session exits. Operations that do not support this run the command normally.
+			 */
+			background?: boolean;
 		},
-	) => Promise<{ exitCode: number | null }>;
+	) => Promise<{ exitCode: number | null; backgrounded?: boolean; pid?: number }>;
 }
 
 /**
@@ -93,7 +116,7 @@ export function createLocalBashOperations(options?: {
 	terminateDescendantsOnExit?: boolean;
 }): BashOperations {
 	return {
-		exec: async (command, cwd, { onData, signal, timeout, env }) => {
+		exec: async (command, cwd, { onData, signal, timeout, env, background }) => {
 			const timeoutMs = resolveTimeoutMs(timeout);
 			if (signal?.aborted) {
 				throw new Error("aborted");
@@ -123,6 +146,30 @@ export function createLocalBashOperations(options?: {
 			const onAbort = () => {
 				if (child.pid) killProcessTree(child.pid);
 			};
+
+			if (background) {
+				// Let the process announce itself (a dev server printing its URL) before returning, then
+				// leave it running. It stays tracked so session shutdown still reaps it.
+				child.stdout?.on("data", onData);
+				child.stderr?.on("data", onData);
+				const exitedEarly = await new Promise<number | null>((resolveExit) => {
+					const settle = setTimeout(() => resolveExit(null), BACKGROUND_STARTUP_GRACE_MS);
+					const finish = (code: number | null) => {
+						clearTimeout(settle);
+						resolveExit(code ?? 0);
+					};
+					child.once("exit", finish);
+					child.once("error", () => finish(1));
+				});
+				if (exitedEarly !== null) {
+					if (child.pid) untrackDetachedChildPid(child.pid);
+					return { exitCode: exitedEarly };
+				}
+				child.stdout?.removeListener("data", onData);
+				child.stderr?.removeListener("data", onData);
+				child.unref();
+				return { exitCode: null, backgrounded: true, pid: child.pid };
+			}
 
 			try {
 				// Set timeout if provided.
@@ -273,7 +320,8 @@ function rebuildBashResultRenderComponent(
 	if (output) {
 		const styledOutput = output
 			.split("\n")
-			.map((line) => theme.fg("toolOutput", line))
+			// Linkified after styling so a dev server URL is clickable straight out to the browser.
+			.map((line) => linkifyUrls(theme.fg("toolOutput", line)))
 			.join("\n");
 
 		if (options.expanded) {
@@ -344,13 +392,15 @@ export function createBashToolDefinition(
 	return {
 		name: "bash",
 		label: "bash",
-		description: `Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds.`,
+		description: `Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds. Use background: true for dev servers and watchers that should keep running after the command returns.`,
 		promptSnippet: bashToolSystemPromptContribution.snippet,
-		promptGuidelines: exposeSessionEnvironment ? [...bashToolSystemPromptContribution.guidelines] : undefined,
+		promptGuidelines: exposeSessionEnvironment
+			? [...bashToolSystemPromptContribution.guidelines]
+			: [...bashBackgroundGuidelines],
 		parameters: bashSchema,
 		async execute(
 			_toolCallId,
-			{ command, timeout }: { command: string; timeout?: number },
+			{ command, timeout, background }: { command: string; timeout?: number; background?: boolean },
 			signal?: AbortSignal,
 			onUpdate?,
 			ctx?,
@@ -443,14 +493,19 @@ export function createBashToolDefinition(
 
 			try {
 				let exitCode: number | null;
+				let backgrounded = false;
+				let backgroundPid: number | undefined;
 				try {
 					const result = await ops.exec(spawnContext.command, spawnContext.cwd, {
 						onData: handleData,
 						signal,
 						timeout,
 						env: spawnContext.env,
+						background,
 					});
 					exitCode = result.exitCode;
+					backgrounded = result.backgrounded === true;
+					backgroundPid = result.pid;
 				} catch (err) {
 					const snapshot = await finishOutput();
 					const { text } = formatOutput(snapshot, "");
@@ -465,7 +520,15 @@ export function createBashToolDefinition(
 				}
 
 				const snapshot = await finishOutput();
-				const { text: outputText, details } = formatOutput(snapshot);
+				const { text: outputText, details } = formatOutput(snapshot, backgrounded ? "" : "(no output)");
+				if (backgrounded) {
+					const urls = findUrls(snapshot.content ?? "");
+					const status = [
+						`Still running in the background${backgroundPid ? ` (pid ${backgroundPid})` : ""}. It stays up for later commands and stops when the session ends.`,
+						...(urls.length > 0 ? [`Open in a browser: ${urls.join(" ")}`] : []),
+					].join("\n");
+					return { content: [{ type: "text", text: appendStatus(outputText, status) }], details };
+				}
 				if (exitCode !== 0 && exitCode !== null) {
 					throw new Error(appendStatus(outputText, `Command exited with code ${exitCode}`));
 				}

@@ -215,6 +215,15 @@ cat README.md | pi -p "Summarize this text"
 
 Built-in tools: `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`.
 
+### Long-running processes
+
+An ordinary bash command is reaped when it returns, including anything it left running with a trailing `&`.
+This keeps a command from writing to protected instruction files after the harness has checked them.
+
+To start a dev server or watcher that should outlive the command, pass `background: true` to the bash tool.
+Diffex waits briefly to capture the startup banner, then leaves the process running for later commands and stops it when the session ends.
+URLs printed by a backgrounded process are clickable in terminals that support hyperlinks, so a `localhost` address opens in your browser.
+
 ### Resource Options
 
 | Option | Description |
@@ -301,6 +310,6 @@ pi --exclude-tools ask_question
 
 Diffex keeps the core small and pushes workflow-specific behavior into extensions, skills, prompt templates, and packages.
 
-It intentionally does not include built-in MCP, sub-agents, permission popups, plan mode, to-dos, or background bash. You can build or install those workflows as extensions or packages, or use external tools such as containers and tmux.
+It intentionally does not include built-in MCP, sub-agents, permission popups, plan mode, or to-dos. You can build or install those workflows as extensions or packages, or use external tools such as containers and tmux.
 
 For the full rationale, read the [blog post](https://mariozechner.at/posts/2025-11-30-pi-coding-agent/).
