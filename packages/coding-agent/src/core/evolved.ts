@@ -918,9 +918,11 @@ function boundEvolvedGuidance(notes: readonly EvolvedNote[], maxNotes: number, m
 		if (!note) continue;
 		const lessonKey = semanticLessonKey(note);
 		if (seenLessons.has(lessonKey)) continue;
-		seenLessons.add(lessonKey);
 		const next = [note, ...selected];
+		// Only claim the lesson key once the note actually fits, so a note dropped for size does not
+		// also suppress an older note carrying the same lesson.
 		if (Buffer.byteLength(renderEvolvedGuidanceSection(next), "utf-8") > maxBytes) continue;
+		seenLessons.add(lessonKey);
 		selected.unshift(note);
 	}
 	return selected;
