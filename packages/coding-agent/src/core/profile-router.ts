@@ -108,51 +108,53 @@ function optionalNonEmptyString(value: unknown, maxLength: number): string | und
 	return normalized.length > 0 ? normalized.slice(0, maxLength) : undefined;
 }
 
-const HIGH_STAKES_KEYWORDS: Readonly<Record<string, readonly string[]>> = Object.freeze({
-	finance: [
-		"balance sheet",
-		"cash flow",
-		"financial",
-		"investment",
-		"investments",
-		"mortgage",
-		"portfolio",
-		"retirement",
-		"securities",
-	],
-	healthcare: [
-		"chest pain",
-		"chest hurts",
-		"covid",
-		"disease",
-		"doctor",
-		"dosage",
-		"emergency room",
-		"er",
-		"fever",
-		"healthcare",
-		"illness",
-		"lab result",
-		"pain",
-		"patient",
-		"prescription",
-		"trouble breathing",
-		"urgent care",
-	],
-	legal: [
-		"attorney",
-		"class action",
-		"clause",
-		"evict",
-		"eviction",
-		"jurisdiction",
-		"landlord",
-		"lawsuit",
-		"lawyer",
-		"legal advice",
-		"subpoena",
-	],
-});
+// Null-prototype so a profile whose ID collides with an Object.prototype member (for example
+// "constructor", which is a valid profile ID) cannot resolve to an inherited non-array value.
+const HIGH_STAKES_KEYWORDS: Readonly<Record<string, readonly string[]>> = Object.freeze(
+	Object.assign(Object.create(null) as Record<string, readonly string[]>, {
+		finance: [
+			"balance sheet",
+			"cash flow",
+			"financial",
+			"investment",
+			"investments",
+			"mortgage",
+			"portfolio",
+			"retirement",
+			"securities",
+		],
+		healthcare: [
+			"chest pain",
+			"chest hurts",
+			"covid",
+			"disease",
+			"doctor",
+			"dosage",
+			"emergency room",
+			"fever",
+			"healthcare",
+			"illness",
+			"lab result",
+			"patient",
+			"prescription",
+			"trouble breathing",
+			"urgent care",
+		],
+		legal: [
+			"attorney",
+			"class action",
+			"clause",
+			"evict",
+			"eviction",
+			"jurisdiction",
+			"landlord",
+			"lawsuit",
+			"lawyer",
+			"legal advice",
+			"subpoena",
+		],
+	}),
+);
 
 const TASK_SIGNAL_PATTERN =
 	/\b(?:advis(?:e|ing)|analy(?:s|z)e|assess|calculate|compare|draft|evaluate|explain|help|interpret|plan|prepare|research|review|summarize|what should|how should)\b/i;
