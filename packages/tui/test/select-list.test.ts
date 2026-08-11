@@ -113,4 +113,17 @@ describe("SelectList", () => {
 		assert.ok(rendered[0].includes("…"));
 		assert.equal(visibleIndexOf(rendered[0], "first"), visibleIndexOf(rendered[1], "second"));
 	});
+
+	it("omits scroll position text for scrollable lists", () => {
+		const items = Array.from({ length: 8 }, (_, index) => {
+			const value = `command-${index + 1}`;
+			return { value, label: value };
+		});
+
+		const list = new SelectList(items, 5, testTheme);
+		const rendered = list.render(80);
+
+		assert.equal(rendered.length, 5);
+		assert.ok(!rendered.join("\n").includes("(1/8)"));
+	});
 });

@@ -99,13 +99,6 @@ export class SelectList implements Component {
 			lines.push(this.renderItem(item, isSelected, width, descriptionSingleLine, primaryColumnWidth));
 		}
 
-		// Add scroll indicators if needed
-		if (startIndex > 0 || endIndex < this.filteredItems.length) {
-			const scrollText = `  (${this.selectedIndex + 1}/${this.filteredItems.length})`;
-			// Truncate if too long for terminal
-			lines.push(this.theme.scrollInfo(truncateToWidth(scrollText, width - 2, "")));
-		}
-
 		return lines;
 	}
 
