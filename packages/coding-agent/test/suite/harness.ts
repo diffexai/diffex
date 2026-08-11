@@ -15,9 +15,9 @@ import type {
 	Model,
 } from "@earendil-works/diffex-ai/compat";
 import { registerFauxProvider, streamSimple } from "@earendil-works/diffex-ai/compat";
-import { AgentSession, type AgentSessionEvent } from "../../src/core/agent-session.ts";
+import { AgentSession, type AgentSessionConfig, type AgentSessionEvent } from "../../src/core/agent-session.ts";
 import { AuthStorage } from "../../src/core/auth-storage.ts";
-import type { ExtensionRunner } from "../../src/core/extensions/index.ts";
+import type { ExtensionRunner, ToolDefinition } from "../../src/core/extensions/index.ts";
 import { convertToLlm } from "../../src/core/messages.ts";
 import { SessionManager } from "../../src/core/session-manager.ts";
 import type { Settings } from "../../src/core/settings-manager.ts";
@@ -65,9 +65,15 @@ export interface HarnessOptions {
 	settings?: Partial<Settings>;
 	systemPrompt?: string;
 	tools?: AgentTool[];
+	customToolDefinitions?: ToolDefinition[];
 	initialActiveToolNames?: string[];
 	allowedToolNames?: string[];
 	excludedToolNames?: string[];
+	selfEvolutionProtectedPaths?: string[];
+	selfEvolutionProtectedRoots?: string[];
+	selfEvolutionQuarantineDir?: string;
+	selfEvolutionEvolvedPaths?: AgentSessionConfig["selfEvolutionEvolvedPaths"];
+	selfEvolutionEvolveTool?: ToolDefinition;
 	resourceLoader?: ResourceLoader;
 	extensionFactories?: Array<InlineExtension | CreateTestExtensionsResultInput>;
 	withConfiguredAuth?: boolean;
@@ -186,10 +192,16 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 		cwd: tempDir,
 		modelRuntime: getModelRuntime(modelRegistry),
 		resourceLoader,
+		customTools: options.customToolDefinitions,
 		baseToolsOverride: toolMap,
 		initialActiveToolNames: options.initialActiveToolNames,
 		allowedToolNames: options.allowedToolNames,
 		excludedToolNames: options.excludedToolNames,
+		selfEvolutionProtectedPaths: options.selfEvolutionProtectedPaths,
+		selfEvolutionProtectedRoots: options.selfEvolutionProtectedRoots,
+		selfEvolutionQuarantineDir: options.selfEvolutionQuarantineDir,
+		selfEvolutionEvolvedPaths: options.selfEvolutionEvolvedPaths,
+		selfEvolutionEvolveTool: options.selfEvolutionEvolveTool,
 		extensionRunnerRef,
 	});
 

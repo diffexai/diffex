@@ -83,6 +83,7 @@ export type PackageSource =
 			extensions?: string[];
 			skills?: string[];
 			prompts?: string[];
+			profiles?: string[];
 			themes?: string[];
 	  };
 
@@ -90,6 +91,7 @@ export interface Settings {
 	lastChangelogVersion?: string;
 	defaultProvider?: string;
 	defaultModel?: string;
+	defaultProfile?: string; // Optional pinned profile ID or path; undefined enables automatic intent routing
 	defaultThinkingLevel?: ThinkingLevel;
 	transport?: TransportSetting; // default: "auto"
 	steeringMode?: "all" | "one-at-a-time";
@@ -114,6 +116,7 @@ export interface Settings {
 	extensions?: string[]; // Array of local extension file paths or directories
 	skills?: string[]; // Array of local skill file paths or directories
 	prompts?: string[]; // Array of local prompt template paths or directories
+	profiles?: string[]; // Array of local task profile file paths or directories
 	themes?: string[]; // Array of local theme file paths or directories
 	enableSkillCommands?: boolean; // default: true - register skills as /skill:name commands
 	terminal?: TerminalSettings;
@@ -685,6 +688,11 @@ export class SettingsManager {
 		return this.settings.defaultModel;
 	}
 
+	getDefaultProfile(): string | undefined {
+		const profile = this.settings.defaultProfile;
+		return profile && profile !== "auto" ? profile : undefined;
+	}
+
 	setDefaultProvider(provider: string): void {
 		this.globalSettings.defaultProvider = provider;
 		this.markModified("defaultProvider");
@@ -694,6 +702,12 @@ export class SettingsManager {
 	setDefaultModel(modelId: string): void {
 		this.globalSettings.defaultModel = modelId;
 		this.markModified("defaultModel");
+		this.save();
+	}
+
+	setDefaultProfile(profile: string | undefined): void {
+		this.globalSettings.defaultProfile = profile && profile !== "auto" ? profile : undefined;
+		this.markModified("defaultProfile");
 		this.save();
 	}
 
@@ -1032,6 +1046,22 @@ export class SettingsManager {
 	setProjectPromptTemplatePaths(paths: string[]): void {
 		this.updateProjectSettings("prompts", (settings) => {
 			settings.prompts = paths;
+		});
+	}
+
+	getProfilePaths(): string[] {
+		return [...(this.settings.profiles ?? [])];
+	}
+
+	setProfilePaths(paths: string[]): void {
+		this.globalSettings.profiles = paths;
+		this.markModified("profiles");
+		this.save();
+	}
+
+	setProjectProfilePaths(paths: string[]): void {
+		this.updateProjectSettings("profiles", (settings) => {
+			settings.profiles = paths;
 		});
 	}
 
