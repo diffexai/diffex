@@ -228,3 +228,38 @@ describe("profile router parsing", () => {
 		expect(decision.decision).toBe("stay");
 	});
 });
+
+describe("profile router robustness", () => {
+	test("does not crash when a profile ID collides with an Object.prototype member", () => {
+		const general = BUILTIN_TASK_PROFILES.find((profile) => profile.id === "general");
+		if (!general) throw new Error("Missing general profile");
+		// "constructor" is a valid profile ID under PROFILE_ID_PATTERN, so a user profile can be named it.
+		const collidingProfile = {
+			...general,
+			id: "constructor",
+			guardrails: { ...general.guardrails, highStakes: true },
+		};
+		const input = routeInput({
+			currentProfile: general,
+			prompt: "Please explain my options",
+			recentTaskContext: "",
+			candidates: [collidingProfile],
+			sessionEstablished: false,
+		});
+
+		expect(() => parseProfileRouteDecision("not json", input)).not.toThrow();
+		const decision = parseProfileRouteDecision("not json", input);
+		expect(["stay", "switch"]).toContain(decision.decision);
+		expect(decision.fallback).toBe("invalid-output");
+	});
+
+	test("does not treat an incidental 'er' or 'pain' as a healthcare task", () => {
+		const decision = parseProfileRouteDecision(
+			"not json",
+			firstPromptInput("Please explain why this is a pain to configure"),
+		);
+
+		expect(decision.decision).toBe("stay");
+		expect(decision.profileId).toBe("general");
+	});
+});
