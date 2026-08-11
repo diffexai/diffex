@@ -125,7 +125,12 @@ import { CustomEditor } from "./components/custom-editor.ts";
 import { CustomEntryComponent } from "./components/custom-entry.ts";
 import { CustomMessageComponent } from "./components/custom-message.ts";
 import { DaxnutsComponent } from "./components/daxnuts.ts";
-import { DiffexWelcomeHeader } from "./components/diffex-welcome.ts";
+import {
+	DiffexWelcomeHeader,
+	diffexIntroAccent,
+	diffexIntroText,
+	diffexIntroTextBold,
+} from "./components/diffex-welcome.ts";
 import { DynamicBorder } from "./components/dynamic-border.ts";
 import { EarendilAnnouncementComponent } from "./components/earendil-announcement.ts";
 import { ExtensionEditorComponent } from "./components/extension-editor.ts";
@@ -934,9 +939,8 @@ export class InteractiveMode {
 
 		// Add header with keybindings from config (unless silenced)
 		if (this.options.verbose || !this.settingsManager.getQuietStartup()) {
-			const logo = theme.bold(theme.fg("mdLink", "Diffex")) + theme.fg("dim", ` v${this.version}`);
-			const projectDirectory = theme.fg(
-				"dim",
+			const logo = diffexIntroAccent("Diffex") + diffexIntroText(` v${this.version}`);
+			const projectDirectory = diffexIntroText(
 				formatCwdForFooter(this.sessionManager.getCwd(), process.env.HOME || process.env.USERPROFILE),
 			);
 			const headerLines = [logo, projectDirectory, ...this.getStartupWhatsNewLines()];
@@ -1164,11 +1168,9 @@ export class InteractiveMode {
 
 		return [
 			"",
-			theme.bold(theme.fg("text", "What's new")),
-			...previewLines.map((line) => theme.fg("dim", line)),
-			theme.fg("muted", "Use ") +
-				theme.bold(theme.fg("text", "/changelog")) +
-				theme.fg("muted", " to see the full changelog."),
+			diffexIntroTextBold("What's new"),
+			...previewLines.map((line) => diffexIntroText(line)),
+			diffexIntroText("Use ") + diffexIntroTextBold("/changelog") + diffexIntroText(" to see the full changelog."),
 			"",
 		];
 	}

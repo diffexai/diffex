@@ -33,7 +33,7 @@ const ThemeJsonSchema = Type.Object({
 	name: Type.String(),
 	vars: Type.Optional(Type.Record(Type.String(), ColorValueSchema)),
 	colors: Type.Object({
-		// Core UI (10 colors)
+		// Core UI (11 required, 3 optional)
 		accent: ColorValueSchema,
 		border: ColorValueSchema,
 		borderAccent: ColorValueSchema,
@@ -45,6 +45,9 @@ const ThemeJsonSchema = Type.Object({
 		dim: ColorValueSchema,
 		text: ColorValueSchema,
 		thinkingText: ColorValueSchema,
+		startupIntroText: Type.Optional(ColorValueSchema),
+		startupIntroAccent: Type.Optional(ColorValueSchema),
+		autocompleteSelected: Type.Optional(ColorValueSchema),
 		// Backgrounds & Content Text (11 required, 1 optional)
 		selectedBg: ColorValueSchema,
 		scrollbarThumb: Type.Optional(ColorValueSchema),
@@ -119,6 +122,9 @@ export type ThemeColor =
 	| "dim"
 	| "text"
 	| "thinkingText"
+	| "startupIntroText"
+	| "startupIntroAccent"
+	| "autocompleteSelected"
 	| "userMessageText"
 	| "customMessageText"
 	| "customMessageLabel"
@@ -321,13 +327,21 @@ function resolveThemeColors<T extends Record<string, ColorValue>>(
 	return resolved as Record<keyof T, string | number>;
 }
 
-function withThemeColorFallbacks(
-	colors: ThemeJson["colors"],
-): ThemeJson["colors"] & { thinkingMax: ColorValue; scrollbarThumb: ColorValue } {
+function withThemeColorFallbacks(colors: ThemeJson["colors"]): ThemeJson["colors"] & {
+	thinkingMax: ColorValue;
+	scrollbarThumb: ColorValue;
+	startupIntroText: ColorValue;
+	startupIntroAccent: ColorValue;
+	autocompleteSelected: ColorValue;
+} {
+	const startupIntroAccent = colors.startupIntroAccent ?? colors.mdLink;
 	return {
 		...colors,
 		thinkingMax: colors.thinkingMax ?? colors.thinkingXhigh,
 		scrollbarThumb: colors.scrollbarThumb ?? colors.selectedBg,
+		startupIntroText: colors.startupIntroText ?? colors.text,
+		startupIntroAccent,
+		autocompleteSelected: colors.autocompleteSelected ?? startupIntroAccent,
 	};
 }
 
@@ -1304,8 +1318,8 @@ export function getEditorTheme(): EditorTheme {
 		borderColor: (text: string) => theme.fg("borderMuted", text),
 		selectList: {
 			...selectList,
-			selectedPrefix: (text: string) => theme.fg("mdLink", text),
-			selectedText: (text: string) => theme.fg("mdLink", text),
+			selectedPrefix: (text: string) => theme.fg("autocompleteSelected", text),
+			selectedText: (text: string) => theme.fg("autocompleteSelected", text),
 		},
 	};
 }

@@ -12,6 +12,8 @@
 		"dimGray": "#666666",
 		"darkGray": "#505050",
 		"accent": "#8abeb7",
+		"startupIntroText": "#CDD6F4",
+		"startupIntroAccent": "#89B4FA",
 		"selectedBg": "#3a3a4a",
 		"userMsgBg": "#343541",
 		"toolPendingBg": "#282832",
@@ -31,6 +33,9 @@
 		"dim": "dimGray",
 		"text": "text",
 		"thinkingText": "gray",
+		"startupIntroText": "startupIntroText",
+		"startupIntroAccent": "startupIntroAccent",
+		"autocompleteSelected": "startupIntroAccent",
 
 		"selectedBg": "selectedBg",
 		"scrollbarThumb": "selectedBg",

@@ -34,7 +34,7 @@
 		},
 		"colors": {
 			"type": "object",
-			"description": "Theme color definitions (thinkingMax and scrollbarThumb are optional and use compatible fallbacks)",
+			"description": "Theme color definitions (thinkingMax, scrollbarThumb, startupIntroText, startupIntroAccent, and autocompleteSelected are optional and use compatible fallbacks)",
 			"required": [
 				"accent",
 				"border",
@@ -132,6 +132,18 @@
 				"thinkingText": {
 					"$ref": "#/$defs/colorValue",
 					"description": "Thinking block text color"
+				},
+				"startupIntroText": {
+					"$ref": "#/$defs/colorValue",
+					"description": "Startup intro logo art, version, directory, and changelog preview text (optional, falls back to text)"
+				},
+				"startupIntroAccent": {
+					"$ref": "#/$defs/colorValue",
+					"description": "Startup intro title and boundary color (optional, falls back to mdLink)"
+				},
+				"autocompleteSelected": {
+					"$ref": "#/$defs/colorValue",
+					"description": "Editor autocomplete selected row foreground (optional, falls back to startupIntroAccent)"
 				},
 				"selectedBg": {
 					"$ref": "#/$defs/colorValue",

@@ -1,3 +1,6 @@
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { type RgbColor, resetCapabilitiesCache, setCapabilities } from "@earendil-works/diffex-tui";
 import { afterEach, describe, expect, it } from "vitest";
 import {
@@ -9,13 +12,19 @@ import {
 	getThemeByName,
 	getThemeForRgbColor,
 	initTheme,
+	loadThemeFromPath,
 	parseAutoThemeSetting,
 	resolveThemeSetting,
 	theme,
 } from "../src/modes/interactive/theme/theme.ts";
 
+const tempDirs: string[] = [];
+
 afterEach(() => {
 	resetCapabilitiesCache();
+	for (const dir of tempDirs.splice(0)) {
+		rmSync(dir, { recursive: true, force: true });
+	}
 });
 
 describe("detectTerminalBackgroundFromEnv", () => {
@@ -178,11 +187,38 @@ describe("theme setting helpers", () => {
 });
 
 describe("editor autocomplete theme", () => {
-	it("uses link blue for slash-command selection without changing generic selectors", () => {
+	it("uses Diffex blue for slash-command selection without changing generic selectors", () => {
+		setCapabilities({ images: null, trueColor: true, hyperlinks: false });
 		initTheme("dark", false);
 
-		expect(getEditorTheme().selectList.selectedText("command")).toBe(`${theme.getFgAnsi("mdLink")}command\x1b[39m`);
-		expect(getEditorTheme().selectList.selectedPrefix("> ")).toBe(`${theme.getFgAnsi("mdLink")}> \x1b[39m`);
+		expect(theme.getFgAnsi("startupIntroText")).toBe("\x1b[38;2;205;214;244m");
+		expect(theme.getFgAnsi("startupIntroAccent")).toBe("\x1b[38;2;137;180;250m");
+		expect(getEditorTheme().selectList.selectedText("command")).toBe(
+			`${theme.getFgAnsi("autocompleteSelected")}command\x1b[39m`,
+		);
+		expect(getEditorTheme().selectList.selectedPrefix("> ")).toBe(
+			`${theme.getFgAnsi("autocompleteSelected")}> \x1b[39m`,
+		);
 		expect(getSelectListTheme().selectedText("command")).toBe(`${theme.getFgAnsi("accent")}command\x1b[39m`);
+	});
+
+	it("falls back for legacy themes without startup intro tokens", () => {
+		const themeJson = JSON.parse(
+			readFileSync(new URL("../src/modes/interactive/theme/dark.json", import.meta.url), "utf8"),
+		) as { name: string; colors: Record<string, unknown> };
+		themeJson.name = "legacy-startup-intro-theme";
+		delete themeJson.colors.startupIntroText;
+		delete themeJson.colors.startupIntroAccent;
+		delete themeJson.colors.autocompleteSelected;
+		const testDir = mkdtempSync(join(tmpdir(), "diffex-startup-intro-theme-"));
+		tempDirs.push(testDir);
+		const themePath = join(testDir, "legacy-startup-intro-theme.json");
+		writeFileSync(themePath, JSON.stringify(themeJson));
+
+		const legacyTheme = loadThemeFromPath(themePath, "truecolor");
+
+		expect(legacyTheme.getFgAnsi("startupIntroText")).toBe(legacyTheme.getFgAnsi("text"));
+		expect(legacyTheme.getFgAnsi("startupIntroAccent")).toBe(legacyTheme.getFgAnsi("mdLink"));
+		expect(legacyTheme.getFgAnsi("autocompleteSelected")).toBe(legacyTheme.getFgAnsi("startupIntroAccent"));
 	});
 });

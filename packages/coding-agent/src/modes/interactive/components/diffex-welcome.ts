@@ -1,4 +1,4 @@
-import { type Component, Text, type TUI, visibleWidth } from "@earendil-works/diffex-tui";
+import { type Component, sliceByColumn, Text, type TUI, visibleWidth } from "@earendil-works/diffex-tui";
 import { theme } from "../theme/theme.ts";
 
 export const DIFFEX_LOGO_ART = [
@@ -22,6 +22,18 @@ const BOAT_FRAMES = [
 	["", "      / | \\", "       /|\\", "    __/___\\__", " __/  o o  \\__", "~~\\___________/", " ~~  ~~  ~~"],
 	["", "       \\|/", "      \\ | /", "     _/___\\_", "  __/ o   o \\__", " \\___________/~~", "   ~~  ~~  ~~"],
 ];
+
+export function diffexIntroText(text: string): string {
+	return theme.fg("startupIntroText", text);
+}
+
+export function diffexIntroAccent(text: string): string {
+	return theme.fg("startupIntroAccent", text);
+}
+
+export function diffexIntroTextBold(text: string): string {
+	return theme.bold(diffexIntroText(text));
+}
 
 function padToWidth(line: string, width: number): string {
 	return line + " ".repeat(Math.max(0, width - visibleWidth(line)));
@@ -103,17 +115,30 @@ export class DiffexWelcomeHeader implements Component {
 	}
 
 	render(width: number): string[] {
-		const padding = width > 1 ? 1 : 0;
-		const contentWidth = Math.max(1, width - padding * 2);
+		if (width < 4) {
+			return [...renderDiffexWelcomeFrame(this.tick, width).map(diffexIntroText), ...this.details.render(width)];
+		}
+
+		const innerWidth = width - 2;
+		const contentPadding = innerWidth > 2 ? 1 : 0;
+		const contentWidth = Math.max(1, innerWidth - contentPadding * 2);
+		const horizontal = "─".repeat(innerWidth);
+		const topBorder = diffexIntroAccent(`┌${horizontal}┐`);
+		const bottomBorder = diffexIntroAccent(`└${horizontal}┘`);
+		const renderBoxLine = (line: string): string => {
+			const clipped = sliceByColumn(line, 0, contentWidth, true);
+			const visiblePadding = " ".repeat(Math.max(0, contentWidth - visibleWidth(clipped)));
+			const paddedContent = " ".repeat(contentPadding) + clipped + visiblePadding + " ".repeat(contentPadding);
+			const innerPadding = " ".repeat(Math.max(0, innerWidth - visibleWidth(paddedContent)));
+			return diffexIntroAccent("│") + paddedContent + innerPadding + diffexIntroAccent("│");
+		};
+
 		const art = renderDiffexWelcomeFrame(this.tick, contentWidth).map((line) => {
-			const clipped = line.slice(0, contentWidth);
-			return (
-				" ".repeat(padding) +
-				theme.fg("mdLink", clipped) +
-				" ".repeat(Math.max(0, width - padding - visibleWidth(clipped)))
-			);
+			return diffexIntroText(padToWidth(sliceByColumn(line, 0, contentWidth, true), contentWidth));
 		});
-		return [...art, " ".repeat(width), ...this.details.render(width)];
+		const details = this.details.render(contentWidth);
+
+		return [topBorder, ...art.map(renderBoxLine), renderBoxLine(""), ...details.map(renderBoxLine), bottomBorder];
 	}
 
 	dispose(): void {

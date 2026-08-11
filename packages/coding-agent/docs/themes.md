@@ -70,6 +70,9 @@ vim ~/.diffex/agent/themes/my-theme.json
     "dim": 240,
     "text": "",
     "thinkingText": "secondary",
+    "startupIntroText": "#CDD6F4",
+    "startupIntroAccent": "#89B4FA",
+    "autocompleteSelected": "#89B4FA",
     "selectedBg": "#2d2d30",
     "scrollbarThumb": "#555566",
     "userMessageBg": "#2d2d30",
@@ -141,13 +144,16 @@ vim ~/.diffex/agent/themes/my-theme.json
 
 - `name` is required, must be unique, and must not contain `/`.
 - `vars` is optional. Define reusable colors here, then reference them in `colors`.
-- `colors` must define all 51 required tokens. `thinkingMax` is optional and falls back to `thinkingXhigh`; `scrollbarThumb` is optional and falls back to `selectedBg`.
+- `colors` must define all 51 required tokens.
+  `thinkingMax`, `scrollbarThumb`, `startupIntroText`, `startupIntroAccent`, and `autocompleteSelected` are optional compatibility tokens with fallbacks.
 
 The `$schema` field enables editor auto-completion and validation.
 
 ## Color Tokens
 
-Every theme must define all 51 required color tokens. `thinkingMax` and `scrollbarThumb` are optional for compatibility with existing themes; when omitted, they use `thinkingXhigh` and `selectedBg`, respectively.
+Every theme must define all 51 required color tokens.
+`thinkingMax`, `scrollbarThumb`, `startupIntroText`, `startupIntroAccent`, and `autocompleteSelected` are optional for compatibility with existing themes.
+When omitted, they use `thinkingXhigh`, `selectedBg`, `text`, `mdLink`, and `startupIntroAccent`, respectively.
 
 ### Core UI (11 colors)
 
@@ -164,6 +170,14 @@ Every theme must define all 51 required color tokens. `thinkingMax` and `scrollb
 | `dim` | Tertiary text |
 | `text` | Default text (usually `""`) |
 | `thinkingText` | Thinking block text |
+
+### Startup Intro And Autocomplete (3 optional)
+
+| Token | Purpose |
+|-------|---------|
+| `startupIntroText` | Startup logo art, version, directory, and changelog preview text; optional, falls back to `text` |
+| `startupIntroAccent` | Startup title and boundary box; optional, falls back to `mdLink` |
+| `autocompleteSelected` | Editor autocomplete selected row; optional, falls back to `startupIntroAccent` |
 
 ### Backgrounds & Content (11 required, 1 optional)
 
