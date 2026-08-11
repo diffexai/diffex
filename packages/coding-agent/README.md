@@ -12,7 +12,9 @@
 
 ---
 
-Diffex is a minimal terminal coding harness. Adapt Diffex to your workflows, not the other way around, without having to fork and modify Diffex internals. Extend it with TypeScript [Extensions](#extensions), [Skills](#skills), [Prompt Templates](#prompt-templates), and [Themes](#themes). Put your extensions, skills, prompt templates, and themes in [Diffex Packages](#diffex-packages) and share them with others via npm or git.
+Diffex is a minimal terminal agent harness.
+It routes each task to an appropriate prompt profile while remaining extensible through TypeScript [Extensions](#extensions), [Skills](#skills), [Prompt Templates](#prompt-templates), and [Themes](#themes).
+Put your profiles, extensions, skills, prompt templates, and themes in [Diffex Packages](#diffex-packages) and share them with others via npm or git.
 
 Diffex ships with powerful defaults but skips features like sub agents and plan mode. Instead, you can ask Diffex to build what you want or install a third party Diffex package that matches your workflow.
 
@@ -47,6 +49,7 @@ Example upstream `pi-mono` work sessions are published here:
   - [Branching](#branching)
   - [Compaction](#compaction)
 - [Settings](#settings)
+- [Task Profiles](#task-profiles)
 - [Context Files](#context-files)
 - [Customization](#customization)
   - [Prompt Templates](#prompt-templates)
@@ -82,7 +85,9 @@ diffex
 /login  # Then select provider
 ```
 
-Then just talk to Diffex. By default, Diffex gives the model four tools: `read`, `write`, `edit`, and `bash`. The model uses these to fulfill your requests. Add capabilities via [skills](#skills), [prompt templates](#prompt-templates), [extensions](#extensions), or [Diffex packages](#diffex-packages).
+Then just talk to Diffex.
+Diffex selects a task profile from the requested outcome and applies that profile's tools and guardrails.
+Add capabilities via [skills](#skills), [prompt templates](#prompt-templates), [extensions](#extensions), or [Diffex packages](#diffex-packages).
 
 **Platform notes:** [Windows](docs/windows.md) | [Termux (Android)](docs/termux.md) | [tmux](docs/tmux.md) | [Terminal setup](docs/terminal-setup.md) | [Shell aliases](docs/shell-aliases.md)
 
@@ -173,6 +178,7 @@ Type `/` in the editor to trigger commands. [Extensions](#extensions) can regist
 | `/login`, `/logout` | Manage provider credentials |
 | [`/llama`](docs/llama-cpp.md) | Download, load, and unload llama.cpp router models |
 | `/model` | Switch models |
+| `/profile <id\|auto>` | Pin a task profile or resume automatic routing |
 | `/scoped-models` | Enable/disable models for Ctrl+P cycling |
 | `/settings` | Thinking level, theme, message delivery, transport |
 | `/resume` | Pick from previous sessions |
@@ -311,22 +317,36 @@ Use `--offline` or `DIFFEX_OFFLINE=1` to disable all startup network operations 
 
 ---
 
+## Task Profiles
+
+Diffex automatically routes new tasks to profiles for coding, research, finance, healthcare, legal, or general work.
+If no existing profile fits, it creates a provisional profile that can evolve only from inspectable `EVOLVED.md` notes.
+Pin a profile with `--profile <id|path>` or `/profile <id>`, and resume routing with `--profile auto` or `/profile auto`.
+
+See [docs/task-profiles.md](docs/task-profiles.md) for profile files, SDK usage, routing boundaries, and controlled evolution.
+
 ## Context Files
 
-Diffex loads `AGENTS.md` (or `CLAUDE.md`) at startup from:
+Diffex loads `AGENTS.md` at startup from:
+
 - `~/.diffex/agent/AGENTS.md` (global)
 - Parent directories (walking up from cwd)
 - Current directory
 
-If a directory contains `AGENTS.override.md`, Diffex loads it instead of `AGENTS.md` or `CLAUDE.md` from that directory. Context files from other directories are still concatenated.
+The coding profile also recognizes `CLAUDE.md` for compatibility.
+Other profiles use the task-agnostic `AGENTS.md` instruction layer.
+If a directory contains `AGENTS.override.md`, Diffex loads it instead of any other applicable instruction file from that directory.
+Context files from other directories are still concatenated.
 
-Use for project instructions (`AGENTS.md`/`CLAUDE.md`), conventions, common commands. All matching files are concatenated.
+Use `AGENTS.md` for project instructions, conventions, and common commands.
+All matching files are concatenated.
 
 Disable context file loading with `--no-context-files` (or `-nc`).
 
 ### System Prompt
 
-Replace the default system prompt with `.diffex/SYSTEM.md` (project) or `~/.diffex/agent/SYSTEM.md` (global). Append without replacing via `APPEND_SYSTEM.md`.
+Diffex does not discover `SYSTEM.md` or `APPEND_SYSTEM.md`.
+Use a task profile for task behavior and `AGENTS.md` for user instructions.
 
 ---
 
@@ -400,7 +420,8 @@ Place in `~/.diffex/agent/themes/`, `.diffex/themes/`, or a [Diffex package](#di
 
 ### Diffex Packages
 
-Bundle and share extensions, skills, prompts, and themes via npm or git. Find packages on [npmjs.com](https://www.npmjs.com/search?q=keywords%3Adiffex-package) or the [upstream Discord](https://discord.com/channels/1456806362351669492/1457744485428629628).
+Bundle and share profiles, extensions, skills, prompts, and themes via npm or git.
+Find packages on [npmjs.com](https://www.npmjs.com/search?q=keywords%3Adiffex-package) or the [upstream Discord](https://discord.com/channels/1456806362351669492/1457744485428629628).
 
 > **Security:** Diffex packages run with full system access. Extensions execute arbitrary code, and skills can instruct the model to perform any action including running executables. Review source code before installing third-party packages.
 
@@ -440,12 +461,13 @@ Create a package by adding the compatibility `diffex` key to `package.json`:
     "extensions": ["./extensions"],
     "skills": ["./skills"],
     "prompts": ["./prompts"],
-    "themes": ["./themes"]
+    "themes": ["./themes"],
+    "profiles": ["./profiles"]
   }
 }
 ```
 
-Without a `diffex` manifest, Diffex auto-discovers from conventional directories (`extensions/`, `skills/`, `prompts/`, `themes/`).
+Without a `diffex` manifest, Diffex auto-discovers from conventional directories (`extensions/`, `skills/`, `prompts/`, `themes/`, `profiles/`).
 
 See [docs/packages.md](docs/packages.md).
 
@@ -460,6 +482,7 @@ import { createAgentSession, ModelRuntime, SessionManager } from "@earendil-work
 
 const modelRuntime = await ModelRuntime.create();
 const { session } = await createAgentSession({
+  profile: "research",
   sessionManager: SessionManager.inMemory(),
   modelRuntime,
 });
@@ -592,7 +615,8 @@ Available built-in tools: `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`
 | `--no-prompt-templates` | Disable prompt template discovery |
 | `--theme <path>` | Load theme (repeatable) |
 | `--no-themes` | Disable theme discovery |
-| `--no-context-files`, `-nc` | Disable AGENTS.md and CLAUDE.md context file discovery |
+| `--no-context-files`, `-nc` | Disable `AGENTS.md` and coding-profile `CLAUDE.md` discovery |
+| `--profile <auto\|id\|path>` | Enable automatic routing or pin a task profile |
 
 Combine `--no-*` with explicit flags to load exactly what you need, ignoring settings.json (e.g., `--no-extensions -e ./my-ext.ts`).
 

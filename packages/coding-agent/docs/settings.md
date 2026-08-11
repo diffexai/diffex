@@ -29,6 +29,7 @@ Use `/trust` in interactive mode to save a project trust decision for future ses
 |---------|------|---------|-------------|
 | `defaultProvider` | string | - | Default provider (e.g., `"anthropic"`, `"openai"`) |
 | `defaultModel` | string | - | Default model ID |
+| `defaultProfile` | string | automatic | Task profile ID or path to pin; omit or use `"auto"` for intent routing |
 | `defaultThinkingLevel` | string | - | `"off"`, `"minimal"`, `"low"`, `"medium"`, `"high"`, `"xhigh"`, `"max"` |
 | `hideThinkingBlock` | boolean | `false` | Hide thinking blocks in output |
 | `showCacheMissNotices` | boolean | `false` | Show transcript notices for significant prompt-cache misses |
@@ -232,7 +233,7 @@ When multiple sources specify a session directory, precedence is `--session-dir`
 
 ### Resources
 
-These settings define where to load extensions, skills, prompts, and themes from.
+These settings define where to load task profiles, extensions, skills, prompts, and themes from.
 
 Paths in `~/.diffex/agent/settings.json` resolve relative to `~/.diffex/agent`. Paths in `.diffex/settings.json` resolve relative to `.diffex`. Absolute paths and `~` are supported.
 
@@ -243,6 +244,7 @@ Paths in `~/.diffex/agent/settings.json` resolve relative to `~/.diffex/agent`. 
 | `skills` | string[] | `[]` | Local skill file paths or directories |
 | `prompts` | string[] | `[]` | Local prompt template paths or directories |
 | `themes` | string[] | `[]` | Local theme file paths or directories |
+| `profiles` | string[] | `[]` | Local task profile manifests or directories |
 | `enableSkillCommands` | boolean | `true` | Register skills as `/skill:name` commands |
 
 Arrays support glob patterns and exclusions. Use `!pattern` to exclude. Use `+path` to force-include an exact path and `-path` to force-exclude an exact path.
@@ -279,6 +281,7 @@ See [packages.md](packages.md) for package management details.
 {
   "defaultProvider": "anthropic",
   "defaultModel": "claude-sonnet-4-20250514",
+  "defaultProfile": "auto",
   "defaultThinkingLevel": "medium",
   "theme": "dark",
   "compaction": {

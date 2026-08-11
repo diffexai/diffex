@@ -39,6 +39,7 @@ Type `/` in the editor to open command completion. Extensions can register custo
 | `/login`, `/logout` | Manage OAuth or API-key credentials |
 | [`/llama`](llama-cpp.md) | Download, load, and unload llama.cpp router models |
 | `/model` | Switch models |
+| `/profile <id\|auto>` | Pin a task profile or resume automatic routing |
 | `/scoped-models` | Enable/disable models for Ctrl+P cycling |
 | `/settings` | Thinking level, theme, message delivery, transport |
 | `/resume` | Pick from previous sessions |
@@ -97,24 +98,24 @@ See [Sessions](sessions.md) and [Compaction](compaction.md) for details.
 
 ## Context Files
 
-Diffex loads `AGENTS.md` or `CLAUDE.md` at startup from:
+Diffex loads `AGENTS.md` at startup from:
 
 - `~/.diffex/agent/AGENTS.md` for global instructions
 - parent directories, walking up from the current working directory
 - the current directory
 
-If a directory contains `AGENTS.override.md`, Diffex loads it instead of `AGENTS.md` or `CLAUDE.md` from that directory. Context files from other directories still layer normally.
+The coding profile also recognizes `CLAUDE.md` for compatibility.
+Other profiles use the task-agnostic `AGENTS.md` instruction layer.
+If a directory contains `AGENTS.override.md`, Diffex loads it instead of any other applicable instruction file from that directory.
+Context files from other directories still layer normally.
 
 Use context files for project conventions, commands, safety rules, and preferences. Disable loading with `--no-context-files` or `-nc`.
 
 ### System Prompt Files
 
-Replace the default system prompt with:
-
-- `.diffex/SYSTEM.md` for a project
-- `~/.diffex/agent/SYSTEM.md` globally
-
-Append to the default prompt without replacing it with `APPEND_SYSTEM.md` in either location.
+The model can read user instruction files but cannot modify them through self-evolution.
+Diffex does not discover `SYSTEM.md` or `APPEND_SYSTEM.md` files.
+Use [task profiles](task-profiles.md) for task behavior and `AGENTS.md` for user instructions.
 
 ### Project Trust
 
@@ -228,7 +229,8 @@ Built-in tools: `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`.
 | `--no-prompt-templates` | Disable prompt template discovery |
 | `--theme <path>` | Load a theme; repeatable |
 | `--no-themes` | Disable theme discovery |
-| `--no-context-files`, `-nc` | Disable `AGENTS.md` and `CLAUDE.md` discovery |
+| `--no-context-files`, `-nc` | Disable `AGENTS.md` and coding-profile `CLAUDE.md` discovery |
+| `--profile <auto\|id\|path>` | Enable automatic routing or pin a task profile |
 
 Combine `--no-*` with explicit flags to load exactly what you need, ignoring settings. Example:
 

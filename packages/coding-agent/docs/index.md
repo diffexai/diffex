@@ -1,6 +1,7 @@
 # Diffex Documentation
 
-Diffex is a minimal terminal coding harness. It is designed to stay small at the core while being extended through TypeScript extensions, skills, prompt templates, themes, and Diffex packages.
+Diffex is a minimal terminal agent harness.
+It stays small at the core while task profiles, TypeScript extensions, skills, prompt templates, themes, and Diffex packages adapt it to different kinds of work.
 
 ## Quick start
 
@@ -34,6 +35,7 @@ For the full first-run flow, see [Quickstart](quickstart.md).
 
 - [Quickstart](quickstart.md) - install, authenticate, and run a first session.
 - [Using Diffex](usage.md) - interactive mode, slash commands, context files, and CLI reference.
+- [Task profiles](task-profiles.md) - automatic task routing, profile authoring, user instructions, and controlled evolution.
 - [Providers](providers.md) - subscription and API-key setup for built-in providers.
 - [llama.cpp](llama-cpp.md) - run a local router and manage models with `/llama`.
 - [Security](security.md) - project trust, sandbox boundaries, and vulnerability reporting.
@@ -49,7 +51,7 @@ For the full first-run flow, see [Quickstart](quickstart.md).
 - [Skills](skills.md) - Agent Skills for reusable on-demand capabilities.
 - [Prompt templates](prompt-templates.md) - reusable prompts that expand from slash commands.
 - [Themes](themes.md) - built-in and custom terminal themes.
-- [Diffex packages](packages.md) - bundle and share extensions, skills, prompts, and themes.
+- [Diffex packages](packages.md) - bundle and share extensions, skills, prompts, themes, and task profiles.
 - [Custom models](models.md) - add model entries for supported provider APIs.
 - [Custom providers](custom-provider.md) - implement custom APIs and OAuth flows.
 
