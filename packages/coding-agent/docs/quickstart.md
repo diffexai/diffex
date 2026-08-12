@@ -74,12 +74,13 @@ Once Diffex starts, type a request and press Enter:
 Summarize this repository and tell me how to run its checks.
 ```
 
-By default, Diffex gives the model four tools:
+By default, Diffex gives the model five tools:
 
 - `read` - read files
 - `write` - create or overwrite files
 - `edit` - patch files
 - `bash` - run shell commands
+- `update_plan` - track progress with an ordered task checklist
 
 Additional built-in read-only tools (`grep`, `find`, `ls`) are available through tool options. Diffex runs in your current working directory and can modify files there. Use git or another checkpointing workflow if you want easy rollback.
 

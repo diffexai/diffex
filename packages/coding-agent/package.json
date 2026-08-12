@@ -1,7 +1,7 @@
 {
 	"name": "@earendil-works/diffex-coding-agent",
 	"version": "0.2.0",
-	"description": "Coding agent CLI with read, bash, edit, write tools and session management",
+	"description": "Coding agent CLI with read, bash, edit, write, update_plan tools and session management",
 	"type": "module",
 	"diffexConfig": {
 		"configDir": ".diffex"

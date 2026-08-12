@@ -61,6 +61,14 @@ export {
 	truncateTail,
 } from "./truncate.ts";
 export {
+	createUpdatePlanTool,
+	createUpdatePlanToolDefinition,
+	type UpdatePlanItem,
+	type UpdatePlanStatus,
+	type UpdatePlanToolDetails,
+	type UpdatePlanToolInput,
+} from "./update-plan.ts";
+export {
 	createWriteTool,
 	createWriteToolDefinition,
 	type WriteOperations,
@@ -76,12 +84,22 @@ import { createFindTool, createFindToolDefinition, type FindToolOptions } from "
 import { createGrepTool, createGrepToolDefinition, type GrepToolOptions } from "./grep.ts";
 import { createLsTool, createLsToolDefinition, type LsToolOptions } from "./ls.ts";
 import { createReadTool, createReadToolDefinition, type ReadToolOptions } from "./read.ts";
+import { createUpdatePlanTool, createUpdatePlanToolDefinition } from "./update-plan.ts";
 import { createWriteTool, createWriteToolDefinition, type WriteToolOptions } from "./write.ts";
 
 export type Tool = AgentTool<any>;
 export type ToolDef = ToolDefinition<any, any>;
-export type ToolName = "read" | "bash" | "edit" | "write" | "grep" | "find" | "ls";
-export const allToolNames: Set<ToolName> = new Set(["read", "bash", "edit", "write", "grep", "find", "ls"]);
+export type ToolName = "read" | "bash" | "edit" | "write" | "update_plan" | "grep" | "find" | "ls";
+export const allToolNames: Set<ToolName> = new Set([
+	"read",
+	"bash",
+	"edit",
+	"write",
+	"update_plan",
+	"grep",
+	"find",
+	"ls",
+]);
 
 export interface ToolsOptions {
 	read?: ReadToolOptions;
@@ -103,6 +121,8 @@ export function createToolDefinition(toolName: ToolName, cwd: string, options?: 
 			return createEditToolDefinition(cwd, options?.edit);
 		case "write":
 			return createWriteToolDefinition(cwd, options?.write);
+		case "update_plan":
+			return createUpdatePlanToolDefinition();
 		case "grep":
 			return createGrepToolDefinition(cwd, options?.grep);
 		case "find":
@@ -124,6 +144,8 @@ export function createTool(toolName: ToolName, cwd: string, options?: ToolsOptio
 			return createEditTool(cwd, options?.edit);
 		case "write":
 			return createWriteTool(cwd, options?.write);
+		case "update_plan":
+			return createUpdatePlanTool();
 		case "grep":
 			return createGrepTool(cwd, options?.grep);
 		case "find":
@@ -141,6 +163,7 @@ export function createCodingToolDefinitions(cwd: string, options?: ToolsOptions)
 		createBashToolDefinition(cwd, options?.bash),
 		createEditToolDefinition(cwd, options?.edit),
 		createWriteToolDefinition(cwd, options?.write),
+		createUpdatePlanToolDefinition(),
 	];
 }
 
@@ -159,6 +182,7 @@ export function createAllToolDefinitions(cwd: string, options?: ToolsOptions): R
 		bash: createBashToolDefinition(cwd, options?.bash),
 		edit: createEditToolDefinition(cwd, options?.edit),
 		write: createWriteToolDefinition(cwd, options?.write),
+		update_plan: createUpdatePlanToolDefinition(),
 		grep: createGrepToolDefinition(cwd, options?.grep),
 		find: createFindToolDefinition(cwd, options?.find),
 		ls: createLsToolDefinition(cwd, options?.ls),
@@ -171,6 +195,7 @@ export function createCodingTools(cwd: string, options?: ToolsOptions): Tool[] {
 		createBashTool(cwd, options?.bash),
 		createEditTool(cwd, options?.edit),
 		createWriteTool(cwd, options?.write),
+		createUpdatePlanTool(),
 	];
 }
 
@@ -189,6 +214,7 @@ export function createAllTools(cwd: string, options?: ToolsOptions): Record<Tool
 		bash: createBashTool(cwd, options?.bash),
 		edit: createEditTool(cwd, options?.edit),
 		write: createWriteTool(cwd, options?.write),
+		update_plan: createUpdatePlanTool(),
 		grep: createGrepTool(cwd, options?.grep),
 		find: createFindTool(cwd, options?.find),
 		ls: createLsTool(cwd, options?.ls),

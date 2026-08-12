@@ -77,7 +77,7 @@ describe("regression #3592: no-builtin-tools keeps extension tools enabled", () 
 			session
 				.getAllTools()
 				.map((tool) => tool.name)
-				.sort(),
+			.sort(),
 		).toEqual([
 			"agent_action",
 			"agents",
@@ -89,6 +89,7 @@ describe("regression #3592: no-builtin-tools keeps extension tools enabled", () 
 			"ls",
 			"read",
 			"spawn_agent",
+			"update_plan",
 			"write",
 		]);
 		expect(session.getActiveToolNames()).toEqual(["spawn_agent", "agent_action", "agents", "dynamic_tool"]);

@@ -2046,7 +2046,7 @@ diffex.registerTool({
 
 ### Overriding Built-in Tools
 
-Extensions can override built-in tools (`read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`) by registering a tool with the same name. Interactive mode displays a warning when this happens.
+Extensions can override built-in tools (`read`, `bash`, `edit`, `write`, `update_plan`, `grep`, `find`, `ls`) by registering a tool with the same name. Interactive mode displays a warning when this happens.
 
 ```bash
 # Extension's read tool replaces built-in read
@@ -2072,6 +2072,7 @@ Built-in tool implementations:
 - [bash.ts](https://github.com/diffexai/diffex/blob/main/packages/coding-agent/src/core/tools/bash.ts) - `BashToolDetails`
 - [edit.ts](https://github.com/diffexai/diffex/blob/main/packages/coding-agent/src/core/tools/edit.ts)
 - [write.ts](https://github.com/diffexai/diffex/blob/main/packages/coding-agent/src/core/tools/write.ts)
+- [update-plan.ts](https://github.com/diffexai/diffex/blob/main/packages/coding-agent/src/core/tools/update-plan.ts) - `UpdatePlanToolDetails`
 - [grep.ts](https://github.com/diffexai/diffex/blob/main/packages/coding-agent/src/core/tools/grep.ts) - `GrepToolDetails`
 - [find.ts](https://github.com/diffexai/diffex/blob/main/packages/coding-agent/src/core/tools/find.ts) - `FindToolDetails`
 - [ls.ts](https://github.com/diffexai/diffex/blob/main/packages/coding-agent/src/core/tools/ls.ts) - `LsToolDetails`

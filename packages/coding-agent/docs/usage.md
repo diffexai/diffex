@@ -218,7 +218,7 @@ cat README.md | diffex -p "Summarize this text"
 | `--no-builtin-tools`, `-nbt` | Disable built-in tools but keep extension/custom tools enabled |
 | `--no-tools`, `-nt` | Disable all tools |
 
-Built-in tools: `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`.
+Built-in tools: `read`, `bash`, `edit`, `write`, `update_plan`, `grep`, `find`, `ls`.
 
 ### Resource Options
 
@@ -305,6 +305,6 @@ diffex --exclude-tools ask_question
 
 Diffex keeps the core small and pushes workflow-specific behavior into extensions, skills, prompt templates, and packages.
 
-It intentionally does not include built-in MCP, sub-agents, permission popups, plan mode, to-dos, or background bash. You can build or install those workflows as extensions or packages, or use external tools such as containers and tmux.
+It intentionally does not include built-in MCP, sub-agents, permission popups, full plan mode, persistent to-dos, or background bash. The built-in `update_plan` tool is only a lightweight progress checklist. You can build or install richer workflows as extensions or packages, or use external tools such as containers and tmux.
 
 For the full rationale, read the [blog post](https://mariozechner.at/posts/2025-11-30-pi-coding-agent/).

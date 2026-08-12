@@ -236,7 +236,7 @@ export function printHelp(extensionFlags?: ExtensionFlag[]): void {
 					})
 					.join("\n")}\n`
 			: "";
-	console.log(`${chalk.bold(APP_TITLE)} - AI coding assistant with read, bash, edit, write tools
+	console.log(`${chalk.bold(APP_TITLE)} - AI coding assistant with read, bash, edit, write, update_plan tools
 
 ${chalk.bold("Usage:")}
   ${APP_NAME} [options] [@files...] [messages...]
@@ -407,12 +407,13 @@ ${chalk.bold("Environment Variables:")}
   DIFFEX_SHARE_VIEWER_URL              - Base URL for /share command (default: https://gist.github.com/)
 
 ${chalk.bold("Built-in Tool Names:")}
-  read   - Read file contents
-  bash   - Execute bash commands
-  edit   - Edit files with find/replace
-  write  - Write files (creates/overwrites)
-  grep   - Search file contents (read-only, off by default)
-  find   - Find files by glob pattern (read-only, off by default)
-  ls     - List directory contents (read-only, off by default)
+  read        - Read file contents
+  bash        - Execute bash commands
+  edit        - Edit files with find/replace
+  write       - Write files (creates/overwrites)
+  update_plan - Track progress with an ordered task checklist
+  grep        - Search file contents (read-only, off by default)
+  find        - Find files by glob pattern (read-only, off by default)
+  ls          - List directory contents (read-only, off by default)
 `);
 }

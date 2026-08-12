@@ -5,6 +5,10 @@ import { createFindToolDefinition, findToolSystemPromptContribution } from "../s
 import { createGrepToolDefinition, grepToolSystemPromptContribution } from "../src/core/tools/grep.ts";
 import { createLsToolDefinition, lsToolSystemPromptContribution } from "../src/core/tools/ls.ts";
 import { createReadToolDefinition, readToolSystemPromptContribution } from "../src/core/tools/read.ts";
+import {
+	createUpdatePlanToolDefinition,
+	updatePlanToolSystemPromptContribution,
+} from "../src/core/tools/update-plan.ts";
 import { createWriteToolDefinition, writeToolSystemPromptContribution } from "../src/core/tools/write.ts";
 
 const cases = [
@@ -12,6 +16,7 @@ const cases = [
 	["bash", bashToolSystemPromptContribution, createBashToolDefinition],
 	["edit", editToolSystemPromptContribution, createEditToolDefinition],
 	["write", writeToolSystemPromptContribution, createWriteToolDefinition],
+	["update_plan", updatePlanToolSystemPromptContribution, createUpdatePlanToolDefinition],
 	["grep", grepToolSystemPromptContribution, createGrepToolDefinition],
 	["find", findToolSystemPromptContribution, createFindToolDefinition],
 	["ls", lsToolSystemPromptContribution, createLsToolDefinition],

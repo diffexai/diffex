@@ -524,14 +524,15 @@ The names `spawn_agent`, `agent_action`, and `agents` are reserved and cannot be
 
 Specify which tools to enable:
 
-- Built-in tool names: `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`
-- Default built-ins: `read`, `bash`, `edit`, `write`
+- Built-in tool names: `read`, `bash`, `edit`, `write`, `update_plan`, `grep`, `find`, `ls`
+- Default built-ins: `read`, `bash`, `edit`, `write`, `update_plan`
 - `noTools: "all"` disables all tools
 - `noTools: "builtin"` disables default built-ins while keeping extension, custom, and coordination tools enabled
 - A `tools` allowlist must explicitly include each coordination tool that should remain available
 - `excludeTools` disables specific built-in, extension, custom, or coordination tool names after any `tools` allowlist is applied
 
 The `edit` tool returns `details.diff` for Diffex's TUI display and `details.patch` as a standard unified patch for SDK consumers.
+The `update_plan` tool returns `details.plan` with the full ordered checklist snapshot.
 
 ```typescript
 import { createAgentSession } from "@earendil-works/diffex-coding-agent";
@@ -1217,7 +1218,7 @@ SettingsManager
 // Tool factories
 createCodingTools
 createReadOnlyTools
-createReadTool, createBashTool, createEditTool, createWriteTool
+createReadTool, createBashTool, createEditTool, createWriteTool, createUpdatePlanTool
 createGrepTool, createFindTool, createLsTool
 
 // Types

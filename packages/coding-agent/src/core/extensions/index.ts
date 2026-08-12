@@ -163,6 +163,8 @@ export type {
 	TreePreparation,
 	TurnEndEvent,
 	TurnStartEvent,
+	UpdatePlanToolCallEvent,
+	UpdatePlanToolResultEvent,
 	// Events - User Bash
 	UserBashEvent,
 	UserBashEventResult,
@@ -181,6 +183,7 @@ export {
 	isLsToolResult,
 	isReadToolResult,
 	isToolCallEventType,
+	isUpdatePlanToolResult,
 	isWriteToolResult,
 } from "./types.ts";
 export { wrapRegisteredTool, wrapRegisteredTools } from "./wrapper.ts";

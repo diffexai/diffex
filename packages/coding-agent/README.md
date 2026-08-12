@@ -82,7 +82,7 @@ diffex
 /login  # Then select provider
 ```
 
-Then just talk to Diffex. By default, Diffex gives the model four tools: `read`, `write`, `edit`, and `bash`. The model uses these to fulfill your requests. Add capabilities via [skills](#skills), [prompt templates](#prompt-templates), [extensions](#extensions), or [Diffex packages](#diffex-packages).
+Then just talk to Diffex. By default, Diffex gives the model five tools: `read`, `write`, `edit`, `bash`, and `update_plan`. The model uses these to fulfill your requests and keep multi-step work visible. Add capabilities via [skills](#skills), [prompt templates](#prompt-templates), [extensions](#extensions), or [Diffex packages](#diffex-packages).
 
 **Platform notes:** [Windows](docs/windows.md) | [Termux (Android)](docs/termux.md) | [tmux](docs/tmux.md) | [Terminal setup](docs/terminal-setup.md) | [Shell aliases](docs/shell-aliases.md)
 
@@ -499,9 +499,9 @@ Diffex is aggressively extensible so it doesn't have to dictate your workflow. F
 
 **No permission popups.** Run in a container, or build your own confirmation flow with [extensions](#extensions) inline with your environment and security requirements.
 
-**No plan mode.** Write plans to files, or build it with [extensions](#extensions), or install a package.
+**No plan mode.** The built-in `update_plan` tool is only a lightweight progress checklist. For approval workflows, read-only planning phases, or richer planning modes, write plans to files, build an [extension](#extensions), or install a package.
 
-**No built-in to-dos.** They confuse models. Use a TODO.md file, or build your own with [extensions](#extensions).
+**No persistent built-in to-dos.** Use a TODO.md file, or build your own with [extensions](#extensions).
 
 **No background bash.** Use tmux. Full observability, direct interaction.
 
@@ -582,7 +582,7 @@ cat README.md | diffex -p "Summarize this text"
 | `--no-builtin-tools`, `-nbt` | Disable built-in tools by default but keep extension/custom tools enabled |
 | `--no-tools`, `-nt` | Disable all tools by default |
 
-Available built-in tools: `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`
+Available built-in tools: `read`, `bash`, `edit`, `write`, `update_plan`, `grep`, `find`, `ls`
 
 ### Resource Options
 

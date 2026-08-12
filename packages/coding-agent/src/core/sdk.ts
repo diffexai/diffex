@@ -28,6 +28,7 @@ import {
 	createLsTool,
 	createReadOnlyTools,
 	createReadTool,
+	createUpdatePlanTool,
 	createWriteTool,
 	type ToolName,
 	withFileMutationQueue,
@@ -66,14 +67,14 @@ export interface CreateAgentSessionOptions {
 	 * Optional default tool suppression mode when no explicit allowlist is provided.
 	 *
 	 * - "all": start with no tools enabled
-	 * - "builtin": disable the default built-in tools (read, bash, edit, write)
+	 * - "builtin": disable the default built-in tools (read, bash, edit, write, update_plan)
 	 *   but keep extension/custom tools enabled
 	 */
 	noTools?: "all" | "builtin";
 	/**
 	 * Optional allowlist of tool names.
 	 *
-	 * When omitted, Diffex enables the default built-in tools (read, bash, edit, write)
+	 * When omitted, Diffex enables the default built-in tools (read, bash, edit, write, update_plan)
 	 * and leaves extension/custom tools enabled unless `noTools` changes that default.
 	 * When provided, only the listed tool names are enabled.
 	 */
@@ -133,6 +134,7 @@ export {
 	createBashTool,
 	createEditTool,
 	createWriteTool,
+	createUpdatePlanTool,
 	createGrepTool,
 	createFindTool,
 	createLsTool,
@@ -305,7 +307,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		thinkingLevel = clampThinkingLevel(model, thinkingLevel) as ThinkingLevel;
 	}
 
-	const defaultActiveToolNames: ToolName[] = ["read", "bash", "edit", "write"];
+	const defaultActiveToolNames: ToolName[] = ["read", "bash", "edit", "write", "update_plan"];
 	const allowedToolNames = options.tools ?? (options.noTools === "all" ? [] : undefined);
 	const excludedToolNames = options.excludeTools;
 	const excludedToolNameSet = excludedToolNames ? new Set(excludedToolNames) : undefined;
