@@ -899,12 +899,14 @@ It never contains the prompt, transcript, router explanation, or harness descrip
   "targetHarnessId": "evidence-review-d4e5f6",
   "targetHarnessRevision": "abcdef1234567890",
   "targetHarnessName": "Evidence review",
+  "willResumeSession": true,
   "confidence": 0.97
 }
 ```
 
 `decision` is `reuse` for an existing evolved harness or `select` for a new harness based on a built-in prompt profile.
 `targetHarnessId` and `targetHarnessRevision` are omitted for `select` proposals because the harness does not exist until the switch is accepted.
+`willResumeSession` is `true` when accepting `reuse` will reopen a prior transcript and `false` when the switch will activate the harness identity in a new root session.
 Reply with `resolve_task_boundary` using the opaque `requestId`.
 
 ### profile_switch
