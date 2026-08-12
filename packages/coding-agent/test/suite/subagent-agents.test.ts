@@ -253,6 +253,23 @@ describe("subagent queries", () => {
 		expect(vi.getTimerCount()).toBe(0);
 	});
 
+	it("rejects cancellation that races a completed revision wait", async () => {
+		const subject = controller();
+		subject.reserve("worker", "task");
+		subject.markRunning("worker");
+		const abortController = new AbortController();
+		const reason = new Error("canceled after revision");
+		subject.subscribe((event) => {
+			if (event.type === "subagent_status_changed" && event.status === "idle") {
+				abortController.abort(reason);
+			}
+		});
+		const waiting = subject.queryAgents({ timeoutMs: 100, until: "all", signal: abortController.signal });
+
+		subject.markIdle("worker", "completed result");
+		await expect(waiting).rejects.toBe(reason);
+	});
+
 	it("rejects controller shutdown during an active wait", async () => {
 		const subject = controller();
 		subject.reserve("worker", "task");
