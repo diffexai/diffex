@@ -2,6 +2,7 @@ import type { AssistantMessage } from "@earendil-works/diffex-ai";
 import type { AgentSession } from "../agent-session.ts";
 import type {
 	CreateSubagentSession,
+	SubagentActionResult,
 	SubagentControllerSnapshot,
 	SubagentLifecycleEvent,
 	SubagentLifecycleListener,
@@ -45,9 +46,9 @@ function normalizeError(error: unknown): string {
 	}
 }
 
-function getAssistantText(messages: AssistantMessage[]): string | undefined {
-	const text = messages
-		.flatMap((message) => message.content)
+function getAssistantText(message: AssistantMessage | undefined): string | undefined {
+	if (!message) return undefined;
+	const text = message.content
 		.filter(
 			(content): content is Extract<AssistantMessage["content"][number], { type: "text" }> =>
 				content.type === "text",
@@ -69,7 +70,6 @@ export class SubagentController {
 	readonly #listeners = new Set<SubagentLifecycleListener>();
 	readonly #waiters = new Set<RevisionWaiter>();
 	readonly #permitQueue: PermitRequest[] = [];
-	readonly #shutdownController = new AbortController();
 	#activePermits = 0;
 	#revision = 0;
 	#closed = false;
@@ -112,10 +112,20 @@ export class SubagentController {
 
 	spawn(name: string, task: string, createSession: CreateSubagentSession): SubagentRecord {
 		const record = this.reserve(name, task);
-		const run = this.#run(record, createSession);
-		record.run = run;
-		void run.catch(() => {});
+		record.createSession = createSession;
+		this.#scheduleRun(record, task);
 		return record;
+	}
+
+	message(name: string, message: string, wake = false): Promise<SubagentActionResult> {
+		if (message.trim().length === 0) {
+			return Promise.reject(new Error("Subagent message must be non-empty"));
+		}
+		return this.#serializeAction(name, () => this.#message(name, message, wake));
+	}
+
+	interrupt(name: string): Promise<SubagentActionResult> {
+		return this.#serializeAction(name, () => this.#interrupt(name));
 	}
 
 	attachSession(name: string, session: AgentSession): void {
@@ -243,7 +253,6 @@ export class SubagentController {
 
 		this.#closed = true;
 		const closedError = this.#closedError();
-		this.#shutdownController.abort(closedError);
 		for (const request of this.#permitQueue.splice(0)) {
 			if (request.signal && request.onAbort) {
 				request.signal.removeEventListener("abort", request.onAbort);
@@ -252,6 +261,9 @@ export class SubagentController {
 		}
 
 		const records = [...this.#records.values()];
+		for (const record of records) {
+			record.runController?.abort(closedError);
+		}
 		this.#records.clear();
 		this.#publish(
 			(revision) => ({
@@ -278,7 +290,12 @@ export class SubagentController {
 		const timestamp = Date.now();
 		record.status = status;
 		record.updatedAt = timestamp;
-		if (status === "running") {
+		if (status === "queued") {
+			record.startedAt = undefined;
+			record.completedAt = undefined;
+			record.finalText = undefined;
+			record.error = undefined;
+		} else if (status === "running") {
 			record.startedAt = timestamp;
 			record.completedAt = undefined;
 			record.finalText = undefined;
@@ -306,7 +323,19 @@ export class SubagentController {
 		if (previousStatus === "running") {
 			return status === "idle" || status === "failed" || status === "interrupted";
 		}
-		return false;
+		return status === "queued";
+	}
+
+	#getRecordForAction(name: string): SubagentRecord {
+		this.#assertOpen();
+		if (!SUBAGENT_NAME_PATTERN.test(name)) {
+			throw new Error(`Invalid subagent name: ${name}`);
+		}
+		const record = this.#records.get(name);
+		if (!record) {
+			throw new Error(`Unknown subagent: ${name}`);
+		}
+		return record;
 	}
 
 	#getRecordForUpdate(name: string): SubagentRecord | undefined {
@@ -409,28 +438,136 @@ export class SubagentController {
 		}
 	}
 
-	async #run(record: SubagentRecord, createSession: CreateSubagentSession): Promise<void> {
+	#serializeAction(name: string, action: () => Promise<SubagentActionResult>): Promise<SubagentActionResult> {
+		const record = this.#getRecordForAction(name);
+		const previous = record.actionTail ?? Promise.resolve();
+		const result = previous.then(async () => {
+			this.#assertOpen();
+			return action();
+		});
+		record.actionTail = result.then(
+			() => {},
+			() => {},
+		);
+		return result;
+	}
+
+	async #message(name: string, message: string, wake: boolean): Promise<SubagentActionResult> {
+		const record = this.#getRecordForAction(name);
+		while (record.status === "running" && record.session?.isIdle) {
+			await record.run;
+			this.#assertOpen();
+		}
+
+		if (record.status === "queued") {
+			throw new Error(`Cannot message queued subagent: ${name}`);
+		}
+		if (record.status === "failed" || record.status === "interrupted") {
+			if (!wake) {
+				throw new Error(`Cannot message ${record.status} subagent without wake: ${name}`);
+			}
+			this.#scheduleRun(record, message);
+			return { target: name, action: "message", status: "queued", delivery: "prompt" };
+		}
+
+		const session = record.session;
+		if (!session) {
+			throw new Error(`Subagent session is unavailable: ${name}`);
+		}
+		if (record.status === "idle") {
+			if (wake) {
+				this.#scheduleRun(record, message);
+				return { target: name, action: "message", status: "queued", delivery: "prompt" };
+			}
+			await session.followUp(message);
+			return { target: name, action: "message", status: "idle", delivery: "follow_up" };
+		}
+
+		if (wake) {
+			await session.steer(message);
+			return { target: name, action: "message", status: "running", delivery: "steer" };
+		}
+		await session.followUp(message);
+		return { target: name, action: "message", status: "running", delivery: "follow_up" };
+	}
+
+	async #interrupt(name: string): Promise<SubagentActionResult> {
+		const record = this.#getRecordForAction(name);
+		while (record.status === "running" && record.session?.isIdle) {
+			await record.run;
+			this.#assertOpen();
+		}
+
+		record.session?.clearQueue();
+		if (record.status === "idle" || record.status === "failed" || record.status === "interrupted") {
+			return { target: name, action: "interrupt", status: record.status };
+		}
+
+		record.interruptionRequested = true;
+		const run = record.run;
+		if (record.status === "queued") {
+			record.runController?.abort(new Error(`Subagent interrupted: ${name}`));
+		} else if (record.session) {
+			try {
+				await record.session.abort();
+			} catch {
+				// The captured run still determines the settled controller state.
+			}
+		}
+		await run;
+		if (record.status === "queued" || record.status === "running") {
+			this.markInterrupted(name);
+		}
+		return { target: name, action: "interrupt", status: record.status };
+	}
+
+	#scheduleRun(record: SubagentRecord, prompt: string): void {
+		this.#assertOpen();
+		if (record.status !== "queued") {
+			this.#transition(record.name, "queued");
+		}
+		record.interruptionRequested = false;
+		const runController = new AbortController();
+		record.runController = runController;
+		const run = this.#runPrompt(record, prompt, runController);
+		record.run = run;
+		void run.catch(() => {});
+	}
+
+	async #runPrompt(record: SubagentRecord, prompt: string, runController: AbortController): Promise<void> {
 		let permit: SubagentPermit | undefined;
-		let session: AgentSession | undefined;
+		let session = record.session;
 		let turnStart: number | undefined;
 		try {
-			permit = await this.acquirePermit(this.#shutdownController.signal);
-			session = await createSession(this.#shutdownController.signal);
-			if (this.#closed || this.#shutdownController.signal.aborted) {
-				session.dispose();
-				return;
+			permit = await this.acquirePermit(runController.signal);
+			if (!session) {
+				const createSession = record.createSession;
+				if (!createSession) {
+					throw new Error(`Subagent session factory is unavailable: ${record.name}`);
+				}
+				session = await createSession(runController.signal);
+				if (this.#closed || runController.signal.aborted) {
+					session.dispose();
+					if (!this.#closed && record.interruptionRequested) {
+						this.markInterrupted(record.name);
+					}
+					return;
+				}
+				this.attachSession(record.name, session);
 			}
 
-			this.attachSession(record.name, session);
+			runController.signal.throwIfAborted();
 			this.markRunning(record.name);
 			turnStart = session.messages.length;
-			await session.prompt(record.task);
+			await session.prompt(prompt);
 			if (this.#closed) return;
 
 			const assistantMessages = getTurnAssistantMessages(session, turnStart);
 			const terminalMessage = assistantMessages.at(-1);
-			const finalText = getAssistantText(assistantMessages);
-			if (!terminalMessage) {
+			const finalText = getAssistantText(terminalMessage);
+			if (record.interruptionRequested) {
+				this.markInterrupted(record.name, finalText);
+			} else if (!terminalMessage) {
 				this.markFailed(record.name, "Subagent prompt completed without an assistant response", finalText);
 			} else if (terminalMessage.stopReason === "aborted") {
 				this.markInterrupted(record.name, finalText);
@@ -443,10 +580,18 @@ export class SubagentController {
 			if (!this.#closed) {
 				const assistantMessages =
 					session && turnStart !== undefined ? getTurnAssistantMessages(session, turnStart) : [];
-				this.markFailed(record.name, normalizeError(error), getAssistantText(assistantMessages));
+				const finalText = getAssistantText(assistantMessages.at(-1));
+				if (record.interruptionRequested) {
+					this.markInterrupted(record.name, finalText);
+				} else {
+					this.markFailed(record.name, normalizeError(error), finalText);
+				}
 			}
 		} finally {
 			permit?.release();
+			if (record.runController === runController) {
+				record.runController = undefined;
+			}
 		}
 	}
 
@@ -464,6 +609,7 @@ export class SubagentController {
 			if (result.status === "rejected") failures.push(result.reason);
 		}
 
+		await Promise.allSettled(records.flatMap((record) => (record.actionTail ? [record.actionTail] : [])));
 		await Promise.allSettled(records.flatMap((record) => (record.run ? [record.run] : [])));
 
 		for (const record of records) {

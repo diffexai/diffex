@@ -6,6 +6,21 @@ export type SubagentStatus = "queued" | "running" | "idle" | "failed" | "interru
 
 export type CreateSubagentSession = (signal: AbortSignal) => Promise<AgentSession>;
 
+export type SubagentMessageDelivery = "steer" | "follow_up" | "prompt";
+
+export type SubagentActionResult =
+	| {
+			readonly target: string;
+			readonly action: "message";
+			readonly status: SubagentStatus;
+			readonly delivery: SubagentMessageDelivery;
+	  }
+	| {
+			readonly target: string;
+			readonly action: "interrupt";
+			readonly status: SubagentStatus;
+	  };
+
 export interface SubagentRecord {
 	name: string;
 	task: string;
@@ -18,6 +33,10 @@ export interface SubagentRecord {
 	error?: string;
 	session?: AgentSession;
 	run?: Promise<void>;
+	createSession?: CreateSubagentSession;
+	runController?: AbortController;
+	interruptionRequested?: boolean;
+	actionTail?: Promise<void>;
 }
 
 export interface SubagentSnapshot {

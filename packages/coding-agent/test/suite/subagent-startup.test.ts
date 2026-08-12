@@ -3,82 +3,29 @@ import { fauxAssistantMessage } from "@earendil-works/diffex-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgentSession } from "../../src/core/agent-session.ts";
 import type { ExtensionContext } from "../../src/core/extensions/types.ts";
-import { SubagentController } from "../../src/core/subagents/controller.ts";
-import {
-	captureSubagentSessionConfig,
-	createSubagentSession,
-	type SubagentSessionConfig,
-} from "../../src/core/subagents/services.ts";
-import type { SubagentLifecycleEvent, SubagentRecord, SubagentStatus } from "../../src/core/subagents/types.ts";
+import { createSubagentSession } from "../../src/core/subagents/services.ts";
+import type { SubagentLifecycleEvent, SubagentRecord } from "../../src/core/subagents/types.ts";
 import { createSpawnAgentTool } from "../../src/core/tools/subagents.ts";
-import { createHarness, type Harness } from "./harness.ts";
-
-interface Deferred<T> {
-	readonly promise: Promise<T>;
-	readonly resolve: (value: T) => void;
-	readonly reject: (reason: unknown) => void;
-}
-
-function deferred<T>(): Deferred<T> {
-	let resolve!: (value: T) => void;
-	let reject!: (reason: unknown) => void;
-	const promise = new Promise<T>((resolvePromise, rejectPromise) => {
-		resolve = resolvePromise;
-		reject = rejectPromise;
-	});
-	return { promise, resolve, reject };
-}
-
-function getLastUserText(context: Context): string {
-	for (let index = context.messages.length - 1; index >= 0; index -= 1) {
-		const message = context.messages[index];
-		if (message?.role !== "user") continue;
-		if (typeof message.content === "string") return message.content;
-		return message.content.flatMap((content) => (content.type === "text" ? [content.text] : [])).join("\n");
-	}
-	return "";
-}
-
-async function waitForStatus(controller: SubagentController, name: string, status: SubagentStatus): Promise<void> {
-	while (true) {
-		const snapshot = controller.snapshot();
-		if (snapshot.agents.find((agent) => agent.name === name)?.status === status) return;
-		const result = await controller.waitForChange(snapshot.revision, { timeoutMs: 1_000 });
-		if (result.reason !== "changed") {
-			throw new Error(`Timed out waiting for ${name} to become ${status}`);
-		}
-	}
-}
+import {
+	createSubagentTestHarness,
+	deferred,
+	getLastUserText,
+	type SubagentTestHarness,
+	waitForStatus,
+} from "./subagent-harness.ts";
 
 describe("asynchronous subagent startup", () => {
-	const harnesses: Harness[] = [];
-	const controllers: SubagentController[] = [];
+	const harnesses: SubagentTestHarness[] = [];
 
 	afterEach(async () => {
 		vi.restoreAllMocks();
-		for (const controller of controllers.splice(0)) {
-			await controller.shutdown();
-		}
-		for (const harness of harnesses.splice(0)) harness.cleanup();
+		for (const harness of harnesses.splice(0)) await harness.cleanup();
 	});
 
-	async function setup(maxConcurrent = 1): Promise<{
-		harness: Harness;
-		controller: SubagentController;
-		config: SubagentSessionConfig;
-		createSession: (signal: AbortSignal) => Promise<AgentSession>;
-	}> {
-		const harness = await createHarness({ settings: { retry: { enabled: false } } });
+	async function setup(maxConcurrent = 1): Promise<SubagentTestHarness> {
+		const harness = await createSubagentTestHarness(maxConcurrent);
 		harnesses.push(harness);
-		const controller = new SubagentController({ maxConcurrent });
-		controllers.push(controller);
-		const config = captureSubagentSessionConfig(harness.session, harness.tempDir);
-		return {
-			harness,
-			controller,
-			config,
-			createSession: (signal) => createSubagentSession(config, { signal }),
-		};
+		return harness;
 	}
 
 	function executeSpawnTool(tool: ReturnType<typeof createSpawnAgentTool>, name: string, task: string) {
