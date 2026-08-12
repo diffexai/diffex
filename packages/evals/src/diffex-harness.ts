@@ -36,6 +36,7 @@ type DiffexCodingAgentHarnessOptions = {
 	name?: string;
 	model?: DiffexCodingAgentModelSelection;
 	noTools?: CreateAgentSessionOptions["noTools"];
+	subagents?: CreateAgentSessionOptions["subagents"];
 	transformSystemPrompt?: (defaultPrompt: string) => string;
 };
 
@@ -147,6 +148,7 @@ async function runDiffexCodingAgent<TOutput extends JsonValue>(
 				model,
 				thinkingLevel: "off",
 				noTools: options.noTools,
+				subagents: options.subagents,
 			})
 		).session;
 

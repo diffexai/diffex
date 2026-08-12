@@ -110,8 +110,9 @@ await session.prompt("Hello");
 | `agentDir` | `~/.diffex/agent` | Config directory |
 | `model` | From settings/first available | Model to use |
 | `thinkingLevel` | From settings/"off" | off, low, medium, high |
-| `tools` | `["read", "bash", "edit", "write"]` built-ins | Allowlist tool names across built-in, extension, and custom tools |
+| `tools` | Default built-ins and coordination tools | Allowlist tool names across built-in, extension, custom, and coordination tools |
 | `customTools` | `[]` | Additional tool definitions |
+| `subagents` | `{ maxConcurrent: 4 }` | Configure child-agent concurrency, or set `false` to disable `spawn_agent`, `agent_action`, and `agents` |
 | `resourceLoader` | DefaultResourceLoader | Resource loader for extensions, skills, prompts, themes, and context files |
 | `sessionManager` | `SessionManager.create(cwd)` | Persistence |
 | `settingsManager` | `SettingsManager.create(cwd, agentDir)` | Settings overrides |

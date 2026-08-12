@@ -508,13 +508,24 @@ const { session } = await createAgentSession({ resourceLoader: loader });
 
 ### Tools
 
-Specify which built-in tools to enable:
+Every root session enables three child-agent coordination tools by default:
+
+- `spawn_agent` starts a child agent asynchronously
+- `agent_action` sends, wakes, or interrupts a child agent
+- `agents` lists child status immediately or waits for controller changes
+
+Root sessions run at most four children concurrently by default.
+Set `subagents: { maxConcurrent: number }` to configure that limit, or `subagents: false` to disable child agents and omit all three coordination tools.
+The names `spawn_agent`, `agent_action`, and `agents` are reserved and cannot be supplied through `customTools`.
+
+Specify which tools to enable:
 
 - Built-in tool names: `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`
 - Default built-ins: `read`, `bash`, `edit`, `write`
 - `noTools: "all"` disables all tools
-- `noTools: "builtin"` disables default built-ins while keeping extension and custom tools enabled
-- `excludeTools` disables specific built-in, extension, or custom tool names after any `tools` allowlist is applied
+- `noTools: "builtin"` disables default built-ins while keeping extension, custom, and coordination tools enabled
+- A `tools` allowlist must explicitly include each coordination tool that should remain available
+- `excludeTools` disables specific built-in, extension, custom, or coordination tool names after any `tools` allowlist is applied
 
 The `edit` tool returns `details.diff` for Diffex's TUI display and `details.patch` as a standard unified patch for SDK consumers.
 
@@ -534,6 +545,21 @@ const { session } = await createAgentSession({
 // Disable one tool while keeping the rest available
 const { session } = await createAgentSession({
   excludeTools: ["ask_question"],
+});
+
+// Allow only read access and child status queries
+const { session } = await createAgentSession({
+  tools: ["read", "agents"],
+});
+
+// Disable child agents entirely
+const { session } = await createAgentSession({
+  subagents: false,
+});
+
+// Run at most two children concurrently
+const { session } = await createAgentSession({
+  subagents: { maxConcurrent: 2 },
 });
 ```
 
