@@ -103,6 +103,7 @@ export async function createSubagentSession(
 		tools: [...config.tools],
 		scopedModels: [],
 		customTools: [],
+		subagents: false,
 	});
 
 	try {

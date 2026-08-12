@@ -222,6 +222,7 @@ export {
 	createReadTool,
 	createWriteTool,
 	type PromptTemplate,
+	type SubagentOptions,
 } from "./core/sdk.ts";
 export {
 	type BranchSummaryEntry,

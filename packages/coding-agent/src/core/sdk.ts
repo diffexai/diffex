@@ -15,6 +15,8 @@ import type { ResourceLoader } from "./resource-loader.ts";
 import { DefaultResourceLoader } from "./resource-loader.ts";
 import { getDefaultSessionDir, SessionManager } from "./session-manager.ts";
 import { SettingsManager } from "./settings-manager.ts";
+import { SubagentController } from "./subagents/controller.ts";
+import { captureSubagentSessionConfig, createSubagentSession } from "./subagents/services.ts";
 import { time } from "./timings.ts";
 import {
 	createBashTool,
@@ -34,6 +36,14 @@ import {
 // or invoke low-level agent loops without supplying streamFn. Agent core remains
 // provider-agnostic and does not import Diffex AI compat itself.
 setDefaultStreamFn(streamSimple);
+
+const DEFAULT_SUBAGENT_CONCURRENCY = 4;
+const RESERVED_SUBAGENT_TOOL_NAMES = new Set(["spawn_agent", "agent_action", "agents"]);
+
+export interface SubagentOptions {
+	/** Maximum number of child agents that may run concurrently. Default: 4 */
+	maxConcurrent?: number;
+}
 
 export interface CreateAgentSessionOptions {
 	/** Working directory for project-local discovery. Default: process.cwd() */
@@ -71,6 +81,8 @@ export interface CreateAgentSessionOptions {
 	excludeTools?: string[];
 	/** Custom tools to register (in addition to built-in tools). */
 	customTools?: ToolDefinition[];
+	/** Child-agent coordination. Enabled by default with a concurrency limit of 4. */
+	subagents?: false | SubagentOptions;
 
 	/** Resource loader. When omitted, DefaultResourceLoader is used. */
 	resourceLoader?: ResourceLoader;
@@ -131,6 +143,34 @@ function getDefaultAgentDir(): string {
 	return getAgentDir();
 }
 
+function normalizeSubagentOptions(value: unknown): false | Required<SubagentOptions> {
+	if (value === false) return false;
+	if (value !== undefined && (typeof value !== "object" || value === null || Array.isArray(value))) {
+		throw new TypeError("subagents must be false or an options object");
+	}
+	const options = value as SubagentOptions | undefined;
+	if (options) {
+		for (const key of Object.keys(options)) {
+			if (key !== "maxConcurrent") {
+				throw new Error(`Unknown subagents option: ${key}`);
+			}
+		}
+	}
+	const maxConcurrent = options?.maxConcurrent ?? DEFAULT_SUBAGENT_CONCURRENCY;
+	if (!Number.isInteger(maxConcurrent) || maxConcurrent <= 0) {
+		throw new RangeError("subagents.maxConcurrent must be a positive integer");
+	}
+	return { maxConcurrent };
+}
+
+function assertNoReservedSubagentTools(customTools: readonly ToolDefinition[] | undefined): void {
+	for (const tool of customTools ?? []) {
+		if (RESERVED_SUBAGENT_TOOL_NAMES.has(tool.name)) {
+			throw new Error(`Custom tool name is reserved for subagent coordination: ${tool.name}`);
+		}
+	}
+}
+
 /**
  * Create an AgentSession with the specified options.
  *
@@ -169,6 +209,19 @@ function getDefaultAgentDir(): string {
 export async function createAgentSession(options: CreateAgentSessionOptions = {}): Promise<CreateAgentSessionResult> {
 	const cwd = resolvePath(options.cwd ?? options.sessionManager?.getCwd() ?? process.cwd());
 	const agentDir = options.agentDir ? resolvePath(options.agentDir) : getDefaultAgentDir();
+	const subagentOptions = normalizeSubagentOptions(options.subagents);
+	assertNoReservedSubagentTools(options.customTools);
+	const subagentController =
+		subagentOptions === false
+			? undefined
+			: new SubagentController({
+					maxConcurrent: subagentOptions.maxConcurrent,
+					captureSession: (parent) => {
+						const config = captureSubagentSessionConfig(parent, agentDir);
+						return (signal) => createSubagentSession(config, { signal });
+					},
+				});
+	const customTools = [...(options.customTools ?? []), ...(subagentController?.createToolDefinitions() ?? [])];
 	let resourceLoader = options.resourceLoader;
 
 	const authPath = options.agentDir ? join(agentDir, "auth.json") : undefined;
@@ -380,7 +433,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		cwd,
 		scopedModels: options.scopedModels,
 		resourceLoader,
-		customTools: options.customTools,
+		customTools,
 		modelRuntime,
 		initialActiveToolNames,
 		allowedToolNames,
@@ -388,6 +441,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		extensionRunnerRef,
 		sessionStartEvent: options.sessionStartEvent,
 	});
+	subagentController?.bindParent(session);
 	const extensionsResult = resourceLoader.getExtensions();
 
 	return {

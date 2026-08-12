@@ -6,6 +6,8 @@ export type SubagentStatus = "queued" | "running" | "idle" | "failed" | "interru
 
 export type CreateSubagentSession = (signal: AbortSignal) => Promise<AgentSession>;
 
+export type CaptureSubagentSession = (parent: AgentSession) => CreateSubagentSession;
+
 export type SubagentMessageDelivery = "steer" | "follow_up" | "prompt";
 
 export type SubagentActionResult =
