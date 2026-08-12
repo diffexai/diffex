@@ -47,6 +47,69 @@ describe("AgentSession subagent lifecycle", () => {
 		return { root, harness };
 	}
 
+	it("returns an immutable empty roster when subagents are disabled", async () => {
+		const harness = await createHarness();
+		harnesses.push(harness);
+		const { session } = await createAgentSession({
+			cwd: harness.tempDir,
+			agentDir: harness.tempDir,
+			modelRuntime: harness.session.modelRuntime,
+			settingsManager: harness.settingsManager,
+			resourceLoader: createTestResourceLoader(),
+			sessionManager: SessionManager.inMemory(harness.tempDir),
+			model: harness.getModel(),
+			subagents: false,
+		});
+		roots.push(session);
+
+		const summaries = session.getSubagents();
+		expect(summaries).toEqual([]);
+		expect(Object.isFrozen(summaries)).toBe(true);
+	});
+
+	it("exposes sorted queued and running summaries through the session", async () => {
+		const { root, harness } = await createRoot();
+		const runningStarted = deferred<void>();
+		const runningFinished = deferred<void>();
+		harness.setResponses([
+			async () => {
+				runningStarted.resolve();
+				await runningFinished.promise;
+				return fauxAssistantMessage("running done");
+			},
+			fauxAssistantMessage("queued done"),
+		]);
+		const spawn = root.getToolDefinition("spawn_agent")!;
+		const agents = root.getToolDefinition("agents")!;
+
+		await spawn.execute(
+			"spawn-zeta",
+			{ name: "zeta", task: "original running task" },
+			undefined,
+			undefined,
+			extensionContext,
+		);
+		await runningStarted.promise;
+		await spawn.execute(
+			"spawn-alpha",
+			{ name: "alpha", task: "original queued task" },
+			undefined,
+			undefined,
+			extensionContext,
+		);
+
+		const summaries = root.getSubagents();
+		expect(summaries).toEqual([
+			{ name: "alpha", status: "queued", task: "original queued task" },
+			{ name: "zeta", status: "running", task: "original running task" },
+		]);
+		expect(Object.isFrozen(summaries)).toBe(true);
+		expect(summaries.every(Object.isFrozen)).toBe(true);
+
+		runningFinished.resolve();
+		await agents.execute("wait-all", { timeout_ms: 1_000, until: "all" }, undefined, undefined, extensionContext);
+	});
+
 	it("awaits root and child cancellation and rejects retained tools after disposal", async () => {
 		const rootToolStarted = deferred<void>();
 		const rootToolAborted = deferred<void>();

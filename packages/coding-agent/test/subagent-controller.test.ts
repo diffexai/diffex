@@ -143,6 +143,34 @@ describe("SubagentController", () => {
 		expect(Reflect.set(snapshot.agents[0]!, "status", "failed")).toBe(false);
 	});
 
+	it("returns immutable name-sorted summaries with original tasks and every status", () => {
+		const controller = new SubagentController({ maxConcurrent: 1 });
+		controller.reserve("echo", "queued task");
+		controller.reserve("delta", "running task");
+		controller.markRunning("delta");
+		controller.reserve("charlie", "interrupted task");
+		controller.markInterrupted("charlie");
+		controller.reserve("bravo", "failed task");
+		controller.markFailed("bravo", "failure details");
+		controller.reserve("alpha", "idle task");
+		controller.markRunning("alpha");
+		controller.markIdle("alpha", "finished");
+
+		const summaries = controller.getSummaries();
+
+		expect(summaries).toEqual([
+			{ name: "alpha", status: "idle", task: "idle task" },
+			{ name: "bravo", status: "failed", task: "failed task" },
+			{ name: "charlie", status: "interrupted", task: "interrupted task" },
+			{ name: "delta", status: "running", task: "running task" },
+			{ name: "echo", status: "queued", task: "queued task" },
+		]);
+		expect(Object.isFrozen(summaries)).toBe(true);
+		expect(summaries.every(Object.isFrozen)).toBe(true);
+		expect(Reflect.set(summaries[0]!, "task", "replacement task")).toBe(false);
+		expect(controller.snapshot().agents.every((agent) => !("task" in agent))).toBe(true);
+	});
+
 	it("publishes safe typed lifecycle events through the revision path", async () => {
 		const controller = new SubagentController({ maxConcurrent: 1 });
 		const events: SubagentLifecycleEvent[] = [];

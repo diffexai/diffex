@@ -4,6 +4,12 @@ export const SUBAGENT_NAME_PATTERN = /^[a-z][a-z0-9_-]{0,63}$/;
 
 export type SubagentStatus = "queued" | "running" | "idle" | "failed" | "interrupted";
 
+export interface SubagentSummary {
+	readonly name: string;
+	readonly status: SubagentStatus;
+	readonly task: string;
+}
+
 export type CreateSubagentSession = (signal: AbortSignal) => Promise<AgentSession>;
 
 export type SubagentSpawnOrigin =
