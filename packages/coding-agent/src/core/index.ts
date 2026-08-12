@@ -169,7 +169,15 @@ export {
 	type SelfEvolutionPolicyViolation,
 	type SelfEvolutionProtectionOptions,
 } from "./self-evolution-policy.ts";
-export type { SessionProfileMetadata } from "./session-manager.ts";
+export {
+	type DiscoveredRelatedSession,
+	MAX_RELATED_SESSION_REFERENCES,
+	MAX_SESSION_ID_LENGTH,
+	mergeRelatedSessionReferences,
+	normalizeRelatedSessionReferences,
+	type RelatedSessionReference,
+	type SessionProfileMetadata,
+} from "./session-manager.ts";
 export { createSyntheticSourceInfo } from "./source-info.ts";
 export {
 	BoundedTelemetryCapture,
