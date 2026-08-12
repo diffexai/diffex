@@ -52,7 +52,7 @@ No declared span events.
 
 ## Harness schema
 
-Schema version: 2
+Schema version: 3
 
 ### `diffex.harness.run`
 
@@ -282,7 +282,9 @@ One structural task-profile routing decision
 |---|---|---:|---|---|---|
 | `diffex.session.id` | `string` | yes |  | high cardinality | Session id before routing |
 | `diffex.routing.mode` | `string` | yes | auto, pinned |  | Configured profile-routing mode |
+| `diffex.routing.trigger` | `string` | yes | initial_turn, future_turn |  | Turn phase that triggered the routing pass |
 | `diffex.routing.current_profile_id` | `string` | yes |  | high cardinality | Profile active before routing |
+| `diffex.routing.current_harness_id` | `string` | no |  | high cardinality | Harness active before routing, when one is established |
 | `diffex.routing.session_established` | `boolean` | yes |  |  | Whether the session already contains task history |
 
 #### End attributes
@@ -291,9 +293,9 @@ All end attributes are optional completion enrichment.
 
 | Name | Type | Values | Notes | Description |
 |---|---|---|---|---|
-| `diffex.routing.outcome` | `string` | bypassed, selected, reused, failed |  | Applied routing outcome |
-| `diffex.routing.target_profile_id` | `string` |  | high cardinality | Profile active after routing |
-| `diffex.routing.harness_id` | `string` |  | high cardinality | Stable identifier of the selected or reused harness |
+| `diffex.routing.outcome` | `string` | bypassed, selected, reused, stayed, declined, failed |  | Closed routing outcome |
+| `diffex.routing.target_profile_id` | `string` |  | high cardinality | Profile selected, proposed, or retained by routing |
+| `diffex.routing.harness_id` | `string` |  | high cardinality | Stable harness identifier associated with the routing outcome |
 | `diffex.routing.confidence` | `number` |  |  | Router confidence between zero and one |
 | `diffex.routing.fallback` | `string` | completion_error, invalid_output, low_confidence |  | Structured fallback class when routing used one |
 

@@ -92,7 +92,7 @@ export interface Settings {
 	defaultProvider?: string;
 	defaultModel?: string;
 	defaultProfile?: string; // Optional pinned profile ID or path; undefined enables automatic intent routing
-	routerModel?: string; // Model used for task-profile routing ("provider/model"); undefined picks a cheap sibling of the session model
+	routerModel?: string; // Dedicated harness router ("provider/model"); undefined uses the active session model
 	defaultThinkingLevel?: ThinkingLevel;
 	transport?: TransportSetting; // default: "auto"
 	steeringMode?: "all" | "one-at-a-time";

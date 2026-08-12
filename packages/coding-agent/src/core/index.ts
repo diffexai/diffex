@@ -16,6 +16,13 @@ export {
 	type CreateAgentSessionRuntimeFactory,
 	type CreateAgentSessionRuntimeResult,
 	createAgentSessionRuntime,
+	type ProfileRoutingMode,
+	type ProfileSwitchEvent,
+	type RuntimePromptResult,
+	TaskBoundaryCancelledError,
+	type TaskBoundaryProposal,
+	type TaskBoundaryResolution,
+	type TaskBoundaryResolver,
 } from "./agent-session-runtime.ts";
 export {
 	type AgentSessionRuntimeDiagnostic,
@@ -105,13 +112,19 @@ export {
 } from "./harness-descriptors.ts";
 export {
 	buildProfileRouterPrompt,
+	buildTaskBoundaryRouterPrompt,
 	PROFILE_ROUTE_CONFIDENCE_THRESHOLD,
 	type ProfileRouteAction,
 	type ProfileRouteDecision,
 	type ProfileRouteInput,
 	type ProfileRouterCompletion,
 	parseProfileRouteDecision,
+	parseTaskBoundaryRouteDecision,
+	routeTaskBoundary,
 	routeTaskProfile,
+	shouldEvaluateTaskBoundary,
+	type TaskBoundaryRouteDecision,
+	type TaskBoundaryRouteInput,
 } from "./profile-router.ts";
 export {
 	BOOTSTRAP_TASK_PROFILE_ID,
