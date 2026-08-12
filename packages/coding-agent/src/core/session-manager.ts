@@ -1405,27 +1405,78 @@ export class SessionManager {
 	}
 
 	/**
+	 * Select and deep-clone one root-to-entry branch.
+	 *
+	 * Label entries are resolved from the current label map and appended after
+	 * the selected branch. Removing historical label entries requires the
+	 * retained entries to be re-chained so the result remains a linear branch.
+	 */
+	private _selectBranchEntries(leafId: string): SessionEntry[] {
+		if (!this.byId.has(leafId)) {
+			throw new Error(`Entry ${leafId} not found`);
+		}
+
+		const pathWithoutLabels: SessionEntry[] = [];
+		let pathParentId: string | null = null;
+		for (const entry of this.getBranch(leafId)) {
+			if (entry.type === "label") continue;
+			const clonedEntry = structuredClone(entry);
+			clonedEntry.parentId = pathParentId;
+			pathWithoutLabels.push(clonedEntry);
+			pathParentId = clonedEntry.id;
+		}
+
+		const pathEntryIds = new Set(pathWithoutLabels.map((entry) => entry.id));
+		const labelEntries: LabelEntry[] = [];
+		let labelParentId = pathParentId;
+		for (const [targetId, label] of this.labelsById) {
+			if (!pathEntryIds.has(targetId)) continue;
+			const timestamp = this.labelTimestampsById.get(targetId);
+			if (!timestamp) {
+				throw new Error(`Label timestamp for entry ${targetId} not found`);
+			}
+			const labelEntry: LabelEntry = {
+				type: "label",
+				id: generateId(pathEntryIds),
+				parentId: labelParentId,
+				timestamp,
+				targetId,
+				label,
+			};
+			pathEntryIds.add(labelEntry.id);
+			labelEntries.push(labelEntry);
+			labelParentId = labelEntry.id;
+		}
+
+		return [...pathWithoutLabels, ...labelEntries];
+	}
+
+	/**
+	 * Copy one branch into a new independent in-memory session.
+	 * The source session and its persistence state are not modified.
+	 */
+	forkBranch(entryId: string): SessionManager {
+		const branchEntries = this._selectBranchEntries(entryId);
+		const fork = SessionManager.inMemory(this.cwd, {
+			parentSession: this.sessionFile ?? this.sessionId,
+		});
+		const header = fork.getHeader();
+		if (!header) {
+			throw new Error("Forked session header is unavailable");
+		}
+		fork.fileEntries = [header, ...branchEntries];
+		fork._buildIndex();
+		return fork;
+	}
+
+	/**
 	 * Create a new session file containing only the path from root to the specified leaf.
 	 * Useful for extracting a single conversation path from a branched session.
 	 * Returns the new session file path, or undefined if not persisting.
 	 */
 	createBranchedSession(leafId: string): string | undefined {
 		const previousSessionFile = this.sessionFile;
-		const path = this.getBranch(leafId);
-		if (path.length === 0) {
-			throw new Error(`Entry ${leafId} not found`);
-		}
-
-		// Filter out LabelEntry from path - we'll recreate them from the resolved map.
-		// Because labels are real tree entries, later entries can be children of labels;
-		// removing labels requires re-chaining the retained path to avoid orphaned subtrees.
-		const pathWithoutLabels: SessionEntry[] = [];
-		let pathParentId: string | null = null;
-		for (const entry of path) {
-			if (entry.type === "label") continue;
-			pathWithoutLabels.push({ ...entry, parentId: pathParentId });
-			pathParentId = entry.id;
-		}
+		const branchEntries = this._selectBranchEntries(leafId);
 
 		const newSessionId = createSessionId();
 		const timestamp = new Date().toISOString();
@@ -1441,35 +1492,8 @@ export class SessionManager {
 			parentSession: this.persist ? previousSessionFile : undefined,
 		};
 
-		// Collect labels for entries in the path
-		const pathEntryIds = new Set(pathWithoutLabels.map((e) => e.id));
-		const labelsToWrite: Array<{ targetId: string; label: string; timestamp: string }> = [];
-		for (const [targetId, label] of this.labelsById) {
-			if (pathEntryIds.has(targetId)) {
-				labelsToWrite.push({ targetId, label, timestamp: this.labelTimestampsById.get(targetId)! });
-			}
-		}
-
 		if (this.persist) {
-			// Build label entries
-			const lastEntryId = pathWithoutLabels[pathWithoutLabels.length - 1]?.id || null;
-			let parentId = lastEntryId;
-			const labelEntries: LabelEntry[] = [];
-			for (const { targetId, label, timestamp: labelTimestamp } of labelsToWrite) {
-				const labelEntry: LabelEntry = {
-					type: "label",
-					id: generateId(new Set(pathEntryIds)),
-					parentId,
-					timestamp: labelTimestamp,
-					targetId,
-					label,
-				};
-				pathEntryIds.add(labelEntry.id);
-				labelEntries.push(labelEntry);
-				parentId = labelEntry.id;
-			}
-
-			this.fileEntries = [header, ...pathWithoutLabels, ...labelEntries];
+			this.fileEntries = [header, ...branchEntries];
 			this.sessionId = newSessionId;
 			this.sessionFile = newSessionFile;
 			this._buildIndex();
@@ -1491,21 +1515,7 @@ export class SessionManager {
 		}
 
 		// In-memory mode: replace current session with the path + labels
-		const labelEntries: LabelEntry[] = [];
-		let parentId = pathWithoutLabels[pathWithoutLabels.length - 1]?.id || null;
-		for (const { targetId, label, timestamp: labelTimestamp } of labelsToWrite) {
-			const labelEntry: LabelEntry = {
-				type: "label",
-				id: generateId(new Set([...pathEntryIds, ...labelEntries.map((e) => e.id)])),
-				parentId,
-				timestamp: labelTimestamp,
-				targetId,
-				label,
-			};
-			labelEntries.push(labelEntry);
-			parentId = labelEntry.id;
-		}
-		this.fileEntries = [header, ...pathWithoutLabels, ...labelEntries];
+		this.fileEntries = [header, ...branchEntries];
 		this.sessionId = newSessionId;
 		this._buildIndex();
 		return undefined;
