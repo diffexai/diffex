@@ -163,6 +163,27 @@ If an extension cancelled:
 {"type": "response", "command": "new_session", "success": true, "data": {"cancelled": true}}
 ```
 
+#### resolve_task_boundary
+
+Resolve a pending `task_boundary_request` before its prompt is delivered.
+Each request can be resolved exactly once with `switch`, `stay`, or `cancel`.
+
+```json
+{"id":"decision-1","type":"resolve_task_boundary","requestId":"7e45281b-2984-4a02-99fe-e214cc8faed9","resolution":"switch"}
+```
+
+Response:
+
+```json
+{"id":"decision-1","type":"response","command":"resolve_task_boundary","success":true}
+```
+
+Unknown, stale, and already-resolved request IDs return an error response.
+An invalid resolution also returns an error without settling the pending request.
+`switch` moves the prompt to the proposed harness, `stay` delivers it to the current harness, and `cancel` rejects the original prompt without delivery.
+The original `prompt` command does not receive its response until the selected action reaches normal prompt preflight.
+`steer` and `follow_up` never trigger task-boundary routing.
+
 ### State
 
 #### get_state
@@ -867,6 +888,51 @@ Events are streamed to stdout as JSON lines during agent operation. Events do no
 | `summarization_retry_attempt_start` | Retried summarization request starts |
 | `summarization_retry_finished` | Summarization retry loop completes |
 | `extension_error` | Extension threw an error |
+| `profile_switch` | An applied harness switch completed |
+| `task_boundary_request` | The runtime requires a host decision before delivering a future prompt |
+
+### task_boundary_request
+
+Emitted when a future prompt appears to begin a distinct task that could use another harness.
+The event contains only bounded display metadata and structural identifiers.
+It never contains the prompt, transcript, router explanation, or harness description.
+
+```json
+{
+  "type": "task_boundary_request",
+  "requestId": "7e45281b-2984-4a02-99fe-e214cc8faed9",
+  "decision": "reuse",
+  "fromProfileId": "coding",
+  "fromHarnessId": "parser-repair-a1b2c3",
+  "toProfileId": "research",
+  "targetHarnessId": "evidence-review-d4e5f6",
+  "targetHarnessRevision": "abcdef1234567890",
+  "targetHarnessName": "Evidence review",
+  "confidence": 0.97
+}
+```
+
+`decision` is `reuse` for an existing evolved harness or `select` for a new harness based on a built-in prompt profile.
+`targetHarnessId` and `targetHarnessRevision` are omitted for `select` proposals because the harness does not exist until the switch is accepted.
+Reply with `resolve_task_boundary` using the opaque `requestId`.
+
+### profile_switch
+
+Emitted only after a harness switch has been applied successfully.
+It is not a request for confirmation.
+
+```json
+{
+  "type": "profile_switch",
+  "fromProfileId": "coding",
+  "toProfileId": "research",
+  "harnessId": "evidence-review-d4e5f6",
+  "harnessRevision": "abcdef1234567890",
+  "harnessName": "Evidence review",
+  "reused": true,
+  "notice": "Found evolved harness \"Evidence review\" for this task. Switched to revision abcdef123456."
+}
+```
 
 ### agent_start
 

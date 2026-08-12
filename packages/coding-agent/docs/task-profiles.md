@@ -38,13 +38,26 @@ After the initial response completes, Diffex performs exactly one harness resolu
 3. A new selection creates a prompt-free harness descriptor that records only identity, description, base-profile reference, and creation time.
 4. Diffex activates the resolved harness for subsequent turns and records its identity and EVOLVED-derived revision in session metadata.
 
-Low-confidence, invalid, or failed routing falls back safely to `general`.
+Low-confidence, invalid, or failed routing uses a conservative fallback.
+An unambiguous finance, healthcare, or legal primary task selects that high-stakes profile, while ambiguous or unmatched work remains on `general`.
+Coding deliverables with incidental high-stakes terminology remain on `general` during fallback.
 The router never invents a prompt, creates a generated `PROMPT.md`, or modifies an existing profile.
 A harness descriptor is not a prompt profile and contains no authored instructions.
 
-Resolution is one-time for a session.
-Later prompts remain in the active harness, including incidental questions from another domain.
-Start a new automatic session or explicitly select a profile when beginning a materially different task.
+Routine follow-ups remain in the active harness.
+Before an idle later prompt is delivered, Diffex conservatively checks whether it clearly begins a materially different task.
+Incidental terminology, refinements, and ambiguous requests stay in the current harness without interrupting the user.
+
+When a clear boundary is found in interactive or RPC mode, Diffex pauses the submitted prompt and asks whether to switch:
+
+- Accepting an existing evolved harness starts a fresh linked session on its immutable base profile.
+- Accepting a new task creates only a metadata descriptor, starts a fresh linked session on the selected immutable base profile, and leaves all prompt profiles unchanged.
+- Declining processes the submitted prompt exactly once in the current harness.
+- Cancelling does not submit the prompt.
+
+Distinct tasks may use the same base profile, such as two unrelated coding projects or two unrelated general tasks.
+Print and JSON modes never auto-accept a task switch because they have no confirmation channel.
+Explicit steering and follow-up queue commands are treated as continuations while a response is active.
 
 Prompts submitted while a response or compaction is active are admitted in order and do not trigger duplicate harness resolution.
 Public skill and prompt-template commands are classified from their expanded content after the initial turn, while built-in and extension slash commands retain precedence and bypass classification.
@@ -76,13 +89,15 @@ pi --profile auto "Start with DEFAULT, then resolve the harness"
 ```
 
 An explicit ID or path pins the session and applies that immutable profile immediately.
-`auto` overrides a configured default and enables one-time post-turn resolution.
+`auto` overrides a configured default and enables post-turn initial resolution plus confirmed future task switches.
 
 ### Routing cost
 
-Automatic routing makes at most one classification request per newly established harness, after the first accepted task turn.
-By default Diffex picks the cheapest model from the same provider and API that has enough context for the router prompt, and falls back to the session model when there is no cheaper sibling.
-Set `routerModel` in `settings.json` to `"provider/model"` to choose one explicitly, or `"auto"` to restore automatic selection.
+Automatic routing makes one classification request after the first accepted task turn.
+After a harness exists, substantive idle prompts are conservatively classified before delivery so clear task changes can be confirmed.
+No second model request is made when deterministic fallback can identify a clear target after router failure, and no switch is applied without host confirmation.
+By default Diffex uses the active session model so routing quality and model behavior remain predictable.
+Set `routerModel` in `settings.json` to `"provider/model"` to choose a dedicated model explicitly, or `"auto"` to restore use of the active session model.
 Pinning a profile disables classification entirely.
 
 ## Custom profile files
@@ -203,7 +218,8 @@ const { session } = await createAgentSession({
 });
 ```
 
-Use `profile: "auto"` with `profileRouting: "auto"` when the host wraps the session in `AgentSessionRuntime` and wants the one-time automatic lifecycle.
+Use `profile: "auto"` with `profileRouting: "auto"` when the host wraps the session in `AgentSessionRuntime` and wants automatic harness resolution.
+A host that supports future-turn switching registers a task-boundary resolver on the runtime and returns `switch`, `stay`, or `cancel` for each proposed boundary.
 A custom `ResourceLoader` must expose the profile registry, active profile, user instruction files, and applicable evolved notes in addition to its other resources.
 
 ## SYSTEM.md removal
