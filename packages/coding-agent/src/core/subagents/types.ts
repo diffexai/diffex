@@ -53,6 +53,27 @@ export interface SubagentControllerSnapshot {
 	readonly agents: readonly SubagentSnapshot[];
 }
 
+export type SubagentQueryUntil = "any" | "all";
+
+export interface SubagentQueryOptions {
+	readonly timeoutMs: number;
+	readonly targets?: readonly string[];
+	readonly until?: SubagentQueryUntil;
+	readonly signal?: AbortSignal;
+}
+
+export interface SubagentResultView {
+	readonly name: string;
+	readonly status: SubagentStatus;
+	readonly result?: string;
+	readonly error?: string;
+}
+
+export interface SubagentQueryResult {
+	readonly timedOut: boolean;
+	readonly agents: readonly SubagentResultView[];
+}
+
 export type SubagentLifecycleEvent =
 	| {
 			readonly type: "subagent_reserved";
