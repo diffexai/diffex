@@ -11,7 +11,13 @@ import {
 } from "@earendil-works/pi-ai/compat";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentSession } from "../src/core/agent-session.ts";
-import type { AgentSessionRuntime, ProfileSwitchEvent } from "../src/core/agent-session-runtime.ts";
+import {
+	type AgentSessionRuntime,
+	type ProfileSwitchEvent,
+	TaskBoundaryCancelledError,
+	type TaskBoundaryProposal,
+	type TaskBoundaryResolver,
+} from "../src/core/agent-session-runtime.ts";
 import { AuthStorage } from "../src/core/auth-storage.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
 import { SettingsManager } from "../src/core/settings-manager.ts";
@@ -101,11 +107,52 @@ function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+type NodeListener = Parameters<typeof process.on>[1];
+
+interface ListenerSnapshot {
+	stdinEnd: NodeListener[];
+	signals: Map<NodeJS.Signals, NodeListener[]>;
+}
+
+function takeListenerSnapshot(): ListenerSnapshot {
+	const signals: NodeJS.Signals[] = process.platform === "win32" ? ["SIGTERM"] : ["SIGTERM", "SIGHUP"];
+	return {
+		stdinEnd: process.stdin.listeners("end") as NodeListener[],
+		signals: new Map(signals.map((signal) => [signal, process.listeners(signal) as NodeListener[]])),
+	};
+}
+
+function restoreListeners(snapshot: ListenerSnapshot): void {
+	for (const listener of process.stdin.listeners("end") as NodeListener[]) {
+		if (!snapshot.stdinEnd.includes(listener)) process.stdin.off("end", listener);
+	}
+	for (const [signal, previousListeners] of snapshot.signals) {
+		for (const listener of process.listeners(signal) as NodeListener[]) {
+			if (!previousListeners.includes(listener)) process.off(signal, listener);
+		}
+	}
+}
+
+function taskBoundaryProposal(): TaskBoundaryProposal {
+	return {
+		decision: "reuse",
+		fromProfileId: "coding",
+		fromHarnessId: "parser-repair-a1b2c3",
+		toProfileId: "research",
+		targetHarnessId: "evidence-review-d4e5f6",
+		targetHarnessRevision: "abcdef1234567890",
+		targetHarnessName: "Evidence review",
+		confidence: 0.97,
+	};
+}
+
 async function createRuntimeHost(options: {
 	withAuth: boolean;
 	responseDelayMs: number;
 	model?: Model<any>;
 	emitProfileSwitch?: boolean;
+	taskBoundaryProposal?: TaskBoundaryProposal;
+	newSessionCancelled?: boolean;
 }): Promise<{
 	runtimeHost: AgentSessionRuntime;
 	cleanup: () => Promise<void>;
@@ -155,7 +202,15 @@ async function createRuntimeHost(options: {
 	});
 
 	let profileSwitchListener: ((event: ProfileSwitchEvent) => void) | undefined;
+	let taskBoundaryResolver: TaskBoundaryResolver | undefined;
 	const runtimePrompt = vi.fn(async (text: string, promptOptions?: Parameters<AgentSession["prompt"]>[1]) => {
+		if (options.taskBoundaryProposal && !promptOptions?.streamingBehavior) {
+			const resolution = (await taskBoundaryResolver?.(options.taskBoundaryProposal)) ?? "stay";
+			if (resolution === "cancel") {
+				promptOptions?.preflightResult?.(false);
+				throw new TaskBoundaryCancelledError();
+			}
+		}
 		await session.prompt(text, promptOptions);
 		if (options.emitProfileSwitch) {
 			profileSwitchListener?.({
@@ -176,14 +231,19 @@ async function createRuntimeHost(options: {
 	});
 	const runtimeHost = {
 		session,
+		activeProfile: { id: options.taskBoundaryProposal?.fromProfileId ?? "general" },
+		activeHarness: options.taskBoundaryProposal ? { id: options.taskBoundaryProposal.fromHarnessId } : undefined,
 		prompt: runtimePrompt,
-		newSession: vi.fn(async () => ({ cancelled: true })),
+		newSession: vi.fn(async () => ({ cancelled: options.newSessionCancelled ?? true })),
 		switchSession: vi.fn(async () => ({ cancelled: true })),
 		fork: vi.fn(async () => ({ cancelled: true, selectedText: "" })),
 		dispose: vi.fn(async () => {}),
 		setRebindSession: vi.fn(),
 		setProfileSwitchListener: vi.fn((listener?: (event: ProfileSwitchEvent) => void) => {
 			profileSwitchListener = listener;
+		}),
+		setTaskBoundaryResolver: vi.fn((resolver?: TaskBoundaryResolver) => {
+			taskBoundaryResolver = resolver;
 		}),
 	} as unknown as AgentSessionRuntime;
 
@@ -210,6 +270,8 @@ async function startRpcMode(options: {
 	responseDelayMs: number;
 	model?: Model<any>;
 	emitProfileSwitch?: boolean;
+	taskBoundaryProposal?: TaskBoundaryProposal;
+	newSessionCancelled?: boolean;
 }): Promise<{
 	lineHandler: (line: string) => void;
 	runtimeHost: AgentSessionRuntime;
@@ -218,11 +280,26 @@ async function startRpcMode(options: {
 	rpcIo.outputLines = [];
 	rpcIo.lineHandler = undefined;
 
+	const listenerSnapshot = takeListenerSnapshot();
 	const { runtimeHost, cleanup } = await createRuntimeHost(options);
 	void runRpcMode(runtimeHost);
 	await vi.waitFor(() => expect(rpcIo.lineHandler).toBeDefined());
+	await vi.waitFor(() => {
+		const previousSignalListeners = listenerSnapshot.signals.get("SIGTERM")?.length ?? 0;
+		expect(process.listenerCount("SIGTERM")).toBeGreaterThan(previousSignalListeners);
+	});
 
-	return { lineHandler: rpcIo.lineHandler!, runtimeHost, cleanup };
+	return {
+		lineHandler: rpcIo.lineHandler!,
+		runtimeHost,
+		cleanup: async () => {
+			try {
+				await cleanup();
+			} finally {
+				restoreListeners(listenerSnapshot);
+			}
+		},
+	};
 }
 
 describe("RPC prompt response semantics", () => {
@@ -316,6 +393,161 @@ describe("RPC prompt response semantics", () => {
 				expect(event).not.toHaveProperty("reason");
 			});
 			expect(runtimeHost.setProfileSwitchListener).toHaveBeenCalledTimes(1);
+		} finally {
+			await cleanup();
+		}
+	});
+
+	it("requests and single-settles a content-free task boundary before prompt preflight", async () => {
+		const { lineHandler, runtimeHost, cleanup } = await startRpcMode({
+			withAuth: true,
+			responseDelayMs: 0,
+			taskBoundaryProposal: taskBoundaryProposal(),
+		});
+
+		try {
+			lineHandler(JSON.stringify({ id: "future-prompt", type: "prompt", message: "Review the evidence" }));
+
+			let requestId = "";
+			await vi.waitFor(() => {
+				const event = parseOutputLines(rpcIo.outputLines).find((record) => record.type === "task_boundary_request");
+				expect(event).toEqual({
+					type: "task_boundary_request",
+					requestId: expect.any(String),
+					decision: "reuse",
+					fromProfileId: "coding",
+					fromHarnessId: "parser-repair-a1b2c3",
+					toProfileId: "research",
+					targetHarnessId: "evidence-review-d4e5f6",
+					targetHarnessRevision: "abcdef1234567890",
+					targetHarnessName: "Evidence review",
+					confidence: 0.97,
+				});
+				requestId = event?.requestId as string;
+				expect(JSON.stringify(event)).not.toContain("reason");
+				expect(JSON.stringify(event)).not.toContain("description");
+				expect(getPromptResponses(rpcIo.outputLines, "future-prompt")).toHaveLength(0);
+			});
+			lineHandler(
+				JSON.stringify({
+					id: "invalid-boundary",
+					type: "resolve_task_boundary",
+					requestId,
+					resolution: "later",
+				}),
+			);
+			await vi.waitFor(() => {
+				expect(getCommandResponses(rpcIo.outputLines, "invalid-boundary", "resolve_task_boundary")).toEqual([
+					expect.objectContaining({ success: false, error: "Invalid task-boundary resolution" }),
+				]);
+				expect(getPromptResponses(rpcIo.outputLines, "future-prompt")).toHaveLength(0);
+			});
+
+			lineHandler(
+				JSON.stringify({
+					id: "resolve-boundary",
+					type: "resolve_task_boundary",
+					requestId,
+					resolution: "switch",
+				}),
+			);
+
+			await vi.waitFor(() => {
+				expect(getCommandResponses(rpcIo.outputLines, "resolve-boundary", "resolve_task_boundary")).toEqual([
+					expect.objectContaining({ success: true }),
+				]);
+				expect(getPromptResponses(rpcIo.outputLines, "future-prompt")).toEqual([
+					expect.objectContaining({ success: true }),
+				]);
+			});
+
+			lineHandler(
+				JSON.stringify({
+					id: "duplicate-boundary",
+					type: "resolve_task_boundary",
+					requestId,
+					resolution: "stay",
+				}),
+			);
+			await vi.waitFor(() => {
+				expect(getCommandResponses(rpcIo.outputLines, "duplicate-boundary", "resolve_task_boundary")).toEqual([
+					expect.objectContaining({ success: false, error: "Task-boundary request is not pending" }),
+				]);
+			});
+			expect(runtimeHost.setTaskBoundaryResolver).toHaveBeenCalledTimes(1);
+		} finally {
+			await cleanup();
+		}
+	});
+
+	it("cancels a pending task boundary on session rebind and rejects stale resolution", async () => {
+		const { lineHandler, cleanup } = await startRpcMode({
+			withAuth: true,
+			responseDelayMs: 0,
+			taskBoundaryProposal: taskBoundaryProposal(),
+			newSessionCancelled: false,
+		});
+
+		try {
+			lineHandler(JSON.stringify({ id: "cancelled-prompt", type: "prompt", message: "Review evidence" }));
+			let requestId = "";
+			await vi.waitFor(() => {
+				const event = parseOutputLines(rpcIo.outputLines).find((record) => record.type === "task_boundary_request");
+				requestId = event?.requestId as string;
+				expect(requestId).not.toBe("");
+			});
+
+			lineHandler(JSON.stringify({ id: "new-session", type: "new_session" }));
+			await vi.waitFor(() => {
+				expect(getPromptResponses(rpcIo.outputLines, "cancelled-prompt")).toEqual([
+					expect.objectContaining({ success: false, error: "Task boundary switch cancelled" }),
+				]);
+			});
+
+			lineHandler(
+				JSON.stringify({
+					id: "stale-boundary",
+					type: "resolve_task_boundary",
+					requestId,
+					resolution: "switch",
+				}),
+			);
+			await vi.waitFor(() => {
+				expect(getCommandResponses(rpcIo.outputLines, "stale-boundary", "resolve_task_boundary")).toEqual([
+					expect.objectContaining({ success: false, error: "Task-boundary request is not pending" }),
+				]);
+			});
+		} finally {
+			await cleanup();
+		}
+	});
+
+	it.each([
+		["steer", "steer"],
+		["follow_up", "followUp"],
+	] as const)("does not request task-boundary routing for an idle %s command", async (command, behavior) => {
+		const { lineHandler, runtimeHost, cleanup } = await startRpcMode({
+			withAuth: true,
+			responseDelayMs: 0,
+			taskBoundaryProposal: taskBoundaryProposal(),
+		});
+
+		try {
+			lineHandler(JSON.stringify({ id: `idle-${command}`, type: command, message: "Start another task" }));
+			await vi.waitFor(() => {
+				expect(getCommandResponses(rpcIo.outputLines, `idle-${command}`, command)).toEqual([
+					expect.objectContaining({ success: true }),
+				]);
+			});
+			expect(parseOutputLines(rpcIo.outputLines).some((record) => record.type === "task_boundary_request")).toBe(
+				false,
+			);
+			expect(runtimeHost.prompt).toHaveBeenCalledWith("Start another task", {
+				images: undefined,
+				streamingBehavior: behavior,
+				source: "rpc",
+				preflightResult: expect.any(Function),
+			});
 		} finally {
 			await cleanup();
 		}

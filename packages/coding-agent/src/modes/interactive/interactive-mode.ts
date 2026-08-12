@@ -62,7 +62,13 @@ import {
 	type PromptOptions,
 	parseSkillBlock,
 } from "../../core/agent-session.ts";
-import { type AgentSessionRuntime, SessionImportFileNotFoundError } from "../../core/agent-session-runtime.ts";
+import {
+	type AgentSessionRuntime,
+	SessionImportFileNotFoundError,
+	TaskBoundaryCancelledError,
+	type TaskBoundaryProposal,
+	type TaskBoundaryResolution,
+} from "../../core/agent-session-runtime.ts";
 import {
 	CACHE_TTL_MS,
 	type CacheMiss,
@@ -545,6 +551,7 @@ export class InteractiveMode {
 		this.runtimeHost.setProfileSwitchListener((event) => {
 			this.showStatus(event.notice);
 		});
+		this.runtimeHost.setTaskBoundaryResolver((proposal) => this.resolveTaskBoundary(proposal));
 		this.version = VERSION;
 		this.renderer = createInteractiveTui({
 			tuiMode,
@@ -1126,9 +1133,17 @@ export class InteractiveMode {
 	}
 
 	private async promptUser(text: string, options?: PromptOptions): Promise<void> {
-		const result = await this.runtimeHost.prompt(text, options);
-		if (result.routing === "failed") {
-			this.showStatus(`Profile routing unavailable; using ${result.activeProfileId}`);
+		try {
+			const result = await this.runtimeHost.prompt(text, options);
+			if (result.routing === "failed") {
+				this.showStatus(`Profile routing unavailable; using ${result.activeProfileId}`);
+			}
+		} catch (error) {
+			if (!(error instanceof TaskBoundaryCancelledError)) throw error;
+			const restored = !this.editor.getText().trim();
+			if (restored) this.editor.setText(text);
+			this.showStatus(restored ? "Task switch cancelled; prompt restored" : "Task switch cancelled");
+			this.ui.requestRender();
 		}
 	}
 
@@ -2494,6 +2509,22 @@ export class InteractiveMode {
 	): Promise<boolean> {
 		const result = await this.showExtensionSelector(`${title}\n${message}`, ["Yes", "No"], opts);
 		return result === "Yes";
+	}
+
+	private async resolveTaskBoundary(proposal: TaskBoundaryProposal): Promise<TaskBoundaryResolution> {
+		const activeHarness = this.runtimeHost.activeHarness;
+		const currentHarnessName =
+			activeHarness?.id === proposal.fromHarnessId ? activeHarness.name : proposal.fromHarnessId;
+		const targetLabel = `${proposal.decision === "reuse" ? "Reuse" : "Create"}: ${proposal.targetHarnessName} (${proposal.toProfileId})`;
+		const currentLabel = `Keep current: ${currentHarnessName} (${proposal.fromProfileId})`;
+		const selected = await this.showExtensionSelector("New task detected\nChoose a harness for this prompt", [
+			targetLabel,
+			currentLabel,
+		]);
+
+		if (selected === targetLabel) return "switch";
+		if (selected === currentLabel) return "stay";
+		return "cancel";
 	}
 
 	private async promptForMissingSessionCwd(error: MissingSessionCwdError): Promise<string | undefined> {
@@ -6489,6 +6520,7 @@ export class InteractiveMode {
 
 	stop(): void {
 		this.runtimeHost.setProfileSwitchListener(undefined);
+		this.runtimeHost.setTaskBoundaryResolver(undefined);
 		this.disposeActiveSelector();
 		if (this.settingsManager.getShowTerminalProgress()) {
 			this.ui.terminal.setProgress(false);

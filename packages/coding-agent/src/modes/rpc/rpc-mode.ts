@@ -12,7 +12,11 @@
  */
 
 import * as crypto from "node:crypto";
-import type { AgentSessionRuntime } from "../../core/agent-session-runtime.ts";
+import type {
+	AgentSessionRuntime,
+	TaskBoundaryProposal,
+	TaskBoundaryResolution,
+} from "../../core/agent-session-runtime.ts";
 import type {
 	ExtensionUIContext,
 	ExtensionUIDialogOptions,
@@ -36,6 +40,7 @@ import type {
 	RpcResponse,
 	RpcSessionState,
 	RpcSlashCommand,
+	RpcTaskBoundaryRequestEvent,
 } from "./rpc-types.ts";
 
 // Re-export types for consumers
@@ -45,7 +50,24 @@ export type {
 	RpcExtensionUIResponse,
 	RpcResponse,
 	RpcSessionState,
+	RpcTaskBoundaryRequestEvent,
+	RpcTaskBoundaryResolution,
 } from "./rpc-types.ts";
+
+function toRpcTaskBoundaryRequestEvent(requestId: string, proposal: TaskBoundaryProposal): RpcTaskBoundaryRequestEvent {
+	return {
+		type: "task_boundary_request",
+		requestId,
+		decision: proposal.decision,
+		fromProfileId: proposal.fromProfileId,
+		fromHarnessId: proposal.fromHarnessId,
+		toProfileId: proposal.toProfileId,
+		...(proposal.targetHarnessId ? { targetHarnessId: proposal.targetHarnessId } : {}),
+		...(proposal.targetHarnessRevision ? { targetHarnessRevision: proposal.targetHarnessRevision } : {}),
+		targetHarnessName: proposal.targetHarnessName,
+		confidence: proposal.confidence,
+	};
+}
 
 /**
  * Run in RPC mode.
@@ -79,15 +101,47 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 		return { id, type: "response", command, success: false, error: message };
 	};
 
+	let shutdownRequested = false;
+	let shuttingDown = false;
+	const pendingTaskBoundaries = new Map<string, (resolution: TaskBoundaryResolution) => void>();
+	const settleTaskBoundary = (requestId: string, resolution: TaskBoundaryResolution): boolean => {
+		const resolve = pendingTaskBoundaries.get(requestId);
+		if (!resolve) return false;
+		pendingTaskBoundaries.delete(requestId);
+		resolve(resolution);
+		return true;
+	};
+	const cancelPendingTaskBoundaries = (): void => {
+		for (const requestId of [...pendingTaskBoundaries.keys()]) {
+			settleTaskBoundary(requestId, "cancel");
+		}
+	};
+	runtimeHost.setTaskBoundaryResolver((proposal) => {
+		if (
+			shuttingDown ||
+			runtimeHost.activeProfile.id !== proposal.fromProfileId ||
+			runtimeHost.activeHarness?.id !== proposal.fromHarnessId
+		) {
+			return Promise.resolve("cancel");
+		}
+		let requestId = crypto.randomUUID();
+		while (pendingTaskBoundaries.has(requestId)) requestId = crypto.randomUUID();
+		return new Promise((resolve) => {
+			pendingTaskBoundaries.set(requestId, resolve);
+			try {
+				output(toRpcTaskBoundaryRequestEvent(requestId, proposal));
+			} catch {
+				settleTaskBoundary(requestId, "cancel");
+			}
+		});
+	});
+
 	// Pending extension UI requests waiting for response
 	const pendingExtensionRequests = new Map<
 		string,
 		{ resolve: (value: any) => void; reject: (error: Error) => void }
 	>();
 
-	// Shutdown request flag
-	let shutdownRequested = false;
-	let shuttingDown = false;
 	const signalCleanupHandlers: Array<() => void> = [];
 
 	/** Helper for dialog methods with signal/timeout support */
@@ -318,6 +372,7 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 	});
 
 	const rebindSession = async (): Promise<void> => {
+		cancelPendingTaskBoundaries();
 		session = runtimeHost.session;
 		await session.bindExtensions({
 			uiContext: createExtensionUIContext(),
@@ -450,6 +505,16 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 					await rebindSession();
 				}
 				return success(id, "new_session", result);
+			}
+
+			case "resolve_task_boundary": {
+				if (command.resolution !== "switch" && command.resolution !== "stay" && command.resolution !== "cancel") {
+					return error(id, "resolve_task_boundary", "Invalid task-boundary resolution");
+				}
+				if (typeof command.requestId !== "string" || !settleTaskBoundary(command.requestId, command.resolution)) {
+					return error(id, "resolve_task_boundary", "Task-boundary request is not pending");
+				}
+				return success(id, "resolve_task_boundary");
 			}
 
 			// =================================================================
@@ -745,6 +810,8 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 		unsubscribe?.();
 		unsubscribeBackpressure?.();
 		runtimeHost.setProfileSwitchListener(undefined);
+		runtimeHost.setTaskBoundaryResolver(undefined);
+		cancelPendingTaskBoundaries();
 		await runtimeHost.dispose();
 		detachInput();
 		process.stdin.pause();

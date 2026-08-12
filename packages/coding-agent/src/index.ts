@@ -221,13 +221,19 @@ export type {
 export { DefaultPackageManager } from "./core/package-manager.ts";
 export {
 	buildProfileRouterPrompt,
+	buildTaskBoundaryRouterPrompt,
 	PROFILE_ROUTE_CONFIDENCE_THRESHOLD,
 	type ProfileRouteAction,
 	type ProfileRouteDecision,
 	type ProfileRouteInput,
 	type ProfileRouterCompletion,
 	parseProfileRouteDecision,
+	parseTaskBoundaryRouteDecision,
+	routeTaskBoundary,
 	routeTaskProfile,
+	shouldEvaluateTaskBoundary,
+	type TaskBoundaryRouteDecision,
+	type TaskBoundaryRouteInput,
 } from "./core/profile-router.ts";
 export {
 	BOOTSTRAP_TASK_PROFILE_ID,
@@ -295,7 +301,14 @@ export {
 	createReadOnlyTools,
 	createReadTool,
 	createWriteTool,
+	type ProfileRoutingMode,
+	type ProfileSwitchEvent,
 	type PromptTemplate,
+	type RuntimePromptResult,
+	TaskBoundaryCancelledError,
+	type TaskBoundaryProposal,
+	type TaskBoundaryResolution,
+	type TaskBoundaryResolver,
 } from "./core/sdk.ts";
 export {
 	findSelfEvolutionPolicyViolation,
@@ -442,8 +455,11 @@ export {
 	type RpcExtensionUIRequest,
 	type RpcExtensionUIResponse,
 	type RpcProfileSwitchEvent,
+	type RpcResolveTaskBoundaryCommand,
 	type RpcResponse,
 	type RpcSessionState,
+	type RpcTaskBoundaryRequestEvent,
+	type RpcTaskBoundaryResolution,
 	runPrintMode,
 	runRpcMode,
 } from "./modes/index.ts";
