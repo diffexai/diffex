@@ -16,6 +16,7 @@ type SubmitContext = {
 	flushPendingBashComponents: () => void;
 	onInputCallback?: (text: string) => void;
 	pendingUserInputs: string[];
+	handleSubagentsCommand: () => void;
 };
 
 type InputContext = {
@@ -45,6 +46,7 @@ function createSubmitContext(): SubmitContext {
 		},
 		flushPendingBashComponents: vi.fn(),
 		pendingUserInputs: [],
+		handleSubagentsCommand: vi.fn(),
 	};
 }
 
@@ -67,6 +69,25 @@ describe("InteractiveMode startup input", () => {
 
 		await expect(interactiveModePrototype.getUserInput.call(context)).resolves.toBe("queued prompt");
 		expect(context.onInputCallback).toBeUndefined();
+		expect(context.pendingUserInputs).toEqual([]);
+	});
+
+	it.each([
+		{ state: "idle", isStreaming: false, isCompacting: false },
+		{ state: "streaming", isStreaming: true, isCompacting: false },
+		{ state: "compacting", isStreaming: false, isCompacting: true },
+	])("handles /subagents immediately while $state", async ({ isStreaming, isCompacting }) => {
+		const context = createSubmitContext();
+		context.session.isStreaming = isStreaming;
+		context.session.isCompacting = isCompacting;
+		interactiveModePrototype.setupEditorSubmitHandler.call(context);
+
+		await context.defaultEditor.onSubmit?.(" /subagents ");
+
+		expect(context.handleSubagentsCommand).toHaveBeenCalledOnce();
+		expect(context.editor.setText).toHaveBeenCalledWith("");
+		expect(context.session.prompt).not.toHaveBeenCalled();
+		expect(context.editor.addToHistory).not.toHaveBeenCalled();
 		expect(context.pendingUserInputs).toEqual([]);
 	});
 });

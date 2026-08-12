@@ -10,4 +10,11 @@ describe("BUILTIN_SLASH_COMMANDS", () => {
 		expect(commandNames).not.toContain("new");
 		expect(commandNames).not.toContain("quit");
 	});
+
+	it("includes the argument-free /subagents command", () => {
+		expect(BUILTIN_SLASH_COMMANDS).toContainEqual({
+			name: "subagents",
+			description: "Show sub-agents in the current session",
+		});
+	});
 });

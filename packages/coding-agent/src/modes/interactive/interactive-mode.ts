@@ -158,6 +158,7 @@ import {
 	type StatusIndicator,
 	WorkingStatusIndicator,
 } from "./components/status-indicator.ts";
+import { SubagentsComponent } from "./components/subagents.ts";
 import { ToolExecutionComponent } from "./components/tool-execution.ts";
 import { TreeSelectorComponent } from "./components/tree-selector.ts";
 import { TrustSelectorComponent } from "./components/trust-selector.ts";
@@ -2926,6 +2927,11 @@ export class InteractiveMode {
 			}
 			if (text === "/session") {
 				this.handleSessionCommand();
+				this.editor.setText("");
+				return;
+			}
+			if (text === "/subagents") {
+				this.handleSubagentsCommand();
 				this.editor.setText("");
 				return;
 			}
@@ -6069,6 +6075,12 @@ export class InteractiveMode {
 
 		this.chatContainer.addChild(new Spacer(1));
 		this.chatContainer.addChild(new Text(info, 1, 0));
+		this.ui.requestRender();
+	}
+
+	private handleSubagentsCommand(): void {
+		this.chatContainer.addChild(new Spacer(1));
+		this.chatContainer.addChild(new SubagentsComponent(this.session.getSubagents()));
 		this.ui.requestRender();
 	}
 
