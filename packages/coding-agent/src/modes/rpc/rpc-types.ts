@@ -12,6 +12,11 @@ import type { BashResult } from "../../core/bash-executor.ts";
 import type { CompactionResult } from "../../core/compaction/index.ts";
 import type { SessionEntry, SessionTreeNode } from "../../core/session-manager.ts";
 import type { SourceInfo } from "../../core/source-info.ts";
+import type { JsonAgentSessionEvent, JsonProfileSwitchEvent } from "../json-event.ts";
+
+/** Events emitted asynchronously by the RPC stdout protocol. */
+export type RpcEvent = JsonAgentSessionEvent;
+export type RpcProfileSwitchEvent = JsonProfileSwitchEvent;
 
 // ============================================================================
 // RPC Commands (stdin)

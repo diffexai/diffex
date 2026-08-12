@@ -36,6 +36,26 @@ describe("SessionManager.newSession with custom id", () => {
 		});
 	});
 
+	it("stores the active harness identity and derived revision with profile metadata", () => {
+		const session = SessionManager.inMemory();
+
+		session.setProfileMetadata({
+			id: "research",
+			hash: "research-hash",
+			routing: "auto",
+			harnessId: "literature-review-a1b2c3",
+			harnessRevision: "evolved-revision-hash",
+		});
+
+		expect(session.getHeader()?.profile).toEqual({
+			id: "research",
+			hash: "research-hash",
+			routing: "auto",
+			harnessId: "literature-review-a1b2c3",
+			harnessRevision: "evolved-revision-hash",
+		});
+	});
+
 	it("uses the provided id instead of generating one", () => {
 		const session = SessionManager.inMemory();
 		session.newSession({ id: "my-custom-id" });

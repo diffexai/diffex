@@ -1,4 +1,5 @@
 import type { AgentSessionEvent } from "../core/agent-session.ts";
+import type { ProfileSwitchEvent } from "../core/agent-session-runtime.ts";
 
 type WithoutPartial<T> = T extends { partial: unknown } ? Omit<T, "partial"> : T;
 
@@ -13,7 +14,18 @@ type ToJsonEvent<T> = T extends {
 	: T;
 
 /** Session event shape emitted by the JSON and RPC stdout protocols. */
-export type JsonAgentSessionEvent = ToJsonEvent<AgentSessionEvent>;
+export interface JsonProfileSwitchEvent {
+	type: "profile_switch";
+	fromProfileId: string;
+	toProfileId: string;
+	harnessId: string;
+	harnessRevision: string;
+	harnessName: string;
+	reused: boolean;
+	notice: string;
+}
+
+export type JsonAgentSessionEvent = ToJsonEvent<AgentSessionEvent> | JsonProfileSwitchEvent;
 
 type MessageUpdateEvent = Extract<AgentSessionEvent, { type: "message_update" }>;
 type JsonMessageUpdateEvent = Extract<JsonAgentSessionEvent, { type: "message_update" }>;
@@ -37,4 +49,18 @@ export function toJsonEvent(event: AgentSessionEvent): JsonAgentSessionEvent {
 
 	const { partial: _partial, ...deltaEvent } = assistantMessageEvent;
 	return { type: "message_update", assistantMessageEvent: deltaEvent };
+}
+
+/** Convert a runtime harness switch into its reason-free public wire event. */
+export function toJsonProfileSwitchEvent(event: ProfileSwitchEvent): JsonProfileSwitchEvent {
+	return {
+		type: "profile_switch",
+		fromProfileId: event.fromProfileId,
+		toProfileId: event.toProfileId,
+		harnessId: event.harnessId,
+		harnessRevision: event.harnessRevision,
+		harnessName: event.harnessName,
+		reused: event.reused,
+		notice: event.notice,
+	};
 }

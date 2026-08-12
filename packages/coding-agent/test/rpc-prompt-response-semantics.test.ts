@@ -11,7 +11,7 @@ import {
 } from "@earendil-works/diffex-ai/compat";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentSession } from "../src/core/agent-session.ts";
-import type { AgentSessionRuntime } from "../src/core/agent-session-runtime.ts";
+import type { AgentSessionRuntime, ProfileSwitchEvent } from "../src/core/agent-session-runtime.ts";
 import { AuthStorage } from "../src/core/auth-storage.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
 import { SettingsManager } from "../src/core/settings-manager.ts";
@@ -101,7 +101,12 @@ function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function createRuntimeHost(options: { withAuth: boolean; responseDelayMs: number; model?: Model<any> }): Promise<{
+async function createRuntimeHost(options: {
+	withAuth: boolean;
+	responseDelayMs: number;
+	model?: Model<any>;
+	emitProfileSwitch?: boolean;
+}): Promise<{
 	runtimeHost: AgentSessionRuntime;
 	cleanup: () => Promise<void>;
 }> {
@@ -149,10 +154,23 @@ async function createRuntimeHost(options: { withAuth: boolean; responseDelayMs: 
 		resourceLoader: createTestResourceLoader(),
 	});
 
+	let profileSwitchListener: ((event: ProfileSwitchEvent) => void) | undefined;
 	const runtimePrompt = vi.fn(async (text: string, promptOptions?: Parameters<AgentSession["prompt"]>[1]) => {
 		await session.prompt(text, promptOptions);
+		if (options.emitProfileSwitch) {
+			profileSwitchListener?.({
+				fromProfileId: "general",
+				toProfileId: "research",
+				reason: "private router reason",
+				harnessId: "evidence-review-a1b2c3",
+				harnessRevision: "abcdef1234567890",
+				harnessName: "Evidence review",
+				reused: true,
+				notice: 'Found evolved harness "Evidence review" for this task. Switched to revision abcdef123456.',
+			});
+		}
 		return {
-			routing: promptOptions?.streamingBehavior ? ("switched" as const) : ("stayed" as const),
+			routing: promptOptions?.streamingBehavior ? ("selected" as const) : ("bypassed" as const),
 			activeProfileId: promptOptions?.streamingBehavior ? "routed-profile" : "general",
 		};
 	});
@@ -164,6 +182,9 @@ async function createRuntimeHost(options: { withAuth: boolean; responseDelayMs: 
 		fork: vi.fn(async () => ({ cancelled: true, selectedText: "" })),
 		dispose: vi.fn(async () => {}),
 		setRebindSession: vi.fn(),
+		setProfileSwitchListener: vi.fn((listener?: (event: ProfileSwitchEvent) => void) => {
+			profileSwitchListener = listener;
+		}),
 	} as unknown as AgentSessionRuntime;
 
 	return {
@@ -184,7 +205,12 @@ async function createRuntimeHost(options: { withAuth: boolean; responseDelayMs: 
 	};
 }
 
-async function startRpcMode(options: { withAuth: boolean; responseDelayMs: number; model?: Model<any> }): Promise<{
+async function startRpcMode(options: {
+	withAuth: boolean;
+	responseDelayMs: number;
+	model?: Model<any>;
+	emitProfileSwitch?: boolean;
+}): Promise<{
 	lineHandler: (line: string) => void;
 	runtimeHost: AgentSessionRuntime;
 	cleanup: () => Promise<void>;
@@ -260,6 +286,36 @@ describe("RPC prompt response semantics", () => {
 					success: true,
 				});
 			});
+		} finally {
+			await cleanup();
+		}
+	});
+
+	it("emits one typed reason-free profile switch event", async () => {
+		const { lineHandler, runtimeHost, cleanup } = await startRpcMode({
+			withAuth: true,
+			responseDelayMs: 0,
+			emitProfileSwitch: true,
+		});
+
+		try {
+			lineHandler(JSON.stringify({ id: "profile-switch", type: "prompt", message: "Review evidence" }));
+
+			await vi.waitFor(() => {
+				const event = parseOutputLines(rpcIo.outputLines).find((record) => record.type === "profile_switch");
+				expect(event).toMatchObject({
+					type: "profile_switch",
+					fromProfileId: "general",
+					toProfileId: "research",
+					harnessId: "evidence-review-a1b2c3",
+					harnessRevision: "abcdef1234567890",
+					harnessName: "Evidence review",
+					reused: true,
+					notice: 'Found evolved harness "Evidence review" for this task. Switched to revision abcdef123456.',
+				});
+				expect(event).not.toHaveProperty("reason");
+			});
+			expect(runtimeHost.setProfileSwitchListener).toHaveBeenCalledTimes(1);
 		} finally {
 			await cleanup();
 		}

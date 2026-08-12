@@ -573,8 +573,7 @@ export class InteractiveMode {
 			await this.rebindCurrentSession({ renderBeforeBind: true });
 		});
 		this.runtimeHost.setProfileSwitchListener((event) => {
-			const prefix = event.generated ? "Created task profile" : "Switched task profile";
-			this.showStatus(`${prefix}: ${event.fromProfileId} -> ${event.toProfileId}`);
+			this.showStatus(event.notice);
 		});
 		this.version = VERSION;
 		this.renderer = createInteractiveTui({
@@ -4691,8 +4690,18 @@ export class InteractiveMode {
 
 		if (!requested) return;
 		if (requested === "auto") {
-			this.runtimeHost.setProfileRouting("auto");
-			this.showStatus(`Automatic profile routing enabled from ${this.runtimeHost.activeProfile.id}`);
+			try {
+				const result = await this.runtimeHost.newSession({ profile: "general", profileRouting: "auto" });
+				if (result.cancelled) {
+					this.showStatus("Automatic profile routing cancelled");
+					return;
+				}
+				this.showStatus("Automatic profile routing enabled from DEFAULT");
+			} catch (error) {
+				this.showError(
+					`Could not enable automatic profile routing: ${error instanceof Error ? error.message : String(error)}`,
+				);
+			}
 			return;
 		}
 
@@ -4715,7 +4724,6 @@ export class InteractiveMode {
 				parentSession: established ? this.session.sessionFile : undefined,
 				profile: target.id,
 				profileRouting: "pinned",
-				generatedProfiles: target.origin === "generated" ? [target] : undefined,
 			});
 			if (result.cancelled) {
 				this.showStatus("Task profile change cancelled");

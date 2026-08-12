@@ -730,7 +730,9 @@ export async function main(args: string[], options?: MainOptions) {
 		sessionManager,
 		profile,
 		profileRouting,
-		generatedProfiles,
+		harnessId,
+		telemetryContext,
+		telemetryCapture,
 		sessionStartEvent,
 		projectTrustContext,
 	}) => {
@@ -751,6 +753,8 @@ export async function main(args: string[], options?: MainOptions) {
 			agentDir,
 			settingsManager: runtimeSettingsManager,
 			modelRuntimeSignal: AbortSignal.timeout(15_000),
+			telemetryContext,
+			telemetryCapture,
 			extensionFlagValues: parsed.unknownFlags,
 			resourceLoaderReloadOptions: shouldResolveProjectTrust
 				? {
@@ -782,7 +786,6 @@ export async function main(args: string[], options?: MainOptions) {
 				additionalPromptTemplatePaths: resolvedPromptTemplatePaths,
 				additionalThemePaths: resolvedThemePaths,
 				profile,
-				generatedProfiles,
 				noExtensions: parsed.noExtensions,
 				noSkills: parsed.noSkills,
 				noPromptTemplates: parsed.noPromptTemplates,
@@ -851,6 +854,7 @@ export async function main(args: string[], options?: MainOptions) {
 			thinkingLevel: sessionOptions.thinkingLevel,
 			scopedModels: sessionOptions.scopedModels,
 			profileRouting: effectiveProfileRouting,
+			harnessId,
 			tools: sessionOptions.tools,
 			excludeTools: sessionOptions.excludeTools,
 			noTools: sessionOptions.noTools,

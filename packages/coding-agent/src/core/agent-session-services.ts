@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import type { ThinkingLevel } from "@earendil-works/diffex-agent-core";
+import { NOOP_TELEMETRY_CONTEXT, type TelemetryContext, type ThinkingLevel } from "@earendil-works/diffex-agent-core";
 import type { Model } from "@earendil-works/diffex-ai";
 import { getAgentDir } from "../config.ts";
 import { resolvePath } from "../utils/paths.ts";
@@ -14,6 +14,11 @@ import {
 import { type CreateAgentSessionOptions, type CreateAgentSessionResult, createAgentSession } from "./sdk.ts";
 import type { SessionManager } from "./session-manager.ts";
 import { SettingsManager } from "./settings-manager.ts";
+import {
+	type EvolutionTraceSnapshot,
+	type ReadableTelemetryCapture,
+	readEvolutionTraceSnapshot,
+} from "./telemetry-capture.ts";
 
 /**
  * Non-fatal issues collected while creating services or sessions.
@@ -40,6 +45,10 @@ export interface CreateAgentSessionServicesOptions {
 	settingsManager?: SettingsManager;
 	modelRuntime?: ModelRuntime;
 	modelRuntimeSignal?: AbortSignal;
+	/** Explicit root context for passive runtime telemetry. Defaults to no-op. */
+	telemetryContext?: TelemetryContext;
+	/** Optional host-owned readable capture. Its context takes precedence over telemetryContext. */
+	telemetryCapture?: ReadableTelemetryCapture;
 	extensionFlagValues?: Map<string, boolean | string>;
 	resourceLoaderOptions?: Omit<DefaultResourceLoaderOptions, "cwd" | "agentDir" | "settingsManager">;
 	resourceLoaderReloadOptions?: ResourceLoaderReloadOptions;
@@ -59,6 +68,7 @@ export interface CreateAgentSessionFromServicesOptions {
 	thinkingLevel?: ThinkingLevel;
 	scopedModels?: Array<{ model: Model<any>; thinkingLevel?: ThinkingLevel }>;
 	profileRouting?: "auto" | "pinned";
+	harnessId?: string;
 	tools?: string[];
 	excludeTools?: CreateAgentSessionOptions["excludeTools"];
 	noTools?: CreateAgentSessionOptions["noTools"];
@@ -77,7 +87,19 @@ export interface AgentSessionServices {
 	modelRuntime: ModelRuntime;
 	settingsManager: SettingsManager;
 	resourceLoader: ResourceLoader;
+	telemetryContext: TelemetryContext;
+	telemetryCapture?: ReadableTelemetryCapture;
 	diagnostics: AgentSessionRuntimeDiagnostic[];
+}
+
+/** Read content-free structural signals captured since a caller-owned cursor. */
+export function readAgentSessionEvolutionTrace(
+	services: AgentSessionServices,
+	afterEndSequence = 0,
+): EvolutionTraceSnapshot | undefined {
+	return services.telemetryCapture
+		? readEvolutionTraceSnapshot(services.telemetryCapture, afterEndSequence)
+		: undefined;
 }
 
 function applyExtensionFlagValues(
@@ -189,6 +211,8 @@ export async function createAgentSessionServices(
 		modelRuntime,
 		settingsManager,
 		resourceLoader,
+		telemetryContext: options.telemetryCapture?.context ?? options.telemetryContext ?? NOOP_TELEMETRY_CONTEXT,
+		...(options.telemetryCapture ? { telemetryCapture: options.telemetryCapture } : {}),
 		diagnostics,
 	};
 }
@@ -214,6 +238,8 @@ export async function createAgentSessionFromServices(
 		thinkingLevel: options.thinkingLevel,
 		scopedModels: options.scopedModels,
 		profileRouting: options.profileRouting,
+		harnessId: options.harnessId,
+		telemetryContext: options.services.telemetryContext,
 		tools: options.tools,
 		excludeTools: options.excludeTools,
 		noTools: options.noTools,

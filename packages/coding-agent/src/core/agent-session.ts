@@ -66,7 +66,6 @@ import {
 	shouldCompact,
 } from "./compaction/index.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
-import { evolvedPromptIncludesNote } from "./evolved.ts";
 import { exportSessionToHtml, type ToolHtmlRenderer } from "./export-html/index.ts";
 import { createToolHtmlRenderer } from "./export-html/tool-renderer.ts";
 import {
@@ -214,6 +213,8 @@ export interface AgentSessionConfig {
 	scopedModels?: Array<{ model: Model<any>; thinkingLevel?: ThinkingLevel }>;
 	/** Resource loader for extensions, skills, prompts, themes, context files, and system prompt */
 	resourceLoader: ResourceLoader;
+	/** Stable harness identity used to scope task-specific EVOLVED notes. */
+	harnessId?: string;
 	/** SDK custom tools registered outside extensions */
 	customTools?: ToolDefinition[];
 	/** Canonical model/auth runtime used by coding-agent internals. */
@@ -366,6 +367,7 @@ export class AgentSession {
 	private _turnIndex = 0;
 
 	private _resourceLoader: ResourceLoader;
+	private _harnessId?: string;
 	private _customTools: ToolDefinition[];
 	private _baseToolDefinitions: Map<string, ToolDefinition> = new Map();
 	private _cwd: string;
@@ -410,6 +412,7 @@ export class AgentSession {
 		this.settingsManager = config.settingsManager;
 		this._scopedModels = config.scopedModels ?? [];
 		this._resourceLoader = config.resourceLoader;
+		this._harnessId = config.harnessId;
 		this._customTools = config.customTools ?? [];
 		this._cwd = config.cwd;
 		this._modelRuntime = config.modelRuntime;
@@ -1157,6 +1160,11 @@ export class AgentSession {
 		return this.sessionManager.getSessionId();
 	}
 
+	/** Stable evolved-harness identity when this session is attached to one. */
+	get harnessId(): string | undefined {
+		return this._harnessId;
+	}
+
 	/** Current session display name, if set */
 	get sessionName(): string | undefined {
 		return this.sessionManager.getSessionName();
@@ -1227,10 +1235,10 @@ export class AgentSession {
 		const evolvedNotes = this._resourceLoader
 			.getEvolvedNotes()
 			.evolvedNotes.filter(
-				(note) => note.profileId === activeProfile.id || note.profileId === "*" || note.profileId === "all",
-			)
-			.filter(
-				(note) => activeProfile.origin !== "generated" || !evolvedPromptIncludesNote(activeProfile.prompt, note),
+				(note) =>
+					note.profileId === (this._harnessId ?? activeProfile.id) ||
+					note.profileId === "*" ||
+					note.profileId === "all",
 			);
 
 		this._baseSystemPromptOptions = {
