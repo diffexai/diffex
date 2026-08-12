@@ -1,44 +1,100 @@
-# Task Profiles
+# Task Profiles and Harnesses
 
-Task profiles let one Diffex harness handle coding, research, finance, healthcare, legal work, and tasks that were not anticipated when Diffex was built.
-A profile is a versioned bundle of task instructions, routing metadata, tool policy, guardrails, context-file rules, and compaction instructions.
+Task profiles let Diffex support coding, research, finance, healthcare, legal work, and unanticipated tasks without making the core harness specific to any one field.
+A task profile is an immutable bundle of base instructions, routing metadata, tool policy, guardrails, and compaction guidance.
+A harness descriptor gives a task a stable identity while referring to one immutable built-in profile and its applicable `EVOLVED.md` notes.
 
 Diffex includes `general`, `coding`, `research`, `finance`, `healthcare`, and `legal` profiles.
 High-stakes profiles require current sources and qualified human review rather than claiming professional authority.
+Automatic routing evaluates the requested outcome, not the user's profession or an incidental topic mention.
 
-## Routing
+## Prompt stack
 
-The CLI uses automatic intent routing unless a profile is pinned by the user, settings, or restored session metadata.
-The router evaluates the requested outcome, not the user's profession or an incidental topic mention.
+Every composed system prompt has three top-level layers in this order:
 
-On the first substantive prompt, Diffex selects the best matching profile.
-If a later prompt starts a clearly distinct task that needs another profile, Diffex creates a linked session runtime and passes it a bounded handoff.
-The original session remains unchanged.
-Prompts submitted while a response or compaction is active are classified before they enter the queue.
-Public skill and prompt-template commands are classified from their expanded content, while built-in and extension slash commands retain precedence and bypass task classification.
-If no existing profile adequately fits a clear task, Diffex creates a provisional profile from the generated-profile template.
-Ambiguous requests and low-confidence classifications stay in the current profile.
+1. **Base** contains exactly one resolved profile portion: the thin `DEFAULT` prompt or an immutable `PROMPT_PROFILE`.
+   Necessary native harness rules, profile guardrails, tool guidance, documentation pointers, skill guidance, and concise runtime facts are folded into this same base layer.
+   Tool JSON schemas remain out-of-band runtime data.
+2. **User instructions** contains the applicable read-only `AGENTS.md` and `CLAUDE.md` files.
+3. **Evolved notes** contains only the bounded `EVOLVED.md` notes applicable to the active harness.
+
+The layer order is fixed so provenance remains inspectable and later observations cannot silently replace a tuned base profile or user instructions.
+Evolved notes are advisory and cannot expand tool access, authority, or other capabilities.
+
+An explicit CLI or SDK custom system prompt replaces the profile portion inside the base layer.
+An explicit append system prompt is appended inside that same profile portion.
+Neither option creates a fourth top-level prompt layer.
+
+## Automatic lifecycle
+
+An automatic session begins with the neutral `general` bootstrap profile, which renders a genuinely thin `DEFAULT` profile portion inside the base layer.
+Diffex completes the first accepted user task with that default before running any task classifier.
+This avoids a speculative pre-turn model call and ensures the user's first request is answered even if classification later fails.
+
+After the initial response completes, Diffex performs exactly one harness resolution:
+
+1. The router considers compatible evolved harnesses first.
+2. If none clearly matches, it selects one immutable built-in base profile.
+3. A new selection creates a prompt-free harness descriptor that records only identity, description, base-profile reference, and creation time.
+4. Diffex activates the resolved harness for subsequent turns and records its identity and EVOLVED-derived revision in session metadata.
+
+Low-confidence, invalid, or failed routing falls back safely to `general`.
+The router never invents a prompt, creates a generated `PROMPT.md`, or modifies an existing profile.
+A harness descriptor is not a prompt profile and contains no authored instructions.
+
+Resolution is one-time for a session.
+Later prompts remain in the active harness, including incidental questions from another domain.
+Start a new automatic session or explicitly select a profile when beginning a materially different task.
+
+Prompts submitted while a response or compaction is active are admitted in order and do not trigger duplicate harness resolution.
+Public skill and prompt-template commands are classified from their expanded content after the initial turn, while built-in and extension slash commands retain precedence and bypass classification.
+
+## Harness descriptors
+
+Harness descriptors are runtime-managed JSON files under `~/.pi/agent/harnesses/`.
+Their IDs use lowercase letters, numbers, and interior hyphens.
+The model cannot author or edit them.
+
+A descriptor points to an immutable built-in base profile rather than copying its prompt.
+Its revision is derived from the descriptor identity and applicable EVOLVED note hashes, so a resumed session can audit which evolved state it restored.
+Once a harness has a harness-scoped durable lesson, it becomes eligible for reuse by a later automatic session whose task clearly matches its description.
+Project-scoped lessons affect reuse only while that trusted project context is present.
+
+This separation keeps carefully tuned prompts predictable while allowing future sessions to reuse task-specific learning through an inspectable note layer.
+
+## Manual selection
 
 Use `/profile <id>` to start a linked session pinned to a profile.
-Use `/profile auto` to allow automatic routing again.
+Use `/profile auto` to start from the automatic lifecycle again.
 
 Pin a profile from the CLI by ID or path:
 
 ```bash
 pi --profile research "Compare the evidence for these claims"
 pi --profile ./profiles/my-domain "Handle this specialized task"
-pi --profile auto "Choose the appropriate workflow"
+pi --profile auto "Start with DEFAULT, then resolve the harness"
 ```
 
-An explicit ID or path pins the session.
-`auto` overrides a configured default and enables routing.
+An explicit ID or path pins the session and applies that immutable profile immediately.
+`auto` overrides a configured default and enables one-time post-turn resolution.
 
-## Profile files
+### Routing cost
+
+Automatic routing makes at most one classification request per newly established harness, after the first accepted task turn.
+By default Diffex picks the cheapest model from the same provider and API that has enough context for the router prompt, and falls back to the session model when there is no cheaper sibling.
+Set `routerModel` in `settings.json` to `"provider/model"` to choose one explicitly, or `"auto"` to restore automatic selection.
+Pinning a profile disables classification entirely.
+
+## Custom profile files
 
 User profiles are discovered under `~/.pi/agent/profiles/`.
 Profiles in a trusted project are discovered under `.pi/profiles/`.
 Each profile directory contains a `profile.json` manifest and normally a prompt file such as `PROMPT.md`.
 Profiles can also be supplied through `settings.json`, a Diffex package manifest, or an explicit path.
+
+Custom and package profiles are immutable to model self-evolution, just like built-ins.
+The user or package author can revise their source files, but Diffex never tunes them from session history.
+Automatic resolution selects only built-in profiles, while a custom profile can be pinned explicitly by ID or path.
 
 A minimal profile manifest looks like this:
 
@@ -66,10 +122,6 @@ A minimal profile manifest looks like this:
     "disallowedActions": [],
     "instructions": ["Separate evidence from inference."]
   },
-  "context": {
-    "fileNames": ["AGENTS.override.md", "AGENTS.md", "AGENTS.MD"],
-    "label": "User instructions"
-  },
   "promptGuidelines": ["Cite primary sources when possible."],
   "compactionInstructions": "Preserve claims, sources, dates, uncertainty, decisions, and pending work."
 }
@@ -89,46 +141,59 @@ A package can expose profiles with its `pi.profiles` field:
 ```
 
 Use `defaultProfile` in `settings.json` to pin a default profile by ID or path.
-Omit `defaultProfile`, or set it to `"auto"`, to keep automatic routing enabled.
-
-### Routing cost
-
-Routing classifies every prompt, so it runs on a small model rather than the session model.
-By default Diffex picks the cheapest model from the same provider and API that still has enough context for the router prompt, and falls back to the session model when there is no cheaper sibling.
-Set `routerModel` in `settings.json` to `"provider/model"` to choose one explicitly, or `"auto"` to restore automatic selection.
-Pinning a profile disables routing entirely, so no classification request is made.
+Omit `defaultProfile`, or set it to `"auto"`, to use the automatic lifecycle.
 
 ## User instructions
 
-`AGENTS.md` is the user-controlled instruction layer for global and repository guidance.
-Diffex reads `~/.pi/agent/AGENTS.md` and applicable files from the current directory and its ancestors.
-`AGENTS.override.md` replaces the other instruction file in the same directory.
-The coding profile also reads `CLAUDE.md` for compatibility.
+`AGENTS.md` and `CLAUDE.md` are independent, user-controlled instruction sources for global and repository guidance.
+Diffex reads applicable files from `~/.pi/agent/`, the current directory, and its ancestors.
+When `AGENTS.override.md` exists in a directory, it replaces the `AGENTS.md` variant in that same directory, but it does not suppress `CLAUDE.md`.
+`CLAUDE.md` is loaded for compatibility in every profile, not only the coding profile.
 
-The model can read these files but the self-evolution path cannot modify them.
+The model can read these files but cannot modify them through self-evolution.
 Only the user should change repository and global instruction files.
 
 ## EVOLVED.md
 
-The global `~/.pi/agent/EVOLVED.md` starts as an empty user-visible file.
+The global `~/.pi/agent/EVOLVED.md` starts as an empty, user-visible file.
 A trusted project can also use `.pi/EVOLVED.md`; Diffex creates that project file only when the first project-scoped lesson is recorded.
 The user can inspect and edit either file directly.
 
-The model can append a bounded, structured lesson only through the `evolve` tool.
-Direct model writes to `EVOLVED.md`, instruction files, and profile files are blocked.
+The model can append a bounded, structured lesson only through the validated `evolve` tool.
+Direct model writes to `EVOLVED.md`, profile files, harness descriptors, `AGENTS.md`, and `CLAUDE.md` are blocked.
+The validated `evolve` tool records task lessons under the active harness ID, or under the pinned base profile before a harness exists.
+Free-form notes written directly by the user are loaded with the `*` identifier and apply user-wide.
+Project-scoped notes remain project-local.
+
+Applicable notes are bounded, deduplicated, and composed only into the final evolved layer.
+They never rewrite the immutable base profile or user instruction files.
 Do not store secrets, credentials, full transcripts, or temporary task state in evolution notes.
 
-Built-in, package, and user-authored profiles are immutable to self-evolution.
-Matching notes remain a separate advisory context layer for those profiles.
-At session finalization, only a generated profile may append relevant, bounded global notes from `EVOLVED.md` to its prompt.
-Project-scoped notes remain project-local advisory context and are never persisted into a globally reusable generated profile.
-This keeps tuned profiles predictable while allowing a new domain profile to improve from explicit, inspectable lessons.
+There is no generated-profile finalization step.
+Diffex does not create or append to `PROMPT.md` at turn completion or session shutdown.
+All durable model-authored learning flows through `EVOLVED.md`.
+
+## Native runtime telemetry
+
+Harness telemetry is passive structural tracing through an explicit `TelemetryContext`.
+The default context is a no-op, and there is no default exporter or coupling to install analytics.
+A host can opt into a bounded, process-local capture and read newly settled spans by cursor after a turn.
+The host owns capture lifetime, retention, and any downstream evolution policy.
+
+Native spans describe lifecycle structure such as runs, turns, steps, tool execution, routing, and evolution outcomes.
+They exclude raw prompts and completions, system-profile and instruction content, EVOLVED note content, file paths and contents, tool arguments and results, provider payloads, headers, credentials, router explanations, handoffs, and free-form errors.
+Traces are not durable application state and are never copied into session files.
+
+A host may use structural signals to decide whether bounded local transcript evaluation is warranted.
+Any accepted durable lesson still passes through the normal EVOLVED validation and writer.
+Telemetry never becomes a fourth prompt layer and never edits a profile or harness descriptor.
 
 ## SDK
 
-The direct SDK starts from the neutral `general` profile and records automatic-routing intent by default.
-Automatic profile classification and runtime replacement are performed by `AgentSessionRuntime`; a bare `AgentSession` uses its currently loaded profile.
-Pin a profile with `profile`:
+`AgentSessionRuntime` owns automatic post-turn harness resolution and runtime replacement.
+A bare `AgentSession` uses its currently loaded profile and does not run the automatic resolver by itself.
+
+Pin a profile with `createAgentSession`:
 
 ```typescript
 const { session } = await createAgentSession({
@@ -138,11 +203,11 @@ const { session } = await createAgentSession({
 });
 ```
 
-Use `profile: "auto"` with `profileRouting: "auto"` when a host will continue automatic routing and runtime replacement.
-A custom `ResourceLoader` must expose the profile registry, active profile, and evolved notes in addition to the other resources.
+Use `profile: "auto"` with `profileRouting: "auto"` when the host wraps the session in `AgentSessionRuntime` and wants the one-time automatic lifecycle.
+A custom `ResourceLoader` must expose the profile registry, active profile, user instruction files, and applicable evolved notes in addition to its other resources.
 
 ## SYSTEM.md removal
 
-Diffex no longer discovers `SYSTEM.md` or `APPEND_SYSTEM.md` from global or project directories.
-Move stable task behavior into a task profile and put user or repository guidance in `AGENTS.md`.
-Explicit `--system-prompt`, `--append-system-prompt`, and SDK prompt overrides remain available for one-off host-controlled customization.
+Diffex does not discover `SYSTEM.md` or `APPEND_SYSTEM.md` from global or project directories.
+Move stable task behavior into an immutable task profile and put user or repository guidance in `AGENTS.md` or `CLAUDE.md`.
+Explicit `--system-prompt`, `--append-system-prompt`, and SDK prompt overrides remain available as host-controlled customization inside the base layer.
