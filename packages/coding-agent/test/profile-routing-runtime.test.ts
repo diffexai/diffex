@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
@@ -17,21 +17,34 @@ import {
 } from "../src/core/agent-session-runtime.ts";
 import { AuthStorage } from "../src/core/auth-storage.ts";
 import { appendEvolvedNote } from "../src/core/evolved.ts";
+import { createHarnessDescriptor, loadHarnessDescriptors } from "../src/core/harness-descriptors.ts";
 import { ModelRuntime } from "../src/core/model-runtime.ts";
+import type { ResolvedTaskProfile } from "../src/core/profiles.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
+import { BoundedTelemetryCapture, readEvolutionTraceSnapshot } from "../src/core/telemetry-capture.ts";
 
-function routeDecision(
-	decision: "stay" | "switch" | "create",
+function selectDecision(
 	profileId: string,
-	overrides: Record<string, unknown> = {},
+	harnessName = "Focused task",
+	harnessDescription = "Complete the user's focused task.",
 ): string {
 	return JSON.stringify({
-		decision,
+		decision: "select",
 		profileId,
 		confidence: 0.99,
-		reason: decision === "stay" ? "The task continues in this profile." : "The user started a distinct task.",
-		distinctTask: decision !== "stay",
-		...overrides,
+		reason: `The ${profileId} base profile best fits the requested outcome.`,
+		harnessName,
+		harnessDescription,
+	});
+}
+
+function reuseDecision(harnessId: string, profileId: string): string {
+	return JSON.stringify({
+		decision: "reuse",
+		harnessId,
+		profileId,
+		confidence: 0.99,
+		reason: "The evolved harness clearly fits the requested outcome.",
 	});
 }
 
@@ -39,15 +52,10 @@ describe("AgentSessionRuntime profile routing", () => {
 	const cleanups: Array<() => Promise<void> | void> = [];
 
 	afterEach(async () => {
-		while (cleanups.length > 0) {
-			await cleanups.pop()?.();
-		}
+		while (cleanups.length > 0) await cleanups.pop()?.();
 	});
 
-	async function createRuntimeHost(
-		profileRouting: "auto" | "pinned" | undefined = "auto",
-		omitInitialProfileSelection = false,
-	) {
+	async function createRuntimeHost(profileRouting: "auto" | "pinned" = "auto", profile = "coding") {
 		const tempDir = join(tmpdir(), `pi-profile-routing-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 		mkdirSync(tempDir, { recursive: true });
 		const faux = registerFauxProvider();
@@ -58,6 +66,7 @@ describe("AgentSessionRuntime profile routing", () => {
 			modelsPath: join(tempDir, "models.json"),
 		});
 		const model = faux.getModel();
+		const telemetryCapture = new BoundedTelemetryCapture();
 		modelRuntime.registerProvider(model.provider, {
 			baseUrl: model.baseUrl,
 			api: model.api,
@@ -76,23 +85,30 @@ describe("AgentSessionRuntime profile routing", () => {
 			],
 		});
 
-		const runtimeRequests: Array<{ profile?: string; profileRouting?: "auto" | "pinned" }> = [];
+		const runtimeRequests: Array<{
+			profile?: string;
+			profileRouting?: "auto" | "pinned";
+			harnessId?: string;
+		}> = [];
 		const createRuntime: CreateAgentSessionRuntimeFactory = async ({
 			cwd,
 			sessionManager,
 			sessionStartEvent,
-			profile,
+			profile: nextProfile,
 			profileRouting: nextRouting,
-			generatedProfiles,
+			harnessId,
+			telemetryContext,
+			telemetryCapture: nextTelemetryCapture,
 		}) => {
-			runtimeRequests.push({ profile, profileRouting: nextRouting });
+			runtimeRequests.push({ profile: nextProfile, profileRouting: nextRouting, harnessId });
 			const services = await createAgentSessionServices({
 				cwd,
 				agentDir: tempDir,
 				modelRuntime,
+				telemetryContext,
+				telemetryCapture: nextTelemetryCapture,
 				resourceLoaderOptions: {
-					profile,
-					generatedProfiles,
+					profile: nextProfile,
 					noExtensions: true,
 					noSkills: true,
 					noPromptTemplates: true,
@@ -106,6 +122,7 @@ describe("AgentSessionRuntime profile routing", () => {
 					sessionStartEvent,
 					model,
 					profileRouting: nextRouting,
+					harnessId,
 				})),
 				services,
 				diagnostics: services.diagnostics,
@@ -115,12 +132,12 @@ describe("AgentSessionRuntime profile routing", () => {
 			cwd: tempDir,
 			agentDir: tempDir,
 			sessionManager: SessionManager.create(tempDir, join(tempDir, "sessions")),
-			...(omitInitialProfileSelection ? {} : { profile: "coding", profileRouting }),
+			profile,
+			profileRouting,
+			telemetryCapture,
 		});
 		await runtimeHost.session.bindExtensions({});
-		runtimeHost.setRebindSession(async (session) => {
-			await session.bindExtensions({});
-		});
+		runtimeHost.setRebindSession(async (session) => session.bindExtensions({}));
 		let disposed = false;
 		const dispose = async () => {
 			if (disposed) return;
@@ -133,277 +150,329 @@ describe("AgentSessionRuntime profile routing", () => {
 			if (existsSync(tempDir)) rmSync(tempDir, { recursive: true, force: true });
 		});
 		cleanups.push(dispose);
-		return { runtimeHost, faux, tempDir, dispose, runtimeRequests };
+		return { runtimeHost, faux, tempDir, runtimeRequests, telemetryCapture, createRuntime };
 	}
 
-	it("routes initial prompts and moves distinct tasks into a fresh linked runtime", async () => {
-		const { runtimeHost, faux } = await createRuntimeHost();
-		let routerContext = "";
+	it("answers the first accepted task with DEFAULT, then creates a descriptor for a built-in profile", async () => {
+		const { runtimeHost, faux, tempDir, runtimeRequests } = await createRuntimeHost();
+		let firstSystemPrompt = "";
 		faux.setResponses([
-			fauxAssistantMessage(routeDecision("stay", "coding")),
-			fauxAssistantMessage("coding answer"),
 			(context) => {
-				routerContext = JSON.stringify(context);
-				return fauxAssistantMessage(
-					routeDecision("switch", "finance", {
-						handoff: "Answer the new portfolio question without carrying over coding context.",
-					}),
-				);
+				firstSystemPrompt = context.systemPrompt ?? "";
+				return fauxAssistantMessage("default answer");
 			},
-			fauxAssistantMessage("finance answer"),
+			fauxAssistantMessage(selectDecision("finance", "Portfolio comparison", "Compare investment risk.")),
 		]);
 
-		const firstResult = await runtimeHost.prompt("Fix the parser bug.");
-		const previousSessionFile = runtimeHost.session.sessionFile;
-		expect(firstResult).toMatchObject({ routing: "stayed", activeProfileId: "coding" });
-		expect(previousSessionFile).toBeTruthy();
-
-		const toolResult: AgentMessage = {
-			role: "toolResult",
-			toolCallId: "secret-result",
-			toolName: "read",
-			content: [{ type: "text", text: "SECRET_TOOL_OUTPUT" }],
-			isError: false,
-			timestamp: Date.now(),
-		};
-		runtimeHost.session.agent.state.messages.push(toolResult);
-		const switches: ProfileSwitchEvent[] = [];
-		runtimeHost.setProfileSwitchListener((event) => switches.push(event));
-
-		const secondResult = await runtimeHost.prompt("Build a retirement portfolio for a separate task.");
-
-		expect(routerContext).not.toContain("SECRET_TOOL_OUTPUT");
-		expect(secondResult).toMatchObject({
-			routing: "switched",
-			activeProfileId: "finance",
-			previousProfileId: "coding",
-		});
-		expect(runtimeHost.activeProfile.id).toBe("finance");
-		expect(runtimeHost.session.sessionManager.getHeader()).toMatchObject({
-			parentSession: previousSessionFile,
-			profile: { id: "finance", routing: "auto" },
-		});
-		expect(switches).toEqual([
-			{
-				fromProfileId: "coding",
-				toProfileId: "finance",
-				reason: "The user started a distinct task.",
-				generated: false,
-			},
-		]);
-		const activeMessages = runtimeHost.session.messages;
-		expect(JSON.stringify(activeMessages)).toContain("portfolio question");
-		expect(JSON.stringify(activeMessages)).toContain("Build a retirement portfolio");
-		expect(JSON.stringify(activeMessages)).toContain("finance answer");
-		expect(JSON.stringify(activeMessages)).not.toContain("Fix the parser bug");
-		expect(JSON.stringify(activeMessages)).not.toContain("SECRET_TOOL_OUTPUT");
-		expect(faux.state.callCount).toBe(4);
-	});
-
-	it("selects a better profile from the first prompt without linking prior task history", async () => {
-		const { runtimeHost, faux, tempDir } = await createRuntimeHost("auto", true);
 		const initialSessionFile = runtimeHost.session.sessionFile;
-		faux.setResponses([
-			fauxAssistantMessage(
-				routeDecision("switch", "finance", {
-					reason: "The first request is a finance task.",
-					distinctTask: false,
-				}),
-			),
-			fauxAssistantMessage("finance answer"),
-		]);
+		const result = await runtimeHost.prompt("Compare the cash-flow risk in these investments.");
 
-		const result = await runtimeHost.prompt("Compare the cash-flow risk in these two investments.");
-
+		expect(firstSystemPrompt).toContain('base_prompt type="DEFAULT" id="general"');
 		expect(result).toMatchObject({
-			routing: "switched",
+			routing: "selected",
 			activeProfileId: "finance",
 			previousProfileId: "general",
 		});
 		expect(runtimeHost.activeProfile.id).toBe("finance");
-		expect(runtimeHost.session.sessionManager.getHeader()).toMatchObject({
-			profile: { id: "finance", routing: "auto" },
-		});
-		expect(runtimeHost.session.sessionManager.getHeader()?.parentSession).toBeUndefined();
 		expect(runtimeHost.session.sessionFile).toBe(initialSessionFile);
-		expect(readdirSync(join(tempDir, "sessions")).filter((file) => file.endsWith(".jsonl"))).toHaveLength(1);
-		expect(JSON.stringify(runtimeHost.session.messages)).toContain("Compare the cash-flow risk");
-		expect(JSON.stringify(runtimeHost.session.messages)).toContain("finance answer");
+		expect(JSON.stringify(runtimeHost.session.messages)).toContain("default answer");
+		expect(runtimeHost.session.sessionManager.getHeader()?.profile).toMatchObject({
+			id: "finance",
+			routing: "auto",
+			harnessId: result.harnessId,
+			harnessRevision: result.harnessRevision,
+		});
+		expect(runtimeRequests).toMatchObject([
+			{ profile: "general", profileRouting: "auto" },
+			{ profile: "finance", profileRouting: "auto", harnessId: result.harnessId },
+		]);
+		const descriptorPath = join(tempDir, "harnesses", `${result.harnessId}.json`);
+		const descriptor = readFileSync(descriptorPath, "utf-8");
+		expect(descriptor).toContain('"baseProfileId": "finance"');
+		expect(descriptor).not.toContain("prompt");
 		expect(faux.state.callCount).toBe(2);
 	});
 
-	it("bypasses routing while a profile is pinned", async () => {
-		const { runtimeHost, faux } = await createRuntimeHost("pinned");
+	it("offers only immutable built-in profiles to automatic routing", async () => {
+		const { runtimeHost, faux, tempDir } = await createRuntimeHost();
+		const loadedProfiles = runtimeHost.services.resourceLoader.getProfiles();
+		const coding = loadedProfiles.profiles.find((profile) => profile.id === "coding");
+		if (!coding) throw new Error("Expected built-in coding profile");
+		const customProfile: ResolvedTaskProfile = {
+			...coding,
+			id: "custom-policy",
+			name: "Custom Policy",
+			description: "User-authored policy workflow.",
+			origin: "user",
+			immutable: true,
+			hash: "custom-policy-hash",
+			source: { path: join(tempDir, "profiles", "custom-policy", "profile.json"), label: "test" },
+		};
+		vi.spyOn(runtimeHost.services.resourceLoader, "getProfiles").mockReturnValue({
+			...loadedProfiles,
+			profiles: [...loadedProfiles.profiles, customProfile],
+		});
+		let routerRequest = "";
+		faux.setResponses([
+			fauxAssistantMessage("default answer"),
+			(context) => {
+				routerRequest = JSON.stringify(context);
+				return fauxAssistantMessage(selectDecision("research", "Evidence task", "Review source evidence."));
+			},
+		]);
+
+		const result = await runtimeHost.prompt("Review the primary source evidence.");
+
+		expect(result).toMatchObject({ routing: "selected", activeProfileId: "research" });
+		expect(routerRequest).not.toContain("custom-policy");
+		expect(routerRequest).not.toContain("Custom Policy");
+	});
+
+	it("resolves only once and does not reroute later turns", async () => {
+		const { runtimeHost, faux } = await createRuntimeHost();
+		faux.setResponses([
+			fauxAssistantMessage("first answer"),
+			fauxAssistantMessage(selectDecision("coding", "Parser repair", "Repair and verify the parser.")),
+			fauxAssistantMessage("second answer"),
+		]);
+
+		await runtimeHost.prompt("Fix the parser bug.");
+		const second = await runtimeHost.prompt("Now add the regression test.");
+
+		expect(second).toMatchObject({ routing: "bypassed", activeProfileId: "coding" });
+		expect(second.harnessId).toBe(runtimeHost.activeHarness?.id);
+		expect(faux.state.callCount).toBe(3);
+	});
+
+	it("records the one-time route in native content-free telemetry", async () => {
+		const { runtimeHost, faux, telemetryCapture } = await createRuntimeHost();
+		faux.setResponses([
+			fauxAssistantMessage("default answer"),
+			fauxAssistantMessage(selectDecision("research", "Evidence task", "Review source evidence.")),
+		]);
+
+		const result = await runtimeHost.prompt("Review the primary evidence.");
+		const trace = readEvolutionTraceSnapshot(telemetryCapture);
+
+		expect(trace.routes).toEqual([
+			{
+				outcome: "selected",
+				targetProfileId: "research",
+				harnessId: result.harnessId,
+			},
+		]);
+		expect(trace.aiRequestCount).toBeGreaterThanOrEqual(2);
+	});
+
+	it("holds a new task turn while post-turn routing activates its harness", async () => {
+		const { runtimeHost, faux } = await createRuntimeHost();
+		let releaseRoute: (() => void) | undefined;
+		const routeGate = new Promise<void>((resolveGate) => {
+			releaseRoute = resolveGate;
+		});
+		faux.setResponses([
+			fauxAssistantMessage("default answer"),
+			async () => {
+				await routeGate;
+				return fauxAssistantMessage(selectDecision("research", "Evidence task", "Review source evidence."));
+			},
+			fauxAssistantMessage("research continuation"),
+		]);
+
+		const first = runtimeHost.prompt("Review evidence on this question.");
+		await vi.waitFor(() => expect(faux.state.callCount).toBe(2));
+		expect(runtimeHost.session.isStreaming).toBe(false);
+		let secondSettled = false;
+		const second = runtimeHost.prompt("Continue with the primary sources.").finally(() => {
+			secondSettled = true;
+		});
+		await new Promise((resolveWait) => setTimeout(resolveWait, 10));
+		expect(secondSettled).toBe(false);
+		expect(faux.state.callCount).toBe(2);
+
+		releaseRoute?.();
+		await first;
+		const result = await second;
+
+		expect(result).toMatchObject({ routing: "bypassed", activeProfileId: "research" });
+		expect(faux.state.callCount).toBe(3);
+	});
+
+	it("falls back to a general descriptor and stops routing when no match is available", async () => {
+		const { runtimeHost, faux, tempDir } = await createRuntimeHost();
+		faux.setResponses([
+			fauxAssistantMessage("default answer"),
+			fauxAssistantMessage("not valid router output"),
+			fauxAssistantMessage("continued answer"),
+		]);
+
+		const first = await runtimeHost.prompt("Help me with an unusual task that has no profile.");
+		const second = await runtimeHost.prompt("Continue.");
+
+		expect(first).toMatchObject({ routing: "selected", activeProfileId: "general" });
+		expect(second.routing).toBe("bypassed");
+		expect(runtimeHost.diagnostics.some((diagnostic) => diagnostic.message.includes("invalid-output"))).toBe(true);
+		expect(loadHarnessDescriptors({ agentDir: tempDir }).harnesses).toHaveLength(1);
+		expect(existsSync(join(tempDir, "profiles", "generated"))).toBe(false);
+		expect(faux.state.callCount).toBe(3);
+	});
+
+	it("reuses the latest evolved harness and emits an interface-independent notice", async () => {
+		const { runtimeHost, faux, tempDir } = await createRuntimeHost();
+		const harness = createHarnessDescriptor({
+			agentDir: tempDir,
+			id: "evidence-review-a1b2c3",
+			name: "Evidence review",
+			description: "Review literature and compare evidence across sources.",
+			baseProfileId: "research",
+			createdAt: "2026-08-01T00:00:00.000Z",
+		});
+		appendEvolvedNote({
+			agentDir: tempDir,
+			profileId: harness.id,
+			category: "source quality",
+			provenance: "test",
+			content: "Prefer primary research over derivative summaries.",
+			scope: "global",
+		});
+		await runtimeHost.services.resourceLoader.reload();
+		const switches: ProfileSwitchEvent[] = [];
+		runtimeHost.setProfileSwitchListener((event) => switches.push(event));
+		faux.setResponses([
+			fauxAssistantMessage("default answer"),
+			fauxAssistantMessage(reuseDecision(harness.id, "research")),
+		]);
+
+		const result = await runtimeHost.prompt("Review the literature and compare the evidence.");
+		const resolved = loadHarnessDescriptors({
+			agentDir: tempDir,
+			notes: runtimeHost.services.resourceLoader.getEvolvedNotes().evolvedNotes,
+		}).harnesses[0];
+
+		expect(result).toMatchObject({
+			routing: "reused",
+			harnessId: harness.id,
+			harnessRevision: resolved?.revision,
+		});
+		expect(result.notice).toBe(
+			`Found evolved harness "Evidence review" for this task. Switched to revision ${resolved?.revision.slice(0, 12)}.`,
+		);
+		expect(switches[0]).toMatchObject({ harnessId: harness.id, reused: true, notice: result.notice });
+		expect(runtimeHost.session.agent.state.systemPrompt).toContain(
+			"Prefer primary research over derivative summaries.",
+		);
+	});
+
+	it("restores a session's harness identity and revision without rerouting", async () => {
+		const { runtimeHost, faux, runtimeRequests } = await createRuntimeHost();
+		faux.setResponses([
+			fauxAssistantMessage("first answer"),
+			fauxAssistantMessage(selectDecision("legal", "Contract review", "Review a contract clause.")),
+		]);
+		const first = await runtimeHost.prompt("Review this contract clause.");
+		const sessionFile = runtimeHost.session.sessionFile;
+		if (!sessionFile) throw new Error("Expected a persisted session file");
+		const finance = runtimeHost.services.resourceLoader
+			.getProfiles()
+			.profiles.find((profile) => profile.id === "finance");
+		if (!finance || !first.harnessId || !first.harnessRevision) {
+			throw new Error("Expected finance profile and persisted harness metadata");
+		}
+		runtimeHost.session.sessionManager.setProfileMetadata({
+			id: finance.id,
+			hash: finance.hash,
+			routing: "auto",
+			harnessId: first.harnessId,
+			harnessRevision: first.harnessRevision,
+		});
+
+		await runtimeHost.switchSession(sessionFile);
+		faux.setResponses([fauxAssistantMessage("resumed answer")]);
+		const resumed = await runtimeHost.prompt("Continue the review.");
+
+		expect(resumed).toMatchObject({
+			routing: "bypassed",
+			harnessId: first.harnessId,
+			harnessRevision: first.harnessRevision,
+		});
+		expect(runtimeRequests.at(-1)).toMatchObject({
+			profile: "legal",
+			harnessId: first.harnessId,
+		});
+		expect(runtimeHost.session.sessionManager.getHeader()?.profile?.id).toBe("legal");
+		expect(faux.state.callCount).toBe(3);
+	});
+
+	it("rejects a tampered custom-profile harness and resumes on DEFAULT", async () => {
+		const { runtimeHost, faux, runtimeRequests, tempDir, createRuntime } = await createRuntimeHost();
+		faux.setResponses([
+			fauxAssistantMessage("first answer"),
+			fauxAssistantMessage(selectDecision("coding", "Parser repair", "Repair a parser.")),
+		]);
+		const first = await runtimeHost.prompt("Repair this parser.");
+		const sessionFile = runtimeHost.session.sessionFile;
+		if (!sessionFile || !first.harnessId) throw new Error("Expected persisted harness session");
+		const descriptorPath = join(tempDir, "harnesses", `${first.harnessId}.json`);
+		const descriptor = JSON.parse(readFileSync(descriptorPath, "utf-8")) as Record<string, unknown>;
+		writeFileSync(descriptorPath, `${JSON.stringify({ ...descriptor, baseProfileId: "custom-policy" }, null, 2)}\n`);
+
+		const resumedRuntime = await createAgentSessionRuntime(createRuntime, {
+			cwd: tempDir,
+			agentDir: tempDir,
+			sessionManager: SessionManager.open(sessionFile),
+		});
+		cleanups.push(() => resumedRuntime.dispose());
+
+		expect(runtimeRequests.at(-1)).toMatchObject({ profile: "general", profileRouting: "auto" });
+		expect(runtimeRequests.at(-1)?.harnessId).toBeUndefined();
+		expect(resumedRuntime.activeProfile.id).toBe("general");
+		expect(resumedRuntime.activeHarness).toBeUndefined();
+		expect(resumedRuntime.session.sessionManager.getHeader()?.profile).toMatchObject({
+			id: "general",
+			routing: "auto",
+		});
+		expect(resumedRuntime.session.sessionManager.getHeader()?.profile?.harnessId).toBeUndefined();
+		expect(
+			resumedRuntime.diagnostics.some((diagnostic) => diagnostic.message.includes("immutable built-in profile")),
+		).toBe(true);
+	});
+
+	it("bypasses routing while a profile is explicitly pinned", async () => {
+		const { runtimeHost, faux } = await createRuntimeHost("pinned", "coding");
 		faux.setResponses([fauxAssistantMessage("done")]);
 
 		const result = await runtimeHost.prompt("Review this balance sheet.");
 
 		expect(result).toEqual({ routing: "bypassed", activeProfileId: "coding" });
 		expect(faux.state.callCount).toBe(1);
-		expect(runtimeHost.activeProfile.id).toBe("coding");
 	});
 
-	it("lets the factory resolve its neutral profile and automatic routing mode", async () => {
-		const { runtimeHost, runtimeRequests } = await createRuntimeHost(undefined, true);
-
-		expect(runtimeRequests[0]).toEqual({ profile: undefined, profileRouting: undefined });
-		expect(runtimeHost.activeProfile.id).toBe("general");
-		expect(runtimeHost.profileRouting).toBe("auto");
-		expect(runtimeHost.session.sessionManager.getHeader()?.profile?.routing).toBe("auto");
-	});
-
-	it("delivers the user prompt when routing fails", async () => {
-		const { runtimeHost, faux } = await createRuntimeHost();
-		faux.setResponses([
-			() => {
-				throw new Error("router unavailable");
-			},
-			fauxAssistantMessage("fallback answer"),
-		]);
-
-		const result = await runtimeHost.prompt("Keep working on the parser.");
-
-		expect(result).toMatchObject({ routing: "stayed", activeProfileId: "coding" });
-		expect(runtimeHost.diagnostics.at(-1)?.message).toContain("router unavailable");
-		expect(JSON.stringify(runtimeHost.session.messages)).toContain("Keep working on the parser");
-		expect(JSON.stringify(runtimeHost.session.messages)).toContain("fallback answer");
-		expect(faux.state.callCount).toBe(2);
-	});
-
-	it("waits for an active turn before a distinct follow-up replaces the session", async () => {
+	it("keeps queued follow-up delivery while resolving after the completed first run", async () => {
 		const { runtimeHost, faux } = await createRuntimeHost();
 		let releaseFirstResponse: (() => void) | undefined;
 		const firstResponseGate = new Promise<void>((resolveGate) => {
 			releaseFirstResponse = resolveGate;
 		});
 		faux.setResponses([
-			fauxAssistantMessage(routeDecision("stay", "coding")),
 			async () => {
 				await firstResponseGate;
-				return fauxAssistantMessage("coding answer");
+				return fauxAssistantMessage("first answer");
 			},
-			fauxAssistantMessage(routeDecision("switch", "finance")),
-			fauxAssistantMessage("finance answer"),
+			fauxAssistantMessage("follow-up answer"),
+			fauxAssistantMessage(selectDecision("finance", "Retirement analysis", "Analyze retirement options.")),
 		]);
 
-		const firstPrompt = runtimeHost.prompt("Fix the parser bug.");
+		const firstPrompt = runtimeHost.prompt("Analyze my retirement options.");
 		await vi.waitFor(() => expect(runtimeHost.session.isStreaming).toBe(true));
-		let followUpSettled = false;
-		const followUp = runtimeHost
-			.prompt("For a separate task, analyze my retirement portfolio.", { streamingBehavior: "followUp" })
-			.finally(() => {
-				followUpSettled = true;
-			});
-		await vi.waitFor(() => expect(faux.state.callCount).toBe(3));
-
-		expect(followUpSettled).toBe(false);
-		expect(runtimeHost.activeProfile.id).toBe("coding");
+		const queued = await runtimeHost.prompt("Include inflation assumptions.", { streamingBehavior: "followUp" });
+		expect(queued.routing).toBe("bypassed");
 		releaseFirstResponse?.();
-		await firstPrompt;
-		const result = await followUp;
+		const result = await firstPrompt;
 
-		expect(result).toMatchObject({ routing: "switched", activeProfileId: "finance" });
-		expect(JSON.stringify(runtimeHost.session.messages)).toContain("analyze my retirement portfolio");
-		expect(JSON.stringify(runtimeHost.session.messages)).toContain("finance answer");
-	});
-
-	it("routes a distinct steer and delivers it after aborting the replaced turn", async () => {
-		const { runtimeHost, faux } = await createRuntimeHost();
-		let releaseOldResponse: (() => void) | undefined;
-		faux.setResponses([
-			fauxAssistantMessage(routeDecision("stay", "coding")),
-			(_context, options) =>
-				new Promise((resolveResponse) => {
-					let resolved = false;
-					const finish = () => {
-						if (resolved) return;
-						resolved = true;
-						resolveResponse(fauxAssistantMessage("old turn stopped"));
-					};
-					releaseOldResponse = finish;
-					if (options?.signal?.aborted) finish();
-					else options?.signal?.addEventListener("abort", finish, { once: true });
-				}),
-			fauxAssistantMessage(routeDecision("switch", "legal")),
-			fauxAssistantMessage("legal answer"),
-		]);
-
-		const firstPrompt = runtimeHost.prompt("Fix the parser bug.");
-		await vi.waitFor(() => expect(runtimeHost.session.isStreaming).toBe(true));
-		const result = await runtimeHost.prompt("For a separate task, review this contract clause.", {
-			streamingBehavior: "steer",
-		});
-		releaseOldResponse?.();
-		await firstPrompt;
-
-		expect(result).toMatchObject({ routing: "switched", activeProfileId: "legal" });
-		expect(JSON.stringify(runtimeHost.session.messages)).toContain("review this contract clause");
-		expect(JSON.stringify(runtimeHost.session.messages)).toContain("legal answer");
-	});
-
-	it("finalizes a generated profile before a replacement runtime reuses it", async () => {
-		const { runtimeHost, faux, tempDir } = await createRuntimeHost();
-		faux.setResponses([
-			fauxAssistantMessage(
-				routeDecision("create", "supply-chain", {
-					generatedLabel: "Supply Chain",
-					generatedDescription: "Analyze supply chain planning and operations.",
-				}),
-			),
-			fauxAssistantMessage("supply chain answer"),
-		]);
-		await runtimeHost.prompt("Start a separate supply chain planning task.");
-		const original = runtimeHost.activeProfile;
-		appendEvolvedNote({
-			agentDir: tempDir,
-			profileId: original.id,
-			category: "response style",
-			provenance: "test",
-			content: "State inventory assumptions before recommendations.",
-			scope: "global",
-		});
-
-		await runtimeHost.newSession({ profileRouting: "auto" });
-
-		const reused = runtimeHost.activeProfile;
-		expect(reused.id).toBe(original.id);
-		expect(reused.hash).not.toBe(original.hash);
-		expect(reused.prompt).toContain("State inventory assumptions before recommendations.");
-		expect(runtimeHost.session.sessionManager.getHeader()?.profile?.hash).toBe(reused.hash);
-	});
-
-	it("finalizes a generated profile from notes loaded at shutdown", async () => {
-		const { runtimeHost, faux, tempDir, dispose } = await createRuntimeHost();
-		faux.setResponses([
-			fauxAssistantMessage(
-				routeDecision("create", "supply-chain", {
-					generatedLabel: "Supply Chain",
-					generatedDescription: "Analyze supply chain planning and operations.",
-				}),
-			),
-			fauxAssistantMessage("supply chain answer"),
-		]);
-
-		const result = await runtimeHost.prompt("Start a separate supply chain planning task.");
-		expect(result.routing).toBe("created");
-		const profile = runtimeHost.activeProfile;
-		expect(profile.origin).toBe("generated");
-		appendEvolvedNote({
-			agentDir: tempDir,
-			profileId: profile.id,
-			category: "response style",
-			provenance: "test",
-			content: "Always state inventory assumptions explicitly.",
-			scope: "global",
-		});
-
-		await dispose();
-
-		if (!profile.source.promptPath) throw new Error("Generated profile prompt path is missing");
-		const prompt = readFileSync(profile.source.promptPath, "utf-8");
-		expect(prompt).toContain("## Evolved guidance");
-		expect(prompt).toContain("Always state inventory assumptions explicitly.");
-		expect(runtimeHost.session.sessionManager.getHeader()?.profile?.hash).not.toBe(profile.hash);
+		expect(result).toMatchObject({ routing: "selected", activeProfileId: "finance" });
+		expect(JSON.stringify(runtimeHost.session.messages)).toContain("Include inflation assumptions");
+		expect(JSON.stringify(runtimeHost.session.messages)).toContain("follow-up answer");
+		expect(faux.state.callCount).toBe(3);
 	});
 
 	it("bounds recent task context and excludes tool and custom messages", () => {
@@ -440,7 +509,7 @@ describe("AgentSessionRuntime profile routing", () => {
 		expect(resolveProfileRoutingMode("research", undefined, undefined)).toBe("pinned");
 	});
 
-	it("expands skills and templates for routing without bypassing command precedence or input hooks", () => {
+	it("expands skills and templates without bypassing command precedence or input hooks", () => {
 		const tempDir = join(tmpdir(), `pi-routing-expansion-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 		mkdirSync(tempDir, { recursive: true });
 		const skillPath = join(tempDir, "SKILL.md");

@@ -75,8 +75,6 @@ describe("createAgentSession session manager defaults", () => {
 			agentDir,
 			model: model!,
 			sessionManager,
-			// The default bootstrap profile is `general`, which denies bash. Pin a profile that allows it.
-			profile: "coding",
 		});
 
 		expect(session.sessionManager).toBe(sessionManager);
@@ -104,8 +102,6 @@ describe("createAgentSession session manager defaults", () => {
 			agentDir,
 			model: model!,
 			thinkingLevel: "high",
-			// The default bootstrap profile is `general`, which denies bash. Pin a profile that allows it.
-			profile: "coding",
 		});
 		expect(session.sessionFile).toBeTruthy();
 		expect(session.systemPrompt).toContain(

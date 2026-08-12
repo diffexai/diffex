@@ -24,6 +24,12 @@ const evolveSchema = Type.Object({
 	scope: Type.Union([Type.Literal("global"), Type.Literal("project")], {
 		description: "Use project only when the lesson applies to the trusted current project.",
 	}),
+	appliesTo: Type.Optional(
+		Type.Union([Type.Literal("user"), Type.Literal("harness")], {
+			description:
+				"Use user for an explicit preference that should follow the user across tasks. Use harness for task-specific workflows, corrections, and mistakes. Defaults to harness.",
+		}),
+	),
 	evidence: Type.Optional(
 		Type.String({
 			description: "A concise source or observation supporting the note.",
@@ -46,6 +52,7 @@ export const evolveToolSystemPromptContribution = {
 	snippet: "Record a durable, user-visible lesson in EVOLVED.md",
 	guidelines: [
 		"Use evolve only for durable lessons that should improve future sessions.",
+		"Record explicit cross-task user preferences with appliesTo=user. Keep workflows, corrections, and task-specific mistakes scoped to the current harness.",
 		"Never record secrets, credentials, raw conversation transcripts, or temporary task state in EVOLVED.md.",
 		"Do not modify AGENTS.md, CLAUDE.md, or task profiles. The evolve tool is the only self-evolution write path.",
 	],

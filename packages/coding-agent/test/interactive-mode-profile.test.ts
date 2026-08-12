@@ -57,14 +57,17 @@ function createContext(): ProfileCommandContext {
 }
 
 describe("InteractiveMode task profile command", () => {
-	test("enables automatic routing without replacing the current session", async () => {
+	test("starts automatic routing in a fresh DEFAULT session", async () => {
 		const context = createContext();
 
 		await handleProfileCommand.call(context, "auto");
 
-		expect(context.runtimeHost.setProfileRouting).toHaveBeenCalledWith("auto");
-		expect(context.runtimeHost.newSession).not.toHaveBeenCalled();
-		expect(context.showStatus).toHaveBeenCalledWith("Automatic profile routing enabled from coding");
+		expect(context.runtimeHost.setProfileRouting).not.toHaveBeenCalled();
+		expect(context.runtimeHost.newSession).toHaveBeenCalledWith({
+			profile: "general",
+			profileRouting: "auto",
+		});
+		expect(context.showStatus).toHaveBeenCalledWith("Automatic profile routing enabled from DEFAULT");
 	});
 
 	test("opens the selector and pins its selected profile in a fresh linked session", async () => {
@@ -83,7 +86,6 @@ describe("InteractiveMode task profile command", () => {
 			parentSession: "/tmp/coding-session.jsonl",
 			profile: "finance",
 			profileRouting: "pinned",
-			generatedProfiles: undefined,
 		});
 		expect(context.showStatus).toHaveBeenCalledWith("Task profile pinned: finance");
 	});
