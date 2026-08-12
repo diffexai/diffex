@@ -12,7 +12,14 @@ import type { BashResult } from "../../core/bash-executor.ts";
 import type { CompactionResult } from "../../core/compaction/index.ts";
 import type { SessionEntry, SessionTreeNode } from "../../core/session-manager.ts";
 import { attachJsonlLineReader, serializeJsonLine } from "./jsonl.ts";
-import type { RpcCommand, RpcEvent, RpcResponse, RpcSessionState, RpcSlashCommand } from "./rpc-types.ts";
+import type {
+	RpcCommand,
+	RpcEvent,
+	RpcResponse,
+	RpcSessionState,
+	RpcSlashCommand,
+	RpcTaskBoundaryResolution,
+} from "./rpc-types.ts";
 
 // ============================================================================
 // Types
@@ -217,6 +224,11 @@ export class RpcClient {
 	 */
 	async abort(): Promise<void> {
 		await this.send({ type: "abort" });
+	}
+
+	/** Resolve one pending task-boundary request. */
+	async resolveTaskBoundary(requestId: string, resolution: RpcTaskBoundaryResolution): Promise<void> {
+		await this.send({ type: "resolve_task_boundary", requestId, resolution });
 	}
 
 	/**

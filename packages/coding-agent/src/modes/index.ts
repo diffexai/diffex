@@ -13,6 +13,9 @@ export type {
 	RpcExtensionUIRequest,
 	RpcExtensionUIResponse,
 	RpcProfileSwitchEvent,
+	RpcResolveTaskBoundaryCommand,
 	RpcResponse,
 	RpcSessionState,
+	RpcTaskBoundaryRequestEvent,
+	RpcTaskBoundaryResolution,
 } from "./rpc/rpc-types.ts";

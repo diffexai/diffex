@@ -8,14 +8,39 @@
 import type { AgentMessage, ThinkingLevel } from "@earendil-works/diffex-agent-core";
 import type { ImageContent, Model } from "@earendil-works/diffex-ai";
 import type { SessionStats } from "../../core/agent-session.ts";
+import type { TaskBoundaryProposal, TaskBoundaryResolution } from "../../core/agent-session-runtime.ts";
 import type { BashResult } from "../../core/bash-executor.ts";
 import type { CompactionResult } from "../../core/compaction/index.ts";
 import type { SessionEntry, SessionTreeNode } from "../../core/session-manager.ts";
 import type { SourceInfo } from "../../core/source-info.ts";
 import type { JsonAgentSessionEvent, JsonProfileSwitchEvent } from "../json-event.ts";
 
+/** Content-free task-boundary decision requested by the runtime. */
+export interface RpcTaskBoundaryRequestEvent {
+	type: "task_boundary_request";
+	requestId: string;
+	decision: TaskBoundaryProposal["decision"];
+	fromProfileId: string;
+	fromHarnessId: string;
+	toProfileId: string;
+	targetHarnessId?: string;
+	targetHarnessRevision?: string;
+	targetHarnessName: string;
+	confidence: number;
+}
+
+export type RpcTaskBoundaryResolution = TaskBoundaryResolution;
+
+/** Resolve exactly one pending task-boundary request. */
+export interface RpcResolveTaskBoundaryCommand {
+	id?: string;
+	type: "resolve_task_boundary";
+	requestId: string;
+	resolution: RpcTaskBoundaryResolution;
+}
+
 /** Events emitted asynchronously by the RPC stdout protocol. */
-export type RpcEvent = JsonAgentSessionEvent;
+export type RpcEvent = JsonAgentSessionEvent | RpcTaskBoundaryRequestEvent;
 export type RpcProfileSwitchEvent = JsonProfileSwitchEvent;
 
 // ============================================================================
@@ -29,6 +54,7 @@ export type RpcCommand =
 	| { id?: string; type: "follow_up"; message: string; images?: ImageContent[] }
 	| { id?: string; type: "abort" }
 	| { id?: string; type: "new_session"; parentSession?: string }
+	| RpcResolveTaskBoundaryCommand
 
 	// State
 	| { id?: string; type: "get_state" }
@@ -124,6 +150,7 @@ export type RpcResponse =
 	| { id?: string; type: "response"; command: "follow_up"; success: true }
 	| { id?: string; type: "response"; command: "abort"; success: true }
 	| { id?: string; type: "response"; command: "new_session"; success: true; data: { cancelled: boolean } }
+	| { id?: string; type: "response"; command: "resolve_task_boundary"; success: true }
 
 	// State
 	| { id?: string; type: "response"; command: "get_state"; success: true; data: RpcSessionState }
