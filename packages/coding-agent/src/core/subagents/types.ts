@@ -1,6 +1,10 @@
 import type { AgentSession } from "../agent-session.ts";
 
+export const SUBAGENT_NAME_PATTERN = /^[a-z][a-z0-9_-]{0,63}$/;
+
 export type SubagentStatus = "queued" | "running" | "idle" | "failed" | "interrupted";
+
+export type CreateSubagentSession = (signal: AbortSignal) => Promise<AgentSession>;
 
 export interface SubagentRecord {
 	name: string;
@@ -10,10 +14,10 @@ export interface SubagentRecord {
 	updatedAt: number;
 	startedAt?: number;
 	completedAt?: number;
-	result?: unknown;
-	error?: unknown;
+	finalText?: string;
+	error?: string;
 	session?: AgentSession;
-	run?: Promise<unknown>;
+	run?: Promise<void>;
 }
 
 export interface SubagentSnapshot {

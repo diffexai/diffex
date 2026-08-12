@@ -61,10 +61,10 @@ describe("SubagentController", () => {
 		const idle = controller.reserve("idle", "task");
 		controller.markRunning("idle");
 		controller.markIdle("idle", "result");
-		expect(idle).toMatchObject({ status: "idle", result: "result" });
+		expect(idle).toMatchObject({ status: "idle", finalText: "result" });
 
 		const queuedFailure = controller.reserve("queued-failure", "task");
-		controller.markFailed("queued-failure", new Error("failed"));
+		controller.markFailed("queued-failure", "failed");
 		expect(queuedFailure.status).toBe("failed");
 
 		const queuedInterrupt = controller.reserve("queued-interrupt", "task");
@@ -73,7 +73,7 @@ describe("SubagentController", () => {
 
 		const runningFailure = controller.reserve("running-failure", "task");
 		controller.markRunning("running-failure");
-		controller.markFailed("running-failure", new Error("failed"));
+		controller.markFailed("running-failure", "failed");
 		expect(runningFailure.status).toBe("failed");
 
 		const runningInterrupt = controller.reserve("running-interrupt", "task");
@@ -121,11 +121,11 @@ describe("SubagentController", () => {
 		const child = await harness();
 		const dispose = vi.spyOn(child.session, "dispose").mockImplementation(() => {});
 		controller.attachSession("worker", child.session);
-		controller.trackRun("worker", Promise.resolve("private run result"));
+		controller.trackRun("worker", Promise.resolve());
 		controller.markRunning("worker");
 		controller.markIdle("worker", "private child output");
 		controller.reserve("failure", "private failure task");
-		controller.markFailed("failure", new Error("private error details"));
+		controller.markFailed("failure", "private error details");
 		const snapshot = controller.snapshot();
 		await controller.shutdown();
 		unsubscribe();
@@ -154,7 +154,7 @@ describe("SubagentController", () => {
 			expect(serializedEvents).not.toContain(secret);
 			expect(serializedSnapshot).not.toContain(secret);
 		}
-		for (const key of ["task", "session", "run", "result", "error"]) {
+		for (const key of ["task", "session", "run", "result", "finalText", "error"]) {
 			expect(serializedEvents).not.toContain(`"${key}"`);
 			expect(serializedSnapshot).not.toContain(`"${key}"`);
 		}
@@ -357,7 +357,7 @@ describe("SubagentController", () => {
 		controller.markRunning("first");
 		controller.reserve("second", "task");
 		controller.attachSession("second", second.session);
-		controller.markFailed("second", new Error("run failed"));
+		controller.markFailed("second", "run failed");
 
 		const error = await controller.shutdown().catch((reason: unknown) => reason);
 		expect(error).toBeInstanceOf(AggregateError);
@@ -378,7 +378,7 @@ describe("SubagentController", () => {
 		const shutdown = controller.shutdown();
 		run.resolve("late result");
 		await shutdown;
-		expect(record).toMatchObject({ status: "running", result: undefined, completedAt: undefined });
+		expect(record).toMatchObject({ status: "running", finalText: undefined, completedAt: undefined });
 		expect(controller.snapshot()).toEqual({ revision: revisionBeforeShutdown + 1, agents: [] });
 	});
 });

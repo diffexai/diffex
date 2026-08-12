@@ -1,5 +1,7 @@
+import type { AssistantMessage } from "@earendil-works/diffex-ai";
 import type { AgentSession } from "../agent-session.ts";
 import type {
+	CreateSubagentSession,
 	SubagentControllerSnapshot,
 	SubagentLifecycleEvent,
 	SubagentLifecycleListener,
@@ -10,8 +12,7 @@ import type {
 	SubagentWaitOptions,
 	SubagentWaitResult,
 } from "./types.ts";
-
-const SUBAGENT_NAME_PATTERN = /^[a-z][a-z0-9_-]{0,63}$/;
+import { SUBAGENT_NAME_PATTERN } from "./types.ts";
 
 interface PermitRequest {
 	readonly resolve: (permit: SubagentPermit) => void;
@@ -31,8 +32,35 @@ interface RevisionWaiter {
 }
 
 interface TransitionFields {
-	readonly result?: unknown;
-	readonly error?: unknown;
+	readonly finalText?: string;
+	readonly error?: string;
+}
+
+function normalizeError(error: unknown): string {
+	if (error instanceof Error) return error.message;
+	try {
+		return String(error);
+	} catch {
+		return "Unknown subagent error";
+	}
+}
+
+function getAssistantText(messages: AssistantMessage[]): string | undefined {
+	const text = messages
+		.flatMap((message) => message.content)
+		.filter(
+			(content): content is Extract<AssistantMessage["content"][number], { type: "text" }> =>
+				content.type === "text",
+		)
+		.map((content) => content.text)
+		.join("\n");
+	return text.trim().length > 0 ? text : undefined;
+}
+
+function getTurnAssistantMessages(session: AgentSession, turnStart: number): AssistantMessage[] {
+	return session.messages
+		.slice(turnStart)
+		.filter((message): message is AssistantMessage => message.role === "assistant");
 }
 
 export class SubagentController {
@@ -41,6 +69,7 @@ export class SubagentController {
 	readonly #listeners = new Set<SubagentLifecycleListener>();
 	readonly #waiters = new Set<RevisionWaiter>();
 	readonly #permitQueue: PermitRequest[] = [];
+	readonly #shutdownController = new AbortController();
 	#activePermits = 0;
 	#revision = 0;
 	#closed = false;
@@ -81,6 +110,14 @@ export class SubagentController {
 		return record;
 	}
 
+	spawn(name: string, task: string, createSession: CreateSubagentSession): SubagentRecord {
+		const record = this.reserve(name, task);
+		const run = this.#run(record, createSession);
+		record.run = run;
+		void run.catch(() => {});
+		return record;
+	}
+
 	attachSession(name: string, session: AgentSession): void {
 		const record = this.#getRecordForUpdate(name);
 		if (!record) return;
@@ -90,7 +127,7 @@ export class SubagentController {
 		record.session = session;
 	}
 
-	trackRun(name: string, run: Promise<unknown>): void {
+	trackRun(name: string, run: Promise<void>): void {
 		const record = this.#getRecordForUpdate(name);
 		if (!record) return;
 		record.run = run;
@@ -101,16 +138,16 @@ export class SubagentController {
 		this.#transition(name, "running");
 	}
 
-	markIdle(name: string, result?: unknown): void {
-		this.#transition(name, "idle", { result });
+	markIdle(name: string, finalText?: string): void {
+		this.#transition(name, "idle", { finalText });
 	}
 
-	markFailed(name: string, error: unknown): void {
-		this.#transition(name, "failed", { error });
+	markFailed(name: string, error: string, finalText?: string): void {
+		this.#transition(name, "failed", { error, finalText });
 	}
 
-	markInterrupted(name: string): void {
-		this.#transition(name, "interrupted");
+	markInterrupted(name: string, finalText?: string): void {
+		this.#transition(name, "interrupted", { finalText });
 	}
 
 	snapshot(): SubagentControllerSnapshot {
@@ -206,6 +243,7 @@ export class SubagentController {
 
 		this.#closed = true;
 		const closedError = this.#closedError();
+		this.#shutdownController.abort(closedError);
 		for (const request of this.#permitQueue.splice(0)) {
 			if (request.signal && request.onAbort) {
 				request.signal.removeEventListener("abort", request.onAbort);
@@ -243,11 +281,11 @@ export class SubagentController {
 		if (status === "running") {
 			record.startedAt = timestamp;
 			record.completedAt = undefined;
-			record.result = undefined;
+			record.finalText = undefined;
 			record.error = undefined;
 		} else {
 			record.completedAt = timestamp;
-			record.result = status === "idle" ? fields.result : undefined;
+			record.finalText = fields.finalText;
 			record.error = status === "failed" ? fields.error : undefined;
 		}
 
@@ -368,6 +406,47 @@ export class SubagentController {
 			const request = this.#permitQueue.shift();
 			if (!request) return;
 			this.#grantPermit(request);
+		}
+	}
+
+	async #run(record: SubagentRecord, createSession: CreateSubagentSession): Promise<void> {
+		let permit: SubagentPermit | undefined;
+		let session: AgentSession | undefined;
+		let turnStart: number | undefined;
+		try {
+			permit = await this.acquirePermit(this.#shutdownController.signal);
+			session = await createSession(this.#shutdownController.signal);
+			if (this.#closed || this.#shutdownController.signal.aborted) {
+				session.dispose();
+				return;
+			}
+
+			this.attachSession(record.name, session);
+			this.markRunning(record.name);
+			turnStart = session.messages.length;
+			await session.prompt(record.task);
+			if (this.#closed) return;
+
+			const assistantMessages = getTurnAssistantMessages(session, turnStart);
+			const terminalMessage = assistantMessages.at(-1);
+			const finalText = getAssistantText(assistantMessages);
+			if (!terminalMessage) {
+				this.markFailed(record.name, "Subagent prompt completed without an assistant response", finalText);
+			} else if (terminalMessage.stopReason === "aborted") {
+				this.markInterrupted(record.name, finalText);
+			} else if (terminalMessage.stopReason === "error") {
+				this.markFailed(record.name, terminalMessage.errorMessage ?? "Subagent provider request failed", finalText);
+			} else {
+				this.markIdle(record.name, finalText);
+			}
+		} catch (error) {
+			if (!this.#closed) {
+				const assistantMessages =
+					session && turnStart !== undefined ? getTurnAssistantMessages(session, turnStart) : [];
+				this.markFailed(record.name, normalizeError(error), getAssistantText(assistantMessages));
+			}
+		} finally {
+			permit?.release();
 		}
 	}
 
