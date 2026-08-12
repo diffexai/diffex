@@ -209,6 +209,17 @@ Sessions can also persist the selected task profile and routing mode:
 The profile metadata contains the profile `id`, its content `hash`, and an `auto` or `pinned` routing mode.
 Non-built-in profiles also record `source`, which is the manifest path used to restore the same profile.
 
+Automatic harness transitions create independent root sessions rather than setting `parentSession`.
+Those roots can reference other sessions by stable, path-free session and harness IDs:
+
+```json
+{"type":"session","version":3,"id":"coding-session","timestamp":"2024-12-03T14:00:00.000Z","cwd":"/path/to/project","relatedSessions":[{"sessionId":"finance-session","harnessId":"retirement-planning-a1b2c3"}]}
+```
+
+`relatedSessions` lets Diffex return to the latest transcript for a related harness.
+It does not create hierarchy in `/resume` and does not add another session's messages to the current context.
+`parentSession` remains reserved for actual fork and clone ancestry.
+
 ### SessionMessageEntry
 
 A message in the conversation. The `message` field contains an `AgentMessage`.
@@ -408,8 +419,10 @@ Key methods for working with sessions programmatically.
 - `SessionManager.listAll(onProgress?)` - List all sessions across all projects
 
 ### Instance Methods - Session Management
-- `newSession(options?)` - Start a new session (options: `{ parentSession?: string }`)
+- `newSession(options?)` - Start a new session (options include `{ parentSession?, relatedSessions? }`)
 - `setProfileMetadata(profile)` - Persist the active task profile and routing mode in the session header
+- `getRelatedSessions()` / `setRelatedSessions(references)` - Read or replace bounded cross-session harness references
+- `discoverRelatedSessions()` - Resolve verified references within the session directory
 - `setSessionFile(path)` - Switch to a different session file
 - `createBranchedSession(leafId)` - Extract branch to new session file
 

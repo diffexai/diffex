@@ -50,8 +50,9 @@ Incidental terminology, refinements, and ambiguous requests stay in the current 
 
 When a clear boundary is found in interactive or RPC mode, Diffex pauses the submitted prompt and asks whether to switch:
 
-- Accepting an existing evolved harness starts a fresh linked session on its immutable base profile.
-- Accepting a new task creates only a metadata descriptor, starts a fresh linked session on the selected immutable base profile, and leaves all prompt profiles unchanged.
+- Accepting a matching harness referenced by the active session reopens that harness's latest session and transcript on its immutable base profile.
+- Accepting an evolved harness with no prior session available starts an independent root session with that harness identity.
+- Accepting a new task creates only a metadata descriptor, starts an independent root session on the selected immutable base profile, and leaves all prompt profiles unchanged.
 - Declining processes the submitted prompt exactly once in the current harness.
 - Cancelling does not submit the prompt.
 
@@ -70,14 +71,20 @@ The model cannot author or edit them.
 
 A descriptor points to an immutable built-in base profile rather than copying its prompt.
 Its revision is derived from the descriptor identity and applicable EVOLVED note hashes, so a resumed session can audit which evolved state it restored.
-Once a harness has a harness-scoped durable lesson, it becomes eligible for reuse by a later automatic session whose task clearly matches its description.
+Harnesses referenced by the active session remain eligible for reuse even before they have evolved, which lets a user return to a prior task without creating a duplicate harness.
+A harness outside that related-session set becomes eligible for reuse after it has a harness-scoped durable lesson and a later automatic task clearly matches its description.
 Project-scoped lessons affect reuse only while that trusted project context is present.
+
+Task transitions do not use `parentSession`.
+Each new task therefore appears as its own root in `/resume`, while real forks and clones retain their hierarchy.
+Sessions store bounded, path-free references to related harness sessions so a confirmed return can reopen the prior transcript without making either session a child of the other.
+Legacy cross-profile task links are displayed as independent roots without rewriting their session files.
 
 This separation keeps carefully tuned prompts predictable while allowing future sessions to reuse task-specific learning through an inspectable note layer.
 
 ## Manual selection
 
-Use `/profile <id>` to start a linked session pinned to a profile.
+Use `/profile <id>` to start an independent root session pinned to a profile.
 Use `/profile auto` to start from the automatic lifecycle again.
 
 Pin a profile from the CLI by ID or path:
