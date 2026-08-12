@@ -26,6 +26,7 @@ export interface SubagentSessionConfig {
 	readonly model: Model<any>;
 	readonly thinkingLevel: ThinkingLevel;
 	readonly tools: readonly ToolName[];
+	readonly parentSession: string;
 }
 
 const SUBAGENT_SYSTEM_PROMPT = [
@@ -76,6 +77,7 @@ export function captureSubagentSessionConfig(parent: AgentSession, agentDir: str
 		model,
 		thinkingLevel: parent.thinkingLevel,
 		tools,
+		parentSession: parent.sessionId,
 	});
 }
 
@@ -92,7 +94,7 @@ export async function createSubagentSession(
 	});
 	options.signal?.throwIfAborted();
 
-	const sessionManager = SessionManager.inMemory(config.cwd);
+	const sessionManager = SessionManager.inMemory(config.cwd, { parentSession: config.parentSession });
 	const { session } = await createAgentSessionFromServices({
 		services,
 		sessionManager,

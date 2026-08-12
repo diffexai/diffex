@@ -358,7 +358,7 @@ describe("subagent sessions", () => {
 			expect(child.sessionManager.getCwd()).toBe(fixture.projectDir);
 			expect(child.sessionFile).toBeUndefined();
 			expect(child.messages).toEqual([]);
-			expect(child.sessionManager.getHeader()?.parentSession).toBeUndefined();
+			expect(child.sessionManager.getHeader()?.parentSession).toBe(root.sessionId);
 		}
 
 		expect(first.agent).not.toBe(second.agent);
