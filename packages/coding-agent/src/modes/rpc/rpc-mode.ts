@@ -65,6 +65,7 @@ function toRpcTaskBoundaryRequestEvent(requestId: string, proposal: TaskBoundary
 		...(proposal.targetHarnessId ? { targetHarnessId: proposal.targetHarnessId } : {}),
 		...(proposal.targetHarnessRevision ? { targetHarnessRevision: proposal.targetHarnessRevision } : {}),
 		targetHarnessName: proposal.targetHarnessName,
+		willResumeSession: proposal.willResumeSession,
 		confidence: proposal.confidence,
 	};
 }

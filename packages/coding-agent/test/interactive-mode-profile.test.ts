@@ -11,8 +11,6 @@ interface ProfileCommandContext {
 	session: {
 		isStreaming: boolean;
 		isCompacting: boolean;
-		sessionFile?: string;
-		messages: Array<{ role: "user" | "assistant" }>;
 		resourceLoader: {
 			getProfiles: () => { profiles: typeof BUILTIN_TASK_PROFILES; registry: TaskProfileRegistry };
 		};
@@ -37,8 +35,6 @@ function createContext(): ProfileCommandContext {
 		session: {
 			isStreaming: false,
 			isCompacting: false,
-			sessionFile: "/tmp/coding-session.jsonl",
-			messages: [{ role: "user" }],
 			resourceLoader: {
 				getProfiles: () => ({ profiles: BUILTIN_TASK_PROFILES, registry }),
 			},
@@ -70,7 +66,7 @@ describe("InteractiveMode task profile command", () => {
 		expect(context.showStatus).toHaveBeenCalledWith("Automatic profile routing enabled from DEFAULT");
 	});
 
-	test("opens the selector and pins its selected profile in a fresh linked session", async () => {
+	test("opens the selector and pins its selected profile in an independent root session", async () => {
 		const context = createContext();
 		const finance = BUILTIN_TASK_PROFILES.find((profile) => profile.id === "finance");
 		if (!finance) throw new Error("Missing finance profile");
@@ -83,10 +79,11 @@ describe("InteractiveMode task profile command", () => {
 			expect.arrayContaining(["auto - automatic routing", `${finance.id} - ${finance.name}`]),
 		);
 		expect(context.runtimeHost.newSession).toHaveBeenCalledWith({
-			parentSession: "/tmp/coding-session.jsonl",
 			profile: "finance",
 			profileRouting: "pinned",
 		});
+		expect(context.runtimeHost.newSession.mock.calls[0]?.[0]).not.toHaveProperty("parentSession");
+		expect(context.runtimeHost.newSession.mock.calls[0]?.[0]).not.toHaveProperty("relatedSessions");
 		expect(context.showStatus).toHaveBeenCalledWith("Task profile pinned: finance");
 	});
 

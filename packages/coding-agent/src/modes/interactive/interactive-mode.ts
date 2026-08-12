@@ -2528,7 +2528,8 @@ export class InteractiveMode {
 		const activeHarness = this.runtimeHost.activeHarness;
 		const currentHarnessName =
 			activeHarness?.id === proposal.fromHarnessId ? activeHarness.name : proposal.fromHarnessId;
-		const targetLabel = `${proposal.decision === "reuse" ? "Reuse" : "Create"}: ${proposal.targetHarnessName} (${proposal.toProfileId})`;
+		const targetAction = proposal.decision === "select" ? "Create" : proposal.willResumeSession ? "Resume" : "Reuse";
+		const targetLabel = `${targetAction}: ${proposal.targetHarnessName} (${proposal.toProfileId})`;
 		const currentLabel = `Keep current: ${currentHarnessName} (${proposal.fromProfileId})`;
 		const selected = await this.showExtensionSelector("New task detected\nChoose a harness for this prompt", [
 			targetLabel,
@@ -4747,12 +4748,8 @@ export class InteractiveMode {
 			return;
 		}
 
-		const established = this.session.messages.some(
-			(message) => message.role === "user" || message.role === "assistant",
-		);
 		try {
 			const result = await this.runtimeHost.newSession({
-				parentSession: established ? this.session.sessionFile : undefined,
 				profile: target.id,
 				profileRouting: "pinned",
 			});
