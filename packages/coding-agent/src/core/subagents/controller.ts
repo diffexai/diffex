@@ -15,6 +15,7 @@ import type {
 	SubagentRecord,
 	SubagentResultView,
 	SubagentSnapshot,
+	SubagentSpawnOrigin,
 	SubagentStatus,
 	SubagentWaitOptions,
 	SubagentWaitResult,
@@ -74,6 +75,40 @@ function isTerminalStatus(status: SubagentStatus): boolean {
 	return status === "idle" || status === "failed" || status === "interrupted";
 }
 
+function captureSpawnOrigin(parent: AgentSession, toolCallId: string): SubagentSpawnOrigin {
+	if (!parent.isStreaming) {
+		return Object.freeze({
+			type: "direct_tool_call",
+			toolCallId,
+			contextEntryId: null,
+		});
+	}
+
+	const matchingEntries = parent.sessionManager
+		.getEntries()
+		.filter(
+			(entry) =>
+				entry.type === "message" &&
+				entry.message.role === "assistant" &&
+				entry.message.content.some(
+					(content) => content.type === "toolCall" && content.id === toolCallId && content.name === "spawn_agent",
+				),
+		);
+	if (matchingEntries.length !== 1) {
+		throw new Error(
+			`Invariant violation: active spawn_agent call ${toolCallId} matched ${matchingEntries.length} persisted assistant entries`,
+		);
+	}
+
+	const assistantEntry = matchingEntries[0];
+	return Object.freeze({
+		type: "agent_tool_call",
+		toolCallId,
+		assistantEntryId: assistantEntry.id,
+		contextEntryId: assistantEntry.parentId,
+	});
+}
+
 const MAX_TIMER_MS = 2_147_483_647;
 
 export class SubagentController {
@@ -102,9 +137,10 @@ export class SubagentController {
 
 	createToolDefinitions(): ToolDefinition[] {
 		const definitions = [
-			createSpawnAgentTool((name, task) => {
+			createSpawnAgentTool((name, task, toolCallId) => {
 				const parent = this.#getBoundParent();
-				const createSession = this.#captureSession?.(parent);
+				const origin = captureSpawnOrigin(parent, toolCallId);
+				const createSession = this.#captureSession?.(parent, name, origin);
 				if (!createSession) {
 					throw new Error("Subagent session capture is unavailable");
 				}

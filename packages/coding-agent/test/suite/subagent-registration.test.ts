@@ -4,7 +4,7 @@ import type { AgentTool } from "@earendil-works/diffex-agent-core";
 import type { Context, Model, SimpleStreamOptions } from "@earendil-works/diffex-ai";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/diffex-ai";
 import { Type } from "typebox";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgentSession } from "../../src/core/agent-session.ts";
 import {
 	type CreateAgentSessionRuntimeFactory,
@@ -19,6 +19,10 @@ import type { ToolDefinition } from "../../src/core/extensions/types.ts";
 import { type CreateAgentSessionOptions, createAgentSession } from "../../src/core/sdk.ts";
 import { SessionManager } from "../../src/core/session-manager.ts";
 import { SubagentController } from "../../src/core/subagents/controller.ts";
+import {
+	RootLocalEphemeralSubagentSessionManagerFactory,
+	type SubagentSessionManagerRequest,
+} from "../../src/core/subagents/session-manager-factory.ts";
 import { createHarness, getMessageText, type Harness } from "./harness.ts";
 import { getLastUserText } from "./subagent-harness.ts";
 
@@ -239,6 +243,121 @@ describe("root subagent tool registration", () => {
 		expect(childContexts).toHaveLength(1);
 		for (const name of COORDINATION_TOOLS) {
 			expect(childContexts[0]?.tools?.map((tool) => tool.name)).not.toContain(name);
+		}
+	});
+
+	it("captures safe origins for agent and direct spawn calls", async () => {
+		const harness = await setupHarness();
+		const requests: SubagentSessionManagerRequest[] = [];
+		const childManagers: SessionManager[] = [];
+		const initialChildMessages: unknown[][] = [];
+		const originalCreate = RootLocalEphemeralSubagentSessionManagerFactory.prototype.create;
+		vi.spyOn(RootLocalEphemeralSubagentSessionManagerFactory.prototype, "create").mockImplementation(function (
+			this: RootLocalEphemeralSubagentSessionManagerFactory,
+			request,
+		) {
+			requests.push(request);
+			const manager = originalCreate.call(this, request);
+			childManagers.push(manager);
+			initialChildMessages.push(manager.buildSessionContext().messages);
+			return manager;
+		});
+
+		const response = (context: Context) => {
+			const toolNames = context.tools?.map((tool) => tool.name) ?? [];
+			if (!toolNames.includes("spawn_agent")) {
+				return fauxAssistantMessage(`completed ${getLastUserText(context)}`);
+			}
+			const toolResults = context.messages.filter((message) => message.role === "toolResult");
+			if (!toolResults.some((message) => message.toolName === "spawn_agent")) {
+				return fauxAssistantMessage(
+					[
+						fauxToolCall("spawn_agent", { name: "first", task: "first task" }, { id: "spawn-first" }),
+						fauxToolCall("spawn_agent", { name: "second", task: "second task" }, { id: "spawn-second" }),
+					],
+					{ stopReason: "toolUse" },
+				);
+			}
+			return fauxAssistantMessage("root complete");
+		};
+		harness.setResponses(Array.from({ length: 8 }, () => response));
+		const { session } = await createRoot(harness);
+
+		await session.prompt("delegate parallel work");
+
+		const assistantEntry = session.sessionManager
+			.getEntries()
+			.find(
+				(entry) =>
+					entry.type === "message" &&
+					entry.message.role === "assistant" &&
+					entry.message.content.some((content) => content.type === "toolCall" && content.id === "spawn-first"),
+			);
+		if (assistantEntry?.type !== "message") throw new Error("Missing spawning assistant entry");
+		const agentRequests = requests.filter((request) => request.origin.type === "agent_tool_call");
+		expect(agentRequests.map((request) => request.childName).sort()).toEqual(["first", "second"]);
+		expect(agentRequests.map((request) => request.origin)).toEqual(
+			expect.arrayContaining([
+				{
+					type: "agent_tool_call",
+					toolCallId: "spawn-first",
+					assistantEntryId: assistantEntry.id,
+					contextEntryId: assistantEntry.parentId,
+				},
+				{
+					type: "agent_tool_call",
+					toolCallId: "spawn-second",
+					assistantEntryId: assistantEntry.id,
+					contextEntryId: assistantEntry.parentId,
+				},
+			]),
+		);
+		expect(assistantEntry.parentId).not.toBeNull();
+		const anchorEntry = session.sessionManager.getEntry(assistantEntry.parentId!);
+		if (anchorEntry?.type !== "message") throw new Error("Missing spawn context anchor");
+		expect(anchorEntry.message.role).toBe("user");
+		expect(getMessageText(anchorEntry.message)).toBe("delegate parallel work");
+
+		const spawn = getActiveTool(session, "spawn_agent");
+		await spawn.execute("spawn-direct", { name: "direct", task: "direct task" });
+		await getActiveTool(session, "agents").execute("wait-direct", { timeout_ms: 1_000, until: "all" });
+
+		const directRequest = requests.find((request) => request.childName === "direct");
+		expect(directRequest?.origin).toEqual({
+			type: "direct_tool_call",
+			toolCallId: "spawn-direct",
+			contextEntryId: null,
+		});
+		expect(requests.every((request) => request.sourceSessionManager === session.sessionManager)).toBe(true);
+		expect(requests.every((request) => request.cwd === session.sessionManager.getCwd())).toBe(true);
+		expect(requests.every((request) => request.parentSessionId === session.sessionId)).toBe(true);
+		expect(requests.every((request) => Object.isFrozen(request) && Object.isFrozen(request.origin))).toBe(true);
+		expect(new Set(childManagers).size).toBe(3);
+		expect(initialChildMessages).toEqual([[], [], []]);
+		for (const manager of childManagers) {
+			expect(manager.isPersisted()).toBe(false);
+			expect(manager.getSessionFile()).toBeUndefined();
+			expect(manager.getHeader()?.parentSession).toBe(session.sessionId);
+			expect(manager.buildSessionContext().messages.map(getMessageText)).not.toContain("delegate parallel work");
+		}
+	});
+
+	it("rejects unmatched spawn calls during an active agent run", async () => {
+		const harness = await setupHarness();
+		const { session } = await createRoot(harness);
+		const internalState = session as unknown as { _isAgentRunActive: boolean };
+		internalState._isAgentRunActive = true;
+		try {
+			await expect(
+				getActiveTool(session, "spawn_agent").execute("missing-call", {
+					name: "worker",
+					task: "task",
+				}),
+			).rejects.toThrow(
+				"Invariant violation: active spawn_agent call missing-call matched 0 persisted assistant entries",
+			);
+		} finally {
+			internalState._isAgentRunActive = false;
 		}
 	});
 

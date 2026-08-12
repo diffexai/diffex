@@ -117,7 +117,7 @@ function assertAgentsRequest(request: unknown): asserts request is AgentsRequest
 }
 
 export function createSpawnAgentTool(
-	spawn: (name: string, task: string) => void,
+	spawn: (name: string, task: string, toolCallId: string) => void,
 ): ToolDefinition<typeof spawnAgentSchema, SpawnAgentDetails> {
 	return {
 		name: "spawn_agent",
@@ -125,14 +125,14 @@ export function createSpawnAgentTool(
 		description: "Start an independent child agent for a focused task and return immediately after acceptance.",
 		parameters: spawnAgentSchema,
 		executionMode: "parallel",
-		execute: async (_toolCallId, { name, task }) => {
+		execute: async (toolCallId, { name, task }) => {
 			if (!SUBAGENT_NAME_PATTERN.test(name)) {
 				throw new Error(`Invalid subagent name: ${name}`);
 			}
 			if (task.trim().length === 0) {
 				throw new Error("Subagent task must be non-empty");
 			}
-			spawn(name, task);
+			spawn(name, task, toolCallId);
 			return {
 				content: [{ type: "text", text: `Accepted subagent: ${name}` }],
 				details: { name, status: "queued" },

@@ -6,7 +6,28 @@ export type SubagentStatus = "queued" | "running" | "idle" | "failed" | "interru
 
 export type CreateSubagentSession = (signal: AbortSignal) => Promise<AgentSession>;
 
-export type CaptureSubagentSession = (parent: AgentSession) => CreateSubagentSession;
+export type SubagentSpawnOrigin =
+	| {
+			readonly type: "agent_tool_call";
+			readonly toolCallId: string;
+			readonly assistantEntryId: string;
+			readonly contextEntryId: string | null;
+	  }
+	| {
+			readonly type: "direct_tool_call";
+			readonly toolCallId: string;
+			readonly contextEntryId: null;
+	  }
+	| {
+			readonly type: "programmatic";
+			readonly contextEntryId: null;
+	  };
+
+export type CaptureSubagentSession = (
+	parent: AgentSession,
+	childName: string,
+	origin: SubagentSpawnOrigin,
+) => CreateSubagentSession;
 
 export type SubagentMessageDelivery = "steer" | "follow_up" | "prompt";
 

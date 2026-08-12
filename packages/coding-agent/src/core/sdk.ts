@@ -17,6 +17,7 @@ import { getDefaultSessionDir, SessionManager } from "./session-manager.ts";
 import { SettingsManager } from "./settings-manager.ts";
 import { SubagentController } from "./subagents/controller.ts";
 import { captureSubagentSessionConfig, createSubagentSession } from "./subagents/services.ts";
+import { RootLocalEphemeralSubagentSessionManagerFactory } from "./subagents/session-manager-factory.ts";
 import { time } from "./timings.ts";
 import {
 	createBashTool,
@@ -171,6 +172,23 @@ function assertNoReservedSubagentTools(customTools: readonly ToolDefinition[] | 
 	}
 }
 
+function createRootSubagentController(maxConcurrent: number, agentDir: string): SubagentController {
+	const sessionManagerFactory = new RootLocalEphemeralSubagentSessionManagerFactory();
+	return new SubagentController({
+		maxConcurrent,
+		captureSession: (parent, childName, origin) => {
+			const config = captureSubagentSessionConfig(parent, agentDir);
+			return (signal) =>
+				createSubagentSession(config, {
+					signal,
+					childName,
+					origin,
+					sessionManagerFactory,
+				});
+		},
+	});
+}
+
 /**
  * Create an AgentSession with the specified options.
  *
@@ -212,15 +230,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	const subagentOptions = normalizeSubagentOptions(options.subagents);
 	assertNoReservedSubagentTools(options.customTools);
 	const subagentController =
-		subagentOptions === false
-			? undefined
-			: new SubagentController({
-					maxConcurrent: subagentOptions.maxConcurrent,
-					captureSession: (parent) => {
-						const config = captureSubagentSessionConfig(parent, agentDir);
-						return (signal) => createSubagentSession(config, { signal });
-					},
-				});
+		subagentOptions === false ? undefined : createRootSubagentController(subagentOptions.maxConcurrent, agentDir);
 	const customTools = [...(options.customTools ?? []), ...(subagentController?.createToolDefinitions() ?? [])];
 	let resourceLoader = options.resourceLoader;
 
