@@ -8,9 +8,11 @@ export type {
 	InferOptionalAttributes,
 	InferRequiredAndOptionalAttributes,
 	InferStartAttributes,
+	InMemoryTelemetryContextOptions,
 	RecordedTelemetryEvent,
 	RecordedTelemetrySpan,
 	SchemaTelemetrySpan,
+	SettledTelemetrySpanSnapshot,
 	SpanAttributes,
 	SpanAttributes as TelemetrySpanAttributes,
 	SpanOptions,
@@ -82,6 +84,7 @@ export * from "./harness/session/search.ts";
 export * from "./harness/skills.ts";
 export * from "./harness/system-prompt.ts";
 export type {
+	AiRequestCompletionMetrics,
 	AiSpan,
 	AiSpanAttributes,
 	AiSpanEndAttributes,
@@ -102,6 +105,8 @@ export type {
 export {
 	AGENT_TELEMETRY_SCHEMAS,
 	AI_TELEMETRY_SCHEMA,
+	completeAiRequestSpan,
+	failAiRequestSpan,
 	HARNESS_TELEMETRY_SCHEMA,
 	startAiSpan,
 	startHarnessSpan,

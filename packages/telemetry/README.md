@@ -158,7 +158,7 @@ The no-op context:
 ```typescript
 import { InMemoryTelemetryContext } from '@earendil-works/pi-telemetry';
 
-const telemetry = new InMemoryTelemetryContext();
+const telemetry = new InMemoryTelemetryContext({ maxSpans: 2048 });
 
 await telemetry.startSpan(
   { name: 'example.operation', attributes: { input: 'demo' } },
@@ -169,11 +169,20 @@ await telemetry.startSpan(
 );
 
 console.log(telemetry.getSpans());
+
+let cursor = 0;
+const settled = telemetry.getSettledSpansAfter(cursor);
+cursor = settled.cursor;
 ```
 
 `getSpans()` returns detached snapshots in span-start order. Each `RecordedTelemetrySpan` contains a deterministic numeric ID, parent ID, merged attributes, ordered events, final status, settlement state, and deterministic end sequence. It records no timestamps.
 
-The adapter is safe to use as an ordinary `TelemetryContext`, but storage is unbounded and process-local. Create a fresh instance to isolate tests or recording scopes, and do not capture sensitive attributes unless the caller's data policy allows them.
+`getSettledSpansAfter()` returns detached settled spans newer than a caller-owned end-sequence cursor, ordered by settlement.
+Its snapshot includes the next cursor and cumulative dropped-span count, so consumers can avoid duplicate processing and detect incomplete bounded history.
+
+The adapter is process-local and unbounded unless `maxSpans` is configured.
+At capacity it evicts the oldest settled span, but it never evicts an open span or interrupts instrumented work.
+Create a fresh instance to isolate tests or recording scopes, and do not capture sensitive attributes unless the caller's data policy allows them.
 
 ## Adapter Conformance
 
@@ -403,8 +412,10 @@ The package does not use `AsyncLocalStorage` or another runtime-specific ambient
 | `SpanStatus` | Explicit `ok` or `error` status |
 | `NOOP_TELEMETRY_CONTEXT` | Shared passive context for disabled telemetry |
 | `InMemoryTelemetryContext` | Reference adapter with deterministic process-local recording |
+| `InMemoryTelemetryContextOptions` | Optional retained-span capacity for bounded local capture |
 | `RecordedTelemetrySpan` | Normalized captured span snapshot |
 | `RecordedTelemetryEvent` | Normalized captured event snapshot |
+| `SettledTelemetrySpanSnapshot` | Cursor-based snapshot of newly settled spans and cumulative drops |
 
 ### Schema definitions and inference
 

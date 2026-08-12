@@ -28,6 +28,8 @@ describe("agent telemetry schemas", () => {
 			"pi.harness.turn",
 			"pi.harness.step",
 			"pi.harness.tool",
+			"pi.harness.profile_route",
+			"pi.harness.evolution",
 			"pi.harness.hook",
 			"pi.harness.sleep",
 			"pi.harness.event_handler",

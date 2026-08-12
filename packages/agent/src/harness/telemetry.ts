@@ -1,3 +1,4 @@
+import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type {
 	ExactTelemetryAttributes,
 	SchemaTelemetrySpan,
@@ -144,6 +145,48 @@ export function startAiSpan<Name extends AiSpanName, const Attributes extends Ai
 	return telemetryContext.startSpan({ name, attributes }, (span) => callback(span as AiTelemetrySpan<Name>));
 }
 
+export interface AiRequestCompletionMetrics {
+	chunkCount?: number;
+	timeToFirstChunkMs?: number;
+	httpStatusCode?: number;
+	errorType?: string;
+}
+
+/** Add content-free completion metadata to an AI request span. */
+export function completeAiRequestSpan(
+	span: AiTelemetrySpan<"pi.ai.request">,
+	message: AssistantMessage,
+	metrics: AiRequestCompletionMetrics = {},
+): void {
+	const stopReason =
+		message.stopReason === "toolUse" ? "tool_use" : message.stopReason === "pending" ? undefined : message.stopReason;
+	span.setAttributes({
+		...(message.responseModel ? { "pi.ai.response.model": message.responseModel } : {}),
+		...(message.responseId ? { "pi.ai.response.id": message.responseId } : {}),
+		...(stopReason ? { "pi.ai.response.stop_reason": stopReason } : {}),
+		...(metrics.httpStatusCode === undefined ? {} : { "pi.ai.http.status_code": metrics.httpStatusCode }),
+		"pi.ai.usage.input_tokens": message.usage.input,
+		"pi.ai.usage.output_tokens": message.usage.output,
+		"pi.ai.usage.cache_read_tokens": message.usage.cacheRead,
+		"pi.ai.usage.cache_write_tokens": message.usage.cacheWrite,
+		...(message.usage.reasoning === undefined ? {} : { "pi.ai.usage.reasoning_tokens": message.usage.reasoning }),
+		"pi.ai.usage.total_tokens": message.usage.totalTokens,
+		"pi.ai.usage.cost": message.usage.cost.total,
+		...(metrics.chunkCount === undefined ? {} : { "pi.ai.stream.chunk_count": metrics.chunkCount }),
+		...(metrics.timeToFirstChunkMs === undefined
+			? {}
+			: { "pi.ai.stream.time_to_first_chunk_ms": metrics.timeToFirstChunkMs }),
+		...(metrics.errorType ? { "pi.ai.error.type": metrics.errorType } : {}),
+	});
+	if (message.stopReason === "error") span.setStatus({ status: "error" });
+}
+
+/** Mark a thrown AI request failure without retaining a free-form error message. */
+export function failAiRequestSpan(span: AiTelemetrySpan<"pi.ai.request">, errorType: string): void {
+	span.setAttributes({ "pi.ai.error.type": errorType });
+	span.setStatus({ status: "error" });
+}
+
 const HOOK_NAMES = [
 	"before_run",
 	"before_resume",
@@ -230,7 +273,7 @@ const operationErrorAttributes = {
 } as const;
 
 export const HARNESS_TELEMETRY_SCHEMA = {
-	version: 1,
+	version: 2,
 	spans: {
 		"pi.harness.run": {
 			description: "One admitted in-process run invocation",
@@ -448,6 +491,111 @@ export const HARNESS_TELEMETRY_SCHEMA = {
 				},
 			},
 			status: { default: "ok", errorWhen: "Raw phase-2 execution returns an error" },
+		},
+		"pi.harness.profile_route": {
+			description: "One structural task-profile routing decision",
+			parents: { kind: "root_or_external" },
+			startAttributes: {
+				"pi.session.id": {
+					type: "string",
+					required: true,
+					cardinality: "high",
+					description: "Session id before routing",
+				},
+				"pi.routing.mode": {
+					type: "string",
+					required: true,
+					values: ["auto", "pinned"],
+					description: "Configured profile-routing mode",
+				},
+				"pi.routing.current_profile_id": {
+					type: "string",
+					required: true,
+					cardinality: "high",
+					description: "Profile active before routing",
+				},
+				"pi.routing.session_established": {
+					type: "boolean",
+					required: true,
+					description: "Whether the session already contains task history",
+				},
+			},
+			endAttributes: {
+				"pi.routing.outcome": {
+					type: "string",
+					values: ["bypassed", "selected", "reused", "failed"],
+					description: "Applied routing outcome",
+				},
+				"pi.routing.target_profile_id": {
+					type: "string",
+					cardinality: "high",
+					description: "Profile active after routing",
+				},
+				"pi.routing.harness_id": {
+					type: "string",
+					cardinality: "high",
+					description: "Stable identifier of the selected or reused harness",
+				},
+				"pi.routing.confidence": {
+					type: "number",
+					description: "Router confidence between zero and one",
+				},
+				"pi.routing.fallback": {
+					type: "string",
+					values: ["completion_error", "invalid_output", "low_confidence"],
+					description: "Structured fallback class when routing used one",
+				},
+			},
+			status: { default: "ok", errorWhen: "Routing fails or throws" },
+		},
+		"pi.harness.evolution": {
+			description: "One structural EVOLVED note proposal or write pass",
+			parents: { kind: "root_or_external" },
+			startAttributes: {
+				"pi.session.id": {
+					type: "string",
+					required: true,
+					cardinality: "high",
+					description: "Session id associated with the evolution pass",
+				},
+				"pi.evolution.trigger": {
+					type: "string",
+					required: true,
+					values: ["explicit", "run_settled", "session_shutdown"],
+					description: "Trigger for the evolution pass",
+				},
+				"pi.evolution.profile_id": {
+					type: "string",
+					required: false,
+					cardinality: "high",
+					description: "Profile associated with the evolution pass",
+				},
+			},
+			endAttributes: {
+				"pi.evolution.outcome": {
+					type: "string",
+					values: ["completed", "skipped", "failed"],
+					description: "Evolution pass outcome",
+				},
+				"pi.evolution.candidate_count": {
+					type: "number",
+					description: "Number of proposed notes",
+				},
+				"pi.evolution.accepted_count": {
+					type: "number",
+					description: "Number of notes written",
+				},
+				"pi.evolution.rejected_count": {
+					type: "number",
+					description: "Number of notes rejected or deduplicated",
+				},
+				"pi.evolution.scope": {
+					type: "string",
+					values: ["global", "project"],
+					description: "Scope written by an explicit evolution pass",
+				},
+			},
+			status: { default: "ok", errorWhen: "Evolution evaluation or writing fails" },
 		},
 		"pi.harness.hook": {
 			description: "One registered hook handler invocation",

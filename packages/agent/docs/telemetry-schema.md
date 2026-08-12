@@ -52,7 +52,7 @@ No declared span events.
 
 ## Harness schema
 
-Schema version: 1
+Schema version: 2
 
 ### `pi.harness.run`
 
@@ -263,6 +263,71 @@ All end attributes are optional completion enrichment.
 | Name | Type | Values | Notes | Description |
 |---|---|---|---|---|
 | `pi.tool.is_error` | `boolean` |  |  | Whether raw phase-2 execution returned an error |
+
+#### Events
+
+No declared span events.
+
+### `pi.harness.profile_route`
+
+One structural task-profile routing decision
+
+- Parents: root or caller-owned external span
+- Default status: `ok`
+- Error when: Routing fails or throws
+
+#### Start attributes
+
+| Name | Type | Required | Values | Notes | Description |
+|---|---|---:|---|---|---|
+| `pi.session.id` | `string` | yes |  | high cardinality | Session id before routing |
+| `pi.routing.mode` | `string` | yes | auto, pinned |  | Configured profile-routing mode |
+| `pi.routing.current_profile_id` | `string` | yes |  | high cardinality | Profile active before routing |
+| `pi.routing.session_established` | `boolean` | yes |  |  | Whether the session already contains task history |
+
+#### End attributes
+
+All end attributes are optional completion enrichment.
+
+| Name | Type | Values | Notes | Description |
+|---|---|---|---|---|
+| `pi.routing.outcome` | `string` | bypassed, selected, reused, failed |  | Applied routing outcome |
+| `pi.routing.target_profile_id` | `string` |  | high cardinality | Profile active after routing |
+| `pi.routing.harness_id` | `string` |  | high cardinality | Stable identifier of the selected or reused harness |
+| `pi.routing.confidence` | `number` |  |  | Router confidence between zero and one |
+| `pi.routing.fallback` | `string` | completion_error, invalid_output, low_confidence |  | Structured fallback class when routing used one |
+
+#### Events
+
+No declared span events.
+
+### `pi.harness.evolution`
+
+One structural EVOLVED note proposal or write pass
+
+- Parents: root or caller-owned external span
+- Default status: `ok`
+- Error when: Evolution evaluation or writing fails
+
+#### Start attributes
+
+| Name | Type | Required | Values | Notes | Description |
+|---|---|---:|---|---|---|
+| `pi.session.id` | `string` | yes |  | high cardinality | Session id associated with the evolution pass |
+| `pi.evolution.trigger` | `string` | yes | explicit, run_settled, session_shutdown |  | Trigger for the evolution pass |
+| `pi.evolution.profile_id` | `string` | no |  | high cardinality | Profile associated with the evolution pass |
+
+#### End attributes
+
+All end attributes are optional completion enrichment.
+
+| Name | Type | Values | Notes | Description |
+|---|---|---|---|---|
+| `pi.evolution.outcome` | `string` | completed, skipped, failed |  | Evolution pass outcome |
+| `pi.evolution.candidate_count` | `number` |  |  | Number of proposed notes |
+| `pi.evolution.accepted_count` | `number` |  |  | Number of notes written |
+| `pi.evolution.rejected_count` | `number` |  |  | Number of notes rejected or deduplicated |
+| `pi.evolution.scope` | `string` | global, project |  | Scope written by an explicit evolution pass |
 
 #### Events
 
