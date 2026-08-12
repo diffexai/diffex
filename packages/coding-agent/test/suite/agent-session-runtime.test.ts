@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join, parse } from "node:path";
 import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "@earendil-works/diffex-ai/compat";
 import { Type } from "typebox";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	type CreateAgentSessionRuntimeFactory,
 	createAgentSessionFromServices,
@@ -11,6 +11,7 @@ import {
 	createAgentSessionServices,
 } from "../../src/core/agent-session-runtime.ts";
 import { AuthStorage } from "../../src/core/auth-storage.ts";
+import { ModelRuntime } from "../../src/core/model-runtime.ts";
 import { SessionManager } from "../../src/core/session-manager.ts";
 import type {
 	AgentToolResult,
@@ -656,5 +657,86 @@ describe("AgentSessionRuntime characterization", () => {
 
 		expect(runtime.session.model?.id).toBe("faux-2");
 		expect(runtime.session.thinkingLevel).toBe("off");
+	});
+
+	it("does not refresh a provided model runtime when no providers register", async () => {
+		const tempDir = join(tmpdir(), `pi-services-empty-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+		mkdirSync(tempDir, { recursive: true });
+		const modelRuntime = await ModelRuntime.create({
+			credentials: AuthStorage.inMemory(),
+			modelsPath: null,
+			allowModelNetwork: false,
+		});
+		const refresh = vi.spyOn(modelRuntime, "refresh");
+		cleanups.push(() => rmSync(tempDir, { recursive: true, force: true }));
+
+		await createAgentSessionServices({
+			cwd: tempDir,
+			agentDir: tempDir,
+			modelRuntime,
+			resourceLoaderOptions: {
+				noExtensions: true,
+				noSkills: true,
+				noPromptTemplates: true,
+				noThemes: true,
+			},
+		});
+
+		expect(refresh).not.toHaveBeenCalled();
+	});
+
+	it("awaits the refresh barrier after provider registration", async () => {
+		const tempDir = join(tmpdir(), `pi-services-provider-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+		mkdirSync(tempDir, { recursive: true });
+		const faux = registerFauxProvider();
+		const modelRuntime = await ModelRuntime.create({
+			credentials: AuthStorage.inMemory(),
+			modelsPath: null,
+			allowModelNetwork: false,
+		});
+		const refreshResult = { aborted: false, errors: new Map<string, Error>() };
+		let releaseBarrier!: () => void;
+		const barrier = new Promise<typeof refreshResult>((resolve) => {
+			releaseBarrier = () => resolve(refreshResult);
+		});
+		const refresh = vi
+			.spyOn(modelRuntime, "refresh")
+			.mockResolvedValueOnce(refreshResult)
+			.mockImplementationOnce(() => barrier);
+		cleanups.push(() => {
+			faux.unregister();
+			rmSync(tempDir, { recursive: true, force: true });
+		});
+
+		let settled = false;
+		const creation = createAgentSessionServices({
+			cwd: tempDir,
+			agentDir: tempDir,
+			modelRuntime,
+			resourceLoaderOptions: {
+				extensionFactories: [
+					(pi: ExtensionAPI) => {
+						const model = faux.getModel();
+						pi.registerProvider("barrier-provider", {
+							baseUrl: model.baseUrl,
+							api: faux.api,
+							models: [{ ...model, provider: "barrier-provider" }],
+						});
+					},
+				],
+				noSkills: true,
+				noPromptTemplates: true,
+				noThemes: true,
+			},
+		}).then((services) => {
+			settled = true;
+			return services;
+		});
+
+		await vi.waitFor(() => expect(refresh).toHaveBeenCalledTimes(2));
+		expect(settled).toBe(false);
+		releaseBarrier();
+		await creation;
+		expect(settled).toBe(true);
 	});
 });

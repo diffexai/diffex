@@ -345,6 +345,55 @@ Content`,
 			expect(themes.some((t) => t.sourcePath?.endsWith("skip.json"))).toBe(false);
 		});
 
+		it("uses current settings without reloading when reloadSettings is false", async () => {
+			const customSkillDir = join(tempDir, "current-settings-skill");
+			const customSkillPath = join(customSkillDir, "SKILL.md");
+			mkdirSync(customSkillDir, { recursive: true });
+			writeFileSync(
+				customSkillPath,
+				`---
+name: current-settings
+description: Loaded from current settings
+---
+Current settings content`,
+			);
+			const settingsManager = SettingsManager.inMemory();
+			settingsManager.setSkillPaths([customSkillPath]);
+			await settingsManager.flush();
+			const reloadSettings = vi.spyOn(settingsManager, "reload");
+			const loader = new DefaultResourceLoader({
+				cwd,
+				agentDir,
+				settingsManager,
+				reloadSettings: false,
+			});
+
+			await loader.reload();
+			await loader.reload();
+
+			expect(reloadSettings).not.toHaveBeenCalled();
+			expect(loader.getSkills().skills.map((skill) => skill.name)).toContain("current-settings");
+			expect(settingsManager.getSkillPaths()).toEqual([customSkillPath]);
+		});
+
+		it("rejects project trust resolution when reloadSettings is false", async () => {
+			const settingsManager = SettingsManager.inMemory();
+			const resolveProjectTrust = vi.fn(async () => false);
+			const loader = new DefaultResourceLoader({
+				cwd,
+				agentDir,
+				settingsManager,
+				reloadSettings: false,
+			});
+
+			await expect(loader.reload({ resolveProjectTrust })).rejects.toThrow(
+				"Project trust resolution is unavailable when settings reloads are disabled",
+			);
+
+			expect(resolveProjectTrust).not.toHaveBeenCalled();
+			expect(settingsManager.isProjectTrusted()).toBe(true);
+		});
+
 		it("should discover AGENTS.md context files", async () => {
 			writeFileSync(join(cwd, "AGENTS.md"), "# Project Guidelines\n\nBe helpful.");
 
