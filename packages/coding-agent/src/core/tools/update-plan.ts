@@ -116,7 +116,7 @@ function validatePlanSnapshot(rawPlan: unknown): UpdatePlanItem[] {
 	return plan;
 }
 
-function validateUpdatePlanInput(input: unknown): UpdatePlanToolDetails {
+export function parseUpdatePlanOperation(input: unknown): UpdatePlanToolDetails {
 	if (!isRecord(input)) {
 		throw new Error("update_plan input must be an object.");
 	}
@@ -204,7 +204,7 @@ function formatPlanCall(args: unknown, theme: Theme): string {
 	let text = theme.fg("toolTitle", theme.bold("update_plan"));
 	let details: UpdatePlanToolDetails;
 	try {
-		details = validateUpdatePlanInput(args);
+		details = parseUpdatePlanOperation(args);
 	} catch {
 		return `${text}\n${invalidArgText(theme)}`;
 	}
@@ -233,7 +233,7 @@ export function createUpdatePlanToolDefinition(): ToolDefinition<typeof updatePl
 		parameters: updatePlanSchema,
 		executionMode: "sequential",
 		async execute(_toolCallId, input) {
-			const details = validateUpdatePlanInput(input);
+			const details = parseUpdatePlanOperation(input);
 			return {
 				content: [
 					{
