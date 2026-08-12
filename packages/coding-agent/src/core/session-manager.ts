@@ -4,8 +4,12 @@ import { randomUUID } from "crypto";
 import {
 	appendFileSync,
 	closeSync,
+	constants,
 	createReadStream,
 	existsSync,
+	fstatSync,
+	ftruncateSync,
+	lstatSync,
 	mkdirSync,
 	openSync,
 	readdirSync,
@@ -14,7 +18,7 @@ import {
 	writeFileSync,
 } from "fs";
 import { readdir, stat } from "fs/promises";
-import { join, resolve } from "path";
+import { dirname, join, resolve } from "path";
 import { createInterface } from "readline";
 import { StringDecoder } from "string_decoder";
 import { getAgentDir as getDefaultAgentDir, getSessionsDir } from "../config.ts";
@@ -28,6 +32,36 @@ import {
 } from "./messages.ts";
 
 export const CURRENT_SESSION_VERSION = 3;
+export const MAX_RELATED_SESSION_REFERENCES = 32;
+export const MAX_SESSION_ID_LENGTH = 128;
+
+const MAX_RELATED_HARNESS_ID_LENGTH = 96;
+const MAX_RELATED_PROFILE_ID_LENGTH = 64;
+const MAX_RELATED_SESSION_CANDIDATE_FILES = MAX_RELATED_SESSION_REFERENCES * 2;
+const SESSION_ID_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/;
+const HARNESS_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const NO_FOLLOW_FILE_FLAG = process.platform === "win32" ? 0 : constants.O_NOFOLLOW;
+
+interface SessionFileIdentity {
+	device: number;
+	inode: number;
+}
+
+/** A content-free link to another session that used the identified harness. */
+export interface RelatedSessionReference {
+	sessionId: string;
+	harnessId: string;
+}
+
+/** A verified related session resolved within the manager's session directory. */
+export interface DiscoveredRelatedSession extends RelatedSessionReference {
+	sessionPath: string;
+	profileId?: string;
+	timestamp: string;
+	/** File identity captured during discovery to prevent path-swap races before resume. */
+	fileDevice: number;
+	fileInode: number;
+}
 
 export interface SessionHeader {
 	type: "session";
@@ -37,6 +71,7 @@ export interface SessionHeader {
 	cwd: string;
 	parentSession?: string;
 	profile?: SessionProfileMetadata;
+	relatedSessions?: RelatedSessionReference[];
 }
 
 export interface SessionProfileMetadata {
@@ -46,7 +81,7 @@ export interface SessionProfileMetadata {
 	source?: string;
 	/** Automatic routing remains enabled unless the profile was explicitly pinned. */
 	routing: "auto" | "pinned";
-	/** Stable evolved-harness identity. The descriptor remains the source of truth. */
+	/** Stable harness identity. The descriptor remains the source of truth. */
 	harnessId?: string;
 	/** Snapshot of the EVOLVED-derived harness revision for resume audit and display. */
 	harnessRevision?: string;
@@ -56,6 +91,7 @@ export interface NewSessionOptions {
 	id?: string;
 	parentSession?: string;
 	profile?: SessionProfileMetadata;
+	relatedSessions?: readonly RelatedSessionReference[];
 }
 
 export interface SessionEntryBase {
@@ -195,6 +231,10 @@ export interface SessionInfo {
 	name?: string;
 	/** Path to the parent session (if this session was forked). */
 	parentSessionPath?: string;
+	/** Active prompt profile recorded in the bounded session header. */
+	profileId?: string;
+	/** Stable harness identity recorded in the bounded session header. */
+	harnessId?: string;
 	created: Date;
 	modified: Date;
 	messageCount: number;
@@ -218,6 +258,7 @@ export type ReadonlySessionManager = Pick<
 	| "getEntries"
 	| "getTree"
 	| "getSessionName"
+	| "getRelatedSessions"
 >;
 
 function createSessionId(): string {
@@ -225,11 +266,66 @@ function createSessionId(): string {
 }
 
 export function assertValidSessionId(id: string): void {
-	if (!/^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/.test(id)) {
+	if (id.length > MAX_SESSION_ID_LENGTH || !SESSION_ID_PATTERN.test(id)) {
 		throw new Error(
-			"Session id must be non-empty, contain only alphanumeric characters, '-', '_', and '.', and start and end with an alphanumeric character",
+			`Session id must be non-empty, contain only alphanumeric characters, '-', '_', and '.', start and end with an alphanumeric character, and be at most ${MAX_SESSION_ID_LENGTH} characters`,
 		);
 	}
+}
+
+function normalizeRelatedIdentifier(value: unknown, pattern: RegExp, maxLength: number): string | undefined {
+	if (typeof value !== "string") return undefined;
+	const normalized = value.trim();
+	if (normalized.length === 0 || normalized.length > maxLength || !pattern.test(normalized)) return undefined;
+	return normalized;
+}
+
+/**
+ * Validate, deduplicate, and bound cross-session references from persisted or caller-provided input.
+ * The first valid reference for each session ID wins.
+ */
+export function normalizeRelatedSessionReferences(
+	value: unknown,
+	currentSessionId?: string,
+): RelatedSessionReference[] {
+	if (!Array.isArray(value)) return [];
+	const references: RelatedSessionReference[] = [];
+	const seenSessionIds = new Set<string>();
+	for (const candidate of value) {
+		if (references.length >= MAX_RELATED_SESSION_REFERENCES) break;
+		if (typeof candidate !== "object" || candidate === null || Array.isArray(candidate)) continue;
+		const record = candidate as Record<string, unknown>;
+		const sessionId = normalizeRelatedIdentifier(record.sessionId, SESSION_ID_PATTERN, MAX_SESSION_ID_LENGTH);
+		const harnessId = normalizeRelatedIdentifier(record.harnessId, HARNESS_ID_PATTERN, MAX_RELATED_HARNESS_ID_LENGTH);
+		if (!sessionId || !harnessId || sessionId === currentSessionId || seenSessionIds.has(sessionId)) continue;
+		seenSessionIds.add(sessionId);
+		references.push({ sessionId, harnessId });
+	}
+	return references;
+}
+
+/** Merge relation sets while prioritizing newly supplied references within the bound. */
+export function mergeRelatedSessionReferences(
+	current: unknown,
+	additional: unknown,
+	currentSessionId?: string,
+): RelatedSessionReference[] {
+	const currentReferences = Array.isArray(current) ? current : [];
+	const additionalReferences = Array.isArray(additional) ? additional : [];
+	return normalizeRelatedSessionReferences([...additionalReferences, ...currentReferences], currentSessionId);
+}
+
+function normalizeSessionHeader(header: SessionHeader): SessionHeader {
+	const relatedSessions = normalizeRelatedSessionReferences(
+		(header as { relatedSessions?: unknown }).relatedSessions,
+		typeof header.id === "string" ? header.id : undefined,
+	);
+	if (relatedSessions.length > 0) {
+		header.relatedSessions = relatedSessions;
+	} else {
+		delete header.relatedSessions;
+	}
+	return header;
 }
 
 /** Generate a unique short ID (8 hex chars, collision-checked) */
@@ -317,12 +413,8 @@ export function parseSessionEntries(content: string): FileEntry[] {
 
 	for (const line of lines) {
 		if (!line.trim()) continue;
-		try {
-			const entry = JSON.parse(line) as FileEntry;
-			entries.push(entry);
-		} catch {
-			// Skip malformed lines
-		}
+		const entry = parseSessionEntryLine(line);
+		if (entry) entries.push(entry);
 	}
 
 	return entries;
@@ -518,47 +610,41 @@ class SessionHeaderScanLimitError extends Error {
 function parseSessionEntryLine(line: string): FileEntry | null {
 	if (!line.trim()) return null;
 	try {
-		return JSON.parse(line) as FileEntry;
+		const entry = JSON.parse(line) as FileEntry;
+		return entry.type === "session" ? normalizeSessionHeader(entry) : entry;
 	} catch {
 		// Skip malformed lines
 		return null;
 	}
 }
 
-/** Exported for testing */
-export function loadEntriesFromFile(filePath: string): FileEntry[] {
-	const resolvedFilePath = normalizePath(filePath);
-	if (!existsSync(resolvedFilePath)) return [];
-
+function loadEntriesFromDescriptor(fd: number): FileEntry[] {
 	const entries: FileEntry[] = [];
-	const fd = openSync(resolvedFilePath, "r");
-	try {
-		const decoder = new StringDecoder("utf8");
-		const buffer = Buffer.allocUnsafe(SESSION_READ_BUFFER_SIZE);
-		let pending = "";
+	const decoder = new StringDecoder("utf8");
+	const buffer = Buffer.allocUnsafe(SESSION_READ_BUFFER_SIZE);
+	let pending = "";
+	let position = 0;
 
-		while (true) {
-			const bytesRead = readSync(fd, buffer, 0, buffer.length, null);
-			if (bytesRead === 0) break;
+	while (true) {
+		const bytesRead = readSync(fd, buffer, 0, buffer.length, position);
+		if (bytesRead === 0) break;
+		position += bytesRead;
 
-			pending += decoder.write(buffer.subarray(0, bytesRead));
-			let lineStart = 0;
-			let newlineIndex = pending.indexOf("\n", lineStart);
-			while (newlineIndex !== -1) {
-				const entry = parseSessionEntryLine(pending.slice(lineStart, newlineIndex));
-				if (entry) entries.push(entry);
-				lineStart = newlineIndex + 1;
-				newlineIndex = pending.indexOf("\n", lineStart);
-			}
-			pending = pending.slice(lineStart);
+		pending += decoder.write(buffer.subarray(0, bytesRead));
+		let lineStart = 0;
+		let newlineIndex = pending.indexOf("\n", lineStart);
+		while (newlineIndex !== -1) {
+			const entry = parseSessionEntryLine(pending.slice(lineStart, newlineIndex));
+			if (entry) entries.push(entry);
+			lineStart = newlineIndex + 1;
+			newlineIndex = pending.indexOf("\n", lineStart);
 		}
-
-		pending += decoder.end();
-		const finalEntry = parseSessionEntryLine(pending);
-		if (finalEntry) entries.push(finalEntry);
-	} finally {
-		closeSync(fd);
+		pending = pending.slice(lineStart);
 	}
+
+	pending += decoder.end();
+	const finalEntry = parseSessionEntryLine(pending);
+	if (finalEntry) entries.push(finalEntry);
 
 	// Validate session header
 	if (entries.length === 0) return entries;
@@ -568,6 +654,19 @@ export function loadEntriesFromFile(filePath: string): FileEntry[] {
 	}
 
 	return entries;
+}
+
+/** Exported for testing */
+export function loadEntriesFromFile(filePath: string): FileEntry[] {
+	const resolvedFilePath = normalizePath(filePath);
+	if (!existsSync(resolvedFilePath)) return [];
+
+	const fd = openSync(resolvedFilePath, "r");
+	try {
+		return loadEntriesFromDescriptor(fd);
+	} finally {
+		closeSync(fd);
+	}
 }
 
 /**
@@ -583,51 +682,56 @@ function parseSessionHeaderCandidate(line: string): SessionHeader | null | undef
 	return entry;
 }
 
-function readSessionHeader(filePath: string): SessionHeader | null {
-	const fd = openSync(filePath, "r");
-	try {
-		const decoder = new StringDecoder("utf8");
-		const buffer = Buffer.allocUnsafe(SESSION_HEADER_READ_BUFFER_SIZE);
-		const lineChunks: string[] = [];
-		let scannedBytes = 0;
+function readSessionHeaderFromDescriptor(fd: number, filePath: string): SessionHeader | null {
+	const decoder = new StringDecoder("utf8");
+	const buffer = Buffer.allocUnsafe(SESSION_HEADER_READ_BUFFER_SIZE);
+	const lineChunks: string[] = [];
+	let scannedBytes = 0;
 
-		while (scannedBytes < MAX_SESSION_HEADER_SCAN_BYTES) {
-			const readLength = Math.min(buffer.length, MAX_SESSION_HEADER_SCAN_BYTES - scannedBytes);
-			const bytesRead = readSync(fd, buffer, 0, readLength, null);
-			if (bytesRead === 0) {
-				lineChunks.push(decoder.end());
-				return parseSessionHeaderCandidate(lineChunks.join("")) ?? null;
-			}
-			scannedBytes += bytesRead;
-
-			const chunk = decoder.write(buffer.subarray(0, bytesRead));
-			let lineStart = 0;
-			let newlineIndex = chunk.indexOf("\n", lineStart);
-			while (newlineIndex !== -1) {
-				lineChunks.push(chunk.slice(lineStart, newlineIndex));
-				const header = parseSessionHeaderCandidate(lineChunks.join(""));
-				if (header !== undefined) return header;
-				lineChunks.length = 0;
-				lineStart = newlineIndex + 1;
-				newlineIndex = chunk.indexOf("\n", lineStart);
-			}
-			lineChunks.push(chunk.slice(lineStart));
-		}
-
-		// Probe for EOF so a final header without a newline is allowed when it ends
-		// exactly at the scan limit. Any additional byte exceeds the bounded scan.
-		const probe = Buffer.allocUnsafe(1);
-		if (readSync(fd, probe, 0, probe.length, null) === 0) {
+	while (scannedBytes < MAX_SESSION_HEADER_SCAN_BYTES) {
+		const readLength = Math.min(buffer.length, MAX_SESSION_HEADER_SCAN_BYTES - scannedBytes);
+		const bytesRead = readSync(fd, buffer, 0, readLength, null);
+		if (bytesRead === 0) {
 			lineChunks.push(decoder.end());
 			return parseSessionHeaderCandidate(lineChunks.join("")) ?? null;
 		}
-		throw new SessionHeaderScanLimitError(filePath);
+		scannedBytes += bytesRead;
+
+		const chunk = decoder.write(buffer.subarray(0, bytesRead));
+		let lineStart = 0;
+		let newlineIndex = chunk.indexOf("\n", lineStart);
+		while (newlineIndex !== -1) {
+			lineChunks.push(chunk.slice(lineStart, newlineIndex));
+			const header = parseSessionHeaderCandidate(lineChunks.join(""));
+			if (header !== undefined) return header;
+			lineChunks.length = 0;
+			lineStart = newlineIndex + 1;
+			newlineIndex = chunk.indexOf("\n", lineStart);
+		}
+		lineChunks.push(chunk.slice(lineStart));
+	}
+
+	// Probe for EOF so a final header without a newline is allowed when it ends
+	// exactly at the scan limit. Any additional byte exceeds the bounded scan.
+	const probe = Buffer.allocUnsafe(1);
+	if (readSync(fd, probe, 0, probe.length, null) === 0) {
+		lineChunks.push(decoder.end());
+		return parseSessionHeaderCandidate(lineChunks.join("")) ?? null;
+	}
+	throw new SessionHeaderScanLimitError(filePath);
+}
+
+function readSessionHeader(filePath: string): SessionHeader | null {
+	const fd = openSync(filePath, "r");
+	try {
+		return readSessionHeaderFromDescriptor(fd, filePath);
 	} finally {
 		closeSync(fd);
 	}
 }
 
-function readSessionHeaderForDiscovery(filePath: string): SessionHeader | null {
+/** Read only the bounded session header for best-effort lineage and picker discovery. */
+export function readSessionHeaderForDiscovery(filePath: string): SessionHeader | null {
 	try {
 		return readSessionHeader(filePath);
 	} catch {
@@ -635,6 +739,84 @@ function readSessionHeaderForDiscovery(filePath: string): SessionHeader | null {
 		// and one corrupt file must not prevent other sessions from being found.
 		return null;
 	}
+}
+
+function getSessionProfileIdentity(header: SessionHeader): { profileId?: string; harnessId?: string } {
+	const rawProfile = (header as { profile?: unknown }).profile;
+	if (typeof rawProfile !== "object" || rawProfile === null || Array.isArray(rawProfile)) return {};
+	const profile = rawProfile as Record<string, unknown>;
+	const profileId = normalizeRelatedIdentifier(profile.id, HARNESS_ID_PATTERN, MAX_RELATED_PROFILE_ID_LENGTH);
+	const harnessId = normalizeRelatedIdentifier(profile.harnessId, HARNESS_ID_PATTERN, MAX_RELATED_HARNESS_ID_LENGTH);
+	return { profileId, harnessId };
+}
+
+function discoverHarnessSessionsInDirectory(
+	sessionDir: string,
+	currentSessionId: string,
+	expectedSessionIds: ReadonlySet<string>,
+): DiscoveredRelatedSession[] {
+	if (!sessionDir || !existsSync(sessionDir) || expectedSessionIds.size === 0) return [];
+	const sessions: Array<{ session: DiscoveredRelatedSession; modifiedTime: number }> = [];
+	try {
+		const expectedSuffixes = [...expectedSessionIds].flatMap((sessionId) => [
+			`${sessionId}.jsonl`,
+			`_${sessionId}.jsonl`,
+		]);
+		const candidateFileNames = readdirSync(sessionDir)
+			.filter((fileName) =>
+				expectedSuffixes.some(
+					(suffix) => fileName === suffix || (suffix.startsWith("_") && fileName.endsWith(suffix)),
+				),
+			)
+			.sort();
+		if (candidateFileNames.length > MAX_RELATED_SESSION_CANDIDATE_FILES) return [];
+		for (const fileName of candidateFileNames) {
+			const sessionPath = join(sessionDir, fileName);
+			try {
+				const stats = lstatSync(sessionPath);
+				if (!stats.isFile() || stats.isSymbolicLink()) continue;
+				const fd = openSync(sessionPath, constants.O_RDONLY | NO_FOLLOW_FILE_FLAG);
+				let openedStats: ReturnType<typeof fstatSync>;
+				let header: SessionHeader | null;
+				try {
+					openedStats = fstatSync(fd);
+					header = readSessionHeaderFromDescriptor(fd, sessionPath);
+				} finally {
+					closeSync(fd);
+				}
+				if (openedStats.dev !== stats.dev || openedStats.ino !== stats.ino || !openedStats.isFile()) continue;
+				if (!header) continue;
+				const sessionId = normalizeRelatedIdentifier(header.id, SESSION_ID_PATTERN, MAX_SESSION_ID_LENGTH);
+				const { profileId, harnessId } = getSessionProfileIdentity(header);
+				if (!sessionId || sessionId === currentSessionId || !harnessId) continue;
+				const parsedTimestamp = Date.parse(header.timestamp);
+				const timestamp = Number.isNaN(parsedTimestamp)
+					? stats.mtime.toISOString()
+					: new Date(parsedTimestamp).toISOString();
+				sessions.push({
+					session: {
+						sessionId,
+						harnessId,
+						sessionPath,
+						profileId,
+						timestamp,
+						fileDevice: openedStats.dev,
+						fileInode: openedStats.ino,
+					},
+					modifiedTime: stats.mtimeMs,
+				});
+			} catch {
+				// A corrupt file or discovery race must not hide other valid sessions.
+			}
+		}
+	} catch {
+		return [];
+	}
+	sessions.sort((a, b) => {
+		const timeDifference = b.modifiedTime - a.modifiedTime;
+		return timeDifference !== 0 ? timeDifference : a.session.sessionPath.localeCompare(b.session.sessionPath);
+	});
+	return sessions.map(({ session }) => session);
 }
 
 function getSessionHeaderCwd(header: SessionHeader): string | undefined {
@@ -754,6 +936,7 @@ async function buildSessionInfo(filePath: string): Promise<SessionInfo | null> {
 
 		const cwd = typeof header.cwd === "string" ? header.cwd : "";
 		const parentSessionPath = header.parentSession;
+		const { profileId, harnessId } = getSessionProfileIdentity(header);
 		const headerTime = typeof header.timestamp === "string" ? new Date(header.timestamp).getTime() : NaN;
 		const modified =
 			typeof lastActivityTime === "number" && lastActivityTime > 0
@@ -768,6 +951,8 @@ async function buildSessionInfo(filePath: string): Promise<SessionInfo | null> {
 			cwd,
 			name,
 			parentSessionPath,
+			profileId,
+			harnessId,
 			created: new Date(header.timestamp),
 			modified,
 			messageCount,
@@ -879,6 +1064,7 @@ export class SessionManager {
 	private labelsById: Map<string, string> = new Map();
 	private labelTimestampsById: Map<string, string> = new Map();
 	private leafId: string | null = null;
+	private sessionFileIdentity: SessionFileIdentity | undefined;
 
 	private constructor(
 		cwd: string,
@@ -887,6 +1073,7 @@ export class SessionManager {
 		persist: boolean,
 		newSessionOptions?: NewSessionOptions,
 		preloadedFileEntries?: FileEntry[],
+		sessionFileIdentity?: SessionFileIdentity,
 	) {
 		this.cwd = resolvePath(cwd);
 		this.sessionDir = normalizePath(sessionDir);
@@ -896,7 +1083,7 @@ export class SessionManager {
 		}
 
 		if (sessionFile) {
-			this._setSessionFile(sessionFile, preloadedFileEntries);
+			this._setSessionFile(sessionFile, preloadedFileEntries, sessionFileIdentity);
 		} else {
 			this.newSession(newSessionOptions);
 		}
@@ -904,12 +1091,17 @@ export class SessionManager {
 
 	/** Switch to a different session file (used for resume and branching) */
 	setSessionFile(sessionFile: string): void {
-		this._setSessionFile(sessionFile);
+		this._setSessionFile(sessionFile, undefined, undefined);
 	}
 
-	private _setSessionFile(sessionFile: string, preloadedFileEntries?: FileEntry[]): void {
+	private _setSessionFile(
+		sessionFile: string,
+		preloadedFileEntries?: FileEntry[],
+		sessionFileIdentity?: SessionFileIdentity,
+	): void {
 		this.sessionFile = resolvePath(sessionFile);
-		if (existsSync(this.sessionFile)) {
+		this.sessionFileIdentity = sessionFileIdentity;
+		if (preloadedFileEntries !== undefined || existsSync(this.sessionFile)) {
 			this.fileEntries = preloadedFileEntries ?? loadEntriesFromFile(this.sessionFile);
 
 			// If file was empty, initialize it with a valid session header. If it was
@@ -947,7 +1139,9 @@ export class SessionManager {
 			assertValidSessionId(options.id);
 		}
 		this.sessionId = options?.id ?? createSessionId();
+		this.sessionFileIdentity = undefined;
 		const timestamp = new Date().toISOString();
+		const relatedSessions = normalizeRelatedSessionReferences(options?.relatedSessions, this.sessionId);
 		const header: SessionHeader = {
 			type: "session",
 			version: CURRENT_SESSION_VERSION,
@@ -956,6 +1150,7 @@ export class SessionManager {
 			cwd: this.cwd,
 			parentSession: options?.parentSession,
 			profile: options?.profile,
+			...(relatedSessions.length > 0 ? { relatedSessions } : {}),
 		};
 		this.fileEntries = [header];
 		this.byId.clear();
@@ -992,10 +1187,43 @@ export class SessionManager {
 		}
 	}
 
+	private _openVerifiedSessionFile(flags: number): number {
+		if (!this.sessionFile) throw new Error("Cannot open a session without a session file");
+		const fd = openSync(this.sessionFile, flags | NO_FOLLOW_FILE_FLAG);
+		if (!this.sessionFileIdentity) return fd;
+		const stats = fstatSync(fd);
+		if (
+			!stats.isFile() ||
+			stats.dev !== this.sessionFileIdentity.device ||
+			stats.ino !== this.sessionFileIdentity.inode
+		) {
+			closeSync(fd);
+			throw new Error(`Session file changed before it could be updated: ${this.sessionId}`);
+		}
+		return fd;
+	}
+
+	private _appendToSessionFile(content: string): void {
+		if (!this.sessionFile) return;
+		if (!this.sessionFileIdentity) {
+			appendFileSync(this.sessionFile, content);
+			return;
+		}
+		const fd = this._openVerifiedSessionFile(constants.O_WRONLY | constants.O_APPEND);
+		try {
+			writeFileSync(fd, content);
+		} finally {
+			closeSync(fd);
+		}
+	}
+
 	private _rewriteFile(): void {
 		if (!this.persist || !this.sessionFile) return;
-		const fd = openSync(this.sessionFile, "w");
+		const fd = this.sessionFileIdentity
+			? this._openVerifiedSessionFile(constants.O_WRONLY)
+			: openSync(this.sessionFile, "w");
 		try {
+			if (this.sessionFileIdentity) ftruncateSync(fd, 0);
 			for (const entry of this.fileEntries) {
 				writeFileSync(fd, `${JSON.stringify(entry)}\n`);
 			}
@@ -1028,13 +1256,103 @@ export class SessionManager {
 		return this.sessionFile;
 	}
 
+	/** Return a defensive copy of the current session's validated relation metadata. */
+	getRelatedSessions(): RelatedSessionReference[] {
+		return normalizeRelatedSessionReferences(this.getHeader()?.relatedSessions, this.sessionId);
+	}
+
+	/** Replace the current session's relation metadata and persist it when the session is already on disk. */
+	setRelatedSessions(references: readonly RelatedSessionReference[]): void {
+		const header = this.getHeader();
+		if (!header) throw new Error("Cannot attach related sessions without a session header");
+		const normalized = normalizeRelatedSessionReferences(references, this.sessionId);
+		if (normalized.length > 0) {
+			header.relatedSessions = normalized;
+		} else {
+			delete header.relatedSessions;
+		}
+		if (this.flushed) this._rewriteFile();
+	}
+
+	/** Merge new relations into the current set, prioritizing the newly supplied references. */
+	mergeRelatedSessions(references: readonly RelatedSessionReference[]): void {
+		this.setRelatedSessions(mergeRelatedSessionReferences(this.getRelatedSessions(), references, this.sessionId));
+	}
+
+	/** Resolve current or supplied relation metadata using bounded headers in this manager's session directory. */
+	discoverRelatedSessions(
+		references: readonly RelatedSessionReference[] = this.getRelatedSessions(),
+	): DiscoveredRelatedSession[] {
+		const normalized = normalizeRelatedSessionReferences(references, this.sessionId);
+		const expectedBySessionId = new Map(normalized.map((reference) => [reference.sessionId, reference.harnessId]));
+		const candidates = discoverHarnessSessionsInDirectory(
+			this.sessionDir,
+			this.sessionId,
+			new Set(expectedBySessionId.keys()),
+		);
+		const sessionIdCounts = new Map<string, number>();
+		for (const candidate of candidates) {
+			sessionIdCounts.set(candidate.sessionId, (sessionIdCounts.get(candidate.sessionId) ?? 0) + 1);
+		}
+		const seenSessionIds = new Set<string>();
+		return candidates.filter((session) => {
+			if (seenSessionIds.has(session.sessionId)) return false;
+			if (sessionIdCounts.get(session.sessionId) !== 1) return false;
+			if (expectedBySessionId.get(session.sessionId) !== session.harnessId) return false;
+			seenSessionIds.add(session.sessionId);
+			return true;
+		});
+	}
+
+	/** Open a related transcript from one no-follow descriptor and pin later writes to that inode. */
+	openDiscoveredRelatedSession(discovered: DiscoveredRelatedSession): SessionManager {
+		if (dirname(resolvePath(discovered.sessionPath)) !== resolvePath(this.sessionDir)) {
+			throw new Error(`Related session is outside the current session directory: ${discovered.sessionId}`);
+		}
+		const stats = lstatSync(discovered.sessionPath);
+		if (
+			!stats.isFile() ||
+			stats.isSymbolicLink() ||
+			stats.dev !== discovered.fileDevice ||
+			stats.ino !== discovered.fileInode
+		) {
+			throw new Error(`Related session changed before it could be opened: ${discovered.sessionId}`);
+		}
+		const fd = openSync(discovered.sessionPath, constants.O_RDONLY | NO_FOLLOW_FILE_FLAG);
+		try {
+			const openedStats = fstatSync(fd);
+			if (
+				!openedStats.isFile() ||
+				openedStats.dev !== discovered.fileDevice ||
+				openedStats.ino !== discovered.fileInode
+			) {
+				throw new Error(`Related session changed while it was being opened: ${discovered.sessionId}`);
+			}
+			const entries = loadEntriesFromDescriptor(fd);
+			const header = entries[0];
+			if (
+				header?.type !== "session" ||
+				header.id !== discovered.sessionId ||
+				header.profile?.harnessId !== discovered.harnessId
+			) {
+				throw new Error(`Related session identity changed while it was being opened: ${discovered.sessionId}`);
+			}
+			return new SessionManager(header.cwd, this.sessionDir, discovered.sessionPath, true, undefined, entries, {
+				device: openedStats.dev,
+				inode: openedStats.ino,
+			});
+		} finally {
+			closeSync(fd);
+		}
+	}
+
 	_persist(entry: SessionEntry): void {
 		if (!this.persist || !this.sessionFile) return;
 
 		const hasAssistant = this.fileEntries.some((e) => e.type === "message" && e.message.role === "assistant");
 		if (!hasAssistant) {
 			if (this.flushed) {
-				appendFileSync(this.sessionFile, `${JSON.stringify(entry)}\n`);
+				this._appendToSessionFile(`${JSON.stringify(entry)}\n`);
 			} else {
 				// Mark as not flushed so when assistant arrives, all entries get written
 				this.flushed = false;
@@ -1045,6 +1363,8 @@ export class SessionManager {
 		if (!this.flushed) {
 			const fd = openSync(this.sessionFile, "wx");
 			try {
+				const stats = fstatSync(fd);
+				this.sessionFileIdentity = { device: stats.dev, inode: stats.ino };
 				for (const e of this.fileEntries) {
 					writeFileSync(fd, `${JSON.stringify(e)}\n`);
 				}
@@ -1053,7 +1373,7 @@ export class SessionManager {
 			}
 			this.flushed = true;
 		} else {
-			appendFileSync(this.sessionFile, `${JSON.stringify(entry)}\n`);
+			this._appendToSessionFile(`${JSON.stringify(entry)}\n`);
 		}
 	}
 
@@ -1462,6 +1782,7 @@ export class SessionManager {
 		const timestamp = new Date().toISOString();
 		const fileTimestamp = timestamp.replace(/[:.]/g, "-");
 		const newSessionFile = join(this.getSessionDir(), `${fileTimestamp}_${newSessionId}.jsonl`);
+		const branchedRelatedSessions = normalizeRelatedSessionReferences(this.getRelatedSessions(), newSessionId);
 
 		const header: SessionHeader = {
 			type: "session",
@@ -1471,6 +1792,7 @@ export class SessionManager {
 			cwd: this.cwd,
 			parentSession: this.persist ? previousSessionFile : undefined,
 			profile: this.getHeader()?.profile,
+			...(branchedRelatedSessions.length > 0 ? { relatedSessions: branchedRelatedSessions } : {}),
 		};
 
 		// Collect labels for entries in the path
@@ -1504,6 +1826,7 @@ export class SessionManager {
 			this.fileEntries = [header, ...pathWithoutLabels, ...labelEntries];
 			this.sessionId = newSessionId;
 			this.sessionFile = newSessionFile;
+			this.sessionFileIdentity = undefined;
 			this._buildIndex();
 
 			// Only write the file now if it contains an assistant message.
@@ -1639,6 +1962,10 @@ export class SessionManager {
 		const timestamp = new Date().toISOString();
 		const fileTimestamp = timestamp.replace(/[:.]/g, "-");
 		const newSessionFile = join(dir, `${fileTimestamp}_${newSessionId}.jsonl`);
+		const forkRelatedSessions = normalizeRelatedSessionReferences(
+			options?.relatedSessions ?? sourceHeader.relatedSessions,
+			newSessionId,
+		);
 
 		// Write new header pointing to source as parent, with updated cwd
 		const newHeader: SessionHeader = {
@@ -1649,6 +1976,7 @@ export class SessionManager {
 			cwd: resolvedTargetCwd,
 			parentSession: resolvedSourcePath,
 			profile: sourceHeader.profile,
+			...(forkRelatedSessions.length > 0 ? { relatedSessions: forkRelatedSessions } : {}),
 		};
 		writeFileSync(newSessionFile, `${JSON.stringify(newHeader)}\n`, { flag: "wx" });
 
