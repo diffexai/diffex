@@ -7,6 +7,7 @@ import { stripFrontmatter } from "../utils/frontmatter.ts";
 import { resolvePath } from "../utils/paths.ts";
 import type { AgentSession, PromptOptions } from "./agent-session.ts";
 import type { AgentSessionRuntimeDiagnostic, AgentSessionServices } from "./agent-session-services.ts";
+import { loadEvolvedNotes } from "./evolved.ts";
 import type {
 	ProjectTrustContext,
 	ReplacedSessionContext,
@@ -19,7 +20,7 @@ import {
 	loadHarnessDescriptors,
 	type ResolvedHarnessDescriptor,
 } from "./harness-descriptors.ts";
-import { routeTaskProfile } from "./profile-router.ts";
+import { routeTaskBoundary, routeTaskProfile, shouldEvaluateTaskBoundary } from "./profile-router.ts";
 import type { ResolvedTaskProfile } from "./profiles.ts";
 import { expandPromptTemplate } from "./prompt-templates.ts";
 import { startProfileRouteSpan, traceAiCompletion } from "./runtime-telemetry.ts";
@@ -75,10 +76,33 @@ export interface ProfileSwitchEvent {
 	notice: string;
 }
 
+/** Content-free task-boundary proposal presented by a host before a future prompt is delivered. */
+export interface TaskBoundaryProposal {
+	decision: "reuse" | "select";
+	fromProfileId: string;
+	fromHarnessId: string;
+	toProfileId: string;
+	targetHarnessId?: string;
+	targetHarnessRevision?: string;
+	targetHarnessName: string;
+	confidence: number;
+}
+
+export type TaskBoundaryResolution = "switch" | "stay" | "cancel";
+export type TaskBoundaryResolver = (proposal: TaskBoundaryProposal) => Promise<TaskBoundaryResolution>;
+
+export class TaskBoundaryCancelledError extends Error {
+	constructor(message = "Task boundary switch cancelled") {
+		super(message);
+		this.name = "TaskBoundaryCancelledError";
+	}
+}
+
 interface PreparedRuntimePrompt {
 	result: RuntimePromptResult;
 	completion: Promise<void>;
 	accepted: boolean;
+	cancelledError?: TaskBoundaryCancelledError;
 	resolution?: {
 		prompt: string;
 		messageCountBefore: number;
@@ -131,8 +155,6 @@ function extractUserMessageText(content: string | Array<{ type: string; text?: s
 
 const ROUTING_CONTEXT_MAX_CHARS = 6_000;
 const ROUTING_TIMEOUT_MS = 15_000;
-/** The router prompt bounds user text at 8k and recent context at 12k characters, plus candidates. */
-const MIN_ROUTER_CONTEXT_WINDOW = 32_000;
 const BUILTIN_SLASH_COMMAND_NAMES = new Set(BUILTIN_SLASH_COMMANDS.map((command) => command.name));
 const ROUTE_FALLBACK_TELEMETRY = {
 	"completion-error": "completion_error",
@@ -236,6 +258,7 @@ export class AgentSessionRuntime {
 	private rebindSession?: (session: AgentSession) => Promise<void>;
 	private beforeSessionInvalidate?: () => void;
 	private profileSwitchListener?: (event: ProfileSwitchEvent) => void;
+	private taskBoundaryResolver?: TaskBoundaryResolver;
 	private _session: AgentSession;
 	private _services: AgentSessionServices;
 	private readonly createRuntime: CreateAgentSessionRuntimeFactory;
@@ -316,6 +339,10 @@ export class AgentSessionRuntime {
 
 	setProfileSwitchListener(listener?: (event: ProfileSwitchEvent) => void): void {
 		this.profileSwitchListener = listener;
+	}
+
+	setTaskBoundaryResolver(resolver?: TaskBoundaryResolver): void {
+		this.taskBoundaryResolver = resolver;
 	}
 
 	/**
@@ -738,7 +765,7 @@ export class AgentSessionRuntime {
 		return { cancelled: false };
 	}
 
-	/** Pick the model used once, after the default profile completes the initial accepted task turn. */
+	/** Use the active model unless the user explicitly configures a dedicated router model. */
 	private resolveProfileRouterModel(sessionModel: Model<Api>): Model<Api> {
 		const configured = this.services.settingsManager.getRouterModel();
 		if (configured) {
@@ -749,18 +776,7 @@ export class AgentSessionRuntime {
 				.find((candidate) => candidate.id === id);
 			if (match) return match;
 		}
-		const sessionInputCost = sessionModel.cost?.input;
-		const cheapest = this.session.modelRuntime
-			.getModels(sessionModel.provider)
-			.filter(
-				(candidate) =>
-					candidate.api === sessionModel.api &&
-					(candidate.contextWindow ?? 0) >= MIN_ROUTER_CONTEXT_WINDOW &&
-					typeof candidate.cost?.input === "number" &&
-					(sessionInputCost === undefined || candidate.cost.input < sessionInputCost),
-			)
-			.sort((left, right) => (left.cost?.input ?? 0) - (right.cost?.input ?? 0))[0];
-		return cheapest ?? sessionModel;
+		return sessionModel;
 	}
 
 	private async completeProfileRoute(
@@ -850,6 +866,301 @@ export class AgentSessionRuntime {
 		return { result, completion, accepted };
 	}
 
+	private cancelPreparedPrompt(options: PromptOptions | undefined, message?: string): PreparedRuntimePrompt {
+		options?.preflightResult?.(false);
+		return {
+			result: {
+				routing: "failed",
+				activeProfileId: this.activeProfile.id,
+				...(this._activeHarness
+					? { harnessId: this._activeHarness.id, harnessRevision: this._activeHarness.revision }
+					: {}),
+			},
+			completion: Promise.resolve(),
+			accepted: false,
+			cancelledError: new TaskBoundaryCancelledError(message),
+		};
+	}
+
+	private async startLinkedHarnessSession(
+		harness: ResolvedHarnessDescriptor,
+		profile: ResolvedTaskProfile,
+	): Promise<void> {
+		const previousSessionFile = this.session.sessionFile;
+		const sessionDir = this.session.sessionManager.getSessionDir();
+		const sessionManager = this.session.sessionManager.isPersisted()
+			? SessionManager.create(this.cwd, sessionDir, { parentSession: previousSessionFile })
+			: SessionManager.inMemory(this.cwd, { parentSession: previousSessionFile });
+		const nextRuntime = await this.createRuntime({
+			cwd: this.cwd,
+			agentDir: this.services.agentDir,
+			sessionManager,
+			profile: profile.id,
+			profileRouting: "auto",
+			harnessId: harness.id,
+			telemetryContext: this.services.telemetryContext,
+			telemetryCapture: this.services.telemetryCapture,
+			sessionStartEvent: { type: "session_start", reason: "new", previousSessionFile },
+		});
+		await this.teardownCurrent("new", sessionManager.getSessionFile());
+		this.apply(nextRuntime, "auto", harness.id);
+		await this.finishSessionReplacement();
+	}
+
+	private async prepareFutureTaskPrompt(
+		text: string,
+		routingPrompt: string,
+		options: PromptOptions | undefined,
+	): Promise<PreparedRuntimePrompt> {
+		const resolver = this.taskBoundaryResolver;
+		const currentHarness = this._activeHarness;
+		const currentProfile = this.activeProfile;
+		if (!resolver || !currentHarness) {
+			return this.startSessionPrompt(text, options, {
+				routing: "bypassed",
+				activeProfileId: currentProfile.id,
+				harnessId: currentHarness?.id,
+				harnessRevision: currentHarness?.revision,
+			});
+		}
+		if (text.trim().length === 0) {
+			return this.startSessionPrompt(text, options, {
+				routing: "bypassed",
+				activeProfileId: currentProfile.id,
+				harnessId: currentHarness.id,
+				harnessRevision: currentHarness.revision,
+			});
+		}
+
+		const profiles = this.services.resourceLoader
+			.getProfiles()
+			.profiles.filter((profile) => profile.origin === "builtin" && profile.immutable);
+		const loadedHarnesses = loadHarnessDescriptors({
+			agentDir: this.services.agentDir,
+			notes: this.services.resourceLoader.getEvolvedNotes().evolvedNotes,
+		});
+		for (const diagnostic of loadedHarnesses.diagnostics) {
+			this.appendDiagnostic(`Could not load harness descriptor ${diagnostic.path}: ${diagnostic.message}`);
+		}
+		const reusableHarnesses = loadedHarnesses.harnesses.filter(
+			(harness) =>
+				harness.id !== currentHarness.id &&
+				harness.harnessNoteCount > 0 &&
+				profiles.some((profile) => profile.id === harness.baseProfileId),
+		);
+		const input = {
+			prompt: routingPrompt,
+			recentTaskContext: buildRecentTaskContext(this.session.messages),
+			candidates: profiles,
+			harnesses: reusableHarnesses,
+			currentProfile,
+			currentHarness,
+		};
+		if (!shouldEvaluateTaskBoundary(input)) {
+			return this.startSessionPrompt(text, options, {
+				routing: "bypassed",
+				activeProfileId: currentProfile.id,
+				harnessId: currentHarness.id,
+				harnessRevision: currentHarness.revision,
+			});
+		}
+
+		const startingSession = this.session;
+		return startProfileRouteSpan(
+			this.services.telemetryContext,
+			{
+				sessionId: this.session.sessionManager.getSessionId(),
+				routingMode: this._profileRouting,
+				trigger: "future_turn",
+				currentProfileId: currentProfile.id,
+				currentHarnessId: currentHarness.id,
+				sessionEstablished: true,
+			},
+			async ({ context: routeContext, complete }) => {
+				const decision = await routeTaskBoundary(input, (routerPrompt) =>
+					this.completeProfileRoute(routerPrompt, routeContext),
+				);
+				if (this.session !== startingSession || this._activeHarness?.id !== currentHarness.id) {
+					complete({ outcome: "failed", targetProfileId: currentProfile.id, harnessId: currentHarness.id });
+					return this.cancelPreparedPrompt(options, "Session changed while task boundary routing was pending");
+				}
+				if (decision.fallback) {
+					const detail = decision.fallbackDetail ? `: ${decision.fallbackDetail}` : "";
+					this.appendDiagnostic(`Task boundary router used ${decision.fallback} fallback${detail}`, true);
+				}
+				if (decision.decision === "stay") {
+					complete({
+						outcome: "stayed",
+						targetProfileId: currentProfile.id,
+						harnessId: currentHarness.id,
+						confidence: decision.confidence,
+						...(decision.fallback ? { fallback: ROUTE_FALLBACK_TELEMETRY[decision.fallback] } : {}),
+					});
+					return this.startSessionPrompt(text, options, {
+						routing: "bypassed",
+						activeProfileId: currentProfile.id,
+						harnessId: currentHarness.id,
+						harnessRevision: currentHarness.revision,
+					});
+				}
+
+				const targetHarness =
+					decision.decision === "reuse"
+						? reusableHarnesses.find((harness) => harness.id === decision.harnessId)
+						: undefined;
+				const targetProfile = profiles.find(
+					(profile) => profile.id === (targetHarness?.baseProfileId ?? decision.profileId),
+				);
+				if (!targetProfile || (decision.decision === "reuse" && !targetHarness)) {
+					complete({ outcome: "failed", targetProfileId: currentProfile.id, harnessId: currentHarness.id });
+					return this.cancelPreparedPrompt(options, "Task boundary target is no longer available");
+				}
+				const proposal: TaskBoundaryProposal = {
+					decision: decision.decision,
+					fromProfileId: currentProfile.id,
+					fromHarnessId: currentHarness.id,
+					toProfileId: targetProfile.id,
+					targetHarnessName: targetHarness?.name ?? decision.harnessName ?? "New task",
+					confidence: decision.confidence,
+					...(targetHarness
+						? { targetHarnessId: targetHarness.id, targetHarnessRevision: targetHarness.revision }
+						: {}),
+				};
+				let resolution: TaskBoundaryResolution;
+				try {
+					resolution = await resolver(proposal);
+				} catch (error) {
+					const message = error instanceof Error ? error.message : String(error);
+					this.appendDiagnostic(`Task boundary confirmation failed: ${message}`);
+					complete({ outcome: "failed", targetProfileId: currentProfile.id, harnessId: currentHarness.id });
+					return this.cancelPreparedPrompt(options, `Task boundary confirmation failed: ${message}`);
+				}
+				if (this.session !== startingSession || this._activeHarness?.id !== currentHarness.id) {
+					complete({ outcome: "failed", targetProfileId: currentProfile.id, harnessId: currentHarness.id });
+					return this.cancelPreparedPrompt(
+						options,
+						"Session changed while task boundary confirmation was pending",
+					);
+				}
+				if (resolution === "stay") {
+					complete({
+						outcome: "declined",
+						targetProfileId: currentProfile.id,
+						harnessId: currentHarness.id,
+						confidence: decision.confidence,
+					});
+					return this.startSessionPrompt(text, options, {
+						routing: "bypassed",
+						activeProfileId: currentProfile.id,
+						harnessId: currentHarness.id,
+						harnessRevision: currentHarness.revision,
+					});
+				}
+				if (resolution !== "switch") {
+					complete({
+						outcome: "declined",
+						targetProfileId: currentProfile.id,
+						harnessId: currentHarness.id,
+						confidence: decision.confidence,
+					});
+					return this.cancelPreparedPrompt(options);
+				}
+
+				let validatedTargetHarness = targetHarness;
+				if (targetHarness) {
+					const currentNotes = loadEvolvedNotes({
+						agentDir: this.services.agentDir,
+						cwd: this.cwd,
+						projectTrusted: this.services.settingsManager.isProjectTrusted(),
+					});
+					for (const diagnostic of currentNotes.diagnostics) {
+						this.appendDiagnostic(`Could not refresh evolved notes ${diagnostic.path}: ${diagnostic.message}`);
+					}
+					const refreshedHarnesses = loadHarnessDescriptors({
+						agentDir: this.services.agentDir,
+						notes: currentNotes.notes,
+					});
+					for (const diagnostic of refreshedHarnesses.diagnostics) {
+						this.appendDiagnostic(
+							`Could not refresh harness descriptor ${diagnostic.path}: ${diagnostic.message}`,
+						);
+					}
+					validatedTargetHarness = refreshedHarnesses.harnesses.find((harness) => harness.id === targetHarness.id);
+					if (
+						!validatedTargetHarness ||
+						validatedTargetHarness.baseProfileId !== targetHarness.baseProfileId ||
+						validatedTargetHarness.revision !== targetHarness.revision
+					) {
+						complete({ outcome: "failed", targetProfileId: currentProfile.id, harnessId: currentHarness.id });
+						return this.cancelPreparedPrompt(
+							options,
+							"The selected evolved harness changed while confirmation was pending",
+						);
+					}
+				}
+
+				let harness: ResolvedHarnessDescriptor;
+				try {
+					const beforeResult = await this.emitBeforeSwitch("new");
+					if (beforeResult.cancelled) {
+						complete({ outcome: "failed", targetProfileId: currentProfile.id, harnessId: currentHarness.id });
+						return this.cancelPreparedPrompt(options, "Task boundary switch was blocked by a session hook");
+					}
+					harness =
+						validatedTargetHarness ??
+						createHarnessDescriptor({
+							agentDir: this.services.agentDir,
+							name: decision.harnessName ?? "New task",
+							description: decision.harnessDescription ?? "Harness for a new task.",
+							baseProfileId: targetProfile.id,
+							notes: this.services.resourceLoader.getEvolvedNotes().evolvedNotes,
+						});
+					await this.startLinkedHarnessSession(harness, targetProfile);
+				} catch (error) {
+					const message = error instanceof Error ? error.message : String(error);
+					complete({ outcome: "failed", targetProfileId: currentProfile.id, harnessId: currentHarness.id });
+					return this.cancelPreparedPrompt(options, `Task boundary switch failed: ${message}`);
+				}
+
+				const reused = decision.decision === "reuse";
+				const notice = reused
+					? `Found evolved harness "${harness.name}" for this task. Switched to revision ${harness.revision.slice(0, 12)}.`
+					: `Created harness "${harness.name}" using the ${targetProfile.name} prompt profile.`;
+				try {
+					this.profileSwitchListener?.({
+						fromProfileId: currentProfile.id,
+						toProfileId: targetProfile.id,
+						reason: decision.reason,
+						harnessId: harness.id,
+						harnessRevision: harness.revision,
+						harnessName: harness.name,
+						reused,
+						notice,
+					});
+				} catch (error) {
+					this.appendDiagnostic(
+						`Task profile switch listener failed: ${error instanceof Error ? error.message : String(error)}`,
+					);
+				}
+				complete({
+					outcome: reused ? "reused" : "selected",
+					targetProfileId: targetProfile.id,
+					harnessId: harness.id,
+					confidence: decision.confidence,
+				});
+				return this.startSessionPrompt(text, options, {
+					routing: reused ? "reused" : "selected",
+					activeProfileId: targetProfile.id,
+					previousProfileId: currentProfile.id,
+					harnessId: harness.id,
+					harnessRevision: harness.revision,
+					notice,
+					reason: decision.reason,
+				});
+			},
+		);
+	}
+
 	private async preparePrompt(text: string, options: PromptOptions | undefined): Promise<PreparedRuntimePrompt> {
 		const routingPrompt = resolvePromptForProfileRouting(this.session, text);
 		if (
@@ -863,8 +1174,7 @@ export class AgentSessionRuntime {
 		}
 		if (
 			this._profileRouting === "pinned" ||
-			this._activeHarness !== undefined ||
-			this.harnessResolutionClaimed ||
+			(this._activeHarness === undefined && this.harnessResolutionClaimed) ||
 			routingPrompt === undefined
 		) {
 			return this.startSessionPrompt(text, options, {
@@ -874,6 +1184,17 @@ export class AgentSessionRuntime {
 					? { harnessId: this._activeHarness.id, harnessRevision: this._activeHarness.revision }
 					: {}),
 			});
+		}
+		if (this._activeHarness !== undefined) {
+			if (this.session.isStreaming || this.session.isCompacting || options?.streamingBehavior !== undefined) {
+				return this.startSessionPrompt(text, options, {
+					routing: "bypassed",
+					activeProfileId: this.activeProfile.id,
+					harnessId: this._activeHarness.id,
+					harnessRevision: this._activeHarness.revision,
+				});
+			}
+			return this.prepareFutureTaskPrompt(text, routingPrompt, options);
 		}
 
 		this.harnessResolutionClaimed = true;
@@ -915,6 +1236,7 @@ export class AgentSessionRuntime {
 			{
 				sessionId: this.session.sessionManager.getSessionId(),
 				routingMode: this._profileRouting,
+				trigger: "initial_turn",
 				currentProfileId: previousProfileId,
 				sessionEstablished: true,
 			},
@@ -1017,6 +1339,7 @@ export class AgentSessionRuntime {
 	/** Run the accepted first task on DEFAULT, then resolve this session's harness exactly once. */
 	async prompt(text: string, options?: PromptOptions): Promise<RuntimePromptResult> {
 		const prepared = await this.enqueuePromptPreparation(() => this.preparePrompt(text, options));
+		if (prepared.cancelledError) throw prepared.cancelledError;
 		try {
 			await prepared.completion;
 		} catch (error) {

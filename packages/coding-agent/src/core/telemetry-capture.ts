@@ -24,7 +24,9 @@ export interface EvolutionToolSignal {
 }
 
 export interface EvolutionRouteSignal {
-	outcome: "bypassed" | "selected" | "reused" | "failed";
+	trigger?: "initial_turn" | "future_turn";
+	currentHarnessId?: string;
+	outcome: "bypassed" | "selected" | "reused" | "stayed" | "declined" | "failed";
 	targetProfileId?: string;
 	harnessId?: string;
 	fallback?: "completion_error" | "invalid_output" | "low_confidence";
@@ -107,14 +109,25 @@ export function readEvolutionTraceSnapshot(
 				break;
 			}
 			case "pi.harness.profile_route": {
+				const trigger = span.attributes["pi.routing.trigger"];
 				const outcome = span.attributes["pi.routing.outcome"];
-				if (outcome !== "bypassed" && outcome !== "selected" && outcome !== "reused" && outcome !== "failed") {
+				if (
+					outcome !== "bypassed" &&
+					outcome !== "selected" &&
+					outcome !== "reused" &&
+					outcome !== "stayed" &&
+					outcome !== "declined" &&
+					outcome !== "failed"
+				) {
 					break;
 				}
+				const currentHarnessId = span.attributes["pi.routing.current_harness_id"];
 				const targetProfileId = span.attributes["pi.routing.target_profile_id"];
 				const harnessId = span.attributes["pi.routing.harness_id"];
 				const fallback = span.attributes["pi.routing.fallback"];
 				routes.push({
+					...(trigger === "initial_turn" || trigger === "future_turn" ? { trigger } : {}),
+					...(typeof currentHarnessId === "string" ? { currentHarnessId } : {}),
 					outcome,
 					...(typeof targetProfileId === "string" ? { targetProfileId } : {}),
 					...(typeof harnessId === "string" ? { harnessId } : {}),

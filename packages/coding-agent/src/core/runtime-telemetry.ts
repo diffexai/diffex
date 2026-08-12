@@ -10,12 +10,14 @@ import type { Api, AssistantMessage, Model } from "@earendil-works/pi-ai";
 export interface ProfileRouteSpanStart {
 	sessionId: string;
 	routingMode: "auto" | "pinned";
+	trigger: "initial_turn" | "future_turn";
 	currentProfileId: string;
+	currentHarnessId?: string;
 	sessionEstablished: boolean;
 }
 
 export interface ProfileRouteSpanResult {
-	outcome: "bypassed" | "selected" | "reused" | "failed";
+	outcome: "bypassed" | "selected" | "reused" | "stayed" | "declined" | "failed";
 	targetProfileId?: string;
 	harnessId?: string;
 	confidence?: number;
@@ -40,7 +42,9 @@ export function startProfileRouteSpan<Result>(
 		{
 			"pi.session.id": start.sessionId,
 			"pi.routing.mode": start.routingMode,
+			"pi.routing.trigger": start.trigger,
 			"pi.routing.current_profile_id": start.currentProfileId,
+			...(start.currentHarnessId ? { "pi.routing.current_harness_id": start.currentHarnessId } : {}),
 			"pi.routing.session_established": start.sessionEstablished,
 		},
 		async (span) => {

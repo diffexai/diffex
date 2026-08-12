@@ -273,7 +273,7 @@ const operationErrorAttributes = {
 } as const;
 
 export const HARNESS_TELEMETRY_SCHEMA = {
-	version: 2,
+	version: 3,
 	spans: {
 		"pi.harness.run": {
 			description: "One admitted in-process run invocation",
@@ -508,11 +508,23 @@ export const HARNESS_TELEMETRY_SCHEMA = {
 					values: ["auto", "pinned"],
 					description: "Configured profile-routing mode",
 				},
+				"pi.routing.trigger": {
+					type: "string",
+					required: true,
+					values: ["initial_turn", "future_turn"],
+					description: "Turn phase that triggered the routing pass",
+				},
 				"pi.routing.current_profile_id": {
 					type: "string",
 					required: true,
 					cardinality: "high",
 					description: "Profile active before routing",
+				},
+				"pi.routing.current_harness_id": {
+					type: "string",
+					required: false,
+					cardinality: "high",
+					description: "Harness active before routing, when one is established",
 				},
 				"pi.routing.session_established": {
 					type: "boolean",
@@ -523,18 +535,18 @@ export const HARNESS_TELEMETRY_SCHEMA = {
 			endAttributes: {
 				"pi.routing.outcome": {
 					type: "string",
-					values: ["bypassed", "selected", "reused", "failed"],
-					description: "Applied routing outcome",
+					values: ["bypassed", "selected", "reused", "stayed", "declined", "failed"],
+					description: "Closed routing outcome",
 				},
 				"pi.routing.target_profile_id": {
 					type: "string",
 					cardinality: "high",
-					description: "Profile active after routing",
+					description: "Profile selected, proposed, or retained by routing",
 				},
 				"pi.routing.harness_id": {
 					type: "string",
 					cardinality: "high",
-					description: "Stable identifier of the selected or reused harness",
+					description: "Stable harness identifier associated with the routing outcome",
 				},
 				"pi.routing.confidence": {
 					type: "number",

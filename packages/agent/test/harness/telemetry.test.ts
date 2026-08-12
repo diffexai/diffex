@@ -121,9 +121,16 @@ describe("agent telemetry schemas", () => {
 	it("infers per-span harness literals and optional completion enrichment", async () => {
 		type RunStart = HarnessSpanStartAttributes<"pi.harness.run">;
 		type RunEnd = HarnessSpanEndAttributes<"pi.harness.run">;
+		type ProfileRouteStart = HarnessSpanStartAttributes<"pi.harness.profile_route">;
+		type ProfileRouteEnd = HarnessSpanEndAttributes<"pi.harness.profile_route">;
 		expectTypeOf<RunStart["pi.operation.kind"]>().toEqualTypeOf<"run">();
 		expectTypeOf<RunEnd["pi.operation.outcome"]>().toEqualTypeOf<
 			"completed" | "aborted" | "failed" | "suspended" | undefined
+		>();
+		expectTypeOf<ProfileRouteStart["pi.routing.trigger"]>().toEqualTypeOf<"initial_turn" | "future_turn">();
+		expectTypeOf<ProfileRouteStart["pi.routing.current_harness_id"]>().toEqualTypeOf<string | undefined>();
+		expectTypeOf<ProfileRouteEnd["pi.routing.outcome"]>().toEqualTypeOf<
+			"bypassed" | "selected" | "reused" | "stayed" | "declined" | "failed" | undefined
 		>();
 
 		const telemetryContext: TelemetryContext = NOOP_TELEMETRY_CONTEXT;
