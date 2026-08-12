@@ -37,6 +37,7 @@ const SELECT_PROPOSAL: TaskBoundaryProposal = {
 	toProfileId: "finance",
 	targetHarnessName: "Retirement planning",
 	confidence: 0.97,
+	willResumeSession: false,
 };
 
 function createContext(selection: string | undefined): TaskBoundaryContext {
@@ -75,12 +76,33 @@ describe("InteractiveMode task boundary confirmation", () => {
 			targetHarnessId: "literature-review-d4e5f6",
 			targetHarnessRevision: "revision-one",
 			targetHarnessName: "Literature review",
+			willResumeSession: true,
 		};
 
 		await expect(resolveTaskBoundary.call(context, reuseProposal)).resolves.toBe("cancel");
 		expect(context.showExtensionSelector).toHaveBeenCalledWith(
 			"New task detected\nChoose a harness for this prompt",
-			["Reuse: Literature review (research)", "Keep current: Voice API (coding)"],
+			["Resume: Literature review (research)", "Keep current: Voice API (coding)"],
+		);
+	});
+
+	test("labels harness reuse without a prior transcript as reuse", async () => {
+		const targetLabel = "Reuse: Literature review (research)";
+		const context = createContext(targetLabel);
+		const reuseProposal: TaskBoundaryProposal = {
+			...SELECT_PROPOSAL,
+			decision: "reuse",
+			toProfileId: "research",
+			targetHarnessId: "literature-review-d4e5f6",
+			targetHarnessRevision: "revision-one",
+			targetHarnessName: "Literature review",
+			willResumeSession: false,
+		};
+
+		await expect(resolveTaskBoundary.call(context, reuseProposal)).resolves.toBe("switch");
+		expect(context.showExtensionSelector).toHaveBeenCalledWith(
+			"New task detected\nChoose a harness for this prompt",
+			[targetLabel, "Keep current: Voice API (coding)"],
 		);
 	});
 

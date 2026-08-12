@@ -137,7 +137,8 @@ Candidate metadata, harness metadata, recent task context, and the user request 
 
 Decision rules:
 - stay: Use for continuations, follow-up questions, refinements, and incidental mentions of another domain.
-- reuse: Use only when the request clearly starts a materially different task and one existing evolved harness precisely matches its primary outcome.
+- reuse: Use only when the request clearly starts a materially different task and one existing reusable harness precisely matches its task identity and primary outcome.
+- Prefer reuse over select when the user explicitly returns to a prior task and a reusable harness clearly matches it.
 - select: Use only when the request clearly starts a materially different task. Select the immutable base profile that best fits it, including the active base profile when two unrelated tasks share a domain. Provide a concise harnessName and harnessDescription.
 - Do not select merely to rename a continuation. A new objective, deliverable, or real-world outcome may be a task boundary even when it uses the same base profile.
 - A greeting, thanks, transition phrase, keyword, example, file name, organization, or side question is not enough by itself.
@@ -150,7 +151,7 @@ ${JSON.stringify(harnessMetadata(input.currentHarness))}
 Active immutable base profile:
 ${JSON.stringify(candidateMetadata(input.currentProfile))}
 
-Existing evolved harnesses, excluding the active harness:
+Existing reusable harnesses, excluding the active harness:
 ${JSON.stringify(input.harnesses.map(harnessMetadata))}
 
 Available immutable base profiles:

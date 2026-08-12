@@ -26,6 +26,7 @@ export interface RpcTaskBoundaryRequestEvent {
 	targetHarnessId?: string;
 	targetHarnessRevision?: string;
 	targetHarnessName: string;
+	willResumeSession: boolean;
 	confidence: number;
 }
 

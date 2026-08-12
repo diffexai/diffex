@@ -26,7 +26,14 @@ import { expandPromptTemplate } from "./prompt-templates.ts";
 import { startProfileRouteSpan, traceAiCompletion } from "./runtime-telemetry.ts";
 import type { CreateAgentSessionResult } from "./sdk.ts";
 import { assertSessionCwdExists } from "./session-cwd.ts";
-import { SessionManager } from "./session-manager.ts";
+import {
+	type DiscoveredRelatedSession,
+	mergeRelatedSessionReferences,
+	normalizeRelatedSessionReferences,
+	type RelatedSessionReference,
+	readSessionHeaderForDiscovery,
+	SessionManager,
+} from "./session-manager.ts";
 import { BUILTIN_SLASH_COMMANDS } from "./slash-commands.ts";
 
 /**
@@ -85,6 +92,8 @@ export interface TaskBoundaryProposal {
 	targetHarnessId?: string;
 	targetHarnessRevision?: string;
 	targetHarnessName: string;
+	/** True when accepting reuse will reopen a prior transcript instead of starting a new root session. */
+	willResumeSession: boolean;
 	confidence: number;
 }
 
@@ -155,6 +164,7 @@ function extractUserMessageText(content: string | Array<{ type: string; text?: s
 
 const ROUTING_CONTEXT_MAX_CHARS = 6_000;
 const ROUTING_TIMEOUT_MS = 15_000;
+const MAX_LEGACY_SESSION_ANCESTRY_DEPTH = 64;
 const BUILTIN_SLASH_COMMAND_NAMES = new Set(BUILTIN_SLASH_COMMANDS.map((command) => command.name));
 const ROUTE_FALLBACK_TELEMETRY = {
 	"completion-error": "completion_error",
@@ -232,6 +242,43 @@ export function buildRecentTaskContext(messages: readonly AgentMessage[]): strin
 	return excerpts.join("\n\n");
 }
 
+/**
+ * Recover task-transition references from sessions created before task switches
+ * stopped overloading parentSession. True same-harness forks remain ancestry only.
+ */
+function getLegacyRelatedSessions(sessionManager: SessionManager): RelatedSessionReference[] {
+	const references: RelatedSessionReference[] = [];
+	const seenPaths = new Set<string>();
+	const activeHarnessId = sessionManager.getHeader()?.profile?.harnessId;
+	let parentSession = sessionManager.getHeader()?.parentSession;
+
+	for (let depth = 0; depth < MAX_LEGACY_SESSION_ANCESTRY_DEPTH && parentSession; depth += 1) {
+		let parentPath: string;
+		try {
+			parentPath = resolvePath(parentSession);
+		} catch {
+			break;
+		}
+		if (seenPaths.has(parentPath)) break;
+		seenPaths.add(parentPath);
+
+		const header = readSessionHeaderForDiscovery(parentPath);
+		if (!header) break;
+		const harnessId = header.profile?.harnessId;
+		if (
+			typeof header.id === "string" &&
+			typeof harnessId === "string" &&
+			harnessId.trim() &&
+			harnessId.trim() !== activeHarnessId
+		) {
+			references.push({ sessionId: header.id, harnessId: harnessId.trim() });
+		}
+		parentSession = typeof header.parentSession === "string" ? header.parentSession : undefined;
+	}
+
+	return normalizeRelatedSessionReferences(references, sessionManager.getSessionId());
+}
+
 function getProfileSelection(sessionManager: SessionManager): {
 	profile?: string;
 	profileRouting?: ProfileRoutingMode;
@@ -267,6 +314,7 @@ export class AgentSessionRuntime {
 	private _modelFallbackMessage?: string;
 	private _profileRouting: ProfileRoutingMode;
 	private _activeHarness?: ResolvedHarnessDescriptor;
+	private readonly liveHarnessSessions = new Map<string, SessionManager>();
 	private harnessResolutionClaimed = false;
 	private harnessResolutionGate?: Promise<void>;
 	private settleHarnessResolutionGate?: () => void;
@@ -289,6 +337,7 @@ export class AgentSessionRuntime {
 		this._profileRouting = profileRouting ?? _session.sessionManager.getHeader()?.profile?.routing ?? "auto";
 		this.restoreHarness(harnessId ?? _session.sessionManager.getHeader()?.profile?.harnessId);
 		this.syncProfileMetadata();
+		this.rememberActiveHarnessSession();
 	}
 
 	get services(): AgentSessionServices {
@@ -411,6 +460,33 @@ export class AgentSessionRuntime {
 		});
 	}
 
+	private rememberActiveHarnessSession(): void {
+		const harnessId = this._activeHarness?.id;
+		if (harnessId && !this.session.sessionManager.isPersisted()) {
+			this.liveHarnessSessions.set(harnessId, this.session.sessionManager);
+		}
+	}
+
+	private getCurrentSessionReference(): RelatedSessionReference | undefined {
+		const harnessId = this._activeHarness?.id;
+		if (!harnessId) return undefined;
+		return { sessionId: this.session.sessionManager.getSessionId(), harnessId };
+	}
+
+	private getRelatedSessionReferences(): RelatedSessionReference[] {
+		const sessionManager = this.session.sessionManager;
+		return mergeRelatedSessionReferences(
+			sessionManager.getRelatedSessions(),
+			getLegacyRelatedSessions(sessionManager),
+			sessionManager.getSessionId(),
+		);
+	}
+
+	private getTransitionRelatedSessions(): RelatedSessionReference[] {
+		const current = this.getCurrentSessionReference();
+		return mergeRelatedSessionReferences(this.getRelatedSessionReferences(), current ? [current] : []);
+	}
+
 	private restoreHarness(harnessId: string | undefined): void {
 		this._activeHarness = undefined;
 		if (!harnessId) return;
@@ -485,6 +561,7 @@ export class AgentSessionRuntime {
 		this.restoreHarness(harnessId ?? result.session.sessionManager.getHeader()?.profile?.harnessId);
 		this.harnessResolutionClaimed = this._activeHarness !== undefined;
 		this.syncProfileMetadata();
+		this.rememberActiveHarnessSession();
 	}
 
 	private async finishSessionReplacement(withSession?: (ctx: ReplacedSessionContext) => Promise<void>): Promise<void> {
@@ -552,8 +629,18 @@ export class AgentSessionRuntime {
 		const sessionManager = this.session.sessionManager.isPersisted()
 			? SessionManager.create(this.cwd, sessionDir)
 			: SessionManager.inMemory(this.cwd);
+		const isProfileTransition = options?.profile !== undefined || options?.harnessId !== undefined;
+		const inheritedRelatedSessions = isProfileTransition
+			? this.getTransitionRelatedSessions()
+			: this.getRelatedSessionReferences();
+		if (inheritedRelatedSessions.length > 0) {
+			sessionManager.setRelatedSessions(inheritedRelatedSessions);
+		}
 		if (options?.parentSession) {
-			sessionManager.newSession({ parentSession: options.parentSession });
+			sessionManager.newSession({
+				parentSession: options.parentSession,
+				relatedSessions: inheritedRelatedSessions,
+			});
 		}
 
 		const targetRouting = options?.profileRouting ?? this._profileRouting;
@@ -630,8 +717,10 @@ export class AgentSessionRuntime {
 			}
 			const sessionDir = this.session.sessionManager.getSessionDir();
 			if (!targetLeafId) {
-				const sessionManager = SessionManager.create(this.cwd, sessionDir);
-				sessionManager.newSession({ parentSession: currentSessionFile });
+				const sessionManager = SessionManager.create(this.cwd, sessionDir, {
+					parentSession: currentSessionFile,
+					relatedSessions: this.getRelatedSessionReferences(),
+				});
 				const targetRouting = this._profileRouting;
 				const targetProfile = this.getCurrentProfileSelection();
 				await this.teardownCurrent("fork", sessionManager.getSessionFile());
@@ -689,7 +778,10 @@ export class AgentSessionRuntime {
 		const targetRouting = this._profileRouting;
 		const targetProfile = this.getCurrentProfileSelection();
 		if (!targetLeafId) {
-			sessionManager.newSession({ parentSession: this.session.sessionFile });
+			sessionManager.newSession({
+				parentSession: this.session.sessionFile,
+				relatedSessions: this.getRelatedSessionReferences(),
+			});
 		} else {
 			sessionManager.createBranchedSession(targetLeafId);
 		}
@@ -882,15 +974,16 @@ export class AgentSessionRuntime {
 		};
 	}
 
-	private async startLinkedHarnessSession(
+	private async startIndependentHarnessSession(
 		harness: ResolvedHarnessDescriptor,
 		profile: ResolvedTaskProfile,
 	): Promise<void> {
 		const previousSessionFile = this.session.sessionFile;
+		const relatedSessions = this.getTransitionRelatedSessions();
 		const sessionDir = this.session.sessionManager.getSessionDir();
 		const sessionManager = this.session.sessionManager.isPersisted()
-			? SessionManager.create(this.cwd, sessionDir, { parentSession: previousSessionFile })
-			: SessionManager.inMemory(this.cwd, { parentSession: previousSessionFile });
+			? SessionManager.create(this.cwd, sessionDir, { relatedSessions })
+			: SessionManager.inMemory(this.cwd, { relatedSessions });
 		const nextRuntime = await this.createRuntime({
 			cwd: this.cwd,
 			agentDir: this.services.agentDir,
@@ -902,9 +995,124 @@ export class AgentSessionRuntime {
 			telemetryCapture: this.services.telemetryCapture,
 			sessionStartEvent: { type: "session_start", reason: "new", previousSessionFile },
 		});
+		const nextSessionReference: RelatedSessionReference = {
+			sessionId: sessionManager.getSessionId(),
+			harnessId: harness.id,
+		};
+		this.session.sessionManager.mergeRelatedSessions([nextSessionReference]);
 		await this.teardownCurrent("new", sessionManager.getSessionFile());
 		this.apply(nextRuntime, "auto", harness.id);
 		await this.finishSessionReplacement();
+	}
+
+	private findHarnessSessionTarget(
+		harnessId: string,
+	):
+		| { sessionId: string; discovered: DiscoveredRelatedSession }
+		| { sessionId: string; sessionManager: SessionManager }
+		| undefined {
+		const persisted = this.session.sessionManager
+			.discoverRelatedSessions(this.getRelatedSessionReferences())
+			.find((session) => session.harnessId === harnessId);
+		if (persisted) return { sessionId: persisted.sessionId, discovered: persisted };
+		const sessionManager = this.liveHarnessSessions.get(harnessId);
+		return sessionManager ? { sessionId: sessionManager.getSessionId(), sessionManager } : undefined;
+	}
+
+	private async resumeHarnessSession(
+		harness: ResolvedHarnessDescriptor,
+		profile: ResolvedTaskProfile,
+		expectedSessionId: string,
+	): Promise<void> {
+		const outgoingSession = this.session.sessionManager;
+		const outgoingSessionFile = this.session.sessionFile;
+		const relatedSessions = this.getTransitionRelatedSessions();
+		const target = this.findHarnessSessionTarget(harness.id);
+		if (!target || target.sessionId !== expectedSessionId) {
+			throw new Error(`The previous session for harness "${harness.id}" changed before it could be resumed`);
+		}
+		const targetSessionManager =
+			"discovered" in target
+				? outgoingSession.openDiscoveredRelatedSession(target.discovered)
+				: target.sessionManager;
+		if (targetSessionManager.getHeader()?.profile?.harnessId !== harness.id) {
+			throw new Error(`Previous session no longer belongs to harness "${harness.id}"`);
+		}
+
+		const nextRuntime = await this.createRuntime({
+			cwd: targetSessionManager.getCwd(),
+			agentDir: this.services.agentDir,
+			sessionManager: targetSessionManager,
+			profile: profile.id,
+			profileRouting: "auto",
+			harnessId: harness.id,
+			telemetryContext: this.services.telemetryContext,
+			telemetryCapture: this.services.telemetryCapture,
+			sessionStartEvent: { type: "session_start", reason: "resume", previousSessionFile: outgoingSessionFile },
+		});
+		targetSessionManager.mergeRelatedSessions(relatedSessions);
+		await this.teardownCurrent("resume", targetSessionManager.getSessionFile());
+		this.apply(nextRuntime, "auto", harness.id);
+		await this.finishSessionReplacement();
+	}
+
+	private getReusableHarnesses(
+		harnesses: readonly ResolvedHarnessDescriptor[],
+		profiles: readonly ResolvedTaskProfile[],
+		currentHarnessId: string,
+		relatedHarnessIds: ReadonlySet<string>,
+	): ResolvedHarnessDescriptor[] {
+		const validById = new Map(
+			harnesses
+				.filter(
+					(harness) =>
+						harness.id !== currentHarnessId && profiles.some((profile) => profile.id === harness.baseProfileId),
+				)
+				.map((harness) => [harness.id, harness]),
+		);
+		const reusable: ResolvedHarnessDescriptor[] = [];
+		const seen = new Set<string>();
+		const add = (harness: ResolvedHarnessDescriptor | undefined): void => {
+			if (!harness || seen.has(harness.id)) return;
+			seen.add(harness.id);
+			reusable.push(harness);
+		};
+
+		for (const harnessId of relatedHarnessIds) add(validById.get(harnessId));
+		for (const harnessId of this.liveHarnessSessions.keys()) add(validById.get(harnessId));
+		for (const harness of harnesses) {
+			if (harness.harnessNoteCount > 0) add(validById.get(harness.id));
+		}
+		return reusable;
+	}
+
+	private revalidateReusableHarness(
+		expectedHarness: ResolvedHarnessDescriptor,
+	): ResolvedHarnessDescriptor | undefined {
+		const currentNotes = loadEvolvedNotes({
+			agentDir: this.services.agentDir,
+			cwd: this.cwd,
+			projectTrusted: this.services.settingsManager.isProjectTrusted(),
+		});
+		for (const diagnostic of currentNotes.diagnostics) {
+			this.appendDiagnostic(`Could not refresh evolved notes ${diagnostic.path}: ${diagnostic.message}`);
+		}
+		const refreshedHarnesses = loadHarnessDescriptors({
+			agentDir: this.services.agentDir,
+			notes: currentNotes.notes,
+		});
+		for (const diagnostic of refreshedHarnesses.diagnostics) {
+			this.appendDiagnostic(`Could not refresh harness descriptor ${diagnostic.path}: ${diagnostic.message}`);
+		}
+		const refreshedHarness = refreshedHarnesses.harnesses.find((harness) => harness.id === expectedHarness.id);
+		if (
+			!refreshedHarness ||
+			refreshedHarness.baseProfileId !== expectedHarness.baseProfileId ||
+			refreshedHarness.revision !== expectedHarness.revision
+		) {
+			return undefined;
+		}
+		return refreshedHarness;
 	}
 
 	private async prepareFutureTaskPrompt(
@@ -942,11 +1150,12 @@ export class AgentSessionRuntime {
 		for (const diagnostic of loadedHarnesses.diagnostics) {
 			this.appendDiagnostic(`Could not load harness descriptor ${diagnostic.path}: ${diagnostic.message}`);
 		}
-		const reusableHarnesses = loadedHarnesses.harnesses.filter(
-			(harness) =>
-				harness.id !== currentHarness.id &&
-				harness.harnessNoteCount > 0 &&
-				profiles.some((profile) => profile.id === harness.baseProfileId),
+		const relatedSessions = this.session.sessionManager.discoverRelatedSessions(this.getRelatedSessionReferences());
+		const reusableHarnesses = this.getReusableHarnesses(
+			loadedHarnesses.harnesses,
+			profiles,
+			currentHarness.id,
+			new Set(relatedSessions.map((reference) => reference.harnessId)),
 		);
 		const input = {
 			prompt: routingPrompt,
@@ -1015,12 +1224,14 @@ export class AgentSessionRuntime {
 					complete({ outcome: "failed", targetProfileId: currentProfile.id, harnessId: currentHarness.id });
 					return this.cancelPreparedPrompt(options, "Task boundary target is no longer available");
 				}
+				const proposedTargetSession = targetHarness ? this.findHarnessSessionTarget(targetHarness.id) : undefined;
 				const proposal: TaskBoundaryProposal = {
 					decision: decision.decision,
 					fromProfileId: currentProfile.id,
 					fromHarnessId: currentHarness.id,
 					toProfileId: targetProfile.id,
 					targetHarnessName: targetHarness?.name ?? decision.harnessName ?? "New task",
+					willResumeSession: proposedTargetSession !== undefined,
 					confidence: decision.confidence,
 					...(targetHarness
 						? { targetHarnessId: targetHarness.id, targetHarnessRevision: targetHarness.revision }
@@ -1068,43 +1279,37 @@ export class AgentSessionRuntime {
 
 				let validatedTargetHarness = targetHarness;
 				if (targetHarness) {
-					const currentNotes = loadEvolvedNotes({
-						agentDir: this.services.agentDir,
-						cwd: this.cwd,
-						projectTrusted: this.services.settingsManager.isProjectTrusted(),
-					});
-					for (const diagnostic of currentNotes.diagnostics) {
-						this.appendDiagnostic(`Could not refresh evolved notes ${diagnostic.path}: ${diagnostic.message}`);
-					}
-					const refreshedHarnesses = loadHarnessDescriptors({
-						agentDir: this.services.agentDir,
-						notes: currentNotes.notes,
-					});
-					for (const diagnostic of refreshedHarnesses.diagnostics) {
-						this.appendDiagnostic(
-							`Could not refresh harness descriptor ${diagnostic.path}: ${diagnostic.message}`,
-						);
-					}
-					validatedTargetHarness = refreshedHarnesses.harnesses.find((harness) => harness.id === targetHarness.id);
-					if (
-						!validatedTargetHarness ||
-						validatedTargetHarness.baseProfileId !== targetHarness.baseProfileId ||
-						validatedTargetHarness.revision !== targetHarness.revision
-					) {
+					validatedTargetHarness = this.revalidateReusableHarness(targetHarness);
+					if (!validatedTargetHarness) {
 						complete({ outcome: "failed", targetProfileId: currentProfile.id, harnessId: currentHarness.id });
 						return this.cancelPreparedPrompt(
 							options,
-							"The selected evolved harness changed while confirmation was pending",
+							"The selected harness changed while confirmation was pending",
 						);
 					}
 				}
 
 				let harness: ResolvedHarnessDescriptor;
 				try {
-					const beforeResult = await this.emitBeforeSwitch("new");
+					const switchReason = proposedTargetSession ? "resume" : "new";
+					const targetSessionFile =
+						proposedTargetSession && "discovered" in proposedTargetSession
+							? proposedTargetSession.discovered.sessionPath
+							: undefined;
+					const beforeResult = await this.emitBeforeSwitch(switchReason, targetSessionFile);
 					if (beforeResult.cancelled) {
 						complete({ outcome: "failed", targetProfileId: currentProfile.id, harnessId: currentHarness.id });
 						return this.cancelPreparedPrompt(options, "Task boundary switch was blocked by a session hook");
+					}
+					if (targetHarness) {
+						validatedTargetHarness = this.revalidateReusableHarness(targetHarness);
+						if (!validatedTargetHarness) {
+							complete({ outcome: "failed", targetProfileId: currentProfile.id, harnessId: currentHarness.id });
+							return this.cancelPreparedPrompt(
+								options,
+								"The selected harness changed while the session switch was pending",
+							);
+						}
 					}
 					harness =
 						validatedTargetHarness ??
@@ -1115,21 +1320,33 @@ export class AgentSessionRuntime {
 							baseProfileId: targetProfile.id,
 							notes: this.services.resourceLoader.getEvolvedNotes().evolvedNotes,
 						});
-					await this.startLinkedHarnessSession(harness, targetProfile);
+					if (validatedTargetHarness && proposedTargetSession) {
+						await this.resumeHarnessSession(harness, targetProfile, proposedTargetSession.sessionId);
+					} else {
+						await this.startIndependentHarnessSession(harness, targetProfile);
+					}
+					const activeHarness = this._activeHarness;
+					if (!activeHarness || activeHarness.id !== harness.id) {
+						throw new Error(`Harness "${harness.id}" was not restored after the session switch`);
+					}
+					harness = activeHarness;
 				} catch (error) {
 					const message = error instanceof Error ? error.message : String(error);
 					complete({ outcome: "failed", targetProfileId: currentProfile.id, harnessId: currentHarness.id });
 					return this.cancelPreparedPrompt(options, `Task boundary switch failed: ${message}`);
 				}
 
+				const activeProfile = this.activeProfile;
 				const reused = decision.decision === "reuse";
 				const notice = reused
-					? `Found evolved harness "${harness.name}" for this task. Switched to revision ${harness.revision.slice(0, 12)}.`
-					: `Created harness "${harness.name}" using the ${targetProfile.name} prompt profile.`;
+					? proposedTargetSession
+						? `Resumed harness "${harness.name}" in its previous session at revision ${harness.revision.slice(0, 12)}.`
+						: `Found existing harness "${harness.name}" for this task. Started an independent session at revision ${harness.revision.slice(0, 12)}.`
+					: `Created harness "${harness.name}" using the ${activeProfile.name} prompt profile.`;
 				try {
 					this.profileSwitchListener?.({
 						fromProfileId: currentProfile.id,
-						toProfileId: targetProfile.id,
+						toProfileId: activeProfile.id,
 						reason: decision.reason,
 						harnessId: harness.id,
 						harnessRevision: harness.revision,
@@ -1144,13 +1361,13 @@ export class AgentSessionRuntime {
 				}
 				complete({
 					outcome: reused ? "reused" : "selected",
-					targetProfileId: targetProfile.id,
+					targetProfileId: activeProfile.id,
 					harnessId: harness.id,
 					confidence: decision.confidence,
 				});
 				return this.startSessionPrompt(text, options, {
 					routing: reused ? "reused" : "selected",
-					activeProfileId: targetProfile.id,
+					activeProfileId: activeProfile.id,
 					previousProfileId: currentProfile.id,
 					harnessId: harness.id,
 					harnessRevision: harness.revision,
