@@ -86,7 +86,10 @@ export class SubagentController {
 	#activePermits = 0;
 	#revision = 0;
 	#closed = false;
+	#resetting = false;
 	#parent: AgentSession | undefined;
+	#resetPromise: Promise<void> | undefined;
+	#resetCleanupPromise: Promise<unknown[]> | undefined;
 	#shutdownPromise: Promise<void> | undefined;
 
 	constructor(options: { maxConcurrent: number; captureSession?: CaptureSubagentSession }) {
@@ -245,8 +248,8 @@ export class SubagentController {
 			if (options.signal?.aborted) {
 				throw options.signal.reason;
 			}
-			if (wait.reason === "disposed") {
-				throw this.#closedError();
+			if (wait.reason === "disposed" || wait.reason === "reset") {
+				throw wait.reason === "disposed" ? this.#closedError() : this.#resetError();
 			}
 			this.#assertOpen();
 			snapshot = this.snapshot();
@@ -273,6 +276,9 @@ export class SubagentController {
 	acquirePermit(signal?: AbortSignal): Promise<SubagentPermit> {
 		if (this.#closed) {
 			return Promise.reject(this.#closedError());
+		}
+		if (this.#resetting) {
+			return Promise.reject(this.#resetError());
 		}
 		if (signal?.aborted) {
 			return Promise.reject(signal.reason);
@@ -340,6 +346,8 @@ export class SubagentController {
 
 			if (this.#closed) {
 				this.#settleWaiter(waiter, "resolve", { reason: "disposed" });
+			} else if (this.#resetting) {
+				this.#settleWaiter(waiter, "resolve", { reason: "reset" });
 			} else if (this.#revision > afterRevision) {
 				this.#settleWaiter(waiter, "resolve", { reason: "changed", snapshot: this.#createSnapshot() });
 			}
@@ -351,30 +359,44 @@ export class SubagentController {
 
 		this.#closed = true;
 		const closedError = this.#closedError();
-		for (const request of this.#permitQueue.splice(0)) {
-			if (request.signal && request.onAbort) {
-				request.signal.removeEventListener("abort", request.onAbort);
-			}
-			request.reject(closedError);
-		}
-
-		const records = [...this.#records.values()];
-		for (const record of records) {
-			record.runController?.abort(closedError);
-		}
-		this.#records.clear();
+		this.#rejectPermitQueue(closedError);
+		const resetCleanup = this.#resetCleanupPromise;
+		const records = this.#detachRecords(closedError);
 		this.#publish(
 			(revision) => ({
 				type: "subagent_controller_disposed",
 				revision,
 				timestamp: Date.now(),
 			}),
-			true,
+			"disposed",
 		);
 		this.#listeners.clear();
 
-		this.#shutdownPromise = this.#finishShutdown(records);
+		this.#shutdownPromise = this.#finishShutdown(records, resetCleanup);
 		return this.#shutdownPromise;
+	}
+
+	reset(): Promise<void> {
+		if (this.#closed) return Promise.reject(this.#closedError());
+		if (this.#resetPromise) return this.#resetPromise;
+
+		this.#resetting = true;
+		const resetError = this.#resetError();
+		this.#rejectPermitQueue(resetError);
+		const records = this.#detachRecords(resetError);
+		this.#publish(
+			(revision) => ({
+				type: "subagent_controller_reset",
+				revision,
+				timestamp: Date.now(),
+			}),
+			"reset",
+		);
+
+		const cleanup = this.#cleanupRecords(records);
+		this.#resetCleanupPromise = cleanup;
+		this.#resetPromise = this.#finishReset(cleanup);
+		return this.#resetPromise;
 	}
 
 	#transition(name: string, status: SubagentStatus, fields: TransitionFields = {}): void {
@@ -445,7 +467,7 @@ export class SubagentController {
 	}
 
 	#getRecordForUpdate(name: string): SubagentRecord | undefined {
-		if (this.#closed) return undefined;
+		if (this.#closed || this.#resetting) return undefined;
 		const record = this.#records.get(name);
 		if (!record) {
 			throw new Error(`Unknown subagent: ${name}`);
@@ -521,12 +543,15 @@ export class SubagentController {
 			: agents.every((agent) => isTerminalStatus(agent.status));
 	}
 
-	#publish(createEvent: (revision: number) => SubagentLifecycleEvent, disposed = false): void {
+	#publish(
+		createEvent: (revision: number) => SubagentLifecycleEvent,
+		settleReason?: "disposed" | "reset",
+	): void {
 		this.#revision += 1;
 		const event = Object.freeze(createEvent(this.#revision));
-		if (disposed) {
+		if (settleReason) {
 			for (const waiter of [...this.#waiters]) {
-				this.#settleWaiter(waiter, "resolve", { reason: "disposed" });
+				this.#settleWaiter(waiter, "resolve", { reason: settleReason });
 			}
 		} else {
 			const snapshot = this.#createSnapshot();
@@ -564,8 +589,8 @@ export class SubagentController {
 		if (request.signal && request.onAbort) {
 			request.signal.removeEventListener("abort", request.onAbort);
 		}
-		if (this.#closed) {
-			request.reject(this.#closedError());
+		if (this.#closed || this.#resetting) {
+			request.reject(this.#closed ? this.#closedError() : this.#resetError());
 			return;
 		}
 		if (request.signal?.aborted) {
@@ -588,7 +613,7 @@ export class SubagentController {
 	}
 
 	#drainPermitQueue(): void {
-		while (!this.#closed && this.#activePermits < this.#maxConcurrent) {
+		while (!this.#closed && !this.#resetting && this.#activePermits < this.#maxConcurrent) {
 			const request = this.#permitQueue.shift();
 			if (!request) return;
 			this.#grantPermit(request);
@@ -703,9 +728,13 @@ export class SubagentController {
 					throw new Error(`Subagent session factory is unavailable: ${record.name}`);
 				}
 				session = await createSession(runController.signal);
-				if (this.#closed || runController.signal.aborted) {
-					session.dispose();
-					if (!this.#closed && record.interruptionRequested) {
+				if (this.#closed || this.#resetting || runController.signal.aborted) {
+					try {
+						await session.dispose();
+					} catch (error) {
+						(record.cleanupFailures ??= []).push(error);
+					}
+					if (!this.#closed && !this.#resetting && record.interruptionRequested) {
 						this.markInterrupted(record.name);
 					}
 					return;
@@ -752,32 +781,91 @@ export class SubagentController {
 		}
 	}
 
-	async #finishShutdown(records: SubagentRecord[]): Promise<void> {
+	#rejectPermitQueue(error: Error): void {
+		for (const request of this.#permitQueue.splice(0)) {
+			if (request.signal && request.onAbort) {
+				request.signal.removeEventListener("abort", request.onAbort);
+			}
+			request.reject(error);
+		}
+	}
+
+	#detachRecords(reason: Error): SubagentRecord[] {
+		const records = [...this.#records.values()];
+		for (const record of records) {
+			record.runController?.abort(reason);
+		}
+		this.#records.clear();
+		return records;
+	}
+
+	async #cleanupRecords(records: SubagentRecord[]): Promise<unknown[]> {
 		const failures: unknown[] = [];
-		const activeSessions = records.flatMap((record) =>
-			record.status === "running" && record.session ? [record.session] : [],
-		);
 		const abortResults = await Promise.allSettled(
-			activeSessions.map(async (session) => {
-				await session.abort();
+			records.flatMap((record) => {
+				const session = record.session;
+				if (!session) return [];
+				try {
+					return [session.abort()];
+				} catch (error) {
+					return [Promise.reject(error)];
+				}
 			}),
 		);
 		for (const result of abortResults) {
 			if (result.status === "rejected") failures.push(result.reason);
 		}
 
-		await Promise.allSettled(records.flatMap((record) => (record.actionTail ? [record.actionTail] : [])));
-		await Promise.allSettled(records.flatMap((record) => (record.run ? [record.run] : [])));
-
+		await Promise.allSettled([
+			...records.flatMap((record) => (record.actionTail ? [record.actionTail] : [])),
+			...records.flatMap((record) => (record.run ? [record.run] : [])),
+		]);
 		for (const record of records) {
-			if (!record.session) continue;
-			try {
-				record.session.dispose();
-			} catch (error) {
-				failures.push(error);
-			}
+			failures.push(...(record.cleanupFailures ?? []));
 		}
 
+		const disposeResults = await Promise.allSettled(
+			records.flatMap((record) => {
+				const session = record.session;
+				if (!session) return [];
+				try {
+					return [session.dispose()];
+				} catch (error) {
+					return [Promise.reject(error)];
+				}
+			}),
+		);
+		for (const result of disposeResults) {
+			if (result.status === "rejected") failures.push(result.reason);
+		}
+		return failures;
+	}
+
+	async #finishReset(cleanup: Promise<unknown[]>): Promise<void> {
+		const failures = await cleanup;
+		if (!this.#closed) {
+			this.#resetting = false;
+			this.#drainPermitQueue();
+		}
+		if (this.#resetCleanupPromise === cleanup) {
+			this.#resetCleanupPromise = undefined;
+		}
+		this.#resetPromise = undefined;
+
+		if (this.#closed) {
+			throw this.#closedError();
+		}
+		if (failures.length > 0) {
+			throw new AggregateError(failures, "Failed to reset subagent controller");
+		}
+	}
+
+	async #finishShutdown(records: SubagentRecord[], resetCleanup?: Promise<unknown[]>): Promise<void> {
+		const [resetFailures, shutdownFailures] = await Promise.all([
+			resetCleanup ?? Promise.resolve([]),
+			this.#cleanupRecords(records),
+		]);
+		const failures = [...resetFailures, ...shutdownFailures];
 		if (failures.length > 0) {
 			throw new AggregateError(failures, "Failed to shut down subagent controller");
 		}
@@ -785,6 +873,11 @@ export class SubagentController {
 
 	#assertOpen(): void {
 		if (this.#closed) throw this.#closedError();
+		if (this.#resetting) throw this.#resetError();
+	}
+
+	#resetError(): Error {
+		return new Error("Subagent controller is resetting");
 	}
 
 	#closedError(): Error {

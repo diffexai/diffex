@@ -369,6 +369,100 @@ describe("SubagentController", () => {
 		await expect(controller.shutdown()).resolves.toBeUndefined();
 	});
 
+	it("blocks admission during reset, settles waiters, and reuses names after cleanup", async () => {
+		const controller = new SubagentController({ maxConcurrent: 1 });
+		const child = await harness();
+		const activePermit = await controller.acquirePermit();
+		const queuedPermit = controller.acquirePermit();
+		const disposeStarted = deferred<void>();
+		const disposeGate = deferred<void>();
+		const dispose = vi.spyOn(child.session, "dispose").mockImplementation(async () => {
+			disposeStarted.resolve();
+			await disposeGate.promise;
+		});
+		controller.reserve("worker", "private task");
+		controller.attachSession("worker", child.session);
+		controller.trackRun("worker", Promise.resolve());
+		controller.markRunning("worker");
+		const waiter = controller.waitForChange(controller.snapshot().revision, { timeoutMs: 100 });
+		const events: SubagentLifecycleEvent[] = [];
+		controller.subscribe((event) => events.push(event));
+
+		const firstReset = controller.reset();
+		const secondReset = controller.reset();
+		expect(firstReset).toBe(secondReset);
+		expect(controller.snapshot().agents).toEqual([]);
+		expect(() => controller.reserve("later", "task")).toThrow("Subagent controller is resetting");
+		expect(() => controller.message("worker", "message")).toThrow("Subagent controller is resetting");
+		await expect(controller.queryAgents({ timeoutMs: 0 })).rejects.toThrow("Subagent controller is resetting");
+		await expect(controller.acquirePermit()).rejects.toThrow("Subagent controller is resetting");
+		await expect(queuedPermit).rejects.toThrow("Subagent controller is resetting");
+		await expect(waiter).resolves.toEqual({ reason: "reset" });
+		await expect(controller.waitForChange(0, { timeoutMs: 100 })).resolves.toEqual({ reason: "reset" });
+		activePermit.release();
+		await disposeStarted.promise;
+		expect(await isPending(firstReset)).toBe(true);
+		disposeGate.resolve();
+		await firstReset;
+
+		expect(dispose).toHaveBeenCalledOnce();
+		expect(events).toHaveLength(1);
+		expect(events[0]).toMatchObject({ type: "subagent_controller_reset" });
+		expect(JSON.stringify(events[0])).not.toContain("private task");
+		expect(() => controller.reserve("worker", "reused task")).not.toThrow();
+		expect(events.map((event) => event.type)).toEqual(["subagent_controller_reset", "subagent_reserved"]);
+	});
+
+	it("reopens after aggregating reset cleanup failures", async () => {
+		const controller = new SubagentController({ maxConcurrent: 2 });
+		const first = await harness();
+		const second = await harness();
+		const abortFailure = new Error("reset abort failed");
+		const disposeFailure = new Error("reset dispose failed");
+		vi.spyOn(first.session, "abort").mockRejectedValue(abortFailure);
+		vi.spyOn(first.session, "dispose").mockRejectedValue(disposeFailure);
+		const secondDispose = vi.spyOn(second.session, "dispose").mockResolvedValue();
+		controller.reserve("first", "task");
+		controller.attachSession("first", first.session);
+		controller.markRunning("first");
+		controller.reserve("second", "task");
+		controller.attachSession("second", second.session);
+		controller.markRunning("second");
+		controller.markIdle("second");
+
+		const error = await controller.reset().catch((reason: unknown) => reason);
+		expect(error).toBeInstanceOf(AggregateError);
+		expect((error as AggregateError).errors).toEqual([abortFailure, disposeFailure]);
+		expect(secondDispose).toHaveBeenCalledOnce();
+		expect(controller.snapshot().agents).toEqual([]);
+		expect(() => controller.reserve("first", "reused")).not.toThrow();
+	});
+
+	it("keeps shutdown permanent when it races reset", async () => {
+		const controller = new SubagentController({ maxConcurrent: 1 });
+		const child = await harness();
+		const disposeStarted = deferred<void>();
+		const disposeGate = deferred<void>();
+		vi.spyOn(child.session, "dispose").mockImplementation(async () => {
+			disposeStarted.resolve();
+			await disposeGate.promise;
+		});
+		controller.reserve("worker", "task");
+		controller.attachSession("worker", child.session);
+		controller.markRunning("worker");
+		controller.markIdle("worker");
+
+		const resetResult = controller.reset().catch((reason: unknown) => reason);
+		const shutdown = controller.shutdown();
+		await disposeStarted.promise;
+		expect(await isPending(shutdown)).toBe(true);
+		disposeGate.resolve();
+		await expect(shutdown).resolves.toBeUndefined();
+		await expect(resetResult).resolves.toMatchObject({ message: "Subagent controller is shut down" });
+		expect(() => controller.reserve("worker", "reused")).toThrow("Subagent controller is shut down");
+		await expect(controller.reset()).rejects.toThrow("Subagent controller is shut down");
+	});
+
 	it("finishes cleanup before aggregating abort and disposal failures", async () => {
 		const controller = new SubagentController({ maxConcurrent: 2 });
 		const first = await harness();
