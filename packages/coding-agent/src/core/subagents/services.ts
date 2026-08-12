@@ -1,7 +1,4 @@
-import {
-	type AgentSessionServices,
-	createAgentSessionServices,
-} from "../agent-session-services.ts";
+import { type AgentSessionServices, createAgentSessionServices } from "../agent-session-services.ts";
 import type { ModelRuntime } from "../model-runtime.ts";
 import type { SettingsManager } from "../settings-manager.ts";
 
@@ -20,9 +17,7 @@ const SUBAGENT_SYSTEM_PROMPT = [
 	"Other agents may use the same filesystem, so avoid unrelated edits and report files you change.",
 ].join("\n");
 
-export function createSubagentServices(
-	options: CreateSubagentServicesOptions,
-): Promise<AgentSessionServices> {
+export function createSubagentServices(options: CreateSubagentServicesOptions): Promise<AgentSessionServices> {
 	return createAgentSessionServices({
 		cwd: options.cwd,
 		agentDir: options.agentDir,

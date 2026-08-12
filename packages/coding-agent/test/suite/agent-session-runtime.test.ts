@@ -720,7 +720,19 @@ describe("AgentSessionRuntime characterization", () => {
 						pi.registerProvider("barrier-provider", {
 							baseUrl: model.baseUrl,
 							api: faux.api,
-							models: [{ ...model, provider: "barrier-provider" }],
+							models: [
+								{
+									id: model.id,
+									name: model.name,
+									api: model.api,
+									reasoning: model.reasoning,
+									input: model.input,
+									cost: model.cost,
+									contextWindow: model.contextWindow,
+									maxTokens: model.maxTokens,
+									baseUrl: model.baseUrl,
+								},
+							],
 						});
 					},
 				],

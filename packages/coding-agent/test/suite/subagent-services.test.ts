@@ -183,9 +183,7 @@ describe("createSubagentServices", () => {
 		expect(refreshModels).not.toHaveBeenCalled();
 		expect(harness.settingsManager.getDefaultModel()).toBe("in-memory-model");
 		expect(new Set(children.map((child) => child.resourceLoader)).size).toBe(children.length);
-		expect(new Set(children.map((child) => child.resourceLoader.getExtensions().runtime)).size).toBe(
-			children.length,
-		);
+		expect(new Set(children.map((child) => child.resourceLoader.getExtensions().runtime)).size).toBe(children.length);
 		expect(children.every((child) => child.resourceLoader.getExtensions().extensions.length === 0)).toBe(true);
 	});
 
