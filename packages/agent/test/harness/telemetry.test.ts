@@ -32,6 +32,8 @@ describe("agent telemetry schemas", () => {
 			"diffex.harness.turn",
 			"diffex.harness.step",
 			"diffex.harness.tool",
+			"diffex.harness.profile_route",
+			"diffex.harness.evolution",
 			"diffex.harness.hook",
 			"diffex.harness.sleep",
 			"diffex.harness.event_handler",

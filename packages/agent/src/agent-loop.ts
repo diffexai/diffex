@@ -8,8 +8,17 @@ import {
 	type Context,
 	EventStream,
 	type ToolResultMessage,
+	uuidv7,
 	validateToolArguments,
 } from "@earendil-works/diffex-ai";
+import { NOOP_TELEMETRY_CONTEXT } from "@earendil-works/diffex-telemetry";
+import {
+	completeAiRequestSpan,
+	failAiRequestSpan,
+	startAiSpan,
+	startHarnessSpan,
+	type TelemetryContext,
+} from "./harness/telemetry.ts";
 import { getDefaultStreamFn } from "./stream-fn.ts";
 import type {
 	AgentContext,
@@ -163,6 +172,12 @@ async function runLoop(
 	let currentContext = initialContext;
 	let config = initialConfig;
 	let firstTurn = true;
+	let turnSequence = 0;
+	const telemetryContext = config.telemetryContext ?? NOOP_TELEMETRY_CONTEXT;
+	const telemetryMetadata = config.telemetryMetadata ?? {
+		laneName: "main",
+		operationId: `legacy-run:${uuidv7()}`,
+	};
 	// Check for steering messages at start (user may have typed while waiting)
 	let pendingMessages: AgentMessage[] = (await config.getSteeringMessages?.()) || [];
 
@@ -178,50 +193,46 @@ async function runLoop(
 				firstTurn = false;
 			}
 
-			// Process pending messages (inject before next assistant response)
-			if (pendingMessages.length > 0) {
-				for (const message of pendingMessages) {
-					await emit({ type: "message_start", message });
-					await emit({ type: "message_end", message });
-					currentContext.messages.push(message);
-					newMessages.push(message);
-				}
-				pendingMessages = [];
-			}
-
-			// Stream assistant response
-			const message = await streamAssistantResponse(currentContext, config, signal, emit, streamFunction);
-			newMessages.push(message);
+			const turnId = `${telemetryMetadata.operationId}:turn-${++turnSequence}`;
+			const turnResult = await startHarnessSpan(
+				telemetryContext,
+				"diffex.harness.turn",
+				{
+					"diffex.lane.name": telemetryMetadata.laneName,
+					"diffex.operation.id": telemetryMetadata.operationId,
+					"diffex.turn.id": turnId,
+				},
+				async (turnSpan) => {
+					try {
+						return await executeAgentTurn(
+							currentContext,
+							newMessages,
+							pendingMessages,
+							config,
+							signal,
+							emit,
+							streamFunction,
+							{
+								context: turnSpan,
+								laneName: telemetryMetadata.laneName,
+								operationId: telemetryMetadata.operationId,
+								turnId,
+							},
+						);
+					} catch (error) {
+						turnSpan.setStatus({ status: "error" });
+						throw error;
+					}
+				},
+			);
+			pendingMessages = [];
+			hasMoreToolCalls = turnResult.hasMoreToolCalls;
+			const { message, toolResults } = turnResult;
 
 			if (message.stopReason === "error" || message.stopReason === "aborted") {
-				await emit({ type: "turn_end", message, toolResults: [] });
 				await emit({ type: "agent_end", messages: newMessages });
 				return;
 			}
-
-			// Check for tool calls
-			const toolCalls = message.content.filter((c) => c.type === "toolCall");
-
-			const toolResults: ToolResultMessage[] = [];
-			hasMoreToolCalls = false;
-			if (toolCalls.length > 0) {
-				// A "length" stop means the output was cut off by the token limit, so
-				// every tool call in the message may carry truncated arguments. Fail
-				// them all instead of executing potentially borked calls.
-				const executedToolBatch =
-					message.stopReason === "length"
-						? await failToolCallsFromTruncatedMessage(toolCalls, emit)
-						: await executeToolCalls(currentContext, message, config, signal, emit);
-				toolResults.push(...executedToolBatch.messages);
-				hasMoreToolCalls = !executedToolBatch.terminate;
-
-				for (const result of toolResults) {
-					currentContext.messages.push(result);
-					newMessages.push(result);
-				}
-			}
-
-			await emit({ type: "turn_end", message, toolResults });
 
 			const nextTurnContext = {
 				message,
@@ -274,6 +285,102 @@ async function runLoop(
 	await emit({ type: "agent_end", messages: newMessages });
 }
 
+interface ActiveTurnTelemetry {
+	context: TelemetryContext;
+	laneName: string;
+	operationId: string;
+	turnId: string;
+}
+
+interface AgentTurnResult {
+	message: AssistantMessage;
+	toolResults: ToolResultMessage[];
+	hasMoreToolCalls: boolean;
+}
+
+async function executeAgentTurn(
+	currentContext: AgentContext,
+	newMessages: AgentMessage[],
+	pendingMessages: AgentMessage[],
+	config: AgentLoopConfig,
+	signal: AbortSignal | undefined,
+	emit: AgentEventSink,
+	streamFunction: StreamFn,
+	telemetry: ActiveTurnTelemetry,
+): Promise<AgentTurnResult> {
+	for (const pendingMessage of pendingMessages) {
+		await emit({ type: "message_start", message: pendingMessage });
+		await emit({ type: "message_end", message: pendingMessage });
+		currentContext.messages.push(pendingMessage);
+		newMessages.push(pendingMessage);
+	}
+
+	const message = await startHarnessSpan(
+		telemetry.context,
+		"diffex.harness.step",
+		{
+			"diffex.lane.name": telemetry.laneName,
+			"diffex.operation.id": telemetry.operationId,
+			"diffex.step.kind": "assistant",
+			"diffex.step.attempt": 1,
+		},
+		async (stepSpan) => {
+			try {
+				const assistant = await streamAssistantResponse(
+					currentContext,
+					config,
+					signal,
+					emit,
+					streamFunction,
+					stepSpan,
+				);
+				if (assistant.stopReason === "error") {
+					stepSpan.setAttributes({ "diffex.step.outcome": "failed" });
+					stepSpan.setStatus({ status: "error" });
+				} else if (assistant.stopReason === "aborted") {
+					stepSpan.setAttributes({ "diffex.step.outcome": "aborted" });
+				} else if (assistant.stopReason === "deferred") {
+					stepSpan.setAttributes({ "diffex.step.outcome": "deferred" });
+				} else {
+					stepSpan.setAttributes({ "diffex.step.outcome": "succeeded" });
+				}
+				return assistant;
+			} catch (error) {
+				const aborted = signal?.aborted === true;
+				stepSpan.setAttributes({ "diffex.step.outcome": aborted ? "aborted" : "failed" });
+				stepSpan.setStatus({ status: aborted ? "ok" : "error" });
+				throw error;
+			}
+		},
+	);
+	newMessages.push(message);
+
+	if (message.stopReason === "error" || message.stopReason === "aborted") {
+		await emit({ type: "turn_end", message, toolResults: [] });
+		return { message, toolResults: [], hasMoreToolCalls: false };
+	}
+
+	const toolCalls = message.content.filter((content) => content.type === "toolCall");
+	const toolResults: ToolResultMessage[] = [];
+	let hasMoreToolCalls = false;
+	if (toolCalls.length > 0) {
+		const executedToolBatch =
+			message.stopReason === "length"
+				? await failToolCallsFromTruncatedMessage(toolCalls, emit)
+				: await executeToolCalls(currentContext, message, config, signal, emit, telemetry);
+		toolResults.push(...executedToolBatch.messages);
+		hasMoreToolCalls = !executedToolBatch.terminate;
+
+		for (const result of toolResults) {
+			currentContext.messages.push(result);
+			newMessages.push(result);
+		}
+	}
+
+	await emit({ type: "turn_end", message, toolResults });
+	return { message, toolResults, hasMoreToolCalls };
+}
+
 /**
  * Stream an assistant response from the LLM.
  * This is where AgentMessage[] gets transformed to Message[] for the LLM.
@@ -284,6 +391,7 @@ async function streamAssistantResponse(
 	signal: AbortSignal | undefined,
 	emit: AgentEventSink,
 	streamFunction: StreamFn,
+	telemetryContext: TelemetryContext,
 ): Promise<AssistantMessage> {
 	// Apply context transform if configured (AgentMessage[] → AgentMessage[])
 	let messages = context.messages;
@@ -304,71 +412,117 @@ async function streamAssistantResponse(
 	// Resolve API key (important for expiring tokens)
 	const resolvedApiKey =
 		(config.getApiKey ? await config.getApiKey(config.model.provider) : undefined) || config.apiKey;
+	const requestStartedAt = Date.now();
+	return startAiSpan(
+		telemetryContext,
+		"diffex.ai.request",
+		{
+			"diffex.ai.operation": "stream",
+			"diffex.ai.provider": config.model.provider,
+			"diffex.ai.model": config.model.id,
+			"diffex.ai.api": config.model.api,
+			"diffex.ai.streaming": true,
+		},
+		async (requestSpan) => {
+			let httpStatusCode: number | undefined;
+			let chunkCount = 0;
+			let timeToFirstChunkMs: number | undefined;
+			try {
+				const { telemetryMetadata: _telemetryMetadata, ...streamOptions } = config;
+				const response = await streamFunction(config.model, llmContext, {
+					...streamOptions,
+					apiKey: resolvedApiKey,
+					signal,
+					telemetryContext: requestSpan,
+					onResponse: async (providerResponse, model) => {
+						httpStatusCode = providerResponse.status;
+						await config.onResponse?.(providerResponse, model);
+					},
+				});
 
-	const response = await streamFunction(config.model, llmContext, {
-		...config,
-		apiKey: resolvedApiKey,
-		signal,
-	});
+				let partialMessage: AssistantMessage | null = null;
+				let addedPartial = false;
 
-	let partialMessage: AssistantMessage | null = null;
-	let addedPartial = false;
+				for await (const event of response) {
+					switch (event.type) {
+						case "start":
+							partialMessage = event.partial;
+							context.messages.push(partialMessage);
+							addedPartial = true;
+							await emit({ type: "message_start", message: { ...partialMessage } });
+							break;
 
-	for await (const event of response) {
-		switch (event.type) {
-			case "start":
-				partialMessage = event.partial;
-				context.messages.push(partialMessage);
-				addedPartial = true;
-				await emit({ type: "message_start", message: { ...partialMessage } });
-				break;
+						case "text_start":
+						case "text_delta":
+						case "text_end":
+						case "thinking_start":
+						case "thinking_delta":
+						case "thinking_end":
+						case "toolcall_start":
+						case "toolcall_delta":
+						case "toolcall_end":
+							chunkCount += 1;
+							timeToFirstChunkMs ??= Math.max(0, Date.now() - requestStartedAt);
+							if (partialMessage) {
+								partialMessage = event.partial;
+								context.messages[context.messages.length - 1] = partialMessage;
+								await emit({
+									type: "message_update",
+									assistantMessageEvent: event,
+									message: { ...partialMessage },
+								});
+							}
+							break;
 
-			case "text_start":
-			case "text_delta":
-			case "text_end":
-			case "thinking_start":
-			case "thinking_delta":
-			case "thinking_end":
-			case "toolcall_start":
-			case "toolcall_delta":
-			case "toolcall_end":
-				if (partialMessage) {
-					partialMessage = event.partial;
-					context.messages[context.messages.length - 1] = partialMessage;
-					await emit({
-						type: "message_update",
-						assistantMessageEvent: event,
-						message: { ...partialMessage },
-					});
+						case "done":
+						case "error": {
+							const finalMessage = await response.result();
+							if (addedPartial) {
+								context.messages[context.messages.length - 1] = finalMessage;
+							} else {
+								context.messages.push(finalMessage);
+							}
+							if (!addedPartial) {
+								await emit({ type: "message_start", message: { ...finalMessage } });
+							}
+							await emit({ type: "message_end", message: finalMessage });
+							completeAiRequestSpan(requestSpan, finalMessage, {
+								chunkCount,
+								timeToFirstChunkMs,
+								httpStatusCode,
+							});
+							return finalMessage;
+						}
+					}
 				}
-				break;
 
-			case "done":
-			case "error": {
 				const finalMessage = await response.result();
 				if (addedPartial) {
 					context.messages[context.messages.length - 1] = finalMessage;
 				} else {
 					context.messages.push(finalMessage);
-				}
-				if (!addedPartial) {
 					await emit({ type: "message_start", message: { ...finalMessage } });
 				}
 				await emit({ type: "message_end", message: finalMessage });
+				completeAiRequestSpan(requestSpan, finalMessage, {
+					chunkCount,
+					timeToFirstChunkMs,
+					httpStatusCode,
+				});
 				return finalMessage;
+			} catch (error) {
+				failAiRequestSpan(requestSpan, classifyTelemetryError(error));
+				throw error;
 			}
-		}
-	}
+		},
+	);
+}
 
-	const finalMessage = await response.result();
-	if (addedPartial) {
-		context.messages[context.messages.length - 1] = finalMessage;
-	} else {
-		context.messages.push(finalMessage);
-		await emit({ type: "message_start", message: { ...finalMessage } });
-	}
-	await emit({ type: "message_end", message: finalMessage });
-	return finalMessage;
+function classifyTelemetryError(error: unknown): string {
+	if (error instanceof DOMException && error.name === "AbortError") return "AbortError";
+	if (error instanceof TypeError) return "TypeError";
+	if (error instanceof Error) return "Error";
+	return "NonError";
 }
 
 /**
@@ -414,15 +568,16 @@ async function executeToolCalls(
 	config: AgentLoopConfig,
 	signal: AbortSignal | undefined,
 	emit: AgentEventSink,
+	telemetry: ActiveTurnTelemetry,
 ): Promise<ExecutedToolCallBatch> {
 	const toolCalls = assistantMessage.content.filter((c) => c.type === "toolCall");
 	const hasSequentialToolCall = toolCalls.some(
 		(tc) => currentContext.tools?.find((t) => t.name === tc.name)?.executionMode === "sequential",
 	);
 	if (config.toolExecution === "sequential" || hasSequentialToolCall) {
-		return executeToolCallsSequential(currentContext, assistantMessage, toolCalls, config, signal, emit);
+		return executeToolCallsSequential(currentContext, assistantMessage, toolCalls, config, signal, emit, telemetry);
 	}
-	return executeToolCallsParallel(currentContext, assistantMessage, toolCalls, config, signal, emit);
+	return executeToolCallsParallel(currentContext, assistantMessage, toolCalls, config, signal, emit, telemetry);
 }
 
 type ExecutedToolCallBatch = {
@@ -437,6 +592,7 @@ async function executeToolCallsSequential(
 	config: AgentLoopConfig,
 	signal: AbortSignal | undefined,
 	emit: AgentEventSink,
+	telemetry: ActiveTurnTelemetry,
 ): Promise<ExecutedToolCallBatch> {
 	const finalizedCalls: FinalizedToolCallOutcome[] = [];
 	const messages: ToolResultMessage[] = [];
@@ -458,7 +614,7 @@ async function executeToolCallsSequential(
 				isError: preparation.isError,
 			};
 		} else {
-			const executed = await executePreparedToolCall(preparation, signal, emit);
+			const executed = await executePreparedToolCall(preparation, signal, emit, telemetry);
 			finalized = await finalizeExecutedToolCall(
 				currentContext,
 				assistantMessage,
@@ -493,6 +649,7 @@ async function executeToolCallsParallel(
 	config: AgentLoopConfig,
 	signal: AbortSignal | undefined,
 	emit: AgentEventSink,
+	telemetry: ActiveTurnTelemetry,
 ): Promise<ExecutedToolCallBatch> {
 	const finalizedCalls: FinalizedToolCallEntry[] = [];
 
@@ -520,7 +677,7 @@ async function executeToolCallsParallel(
 		}
 
 		finalizedCalls.push(async () => {
-			const executed = await executePreparedToolCall(preparation, signal, emit);
+			const executed = await executePreparedToolCall(preparation, signal, emit, telemetry);
 			const finalized = await finalizeExecutedToolCall(
 				currentContext,
 				assistantMessage,
@@ -671,43 +828,70 @@ async function executePreparedToolCall(
 	prepared: PreparedToolCall,
 	signal: AbortSignal | undefined,
 	emit: AgentEventSink,
+	telemetry: ActiveTurnTelemetry,
 ): Promise<ExecutedToolCallOutcome> {
-	const updateEvents: Promise<void>[] = [];
-	let acceptingUpdates = true;
+	return startHarnessSpan(
+		telemetry.context,
+		"diffex.harness.tool",
+		{
+			"diffex.lane.name": telemetry.laneName,
+			"diffex.operation.id": telemetry.operationId,
+			"diffex.turn.id": telemetry.turnId,
+			"diffex.tool.name": prepared.toolCall.name,
+			"diffex.tool.call_id": prepared.toolCall.id,
+			"diffex.tool.replay": "never",
+			"diffex.tool.recovery": false,
+		},
+		async (toolSpan) => {
+			try {
+				const updateEvents: Promise<void>[] = [];
+				let acceptingUpdates = true;
+				let outcome: ExecutedToolCallOutcome;
 
-	try {
-		const result = await prepared.tool.execute(
-			prepared.toolCall.id,
-			prepared.args as never,
-			signal,
-			(partialResult) => {
-				if (!acceptingUpdates) return;
-				updateEvents.push(
-					Promise.resolve(
-						emit({
-							type: "tool_execution_update",
-							toolCallId: prepared.toolCall.id,
-							toolName: prepared.toolCall.name,
-							args: prepared.toolCall.arguments,
-							partialResult,
-						}),
-					),
-				);
-			},
-		);
-		acceptingUpdates = false;
-		await Promise.all(updateEvents);
-		return { result, isError: false };
-	} catch (error) {
-		acceptingUpdates = false;
-		await Promise.all(updateEvents);
-		return {
-			result: createErrorToolResult(error instanceof Error ? error.message : String(error)),
-			isError: true,
-		};
-	} finally {
-		acceptingUpdates = false;
-	}
+				try {
+					const result = await prepared.tool.execute(
+						prepared.toolCall.id,
+						prepared.args as never,
+						signal,
+						(partialResult) => {
+							if (!acceptingUpdates) return;
+							updateEvents.push(
+								Promise.resolve(
+									emit({
+										type: "tool_execution_update",
+										toolCallId: prepared.toolCall.id,
+										toolName: prepared.toolCall.name,
+										args: prepared.toolCall.arguments,
+										partialResult,
+									}),
+								),
+							);
+						},
+					);
+					acceptingUpdates = false;
+					await Promise.all(updateEvents);
+					outcome = { result, isError: false };
+				} catch (error) {
+					acceptingUpdates = false;
+					await Promise.all(updateEvents);
+					outcome = {
+						result: createErrorToolResult(error instanceof Error ? error.message : String(error)),
+						isError: true,
+					};
+				} finally {
+					acceptingUpdates = false;
+				}
+
+				toolSpan.setAttributes({ "diffex.tool.is_error": outcome.isError });
+				if (outcome.isError) toolSpan.setStatus({ status: "error" });
+				return outcome;
+			} catch (error) {
+				toolSpan.setAttributes({ "diffex.tool.is_error": true });
+				toolSpan.setStatus({ status: "error" });
+				throw error;
+			}
+		},
+	);
 }
 
 async function finalizeExecutedToolCall(

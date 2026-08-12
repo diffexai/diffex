@@ -148,6 +148,11 @@ export interface PrepareNextTurnContext extends ShouldStopAfterTurnContext {}
 
 export interface AgentLoopConfig extends SimpleStreamOptions {
 	model: Model<any>;
+	/** Structural identifiers used only by agent-owned harness telemetry. */
+	telemetryMetadata?: {
+		laneName: string;
+		operationId: string;
+	};
 
 	/**
 	 * Converts AgentMessage[] to LLM-compatible Message[] before each LLM call.

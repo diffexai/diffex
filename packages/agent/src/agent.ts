@@ -7,7 +7,10 @@ import type {
 	ThinkingBudgets,
 	Transport,
 } from "@earendil-works/diffex-ai";
+import { uuidv7 } from "@earendil-works/diffex-ai";
+import { NOOP_TELEMETRY_CONTEXT } from "@earendil-works/diffex-telemetry";
 import { runAgentLoop, runAgentLoopContinue } from "./agent-loop.ts";
+import { startHarnessSpan, type TelemetryContext } from "./harness/telemetry.ts";
 import { getDefaultStreamFn } from "./stream-fn.ts";
 import type {
 	AfterToolCallContext,
@@ -120,6 +123,10 @@ export interface AgentOptions {
 	transport?: Transport;
 	maxRetryDelayMs?: number;
 	toolExecution?: ToolExecutionMode;
+	/** Explicit root context for passive agent telemetry. Defaults to the shared no-op context. */
+	telemetryContext?: TelemetryContext;
+	/** Lane label used by legacy Agent harness spans. Defaults to "main". */
+	telemetryLaneName?: string;
 }
 
 class PendingMessageQueue {
@@ -212,6 +219,12 @@ export class Agent {
 	public maxRetryDelayMs?: number;
 	/** Tool execution strategy for assistant messages that contain multiple tool calls. */
 	public toolExecution: ToolExecutionMode;
+	/** Explicit root context for passive agent telemetry. */
+	public telemetryContext: TelemetryContext;
+	/** Lane label used by legacy Agent harness spans. */
+	public telemetryLaneName: string;
+	private readonly telemetryAgentId = uuidv7();
+	private telemetryOperationSequence = 0;
 
 	constructor(options: AgentOptions) {
 		// Older compiled consumers may omit options or streamFn even though the current API requires them.
@@ -235,6 +248,8 @@ export class Agent {
 		this.transport = runtimeOptions.transport ?? "auto";
 		this.maxRetryDelayMs = runtimeOptions.maxRetryDelayMs;
 		this.toolExecution = runtimeOptions.toolExecution ?? "parallel";
+		this.telemetryContext = runtimeOptions.telemetryContext ?? NOOP_TELEMETRY_CONTEXT;
+		this.telemetryLaneName = runtimeOptions.telemetryLaneName ?? "main";
 	}
 
 	/**
@@ -410,11 +425,11 @@ export class Agent {
 		messages: AgentMessage[],
 		options: { skipInitialSteeringPoll?: boolean } = {},
 	): Promise<void> {
-		await this.runWithLifecycle(async (signal) => {
+		await this.runWithLifecycle(async (signal, telemetryContext, operationId) => {
 			await runAgentLoop(
 				messages,
 				this.createContextSnapshot(),
-				this.createLoopConfig(options),
+				this.createLoopConfig(options, telemetryContext, operationId),
 				(event) => this.processEvents(event),
 				signal,
 				this.streamFunction,
@@ -423,10 +438,10 @@ export class Agent {
 	}
 
 	private async runContinuation(): Promise<void> {
-		await this.runWithLifecycle(async (signal) => {
+		await this.runWithLifecycle(async (signal, telemetryContext, operationId) => {
 			await runAgentLoopContinue(
 				this.createContextSnapshot(),
-				this.createLoopConfig(),
+				this.createLoopConfig({}, telemetryContext, operationId),
 				(event) => this.processEvents(event),
 				signal,
 				this.streamFunction,
@@ -442,11 +457,20 @@ export class Agent {
 		};
 	}
 
-	private createLoopConfig(options: { skipInitialSteeringPoll?: boolean } = {}): AgentLoopConfig {
+	private createLoopConfig(
+		options: { skipInitialSteeringPoll?: boolean },
+		telemetryContext: TelemetryContext,
+		operationId: string,
+	): AgentLoopConfig {
 		let skipInitialSteeringPoll = options.skipInitialSteeringPoll === true;
 		const shouldStopAfterTurn = this.shouldStopAfterTurn;
 		return {
 			model: this._state.model,
+			telemetryContext,
+			telemetryMetadata: {
+				laneName: this.telemetryLaneName,
+				operationId,
+			},
 			reasoning: this._state.thinkingLevel === "off" ? undefined : this._state.thinkingLevel,
 			sessionId: this.sessionId,
 			onPayload: this.onPayload,
@@ -483,7 +507,9 @@ export class Agent {
 		};
 	}
 
-	private async runWithLifecycle(executor: (signal: AbortSignal) => Promise<void>): Promise<void> {
+	private async runWithLifecycle(
+		executor: (signal: AbortSignal, telemetryContext: TelemetryContext, operationId: string) => Promise<void>,
+	): Promise<void> {
 		if (this.activeRun) {
 			throw new Error("Agent is already processing.");
 		}
@@ -498,11 +524,51 @@ export class Agent {
 		this._state.isStreaming = true;
 		this._state.streamingMessage = undefined;
 		this._state.errorMessage = undefined;
+		const telemetrySessionId = this.sessionId ?? this.telemetryAgentId;
+		const operationId = `${telemetrySessionId}:${this.telemetryAgentId}:run-${++this.telemetryOperationSequence}`;
 
 		try {
-			await executor(abortController.signal);
-		} catch (error) {
-			await this.handleRunFailure(error, abortController.signal.aborted);
+			await startHarnessSpan(
+				this.telemetryContext,
+				"diffex.harness.run",
+				{
+					"diffex.session.id": telemetrySessionId,
+					"diffex.lane.name": this.telemetryLaneName,
+					"diffex.operation.id": operationId,
+					"diffex.operation.kind": "run",
+					"diffex.operation.recovery": false,
+				},
+				async (span) => {
+					try {
+						await executor(abortController.signal, span, operationId);
+						let lastAssistant: Extract<AgentMessage, { role: "assistant" }> | undefined;
+						for (let index = this._state.messages.length - 1; index >= 0; index -= 1) {
+							const candidate = this._state.messages[index];
+							if (candidate?.role !== "assistant") continue;
+							lastAssistant = candidate;
+							break;
+						}
+						if (abortController.signal.aborted || lastAssistant?.stopReason === "aborted") {
+							span.setAttributes({ "diffex.operation.outcome": "aborted" });
+						} else if (lastAssistant?.stopReason === "error") {
+							span.setAttributes({ "diffex.operation.outcome": "failed" });
+							span.setStatus({ status: "error" });
+						} else {
+							span.setAttributes({ "diffex.operation.outcome": "completed" });
+						}
+					} catch (error) {
+						const aborted = abortController.signal.aborted;
+						span.setAttributes({ "diffex.operation.outcome": aborted ? "aborted" : "failed" });
+						span.setStatus({ status: aborted ? "ok" : "error" });
+						try {
+							await this.handleRunFailure(error, aborted);
+						} catch (handlerError) {
+							span.setStatus({ status: "error" });
+							throw handlerError;
+						}
+					}
+				},
+			);
 		} finally {
 			this.finishRun();
 		}
