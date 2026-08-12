@@ -53,6 +53,16 @@ function canonicalizePath(path: string | undefined): string | undefined {
 	return _canonicalizePath(path);
 }
 
+function shouldNestSession(parent: SessionInfo, child: SessionInfo): boolean {
+	if (parent.harnessId && child.harnessId) {
+		return parent.harnessId === child.harnessId;
+	}
+	if (parent.profileId && child.profileId && parent.profileId !== child.profileId) {
+		return false;
+	}
+	return true;
+}
+
 class SessionSelectorHeader implements Component {
 	private scope: SessionScope;
 	private sortMode: SortMode;
@@ -214,41 +224,66 @@ function buildSessionTree(sessions: SessionInfo[]): SessionTreeNode[] {
 		byPath.set(sessionPath, { session, children: [], latestActivity: session.modified.getTime() });
 	}
 
-	const roots: SessionTreeNode[] = [];
-
+	const parentByPath = new Map<string, string>();
 	for (const session of sessions) {
 		const sessionPath = canonicalizePath(session.path) ?? session.path;
-		const node = byPath.get(sessionPath)!;
 		const parentPath = canonicalizePath(session.parentSessionPath);
-
-		if (parentPath && byPath.has(parentPath)) {
-			byPath.get(parentPath)!.children.push(node);
-		} else {
-			roots.push(node);
+		const parent = parentPath ? byPath.get(parentPath) : undefined;
+		if (parentPath && parentPath !== sessionPath && parent && shouldNestSession(parent.session, session)) {
+			parentByPath.set(sessionPath, parentPath);
 		}
 	}
 
-	const updateLatestActivity = (node: SessionTreeNode): number => {
-		let latestActivity = node.session.modified.getTime();
-		for (const child of node.children) {
-			latestActivity = Math.max(latestActivity, updateLatestActivity(child));
+	// A malformed legacy header can create a parent cycle. Remove every edge
+	// inside that cycle so all affected sessions remain visible as roots.
+	const cyclePaths = new Set<string>();
+	const resolvedPaths = new Set<string>();
+	for (const startPath of parentByPath.keys()) {
+		if (resolvedPaths.has(startPath)) continue;
+		const chain: string[] = [];
+		const chainIndex = new Map<string, number>();
+		let currentPath: string | undefined = startPath;
+		while (currentPath && !resolvedPaths.has(currentPath)) {
+			const cycleStart = chainIndex.get(currentPath);
+			if (cycleStart !== undefined) {
+				for (const cyclePath of chain.slice(cycleStart)) cyclePaths.add(cyclePath);
+				break;
+			}
+			chainIndex.set(currentPath, chain.length);
+			chain.push(currentPath);
+			currentPath = parentByPath.get(currentPath);
 		}
-		node.latestActivity = latestActivity;
-		return latestActivity;
-	};
-
-	for (const root of roots) {
-		updateLatestActivity(root);
+		for (const path of chain) resolvedPaths.add(path);
 	}
 
-	// Sort children and roots by latest activity in each subtree (descending)
-	const sortNodes = (nodes: SessionTreeNode[]): void => {
+	const roots: SessionTreeNode[] = [];
+	for (const [sessionPath, node] of byPath) {
+		const parentPath = cyclePaths.has(sessionPath) ? undefined : parentByPath.get(sessionPath);
+		const parent = parentPath ? byPath.get(parentPath) : undefined;
+		if (parent) parent.children.push(node);
+		else roots.push(node);
+	}
+
+	const activityStack = roots.map((node) => ({ node, visited: false }));
+	while (activityStack.length > 0) {
+		const item = activityStack.pop()!;
+		if (!item.visited) {
+			activityStack.push({ node: item.node, visited: true });
+			for (const child of item.node.children) activityStack.push({ node: child, visited: false });
+			continue;
+		}
+		item.node.latestActivity = item.node.children.reduce(
+			(latest, child) => Math.max(latest, child.latestActivity),
+			item.node.session.modified.getTime(),
+		);
+	}
+
+	const sortStack: SessionTreeNode[][] = [roots];
+	while (sortStack.length > 0) {
+		const nodes = sortStack.pop()!;
 		nodes.sort((a, b) => b.latestActivity - a.latestActivity);
-		for (const node of nodes) {
-			sortNodes(node.children);
-		}
-	};
-	sortNodes(roots);
+		for (const node of nodes) sortStack.push(node.children);
+	}
 
 	return roots;
 }
@@ -258,20 +293,38 @@ function buildSessionTree(sessions: SessionInfo[]): SessionTreeNode[] {
  */
 function flattenSessionTree(roots: SessionTreeNode[]): FlatSessionNode[] {
 	const result: FlatSessionNode[] = [];
-
-	const walk = (node: SessionTreeNode, depth: number, ancestorContinues: boolean[], isLast: boolean): void => {
-		result.push({ session: node.session, depth, isLast, ancestorContinues });
-
-		for (let i = 0; i < node.children.length; i++) {
-			const childIsLast = i === node.children.length - 1;
-			// Only show continuation line for non-root ancestors
-			const continues = depth > 0 ? !isLast : false;
-			walk(node.children[i]!, depth + 1, [...ancestorContinues, continues], childIsLast);
+	const maxDisplayDepth = 32;
+	const stack: Array<{
+		node: SessionTreeNode;
+		depth: number;
+		isLast: boolean;
+		ancestorContinues: boolean[];
+	}> = [];
+	for (let index = roots.length - 1; index >= 0; index -= 1) {
+		stack.push({ node: roots[index]!, depth: 0, isLast: index === roots.length - 1, ancestorContinues: [] });
+	}
+	while (stack.length > 0) {
+		const item = stack.pop()!;
+		result.push({
+			session: item.node.session,
+			depth: item.depth,
+			isLast: item.isLast,
+			ancestorContinues: item.ancestorContinues,
+		});
+		for (let index = item.node.children.length - 1; index >= 0; index -= 1) {
+			const childIsLast = index === item.node.children.length - 1;
+			const nextDepth = Math.min(item.depth + 1, maxDisplayDepth);
+			const nextAncestors =
+				item.depth < maxDisplayDepth
+					? [...item.ancestorContinues, item.depth > 0 ? !item.isLast : false]
+					: item.ancestorContinues;
+			stack.push({
+				node: item.node.children[index]!,
+				depth: nextDepth,
+				isLast: childIsLast,
+				ancestorContinues: nextAncestors,
+			});
 		}
-	};
-
-	for (let i = 0; i < roots.length; i++) {
-		walk(roots[i]!, 0, [], i === roots.length - 1);
 	}
 
 	return result;
