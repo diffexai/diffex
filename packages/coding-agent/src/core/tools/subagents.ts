@@ -1,6 +1,11 @@
 import { Type } from "typebox";
 import type { ToolDefinition } from "../extensions/types.ts";
-import type { SubagentActionResult } from "../subagents/types.ts";
+import type {
+	SubagentActionResult,
+	SubagentQueryOptions,
+	SubagentQueryResult,
+	SubagentResultView,
+} from "../subagents/types.ts";
 import { SUBAGENT_NAME_PATTERN } from "../subagents/types.ts";
 
 const spawnAgentSchema = Type.Object({
@@ -35,6 +40,28 @@ const agentActionSchema = Type.Union([
 	),
 ]);
 
+const agentsSchema = Type.Object(
+	{
+		timeout_ms: Type.Integer({
+			description: "Maximum time to wait in milliseconds, or zero to return immediately",
+			minimum: 0,
+		}),
+		targets: Type.Optional(
+			Type.Array(targetSchema, {
+				description: "Child agent names to inspect, frozen when the call starts",
+				minItems: 1,
+				uniqueItems: true,
+			}),
+		),
+		until: Type.Optional(
+			Type.Union([Type.Literal("any"), Type.Literal("all")], {
+				description: "Wait until any or all selected agents reach a terminal status",
+			}),
+		),
+	},
+	{ additionalProperties: false },
+);
+
 export type AgentActionRequest =
 	| { readonly target: string; readonly action: "message"; readonly message: string; readonly wake?: boolean }
 	| { readonly target: string; readonly action: "interrupt" };
@@ -42,6 +69,51 @@ export type AgentActionRequest =
 export interface SpawnAgentDetails {
 	readonly name: string;
 	readonly status: "queued";
+}
+
+export interface AgentsRequest {
+	readonly timeout_ms: number;
+	readonly targets?: string[];
+	readonly until?: "any" | "all";
+}
+
+export interface AgentsDetails {
+	readonly timed_out: boolean;
+	readonly agents: readonly SubagentResultView[];
+}
+
+function assertAgentsRequest(request: unknown): asserts request is AgentsRequest {
+	if (typeof request !== "object" || request === null || Array.isArray(request)) {
+		throw new Error("Agents request must be an object");
+	}
+	for (const key of Object.keys(request)) {
+		if (key !== "timeout_ms" && key !== "targets" && key !== "until") {
+			throw new Error(`Unknown agents request field: ${key}`);
+		}
+	}
+
+	const { timeout_ms, targets, until } = request as Partial<AgentsRequest>;
+	if (!Number.isInteger(timeout_ms) || timeout_ms === undefined || timeout_ms < 0) {
+		throw new RangeError("timeout_ms must be a non-negative integer");
+	}
+	if (targets !== undefined) {
+		if (!Array.isArray(targets) || targets.length === 0) {
+			throw new Error("targets must be a non-empty array");
+		}
+		const uniqueTargets = new Set<string>();
+		for (const target of targets) {
+			if (typeof target !== "string" || !SUBAGENT_NAME_PATTERN.test(target)) {
+				throw new Error(`Invalid subagent name: ${String(target)}`);
+			}
+			if (uniqueTargets.has(target)) {
+				throw new Error(`Duplicate subagent target: ${target}`);
+			}
+			uniqueTargets.add(target);
+		}
+	}
+	if (until !== undefined && until !== "any" && until !== "all") {
+		throw new Error(`Invalid agents wait condition: ${String(until)}`);
+	}
 }
 
 export function createSpawnAgentTool(
@@ -95,6 +167,35 @@ export function createAgentActionTool(
 			const details = await action(normalized);
 			return {
 				content: [{ type: "text", text: `Completed ${details.action} action for ${details.target}` }],
+				details,
+			};
+		},
+	};
+}
+
+export function createAgentsTool(
+	query: (options: SubagentQueryOptions) => Promise<SubagentQueryResult>,
+): ToolDefinition<typeof agentsSchema, AgentsDetails> {
+	return {
+		name: "agents",
+		label: "Agents",
+		description: "List child agents immediately or wait for controller changes and terminal statuses.",
+		parameters: agentsSchema,
+		executionMode: "parallel",
+		execute: async (_toolCallId, request, signal) => {
+			assertAgentsRequest(request);
+			const result = await query({
+				timeoutMs: request.timeout_ms,
+				...(request.targets === undefined ? {} : { targets: request.targets }),
+				...(request.until === undefined ? {} : { until: request.until }),
+				...(signal === undefined ? {} : { signal }),
+			});
+			const details: AgentsDetails = Object.freeze({
+				timed_out: result.timedOut,
+				agents: result.agents,
+			});
+			return {
+				content: [{ type: "text", text: JSON.stringify(details) }],
 				details,
 			};
 		},

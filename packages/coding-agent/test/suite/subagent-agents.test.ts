@@ -1,8 +1,21 @@
 import { fauxAssistantMessage } from "@earendil-works/diffex-ai";
+import { Check } from "typebox/value";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { ExtensionContext } from "../../src/core/extensions/types.ts";
 import { SubagentController } from "../../src/core/subagents/controller.ts";
-import type { SubagentLifecycleEvent } from "../../src/core/subagents/types.ts";
+import type {
+	SubagentLifecycleEvent,
+	SubagentQueryOptions,
+	SubagentQueryResult,
+} from "../../src/core/subagents/types.ts";
+import { type AgentsRequest, createAgentsTool } from "../../src/core/tools/subagents.ts";
 import { createSubagentTestHarness, type SubagentTestHarness } from "./subagent-harness.ts";
+
+type AgentsTool = ReturnType<typeof createAgentsTool>;
+
+function executeAgents(tool: AgentsTool, request: AgentsRequest, signal?: AbortSignal) {
+	return tool.execute("agents-call", request, signal, undefined, {} as ExtensionContext);
+}
 
 async function isPending(promise: Promise<unknown>): Promise<boolean> {
 	const pending = Symbol("pending");
@@ -66,7 +79,7 @@ describe("subagent queries", () => {
 		const interrupted = subject.spawn("interrupted", "private interrupted task", createSession);
 		await interrupted.run;
 
-		const result = await subject.queryAgents({ timeoutMs: 0 });
+		const result = await subject.queryAgents({ timeoutMs: 100, until: "all" });
 		expect(result).toEqual({
 			timedOut: false,
 			agents: [
@@ -134,6 +147,20 @@ describe("subagent queries", () => {
 		await expect(waiting).resolves.toEqual({
 			timedOut: false,
 			agents: [{ name: "selected", status: "running" }],
+		});
+	});
+
+	it("times out while waiting for the next revision", async () => {
+		vi.useFakeTimers();
+		const subject = controller();
+		subject.reserve("worker", "task");
+		const waiting = subject.queryAgents({ timeoutMs: 25, targets: ["worker"] });
+		await Promise.resolve();
+
+		await vi.advanceTimersByTimeAsync(25);
+		await expect(waiting).resolves.toEqual({
+			timedOut: true,
+			agents: [{ name: "worker", status: "queued" }],
 		});
 	});
 
@@ -229,10 +256,13 @@ describe("subagent queries", () => {
 	it("rejects controller shutdown during an active wait", async () => {
 		const subject = controller();
 		subject.reserve("worker", "task");
-		const waiting = subject.queryAgents({ timeoutMs: 100, until: "all" });
+		const abortController = new AbortController();
+		const removeEventListener = vi.spyOn(abortController.signal, "removeEventListener");
+		const waiting = subject.queryAgents({ timeoutMs: 100, until: "all", signal: abortController.signal });
 
 		await subject.shutdown();
 		await expect(waiting).rejects.toThrow("Subagent controller is shut down");
+		expect(removeEventListener).toHaveBeenCalled();
 	});
 
 	it("does not lose completion during waiter registration", async () => {
@@ -268,5 +298,92 @@ describe("subagent queries", () => {
 		for (const key of ["task", "result", "finalText", "error"]) {
 			expect(serializedLifecycle).not.toContain(`"${key}"`);
 		}
+	});
+
+	it("defines a strict agents tool schema", () => {
+		const tool = createAgentsTool(() => Promise.resolve({ timedOut: false, agents: [] }));
+
+		expect(tool.executionMode).toBe("parallel");
+		expect(Check(tool.parameters, { timeout_ms: 0 })).toBe(true);
+		expect(Check(tool.parameters, { timeout_ms: 100, targets: ["first", "second"], until: "all" })).toBe(true);
+		for (const request of [
+			{},
+			{ timeout_ms: -1 },
+			{ timeout_ms: 1.5 },
+			{ timeout_ms: 0, targets: [] },
+			{ timeout_ms: 0, targets: ["worker", "worker"] },
+			{ timeout_ms: 0, targets: [""] },
+			{ timeout_ms: 0, targets: ["Invalid"] },
+			{ timeout_ms: 0, until: "later" },
+			{ timeout_ms: 0, extra: true },
+		]) {
+			expect(Check(tool.parameters, request)).toBe(false);
+		}
+	});
+
+	it("defensively validates agents tool requests", async () => {
+		const tool = createAgentsTool(() => Promise.resolve({ timedOut: false, agents: [] }));
+
+		await expect(executeAgents(tool, {} as AgentsRequest)).rejects.toThrow(
+			"timeout_ms must be a non-negative integer",
+		);
+		await expect(executeAgents(tool, { timeout_ms: -1 })).rejects.toThrow(
+			"timeout_ms must be a non-negative integer",
+		);
+		await expect(executeAgents(tool, { timeout_ms: 0, targets: [] })).rejects.toThrow(
+			"targets must be a non-empty array",
+		);
+		await expect(
+			executeAgents(tool, { timeout_ms: 0, targets: "worker" } as unknown as AgentsRequest),
+		).rejects.toThrow("targets must be a non-empty array");
+		await expect(executeAgents(tool, { timeout_ms: 0, targets: ["worker", "worker"] })).rejects.toThrow(
+			"Duplicate subagent target: worker",
+		);
+		await expect(executeAgents(tool, { timeout_ms: 0, targets: ["Invalid"] })).rejects.toThrow(
+			"Invalid subagent name: Invalid",
+		);
+		await expect(executeAgents(tool, { timeout_ms: 0, until: "later" as "all" })).rejects.toThrow(
+			"Invalid agents wait condition: later",
+		);
+		await expect(executeAgents(tool, { timeout_ms: 0, extra: true } as AgentsRequest)).rejects.toThrow(
+			"Unknown agents request field: extra",
+		);
+	});
+
+	it("maps snake-case requests and serializes identical result details", async () => {
+		const abortController = new AbortController();
+		const queryResult: SubagentQueryResult = {
+			timedOut: true,
+			agents: [{ name: "worker", status: "failed", result: "partial", error: "failed" }],
+		};
+		const query = vi.fn((_options: SubagentQueryOptions) => Promise.resolve(queryResult));
+		const tool = createAgentsTool(query);
+
+		const result = await executeAgents(
+			tool,
+			{ timeout_ms: 250, targets: ["worker"], until: "any" },
+			abortController.signal,
+		);
+
+		expect(query).toHaveBeenCalledWith({
+			timeoutMs: 250,
+			targets: ["worker"],
+			until: "any",
+			signal: abortController.signal,
+		});
+		expect(result.details).toEqual({
+			timed_out: true,
+			agents: [{ name: "worker", status: "failed", result: "partial", error: "failed" }],
+		});
+		expect(result.content).toEqual([{ type: "text", text: JSON.stringify(result.details) }]);
+	});
+
+	it("surfaces controller target errors through the agents tool", async () => {
+		const subject = controller();
+		const tool = createAgentsTool((options) => subject.queryAgents(options));
+
+		await expect(executeAgents(tool, { timeout_ms: 0, targets: ["missing"] })).rejects.toThrow(
+			"Unknown subagent: missing",
+		);
 	});
 });
