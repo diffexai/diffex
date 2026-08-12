@@ -12,7 +12,7 @@ const { session: defaultAuthSession } = await createAgentSession({
 	modelRuntime,
 });
 console.log("Session with default model runtime");
-defaultAuthSession.dispose();
+await defaultAuthSession.dispose();
 
 const customRuntime = await ModelRuntime.create({
 	authPath: "/tmp/my-app/auth.json",
@@ -23,7 +23,7 @@ const { session: customAuthSession } = await createAgentSession({
 	modelRuntime: customRuntime,
 });
 console.log("Session with custom auth and models locations");
-customAuthSession.dispose();
+await customAuthSession.dispose();
 
 await modelRuntime.setRuntimeApiKey("anthropic", "sk-my-temp-key");
 const { session: runtimeKeySession } = await createAgentSession({
@@ -31,4 +31,4 @@ const { session: runtimeKeySession } = await createAgentSession({
 	modelRuntime,
 });
 console.log("Session with runtime API key override");
-runtimeKeySession.dispose();
+await runtimeKeySession.dispose();

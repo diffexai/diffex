@@ -41,7 +41,7 @@ try {
 	await session1.prompt("What is 2 + 2?");
 	console.log("\n");
 } finally {
-	session1.dispose();
+	await session1.dispose();
 }
 
 // Option 2: Append instructions to the default prompt
@@ -71,5 +71,5 @@ try {
 	await session2.prompt("List 3 benefits of TypeScript.");
 	console.log();
 } finally {
-	session2.dispose();
+	await session2.dispose();
 }

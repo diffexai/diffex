@@ -24,7 +24,7 @@ const { session: customSettingsSession } = await createAgentSession({
 	sessionManager: SessionManager.inMemory(),
 });
 console.log("Session created with custom settings");
-customSettingsSession.dispose();
+await customSettingsSession.dispose();
 
 // Setters update memory immediately and queue persistence writes.
 // Call flush() when you need a durability boundary.
@@ -50,4 +50,4 @@ const { session: testSession } = await createAgentSession({
 	sessionManager: SessionManager.inMemory(),
 });
 console.log("Test session created with in-memory settings");
-testSession.dispose();
+await testSession.dispose();

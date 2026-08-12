@@ -31,6 +31,7 @@ session.subscribe((event) => {
 });
 
 await session.prompt("What files are in the current directory?");
+await session.dispose();
 ```
 
 ## Installation
@@ -107,9 +108,12 @@ interface AgentSession {
   abort(): Promise<void>;
 
   // Cleanup
-  dispose(): void;
+  dispose(): Promise<void>;
 }
 ```
+
+Always await `dispose()` before releasing process resources or removing a session workspace.
+Disposal closes child-agent admission immediately, then waits for active root and child work to stop and for all session resources to be released.
 
 Session replacement APIs such as new-session, resume, fork, and import live on `AgentSessionRuntime`, not on `AgentSession`.
 

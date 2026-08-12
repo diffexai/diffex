@@ -223,7 +223,7 @@ async function runDiffexCodingAgent<TOutput extends JsonValue>(
 		}
 	}
 	try {
-		session?.dispose();
+		await session?.dispose();
 	} catch (error) {
 		cleanupErrors.push(error);
 	}

@@ -18,7 +18,7 @@ const { session: readOnlySession } = await createAgentSession({
 	sessionManager: SessionManager.inMemory(),
 });
 console.log("Read-only session created");
-readOnlySession.dispose();
+await readOnlySession.dispose();
 
 // Custom tool selection
 const { session: customToolsSession } = await createAgentSession({
@@ -26,7 +26,7 @@ const { session: customToolsSession } = await createAgentSession({
 	sessionManager: SessionManager.inMemory(),
 });
 console.log("Custom tools session created");
-customToolsSession.dispose();
+await customToolsSession.dispose();
 
 // With custom cwd
 const customCwd = "/path/to/project";
@@ -36,7 +36,7 @@ const { session: customCwdSession } = await createAgentSession({
 	sessionManager: SessionManager.inMemory(customCwd),
 });
 console.log("Custom cwd session created");
-customCwdSession.dispose();
+await customCwdSession.dispose();
 
 // Or pick specific tools for custom cwd
 const { session: specificToolsSession } = await createAgentSession({
@@ -45,4 +45,4 @@ const { session: specificToolsSession } = await createAgentSession({
 	sessionManager: SessionManager.inMemory(customCwd),
 });
 console.log("Specific tools with custom cwd session created");
-specificToolsSession.dispose();
+await specificToolsSession.dispose();
