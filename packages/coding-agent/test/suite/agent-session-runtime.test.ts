@@ -4,6 +4,7 @@ import { join, parse } from "node:path";
 import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "@earendil-works/diffex-ai/compat";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { AgentSession } from "../../src/core/agent-session.ts";
 import {
 	type CreateAgentSessionRuntimeFactory,
 	createAgentSessionFromServices,
@@ -16,18 +17,22 @@ import { SessionManager } from "../../src/core/session-manager.ts";
 import type {
 	AgentToolResult,
 	ExtensionAPI,
+	ExtensionContext,
 	ExtensionFactory,
 	SessionBeforeForkEvent,
 	SessionBeforeSwitchEvent,
 	SessionShutdownEvent,
 	SessionStartEvent,
 } from "../../src/index.ts";
+import { deferred } from "./subagent-harness.ts";
 
 type RecordedSessionEvent =
 	| SessionBeforeSwitchEvent
 	| SessionBeforeForkEvent
 	| SessionShutdownEvent
 	| SessionStartEvent;
+
+const extensionContext = {} as ExtensionContext;
 
 describe("AgentSessionRuntime characterization", () => {
 	const cleanups: Array<() => Promise<void> | void> = [];
@@ -211,6 +216,159 @@ describe("AgentSessionRuntime characterization", () => {
 			"toolResult",
 			"assistant",
 		]);
+	});
+
+	it.each(["clear", "resume", "fork", "import"] as const)(
+		"awaits active child cleanup before %s replacement",
+		async (flow) => {
+			const { runtime, faux, tempDir } = await createRuntimeForTest(() => {});
+			await runtime.session.prompt("seed");
+			const forkEntryId = runtime.session.getUserMessagesForForking()[0]!.entryId;
+			let targetSessionFile: string | undefined;
+			if (flow === "resume") {
+				const target = SessionManager.create(tempDir);
+				target.appendMessage({
+					role: "user",
+					content: [{ type: "text", text: "target" }],
+					timestamp: Date.now(),
+				});
+				targetSessionFile = target.getSessionFile();
+			} else if (flow === "import") {
+				targetSessionFile = runtime.session.sessionFile;
+			}
+
+			const childProviderStarted = deferred<void>();
+			const childProviderAborted = deferred<void>();
+			faux.setResponses([
+				(_context, options) =>
+					new Promise((resolve) => {
+						childProviderStarted.resolve();
+						options?.signal?.addEventListener(
+							"abort",
+							() => {
+								childProviderAborted.resolve();
+								resolve(fauxAssistantMessage("child aborted", { stopReason: "aborted" }));
+							},
+							{ once: true },
+						);
+					}),
+			]);
+			const outgoing = runtime.session;
+			const spawn = outgoing.getToolDefinition("spawn_agent")!;
+			const agents = outgoing.getToolDefinition("agents")!;
+			await spawn.execute("spawn-worker", { name: "worker", task: "wait" }, undefined, undefined, extensionContext);
+			await childProviderStarted.promise;
+			await spawn.execute("spawn-queued", { name: "queued", task: "wait" }, undefined, undefined, extensionContext);
+			const oldWaitResult = agents
+				.execute(
+					"wait-old",
+					{ timeout_ms: 10_000, targets: ["worker", "queued"], until: "all" },
+					undefined,
+					undefined,
+					extensionContext,
+				)
+				.catch((error: unknown) => error);
+
+			const originalDispose = outgoing.dispose.bind(outgoing);
+			const disposeReached = deferred<void>();
+			const disposeGate = deferred<void>();
+			vi.spyOn(outgoing, "dispose").mockImplementation(async () => {
+				await originalDispose();
+				disposeReached.resolve();
+				await disposeGate.promise;
+			});
+			let replacement: Promise<unknown>;
+			if (flow === "clear") {
+				replacement = runtime.newSession();
+			} else if (flow === "resume") {
+				replacement = runtime.switchSession(targetSessionFile!);
+			} else if (flow === "fork") {
+				replacement = runtime.fork(forkEntryId);
+			} else {
+				replacement = runtime.importFromJsonl(targetSessionFile!);
+			}
+
+			await Promise.all([childProviderAborted.promise, disposeReached.promise]);
+			expect(runtime.session).toBe(outgoing);
+			disposeGate.resolve();
+			await replacement;
+			expect(runtime.session).not.toBe(outgoing);
+			await expect(oldWaitResult).resolves.toMatchObject({ message: "Subagent controller is shut down" });
+
+			const nextAgents = runtime.session.getToolDefinition("agents")!;
+			await expect(
+				nextAgents.execute("list-empty", { timeout_ms: 0 }, undefined, undefined, extensionContext),
+			).resolves.toMatchObject({ details: { timed_out: false, agents: [] } });
+			faux.setResponses([fauxAssistantMessage("replacement child done")]);
+			const nextSpawn = runtime.session.getToolDefinition("spawn_agent")!;
+			await nextSpawn.execute(
+				"reuse-worker",
+				{ name: "worker", task: "again" },
+				undefined,
+				undefined,
+				extensionContext,
+			);
+			await expect(
+				nextAgents.execute(
+					"wait-worker",
+					{ timeout_ms: 1_000, targets: ["worker"], until: "all" },
+					undefined,
+					undefined,
+					extensionContext,
+				),
+			).resolves.toMatchObject({
+				details: { timed_out: false, agents: [{ name: "worker", status: "idle" }] },
+			});
+		},
+	);
+
+	it("awaits active and queued children during application shutdown", async () => {
+		const { runtime, faux } = await createRuntimeForTest(() => {});
+		const childProviderStarted = deferred<void>();
+		const childProviderAborted = deferred<void>();
+		faux.setResponses([
+			(_context, options) =>
+				new Promise((resolve) => {
+					childProviderStarted.resolve();
+					options?.signal?.addEventListener(
+						"abort",
+						() => {
+							childProviderAborted.resolve();
+							resolve(fauxAssistantMessage("child aborted", { stopReason: "aborted" }));
+						},
+						{ once: true },
+					);
+				}),
+		]);
+		const outgoing = runtime.session;
+		const spawn = outgoing.getToolDefinition("spawn_agent")!;
+		const agents = outgoing.getToolDefinition("agents")!;
+		await spawn.execute("spawn-active", { name: "active", task: "wait" }, undefined, undefined, extensionContext);
+		await childProviderStarted.promise;
+		await spawn.execute("spawn-queued", { name: "queued", task: "wait" }, undefined, undefined, extensionContext);
+		const agentsResult = agents
+			.execute(
+				"wait-agents",
+				{ timeout_ms: 10_000, targets: ["active", "queued"], until: "all" },
+				undefined,
+				undefined,
+				extensionContext,
+			)
+			.catch((error: unknown) => error);
+		const originalDispose = AgentSession.prototype.dispose;
+		const disposedChildren: AgentSession[] = [];
+		vi.spyOn(AgentSession.prototype, "dispose").mockImplementation(function (this: AgentSession) {
+			if (this !== outgoing) disposedChildren.push(this);
+			return originalDispose.call(this);
+		});
+
+		const firstDispose = runtime.dispose();
+		const secondDispose = runtime.dispose();
+		expect(firstDispose).toBe(secondDispose);
+		await childProviderAborted.promise;
+		await firstDispose;
+		await expect(agentsResult).resolves.toMatchObject({ message: "Subagent controller is shut down" });
+		expect(disposedChildren).toHaveLength(1);
 	});
 
 	it("emits session_before_switch and session_start for new and resume flows", async () => {

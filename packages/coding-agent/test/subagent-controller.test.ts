@@ -153,7 +153,7 @@ describe("SubagentController", () => {
 
 		const record = controller.reserve("worker", "private task text");
 		const child = await harness();
-		const dispose = vi.spyOn(child.session, "dispose").mockImplementation(() => {});
+		const dispose = vi.spyOn(child.session, "dispose").mockResolvedValue();
 		controller.attachSession("worker", child.session);
 		controller.trackRun("worker", Promise.resolve());
 		controller.markRunning("worker");
@@ -333,7 +333,7 @@ describe("SubagentController", () => {
 		const controller = new SubagentController({ maxConcurrent: 1 });
 		const child = await harness();
 		const abort = vi.spyOn(child.session, "abort").mockResolvedValue();
-		const dispose = vi.spyOn(child.session, "dispose").mockImplementation(() => {});
+		const dispose = vi.spyOn(child.session, "dispose").mockResolvedValue();
 		const run = deferred<void>();
 		controller.reserve("worker", "task");
 		controller.attachSession("worker", child.session);
@@ -461,6 +461,23 @@ describe("SubagentController", () => {
 		await expect(resetResult).resolves.toMatchObject({ message: "Subagent controller is shut down" });
 		expect(() => controller.reserve("worker", "reused")).toThrow("Subagent controller is shut down");
 		await expect(controller.reset()).rejects.toThrow("Subagent controller is shut down");
+	});
+
+	it("shares lifecycle promises with reentrant listeners", async () => {
+		const controller = new SubagentController({ maxConcurrent: 1 });
+		let nestedReset: Promise<void> | undefined;
+		let nestedShutdown: Promise<void> | undefined;
+		controller.subscribe((event) => {
+			if (event.type === "subagent_controller_reset") nestedReset = controller.reset();
+			if (event.type === "subagent_controller_disposed") nestedShutdown = controller.shutdown();
+		});
+
+		const reset = controller.reset();
+		expect(nestedReset).toBe(reset);
+		await reset;
+		const shutdown = controller.shutdown();
+		expect(nestedShutdown).toBe(shutdown);
+		await shutdown;
 	});
 
 	it("finishes cleanup before aggregating abort and disposal failures", async () => {

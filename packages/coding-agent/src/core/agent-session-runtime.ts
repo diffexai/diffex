@@ -79,6 +79,7 @@ export class AgentSessionRuntime {
 	private readonly createRuntime: CreateAgentSessionRuntimeFactory;
 	private _diagnostics: AgentSessionRuntimeDiagnostic[];
 	private _modelFallbackMessage?: string;
+	private disposePromise: Promise<void> | undefined;
 
 	constructor(
 		_session: AgentSession,
@@ -165,16 +166,41 @@ export class AgentSessionRuntime {
 	}
 
 	private async teardownCurrent(reason: SessionShutdownEvent["reason"], targetSessionFile?: string): Promise<void> {
+		const session = this.session;
+		const failures: unknown[] = [];
 		// Settle any active response first so the aborted turn (including tool
 		// results) is persisted to the outgoing session before it is replaced.
-		await this.session.abort();
-		await emitSessionShutdownEvent(this.session.extensionRunner, {
-			type: "session_shutdown",
-			reason,
-			targetSessionFile,
-		});
-		this.beforeSessionInvalidate?.();
-		this.session.dispose();
+		try {
+			await session.abort();
+		} catch (error) {
+			failures.push(error);
+		}
+		try {
+			await emitSessionShutdownEvent(session.extensionRunner, {
+				type: "session_shutdown",
+				reason,
+				targetSessionFile,
+			});
+		} catch (error) {
+			failures.push(error);
+		}
+		try {
+			this.beforeSessionInvalidate?.();
+		} catch (error) {
+			failures.push(error);
+		}
+		try {
+			await session.dispose();
+		} catch (error) {
+			if (error instanceof AggregateError) {
+				failures.push(...error.errors);
+			} else {
+				failures.push(error);
+			}
+		}
+		if (failures.length > 0) {
+			throw new AggregateError(failures, `Failed to tear down agent session for ${reason}`);
+		}
 	}
 
 	private apply(result: CreateAgentSessionRuntimeResult): void {
@@ -395,13 +421,9 @@ export class AgentSessionRuntime {
 		return { cancelled: false };
 	}
 
-	async dispose(): Promise<void> {
-		await emitSessionShutdownEvent(this.session.extensionRunner, {
-			type: "session_shutdown",
-			reason: "quit",
-		});
-		this.beforeSessionInvalidate?.();
-		this.session.dispose();
+	dispose(): Promise<void> {
+		this.disposePromise ??= this.teardownCurrent("quit");
+		return this.disposePromise;
 	}
 }
 

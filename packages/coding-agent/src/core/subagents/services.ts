@@ -109,7 +109,7 @@ export async function createSubagentSession(
 	try {
 		options.signal?.throwIfAborted();
 	} catch (error) {
-		session.dispose();
+		await session.dispose();
 		throw error;
 	}
 	return session;
