@@ -24,6 +24,20 @@ export interface RecordedTelemetrySpan {
 	readonly endSequence?: number;
 }
 
+export interface InMemoryTelemetryContextOptions {
+	/** Maximum number of recorded spans retained in memory. Defaults to unbounded. */
+	maxSpans?: number;
+}
+
+export interface SettledTelemetrySpanSnapshot {
+	/** Highest settlement sequence observed by this capture. */
+	readonly cursor: number;
+	/** Detached settled spans newer than the requested cursor, ordered by settlement. */
+	readonly spans: readonly RecordedTelemetrySpan[];
+	/** Cumulative spans evicted or declined because the configured capacity was full. */
+	readonly droppedSpanCount: number;
+}
+
 interface MutableRecordedTelemetryEvent {
 	name: string;
 	attributes: SpanAttributes;
@@ -45,6 +59,8 @@ interface InMemoryTelemetryState {
 	spans: MutableRecordedTelemetrySpan[];
 	nextSpanId: number;
 	nextEndSequence: number;
+	maxSpans: number;
+	droppedSpanCount: number;
 }
 
 function copyAttributeValue(value: AttributeValue): AttributeValue {
@@ -117,6 +133,20 @@ function createSpan(
 	};
 }
 
+function retainSpan(state: InMemoryTelemetryState, span: MutableRecordedTelemetrySpan): boolean {
+	while (state.spans.length >= state.maxSpans) {
+		const settledIndex = state.spans.findIndex((candidate) => candidate.settled);
+		if (settledIndex === -1) {
+			state.droppedSpanCount += 1;
+			return false;
+		}
+		state.spans.splice(settledIndex, 1);
+		state.droppedSpanCount += 1;
+	}
+	state.spans.push(span);
+	return true;
+}
+
 function startInMemorySpan<T>(
 	state: InMemoryTelemetryState,
 	parent: MutableRecordedTelemetrySpan | undefined,
@@ -128,7 +158,7 @@ function startInMemorySpan<T>(
 	let recordedSpan: MutableRecordedTelemetrySpan;
 	try {
 		recordedSpan = createSpan(state, parent, options);
-		state.spans.push(recordedSpan);
+		if (!retainSpan(state, recordedSpan)) return NOOP_TELEMETRY_CONTEXT.startSpan(options, callback);
 	} catch {
 		return NOOP_TELEMETRY_CONTEXT.startSpan(options, callback);
 	}
@@ -190,11 +220,21 @@ function startInMemorySpan<T>(
  * Create a fresh instance to isolate tests or independent recording scopes.
  */
 export class InMemoryTelemetryContext implements TelemetryContext {
-	private readonly state: InMemoryTelemetryState = {
-		spans: [],
-		nextSpanId: 1,
-		nextEndSequence: 1,
-	};
+	private readonly state: InMemoryTelemetryState;
+
+	constructor(options: InMemoryTelemetryContextOptions = {}) {
+		const maxSpans = options.maxSpans ?? Number.POSITIVE_INFINITY;
+		if (maxSpans !== Number.POSITIVE_INFINITY && (!Number.isSafeInteger(maxSpans) || maxSpans < 1)) {
+			throw new RangeError("maxSpans must be a positive safe integer");
+		}
+		this.state = {
+			spans: [],
+			nextSpanId: 1,
+			nextEndSequence: 1,
+			maxSpans,
+			droppedSpanCount: 0,
+		};
+	}
 
 	startSpan<T>(options: SpanOptions, callback: (span: TelemetrySpan) => T | Promise<T>): Promise<T> {
 		return startInMemorySpan(this.state, undefined, options, callback);
@@ -215,5 +255,34 @@ export class InMemoryTelemetryContext implements TelemetryContext {
 			settled: span.settled,
 			...(span.endSequence === undefined ? {} : { endSequence: span.endSequence }),
 		}));
+	}
+
+	/**
+	 * Return each retained settled span after a caller-owned cursor at most once.
+	 *
+	 * The returned cursor advances across all settlements, including spans already
+	 * evicted from the bounded buffer. A higher dropped count tells the caller the
+	 * retained result is incomplete and must not be treated as a full history.
+	 */
+	getSettledSpansAfter(endSequence = 0): SettledTelemetrySpanSnapshot {
+		if (!Number.isSafeInteger(endSequence) || endSequence < 0) {
+			throw new RangeError("endSequence must be a non-negative safe integer");
+		}
+		const spans = this.getSpans()
+			.filter(
+				(span): span is RecordedTelemetrySpan & { readonly endSequence: number } =>
+					span.settled && span.endSequence !== undefined && span.endSequence > endSequence,
+			)
+			.sort((left, right) => left.endSequence - right.endSequence);
+		return {
+			cursor: Math.max(endSequence, this.state.nextEndSequence - 1),
+			spans,
+			droppedSpanCount: this.state.droppedSpanCount,
+		};
+	}
+
+	/** Number of spans evicted or declined because the configured capacity was full. */
+	getDroppedSpanCount(): number {
+		return this.state.droppedSpanCount;
 	}
 }

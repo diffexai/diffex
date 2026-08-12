@@ -52,7 +52,7 @@ No declared span events.
 
 ## Harness schema
 
-Schema version: 1
+Schema version: 2
 
 ### `diffex.harness.run`
 
@@ -263,6 +263,71 @@ All end attributes are optional completion enrichment.
 | Name | Type | Values | Notes | Description |
 |---|---|---|---|---|
 | `diffex.tool.is_error` | `boolean` |  |  | Whether raw phase-2 execution returned an error |
+
+#### Events
+
+No declared span events.
+
+### `diffex.harness.profile_route`
+
+One structural task-profile routing decision
+
+- Parents: root or caller-owned external span
+- Default status: `ok`
+- Error when: Routing fails or throws
+
+#### Start attributes
+
+| Name | Type | Required | Values | Notes | Description |
+|---|---|---:|---|---|---|
+| `diffex.session.id` | `string` | yes |  | high cardinality | Session id before routing |
+| `diffex.routing.mode` | `string` | yes | auto, pinned |  | Configured profile-routing mode |
+| `diffex.routing.current_profile_id` | `string` | yes |  | high cardinality | Profile active before routing |
+| `diffex.routing.session_established` | `boolean` | yes |  |  | Whether the session already contains task history |
+
+#### End attributes
+
+All end attributes are optional completion enrichment.
+
+| Name | Type | Values | Notes | Description |
+|---|---|---|---|---|
+| `diffex.routing.outcome` | `string` | bypassed, selected, reused, failed |  | Applied routing outcome |
+| `diffex.routing.target_profile_id` | `string` |  | high cardinality | Profile active after routing |
+| `diffex.routing.harness_id` | `string` |  | high cardinality | Stable identifier of the selected or reused harness |
+| `diffex.routing.confidence` | `number` |  |  | Router confidence between zero and one |
+| `diffex.routing.fallback` | `string` | completion_error, invalid_output, low_confidence |  | Structured fallback class when routing used one |
+
+#### Events
+
+No declared span events.
+
+### `diffex.harness.evolution`
+
+One structural EVOLVED note proposal or write pass
+
+- Parents: root or caller-owned external span
+- Default status: `ok`
+- Error when: Evolution evaluation or writing fails
+
+#### Start attributes
+
+| Name | Type | Required | Values | Notes | Description |
+|---|---|---:|---|---|---|
+| `diffex.session.id` | `string` | yes |  | high cardinality | Session id associated with the evolution pass |
+| `diffex.evolution.trigger` | `string` | yes | explicit, run_settled, session_shutdown |  | Trigger for the evolution pass |
+| `diffex.evolution.profile_id` | `string` | no |  | high cardinality | Profile associated with the evolution pass |
+
+#### End attributes
+
+All end attributes are optional completion enrichment.
+
+| Name | Type | Values | Notes | Description |
+|---|---|---|---|---|
+| `diffex.evolution.outcome` | `string` | completed, skipped, failed |  | Evolution pass outcome |
+| `diffex.evolution.candidate_count` | `number` |  |  | Number of proposed notes |
+| `diffex.evolution.accepted_count` | `number` |  |  | Number of notes written |
+| `diffex.evolution.rejected_count` | `number` |  |  | Number of notes rejected or deduplicated |
+| `diffex.evolution.scope` | `string` | global, project |  | Scope written by an explicit evolution pass |
 
 #### Events
 
