@@ -45,6 +45,7 @@ Type `/` in the editor to open command completion. Extensions can register custo
 | `/new` | Start a new session |
 | `/name <name>` | Set session display name |
 | `/session` | Show session file, ID, messages, tokens, and cost |
+| `/subagents` | Show all sub-agents in the current session |
 | `/tree` | Jump to any point in the session and continue from there |
 | `/trust` | Save project trust decision for future sessions |
 | `/fork` | Create a new session from a previous user message |
@@ -58,6 +59,9 @@ Type `/` in the editor to open command completion. Extensions can register custo
 | `/hotkeys` | Show all keyboard shortcuts |
 | `/changelog` | Display version history |
 | `/quit` | Quit Diffex |
+
+`/subagents` runs immediately, including while the parent agent is working or compacting.
+It displays the current in-memory roster without adding the command or roster to model context.
 
 ## Message Queue
 

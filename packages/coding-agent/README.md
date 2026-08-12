@@ -14,7 +14,7 @@
 
 Diffex is a minimal terminal coding harness. Adapt Diffex to your workflows, not the other way around, without having to fork and modify Diffex internals. Extend it with TypeScript [Extensions](#extensions), [Skills](#skills), [Prompt Templates](#prompt-templates), and [Themes](#themes). Put your extensions, skills, prompt templates, and themes in [Diffex Packages](#diffex-packages) and share them with others via npm or git.
 
-Diffex ships with powerful defaults but skips features like sub agents and plan mode. Instead, you can ask Diffex to build what you want or install a third party Diffex package that matches your workflow.
+Diffex ships with powerful defaults, including session-scoped sub-agents, but skips features like plan mode. You can ask Diffex to build other workflows or install a third party Diffex package that matches them.
 
 Diffex runs in four modes: interactive, print or JSON, RPC for process integration, and an SDK for embedding in your own apps.
 
@@ -179,6 +179,7 @@ Type `/` in the editor to trigger commands. [Extensions](#extensions) can regist
 | `/new` | Start a new session |
 | `/name <name>` | Set session display name |
 | `/session` | Show session info (file, ID, messages, tokens, cost) |
+| `/subagents` | Show all sub-agents in the current session |
 | `/tree` | Jump to any point in the session and continue from there |
 | `/trust` | Save project trust decision for future sessions (restart required) |
 | `/fork` | Create a new session from a previous user message |
@@ -192,6 +193,9 @@ Type `/` in the editor to trigger commands. [Extensions](#extensions) can regist
 | `/hotkeys` | Show all keyboard shortcuts |
 | `/changelog` | Display version history |
 | `/quit` | Quit Diffex |
+
+`/subagents` runs immediately, including while the parent agent is working or compacting.
+It displays the current in-memory roster without adding the command or roster to model context.
 
 ### Keyboard Shortcuts
 
@@ -378,7 +382,7 @@ The default export can also be `async`. Diffex waits for async extension factori
 
 **What's possible:**
 - Custom tools (or replace built-in tools entirely)
-- Sub-agents and plan mode
+- Alternative sub-agent workflows and plan mode
 - Custom compaction and summarization
 - Permission gates and path protection
 - Custom editors and UI components
@@ -491,7 +495,7 @@ Diffex is aggressively extensible so it doesn't have to dictate your workflow. F
 
 **No MCP.** Build CLI tools with READMEs (see [Skills](#skills)), or build an extension that adds MCP support. [Why?](https://mariozechner.at/posts/2025-11-02-what-if-you-dont-need-mcp/)
 
-**No sub-agents.** There's many ways to do this. Spawn Diffex instances via tmux, or build your own with [extensions](#extensions), or install a package that does it your way.
+**Session-scoped sub-agents.** The model can delegate work to child agents, and `/subagents` shows their current status and original tasks without sending that roster to the model.
 
 **No permission popups.** Run in a container, or build your own confirmation flow with [extensions](#extensions) inline with your environment and security requirements.
 
