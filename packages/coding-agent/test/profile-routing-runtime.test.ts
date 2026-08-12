@@ -57,7 +57,11 @@ describe("AgentSessionRuntime profile routing", () => {
 		while (cleanups.length > 0) await cleanups.pop()?.();
 	});
 
-	async function createRuntimeHost(profileRouting: "auto" | "pinned" = "auto", profile = "coding") {
+	async function createRuntimeHost(
+		profileRouting: "auto" | "pinned" = "auto",
+		profile = "coding",
+		options?: { persist?: boolean },
+	) {
 		const tempDir = join(tmpdir(), `pi-profile-routing-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 		mkdirSync(tempDir, { recursive: true });
 		const faux = registerFauxProvider();
@@ -133,7 +137,10 @@ describe("AgentSessionRuntime profile routing", () => {
 		const runtimeHost = await createAgentSessionRuntime(createRuntime, {
 			cwd: tempDir,
 			agentDir: tempDir,
-			sessionManager: SessionManager.create(tempDir, join(tempDir, "sessions")),
+			sessionManager:
+				options?.persist === false
+					? SessionManager.inMemory(tempDir)
+					: SessionManager.create(tempDir, join(tempDir, "sessions")),
 			profile,
 			profileRouting,
 			telemetryCapture,
@@ -309,7 +316,7 @@ describe("AgentSessionRuntime profile routing", () => {
 		expect(faux.state.callCount).toBe(3);
 	});
 
-	it("confirms a finance-to-coding boundary before delivering the prompt once in a linked session", async () => {
+	it("confirms a finance-to-coding boundary before delivering the prompt once in an independent session", async () => {
 		const { runtimeHost, faux } = await createRuntimeHost();
 		const proposals: TaskBoundaryProposal[] = [];
 		runtimeHost.setTaskBoundaryResolver(async (proposal) => {
@@ -330,6 +337,9 @@ describe("AgentSessionRuntime profile routing", () => {
 
 		await runtimeHost.prompt("Compare paying down my mortgage with investing.");
 		const previousSessionFile = runtimeHost.session.sessionFile;
+		const previousSessionId = runtimeHost.session.sessionManager.getSessionId();
+		const previousHarnessId = runtimeHost.activeHarness?.id;
+		if (!previousHarnessId) throw new Error("Expected the Finance harness");
 		const result = await runtimeHost.prompt(shiftedPrompt);
 
 		expect(proposals).toEqual([
@@ -346,12 +356,225 @@ describe("AgentSessionRuntime profile routing", () => {
 			previousProfileId: "finance",
 		});
 		expect(runtimeHost.session.sessionFile).not.toBe(previousSessionFile);
-		expect(runtimeHost.session.sessionManager.getHeader()?.parentSession).toBe(previousSessionFile);
+		expect(runtimeHost.session.sessionManager.getHeader()?.parentSession).toBeUndefined();
+		expect(runtimeHost.session.sessionManager.getRelatedSessions()).toContainEqual({
+			sessionId: previousSessionId,
+			harnessId: previousHarnessId,
+		});
 		expect(
 			runtimeHost.session.messages.filter((message) => JSON.stringify(message).includes(shiftedPrompt)),
 		).toHaveLength(1);
 		expect(shiftedTaskSystemPrompt).toContain('base_prompt type="PROMPT_PROFILE" id="coding"');
 		expect(faux.state.callCount).toBe(4);
+	});
+
+	it("returns from coding to an existing unevolved finance harness", async () => {
+		const { runtimeHost, faux, tempDir } = await createRuntimeHost();
+		const proposals: TaskBoundaryProposal[] = [];
+		runtimeHost.setTaskBoundaryResolver(async (proposal) => {
+			proposals.push(proposal);
+			return "switch";
+		});
+		faux.setResponses([
+			fauxAssistantMessage("financial answer"),
+			fauxAssistantMessage(
+				selectDecision(
+					"finance",
+					"Roth IRA investment guidance",
+					"Compare Roth IRA investments and contribution decisions.",
+				),
+			),
+		]);
+
+		const finance = await runtimeHost.prompt("I want to buy some stocks with my Roth IRA. What should I buy?");
+		if (!finance.harnessId) throw new Error("Expected the initial Finance harness");
+		const financeSessionFile = runtimeHost.session.sessionFile;
+		const financeSessionId = runtimeHost.session.sessionManager.getSessionId();
+		if (!financeSessionFile) throw new Error("Expected the Finance session to persist");
+		expect(
+			loadHarnessDescriptors({ agentDir: tempDir }).harnesses.find((harness) => harness.id === finance.harnessId)
+				?.harnessNoteCount,
+		).toBe(0);
+
+		faux.setResponses([
+			fauxAssistantMessage(
+				selectDecision("coding", "Basic chatbot implementation", "Design and implement a basic chatbot."),
+			),
+			fauxAssistantMessage("coding answer"),
+		]);
+		await runtimeHost.prompt("Actually, help me implement a basic chatbot instead.");
+		const codingSessionId = runtimeHost.session.sessionManager.getSessionId();
+		const codingHarnessId = runtimeHost.activeHarness?.id;
+		if (!codingHarnessId) throw new Error("Expected the Coding harness");
+		expect(runtimeHost.session.sessionManager.getHeader()?.parentSession).toBeUndefined();
+		expect(runtimeHost.session.sessionManager.getRelatedSessions()).toContainEqual({
+			sessionId: financeSessionId,
+			harnessId: finance.harnessId,
+		});
+		expect(SessionManager.open(financeSessionFile).getRelatedSessions()).toContainEqual({
+			sessionId: codingSessionId,
+			harnessId: codingHarnessId,
+		});
+
+		faux.setResponses([
+			fauxAssistantMessage(reuseDecision(finance.harnessId, "finance")),
+			(context) => {
+				const messages = JSON.stringify(context.messages);
+				expect(messages).toContain("I want to buy some stocks with my Roth IRA");
+				expect(messages).toContain("financial answer");
+				expect(messages).not.toContain("coding answer");
+				return fauxAssistantMessage("continued Roth IRA answer");
+			},
+		]);
+		const returned = await runtimeHost.prompt("Let's go back to our Roth IRA discussion. I just got a paycheck.");
+
+		expect(proposals.at(-1)).toMatchObject({
+			decision: "reuse",
+			targetHarnessId: finance.harnessId,
+			targetHarnessName: "Roth IRA investment guidance",
+			willResumeSession: true,
+		});
+		expect(returned).toMatchObject({
+			routing: "reused",
+			activeProfileId: "finance",
+			harnessId: finance.harnessId,
+		});
+		expect(runtimeHost.session.sessionFile).toBe(financeSessionFile);
+		expect(runtimeHost.session.sessionManager.getHeader()?.parentSession).toBeUndefined();
+		expect(runtimeHost.session.sessionManager.getRelatedSessions()).toContainEqual({
+			sessionId: codingSessionId,
+			harnessId: codingHarnessId,
+		});
+		const sessions = await SessionManager.list(tempDir, join(tempDir, "sessions"));
+		expect(sessions).toHaveLength(2);
+		expect(sessions.every((session) => session.parentSessionPath === undefined)).toBe(true);
+		expect(loadHarnessDescriptors({ agentDir: tempDir }).harnesses).toHaveLength(2);
+		expect(faux.state.callCount).toBe(6);
+	});
+
+	it("restores cross-session references after restart and resumes the earlier harness transcript", async () => {
+		const { runtimeHost, faux, tempDir, createRuntime } = await createRuntimeHost();
+		runtimeHost.setTaskBoundaryResolver(async () => "switch");
+		faux.setResponses([
+			fauxAssistantMessage("financial answer"),
+			fauxAssistantMessage(selectDecision("finance", "Retirement investing", "Compare retirement investments.")),
+		]);
+		const finance = await runtimeHost.prompt("Compare investments for my Roth IRA.");
+		if (!finance.harnessId) throw new Error("Expected the Finance harness");
+		const financeSessionFile = runtimeHost.session.sessionFile;
+		if (!financeSessionFile) throw new Error("Expected the Finance session file");
+
+		faux.setResponses([
+			fauxAssistantMessage(
+				selectDecision("coding", "Chatbot implementation", "Implement a customer support chatbot."),
+			),
+			fauxAssistantMessage("coding answer"),
+		]);
+		await runtimeHost.prompt("Switching tasks: implement a customer support chatbot.");
+		const codingSessionFile = runtimeHost.session.sessionFile;
+		if (!codingSessionFile) throw new Error("Expected the Coding session file");
+
+		const resumedRuntime = await createAgentSessionRuntime(createRuntime, {
+			cwd: tempDir,
+			agentDir: tempDir,
+			sessionManager: SessionManager.open(codingSessionFile),
+		});
+		await resumedRuntime.session.bindExtensions({});
+		resumedRuntime.setRebindSession(async (session) => session.bindExtensions({}));
+		resumedRuntime.setTaskBoundaryResolver(async (proposal) => {
+			expect(proposal).toMatchObject({
+				decision: "reuse",
+				targetHarnessId: finance.harnessId,
+				willResumeSession: true,
+			});
+			return "switch";
+		});
+		faux.setResponses([
+			fauxAssistantMessage(reuseDecision(finance.harnessId, "finance")),
+			(context) => {
+				const messages = JSON.stringify(context.messages);
+				expect(messages).toContain("Compare investments for my Roth IRA");
+				expect(messages).not.toContain("coding answer");
+				return fauxAssistantMessage("resumed finance answer");
+			},
+		]);
+
+		const result = await resumedRuntime.prompt("Go back to the Roth IRA task.");
+
+		expect(result).toMatchObject({ routing: "reused", harnessId: finance.harnessId });
+		expect(resumedRuntime.session.sessionFile).toBe(financeSessionFile);
+		expect(await SessionManager.list(tempDir, join(tempDir, "sessions"))).toHaveLength(2);
+		await resumedRuntime.dispose();
+	});
+
+	it("returns to a prior in-memory harness transcript without creating ancestry", async () => {
+		const { runtimeHost, faux } = await createRuntimeHost("auto", "coding", { persist: false });
+		runtimeHost.setTaskBoundaryResolver(async () => "switch");
+		faux.setResponses([
+			fauxAssistantMessage("in-memory financial answer"),
+			fauxAssistantMessage(selectDecision("finance", "Roth planning", "Plan Roth IRA investments.")),
+		]);
+
+		const finance = await runtimeHost.prompt("Plan investments for my Roth IRA.");
+		if (!finance.harnessId) throw new Error("Expected the Finance harness");
+		faux.setResponses([
+			fauxAssistantMessage(selectDecision("coding", "Chatbot build", "Build a chatbot.")),
+			fauxAssistantMessage("in-memory coding answer"),
+		]);
+		await runtimeHost.prompt("New task: build a chatbot.");
+		faux.setResponses([
+			fauxAssistantMessage(reuseDecision(finance.harnessId, "finance")),
+			(context) => {
+				const messages = JSON.stringify(context.messages);
+				expect(messages).toContain("Plan investments for my Roth IRA");
+				expect(messages).not.toContain("in-memory coding answer");
+				return fauxAssistantMessage("resumed in-memory answer");
+			},
+		]);
+
+		const result = await runtimeHost.prompt("Return to the Roth IRA planning task.");
+
+		expect(result).toMatchObject({ routing: "reused", harnessId: finance.harnessId });
+		expect(runtimeHost.session.sessionFile).toBeUndefined();
+		expect(runtimeHost.session.sessionManager.getHeader()?.parentSession).toBeUndefined();
+	});
+
+	it("rejects a stale related session after confirmation without delivering the held prompt", async () => {
+		const { runtimeHost, faux } = await createRuntimeHost();
+		let financeSessionFile: string | undefined;
+		runtimeHost.setTaskBoundaryResolver(async (proposal) => {
+			if (proposal.decision === "reuse") {
+				expect(proposal.willResumeSession).toBe(true);
+				if (!financeSessionFile) throw new Error("Expected the Finance session file");
+				rmSync(financeSessionFile);
+			}
+			return "switch";
+		});
+		faux.setResponses([
+			fauxAssistantMessage("financial answer"),
+			fauxAssistantMessage(selectDecision("finance", "Roth planning", "Plan Roth IRA investments.")),
+		]);
+		const finance = await runtimeHost.prompt("Plan investments for my Roth IRA.");
+		if (!finance.harnessId) throw new Error("Expected the Finance harness");
+		financeSessionFile = runtimeHost.session.sessionFile;
+
+		faux.setResponses([
+			fauxAssistantMessage(selectDecision("coding", "Chatbot build", "Build a chatbot.")),
+			fauxAssistantMessage("coding answer"),
+		]);
+		await runtimeHost.prompt("New task: build a chatbot.");
+		const codingSessionFile = runtimeHost.session.sessionFile;
+		const returnPrompt = "Return to the Roth IRA planning task.";
+		faux.setResponses([fauxAssistantMessage(reuseDecision(finance.harnessId, "finance"))]);
+
+		await expect(runtimeHost.prompt(returnPrompt)).rejects.toThrow(
+			`The previous session for harness "${finance.harnessId}" changed before it could be resumed`,
+		);
+		expect(runtimeHost.session.sessionFile).toBe(codingSessionFile);
+		expect(runtimeHost.activeProfile.id).toBe("coding");
+		expect(runtimeHost.session.messages.some((message) => JSON.stringify(message).includes(returnPrompt))).toBe(
+			false,
+		);
 	});
 
 	it("delivers a declined task boundary once under the current harness", async () => {
@@ -426,6 +649,7 @@ describe("AgentSessionRuntime profile routing", () => {
 			decision: "reuse",
 			targetHarnessId: codingHarness.id,
 			targetHarnessName: codingHarness.name,
+			willResumeSession: false,
 		});
 		expect(result).toMatchObject({ routing: "reused", activeProfileId: "coding", harnessId: codingHarness.id });
 		expect(
@@ -477,7 +701,7 @@ describe("AgentSessionRuntime profile routing", () => {
 		const currentSessionFile = runtimeHost.session.sessionFile;
 
 		await expect(runtimeHost.prompt(shiftedPrompt)).rejects.toThrow(
-			"The selected evolved harness changed while confirmation was pending",
+			"The selected harness changed while confirmation was pending",
 		);
 		expect(runtimeHost.session.sessionFile).toBe(currentSessionFile);
 		expect(runtimeHost.activeProfile.id).toBe("finance");
@@ -485,6 +709,122 @@ describe("AgentSessionRuntime profile routing", () => {
 			false,
 		);
 		expect(faux.state.callCount).toBe(3);
+	});
+
+	it("revalidates a reusable harness after session switch hooks", async () => {
+		const { runtimeHost, faux, tempDir } = await createRuntimeHost();
+		const codingHarness = createHarnessDescriptor({
+			agentDir: tempDir,
+			id: "parser-repair-hook-a1b2c3",
+			name: "Parser repair",
+			description: "Repair and verify TypeScript parsers.",
+			baseProfileId: "coding",
+			createdAt: "2026-08-01T00:00:00.000Z",
+		});
+		appendEvolvedNote({
+			agentDir: tempDir,
+			profileId: codingHarness.id,
+			category: "verification",
+			provenance: "test",
+			content: "Run the parser regression test.",
+			scope: "global",
+		});
+		await runtimeHost.services.resourceLoader.reload();
+		runtimeHost.setTaskBoundaryResolver(async () => "switch");
+		faux.setResponses([
+			fauxAssistantMessage("financial answer"),
+			fauxAssistantMessage(selectDecision("finance", "Mortgage analysis", "Compare mortgage options.")),
+		]);
+
+		await runtimeHost.prompt("Compare paying down my mortgage with investing.");
+		const currentSessionFile = runtimeHost.session.sessionFile;
+		const extensionRunner = runtimeHost.session.extensionRunner;
+		vi.spyOn(extensionRunner, "hasHandlers").mockImplementation((eventType) => eventType === "session_before_switch");
+		vi.spyOn(extensionRunner, "emit").mockImplementation(async (event) => {
+			if (event.type === "session_before_switch") {
+				appendEvolvedNote({
+					agentDir: tempDir,
+					profileId: codingHarness.id,
+					category: "new constraint",
+					provenance: "test hook",
+					content: "Also run the integration test.",
+					scope: "global",
+				});
+			}
+			return undefined;
+		});
+		const shiftedPrompt = "Switching to a separate task: repair the TypeScript parser.";
+		faux.setResponses([fauxAssistantMessage(reuseDecision(codingHarness.id, "coding"))]);
+
+		await expect(runtimeHost.prompt(shiftedPrompt)).rejects.toThrow(
+			"The selected harness changed while the session switch was pending",
+		);
+		expect(runtimeHost.session.sessionFile).toBe(currentSessionFile);
+		expect(runtimeHost.activeProfile.id).toBe("finance");
+		expect(runtimeHost.session.messages.some((message) => JSON.stringify(message).includes(shiftedPrompt))).toBe(
+			false,
+		);
+		expect(faux.state.callCount).toBe(3);
+	});
+
+	it("reports the harness metadata restored during session replacement", async () => {
+		const { runtimeHost, faux, tempDir } = await createRuntimeHost();
+		const codingHarness = createHarnessDescriptor({
+			agentDir: tempDir,
+			id: "parser-repair-restored-a1b2c3",
+			name: "Parser repair",
+			description: "Repair and verify TypeScript parsers.",
+			baseProfileId: "coding",
+			createdAt: "2026-08-01T00:00:00.000Z",
+		});
+		appendEvolvedNote({
+			agentDir: tempDir,
+			profileId: codingHarness.id,
+			category: "verification",
+			provenance: "test",
+			content: "Run the parser regression test.",
+			scope: "global",
+		});
+		await runtimeHost.services.resourceLoader.reload();
+		runtimeHost.setTaskBoundaryResolver(async () => "switch");
+		faux.setResponses([
+			fauxAssistantMessage("financial answer"),
+			fauxAssistantMessage(selectDecision("finance", "Mortgage analysis", "Compare mortgage options.")),
+		]);
+
+		await runtimeHost.prompt("Compare paying down my mortgage with investing.");
+		const switches: ProfileSwitchEvent[] = [];
+		runtimeHost.setProfileSwitchListener((event) => switches.push(event));
+		const outgoingSession = runtimeHost.session;
+		const abort = outgoingSession.abort.bind(outgoingSession);
+		vi.spyOn(outgoingSession, "abort").mockImplementation(async () => {
+			await abort();
+			const descriptorPath = join(tempDir, "harnesses", `${codingHarness.id}.json`);
+			const descriptor = JSON.parse(readFileSync(descriptorPath, "utf-8")) as Record<string, unknown>;
+			writeFileSync(
+				descriptorPath,
+				`${JSON.stringify({ ...descriptor, name: "Restored parser repair" }, null, 2)}\n`,
+			);
+		});
+		faux.setResponses([
+			fauxAssistantMessage(reuseDecision(codingHarness.id, "coding")),
+			fauxAssistantMessage("parser repaired"),
+		]);
+
+		const result = await runtimeHost.prompt("Switching tasks: repair the TypeScript parser.");
+		const activeHarness = runtimeHost.activeHarness;
+		if (!activeHarness) throw new Error("Expected the restored Coding harness");
+
+		expect(activeHarness.name).toBe("Restored parser repair");
+		expect(result.harnessRevision).toBe(activeHarness.revision);
+		expect(result.notice).toContain(`"${activeHarness.name}"`);
+		expect(result.notice).toContain(activeHarness.revision.slice(0, 12));
+		expect(switches.at(-1)).toMatchObject({
+			harnessId: activeHarness.id,
+			harnessRevision: activeHarness.revision,
+			harnessName: activeHarness.name,
+			notice: result.notice,
+		});
 	});
 
 	it("cancels a proposed task boundary without delivering the prompt", async () => {

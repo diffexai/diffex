@@ -142,6 +142,7 @@ function taskBoundaryProposal(): TaskBoundaryProposal {
 		targetHarnessId: "evidence-review-d4e5f6",
 		targetHarnessRevision: "abcdef1234567890",
 		targetHarnessName: "Evidence review",
+		willResumeSession: true,
 		confidence: 0.97,
 	};
 }
@@ -421,6 +422,7 @@ describe("RPC prompt response semantics", () => {
 					targetHarnessId: "evidence-review-d4e5f6",
 					targetHarnessRevision: "abcdef1234567890",
 					targetHarnessName: "Evidence review",
+					willResumeSession: true,
 					confidence: 0.97,
 				});
 				requestId = event?.requestId as string;
