@@ -1,5 +1,6 @@
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/diffex-ai";
 import { afterEach, describe, expect, it } from "vitest";
+import { updatePlanToolSystemPromptContribution } from "../../src/core/tools/update-plan.ts";
 import { createHarness, getMessageText, type Harness } from "./harness.ts";
 
 describe("AgentSession update_plan tool", () => {
@@ -17,21 +18,18 @@ describe("AgentSession update_plan tool", () => {
 
 		expect(harness.session.getActiveToolNames()).toContain("update_plan");
 		expect(harness.session.systemPrompt).toContain("- update_plan: track progress with an ordered task checklist");
-		expect(harness.session.systemPrompt).toContain(
-			"- Use update_plan for complex or multi-step work; skip it for simple work.",
-		);
-		expect(harness.session.systemPrompt).toContain(
-			"- Keep the full update_plan checklist current with exactly one in_progress item until all items are completed.",
-		);
-		expect(harness.session.systemPrompt).toContain(
-			"- Updating the update_plan checklist communicates progress and does not execute the steps.",
-		);
+		for (const guideline of updatePlanToolSystemPromptContribution.guidelines) {
+			expect(harness.session.systemPrompt).toContain(`- ${guideline}`);
+		}
 
 		harness.session.setActiveToolsByName(["read", "bash", "edit", "write"]);
 
 		expect(harness.session.getActiveToolNames()).not.toContain("update_plan");
 		expect(harness.session.systemPrompt).not.toContain("update_plan");
 		expect(harness.session.systemPrompt).not.toContain("task checklist");
+		for (const guideline of updatePlanToolSystemPromptContribution.guidelines) {
+			expect(harness.session.systemPrompt).not.toContain(guideline);
+		}
 	});
 
 	it("handles update_plan tool calls in the faux-provider loop", async () => {
@@ -64,6 +62,51 @@ describe("AgentSession update_plan tool", () => {
 		expect(getMessageText(toolResult)).toBe("Plan updated: 1 completed, 1 in progress, 1 pending.");
 		expect(toolResult.details).toEqual({ plan });
 		expect(getMessageText(harness.session.messages[3])).toBe("continuing after plan");
+	});
+
+	it("executes batched update_plan operations sequentially in source order", async () => {
+		const harness = await createHarness();
+		harnesses.push(harness);
+
+		harness.setResponses([
+			fauxAssistantMessage(
+				[
+					fauxToolCall(
+						"update_plan",
+						{ plan: [{ step: "Implement the change", status: "in_progress" }] },
+						{ id: "plan-update" },
+					),
+					fauxToolCall("update_plan", { clear: true }, { id: "plan-clear" }),
+				],
+				{ stopReason: "toolUse" },
+			),
+			fauxAssistantMessage("done"),
+		]);
+
+		await harness.session.prompt("plan and then abandon the work");
+
+		const executionOrder = harness.events.flatMap((event) => {
+			if (
+				(event.type === "tool_execution_start" || event.type === "tool_execution_end") &&
+				event.toolName === "update_plan"
+			) {
+				return `${event.type}:${event.toolCallId}`;
+			}
+			return [];
+		});
+		expect(executionOrder).toEqual([
+			"tool_execution_start:plan-update",
+			"tool_execution_end:plan-update",
+			"tool_execution_start:plan-clear",
+			"tool_execution_end:plan-clear",
+		]);
+
+		const toolResults = harness.session.messages.filter((message) => message.role === "toolResult");
+		expect(toolResults.map((message) => message.toolCallId)).toEqual(["plan-update", "plan-clear"]);
+		expect(toolResults.map((message) => message.details)).toEqual([
+			{ plan: [{ step: "Implement the change", status: "in_progress" }] },
+			{ clear: true },
+		]);
 	});
 
 	it("lets allowlists and excludes handle update_plan generically", async () => {

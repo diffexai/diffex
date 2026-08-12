@@ -15,13 +15,17 @@ export interface UpdatePlanItem {
 	status: UpdatePlanStatus;
 }
 
-export interface UpdatePlanToolInput {
-	plan: UpdatePlanItem[];
-}
+export type UpdatePlanToolInput =
+	| {
+			plan: UpdatePlanItem[];
+			explanation?: string;
+	  }
+	| {
+			clear: true;
+			explanation?: string;
+	  };
 
-export interface UpdatePlanToolDetails {
-	plan: UpdatePlanItem[];
-}
+export type UpdatePlanToolDetails = UpdatePlanToolInput;
 
 const updatePlanStatusSchema = Type.Unsafe<UpdatePlanStatus>({
 	type: "string",
@@ -37,22 +41,35 @@ const updatePlanItemSchema = Type.Object(
 	{ additionalProperties: false },
 );
 
-const updatePlanSchema = Type.Object(
-	{
-		plan: Type.Array(updatePlanItemSchema, {
-			minItems: 1,
-			description: "Full ordered plan snapshot.",
-		}),
-	},
-	{ additionalProperties: false },
-);
+const updatePlanSchema = Type.Union([
+	Type.Object(
+		{
+			plan: Type.Array(updatePlanItemSchema, {
+				minItems: 1,
+				description: "Full ordered plan snapshot.",
+			}),
+			explanation: Type.Optional(Type.String({ description: "Reason for a material plan change." })),
+		},
+		{ additionalProperties: false },
+	),
+	Type.Object(
+		{
+			clear: Type.Literal(true, { description: "Explicitly abandon and clear the current plan." }),
+			explanation: Type.Optional(Type.String({ description: "Reason for clearing the plan." })),
+		},
+		{ additionalProperties: false },
+	),
+]);
 
 export const updatePlanToolSystemPromptContribution = {
 	snippet: "track progress with an ordered task checklist",
 	guidelines: [
-		"Use update_plan for complex or multi-step work; skip it for simple work.",
-		"Keep the full update_plan checklist current with exactly one in_progress item until all items are completed.",
-		"Updating the update_plan checklist communicates progress and does not execute the steps.",
+		"Use update_plan for complex, ambiguous, dependent, long-running, or multi-part work, when the user requests a plan, or when checkpoints would improve collaboration; skip it for simple or immediately executable work.",
+		"Write short, ordered, outcome-focused steps with observable evidence where useful; do not narrate commands or pad the checklist with obvious actions.",
+		"Include final verification when correctness requires it.",
+		"Update the full checklist at meaningful milestones, marking completed work before moving on and keeping exactly one in_progress item until all items are completed.",
+		"Include an explanation when new evidence requires material replanning, omit it for routine progress, and use clear: true when abandoning the checklist.",
+		"Publishing the checklist communicates progress but does not execute, schedule, or prove completion of its steps.",
 	],
 } as const;
 
@@ -64,8 +81,7 @@ function isUpdatePlanStatus(value: unknown): value is UpdatePlanStatus {
 	return typeof value === "string" && (UPDATE_PLAN_STATUSES as readonly string[]).includes(value);
 }
 
-function validatePlanSnapshot(input: UpdatePlanToolInput): UpdatePlanToolDetails {
-	const rawPlan = (input as { plan?: unknown }).plan;
+function validatePlanSnapshot(rawPlan: unknown): UpdatePlanItem[] {
 	if (!Array.isArray(rawPlan) || rawPlan.length === 0) {
 		throw new Error("Plan must contain at least one item.");
 	}
@@ -75,6 +91,10 @@ function validatePlanSnapshot(input: UpdatePlanToolInput): UpdatePlanToolDetails
 		const rawItem = rawPlan[index];
 		if (!isRecord(rawItem)) {
 			throw new Error(`Plan item ${index + 1} must be an object.`);
+		}
+		const unexpectedField = Object.keys(rawItem).find((field) => field !== "step" && field !== "status");
+		if (unexpectedField !== undefined) {
+			throw new Error(`Plan item ${index + 1} contains unexpected field: ${unexpectedField}.`);
 		}
 
 		const { step, status } = rawItem;
@@ -93,7 +113,42 @@ function validatePlanSnapshot(input: UpdatePlanToolInput): UpdatePlanToolDetails
 		throw new Error("Unfinished plans must contain exactly one in_progress item.");
 	}
 
-	return { plan };
+	return plan;
+}
+
+function validateUpdatePlanInput(input: unknown): UpdatePlanToolDetails {
+	if (!isRecord(input)) {
+		throw new Error("update_plan input must be an object.");
+	}
+
+	const unexpectedField = Object.keys(input).find(
+		(field) => field !== "plan" && field !== "clear" && field !== "explanation",
+	);
+	if (unexpectedField !== undefined) {
+		throw new Error(`Unexpected update_plan field: ${unexpectedField}.`);
+	}
+
+	const hasPlan = Object.hasOwn(input, "plan");
+	const hasClear = Object.hasOwn(input, "clear");
+	if (hasPlan === hasClear) {
+		throw new Error("Provide exactly one update_plan operation: plan or clear.");
+	}
+
+	const hasExplanation = Object.hasOwn(input, "explanation");
+	if (hasExplanation && typeof input.explanation !== "string") {
+		throw new Error("Explanation must be a string.");
+	}
+	const explanation = input.explanation as string | undefined;
+
+	if (hasClear) {
+		if (input.clear !== true) {
+			throw new Error("Clear must be true.");
+		}
+		return hasExplanation ? { clear: true, explanation } : { clear: true };
+	}
+
+	const plan = validatePlanSnapshot(input.plan);
+	return hasExplanation ? { plan, explanation } : { plan };
 }
 
 function countPlanStatuses(plan: readonly UpdatePlanItem[]): {
@@ -147,15 +202,21 @@ function formatPlanStep(step: unknown, theme: Theme): string {
 
 function formatPlanCall(args: unknown, theme: Theme): string {
 	let text = theme.fg("toolTitle", theme.bold("update_plan"));
-	if (!isRecord(args) || !Array.isArray(args.plan)) {
+	let details: UpdatePlanToolDetails;
+	try {
+		details = validateUpdatePlanInput(args);
+	} catch {
 		return `${text}\n${invalidArgText(theme)}`;
 	}
 
-	for (const item of args.plan) {
-		if (!isRecord(item)) {
-			text += `\n${invalidArgText(theme)}`;
-			continue;
-		}
+	if (details.explanation !== undefined) {
+		text += `\n${theme.fg("toolOutput", `Explanation: ${details.explanation}`)}`;
+	}
+	if ("clear" in details) {
+		return `${text}\n${theme.fg("toolOutput", "Plan cleared.")}`;
+	}
+
+	for (const item of details.plan) {
 		text += `\n${formatPlanMarker(item.status, theme)} ${formatPlanStep(item.step, theme)}`;
 	}
 	return text;
@@ -166,14 +227,20 @@ export function createUpdatePlanToolDefinition(): ToolDefinition<typeof updatePl
 		name: "update_plan",
 		label: "update_plan",
 		description:
-			"Update the full ordered task checklist for complex or multi-step work. Provide the complete current plan snapshot; exactly one item must be in_progress until all items are completed.",
+			"Replace the full ordered task checklist for complex work, or explicitly clear it. Updates require exactly one in_progress item until all items are completed; explanations are for material replanning.",
 		promptSnippet: updatePlanToolSystemPromptContribution.snippet,
 		promptGuidelines: [...updatePlanToolSystemPromptContribution.guidelines],
 		parameters: updatePlanSchema,
+		executionMode: "sequential",
 		async execute(_toolCallId, input) {
-			const details = validatePlanSnapshot(input);
+			const details = validateUpdatePlanInput(input);
 			return {
-				content: [{ type: "text", text: formatPlanSummary(details.plan) }],
+				content: [
+					{
+						type: "text",
+						text: "clear" in details ? "Plan cleared." : formatPlanSummary(details.plan),
+					},
+				],
 				details,
 			};
 		},

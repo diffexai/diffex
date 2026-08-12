@@ -38,4 +38,15 @@ describe("built-in tool system prompt contributions", () => {
 
 		expect(definition.promptGuidelines).toBeUndefined();
 	});
+
+	test("provides outcome-focused checklist lifecycle guidance", () => {
+		expect(updatePlanToolSystemPromptContribution.guidelines).toEqual([
+			"Use update_plan for complex, ambiguous, dependent, long-running, or multi-part work, when the user requests a plan, or when checkpoints would improve collaboration; skip it for simple or immediately executable work.",
+			"Write short, ordered, outcome-focused steps with observable evidence where useful; do not narrate commands or pad the checklist with obvious actions.",
+			"Include final verification when correctness requires it.",
+			"Update the full checklist at meaningful milestones, marking completed work before moving on and keeping exactly one in_progress item until all items are completed.",
+			"Include an explanation when new evidence requires material replanning, omit it for routine progress, and use clear: true when abandoning the checklist.",
+			"Publishing the checklist communicates progress but does not execute, schedule, or prove completion of its steps.",
+		]);
+	});
 });
