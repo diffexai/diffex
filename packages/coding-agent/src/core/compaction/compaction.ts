@@ -470,69 +470,86 @@ export function findCutPoint(
 // Summarization
 // ============================================================================
 
-const SUMMARIZATION_PROMPT = `The messages above are a conversation to summarize. Create a structured context checkpoint summary that another LLM will use to continue the work.
+const SUMMARIZATION_PROMPT = `The messages above are a conversation to summarize. Create a structured context checkpoint that another LLM can use to continue the user's task.
 
 Use this EXACT format:
 
-## Goal
-[What is the user trying to accomplish? Can be multiple items if the session covers different tasks.]
+## Objective
+[What outcome is the user trying to achieve? Include multiple objectives if the session covers distinct tasks.]
 
-## Constraints & Preferences
-- [Any constraints, preferences, or requirements mentioned by user]
+## Requirements & Preferences
+- [Requirements, constraints, preferences, or success criteria stated by the user]
 - [Or "(none)" if none were mentioned]
 
-## Progress
-### Done
-- [x] [Completed tasks/changes]
+## Current State
+### Completed
+- [x] [Completed work and established outcomes]
 
 ### In Progress
-- [ ] [Current work]
+- [ ] [Work currently underway]
 
 ### Blocked
-- [Issues preventing progress, if any]
+- [Issues preventing progress, or "(none)"]
 
 ## Key Decisions
 - **[Decision]**: [Brief rationale]
+
+## Sources, Evidence & Artifacts
+- [Important documents, links, datasets, calculations, files, outputs, or other artifacts]
+- [Or "(none)" if not applicable]
+
+## Open Questions & Uncertainty
+- [Unresolved questions, assumptions, risks, or uncertainty]
+- [Or "(none)" if not applicable]
 
 ## Next Steps
 1. [Ordered list of what should happen next]
 
 ## Critical Context
-- [Any data, examples, or references needed to continue]
+- [Any additional facts, examples, definitions, or references needed to continue]
 - [Or "(none)" if not applicable]
 
-Keep each section concise. Preserve exact file paths, function names, and error messages.`;
+Keep each section concise.
+Preserve exact names, identifiers, citations, calculations, artifact locations, quoted requirements, and error text when they matter.
+Include file and tool details only when the conversation actually used them.`;
 
 const UPDATE_SUMMARIZATION_PROMPT = `The messages above are NEW conversation messages to incorporate into the existing summary provided in <previous-summary> tags.
 
 Update the existing structured summary with new information. RULES:
-- PRESERVE all existing information from the previous summary
-- ADD new progress, decisions, and context from the new messages
-- UPDATE the Progress section: move items from "In Progress" to "Done" when completed
-- UPDATE "Next Steps" based on what was accomplished
-- PRESERVE exact file paths, function names, and error messages
-- If something is no longer relevant, you may remove it
+- Carry forward all still-relevant information from the previous summary
+- Add new outcomes, decisions, evidence, artifacts, and context from the new messages
+- Move work between "In Progress", "Completed", and "Blocked" as its state changes
+- Update "Next Steps" based on what was accomplished
+- Preserve exact names, identifiers, citations, calculations, artifact locations, quoted requirements, and error text when they matter
+- Record unresolved conflicts or uncertainty instead of guessing
+- Remove information that is no longer relevant
 
 Use this EXACT format:
 
-## Goal
-[Preserve existing goals, add new ones if the task expanded]
+## Objective
+[Preserve existing objectives and add new ones if the task expanded]
 
-## Constraints & Preferences
-- [Preserve existing, add new ones discovered]
+## Requirements & Preferences
+- [Preserve existing requirements and add newly discovered ones]
 
-## Progress
-### Done
-- [x] [Include previously done items AND newly completed items]
+## Current State
+### Completed
+- [x] [Include previously completed work and newly completed work]
 
 ### In Progress
-- [ ] [Current work - update based on progress]
+- [ ] [Current work, updated based on progress]
 
 ### Blocked
-- [Current blockers - remove if resolved]
+- [Current blockers, removing any that were resolved]
 
 ## Key Decisions
-- **[Decision]**: [Brief rationale] (preserve all previous, add new)
+- **[Decision]**: [Brief rationale, preserving prior decisions and adding new ones]
+
+## Sources, Evidence & Artifacts
+- [Preserve relevant sources and artifacts and add new ones]
+
+## Open Questions & Uncertainty
+- [Current open questions, assumptions, risks, or uncertainty]
 
 ## Next Steps
 1. [Update based on current state]
@@ -540,7 +557,8 @@ Use this EXACT format:
 ## Critical Context
 - [Preserve important context, add new if needed]
 
-Keep each section concise. Preserve exact file paths, function names, and error messages.`;
+Keep each section concise.
+Include file and tool details only when the conversation actually used them.`;
 
 function createSummarizationOptions(
 	model: Model<any>,
@@ -802,16 +820,24 @@ const TURN_PREFIX_SUMMARIZATION_PROMPT = `This is the PREFIX of a turn that was 
 
 Summarize the prefix to provide context for the retained suffix:
 
-## Original Request
-[What did the user ask for in this turn?]
+## Request or Objective
+[What outcome did the user request in this turn?]
 
-## Early Progress
-- [Key decisions and work done in the prefix]
+## Work Completed in the Prefix
+- [Important actions and established outcomes]
 
-## Context for Suffix
-- [Information needed to understand the retained recent work]
+## Decisions, Evidence & Artifacts
+- [Key decisions, sources, calculations, files, outputs, or other artifacts that matter to the retained suffix]
 
-Be concise. Focus on what's needed to understand the kept suffix.`;
+## Context Needed for the Retained Suffix
+- [Information needed to understand and continue the retained recent work]
+
+## Open Questions & Uncertainty
+- [Unresolved questions, assumptions, or risks that remain]
+
+Be concise.
+Preserve exact identifiers and artifact details when relevant.
+Include file and tool details only when the prefix actually used them.`;
 
 /**
  * Generate summaries for compaction using prepared data.
@@ -878,6 +904,7 @@ export async function compact(
 			headers,
 			env,
 			signal,
+			customInstructions,
 			thinkingLevel,
 			streamFn,
 			retry,
@@ -935,6 +962,7 @@ async function generateTurnPrefixSummary(
 	headers?: Record<string, string>,
 	env?: Record<string, string>,
 	signal?: AbortSignal,
+	customInstructions?: string,
 	thinkingLevel?: ThinkingLevel,
 	streamFn?: StreamFn,
 	retry?: RetryPolicy,
@@ -946,7 +974,10 @@ async function generateTurnPrefixSummary(
 	); // Smaller budget for turn prefix
 	const llmMessages = convertToLlm(messages);
 	const conversationText = serializeConversation(llmMessages);
-	const promptText = `<conversation>\n${conversationText}\n</conversation>\n\n${TURN_PREFIX_SUMMARIZATION_PROMPT}`;
+	const instructions = customInstructions
+		? `${TURN_PREFIX_SUMMARIZATION_PROMPT}\n\nAdditional focus: ${customInstructions}`
+		: TURN_PREFIX_SUMMARIZATION_PROMPT;
+	const promptText = `<conversation>\n${conversationText}\n</conversation>\n\n${instructions}`;
 	const summarizationMessages = [
 		{
 			role: "user" as const,
