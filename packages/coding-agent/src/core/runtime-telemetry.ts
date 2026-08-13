@@ -10,12 +10,14 @@ import type { Api, AssistantMessage, Model } from "@earendil-works/diffex-ai";
 export interface ProfileRouteSpanStart {
 	sessionId: string;
 	routingMode: "auto" | "pinned";
+	trigger: "initial_turn" | "future_turn";
 	currentProfileId: string;
+	currentHarnessId?: string;
 	sessionEstablished: boolean;
 }
 
 export interface ProfileRouteSpanResult {
-	outcome: "bypassed" | "selected" | "reused" | "failed";
+	outcome: "bypassed" | "selected" | "reused" | "stayed" | "declined" | "failed";
 	targetProfileId?: string;
 	harnessId?: string;
 	confidence?: number;
@@ -40,7 +42,9 @@ export function startProfileRouteSpan<Result>(
 		{
 			"diffex.session.id": start.sessionId,
 			"diffex.routing.mode": start.routingMode,
+			"diffex.routing.trigger": start.trigger,
 			"diffex.routing.current_profile_id": start.currentProfileId,
+			...(start.currentHarnessId ? { "diffex.routing.current_harness_id": start.currentHarnessId } : {}),
 			"diffex.routing.session_established": start.sessionEstablished,
 		},
 		async (span) => {

@@ -53,14 +53,16 @@ describe("bounded runtime telemetry capture", () => {
 			{
 				sessionId: "session-1",
 				routingMode: "auto",
-				currentProfileId: "general",
+				trigger: "future_turn",
+				currentProfileId: "research",
+				currentHarnessId: "research-harness",
 				sessionEstablished: true,
 			},
 			({ complete }) => {
 				complete({
-					outcome: "reused",
-					targetProfileId: "research",
-					harnessId: "research-harness",
+					outcome: "declined",
+					targetProfileId: "finance",
+					harnessId: "finance-harness",
 					confidence: 0.97,
 				});
 			},
@@ -68,10 +70,54 @@ describe("bounded runtime telemetry capture", () => {
 
 		const [route] = capture.readSettled().spans;
 		expect(route?.attributes).toMatchObject({
-			"diffex.routing.outcome": "reused",
-			"diffex.routing.target_profile_id": "research",
-			"diffex.routing.harness_id": "research-harness",
+			"diffex.routing.trigger": "future_turn",
+			"diffex.routing.current_harness_id": "research-harness",
+			"diffex.routing.outcome": "declined",
+			"diffex.routing.target_profile_id": "finance",
+			"diffex.routing.harness_id": "finance-harness",
 		});
 		expect(Object.keys(route?.attributes ?? {})).not.toContain("diffex.routing.reason");
+		expect(route?.status.status).toBe("ok");
+		expect(readEvolutionTraceSnapshot(capture).routes).toEqual([
+			{
+				trigger: "future_turn",
+				currentHarnessId: "research-harness",
+				outcome: "declined",
+				targetProfileId: "finance",
+				harnessId: "finance-harness",
+			},
+		]);
+	});
+
+	it("summarizes a future route that stays on the active harness", async () => {
+		const capture = new BoundedTelemetryCapture();
+		await startProfileRouteSpan(
+			capture.context,
+			{
+				sessionId: "session-1",
+				routingMode: "auto",
+				trigger: "future_turn",
+				currentProfileId: "research",
+				currentHarnessId: "research-harness",
+				sessionEstablished: true,
+			},
+			({ complete }) => {
+				complete({
+					outcome: "stayed",
+					targetProfileId: "research",
+					harnessId: "research-harness",
+				});
+			},
+		);
+
+		expect(readEvolutionTraceSnapshot(capture).routes).toEqual([
+			{
+				trigger: "future_turn",
+				currentHarnessId: "research-harness",
+				outcome: "stayed",
+				targetProfileId: "research",
+				harnessId: "research-harness",
+			},
+		]);
 	});
 });
