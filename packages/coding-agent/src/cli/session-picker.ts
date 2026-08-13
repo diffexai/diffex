@@ -3,6 +3,8 @@
  */
 
 import { setKeybindings } from "@earendil-works/diffex-tui";
+import { getAgentDir } from "../config.ts";
+import { loadHarnessDescriptors } from "../core/harness-descriptors.ts";
 import { KeybindingsManager } from "../core/keybindings.ts";
 import type { SessionInfo, SessionListProgress } from "../core/session-manager.ts";
 import type { SettingsManager } from "../core/settings-manager.ts";
@@ -18,6 +20,9 @@ export async function selectSession(
 	settingsManager: SettingsManager,
 ): Promise<string | null> {
 	const ui = await createStartupTui(settingsManager);
+	const harnessNames = new Map(
+		loadHarnessDescriptors({ agentDir: getAgentDir() }).harnesses.map((harness) => [harness.id, harness.name]),
+	);
 	return new Promise((resolve) => {
 		const keybindings = KeybindingsManager.create();
 		setKeybindings(keybindings);
@@ -45,7 +50,11 @@ export async function selectSession(
 				process.exit(0);
 			},
 			() => ui.requestRender(),
-			{ showRenameHint: false, keybindings },
+			{
+				showRenameHint: false,
+				keybindings,
+				getHarnessName: (harnessId) => harnessNames.get(harnessId),
+			},
 		);
 
 		ui.addChild(selector);
