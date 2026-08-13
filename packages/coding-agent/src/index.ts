@@ -49,6 +49,22 @@ export {
 	shouldCompact,
 } from "./core/compaction/index.ts";
 export { createEventBus, type EventBus, type EventBusController } from "./core/event-bus.ts";
+export {
+	type AppendEvolvedNoteOptions,
+	appendEvolvedNote,
+	type CreateGeneratedProfileOptions,
+	createGeneratedProfile,
+	type EvolvedDiagnostic,
+	type EvolvedLocationOptions,
+	type EvolvedNote,
+	type EvolvedPaths,
+	type FinalizeGeneratedProfileOptions,
+	finalizeGeneratedProfile,
+	initializeEvolvedFiles,
+	type LoadEvolvedNotesOptions,
+	type LoadEvolvedNotesResult,
+	loadEvolvedNotes,
+} from "./core/evolved.ts";
 // Extension system
 export type {
 	AgentEndEvent,
@@ -196,6 +212,43 @@ export type {
 	ResolvedResource,
 } from "./core/package-manager.ts";
 export { DefaultPackageManager } from "./core/package-manager.ts";
+export {
+	buildProfileRouterPrompt,
+	PROFILE_ROUTE_CONFIDENCE_THRESHOLD,
+	type ProfileRouteAction,
+	type ProfileRouteDecision,
+	type ProfileRouteInput,
+	type ProfileRouterCompletion,
+	parseProfileRouteDecision,
+	routeTaskProfile,
+} from "./core/profile-router.ts";
+export {
+	BOOTSTRAP_TASK_PROFILE_ID,
+	BUILTIN_TASK_PROFILES,
+	computeTaskProfileHash,
+	DEFAULT_TASK_PROFILE_ID,
+	loadTaskProfiles,
+	type ResolvedTaskProfile,
+	type ResolveTaskProfileManifestOptions,
+	type ResolveTaskProfileManifestResult,
+	type ResolveTaskProfileSelectionOptions,
+	type ResolveTaskProfileSelectionResult,
+	resolveTaskProfileManifest,
+	resolveTaskProfileSelection,
+	type TaskProfile,
+	type TaskProfileCollision,
+	type TaskProfileContext,
+	type TaskProfileDiagnostic,
+	type TaskProfileGuardrails,
+	type TaskProfileLoadInput,
+	type TaskProfileLoadResult,
+	type TaskProfileManifest,
+	type TaskProfileOrigin,
+	TaskProfileRegistry,
+	type TaskProfileRouting,
+	type TaskProfileSource,
+	type TaskProfileToolPolicy,
+} from "./core/profiles.ts";
 export type { ResourceCollision, ResourceDiagnostic, ResourceLoader } from "./core/resource-loader.ts";
 export { DefaultResourceLoader, loadProjectContextFiles } from "./core/resource-loader.ts";
 // SDK for programmatic usage
@@ -229,6 +282,11 @@ export {
 	type SubagentOptions,
 } from "./core/sdk.ts";
 export {
+	findSelfEvolutionPolicyViolation,
+	type SelfEvolutionPolicyViolation,
+	type SelfEvolutionProtectionOptions,
+} from "./core/self-evolution-policy.ts";
+export {
 	type BranchSummaryEntry,
 	buildContextEntries,
 	buildSessionContext,
@@ -250,6 +308,7 @@ export {
 	type SessionInfoEntry,
 	SessionManager,
 	type SessionMessageEntry,
+	type SessionProfileMetadata,
 	type SessionTreeNode,
 	sessionEntryToContextMessages,
 	type ThinkingLevelChangeEntry,
@@ -287,6 +346,8 @@ export {
 	type BashToolOptions,
 	createBashToolDefinition,
 	createEditToolDefinition,
+	createEvolveTool,
+	createEvolveToolDefinition,
 	createFindToolDefinition,
 	createGrepToolDefinition,
 	createLocalBashOperations,
@@ -300,6 +361,10 @@ export {
 	type EditToolDetails,
 	type EditToolInput,
 	type EditToolOptions,
+	type EvolveToolDetails,
+	type EvolveToolInput,
+	type EvolveToolOptions,
+	evolveToolSystemPromptContribution,
 	type FindOperations,
 	type FindToolDetails,
 	type FindToolInput,

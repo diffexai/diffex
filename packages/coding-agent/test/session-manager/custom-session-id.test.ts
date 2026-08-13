@@ -7,6 +7,35 @@ import { SessionManager } from "../../src/core/session-manager.ts";
 const UUID_V7_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 describe("SessionManager.newSession with custom id", () => {
+	it("stores task profile metadata in a new session header", () => {
+		const profile = {
+			id: "finance",
+			hash: "profile-hash",
+			routing: "auto" as const,
+		};
+		const session = SessionManager.inMemory(process.cwd(), { profile });
+
+		expect(session.getHeader()?.profile).toEqual(profile);
+	});
+
+	it("updates task profile metadata for a resumable session", () => {
+		const session = SessionManager.inMemory();
+
+		session.setProfileMetadata({
+			id: "legal",
+			hash: "legal-hash",
+			source: "/profiles/legal/profile.json",
+			routing: "pinned",
+		});
+
+		expect(session.getHeader()?.profile).toEqual({
+			id: "legal",
+			hash: "legal-hash",
+			source: "/profiles/legal/profile.json",
+			routing: "pinned",
+		});
+	});
+
 	it("uses the provided id instead of generating one", () => {
 		const session = SessionManager.inMemory();
 		session.newSession({ id: "my-custom-id" });
@@ -83,7 +112,8 @@ describe("SessionManager.newSession with custom id", () => {
 	});
 
 	it("generates a UUIDv7 id when creating a branched session", () => {
-		const session = SessionManager.inMemory();
+		const profile = { id: "coding", hash: "coding-hash", routing: "auto" as const };
+		const session = SessionManager.inMemory(process.cwd(), { profile });
 		const firstId = session.appendMessage({
 			role: "user",
 			content: [{ type: "text", text: "hello" }],
@@ -94,6 +124,7 @@ describe("SessionManager.newSession with custom id", () => {
 
 		expect(session.getSessionId()).toMatch(UUID_V7_RE);
 		expect(session.getHeader()!.id).toBe(session.getSessionId());
+		expect(session.getHeader()!.profile).toEqual(profile);
 	});
 
 	it("generates a UUIDv7 id when forking from another session file", () => {
@@ -108,6 +139,7 @@ describe("SessionManager.newSession with custom id", () => {
 					id: "legacy-session-id",
 					timestamp: new Date().toISOString(),
 					cwd: tempDir,
+					profile: { id: "research", hash: "research-hash", routing: "auto" },
 				}),
 				JSON.stringify({
 					type: "message",
@@ -141,6 +173,7 @@ describe("SessionManager.newSession with custom id", () => {
 		expect(header).not.toBeNull();
 		expect(header!.id).toMatch(UUID_V7_RE);
 		expect(header!.parentSession).toBe(sourcePath);
+		expect(header!.profile).toEqual({ id: "research", hash: "research-hash", routing: "auto" });
 	});
 
 	it("uses the provided id when forking from another session file", () => {

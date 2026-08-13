@@ -28,6 +28,22 @@ export {
 export { type BashExecutorOptions, type BashResult, executeBashWithOperations } from "./bash-executor.ts";
 export type { CompactionResult } from "./compaction/index.ts";
 export { createEventBus, type EventBus, type EventBusController } from "./event-bus.ts";
+export {
+	type AppendEvolvedNoteOptions,
+	appendEvolvedNote,
+	type CreateGeneratedProfileOptions,
+	createGeneratedProfile,
+	type EvolvedDiagnostic,
+	type EvolvedLocationOptions,
+	type EvolvedNote,
+	type EvolvedPaths,
+	type FinalizeGeneratedProfileOptions,
+	finalizeGeneratedProfile,
+	initializeEvolvedFiles,
+	type LoadEvolvedNotesOptions,
+	type LoadEvolvedNotesResult,
+	loadEvolvedNotes,
+} from "./evolved.ts";
 export { areExperimentalFeaturesEnabled } from "./experimental.ts";
 // Extensions system
 export {
@@ -77,4 +93,47 @@ export {
 	type TurnStartEvent,
 	type WorkingIndicatorOptions,
 } from "./extensions/index.ts";
+export {
+	buildProfileRouterPrompt,
+	PROFILE_ROUTE_CONFIDENCE_THRESHOLD,
+	type ProfileRouteAction,
+	type ProfileRouteDecision,
+	type ProfileRouteInput,
+	type ProfileRouterCompletion,
+	parseProfileRouteDecision,
+	routeTaskProfile,
+} from "./profile-router.ts";
+export {
+	BOOTSTRAP_TASK_PROFILE_ID,
+	BUILTIN_TASK_PROFILES,
+	computeTaskProfileHash,
+	DEFAULT_TASK_PROFILE_ID,
+	loadTaskProfiles,
+	type ResolvedTaskProfile,
+	type ResolveTaskProfileManifestOptions,
+	type ResolveTaskProfileManifestResult,
+	type ResolveTaskProfileSelectionOptions,
+	type ResolveTaskProfileSelectionResult,
+	resolveTaskProfileManifest,
+	resolveTaskProfileSelection,
+	type TaskProfile,
+	type TaskProfileCollision,
+	type TaskProfileContext,
+	type TaskProfileDiagnostic,
+	type TaskProfileGuardrails,
+	type TaskProfileLoadInput,
+	type TaskProfileLoadResult,
+	type TaskProfileManifest,
+	type TaskProfileOrigin,
+	TaskProfileRegistry,
+	type TaskProfileRouting,
+	type TaskProfileSource,
+	type TaskProfileToolPolicy,
+} from "./profiles.ts";
+export {
+	findSelfEvolutionPolicyViolation,
+	type SelfEvolutionPolicyViolation,
+	type SelfEvolutionProtectionOptions,
+} from "./self-evolution-policy.ts";
+export type { SessionProfileMetadata } from "./session-manager.ts";
 export { createSyntheticSourceInfo } from "./source-info.ts";

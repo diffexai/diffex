@@ -28,6 +28,7 @@ import {
 import { AuthStorage } from "../src/core/auth-storage.ts";
 import { createExtensionRuntime } from "../src/core/extensions/loader.ts";
 import type { ToolDefinition } from "../src/core/extensions/types.ts";
+import { loadTaskProfiles } from "../src/core/profiles.ts";
 import type { ResourceLoader } from "../src/core/resource-loader.ts";
 import { createAgentSession } from "../src/core/sdk.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
@@ -171,12 +172,18 @@ function buildPrompt(turn: number): string {
 }
 
 function createMinimalResourceLoader(systemPrompt: string): ResourceLoader {
+	const profiles = loadTaskProfiles();
+	const activeProfile = profiles.registry.get("coding");
+	if (!activeProfile) throw new Error("Built-in coding task profile is unavailable");
 	return {
 		getExtensions: () => ({ extensions: [], errors: [], runtime: createExtensionRuntime() }),
 		getSkills: () => ({ skills: [], diagnostics: [] }),
 		getPrompts: () => ({ prompts: [], diagnostics: [] }),
 		getThemes: () => ({ themes: [], diagnostics: [] }),
+		getProfiles: () => profiles,
+		getActiveProfile: () => activeProfile,
 		getAgentsFiles: () => ({ agentsFiles: [] }),
+		getEvolvedNotes: () => ({ evolvedNotes: [], diagnostics: [] }),
 		getSystemPrompt: () => systemPrompt,
 		getSystemPromptSource: () => undefined,
 		getAppendSystemPrompt: () => [],

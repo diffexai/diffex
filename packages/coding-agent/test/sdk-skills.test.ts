@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createExtensionRuntime } from "../src/core/extensions/loader.ts";
+import { loadTaskProfiles } from "../src/core/profiles.ts";
 import type { ResourceLoader } from "../src/core/resource-loader.ts";
 import { createAgentSession } from "../src/core/sdk.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
@@ -11,6 +12,9 @@ import { createSyntheticSourceInfo } from "../src/core/source-info.ts";
 describe("createAgentSession skills option", () => {
 	let tempDir: string;
 	let skillsDir: string;
+	const profiles = loadTaskProfiles();
+	const activeProfile = profiles.registry.get("coding");
+	if (!activeProfile) throw new Error("Built-in coding task profile is unavailable");
 
 	beforeEach(() => {
 		tempDir = join(tmpdir(), `pi-sdk-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -56,7 +60,10 @@ This is a test skill.
 			getSkills: () => ({ skills: [], diagnostics: [] }),
 			getPrompts: () => ({ prompts: [], diagnostics: [] }),
 			getThemes: () => ({ themes: [], diagnostics: [] }),
+			getProfiles: () => profiles,
+			getActiveProfile: () => activeProfile,
 			getAgentsFiles: () => ({ agentsFiles: [] }),
+			getEvolvedNotes: () => ({ evolvedNotes: [], diagnostics: [] }),
 			getSystemPrompt: () => undefined,
 			getSystemPromptSource: () => undefined,
 			getAppendSystemPrompt: () => [],
@@ -91,7 +98,10 @@ This is a test skill.
 			getSkills: () => ({ skills: [customSkill], diagnostics: [] }),
 			getPrompts: () => ({ prompts: [], diagnostics: [] }),
 			getThemes: () => ({ themes: [], diagnostics: [] }),
+			getProfiles: () => profiles,
+			getActiveProfile: () => activeProfile,
 			getAgentsFiles: () => ({ agentsFiles: [] }),
+			getEvolvedNotes: () => ({ evolvedNotes: [], diagnostics: [] }),
 			getSystemPrompt: () => undefined,
 			getSystemPromptSource: () => undefined,
 			getAppendSystemPrompt: () => [],

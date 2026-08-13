@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthStorage } from "../src/core/auth-storage.ts";
+import { appendEvolvedNote } from "../src/core/evolved.ts";
 import { ExtensionRunner } from "../src/core/extensions/runner.ts";
 import { DefaultResourceLoader, loadProjectContextFiles } from "../src/core/resource-loader.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
@@ -38,6 +39,8 @@ describe("DefaultResourceLoader", () => {
 			expect(loader.getSkills().skills).toEqual([]);
 			expect(loader.getPrompts().prompts).toEqual([]);
 			expect(loader.getThemes().themes).toEqual([]);
+			expect(loader.getProfiles().profiles.length).toBeGreaterThan(0);
+			expect(() => loader.getActiveProfile()).toThrow("Call reload()");
 		});
 
 		it("should discover skills from agentDir", async () => {
@@ -404,6 +407,83 @@ Current settings content`,
 			expect(agentsFiles.some((f) => f.path.includes("AGENTS.md"))).toBe(true);
 		});
 
+		it("uses the active profile to select user instruction filenames", async () => {
+			const profileDir = join(tempDir, "profiles", "evidence-review");
+			mkdirSync(profileDir, { recursive: true });
+			writeFileSync(
+				join(profileDir, "profile.json"),
+				JSON.stringify({
+					schemaVersion: 1,
+					id: "evidence-review",
+					name: "Evidence review",
+					description: "Review a bounded body of evidence.",
+					prompt: "Review the evidence and distinguish findings from inference.",
+					routing: { description: "Evidence reviews", examples: ["Review these sources"], keywords: ["evidence"] },
+					tools: { default: ["read"], required: [], denied: ["edit", "write"] },
+					guardrails: {
+						highStakes: false,
+						requireHumanReview: false,
+						requireCurrentSources: false,
+						disallowedActions: [],
+						instructions: [],
+					},
+					context: { fileNames: ["RESEARCH.md"], label: "Research instructions" },
+				}),
+			);
+			writeFileSync(join(cwd, "AGENTS.md"), "generic instructions");
+			writeFileSync(join(cwd, "RESEARCH.md"), "research instructions");
+
+			const loader = new DefaultResourceLoader({
+				cwd,
+				agentDir,
+				profile: "evidence-review",
+				additionalProfilePaths: [profileDir],
+			});
+			await loader.reload();
+
+			expect(loader.getActiveProfile().id).toBe("evidence-review");
+			expect(loader.getProfiles().profiles.some((profile) => profile.id === "evidence-review")).toBe(true);
+			expect(loader.getAgentsFiles().agentsFiles).toEqual([
+				{ path: join(cwd, "RESEARCH.md"), content: "research instructions" },
+			]);
+		});
+
+		it("loads a selected profile directly from its directory", async () => {
+			const profileDir = join(tempDir, "profiles", "direct-profile");
+			mkdirSync(profileDir, { recursive: true });
+			writeFileSync(
+				join(profileDir, "profile.json"),
+				JSON.stringify({
+					schemaVersion: 1,
+					id: "direct-profile",
+					name: "Direct profile",
+					description: "Loaded directly by path.",
+					prompt: "Complete the selected task.",
+					routing: { description: "Direct tasks", examples: ["Use this profile"], keywords: ["direct"] },
+					tools: { default: ["read"], required: [], denied: ["edit", "write"] },
+					guardrails: {
+						highStakes: false,
+						requireHumanReview: false,
+						requireCurrentSources: false,
+						disallowedActions: [],
+						instructions: [],
+					},
+				}),
+			);
+
+			const loader = new DefaultResourceLoader({ cwd, agentDir, profile: profileDir });
+			await loader.reload();
+
+			expect(loader.getActiveProfile().id).toBe("direct-profile");
+			expect(loader.getActiveProfile().source.path).toBe(join(profileDir, "profile.json"));
+		});
+
+		it("rejects an unknown selected profile with a clear startup error", async () => {
+			const loader = new DefaultResourceLoader({ cwd, agentDir, profile: "missing-profile" });
+
+			await expect(loader.reload()).rejects.toThrow('Unable to resolve task profile "missing-profile"');
+		});
+
 		it("should prefer AGENTS.override.md within each directory while preserving ancestor layering", async () => {
 			const nestedCwd = join(cwd, "service");
 			mkdirSync(nestedCwd);
@@ -429,7 +509,7 @@ Current settings content`,
 			writeFileSync(join(cwd, "CLAUDE.md"), "Fallback instructions");
 			const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
 
-			const loader = new DefaultResourceLoader({ cwd, agentDir });
+			const loader = new DefaultResourceLoader({ cwd, agentDir, profile: "coding" });
 			await loader.reload();
 
 			expect(loader.getAgentsFiles().agentsFiles).toContainEqual({
@@ -453,28 +533,30 @@ Current settings content`,
 			expect(agentsFiles).toEqual([]);
 		});
 
-		it("should discover SYSTEM.md from cwd/.diffex", async () => {
-			const piDir = join(cwd, ".diffex");
-			mkdirSync(piDir, { recursive: true });
-			writeFileSync(join(piDir, "SYSTEM.md"), "You are a helpful assistant.");
+		it("should ignore legacy SYSTEM.md files", async () => {
+			const diffexDir = join(cwd, ".diffex");
+			mkdirSync(diffexDir, { recursive: true });
+			writeFileSync(join(diffexDir, "SYSTEM.md"), "You are a helpful assistant.");
+			writeFileSync(join(agentDir, "SYSTEM.md"), "Global legacy prompt.");
 
 			const loader = new DefaultResourceLoader({ cwd, agentDir });
 			await loader.reload();
 
-			expect(loader.getSystemPrompt()).toBe("You are a helpful assistant.");
+			expect(loader.getSystemPrompt()).toBeUndefined();
+			expect(loader.getSystemPromptSource()).toBeUndefined();
 		});
 
 		it("should skip project resources that require trust when project is not trusted", async () => {
-			const piDir = join(cwd, ".diffex");
-			const extensionsDir = join(piDir, "extensions");
-			const skillDir = join(piDir, "skills", "project-skill");
-			const promptsDir = join(piDir, "prompts");
-			const themesDir = join(piDir, "themes");
+			const diffexDir = join(cwd, ".diffex");
+			const extensionsDir = join(diffexDir, "extensions");
+			const skillDir = join(diffexDir, "skills", "project-skill");
+			const promptsDir = join(diffexDir, "prompts");
+			const themesDir = join(diffexDir, "themes");
 			mkdirSync(extensionsDir, { recursive: true });
 			mkdirSync(skillDir, { recursive: true });
 			mkdirSync(promptsDir, { recursive: true });
 			mkdirSync(themesDir, { recursive: true });
-			writeFileSync(join(piDir, "SYSTEM.md"), "Project system prompt.");
+			writeFileSync(join(diffexDir, "SYSTEM.md"), "Project system prompt.");
 			writeFileSync(join(agentDir, "SYSTEM.md"), "Global system prompt.");
 			writeFileSync(join(agentDir, "AGENTS.md"), "Global instructions");
 			writeFileSync(join(cwd, "AGENTS.md"), "Project instructions");
@@ -498,7 +580,7 @@ Project skill content`,
 			const loader = new DefaultResourceLoader({ cwd, agentDir, settingsManager });
 			await loader.reload();
 
-			expect(loader.getSystemPrompt()).toBe("Global system prompt.");
+			expect(loader.getSystemPrompt()).toBeUndefined();
 			expect(loader.getAgentsFiles().agentsFiles.some((file) => file.path === join(agentDir, "AGENTS.md"))).toBe(
 				true,
 			);
@@ -510,41 +592,127 @@ Project skill content`,
 			expect(loader.getThemes().themes.some((theme) => theme.name === "project-theme")).toBe(false);
 		});
 
-		it("should discover APPEND_SYSTEM.md", async () => {
-			const piDir = join(cwd, ".diffex");
-			mkdirSync(piDir, { recursive: true });
-			writeFileSync(join(piDir, "APPEND_SYSTEM.md"), "Additional instructions.");
+		it("should ignore legacy APPEND_SYSTEM.md files", async () => {
+			const diffexDir = join(cwd, ".diffex");
+			mkdirSync(diffexDir, { recursive: true });
+			writeFileSync(join(diffexDir, "APPEND_SYSTEM.md"), "Additional instructions.");
+			writeFileSync(join(agentDir, "APPEND_SYSTEM.md"), "Global additional instructions.");
 
 			const loader = new DefaultResourceLoader({ cwd, agentDir });
 			await loader.reload();
 
-			expect(loader.getAppendSystemPrompt()).toContain("Additional instructions.");
+			expect(loader.getAppendSystemPrompt()).toEqual([]);
+			expect(loader.getAppendSystemPromptSources()).toEqual([]);
+		});
+
+		it("loads bounded EVOLVED.md notes and keeps their newest content", async () => {
+			for (let index = 0; index < 60; index++) {
+				appendEvolvedNote({
+					agentDir,
+					scope: "global",
+					profileId: "general",
+					category: "workflow",
+					provenance: "test",
+					content: `entry-${index} ${"x".repeat(500)}`,
+					timestamp: new Date(Date.UTC(2026, 0, 1, 0, 0, index)),
+				});
+			}
+
+			const loader = new DefaultResourceLoader({ cwd, agentDir });
+			await loader.reload();
+
+			const { evolvedNotes } = loader.getEvolvedNotes();
+			expect(evolvedNotes.length).toBeGreaterThan(0);
+			expect(evolvedNotes.length).toBeLessThan(60);
+			expect(evolvedNotes[0]).toMatchObject({ truncated: true, sourceInfo: { scope: "user" } });
+			expect(evolvedNotes.some((note) => note.content.includes("entry-59"))).toBe(true);
+		});
+
+		it("initializes only global EVOLVED.md without materializing trusted project storage", async () => {
+			const untrustedSettings = SettingsManager.create(cwd, agentDir, { projectTrusted: false });
+			const untrustedLoader = new DefaultResourceLoader({ cwd, agentDir, settingsManager: untrustedSettings });
+			await untrustedLoader.reload();
+
+			expect(readFileSync(join(agentDir, "EVOLVED.md"), "utf-8")).toBe("");
+			expect(() => readFileSync(join(cwd, ".diffex", "EVOLVED.md"), "utf-8")).toThrow();
+
+			const trustedSettings = SettingsManager.create(cwd, agentDir, { projectTrusted: true });
+			const trustedLoader = new DefaultResourceLoader({ cwd, agentDir, settingsManager: trustedSettings });
+			await trustedLoader.reload();
+
+			expect(readFileSync(join(agentDir, "EVOLVED.md"), "utf-8")).toBe("");
+			expect(() => readFileSync(join(cwd, ".diffex", "EVOLVED.md"), "utf-8")).toThrow();
+		});
+
+		it("reports unsafe EVOLVED.md paths as resource diagnostics", async () => {
+			const target = join(tempDir, "outside-evolved.md");
+			writeFileSync(target, "outside note");
+			symlinkSync(target, join(agentDir, "EVOLVED.md"));
+
+			const loader = new DefaultResourceLoader({ cwd, agentDir });
+			await loader.reload();
+
+			expect(loader.getEvolvedNotes().evolvedNotes).toEqual([]);
+			expect(loader.getEvolvedNotes().diagnostics).toEqual([
+				expect.objectContaining({ type: "error", message: expect.stringContaining("non-regular EVOLVED.md") }),
+			]);
+		});
+
+		it("loads global and trusted project EVOLVED.md with source metadata", async () => {
+			const projectDiffexDir = join(cwd, ".diffex");
+			mkdirSync(projectDiffexDir, { recursive: true });
+			writeFileSync(join(agentDir, "EVOLVED.md"), "global note");
+			writeFileSync(join(projectDiffexDir, "EVOLVED.md"), "project note");
+
+			const loader = new DefaultResourceLoader({ cwd, agentDir });
+			await loader.reload();
+
+			expect(loader.getEvolvedNotes().evolvedNotes).toEqual([
+				expect.objectContaining({ content: "global note", sourceInfo: expect.objectContaining({ scope: "user" }) }),
+				expect.objectContaining({
+					content: "project note",
+					sourceInfo: expect.objectContaining({ scope: "project" }),
+				}),
+			]);
+		});
+
+		it("does not load project EVOLVED.md before project trust", async () => {
+			const projectDiffexDir = join(cwd, ".diffex");
+			mkdirSync(projectDiffexDir, { recursive: true });
+			writeFileSync(join(agentDir, "EVOLVED.md"), "global note");
+			writeFileSync(join(projectDiffexDir, "EVOLVED.md"), "project note");
+			const settingsManager = SettingsManager.create(cwd, agentDir, { projectTrusted: false });
+
+			const loader = new DefaultResourceLoader({ cwd, agentDir, settingsManager });
+			await loader.reload();
+
+			expect(loader.getEvolvedNotes().evolvedNotes.map((note) => note.content)).toEqual(["global note"]);
 		});
 	});
 
 	describe("system prompt sources", () => {
-		it("exposes discovered project SYSTEM.md as the system prompt source", async () => {
-			const piDir = join(cwd, ".diffex");
-			const systemPromptPath = join(piDir, "SYSTEM.md");
-			mkdirSync(piDir, { recursive: true });
+		it("does not expose project SYSTEM.md as the system prompt source", async () => {
+			const diffexDir = join(cwd, ".diffex");
+			const systemPromptPath = join(diffexDir, "SYSTEM.md");
+			mkdirSync(diffexDir, { recursive: true });
 			writeFileSync(systemPromptPath, "Project system prompt.");
 
 			const loader = new DefaultResourceLoader({ cwd, agentDir });
 			await loader.reload();
 
-			expect(loader.getSystemPrompt()).toBe("Project system prompt.");
-			expect(loader.getSystemPromptSource()).toEqual({ path: systemPromptPath });
+			expect(loader.getSystemPrompt()).toBeUndefined();
+			expect(loader.getSystemPromptSource()).toBeUndefined();
 		});
 
-		it("exposes discovered global SYSTEM.md as the system prompt source", async () => {
+		it("does not expose global SYSTEM.md as the system prompt source", async () => {
 			const systemPromptPath = join(agentDir, "SYSTEM.md");
 			writeFileSync(systemPromptPath, "Global system prompt.");
 
 			const loader = new DefaultResourceLoader({ cwd, agentDir });
 			await loader.reload();
 
-			expect(loader.getSystemPrompt()).toBe("Global system prompt.");
-			expect(loader.getSystemPromptSource()).toEqual({ path: systemPromptPath });
+			expect(loader.getSystemPrompt()).toBeUndefined();
+			expect(loader.getSystemPromptSource()).toBeUndefined();
 		});
 
 		it("does not expose literal system prompt text as a source", async () => {
@@ -566,17 +734,17 @@ Project skill content`,
 			expect(loader.getSystemPromptSource()).toEqual({ path: systemPromptPath });
 		});
 
-		it("exposes discovered APPEND_SYSTEM.md as an append system prompt source", async () => {
-			const piDir = join(cwd, ".diffex");
-			const appendSystemPromptPath = join(piDir, "APPEND_SYSTEM.md");
-			mkdirSync(piDir, { recursive: true });
+		it("does not expose discovered APPEND_SYSTEM.md as an append system prompt source", async () => {
+			const diffexDir = join(cwd, ".diffex");
+			const appendSystemPromptPath = join(diffexDir, "APPEND_SYSTEM.md");
+			mkdirSync(diffexDir, { recursive: true });
 			writeFileSync(appendSystemPromptPath, "Project append prompt.");
 
 			const loader = new DefaultResourceLoader({ cwd, agentDir });
 			await loader.reload();
 
-			expect(loader.getAppendSystemPrompt()).toEqual(["Project append prompt."]);
-			expect(loader.getAppendSystemPromptSources()).toEqual([{ path: appendSystemPromptPath }]);
+			expect(loader.getAppendSystemPrompt()).toEqual([]);
+			expect(loader.getAppendSystemPromptSources()).toEqual([]);
 		});
 
 		it("does not expose literal append system prompt text as a source", async () => {
