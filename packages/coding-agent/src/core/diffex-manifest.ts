@@ -5,9 +5,10 @@ export interface DiffexManifest {
 	skills?: string[];
 	prompts?: string[];
 	themes?: string[];
+	profiles?: string[];
 }
 
-const RESOURCE_FIELDS = ["extensions", "skills", "prompts", "themes"] as const;
+const RESOURCE_FIELDS = ["extensions", "skills", "prompts", "themes", "profiles"] as const;
 
 function isObject(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);

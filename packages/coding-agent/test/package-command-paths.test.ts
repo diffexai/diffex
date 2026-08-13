@@ -48,6 +48,7 @@ describe("package commands", () => {
 			skills: [],
 			prompts: [],
 			themes: [],
+			profiles: [],
 		};
 	}
 
