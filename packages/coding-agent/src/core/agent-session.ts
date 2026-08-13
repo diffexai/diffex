@@ -64,7 +64,7 @@ import {
 	prepareCompaction,
 	shouldCompact,
 } from "./compaction/index.ts";
-import { createSessionUpdatePlanToolDefinition } from "./current-plan-state.ts";
+import { createSessionUpdatePlanToolDefinition, resolveCurrentPlanState } from "./current-plan-state.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
 import { exportSessionToHtml, type ToolHtmlRenderer } from "./export-html/index.ts";
 import { createToolHtmlRenderer } from "./export-html/tool-renderer.ts";
@@ -302,6 +302,9 @@ function estimateMessagesTokens(messages: AgentMessage[]): number {
 
 /** Standard thinking levels */
 const THINKING_LEVELS: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high"];
+const CURRENT_PLAN_RESTORATION_CUSTOM_TYPE = "diffex.current-plan-restoration";
+const CURRENT_PLAN_RESTORATION_REMINDER =
+	"Reminder: restored context is not proof of completion. Verify current state before claiming work is done.";
 
 // ============================================================================
 // AgentSession Class
@@ -327,6 +330,7 @@ export class AgentSession {
 	private _followUpMessages: string[] = [];
 	/** Messages queued to be included with the next user prompt as context ("asides"). */
 	private _pendingNextTurnMessages: CustomMessage[] = [];
+	private _pendingCurrentPlanRestoration = false;
 
 	// Compaction state
 	private _compactionAbortController: AbortController | undefined = undefined;
@@ -398,10 +402,13 @@ export class AgentSession {
 		this._sessionStartEvent = config.sessionStartEvent ?? { type: "session_start", reason: "startup" };
 		this._subagentController = config.subagentController;
 
+		this._armInitialCurrentPlanRestoration();
+
 		// Always subscribe to agent events for internal handling
 		// (session persistence, extensions, auto-compaction, retry logic)
 		this._unsubscribeAgent = this.agent.subscribe(this._handleAgentEvent);
 		this._installAgentToolHooks();
+		this._installAgentContextRestoration();
 		this._installAgentNextTurnRefresh();
 
 		this._buildRuntime({
@@ -561,6 +568,62 @@ export class AgentSession {
 				thinkingLevel: this.agent.state.thinkingLevel,
 			};
 		};
+	}
+
+	private _installAgentContextRestoration(): void {
+		const previousTransformContext = this.agent.transformContext;
+		this.agent.transformContext = async (messages, signal) => {
+			const transformedMessages = previousTransformContext
+				? await previousTransformContext(messages, signal)
+				: messages;
+			return this._consumePendingCurrentPlanRestoration(transformedMessages);
+		};
+	}
+
+	private _armInitialCurrentPlanRestoration(): void {
+		if (this._sessionStartEvent.reason !== "startup" && this._sessionStartEvent.reason !== "resume") {
+			return;
+		}
+		this._armCurrentPlanRestorationIfActive();
+	}
+
+	private _armCurrentPlanRestorationIfActive(): void {
+		if (resolveCurrentPlanState(this.sessionManager).status === "active") {
+			this._pendingCurrentPlanRestoration = true;
+		}
+	}
+
+	private _consumePendingCurrentPlanRestoration(messages: AgentMessage[]): AgentMessage[] {
+		if (!this._pendingCurrentPlanRestoration) {
+			return messages;
+		}
+
+		const state = resolveCurrentPlanState(this.sessionManager);
+		this._pendingCurrentPlanRestoration = false;
+		if (state.status !== "active") {
+			return messages;
+		}
+
+		const lines = [
+			"Restored unfinished update_plan checklist from the current session. Use this hidden context to continue the work.",
+		];
+		if (state.operation.explanation !== undefined) {
+			lines.push("", "Explanation:", state.operation.explanation);
+		}
+		lines.push("", "Checklist:");
+		for (const [index, item] of state.operation.plan.entries()) {
+			lines.push(`${index + 1}. [${item.status}] ${item.step}`);
+		}
+		lines.push("", CURRENT_PLAN_RESTORATION_REMINDER);
+
+		const restoredContext: CustomMessage = {
+			role: "custom",
+			customType: CURRENT_PLAN_RESTORATION_CUSTOM_TYPE,
+			content: [{ type: "text", text: lines.join("\n") }],
+			display: false,
+			timestamp: Date.now(),
+		};
+		return [...messages, restoredContext];
 	}
 
 	// =========================================================================
@@ -1993,35 +2056,16 @@ export class AgentSession {
 				throw new Error("Compaction cancelled");
 			}
 
-			this.sessionManager.appendCompaction(summary, firstKeptEntryId, tokensBefore, details, fromExtension, usage);
-			const newEntries = this.sessionManager.getEntries();
-			const sessionContext = this.sessionManager.buildSessionContext();
-			this.agent.state.messages = sessionContext.messages;
-			const estimatedTokensAfter = estimateMessagesTokens(sessionContext.messages);
-
-			// Get the saved compaction entry for the extension event
-			const savedCompactionEntry = newEntries.find((e) => e.type === "compaction" && e.summary === summary) as
-				| CompactionEntry
-				| undefined;
-
-			if (this._extensionRunner && savedCompactionEntry) {
-				await this._extensionRunner.emit({
-					type: "session_compact",
-					compactionEntry: savedCompactionEntry,
-					fromExtension,
-					reason: "manual",
-					willRetry: false,
-				});
-			}
-
-			const compactionResult: CompactionResult = {
+			const compactionResult = await this._recordSuccessfulCompaction({
+				reason: "manual",
 				summary,
 				firstKeptEntryId,
 				tokensBefore,
-				estimatedTokensAfter,
-				usage,
 				details,
-			};
+				fromExtension,
+				usage,
+				willRetry: false,
+			});
 			// compaction_end listeners may submit queued prompts, so expose idle state before notifying them.
 			this._compactionAbortController = undefined;
 			this._emit({
@@ -2063,6 +2107,56 @@ export class AgentSession {
 	 */
 	abortBranchSummary(): void {
 		this._branchSummaryAbortController?.abort();
+	}
+
+	private async _recordSuccessfulCompaction(options: {
+		reason: "manual" | "threshold" | "overflow";
+		summary: string;
+		firstKeptEntryId: string;
+		tokensBefore: number;
+		details: unknown;
+		fromExtension: boolean;
+		usage: Usage | undefined;
+		willRetry: boolean;
+	}): Promise<CompactionResult> {
+		this.sessionManager.appendCompaction(
+			options.summary,
+			options.firstKeptEntryId,
+			options.tokensBefore,
+			options.details,
+			options.fromExtension,
+			options.usage,
+		);
+		const newEntries = this.sessionManager.getEntries();
+		const sessionContext = this.sessionManager.buildSessionContext();
+		this.agent.state.messages = sessionContext.messages;
+		const estimatedTokensAfter = estimateMessagesTokens(sessionContext.messages);
+
+		// Get the saved compaction entry for the extension event
+		const savedCompactionEntry = newEntries.find((e) => e.type === "compaction" && e.summary === options.summary) as
+			| CompactionEntry
+			| undefined;
+
+		if (this._extensionRunner && savedCompactionEntry) {
+			await this._extensionRunner.emit({
+				type: "session_compact",
+				compactionEntry: savedCompactionEntry,
+				fromExtension: options.fromExtension,
+				reason: options.reason,
+				willRetry: options.willRetry,
+			});
+		}
+
+		const compactionResult: CompactionResult = {
+			summary: options.summary,
+			firstKeptEntryId: options.firstKeptEntryId,
+			tokensBefore: options.tokensBefore,
+			estimatedTokensAfter,
+			usage: options.usage,
+			details: options.details,
+		};
+		this._armCurrentPlanRestorationIfActive();
+		return compactionResult;
 	}
 
 	/**
@@ -2278,35 +2372,16 @@ export class AgentSession {
 				return false;
 			}
 
-			this.sessionManager.appendCompaction(summary, firstKeptEntryId, tokensBefore, details, fromExtension, usage);
-			const newEntries = this.sessionManager.getEntries();
-			const sessionContext = this.sessionManager.buildSessionContext();
-			this.agent.state.messages = sessionContext.messages;
-			const estimatedTokensAfter = estimateMessagesTokens(sessionContext.messages);
-
-			// Get the saved compaction entry for the extension event
-			const savedCompactionEntry = newEntries.find((e) => e.type === "compaction" && e.summary === summary) as
-				| CompactionEntry
-				| undefined;
-
-			if (this._extensionRunner && savedCompactionEntry) {
-				await this._extensionRunner.emit({
-					type: "session_compact",
-					compactionEntry: savedCompactionEntry,
-					fromExtension,
-					reason,
-					willRetry,
-				});
-			}
-
-			const result: CompactionResult = {
+			const result = await this._recordSuccessfulCompaction({
+				reason,
 				summary,
 				firstKeptEntryId,
 				tokensBefore,
-				estimatedTokensAfter,
-				usage,
 				details,
-			};
+				fromExtension,
+				usage,
+				willRetry,
+			});
 			this._emit({ type: "compaction_end", reason, result, aborted: false, willRetry });
 
 			if (willRetry) {

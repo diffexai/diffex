@@ -17,7 +17,7 @@ import type {
 import { registerFauxProvider, streamSimple } from "@earendil-works/diffex-ai/compat";
 import { AgentSession, type AgentSessionEvent } from "../../src/core/agent-session.ts";
 import { AuthStorage } from "../../src/core/auth-storage.ts";
-import type { ExtensionRunner } from "../../src/core/extensions/index.ts";
+import type { ExtensionRunner, SessionStartEvent } from "../../src/core/extensions/index.ts";
 import { convertToLlm } from "../../src/core/messages.ts";
 import { SessionManager } from "../../src/core/session-manager.ts";
 import type { Settings } from "../../src/core/settings-manager.ts";
@@ -73,6 +73,7 @@ export interface HarnessOptions {
 	extensionFactories?: Array<InlineExtension | CreateTestExtensionsResultInput>;
 	withConfiguredAuth?: boolean;
 	modelsJson?: Record<string, unknown>;
+	sessionStartEvent?: SessionStartEvent;
 }
 
 export interface Harness {
@@ -192,6 +193,7 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 		allowedToolNames: options.allowedToolNames,
 		excludedToolNames: options.excludedToolNames,
 		extensionRunnerRef,
+		sessionStartEvent: options.sessionStartEvent,
 	});
 
 	const events: AgentSessionEvent[] = [];

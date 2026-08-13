@@ -235,6 +235,8 @@ Configure delivery in [settings](docs/settings.md): `steeringMode` and `followUp
 
 Sessions are stored as JSONL files with a tree structure. Each entry has an `id` and `parentId`, enabling in-place branching without creating new files. See [docs/session-format.md](docs/session-format.md) for file format.
 
+The built-in `update_plan` checklist records the latest checklist state in the session. When an unfinished checklist exists after opening or resuming a session, or after successful compaction, Diffex restores it once as hidden context for the next model request. This is not a workflow engine: it does not schedule, execute, gate, verify, or prove work.
+
 ### Management
 
 Sessions auto-save to `~/.diffex/agent/sessions/` organized by working directory.
