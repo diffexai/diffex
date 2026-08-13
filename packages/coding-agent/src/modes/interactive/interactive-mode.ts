@@ -91,6 +91,7 @@ import type {
 	WorkingIndicatorOptions,
 } from "../../core/extensions/index.ts";
 import { FooterDataProvider, type ReadonlyFooterDataProvider } from "../../core/footer-data-provider.ts";
+import { loadHarnessDescriptors } from "../../core/harness-descriptors.ts";
 import { configureHttpDispatcher, formatHttpIdleTimeoutMs } from "../../core/http-dispatcher.ts";
 import { type AppKeybinding, KeybindingsManager } from "../../core/keybindings.ts";
 import { createCompactionSummaryMessage } from "../../core/messages.ts";
@@ -5325,6 +5326,12 @@ export class InteractiveMode {
 	}
 
 	private showSessionSelector(): void {
+		const harnessNames = new Map(
+			loadHarnessDescriptors({ agentDir: this.runtimeHost.services.agentDir }).harnesses.map((harness) => [
+				harness.id,
+				harness.name,
+			]),
+		);
 		this.showSelector((done) => {
 			const selector = new SessionSelectorComponent(
 				(onProgress) =>
@@ -5354,6 +5361,7 @@ export class InteractiveMode {
 					},
 					showRenameHint: true,
 					keybindings: this.keybindings,
+					getHarnessName: (harnessId) => harnessNames.get(harnessId),
 				},
 
 				this.sessionManager.getSessionFile(),

@@ -5,7 +5,7 @@ import type { SessionInfo } from "../src/core/session-manager.ts";
 import { SessionSelectorComponent } from "../src/modes/interactive/components/session-selector.ts";
 import { initTheme } from "../src/modes/interactive/theme/theme.ts";
 
-function makeSession(overrides: Partial<SessionInfo> & { id: string; name: string }): SessionInfo {
+function makeSession(overrides: Partial<SessionInfo> & { id: string; name?: string }): SessionInfo {
 	return {
 		path: overrides.path ?? `/tmp/${overrides.id}.jsonl`,
 		id: overrides.id,
@@ -17,12 +17,15 @@ function makeSession(overrides: Partial<SessionInfo> & { id: string; name: strin
 		created: overrides.created ?? new Date("2026-08-12T00:00:00.000Z"),
 		modified: overrides.modified ?? new Date("2026-08-12T00:00:00.000Z"),
 		messageCount: overrides.messageCount ?? 2,
-		firstMessage: overrides.firstMessage ?? overrides.name,
-		allMessagesText: overrides.allMessagesText ?? overrides.name,
+		firstMessage: overrides.firstMessage ?? overrides.name ?? "(no messages)",
+		allMessagesText: overrides.allMessagesText ?? overrides.name ?? "",
 	};
 }
 
-async function renderThreadedSessions(sessions: SessionInfo[]): Promise<string> {
+async function renderThreadedSessions(
+	sessions: SessionInfo[],
+	harnessNames: ReadonlyMap<string, string> = new Map(),
+): Promise<string> {
 	const selector = new SessionSelectorComponent(
 		async () => sessions,
 		async () => [],
@@ -30,7 +33,10 @@ async function renderThreadedSessions(sessions: SessionInfo[]): Promise<string> 
 		() => {},
 		() => {},
 		() => {},
-		{ keybindings: new KeybindingsManager() },
+		{
+			keybindings: new KeybindingsManager(),
+			getHarnessName: (harnessId) => harnessNames.get(harnessId),
+		},
 	);
 	await new Promise<void>((resolve) => setImmediate(resolve));
 	return selector
@@ -43,6 +49,42 @@ describe("session selector harness roots", () => {
 	beforeAll(() => initTheme("dark"));
 
 	beforeEach(() => setKeybindings(new KeybindingsManager()));
+
+	test("labels sessions by explicit name, harness name, then first prompt", async () => {
+		const sessions = [
+			makeSession({
+				id: "explicit",
+				name: "My retirement session",
+				harnessId: "retirement-planning",
+				firstMessage: "Which index funds should I buy?",
+				modified: new Date("2026-08-12T03:00:00.000Z"),
+			}),
+			makeSession({
+				id: "harness",
+				harnessId: "backend-api",
+				firstMessage: "Help me build an endpoint",
+				modified: new Date("2026-08-12T02:00:00.000Z"),
+			}),
+			makeSession({
+				id: "fallback",
+				firstMessage: "How should I grow carrots?",
+				modified: new Date("2026-08-12T01:00:00.000Z"),
+			}),
+		];
+		const output = await renderThreadedSessions(
+			sessions,
+			new Map([
+				["retirement-planning", "Retirement planning"],
+				["backend-api", "Backend API"],
+			]),
+		);
+
+		expect(output).toContain("My retirement session");
+		expect(output).not.toContain("Retirement planning");
+		expect(output).toContain("Backend API");
+		expect(output).not.toContain("Help me build an endpoint");
+		expect(output).toContain("How should I grow carrots?");
+	});
 
 	test("renders a legacy Finance to Coding task transition as independent roots", async () => {
 		const finance = makeSession({

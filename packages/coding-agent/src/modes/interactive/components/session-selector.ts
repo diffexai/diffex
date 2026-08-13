@@ -21,7 +21,13 @@ import { canonicalizePath as _canonicalizePath } from "../../../utils/paths.ts";
 import { theme } from "../theme/theme.ts";
 import { DynamicBorder } from "./dynamic-border.ts";
 import { keyHint, keyText } from "./keybinding-hints.ts";
-import { filterAndSortSessions, hasSessionName, type NameFilter, type SortMode } from "./session-selector-search.ts";
+import {
+	filterAndSortSessions,
+	hasSessionName,
+	type NameFilter,
+	type SelectableSessionInfo,
+	type SortMode,
+} from "./session-selector-search.ts";
 
 type SessionScope = "current" | "all";
 
@@ -200,14 +206,14 @@ class SessionSelectorHeader implements Component {
 
 /** A session tree node for hierarchical display */
 interface SessionTreeNode {
-	session: SessionInfo;
+	session: SelectableSessionInfo;
 	children: SessionTreeNode[];
 	latestActivity: number;
 }
 
 /** Flattened node for display with tree structure info */
 interface FlatSessionNode {
-	session: SessionInfo;
+	session: SelectableSessionInfo;
 	depth: number;
 	isLast: boolean;
 	/** For each ancestor level, whether there are more siblings after it */
@@ -218,7 +224,7 @@ interface FlatSessionNode {
  * Build a tree structure from sessions based on parentSessionPath.
  * Returns root nodes sorted by modified date (descending).
  */
-function buildSessionTree(sessions: SessionInfo[]): SessionTreeNode[] {
+function buildSessionTree(sessions: SelectableSessionInfo[]): SessionTreeNode[] {
 	const byPath = new Map<string, SessionTreeNode>();
 
 	for (const session of sessions) {
@@ -340,7 +346,7 @@ class SessionList implements Component, Focusable {
 		const selected = this.filteredSessions[this.selectedIndex];
 		return selected?.session.path;
 	}
-	private allSessions: SessionInfo[] = [];
+	private allSessions: SelectableSessionInfo[] = [];
 	private filteredSessions: FlatSessionNode[] = [];
 	private selectedIndex: number = 0;
 	private searchInput: Input;
@@ -351,6 +357,7 @@ class SessionList implements Component, Focusable {
 	private showPath = false;
 	private confirmingDeletePath: string | null = null;
 	private currentSessionCanonicalPath?: string;
+	private getHarnessName?: (harnessId: string) => string | undefined;
 	public onSelect?: (sessionPath: string) => void;
 	public onCancel?: () => void;
 	public onExit: () => void = () => {};
@@ -381,8 +388,10 @@ class SessionList implements Component, Focusable {
 		nameFilter: NameFilter,
 		keybindings: KeybindingsManager,
 		currentSessionFilePath?: string,
+		getHarnessName?: (harnessId: string) => string | undefined,
 	) {
-		this.allSessions = sessions;
+		this.getHarnessName = getHarnessName;
+		this.allSessions = this.resolveHarnessNames(sessions);
 		this.filteredSessions = [];
 		this.searchInput = new Input();
 		this.showCwd = showCwd;
@@ -414,9 +423,16 @@ class SessionList implements Component, Focusable {
 	}
 
 	setSessions(sessions: SessionInfo[], showCwd: boolean): void {
-		this.allSessions = sessions;
+		this.allSessions = this.resolveHarnessNames(sessions);
 		this.showCwd = showCwd;
 		this.filterSessions(this.searchInput.getValue());
+	}
+
+	private resolveHarnessNames(sessions: SessionInfo[]): SelectableSessionInfo[] {
+		return sessions.map((session) => {
+			const harnessName = session.harnessId ? this.getHarnessName?.(session.harnessId)?.trim() : undefined;
+			return harnessName ? { ...session, harnessName } : session;
+		});
 	}
 
 	private filterSessions(query: string): void {
@@ -512,8 +528,8 @@ class SessionList implements Component, Focusable {
 			const prefix = this.buildTreePrefix(node);
 
 			// Session display text (name or first message)
-			const hasName = !!session.name;
-			const displayText = session.name ?? session.firstMessage;
+			const hasName = !!(session.name || session.harnessName);
+			const displayText = session.name ?? session.harnessName ?? session.firstMessage;
 			const normalizedMessage = displayText.replace(/[\x00-\x1f\x7f]/g, " ").trim();
 
 			// Right side: message count and age
@@ -812,6 +828,7 @@ export class SessionSelectorComponent extends Container implements Focusable {
 			renameSession?: (sessionPath: string, currentName: string | undefined) => Promise<void>;
 			showRenameHint?: boolean;
 			keybindings?: KeybindingsManager;
+			getHarnessName?: (harnessId: string) => string | undefined;
 		},
 		currentSessionFilePath?: string,
 	) {
@@ -834,6 +851,7 @@ export class SessionSelectorComponent extends Container implements Focusable {
 			this.nameFilter,
 			this.keybindings,
 			currentSessionFilePath,
+			options?.getHarnessName,
 		);
 
 		this.buildBaseLayout(this.sessionList);
