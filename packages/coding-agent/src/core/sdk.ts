@@ -2,6 +2,7 @@ import { join } from "node:path";
 import {
 	Agent,
 	type AgentMessage,
+	NOOP_TELEMETRY_CONTEXT,
 	setDefaultStreamFn,
 	type TelemetryContext,
 	type ThinkingLevel,
@@ -14,13 +15,14 @@ import { formatNoModelsAvailableMessage } from "./auth-guidance.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
 import { appendEvolvedNote } from "./evolved.ts";
 import type { ExtensionRunner, LoadExtensionsResult, SessionStartEvent, ToolDefinition } from "./extensions/index.ts";
+import { getHarnessDescriptorsDirectory } from "./harness-descriptors.ts";
 import { convertToLlm } from "./messages.ts";
 import { findInitialModel } from "./model-resolver.ts";
 import { ModelRuntime } from "./model-runtime.ts";
 import type { ResolvedTaskProfile } from "./profiles.ts";
 import { mergeProviderAttributionHeaders } from "./provider-attribution.ts";
-import type { ResourceLoader } from "./resource-loader.ts";
-import { DefaultResourceLoader } from "./resource-loader.ts";
+import { DefaultResourceLoader, getProjectContextFileCandidatePaths, type ResourceLoader } from "./resource-loader.ts";
+import { startEvolutionSpan } from "./runtime-telemetry.ts";
 import { getDefaultSessionDir, SessionManager, type SessionProfileMetadata } from "./session-manager.ts";
 import { SettingsManager } from "./settings-manager.ts";
 import { SubagentController } from "./subagents/controller.ts";
@@ -63,7 +65,7 @@ export interface CreateAgentSessionOptions {
 
 	/** Canonical model/auth runtime. Defaults to a runtime using agentDir/auth.json and models.json. */
 	modelRuntime?: ModelRuntime;
-	/** Explicit root context for passive runtime telemetry. */
+	/** Explicit root context for passive runtime telemetry. Defaults to no-op. */
 	telemetryContext?: TelemetryContext;
 
 	/** Model to use. Default: from settings, else first available */
@@ -259,10 +261,12 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	const authPath = options.agentDir ? join(agentDir, "auth.json") : undefined;
 	const modelsPath = options.agentDir ? join(agentDir, "models.json") : undefined;
 	const modelRuntime = options.modelRuntime ?? (await ModelRuntime.create({ authPath, modelsPath }));
+	const telemetryContext = options.telemetryContext ?? NOOP_TELEMETRY_CONTEXT;
 
 	const settingsManager = options.settingsManager ?? SettingsManager.create(cwd, agentDir);
 	const sessionManager = options.sessionManager ?? SessionManager.create(cwd, getDefaultSessionDir(cwd, agentDir));
 	const storedProfile = sessionManager.getHeader()?.profile;
+	const harnessId = options.harnessId ?? storedProfile?.harnessId;
 	const settingsProfile = settingsManager.getDefaultProfile();
 	const selectedProfile = options.profile ?? storedProfile?.source ?? storedProfile?.id ?? settingsProfile;
 
@@ -291,12 +295,22 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		hash: activeProfile.hash,
 		...(activeProfile.origin === "builtin" ? {} : { source: activeProfile.source.path }),
 		routing: profileRouting,
+		...(harnessId
+			? {
+					harnessId,
+					...(storedProfile?.harnessId === harnessId && storedProfile.harnessRevision
+						? { harnessRevision: storedProfile.harnessRevision }
+						: {}),
+				}
+			: {}),
 	};
 	if (
 		storedProfile?.id !== profileMetadata.id ||
 		storedProfile.hash !== profileMetadata.hash ||
 		storedProfile.source !== profileMetadata.source ||
-		storedProfile.routing !== profileMetadata.routing
+		storedProfile.routing !== profileMetadata.routing ||
+		storedProfile.harnessId !== profileMetadata.harnessId ||
+		storedProfile.harnessRevision !== profileMetadata.harnessRevision
 	) {
 		sessionManager.setProfileMetadata(profileMetadata);
 	}
@@ -393,17 +407,45 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	const evolveToolDefinition = shouldRegisterEvolve
 		? createEvolveToolDefinition({
 				appendNote: async (input) => {
-					const note = appendEvolvedNote({
-						agentDir,
-						cwd,
-						projectTrusted: settingsManager.isProjectTrusted(),
-						scope: input.scope,
-						profileId: activeProfile.id,
-						category: input.category,
-						provenance: `session:${sessionManager.getSessionId()}`,
-						content: input.evidence ? `${input.note}\n\nEvidence: ${input.evidence}` : input.note,
-					});
-					return { path: note.sourcePath };
+					return startEvolutionSpan(
+						telemetryContext,
+						{
+							sessionId: sessionManager.getSessionId(),
+							trigger: "explicit",
+							profileId: harnessId ?? activeProfile.id,
+						},
+						({ complete }) => {
+							try {
+								const note = appendEvolvedNote({
+									agentDir,
+									cwd,
+									projectTrusted: settingsManager.isProjectTrusted(),
+									scope: input.scope,
+									profileId: input.appliesTo === "user" ? "*" : (harnessId ?? activeProfile.id),
+									category: input.category,
+									provenance: `session:${sessionManager.getSessionId()}`,
+									content: input.evidence ? `${input.note}\n\nEvidence: ${input.evidence}` : input.note,
+								});
+								complete({
+									outcome: "completed",
+									candidateCount: 1,
+									acceptedCount: 1,
+									rejectedCount: 0,
+									scope: input.scope,
+								});
+								return { path: note.sourcePath };
+							} catch (error) {
+								complete({
+									outcome: "failed",
+									candidateCount: 1,
+									acceptedCount: 0,
+									rejectedCount: 1,
+									scope: input.scope,
+								});
+								throw error;
+							}
+						},
+					);
 				},
 			})
 		: undefined;
@@ -520,6 +562,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		transport: settingsManager.getTransport(),
 		thinkingBudgets: settingsManager.getThinkingBudgets(),
 		maxRetryDelayMs: settingsManager.getProviderRetrySettings().maxRetryDelayMs,
+		telemetryContext,
 	});
 
 	// Restore messages if session has existing data
@@ -543,6 +586,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		cwd,
 		scopedModels: options.scopedModels,
 		resourceLoader,
+		harnessId,
 		customTools,
 		modelRuntime,
 		initialActiveToolNames,
@@ -551,11 +595,13 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		excludedBuiltinToolNames: profileDeniedToolNames,
 		selfEvolutionProtectedPaths: [
 			join(agentDir, "EVOLVED.md"),
-			...["AGENTS.override.md", "AGENTS.md", "AGENTS.MD", "CLAUDE.md", "CLAUDE.MD"].map((fileName) =>
-				join(agentDir, fileName),
-			),
+			...getProjectContextFileCandidatePaths({ cwd, agentDir }),
 		],
-		selfEvolutionProtectedRoots: [join(agentDir, "profiles"), join(cwd, CONFIG_DIR_NAME, "profiles")],
+		selfEvolutionProtectedRoots: [
+			join(agentDir, "profiles"),
+			join(cwd, CONFIG_DIR_NAME, "profiles"),
+			getHarnessDescriptorsDirectory(agentDir),
+		],
 		selfEvolutionQuarantineDir: join(agentDir, "quarantine", "self-evolution"),
 		selfEvolutionEvolvedPaths: {
 			globalPath: join(agentDir, "EVOLVED.md"),

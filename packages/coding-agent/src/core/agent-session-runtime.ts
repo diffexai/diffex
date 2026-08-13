@@ -7,7 +7,6 @@ import { stripFrontmatter } from "../utils/frontmatter.ts";
 import { resolvePath } from "../utils/paths.ts";
 import type { AgentSession, PromptOptions } from "./agent-session.ts";
 import type { AgentSessionRuntimeDiagnostic, AgentSessionServices } from "./agent-session-services.ts";
-import { createGeneratedProfile, finalizeGeneratedProfile, loadEvolvedNotes } from "./evolved.ts";
 import type {
 	ProjectTrustContext,
 	ReplacedSessionContext,
@@ -15,9 +14,15 @@ import type {
 	SessionStartEvent,
 } from "./extensions/index.ts";
 import { emitSessionShutdownEvent } from "./extensions/runner.ts";
+import {
+	createHarnessDescriptor,
+	loadHarnessDescriptors,
+	type ResolvedHarnessDescriptor,
+} from "./harness-descriptors.ts";
 import { routeTaskProfile } from "./profile-router.ts";
 import type { ResolvedTaskProfile } from "./profiles.ts";
 import { expandPromptTemplate } from "./prompt-templates.ts";
+import { startProfileRouteSpan, traceAiCompletion } from "./runtime-telemetry.ts";
 import type { CreateAgentSessionResult } from "./sdk.ts";
 import { assertSessionCwdExists } from "./session-cwd.ts";
 import { SessionManager } from "./session-manager.ts";
@@ -50,9 +55,12 @@ export function resolveProfileRoutingMode(
 }
 
 export interface RuntimePromptResult {
-	routing: "bypassed" | "stayed" | "switched" | "created" | "failed";
+	routing: "bypassed" | "selected" | "reused" | "failed";
 	activeProfileId: string;
 	previousProfileId?: string;
+	harnessId?: string;
+	harnessRevision?: string;
+	notice?: string;
 	reason?: string;
 }
 
@@ -60,12 +68,21 @@ export interface ProfileSwitchEvent {
 	fromProfileId: string;
 	toProfileId: string;
 	reason: string;
-	generated: boolean;
+	harnessId: string;
+	harnessRevision: string;
+	harnessName: string;
+	reused: boolean;
+	notice: string;
 }
 
 interface PreparedRuntimePrompt {
 	result: RuntimePromptResult;
 	completion: Promise<void>;
+	accepted: boolean;
+	resolution?: {
+		prompt: string;
+		messageCountBefore: number;
+	};
 }
 
 /**
@@ -81,7 +98,9 @@ export type CreateAgentSessionRuntimeFactory = (options: {
 	sessionManager: SessionManager;
 	profile?: string;
 	profileRouting?: ProfileRoutingMode;
-	generatedProfiles?: ResolvedTaskProfile[];
+	harnessId?: string;
+	telemetryContext?: AgentSessionServices["telemetryContext"];
+	telemetryCapture?: AgentSessionServices["telemetryCapture"];
 	sessionStartEvent?: SessionStartEvent;
 	projectTrustContext?: ProjectTrustContext;
 }) => Promise<CreateAgentSessionRuntimeResult>;
@@ -111,11 +130,15 @@ function extractUserMessageText(content: string | Array<{ type: string; text?: s
 }
 
 const ROUTING_CONTEXT_MAX_CHARS = 6_000;
-const ROUTING_HANDOFF_MAX_CHARS = 2_000;
 const ROUTING_TIMEOUT_MS = 15_000;
 /** The router prompt bounds user text at 8k and recent context at 12k characters, plus candidates. */
 const MIN_ROUTER_CONTEXT_WINDOW = 32_000;
 const BUILTIN_SLASH_COMMAND_NAMES = new Set(BUILTIN_SLASH_COMMANDS.map((command) => command.name));
+const ROUTE_FALLBACK_TELEMETRY = {
+	"completion-error": "completion_error",
+	"invalid-output": "invalid_output",
+	"low-confidence": "low_confidence",
+} as const;
 
 /**
  * Expand public skill/template resources for classification only.
@@ -190,12 +213,16 @@ export function buildRecentTaskContext(messages: readonly AgentMessage[]): strin
 function getProfileSelection(sessionManager: SessionManager): {
 	profile?: string;
 	profileRouting?: ProfileRoutingMode;
+	harnessId?: string;
+	harnessRevision?: string;
 } {
 	const metadata = sessionManager.getHeader()?.profile;
 	if (!metadata) return {};
 	return {
 		profile: metadata.source ?? metadata.id,
 		profileRouting: metadata.routing,
+		harnessId: metadata.harnessId,
+		harnessRevision: metadata.harnessRevision,
 	};
 }
 
@@ -217,6 +244,10 @@ export class AgentSessionRuntime {
 	private _modelFallbackMessage?: string;
 	private disposePromise: Promise<void> | undefined;
 	private _profileRouting: ProfileRoutingMode;
+	private _activeHarness?: ResolvedHarnessDescriptor;
+	private harnessResolutionClaimed = false;
+	private harnessResolutionGate?: Promise<void>;
+	private settleHarnessResolutionGate?: () => void;
 	private promptPreparationQueue: Promise<void> = Promise.resolve();
 
 	constructor(
@@ -226,6 +257,7 @@ export class AgentSessionRuntime {
 		_diagnostics: AgentSessionRuntimeDiagnostic[] = [],
 		_modelFallbackMessage?: string,
 		profileRouting?: ProfileRoutingMode,
+		harnessId?: string,
 	) {
 		this._session = _session;
 		this._services = _services;
@@ -233,6 +265,7 @@ export class AgentSessionRuntime {
 		this._diagnostics = _diagnostics;
 		this._modelFallbackMessage = _modelFallbackMessage;
 		this._profileRouting = profileRouting ?? _session.sessionManager.getHeader()?.profile?.routing ?? "auto";
+		this.restoreHarness(harnessId ?? _session.sessionManager.getHeader()?.profile?.harnessId);
 		this.syncProfileMetadata();
 	}
 
@@ -262,6 +295,10 @@ export class AgentSessionRuntime {
 
 	get profileRouting(): ProfileRoutingMode {
 		return this._profileRouting;
+	}
+
+	get activeHarness(): ResolvedHarnessDescriptor | undefined {
+		return this._activeHarness;
 	}
 
 	setProfileRouting(mode: ProfileRoutingMode): void {
@@ -342,43 +379,57 @@ export class AgentSessionRuntime {
 			hash: profile.hash,
 			...(profile.origin === "builtin" ? {} : { source: profile.source.path }),
 			routing: this._profileRouting,
+			...(this._activeHarness
+				? { harnessId: this._activeHarness.id, harnessRevision: this._activeHarness.revision }
+				: {}),
 		});
 	}
 
-	private finalizeCurrentGeneratedProfile(required = false): ResolvedTaskProfile | undefined {
-		let profileId = "active";
-		try {
-			const profile = this.activeProfile;
-			profileId = profile.id;
-			if (profile.origin !== "generated") return undefined;
-			const evolved = loadEvolvedNotes({
-				agentDir: this.services.agentDir,
-				cwd: this.cwd,
-				projectTrusted: this.services.settingsManager.isProjectTrusted(),
-			});
-			for (const diagnostic of evolved.diagnostics) {
-				this.appendDiagnostic(`Could not load evolved note ${diagnostic.path}: ${diagnostic.message}`, true);
-			}
-			const finalizedProfile = finalizeGeneratedProfile({
-				agentDir: this.services.agentDir,
-				profile,
-				notes: evolved.notes,
-			});
-			this.syncProfileMetadata(finalizedProfile);
-			return finalizedProfile;
-		} catch (error) {
-			const message = `Could not finalize generated profile "${profileId}": ${error instanceof Error ? error.message : String(error)}`;
-			this.appendDiagnostic(message, true);
-			if (required) throw new Error(message, { cause: error });
-			return undefined;
+	private restoreHarness(harnessId: string | undefined): void {
+		this._activeHarness = undefined;
+		if (!harnessId) return;
+		const loaded = loadHarnessDescriptors({
+			agentDir: this.services.agentDir,
+			notes: this.services.resourceLoader.getEvolvedNotes().evolvedNotes,
+		});
+		for (const diagnostic of loaded.diagnostics) {
+			this.appendDiagnostic(`Could not load harness descriptor ${diagnostic.path}: ${diagnostic.message}`);
 		}
+		const harness = loaded.harnesses.find((candidate) => candidate.id === harnessId);
+		if (!harness) {
+			this.appendDiagnostic(
+				`Could not restore harness "${harnessId}"; this session will use one-time routing again.`,
+			);
+			return;
+		}
+		if (this.activeProfile.id !== harness.baseProfileId) {
+			this.appendDiagnostic(
+				`Could not restore harness "${harnessId}" because its base profile "${harness.baseProfileId}" does not match active profile "${this.activeProfile.id}"; this session will use one-time routing again.`,
+			);
+			return;
+		}
+		this._activeHarness = harness;
 	}
 
-	private async teardownCurrent(
-		reason: SessionShutdownEvent["reason"],
-		targetSessionFile?: string,
-		finalizeGenerated = true,
-	): Promise<void> {
+	private getSessionProfileSelection(sessionManager: SessionManager): ReturnType<typeof getProfileSelection> {
+		const selection = getProfileSelection(sessionManager);
+		if (!selection.harnessId) return selection;
+		const loaded = loadHarnessDescriptors({ agentDir: this.services.agentDir });
+		for (const diagnostic of loaded.diagnostics) {
+			this.appendDiagnostic(`Could not load harness descriptor ${diagnostic.path}: ${diagnostic.message}`);
+		}
+		const harness = loaded.harnesses.find((candidate) => candidate.id === selection.harnessId);
+		if (harness) return { ...selection, profile: harness.baseProfileId };
+		this.appendDiagnostic(
+			`Could not restore harness "${selection.harnessId}"; ${selection.profileRouting === "auto" ? "falling back to DEFAULT" : "keeping the pinned profile"}.`,
+		);
+		return {
+			profile: selection.profileRouting === "auto" ? "general" : selection.profile,
+			profileRouting: selection.profileRouting,
+		};
+	}
+
+	private async teardownCurrent(reason: SessionShutdownEvent["reason"], targetSessionFile?: string): Promise<void> {
 		const session = this.session;
 		const failures: unknown[] = [];
 		// Settle any active response first so the aborted turn (including tool
@@ -397,7 +448,6 @@ export class AgentSessionRuntime {
 		} catch (error) {
 			failures.push(error);
 		}
-		if (finalizeGenerated) this.finalizeCurrentGeneratedProfile();
 		try {
 			this.beforeSessionInvalidate?.();
 		} catch (error) {
@@ -417,7 +467,11 @@ export class AgentSessionRuntime {
 		}
 	}
 
-	private apply(result: CreateAgentSessionRuntimeResult, profileRouting?: ProfileRoutingMode): void {
+	private apply(
+		result: CreateAgentSessionRuntimeResult,
+		profileRouting?: ProfileRoutingMode,
+		harnessId?: string,
+	): void {
 		this._session = result.session;
 		this._services = result.services;
 		this._diagnostics = [...result.diagnostics, ...this.replacementDiagnostics];
@@ -427,6 +481,8 @@ export class AgentSessionRuntime {
 		this.replacementDiagnostics = [];
 		this._modelFallbackMessage = result.modelFallbackMessage;
 		this._profileRouting = result.session.sessionManager.getHeader()?.profile?.routing ?? profileRouting ?? "auto";
+		this.restoreHarness(harnessId ?? result.session.sessionManager.getHeader()?.profile?.harnessId);
+		this.harnessResolutionClaimed = this._activeHarness !== undefined;
 		this.syncProfileMetadata();
 	}
 
@@ -455,7 +511,7 @@ export class AgentSessionRuntime {
 		const previousSessionFile = this.session.sessionFile;
 		const sessionManager = SessionManager.open(sessionPath, undefined, options?.cwdOverride);
 		assertSessionCwdExists(sessionManager, this.cwd);
-		const profileSelection = getProfileSelection(sessionManager);
+		const profileSelection = this.getSessionProfileSelection(sessionManager);
 		await this.teardownCurrent("resume", sessionManager.getSessionFile());
 		this.apply(
 			await this.createRuntime({
@@ -464,10 +520,14 @@ export class AgentSessionRuntime {
 				sessionManager,
 				profile: profileSelection.profile,
 				profileRouting: profileSelection.profileRouting,
+				harnessId: profileSelection.harnessId,
+				telemetryContext: this.services.telemetryContext,
+				telemetryCapture: this.services.telemetryCapture,
 				sessionStartEvent: { type: "session_start", reason: "resume", previousSessionFile },
 				projectTrustContext: options?.projectTrustContextFactory?.(sessionManager.getCwd()),
 			}),
 			profileSelection.profileRouting,
+			profileSelection.harnessId,
 		);
 		await this.finishSessionReplacement(options?.withSession);
 		return { cancelled: false };
@@ -477,9 +537,7 @@ export class AgentSessionRuntime {
 		parentSession?: string;
 		profile?: string;
 		profileRouting?: ProfileRoutingMode;
-		generatedProfiles?: ResolvedTaskProfile[];
-		hiddenHandoff?: string;
-		reuseCurrentSessionManager?: boolean;
+		harnessId?: string;
 		setup?: (sessionManager: SessionManager) => Promise<void>;
 		withSession?: (ctx: ReplacedSessionContext) => Promise<void>;
 	}): Promise<{ cancelled: boolean }> {
@@ -490,56 +548,41 @@ export class AgentSessionRuntime {
 
 		const previousSessionFile = this.session.sessionFile;
 		const sessionDir = this.session.sessionManager.getSessionDir();
-		const reuseCurrentSessionManager =
-			options?.reuseCurrentSessionManager === true &&
-			!options.parentSession &&
-			!this.session.messages.some((message) => message.role === "user" || message.role === "assistant");
-		const sessionManager = reuseCurrentSessionManager
-			? this.session.sessionManager
-			: this.session.sessionManager.isPersisted()
-				? SessionManager.create(this.cwd, sessionDir)
-				: SessionManager.inMemory(this.cwd);
+		const sessionManager = this.session.sessionManager.isPersisted()
+			? SessionManager.create(this.cwd, sessionDir)
+			: SessionManager.inMemory(this.cwd);
 		if (options?.parentSession) {
 			sessionManager.newSession({ parentSession: options.parentSession });
 		}
 
 		const targetRouting = options?.profileRouting ?? this._profileRouting;
-		const targetProfile = options?.profile ?? this.getCurrentProfileSelection();
-		const currentProfile = this.activeProfile;
-		const reusesCurrentGeneratedProfile =
-			currentProfile.origin === "generated" &&
-			(targetProfile === currentProfile.id || resolve(targetProfile) === resolve(currentProfile.source.path));
-		const finalizedProfile = reusesCurrentGeneratedProfile ? this.finalizeCurrentGeneratedProfile(true) : undefined;
-		const generatedProfiles = finalizedProfile
-			? [
-					finalizedProfile,
-					...(options?.generatedProfiles ?? []).filter((profile) => profile.id !== finalizedProfile.id),
-				]
-			: options?.generatedProfiles;
+		const targetHarness = options?.harnessId
+			? loadHarnessDescriptors({ agentDir: this.services.agentDir }).harnesses.find(
+					(harness) => harness.id === options.harnessId,
+				)
+			: undefined;
+		const targetHarnessId = targetHarness?.id;
+		const targetProfile =
+			targetHarness?.baseProfileId ??
+			(targetRouting === "auto" ? "general" : (options?.profile ?? this.getCurrentProfileSelection()));
 		const nextRuntime = await this.createRuntime({
 			cwd: this.cwd,
 			agentDir: this.services.agentDir,
 			sessionManager,
 			profile: targetProfile,
 			profileRouting: targetRouting,
-			generatedProfiles,
+			harnessId: targetHarnessId,
+			telemetryContext: this.services.telemetryContext,
+			telemetryCapture: this.services.telemetryCapture,
 			sessionStartEvent: {
 				type: "session_start",
 				reason: "new",
-				...(reuseCurrentSessionManager ? {} : { previousSessionFile }),
+				previousSessionFile,
 			},
 		});
-		await this.teardownCurrent("new", sessionManager.getSessionFile(), !reusesCurrentGeneratedProfile);
-		this.apply(nextRuntime, targetRouting);
-		const hiddenHandoff = options?.hiddenHandoff?.trim().slice(0, ROUTING_HANDOFF_MAX_CHARS);
+		await this.teardownCurrent("new", sessionManager.getSessionFile());
+		this.apply(nextRuntime, targetRouting, targetHarnessId);
 		let contextChanged = false;
-		if (hiddenHandoff) {
-			this.session.sessionManager.appendCustomMessageEntry("profile-router-handoff", hiddenHandoff, false, {
-				fromSession: previousSessionFile,
-				profile: this.activeProfile.id,
-			});
-			contextChanged = true;
-		}
 		if (options?.setup) {
 			await options.setup(this.session.sessionManager);
 			contextChanged = true;
@@ -598,9 +641,13 @@ export class AgentSessionRuntime {
 						sessionManager,
 						profile: targetProfile,
 						profileRouting: targetRouting,
+						harnessId: this._activeHarness?.id,
+						telemetryContext: this.services.telemetryContext,
+						telemetryCapture: this.services.telemetryCapture,
 						sessionStartEvent: { type: "session_start", reason: "fork", previousSessionFile },
 					}),
 					targetRouting,
+					this._activeHarness?.id,
 				);
 				await this.finishSessionReplacement(options?.withSession);
 				return { cancelled: false, selectedText };
@@ -616,7 +663,7 @@ export class AgentSessionRuntime {
 			if (!forkedSessionPath) {
 				throw new Error("Failed to create forked session");
 			}
-			const profileSelection = getProfileSelection(sessionManager);
+			const profileSelection = this.getSessionProfileSelection(sessionManager);
 			await this.teardownCurrent("fork", sessionManager.getSessionFile());
 			this.apply(
 				await this.createRuntime({
@@ -625,9 +672,13 @@ export class AgentSessionRuntime {
 					sessionManager,
 					profile: profileSelection.profile,
 					profileRouting: profileSelection.profileRouting,
+					harnessId: profileSelection.harnessId,
+					telemetryContext: this.services.telemetryContext,
+					telemetryCapture: this.services.telemetryCapture,
 					sessionStartEvent: { type: "session_start", reason: "fork", previousSessionFile },
 				}),
 				profileSelection.profileRouting,
+				profileSelection.harnessId,
 			);
 			await this.finishSessionReplacement(options?.withSession);
 			return { cancelled: false, selectedText };
@@ -649,9 +700,13 @@ export class AgentSessionRuntime {
 				sessionManager,
 				profile: targetProfile,
 				profileRouting: targetRouting,
+				harnessId: this._activeHarness?.id,
+				telemetryContext: this.services.telemetryContext,
+				telemetryCapture: this.services.telemetryCapture,
 				sessionStartEvent: { type: "session_start", reason: "fork", previousSessionFile },
 			}),
 			targetRouting,
+			this._activeHarness?.id,
 		);
 		await this.finishSessionReplacement(options?.withSession);
 		return { cancelled: false, selectedText };
@@ -688,7 +743,7 @@ export class AgentSessionRuntime {
 
 		const sessionManager = SessionManager.open(destinationPath, sessionDir, cwdOverride);
 		assertSessionCwdExists(sessionManager, this.cwd);
-		const profileSelection = getProfileSelection(sessionManager);
+		const profileSelection = this.getSessionProfileSelection(sessionManager);
 		await this.teardownCurrent("resume", sessionManager.getSessionFile());
 		this.apply(
 			await this.createRuntime({
@@ -697,21 +752,19 @@ export class AgentSessionRuntime {
 				sessionManager,
 				profile: profileSelection.profile,
 				profileRouting: profileSelection.profileRouting,
+				harnessId: profileSelection.harnessId,
+				telemetryContext: this.services.telemetryContext,
+				telemetryCapture: this.services.telemetryCapture,
 				sessionStartEvent: { type: "session_start", reason: "resume", previousSessionFile },
 			}),
 			profileSelection.profileRouting,
+			profileSelection.harnessId,
 		);
 		await this.finishSessionReplacement();
 		return { cancelled: false };
 	}
 
-	/**
-	 * Pick the model used to classify the task before each prompt.
-	 *
-	 * Routing runs on every prompt, so it should not cost a full turn on the main model. Preference
-	 * order is the configured `routerModel`, then the cheapest sibling from the same provider and API
-	 * with enough context for the router prompt, then the session model.
-	 */
+	/** Pick the model used once, after the default profile completes the initial accepted task turn. */
 	private resolveProfileRouterModel(sessionModel: Model<Api>): Model<Api> {
 		const configured = this.services.settingsManager.getRouterModel();
 		if (configured) {
@@ -736,30 +789,36 @@ export class AgentSessionRuntime {
 		return cheapest ?? sessionModel;
 	}
 
-	private async completeProfileRoute(routerPrompt: string): Promise<string> {
+	private async completeProfileRoute(
+		routerPrompt: string,
+		telemetryContext: AgentSessionServices["telemetryContext"],
+	): Promise<string> {
 		const sessionModel = this.session.model;
 		if (!sessionModel) {
 			throw new Error("No model is selected for task profile routing");
 		}
 		const model = this.resolveProfileRouterModel(sessionModel);
-		const response = await this.session.modelRuntime.completeSimple(
-			model,
-			{
-				systemPrompt: "Route the task using the requested JSON schema. Return JSON only.",
-				messages: [
-					{
-						role: "user",
-						content: [{ type: "text", text: routerPrompt }],
-						timestamp: Date.now(),
-					},
-				],
-			},
-			{
-				maxTokens: 1_200,
-				cacheRetention: "none",
-				sessionId: randomUUID(),
-				signal: AbortSignal.timeout(ROUTING_TIMEOUT_MS),
-			},
+		const response = await traceAiCompletion(telemetryContext, model, (childContext) =>
+			this.session.modelRuntime.completeSimple(
+				model,
+				{
+					systemPrompt: "Route the task using the requested JSON schema. Return JSON only.",
+					messages: [
+						{
+							role: "user",
+							content: [{ type: "text", text: routerPrompt }],
+							timestamp: Date.now(),
+						},
+					],
+				},
+				{
+					maxTokens: 1_200,
+					cacheRetention: "none",
+					sessionId: randomUUID(),
+					signal: AbortSignal.timeout(ROUTING_TIMEOUT_MS),
+					telemetryContext: childContext,
+				},
+			),
 		);
 		if (response.stopReason === "error" || response.stopReason === "aborted") {
 			throw new Error(response.errorMessage ?? `Profile router request ${response.stopReason}`);
@@ -789,15 +848,15 @@ export class AgentSessionRuntime {
 		options: PromptOptions | undefined,
 		result: RuntimePromptResult,
 	): Promise<PreparedRuntimePrompt> {
-		let settlePreflight: (() => void) | undefined;
-		const preflight = new Promise<void>((resolvePreflight) => {
+		let settlePreflight: ((success: boolean) => void) | undefined;
+		const preflight = new Promise<boolean>((resolvePreflight) => {
 			settlePreflight = resolvePreflight;
 		});
 		let preflightSettled = false;
-		const settle = () => {
+		const settle = (success: boolean) => {
 			if (preflightSettled) return;
 			preflightSettled = true;
-			settlePreflight?.();
+			settlePreflight?.(success);
 		};
 		const completion = this.session.prompt(text, {
 			...options,
@@ -805,131 +864,208 @@ export class AgentSessionRuntime {
 				try {
 					options?.preflightResult?.(success);
 				} finally {
-					settle();
+					settle(success);
 				}
 			},
 		});
-		void completion.then(settle, settle);
-		await preflight;
-		return { result, completion };
+		void completion.then(
+			() => settle(true),
+			() => settle(false),
+		);
+		const accepted = await preflight;
+		return { result, completion, accepted };
 	}
 
 	private async preparePrompt(text: string, options: PromptOptions | undefined): Promise<PreparedRuntimePrompt> {
 		const routingPrompt = resolvePromptForProfileRouting(this.session, text);
-		if (this._profileRouting === "pinned" || routingPrompt === undefined) {
+		if (
+			this._profileRouting === "auto" &&
+			this._activeHarness === undefined &&
+			this.harnessResolutionClaimed &&
+			routingPrompt !== undefined &&
+			!this.session.isStreaming
+		) {
+			await this.harnessResolutionGate;
+		}
+		if (
+			this._profileRouting === "pinned" ||
+			this._activeHarness !== undefined ||
+			this.harnessResolutionClaimed ||
+			routingPrompt === undefined
+		) {
 			return this.startSessionPrompt(text, options, {
 				routing: "bypassed",
 				activeProfileId: this.activeProfile.id,
+				...(this._activeHarness
+					? { harnessId: this._activeHarness.id, harnessRevision: this._activeHarness.revision }
+					: {}),
 			});
 		}
 
-		const currentProfile = this.activeProfile;
-		const candidates = this.services.resourceLoader.getProfiles().profiles;
-		const priorMessages = this.session.messages;
-		const sessionEstablished = priorMessages.some(
+		this.harnessResolutionClaimed = true;
+		this.harnessResolutionGate = new Promise<void>((resolveGate) => {
+			this.settleHarnessResolutionGate = resolveGate;
+		});
+		const messageCountBefore = this.session.messages.filter(
 			(message) => message.role === "user" || message.role === "assistant",
-		);
-
-		try {
-			const decision = await routeTaskProfile(
-				{
-					currentProfile,
-					prompt: routingPrompt,
-					recentTaskContext: buildRecentTaskContext(priorMessages),
-					candidates,
-					sessionEstablished,
-				},
-				(routerPrompt) => this.completeProfileRoute(routerPrompt),
-			);
-			if (decision.fallback) {
-				const detail = decision.fallbackDetail ? `: ${decision.fallbackDetail}` : "";
-				this.appendDiagnostic(`Task profile router used ${decision.fallback} fallback${detail}`);
-			}
-
-			if (decision.decision === "stay" || decision.decision === "defer") {
-				return this.startSessionPrompt(text, options, {
-					routing: "stayed",
-					activeProfileId: currentProfile.id,
-					reason: decision.reason,
-				});
-			}
-
-			let targetProfile: ResolvedTaskProfile;
-			let generated = false;
-			if (decision.decision === "switch") {
-				const resolved = candidates.find((candidate) => candidate.id === decision.profileId);
-				if (!resolved) {
-					throw new Error(`Profile router selected unknown profile "${decision.profileId}"`);
-				}
-				targetProfile = resolved;
-			} else {
-				targetProfile = createGeneratedProfile({
-					agentDir: this.services.agentDir,
-					id: decision.profileId,
-					label: decision.generatedLabel ?? decision.profileId,
-					description: decision.generatedDescription ?? decision.reason,
-					handoff: decision.handoff,
-				});
-				generated = true;
-			}
-
-			if (options?.streamingBehavior === "followUp" && this.session.isStreaming) {
-				await this.session.waitForIdle();
-			}
-			const replacement = await this.newSession({
-				parentSession: sessionEstablished ? this.session.sessionFile : undefined,
-				profile: targetProfile.id,
-				profileRouting: "auto",
-				generatedProfiles: generated ? [targetProfile] : undefined,
-				hiddenHandoff: decision.handoff,
-				reuseCurrentSessionManager: !sessionEstablished,
-			});
-			if (replacement.cancelled) {
-				return this.startSessionPrompt(text, options, {
-					routing: "stayed",
-					activeProfileId: currentProfile.id,
-					reason: "Profile switch was cancelled by a session handler.",
-				});
-			}
-
-			try {
-				this.profileSwitchListener?.({
-					fromProfileId: currentProfile.id,
-					toProfileId: targetProfile.id,
-					reason: decision.reason,
-					generated,
-				});
-			} catch (error) {
-				this.appendDiagnostic(
-					`Task profile switch listener failed: ${error instanceof Error ? error.message : String(error)}`,
-				);
-			}
-			return this.startSessionPrompt(text, options, {
-				routing: generated ? "created" : "switched",
-				activeProfileId: targetProfile.id,
-				previousProfileId: currentProfile.id,
-				reason: decision.reason,
-			});
-		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error);
-			let fallbackProfileId = currentProfile.id;
-			try {
-				fallbackProfileId = this.activeProfile.id;
-			} catch {}
-			this.appendDiagnostic(`Task profile routing failed; continuing with "${fallbackProfileId}": ${message}`);
-			return this.startSessionPrompt(text, options, {
-				routing: "failed",
-				activeProfileId: fallbackProfileId,
-				reason: message,
-			});
-		}
+		).length;
+		const prepared = await this.startSessionPrompt(text, options, {
+			routing: "bypassed",
+			activeProfileId: this.activeProfile.id,
+		});
+		return { ...prepared, resolution: { prompt: routingPrompt, messageCountBefore } };
 	}
 
-	/** Route prompts before AgentSession accepts them, including queued steer/follow-up input. */
+	private async activateHarness(harness: ResolvedHarnessDescriptor, profile: ResolvedTaskProfile): Promise<void> {
+		const sessionManager = this.session.sessionManager;
+		const nextRuntime = await this.createRuntime({
+			cwd: this.cwd,
+			agentDir: this.services.agentDir,
+			sessionManager,
+			profile: profile.id,
+			profileRouting: "auto",
+			harnessId: harness.id,
+			telemetryContext: this.services.telemetryContext,
+			telemetryCapture: this.services.telemetryCapture,
+			sessionStartEvent: { type: "session_start", reason: "new" },
+		});
+		await this.teardownCurrent("new", sessionManager.getSessionFile());
+		this.apply(nextRuntime, "auto", harness.id);
+		await this.finishSessionReplacement();
+	}
+
+	private async resolveHarnessAfterInitialTurn(prompt: string): Promise<RuntimePromptResult> {
+		const previousProfileId = this.activeProfile.id;
+		return startProfileRouteSpan(
+			this.services.telemetryContext,
+			{
+				sessionId: this.session.sessionManager.getSessionId(),
+				routingMode: this._profileRouting,
+				currentProfileId: previousProfileId,
+				sessionEstablished: true,
+			},
+			async ({ context: routeContext, complete }) => {
+				try {
+					const profiles = this.services.resourceLoader
+						.getProfiles()
+						.profiles.filter((profile) => profile.origin === "builtin" && profile.immutable);
+					const loadedHarnesses = loadHarnessDescriptors({
+						agentDir: this.services.agentDir,
+						notes: this.services.resourceLoader.getEvolvedNotes().evolvedNotes,
+					});
+					for (const diagnostic of loadedHarnesses.diagnostics) {
+						this.appendDiagnostic(`Could not load harness descriptor ${diagnostic.path}: ${diagnostic.message}`);
+					}
+					const reusableHarnesses = loadedHarnesses.harnesses.filter(
+						(harness) =>
+							harness.harnessNoteCount > 0 && profiles.some((profile) => profile.id === harness.baseProfileId),
+					);
+					const decision = await routeTaskProfile(
+						{
+							prompt,
+							recentTaskContext: buildRecentTaskContext(this.session.messages),
+							candidates: profiles,
+							harnesses: reusableHarnesses,
+						},
+						(routerPrompt) => this.completeProfileRoute(routerPrompt, routeContext),
+					);
+					if (decision.fallback) {
+						const detail = decision.fallbackDetail ? `: ${decision.fallbackDetail}` : "";
+						this.appendDiagnostic(`Task profile router used ${decision.fallback} fallback${detail}`, true);
+					}
+
+					let harness: ResolvedHarnessDescriptor;
+					if (decision.decision === "reuse") {
+						const existingHarness = reusableHarnesses.find((candidate) => candidate.id === decision.harnessId);
+						if (!existingHarness)
+							throw new Error(`Profile router selected unknown harness "${decision.harnessId}"`);
+						harness = existingHarness;
+					} else {
+						harness = createHarnessDescriptor({
+							agentDir: this.services.agentDir,
+							name: decision.harnessName ?? "General task",
+							description: decision.harnessDescription ?? "Harness for the current task.",
+							baseProfileId: decision.profileId,
+							notes: this.services.resourceLoader.getEvolvedNotes().evolvedNotes,
+						});
+					}
+					const profile = profiles.find((candidate) => candidate.id === harness.baseProfileId);
+					if (!profile) throw new Error(`Harness references unknown immutable profile "${harness.baseProfileId}"`);
+					await this.activateHarness(harness, profile);
+
+					const reused = decision.decision === "reuse";
+					const notice = reused
+						? `Found evolved harness "${harness.name}" for this task. Switched to revision ${harness.revision.slice(0, 12)}.`
+						: `Created harness "${harness.name}" using the ${profile.name} prompt profile.`;
+					try {
+						this.profileSwitchListener?.({
+							fromProfileId: previousProfileId,
+							toProfileId: profile.id,
+							reason: decision.reason,
+							harnessId: harness.id,
+							harnessRevision: harness.revision,
+							harnessName: harness.name,
+							reused,
+							notice,
+						});
+					} catch (error) {
+						this.appendDiagnostic(
+							`Task profile switch listener failed: ${error instanceof Error ? error.message : String(error)}`,
+						);
+					}
+					const result: RuntimePromptResult = {
+						routing: reused ? "reused" : "selected",
+						activeProfileId: profile.id,
+						previousProfileId,
+						harnessId: harness.id,
+						harnessRevision: harness.revision,
+						notice,
+						reason: decision.reason,
+					};
+					complete({
+						outcome: result.routing,
+						targetProfileId: profile.id,
+						harnessId: harness.id,
+						confidence: decision.confidence,
+						...(decision.fallback ? { fallback: ROUTE_FALLBACK_TELEMETRY[decision.fallback] } : {}),
+					});
+					return result;
+				} catch (error) {
+					const message = error instanceof Error ? error.message : String(error);
+					this.appendDiagnostic(`Task profile routing failed; continuing with "${previousProfileId}": ${message}`);
+					complete({ outcome: "failed", targetProfileId: previousProfileId });
+					return { routing: "failed", activeProfileId: previousProfileId, reason: message };
+				}
+			},
+		);
+	}
+
+	/** Run the accepted first task on DEFAULT, then resolve this session's harness exactly once. */
 	async prompt(text: string, options?: PromptOptions): Promise<RuntimePromptResult> {
 		const prepared = await this.enqueuePromptPreparation(() => this.preparePrompt(text, options));
-		await prepared.completion;
-		return prepared.result;
+		try {
+			await prepared.completion;
+		} catch (error) {
+			if (prepared.resolution) {
+				this.harnessResolutionClaimed = false;
+				this.settleHarnessResolutionGate?.();
+			}
+			throw error;
+		}
+		if (!prepared.resolution) return prepared.result;
+		const messageCountAfter = this.session.messages.filter(
+			(message) => message.role === "user" || message.role === "assistant",
+		).length;
+		if (!prepared.accepted || messageCountAfter <= prepared.resolution.messageCountBefore) {
+			this.harnessResolutionClaimed = false;
+			this.settleHarnessResolutionGate?.();
+			return prepared.result;
+		}
+		try {
+			return await this.resolveHarnessAfterInitialTurn(prepared.resolution.prompt);
+		} finally {
+			this.settleHarnessResolutionGate?.();
+		}
 	}
 
 	dispose(): Promise<void> {
@@ -961,22 +1097,46 @@ export async function createAgentSessionRuntime(
 		sessionManager: SessionManager;
 		profile?: string;
 		profileRouting?: ProfileRoutingMode;
-		generatedProfiles?: ResolvedTaskProfile[];
+		harnessId?: string;
+		telemetryContext?: AgentSessionServices["telemetryContext"];
+		telemetryCapture?: AgentSessionServices["telemetryCapture"];
 		sessionStartEvent?: SessionStartEvent;
 	},
 ): Promise<AgentSessionRuntime> {
 	assertSessionCwdExists(options.sessionManager, options.cwd);
 	const persistedSelection = getProfileSelection(options.sessionManager);
-	const requestedRouting = options.profileRouting ?? persistedSelection.profileRouting;
+	const requestedRouting = options.profileRouting ?? persistedSelection.profileRouting ?? "auto";
+	const requestedHarnessId = options.harnessId ?? persistedSelection.harnessId;
+	const loadedHarnesses = requestedHarnessId
+		? loadHarnessDescriptors({ agentDir: options.agentDir })
+		: { harnesses: [], diagnostics: [] };
+	const restoredHarness = loadedHarnesses.harnesses.find((harness) => harness.id === requestedHarnessId);
+	const harnessId = restoredHarness?.id;
+	const profile =
+		restoredHarness?.baseProfileId ??
+		(requestedRouting === "auto" ? "general" : (options.profile ?? persistedSelection.profile));
 	const result = await createRuntime({
 		...options,
-		profile: options.profile ?? persistedSelection.profile,
+		profile,
 		profileRouting: requestedRouting,
+		harnessId,
 	});
 	const profileRouting = result.session.sessionManager.getHeader()?.profile?.routing ?? requestedRouting ?? "auto";
 	const diagnostics = result.deniedToolsMessage
 		? [...result.diagnostics, { type: "warning" as const, message: result.deniedToolsMessage }]
 		: result.diagnostics;
+	for (const diagnostic of loadedHarnesses.diagnostics) {
+		diagnostics.push({
+			type: "warning",
+			message: `Could not load harness descriptor ${diagnostic.path}: ${diagnostic.message}`,
+		});
+	}
+	if (requestedHarnessId && !restoredHarness) {
+		diagnostics.push({
+			type: "warning",
+			message: `Could not restore harness "${requestedHarnessId}"; ${requestedRouting === "auto" ? "falling back to DEFAULT" : "keeping the pinned profile"}.`,
+		});
+	}
 	return new AgentSessionRuntime(
 		result.session,
 		result.services,
@@ -984,6 +1144,7 @@ export async function createAgentSessionRuntime(
 		diagnostics,
 		result.modelFallbackMessage,
 		profileRouting,
+		harnessId,
 	);
 }
 

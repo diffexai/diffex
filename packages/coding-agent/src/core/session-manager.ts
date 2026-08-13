@@ -46,6 +46,10 @@ export interface SessionProfileMetadata {
 	source?: string;
 	/** Automatic routing remains enabled unless the profile was explicitly pinned. */
 	routing: "auto" | "pinned";
+	/** Stable evolved-harness identity. The descriptor remains the source of truth. */
+	harnessId?: string;
+	/** Snapshot of the EVOLVED-derived harness revision for resume audit and display. */
+	harnessRevision?: string;
 }
 
 export interface NewSessionOptions {
