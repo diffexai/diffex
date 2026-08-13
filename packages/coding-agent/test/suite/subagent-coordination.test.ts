@@ -641,4 +641,44 @@ describe("automatic subagent coordination", () => {
 
 		expect(getNotifications(root)).toEqual([]);
 	});
+
+	it("stops an in-flight progress dispatch during disposal", async () => {
+		const { root, harness } = await createRoot();
+		const childResult = deferred<void>();
+		const progressStarted = deferred<void>();
+		const response = async (context: Context, options?: SimpleStreamOptions) => {
+			if (!hasTool(context, "spawn_agent")) {
+				await childResult.promise;
+				return fauxAssistantMessage("IN-FLIGHT-DISPOSE-SENTINEL");
+			}
+			const lastUserText = getLastUserText(context);
+			if (lastUserText.includes('"completed_attempts"')) {
+				progressStarted.resolve();
+				return new Promise<ReturnType<typeof fauxAssistantMessage>>((resolve) => {
+					options?.signal?.addEventListener(
+						"abort",
+						() => resolve(fauxAssistantMessage("progress aborted", { stopReason: "aborted" })),
+						{ once: true },
+					);
+				});
+			}
+			if (!getToolResultNames(context).includes("spawn_agent")) {
+				return fauxAssistantMessage(fauxToolCall("spawn_agent", { name: "worker", task: "dispose in flight" }), {
+					stopReason: "toolUse",
+				});
+			}
+			return fauxAssistantMessage("worker accepted");
+		};
+		harness.setResponses(Array.from({ length: 8 }, () => response));
+		await root.prompt("dispose during progress");
+
+		childResult.resolve();
+		await progressStarted.promise;
+		await root.dispose();
+		await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+		const notifications = getNotifications(root);
+		expect(notifications).toHaveLength(1);
+		expect(parseNotification(notifications[0]!.content)).toMatchObject({ cohort_complete: false });
+	});
 });

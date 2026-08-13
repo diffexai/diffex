@@ -1020,6 +1020,7 @@ export class SubagentController {
 					{ triggerTurn: true, deliverAs: "steer" },
 				);
 			}
+			if (this.#closed || this.#resetting || generation !== this.#dispatchGeneration) return;
 
 			const hasUndeliveredAttempts = cohort.completedAttempts.some(
 				(attempt) => !this.#deliveredResultIds.has(attempt.result_id),
