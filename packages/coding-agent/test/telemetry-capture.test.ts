@@ -1,0 +1,77 @@
+import { describe, expect, it } from "vitest";
+import { startProfileRouteSpan } from "../src/core/runtime-telemetry.ts";
+import { BoundedTelemetryCapture, readEvolutionTraceSnapshot } from "../src/core/telemetry-capture.ts";
+
+describe("bounded runtime telemetry capture", () => {
+	it("summarizes only newly settled content-free structural spans", async () => {
+		const capture = new BoundedTelemetryCapture({ maxSpans: 16 });
+		await capture.context.startSpan(
+			{
+				name: "diffex.harness.tool",
+				attributes: {
+					"diffex.tool.name": "read",
+					"diffex.tool.is_error": true,
+					"diffex.tool.call_id": "call-1",
+				},
+			},
+			(span) => span.setStatus({ status: "error" }),
+		);
+		await capture.context.startSpan(
+			{
+				name: "diffex.harness.profile_route",
+				attributes: {
+					"diffex.routing.outcome": "reused",
+					"diffex.routing.target_profile_id": "research",
+					"diffex.routing.harness_id": "harness-1",
+				},
+			},
+			() => {},
+		);
+
+		const first = readEvolutionTraceSnapshot(capture);
+		expect(first.tools).toEqual([{ name: "read", callCount: 1, failureCount: 1 }]);
+		expect(first.routes).toEqual([{ outcome: "reused", targetProfileId: "research", harnessId: "harness-1" }]);
+		expect(JSON.stringify(first)).not.toContain("call-1");
+		expect(readEvolutionTraceSnapshot(capture, first.cursor).tools).toEqual([]);
+	});
+
+	it("reports when bounded retention makes a snapshot incomplete", async () => {
+		const capture = new BoundedTelemetryCapture({ maxSpans: 1 });
+		await capture.context.startSpan({ name: "diffex.harness.run" }, () => {});
+		await capture.context.startSpan({ name: "diffex.harness.run" }, () => {});
+
+		const snapshot = readEvolutionTraceSnapshot(capture);
+		expect(snapshot.runCount).toBe(1);
+		expect(snapshot.incomplete).toBe(true);
+		expect(snapshot.droppedSpanCount).toBe(1);
+	});
+
+	it("captures typed route structure without router content", async () => {
+		const capture = new BoundedTelemetryCapture();
+		await startProfileRouteSpan(
+			capture.context,
+			{
+				sessionId: "session-1",
+				routingMode: "auto",
+				currentProfileId: "general",
+				sessionEstablished: true,
+			},
+			({ complete }) => {
+				complete({
+					outcome: "reused",
+					targetProfileId: "research",
+					harnessId: "research-harness",
+					confidence: 0.97,
+				});
+			},
+		);
+
+		const [route] = capture.readSettled().spans;
+		expect(route?.attributes).toMatchObject({
+			"diffex.routing.outcome": "reused",
+			"diffex.routing.target_profile_id": "research",
+			"diffex.routing.harness_id": "research-harness",
+		});
+		expect(Object.keys(route?.attributes ?? {})).not.toContain("diffex.routing.reason");
+	});
+});

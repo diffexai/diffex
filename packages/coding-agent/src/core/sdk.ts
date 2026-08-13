@@ -1,5 +1,11 @@
 import { join } from "node:path";
-import { Agent, type AgentMessage, setDefaultStreamFn, type ThinkingLevel } from "@earendil-works/diffex-agent-core";
+import {
+	Agent,
+	type AgentMessage,
+	setDefaultStreamFn,
+	type TelemetryContext,
+	type ThinkingLevel,
+} from "@earendil-works/diffex-agent-core";
 import { clampThinkingLevel, type Message, type Model, streamSimple } from "@earendil-works/diffex-ai/compat";
 import { CONFIG_DIR_NAME, getAgentDir } from "../config.ts";
 import { resolvePath } from "../utils/paths.ts";
@@ -57,6 +63,8 @@ export interface CreateAgentSessionOptions {
 
 	/** Canonical model/auth runtime. Defaults to a runtime using agentDir/auth.json and models.json. */
 	modelRuntime?: ModelRuntime;
+	/** Explicit root context for passive runtime telemetry. */
+	telemetryContext?: TelemetryContext;
 
 	/** Model to use. Default: from settings, else first available */
 	model?: Model<any>;
@@ -71,6 +79,8 @@ export interface CreateAgentSessionOptions {
 	profileRouting?: "auto" | "pinned";
 	/** Generated profiles that must be available before their package path is rediscovered. */
 	generatedProfiles?: ResolvedTaskProfile[];
+	/** Stable evolved-harness identity used to scope EVOLVED notes. */
+	harnessId?: string;
 
 	/**
 	 * Optional default tool suppression mode when no explicit allowlist is provided.

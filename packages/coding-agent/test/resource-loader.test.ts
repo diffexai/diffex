@@ -407,7 +407,7 @@ Current settings content`,
 			expect(agentsFiles.some((f) => f.path.includes("AGENTS.md"))).toBe(true);
 		});
 
-		it("uses the active profile to select user instruction filenames", async () => {
+		it("keeps the authored instruction layer fixed to AGENTS and CLAUDE files", async () => {
 			const profileDir = join(tempDir, "profiles", "evidence-review");
 			mkdirSync(profileDir, { recursive: true });
 			writeFileSync(
@@ -431,6 +431,7 @@ Current settings content`,
 				}),
 			);
 			writeFileSync(join(cwd, "AGENTS.md"), "generic instructions");
+			writeFileSync(join(cwd, "CLAUDE.md"), "compatibility instructions");
 			writeFileSync(join(cwd, "RESEARCH.md"), "research instructions");
 
 			const loader = new DefaultResourceLoader({
@@ -444,7 +445,8 @@ Current settings content`,
 			expect(loader.getActiveProfile().id).toBe("evidence-review");
 			expect(loader.getProfiles().profiles.some((profile) => profile.id === "evidence-review")).toBe(true);
 			expect(loader.getAgentsFiles().agentsFiles).toEqual([
-				{ path: join(cwd, "RESEARCH.md"), content: "research instructions" },
+				{ path: join(cwd, "AGENTS.md"), content: "generic instructions" },
+				{ path: join(cwd, "CLAUDE.md"), content: "compatibility instructions" },
 			]);
 		});
 
@@ -489,6 +491,7 @@ Current settings content`,
 			mkdirSync(nestedCwd);
 			writeFileSync(join(agentDir, "AGENTS.md"), "global instructions");
 			writeFileSync(join(agentDir, "AGENTS.override.md"), "global override");
+			writeFileSync(join(agentDir, "CLAUDE.md"), "global compatibility");
 			writeFileSync(join(cwd, "AGENTS.md"), "project instructions");
 			writeFileSync(join(nestedCwd, "AGENTS.md"), "service instructions");
 			writeFileSync(join(nestedCwd, "AGENTS.override.md"), "service override");
@@ -498,6 +501,7 @@ Current settings content`,
 
 			expect(loader.getAgentsFiles().agentsFiles).toEqual([
 				{ path: join(agentDir, "AGENTS.override.md"), content: "global override" },
+				{ path: join(agentDir, "CLAUDE.md"), content: "global compatibility" },
 				{ path: join(cwd, "AGENTS.md"), content: "project instructions" },
 				{ path: join(nestedCwd, "AGENTS.override.md"), content: "service override" },
 			]);

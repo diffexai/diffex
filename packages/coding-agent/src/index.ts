@@ -23,6 +23,7 @@ export {
 	parseSkillBlock,
 	type SessionStats,
 } from "./core/agent-session.ts";
+export { readAgentSessionEvolutionTrace } from "./core/agent-session-services.ts";
 export { readStoredCredential } from "./core/auth-storage.ts";
 // Compaction
 export {
@@ -186,6 +187,19 @@ export {
 } from "./core/extensions/index.ts";
 // Footer data provider (git branch + extension statuses - data not otherwise available to extensions)
 export type { ReadonlyFooterDataProvider } from "./core/footer-data-provider.ts";
+export {
+	type CreateHarnessDescriptorOptions,
+	createHarnessDescriptor,
+	getApplicableHarnessNotes,
+	getHarnessDescriptorsDirectory,
+	HARNESS_DESCRIPTORS_DIRECTORY,
+	type HarnessDescriptor,
+	type HarnessDescriptorDiagnostic,
+	type LoadHarnessDescriptorsResult,
+	loadHarnessDescriptors,
+	type ResolvedHarnessDescriptor,
+	resolveHarnessDescriptor,
+} from "./core/harness-descriptors.ts";
 export { convertToLlm } from "./core/messages.ts";
 export { ModelRegistry } from "./core/model-registry.ts";
 export {
@@ -251,6 +265,17 @@ export {
 } from "./core/profiles.ts";
 export type { ResourceCollision, ResourceDiagnostic, ResourceLoader } from "./core/resource-loader.ts";
 export { DefaultResourceLoader, loadProjectContextFiles } from "./core/resource-loader.ts";
+export {
+	type EvolutionSpanResult,
+	type EvolutionSpanScope,
+	type EvolutionSpanStart,
+	type ProfileRouteSpanResult,
+	type ProfileRouteSpanScope,
+	type ProfileRouteSpanStart,
+	startEvolutionSpan,
+	startProfileRouteSpan,
+	traceAiCompletion,
+} from "./core/runtime-telemetry.ts";
 // SDK for programmatic usage
 export {
 	AgentSessionRuntime,
@@ -335,6 +360,16 @@ export {
 } from "./core/skills.ts";
 export { createSyntheticSourceInfo } from "./core/source-info.ts";
 export type { SubagentStatus, SubagentSummary } from "./core/subagents/types.ts";
+export {
+	BoundedTelemetryCapture,
+	type BoundedTelemetryCaptureOptions,
+	type EvolutionRouteSignal,
+	type EvolutionToolSignal,
+	type EvolutionTraceSnapshot,
+	type ReadableTelemetryCapture,
+	readEvolutionTraceSnapshot,
+	type TelemetryCaptureSnapshot,
+} from "./core/telemetry-capture.ts";
 export { type EditDiffResult, generateDiffString, generateUnifiedPatch } from "./core/tools/edit-diff.ts";
 // Tools
 export {

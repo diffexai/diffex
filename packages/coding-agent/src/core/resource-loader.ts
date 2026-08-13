@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { basename, dirname, join, resolve, sep } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import chalk from "chalk";
 import { CONFIG_DIR_NAME } from "../config.ts";
 import { loadThemeFromPath, type Theme } from "../modes/interactive/theme/theme.ts";
@@ -90,7 +90,74 @@ function resolvePromptInput(input: string | undefined, description: string): str
 	return input;
 }
 
-function loadContextFileFromDir(dir: string, candidates: readonly string[]): { path: string; content: string } | null {
+const DEFAULT_CONTEXT_FILE_GROUPS: readonly (readonly string[])[] = [
+	["AGENTS.override.md", "AGENTS.md", "AGENTS.MD"],
+	["CLAUDE.md", "CLAUDE.MD"],
+];
+
+export interface ProjectContextFileDiscoveryOptions {
+	cwd: string;
+	agentDir: string;
+	contextFileNames?: readonly string[];
+}
+
+interface ProjectContextFileDiscoveryPlan {
+	resolvedCwd: string;
+	resolvedAgentDir: string;
+	ancestorDirectories: readonly string[];
+	candidateGroups: readonly (readonly string[])[];
+}
+
+function createProjectContextFileDiscoveryPlan(
+	options: ProjectContextFileDiscoveryOptions,
+): ProjectContextFileDiscoveryPlan {
+	const resolvedCwd = resolvePath(options.cwd);
+	const resolvedAgentDir = resolvePath(options.agentDir);
+	const ancestorDirectories: string[] = [];
+	let currentDir = resolvedCwd;
+
+	while (true) {
+		ancestorDirectories.unshift(currentDir);
+		const parentDir = dirname(currentDir);
+		if (parentDir === currentDir) break;
+		currentDir = parentDir;
+	}
+
+	return {
+		resolvedCwd,
+		resolvedAgentDir,
+		ancestorDirectories,
+		candidateGroups: options.contextFileNames ? [options.contextFileNames] : DEFAULT_CONTEXT_FILE_GROUPS,
+	};
+}
+
+/**
+ * Enumerate every user-controlled context path that discovery can inspect, including files that do not exist yet.
+ * Consumers can protect this stable path set without repeating filesystem discovery.
+ */
+export function getProjectContextFileCandidatePaths(options: ProjectContextFileDiscoveryOptions): string[] {
+	const plan = createProjectContextFileDiscoveryPlan(options);
+	const paths: string[] = [];
+	const seenPaths = new Set<string>();
+
+	for (const dir of [plan.resolvedAgentDir, ...plan.ancestorDirectories]) {
+		for (const candidates of plan.candidateGroups) {
+			for (const fileName of candidates) {
+				const path = join(dir, fileName);
+				if (seenPaths.has(path)) continue;
+				seenPaths.add(path);
+				paths.push(path);
+			}
+		}
+	}
+
+	return paths;
+}
+
+function loadContextFileFromDir(
+	dir: string,
+	candidates: readonly string[],
+): { path: string; content: string } | undefined {
 	for (const filename of candidates) {
 		const filePath = join(dir, filename);
 		if (existsSync(filePath)) {
@@ -107,80 +174,73 @@ function loadContextFileFromDir(dir: string, candidates: readonly string[]): { p
 			}
 		}
 	}
-	return null;
+	return undefined;
+}
+
+function loadContextFilesFromDir(
+	dir: string,
+	candidateGroups: readonly (readonly string[])[],
+): Array<{ path: string; content: string }> {
+	return candidateGroups
+		.map((candidates) => loadContextFileFromDir(dir, candidates))
+		.filter((file): file is { path: string; content: string } => file !== undefined);
 }
 
 /**
- * The main repo's context file that a nested linked worktree's own copy shadows: both
- * occupy the same logical repository scope, so loading both applies that context twice. Returns
- * undefined when nothing is shadowed, leaving normal ancestor inheritance alone.
+ * The main repo context files that a nested linked worktree's own copies shadow.
+ * Both occupy the same logical repository scope, so loading both applies that context twice.
  *
  * Returned canonicalized (realpath), because `git worktree add` writes the `.git`
  * file's `gitdir:` target in realpath form while cwd may still be symlinked
  * (macOS `/tmp` -> `/private/tmp`).
  */
-function findShadowedContextFile(cwd: string, contextFileNames: readonly string[]): string | undefined {
+function findShadowedContextFiles(cwd: string, candidateGroups: readonly (readonly string[])[]): ReadonlySet<string> {
 	const gitPaths = findGitPaths(cwd);
-	if (!gitPaths) return undefined;
+	if (!gitPaths) return new Set();
 	const commonGitDir = canonicalizePath(gitPaths.commonGitDir);
 	const worktreeRoot = canonicalizePath(gitPaths.repoDir);
 	const mainRepoRoot = dirname(commonGitDir);
 	// False for an ordinary repo, where the two are the same dir, and for a sibling
 	// worktree (`git worktree add ../feat`), whose main repo is not an ancestor.
-	if (!worktreeRoot.startsWith(`${mainRepoRoot}${sep}`)) return undefined;
+	if (!worktreeRoot.startsWith(`${mainRepoRoot}${sep}`)) return new Set();
 	// dirname of the common git dir is the main worktree root only when that dir is
 	// itself checked out from the same repo. In a bare layout (`proj/.bare` +
 	// `proj/main`) it is just the directory holding `.bare`, which tracks nothing; a
 	// submodule's gitdir has no `commondir`, so it lands under `.git/modules`.
-	if (canonicalizePath(join(mainRepoRoot, ".git")) !== commonGitDir) return undefined;
-	const worktreeContextFile = loadContextFileFromDir(worktreeRoot, contextFileNames);
-	return worktreeContextFile ? join(mainRepoRoot, basename(worktreeContextFile.path)) : undefined;
+	if (canonicalizePath(join(mainRepoRoot, ".git")) !== commonGitDir) return new Set();
+
+	const shadowed = new Set<string>();
+	for (const candidates of candidateGroups) {
+		if (!loadContextFileFromDir(worktreeRoot, candidates)) continue;
+		const mainContextFile = loadContextFileFromDir(mainRepoRoot, candidates);
+		if (mainContextFile) shadowed.add(canonicalizePath(mainContextFile.path));
+	}
+	return shadowed;
 }
 
-export function loadProjectContextFiles(options: {
-	cwd: string;
-	agentDir: string;
-	contextFileNames?: readonly string[];
-}): Array<{ path: string; content: string }> {
-	const resolvedCwd = resolvePath(options.cwd);
-	const resolvedAgentDir = resolvePath(options.agentDir);
-
+export function loadProjectContextFiles(
+	options: ProjectContextFileDiscoveryOptions,
+): Array<{ path: string; content: string }> {
+	const plan = createProjectContextFileDiscoveryPlan(options);
 	const contextFiles: Array<{ path: string; content: string }> = [];
 	const seenPaths = new Set<string>();
-	const contextFileNames = options.contextFileNames ?? [
-		"AGENTS.override.md",
-		"AGENTS.md",
-		"AGENTS.MD",
-		"CLAUDE.md",
-		"CLAUDE.MD",
-	];
 
-	const globalContext = loadContextFileFromDir(resolvedAgentDir, contextFileNames);
-	if (globalContext) {
+	for (const globalContext of loadContextFilesFromDir(plan.resolvedAgentDir, plan.candidateGroups)) {
 		contextFiles.push(globalContext);
 		seenPaths.add(globalContext.path);
 	}
 
-	const ancestorContextFiles: Array<{ path: string; content: string }> = [];
-
-	const shadowedContextFile = findShadowedContextFile(resolvedCwd, contextFileNames);
-	let currentDir = resolvedCwd;
-
-	while (true) {
-		const contextFile = loadContextFileFromDir(currentDir, contextFileNames);
-		const isShadowed =
-			shadowedContextFile !== undefined && canonicalizePath(contextFile?.path ?? "") === shadowedContextFile;
-		if (contextFile && !isShadowed && !seenPaths.has(contextFile.path)) {
-			ancestorContextFiles.unshift(contextFile);
-			seenPaths.add(contextFile.path);
+	const shadowedContextFiles = findShadowedContextFiles(plan.resolvedCwd, plan.candidateGroups);
+	for (const currentDir of plan.ancestorDirectories) {
+		const directoryFiles = loadContextFilesFromDir(currentDir, plan.candidateGroups).filter(
+			(contextFile) =>
+				!shadowedContextFiles.has(canonicalizePath(contextFile.path)) && !seenPaths.has(contextFile.path),
+		);
+		if (directoryFiles.length > 0) {
+			contextFiles.push(...directoryFiles);
+			for (const contextFile of directoryFiles) seenPaths.add(contextFile.path);
 		}
-
-		const parentDir = dirname(currentDir);
-		if (parentDir === currentDir) break;
-		currentDir = parentDir;
 	}
-
-	contextFiles.push(...ancestorContextFiles);
 
 	return contextFiles;
 }
@@ -637,7 +697,6 @@ export class DefaultResourceLoader implements ResourceLoader {
 				: loadProjectContextFiles({
 						cwd: this.cwd,
 						agentDir: this.agentDir,
-						contextFileNames: this.activeProfile.context.fileNames,
 					}),
 		};
 		const resolvedAgentsFiles = this.agentsFilesOverride ? this.agentsFilesOverride(agentsFiles) : agentsFiles;

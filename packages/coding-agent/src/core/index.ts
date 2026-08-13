@@ -24,6 +24,7 @@ export {
 	type CreateAgentSessionServicesOptions,
 	createAgentSessionFromServices,
 	createAgentSessionServices,
+	readAgentSessionEvolutionTrace,
 } from "./agent-session-services.ts";
 export { type BashExecutorOptions, type BashResult, executeBashWithOperations } from "./bash-executor.ts";
 export type { CompactionResult } from "./compaction/index.ts";
@@ -94,6 +95,19 @@ export {
 	type WorkingIndicatorOptions,
 } from "./extensions/index.ts";
 export {
+	type CreateHarnessDescriptorOptions,
+	createHarnessDescriptor,
+	getApplicableHarnessNotes,
+	getHarnessDescriptorsDirectory,
+	HARNESS_DESCRIPTORS_DIRECTORY,
+	type HarnessDescriptor,
+	type HarnessDescriptorDiagnostic,
+	type LoadHarnessDescriptorsResult,
+	loadHarnessDescriptors,
+	type ResolvedHarnessDescriptor,
+	resolveHarnessDescriptor,
+} from "./harness-descriptors.ts";
+export {
 	buildProfileRouterPrompt,
 	PROFILE_ROUTE_CONFIDENCE_THRESHOLD,
 	type ProfileRouteAction,
@@ -131,9 +145,30 @@ export {
 	type TaskProfileToolPolicy,
 } from "./profiles.ts";
 export {
+	type EvolutionSpanResult,
+	type EvolutionSpanScope,
+	type EvolutionSpanStart,
+	type ProfileRouteSpanResult,
+	type ProfileRouteSpanScope,
+	type ProfileRouteSpanStart,
+	startEvolutionSpan,
+	startProfileRouteSpan,
+	traceAiCompletion,
+} from "./runtime-telemetry.ts";
+export {
 	findSelfEvolutionPolicyViolation,
 	type SelfEvolutionPolicyViolation,
 	type SelfEvolutionProtectionOptions,
 } from "./self-evolution-policy.ts";
 export type { SessionProfileMetadata } from "./session-manager.ts";
 export { createSyntheticSourceInfo } from "./source-info.ts";
+export {
+	BoundedTelemetryCapture,
+	type BoundedTelemetryCaptureOptions,
+	type EvolutionRouteSignal,
+	type EvolutionToolSignal,
+	type EvolutionTraceSnapshot,
+	type ReadableTelemetryCapture,
+	readEvolutionTraceSnapshot,
+	type TelemetryCaptureSnapshot,
+} from "./telemetry-capture.ts";
