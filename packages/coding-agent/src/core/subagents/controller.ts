@@ -1021,7 +1021,10 @@ export class SubagentController {
 				);
 			}
 
-			if (!cohort.completionDelivered && this.#isCohortComplete(cohort)) {
+			const hasUndeliveredAttempts = cohort.completedAttempts.some(
+				(attempt) => !this.#deliveredResultIds.has(attempt.result_id),
+			);
+			if (!cohort.completionDelivered && !hasUndeliveredAttempts && this.#isCohortComplete(cohort)) {
 				cohort.completionDelivered = true;
 				await parent.sendCustomMessage(
 					{
