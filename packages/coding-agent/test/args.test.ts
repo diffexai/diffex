@@ -100,6 +100,33 @@ describe("parseArgs", () => {
 			expect(result.apiKey).toBe("sk-test-key");
 		});
 
+		test("parses --profile by ID", () => {
+			const result = parseArgs(["--profile", "research"]);
+			expect(result.profile).toBe("research");
+		});
+
+		test("parses --profile by path", () => {
+			const result = parseArgs(["--profile", "./profiles/finance/profile.json"]);
+			expect(result.profile).toBe("./profiles/finance/profile.json");
+		});
+
+		test("parses --profile auto as an explicit routing override", () => {
+			const result = parseArgs(["--profile", "auto"]);
+			expect(result.profile).toBe("auto");
+		});
+
+		test("reports a missing --profile value", () => {
+			const result = parseArgs(["--profile"]);
+			expect(result.diagnostics).toEqual([{ type: "error", message: "--profile requires auto, an ID, or a path" }]);
+		});
+
+		test("does not consume the next option as a --profile value", () => {
+			const result = parseArgs(["--profile", "--help"]);
+			expect(result.profile).toBeUndefined();
+			expect(result.help).toBe(true);
+			expect(result.diagnostics).toEqual([{ type: "error", message: "--profile requires auto, an ID, or a path" }]);
+		});
+
 		test("parses --system-prompt", () => {
 			const result = parseArgs(["--system-prompt", "You are a helpful assistant"]);
 			expect(result.systemPrompt).toBe("You are a helpful assistant");

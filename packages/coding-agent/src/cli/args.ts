@@ -14,6 +14,7 @@ export interface Args {
 	provider?: string;
 	model?: string;
 	apiKey?: string;
+	profile?: string;
 	systemPrompt?: string;
 	appendSystemPrompt?: string[];
 	thinking?: ThinkingLevel;
@@ -92,6 +93,14 @@ export function parseArgs(args: string[]): Args {
 			result.model = args[++i];
 		} else if (arg === "--api-key" && i + 1 < args.length) {
 			result.apiKey = args[++i];
+		} else if (arg === "--profile") {
+			const profile = args[i + 1];
+			if (profile === undefined || profile.startsWith("-") || profile.startsWith("@")) {
+				result.diagnostics.push({ type: "error", message: "--profile requires auto, an ID, or a path" });
+			} else {
+				result.profile = profile;
+				i++;
+			}
 		} else if (arg === "--system-prompt" && i + 1 < args.length) {
 			result.systemPrompt = args[++i];
 		} else if (arg === "--append-system-prompt" && i + 1 < args.length) {
@@ -236,7 +245,7 @@ export function printHelp(extensionFlags?: ExtensionFlag[]): void {
 					})
 					.join("\n")}\n`
 			: "";
-	console.log(`${chalk.bold(APP_TITLE)} - AI coding assistant with read, bash, edit, write, update_plan tools
+	console.log(`${chalk.bold(APP_TITLE)} - AI assistant with automatic intent routing across tasks and domains
 
 ${chalk.bold("Usage:")}
   ${APP_NAME} [options] [@files...] [messages...]
@@ -255,8 +264,9 @@ ${chalk.bold("Options:")}
   --provider <name>              Provider name (default: google)
   --model <pattern>              Model pattern or ID (supports "provider/id" and optional ":<thinking>")
   --api-key <key>                API key (defaults to env vars)
-  --system-prompt <text>         System prompt (default: coding assistant prompt)
-  --append-system-prompt <text>  Append text or file contents to the system prompt (can be used multiple times)
+  --profile <auto|id|path>       Pin a profile by ID/path, or use auto to force intent routing
+  --system-prompt <text>         Override the active task profile prompt
+  --append-system-prompt <text>  Append text or file contents to the profile prompt (repeatable)
   --mode <mode>                  Output mode: text (default), json, or rpc
   --print, -p                    Non-interactive mode: process prompt and exit
   --continue, -c                 Continue previous session
@@ -297,6 +307,8 @@ ${chalk.bold("Options:")}
 
 Extensions can register additional flags (e.g., --plan from plan-mode extension).${extensionFlagsText}
 
+Pi routes new tasks to an appropriate profile automatically. An explicit profile ID or path pins the run to that profile.
+
 ${chalk.bold("Examples:")}
   # Print a provider API key for an external client
   ${APP_NAME} auth print-api-key --provider openai
@@ -308,28 +320,37 @@ ${chalk.bold("Examples:")}
   ${APP_NAME}
 
   # Interactive mode with initial prompt
-  ${APP_NAME} "List all .ts files in src/"
+  ${APP_NAME} "Summarize the material in this directory"
+
+  # Force automatic intent routing, overriding a pinned default
+  ${APP_NAME} --profile auto "Analyze this request and choose the right workflow"
+
+  # Pin a named task profile
+  ${APP_NAME} --profile research "Compare the evidence for these claims"
+
+  # Pin a task profile from a directory
+  ${APP_NAME} --profile ./profiles/finance "Analyze this quarterly report"
 
   # Include files in initial message
   ${APP_NAME} @prompt.md @image.png "What color is the sky?"
 
   # Non-interactive mode (process and exit)
-  ${APP_NAME} -p "List all .ts files in src/"
+  ${APP_NAME} -p "Summarize these meeting notes"
 
   # Multiple messages (interactive)
-  ${APP_NAME} "Read package.json" "What dependencies do we have?"
+  ${APP_NAME} "Review the attached report" "What are its key risks?"
 
   # Continue previous session
   ${APP_NAME} --continue "What did we discuss?"
 
   # Start a named session
-  ${APP_NAME} --name "Refactor auth module"
+  ${APP_NAME} --name "Quarterly research"
 
   # Use different model
-  ${APP_NAME} --provider openai --model gpt-4o-mini "Help me refactor this code"
+  ${APP_NAME} --provider openai --model gpt-4o-mini "Summarize this report"
 
   # Use model with provider prefix (no --provider needed)
-  ${APP_NAME} --model openai/gpt-4o "Help me refactor this code"
+  ${APP_NAME} --model openai/gpt-4o "Analyze this dataset"
 
   # Use model with thinking level shorthand
   ${APP_NAME} --model sonnet:high "Solve this complex problem"
@@ -347,7 +368,7 @@ ${chalk.bold("Examples:")}
   ${APP_NAME} --thinking high "Solve this complex problem"
 
   # Read-only mode (no file modifications possible)
-  ${APP_NAME} --tools read,grep,find,ls -p "Review the code in src/"
+  ${APP_NAME} --tools read,grep,find,ls -p "Research this project without changing files"
 
   # Disable one tool while keeping the rest available
   ${APP_NAME} --exclude-tools ask_question

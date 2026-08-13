@@ -57,7 +57,12 @@ import {
 	getShareViewerUrl,
 	VERSION,
 } from "../../config.ts";
-import { type AgentSession, type AgentSessionEvent, parseSkillBlock } from "../../core/agent-session.ts";
+import {
+	type AgentSession,
+	type AgentSessionEvent,
+	type PromptOptions,
+	parseSkillBlock,
+} from "../../core/agent-session.ts";
 import { type AgentSessionRuntime, SessionImportFileNotFoundError } from "../../core/agent-session-runtime.ts";
 import {
 	CACHE_TTL_MS,
@@ -569,6 +574,10 @@ export class InteractiveMode {
 		this.runtimeHost.setRebindSession(async () => {
 			await this.rebindCurrentSession({ renderBeforeBind: true });
 		});
+		this.runtimeHost.setProfileSwitchListener((event) => {
+			const prefix = event.generated ? "Created task profile" : "Switched task profile";
+			this.showStatus(`${prefix}: ${event.fromProfileId} -> ${event.toProfileId}`);
+		});
 		this.version = VERSION;
 		this.renderer = createInteractiveTui({
 			tuiMode,
@@ -704,6 +713,27 @@ export class InteractiveMode {
 					label: item.id,
 					description: item.provider,
 				}));
+			};
+		}
+
+		const profileCommand = slashCommands.find((command) => command.name === "profile");
+		if (profileCommand) {
+			profileCommand.getArgumentCompletions = (prefix: string): AutocompleteItem[] | null => {
+				const profiles = this.session.resourceLoader.getProfiles().profiles;
+				const items = [
+					{ id: "auto", name: "Automatic routing", description: "Choose a profile for each distinct task" },
+					...profiles.map((profile) => ({
+						id: profile.id,
+						name: profile.name,
+						description: profile.description,
+					})),
+				];
+				return createFuzzyAutocompleteItems(
+					items,
+					prefix,
+					(item) => `${item.id} ${item.name} ${item.description}`,
+					(item) => ({ value: item.id, label: item.id, description: item.name }),
+				);
 			};
 		}
 
@@ -1072,7 +1102,7 @@ export class InteractiveMode {
 		// Process initial messages
 		if (initialMessage) {
 			try {
-				await this.session.prompt(initialMessage, { images: initialImages });
+				await this.promptUser(initialMessage, { images: initialImages });
 			} catch (error: unknown) {
 				const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
 				this.showError(errorMessage);
@@ -1082,7 +1112,7 @@ export class InteractiveMode {
 		if (initialMessages) {
 			for (const message of initialMessages) {
 				try {
-					await this.session.prompt(message);
+					await this.promptUser(message);
 				} catch (error: unknown) {
 					const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
 					this.showError(errorMessage);
@@ -1094,11 +1124,18 @@ export class InteractiveMode {
 		while (true) {
 			const userInput = await this.getUserInput();
 			try {
-				await this.session.prompt(userInput);
+				await this.promptUser(userInput);
 			} catch (error: unknown) {
 				const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
 				this.showError(errorMessage);
 			}
+		}
+	}
+
+	private async promptUser(text: string, options?: PromptOptions): Promise<void> {
+		const result = await this.runtimeHost.prompt(text, options);
+		if (result.routing === "failed") {
+			this.showStatus(`Profile routing unavailable; using ${result.activeProfileId}`);
 		}
 	}
 
@@ -2914,6 +2951,12 @@ export class InteractiveMode {
 				await this.handleModelCommand(searchTerm);
 				return;
 			}
+			if (text === "/profile" || text.startsWith("/profile ")) {
+				const selection = text.startsWith("/profile ") ? text.slice(9).trim() : undefined;
+				this.editor.setText("");
+				await this.handleProfileCommand(selection);
+				return;
+			}
 			if (text === "/export" || text.startsWith("/export ")) {
 				await this.handleExportCommand(text);
 				this.editor.setText("");
@@ -3049,7 +3092,7 @@ export class InteractiveMode {
 			if (this.session.isStreaming) {
 				this.editor.addToHistory?.(text);
 				this.editor.setText("");
-				await this.session.prompt(text, { streamingBehavior: "steer" });
+				await this.promptUser(text, { streamingBehavior: "steer" });
 				this.updatePendingMessagesDisplay();
 				this.ui.requestRender();
 				return;
@@ -4005,7 +4048,7 @@ export class InteractiveMode {
 		if (this.session.isStreaming) {
 			this.editor.addToHistory?.(text);
 			this.editor.setText("");
-			await this.session.prompt(text, { streamingBehavior: "followUp" });
+			await this.promptUser(text, { streamingBehavior: "followUp" });
 			this.updatePendingMessagesDisplay();
 			this.ui.requestRender();
 		}
@@ -4288,7 +4331,7 @@ export class InteractiveMode {
 		return !!extensionRunner.getCommand(commandName);
 	}
 
-	private async flushCompactionQueue(options?: { willRetry?: boolean }): Promise<void> {
+	private async flushCompactionQueue(_options?: { willRetry?: boolean }): Promise<void> {
 		if (this.compactionQueuedMessages.length === 0) {
 			return;
 		}
@@ -4296,75 +4339,70 @@ export class InteractiveMode {
 		const queuedMessages = [...this.compactionQueuedMessages];
 		this.compactionQueuedMessages = [];
 		this.updatePendingMessagesDisplay();
+		let queueRestored = false;
 
-		const restoreQueue = (error: unknown) => {
-			this.session.clearQueue();
-			this.compactionQueuedMessages = queuedMessages;
+		const restoreQueueFrom = (index: number, error: unknown) => {
+			if (queueRestored) return;
+			queueRestored = true;
+			const remaining = queuedMessages.slice(index);
+			this.compactionQueuedMessages = [...remaining, ...this.compactionQueuedMessages];
 			this.updatePendingMessagesDisplay();
 			this.showError(
-				`Failed to send queued message${queuedMessages.length > 1 ? "s" : ""}: ${
+				`Failed to send queued message${remaining.length > 1 ? "s" : ""}: ${
 					error instanceof Error ? error.message : String(error)
 				}`,
 			);
 		};
+		const reportAcceptedFailure = (error: unknown) => {
+			this.showError(
+				`Queued message failed after it was accepted: ${error instanceof Error ? error.message : String(error)}`,
+			);
+		};
 
-		try {
-			if (options?.willRetry) {
-				// When retry is pending, queue messages for the retry turn
-				for (const message of queuedMessages) {
-					if (this.isExtensionCommand(message.text)) {
-						await this.session.prompt(message.text);
-					} else if (message.mode === "followUp") {
-						await this.session.followUp(message.text);
-					} else {
-						await this.session.steer(message.text);
-					}
-				}
-				this.updatePendingMessagesDisplay();
-				return;
-			}
-
-			// Find first non-extension-command message to use as prompt
-			const firstPromptIndex = queuedMessages.findIndex((message) => !this.isExtensionCommand(message.text));
-			if (firstPromptIndex === -1) {
-				// All extension commands - execute them all
-				for (const message of queuedMessages) {
-					await this.session.prompt(message.text);
-				}
-				return;
-			}
-
-			// Execute any extension commands before the first prompt
-			const preCommands = queuedMessages.slice(0, firstPromptIndex);
-			const firstPrompt = queuedMessages[firstPromptIndex];
-			const rest = queuedMessages.slice(firstPromptIndex + 1);
-
-			for (const message of preCommands) {
-				await this.session.prompt(message.text);
-			}
-
-			// Start a prompt when idle, or queue it into a run still finishing compaction.
-			const promptPromise = this.session
-				.prompt(firstPrompt.text, { streamingBehavior: firstPrompt.mode })
-				.catch((error) => {
-					restoreQueue(error);
-				});
-
-			// Queue remaining messages
-			for (const message of rest) {
+		for (let index = 0; index < queuedMessages.length; index++) {
+			const message = queuedMessages[index];
+			try {
 				if (this.isExtensionCommand(message.text)) {
 					await this.session.prompt(message.text);
-				} else if (message.mode === "followUp") {
-					await this.session.followUp(message.text);
-				} else {
-					await this.session.steer(message.text);
+					continue;
 				}
+
+				let resolvePreflight: (didSucceed: boolean) => void = () => {};
+				let preflightResolved = false;
+				let preflightAccepted = false;
+				const preflight = new Promise<boolean>((resolve) => {
+					resolvePreflight = (didSucceed) => {
+						if (preflightResolved) return;
+						preflightResolved = true;
+						preflightAccepted = didSucceed;
+						resolve(didSucceed);
+					};
+				});
+				const promptPromise = this.runtimeHost
+					.prompt(message.text, {
+						streamingBehavior: message.mode,
+						preflightResult: resolvePreflight,
+					})
+					.then(() => resolvePreflight(true))
+					.catch((error) => {
+						resolvePreflight(false);
+						if (preflightAccepted) {
+							reportAcceptedFailure(error);
+						} else {
+							restoreQueueFrom(index, error);
+						}
+					});
+				if (!(await preflight)) {
+					await promptPromise;
+					return;
+				}
+				void promptPromise;
+			} catch (error) {
+				restoreQueueFrom(index, error);
+				return;
 			}
-			this.updatePendingMessagesDisplay();
-			void promptPromise;
-		} catch (error) {
-			restoreQueue(error);
 		}
+		this.updatePendingMessagesDisplay();
 	}
 
 	/** Move pending bash components from pending area to chat */
@@ -4646,6 +4684,72 @@ export class InteractiveMode {
 		}
 
 		this.showModelSelector(searchTerm);
+	}
+
+	private async handleProfileCommand(selection?: string): Promise<void> {
+		if (this.session.isStreaming) {
+			this.showWarning("Wait for the current response to finish before changing profiles.");
+			return;
+		}
+		if (this.session.isCompacting) {
+			this.showWarning("Wait for compaction to finish before changing profiles.");
+			return;
+		}
+
+		const activeProfile = this.runtimeHost.activeProfile;
+		let requested = selection;
+		if (!requested) {
+			const labels = new Map<string, string>();
+			const autoLabel = `auto - automatic routing${this.runtimeHost.profileRouting === "auto" ? " (active)" : ""}`;
+			labels.set(autoLabel, "auto");
+			for (const profile of this.session.resourceLoader.getProfiles().profiles) {
+				const active = profile.id === activeProfile.id ? " (active)" : "";
+				labels.set(`${profile.id} - ${profile.name}${active}`, profile.id);
+			}
+			const selectedLabel = await this.showExtensionSelector(
+				`Task profile: ${activeProfile.id} (${this.runtimeHost.profileRouting})`,
+				[...labels.keys()],
+			);
+			if (!selectedLabel) return;
+			requested = labels.get(selectedLabel);
+		}
+
+		if (!requested) return;
+		if (requested === "auto") {
+			this.runtimeHost.setProfileRouting("auto");
+			this.showStatus(`Automatic profile routing enabled from ${this.runtimeHost.activeProfile.id}`);
+			return;
+		}
+
+		const target = this.session.resourceLoader.getProfiles().registry.get(requested);
+		if (!target) {
+			this.showError(`Unknown task profile: ${requested}`);
+			return;
+		}
+		if (target.id === activeProfile.id) {
+			this.runtimeHost.setProfileRouting("pinned");
+			this.showStatus(`Task profile pinned: ${target.id}`);
+			return;
+		}
+
+		const established = this.session.messages.some(
+			(message) => message.role === "user" || message.role === "assistant",
+		);
+		try {
+			const result = await this.runtimeHost.newSession({
+				parentSession: established ? this.session.sessionFile : undefined,
+				profile: target.id,
+				profileRouting: "pinned",
+				generatedProfiles: target.origin === "generated" ? [target] : undefined,
+			});
+			if (result.cancelled) {
+				this.showStatus("Task profile change cancelled");
+				return;
+			}
+			this.showStatus(`Task profile pinned: ${target.id}`);
+		} catch (error) {
+			this.showError(`Could not change task profile: ${error instanceof Error ? error.message : String(error)}`);
+		}
 	}
 
 	private async findExactModelMatch(searchTerm: string): Promise<Model<any> | undefined> {
@@ -6050,7 +6154,9 @@ export class InteractiveMode {
 			info += `${theme.fg("dim", "Name:")} ${sessionName}\n`;
 		}
 		info += `${theme.fg("dim", "File:")} ${stats.sessionFile ?? "In-memory"}\n`;
-		info += `${theme.fg("dim", "ID:")} ${stats.sessionId}\n\n`;
+		info += `${theme.fg("dim", "ID:")} ${stats.sessionId}\n`;
+		const activeProfile = this.runtimeHost.activeProfile;
+		info += `${theme.fg("dim", "Profile:")} ${activeProfile.name} (${activeProfile.id}, ${this.runtimeHost.profileRouting})\n\n`;
 		info += `${theme.bold("Messages")}\n`;
 		info += `${theme.fg("dim", "Total:")} ${stats.totalMessages}\n`;
 		info += `${theme.fg("dim", "User:")} ${stats.userMessages}\n`;
@@ -6422,6 +6528,7 @@ export class InteractiveMode {
 	}
 
 	stop(): void {
+		this.runtimeHost.setProfileSwitchListener(undefined);
 		this.disposeActiveSelector();
 		if (this.settingsManager.getShowTerminalProgress()) {
 			this.ui.terminal.setProgress(false);
