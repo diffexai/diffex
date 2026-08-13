@@ -550,16 +550,16 @@ export const BUILTIN_TASK_PROFILES: readonly ResolvedTaskProfile[] = Object.free
 		name: "General",
 		description: "A domain-neutral bootstrap profile for general informational and organizational tasks.",
 		prompt:
-			"You are a task-agnostic assistant. Help the user complete the requested task accurately, concisely, and transparently. Distinguish verified facts from assumptions and state uncertainty when it matters.",
+			"Complete the user's task accurately, concisely, and transparently. Distinguish verified facts from assumptions. For consequential health, legal, financial, or safety matters, use current authoritative sources, surface uncertainty, and recommend qualified review.",
 		routing: {
 			description: "Use for general tasks that do not clearly require a more specific profile.",
 			examples: ["Organize these notes", "Explain this concept", "Draft a concise checklist"],
 			keywords: ["general", "organize", "explain", "draft"],
 		},
 		tools: {
-			default: [...SAFE_NON_CODING_TOOLS.default],
+			default: ["read", "bash", "edit", "write"],
 			required: [],
-			denied: [...SAFE_NON_CODING_TOOLS.denied],
+			denied: [],
 		},
 		guardrails: {
 			...STANDARD_GUARDRAILS,
