@@ -636,7 +636,7 @@ export function createGeneratedProfile(options: CreateGeneratedProfileOptions): 
 		description,
 		promptFile: "PROMPT.md",
 		routing,
-		tools: options.tools ?? { default: ["read", "write", "edit"], required: [], denied: ["bash"] },
+		tools: options.tools ?? { default: ["read", "write", "edit", "update_plan"], required: [], denied: ["bash"] },
 		guardrails: options.guardrails ?? defaultGeneratedGuardrails(),
 		context: options.context ?? {
 			fileNames: ["AGENTS.override.md", "AGENTS.md", "AGENTS.MD"],

@@ -1,19 +1,21 @@
 import { join } from "node:path";
 import { Agent, type AgentMessage, setDefaultStreamFn, type ThinkingLevel } from "@earendil-works/diffex-agent-core";
 import { clampThinkingLevel, type Message, type Model, streamSimple } from "@earendil-works/diffex-ai/compat";
-import { getAgentDir } from "../config.ts";
+import { CONFIG_DIR_NAME, getAgentDir } from "../config.ts";
 import { resolvePath } from "../utils/paths.ts";
 import { AgentSession } from "./agent-session.ts";
 import { formatNoModelsAvailableMessage } from "./auth-guidance.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
+import { appendEvolvedNote } from "./evolved.ts";
 import type { ExtensionRunner, LoadExtensionsResult, SessionStartEvent, ToolDefinition } from "./extensions/index.ts";
 import { convertToLlm } from "./messages.ts";
 import { findInitialModel } from "./model-resolver.ts";
 import { ModelRuntime } from "./model-runtime.ts";
+import type { ResolvedTaskProfile } from "./profiles.ts";
 import { mergeProviderAttributionHeaders } from "./provider-attribution.ts";
 import type { ResourceLoader } from "./resource-loader.ts";
 import { DefaultResourceLoader } from "./resource-loader.ts";
-import { getDefaultSessionDir, SessionManager } from "./session-manager.ts";
+import { getDefaultSessionDir, SessionManager, type SessionProfileMetadata } from "./session-manager.ts";
 import { SettingsManager } from "./settings-manager.ts";
 import { SubagentController } from "./subagents/controller.ts";
 import { captureSubagentSessionConfig, createSubagentSession } from "./subagents/services.ts";
@@ -23,6 +25,7 @@ import {
 	createBashTool,
 	createCodingTools,
 	createEditTool,
+	createEvolveToolDefinition,
 	createFindTool,
 	createGrepTool,
 	createLsTool,
@@ -30,7 +33,6 @@ import {
 	createReadTool,
 	createUpdatePlanTool,
 	createWriteTool,
-	type ToolName,
 	withFileMutationQueue,
 } from "./tools/index.ts";
 
@@ -63,6 +65,13 @@ export interface CreateAgentSessionOptions {
 	/** Models available for cycling (Ctrl+P in interactive mode) */
 	scopedModels?: Array<{ model: Model<any>; thinkingLevel?: ThinkingLevel }>;
 
+	/** Task profile ID/path. Use "auto" for the neutral bootstrap profile. */
+	profile?: string;
+	/** Whether a host should continue automatic task routing for this session. */
+	profileRouting?: "auto" | "pinned";
+	/** Generated profiles that must be available before their package path is rediscovered. */
+	generatedProfiles?: ResolvedTaskProfile[];
+
 	/**
 	 * Optional default tool suppression mode when no explicit allowlist is provided.
 	 *
@@ -74,8 +83,8 @@ export interface CreateAgentSessionOptions {
 	/**
 	 * Optional allowlist of tool names.
 	 *
-	 * When omitted, Diffex enables the default built-in tools (read, bash, edit, write, update_plan)
-	 * and leaves extension/custom tools enabled unless `noTools` changes that default.
+	 * When omitted, Diffex enables the active profile's default tools and leaves
+	 * extension/custom tools enabled unless `noTools` changes that default.
 	 * When provided, only the listed tool names are enabled.
 	 */
 	tools?: string[];
@@ -106,6 +115,8 @@ export interface CreateAgentSessionResult {
 	extensionsResult: LoadExtensionsResult;
 	/** Warning if session was restored with a different model than saved */
 	modelFallbackMessage?: string;
+	/** Warning if the active task profile denied tools that the caller explicitly requested */
+	deniedToolsMessage?: string;
 }
 
 // Re-exports
@@ -233,7 +244,6 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	assertNoReservedSubagentTools(options.customTools);
 	const subagentController =
 		subagentOptions === false ? undefined : createRootSubagentController(subagentOptions.maxConcurrent, agentDir);
-	const customTools = [...(options.customTools ?? []), ...(subagentController?.createToolDefinitions() ?? [])];
 	let resourceLoader = options.resourceLoader;
 
 	const authPath = options.agentDir ? join(agentDir, "auth.json") : undefined;
@@ -242,11 +252,43 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 
 	const settingsManager = options.settingsManager ?? SettingsManager.create(cwd, agentDir);
 	const sessionManager = options.sessionManager ?? SessionManager.create(cwd, getDefaultSessionDir(cwd, agentDir));
+	const storedProfile = sessionManager.getHeader()?.profile;
+	const settingsProfile = settingsManager.getDefaultProfile();
+	const selectedProfile = options.profile ?? storedProfile?.source ?? storedProfile?.id ?? settingsProfile;
 
 	if (!resourceLoader) {
-		resourceLoader = new DefaultResourceLoader({ cwd, agentDir, settingsManager });
+		resourceLoader = new DefaultResourceLoader({
+			cwd,
+			agentDir,
+			settingsManager,
+			profile: selectedProfile,
+			generatedProfiles: options.generatedProfiles,
+		});
 		await resourceLoader.reload();
 		time("resourceLoader.reload");
+	}
+	const activeProfile = resourceLoader.getActiveProfile();
+	const profileRouting =
+		options.profileRouting ??
+		(options.profile !== undefined
+			? options.profile === "auto"
+				? "auto"
+				: "pinned"
+			: (storedProfile?.routing ??
+				(settingsProfile === undefined || settingsProfile === "auto" ? "auto" : "pinned")));
+	const profileMetadata: SessionProfileMetadata = {
+		id: activeProfile.id,
+		hash: activeProfile.hash,
+		...(activeProfile.origin === "builtin" ? {} : { source: activeProfile.source.path }),
+		routing: profileRouting,
+	};
+	if (
+		storedProfile?.id !== profileMetadata.id ||
+		storedProfile.hash !== profileMetadata.hash ||
+		storedProfile.source !== profileMetadata.source ||
+		storedProfile.routing !== profileMetadata.routing
+	) {
+		sessionManager.setProfileMetadata(profileMetadata);
 	}
 
 	// Check if session has existing data to restore
@@ -307,13 +349,59 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		thinkingLevel = clampThinkingLevel(model, thinkingLevel) as ThinkingLevel;
 	}
 
-	const defaultActiveToolNames: ToolName[] = ["read", "bash", "edit", "write", "update_plan"];
-	const allowedToolNames = options.tools ?? (options.noTools === "all" ? [] : undefined);
+	const defaultActiveToolNames = activeProfile.tools.default;
+	const profileRequiredToolNames = activeProfile.tools.required;
+	const allowedToolNames = options.tools
+		? [...new Set([...options.tools, ...profileRequiredToolNames])]
+		: options.noTools === "all"
+			? []
+			: undefined;
 	const excludedToolNames = options.excludeTools;
-	const excludedToolNameSet = excludedToolNames ? new Set(excludedToolNames) : undefined;
+	// A profile's denied list is a ceiling, not a default: a high-stakes profile must not gain a tool
+	// just because a caller asked for it. Requested-but-denied tools are reported rather than dropped
+	// silently, so `--tools read,bash` under a bash-denying profile is not a mystery.
+	const profileDeniedToolNames = activeProfile.tools.denied;
+	const excludedBuiltinToolNameSet = new Set(profileDeniedToolNames);
+	const deniedRequestedToolNames = (options.tools ?? []).filter((name) => excludedBuiltinToolNameSet.has(name));
+	const deniedToolsMessage =
+		deniedRequestedToolNames.length > 0
+			? `Task profile "${activeProfile.id}" denies ${deniedRequestedToolNames.join(", ")}. ${
+					deniedRequestedToolNames.length === 1 ? "That tool was" : "Those tools were"
+				} not enabled. Pin a profile that allows it with --profile.`
+			: undefined;
 	const initialActiveToolNames: string[] = (
-		options.tools ? [...options.tools] : options.noTools ? [] : defaultActiveToolNames
-	).filter((name) => !excludedToolNameSet?.has(name));
+		options.tools
+			? [...new Set([...options.tools, ...profileRequiredToolNames])]
+			: options.noTools
+				? []
+				: [...new Set([...defaultActiveToolNames, ...profileRequiredToolNames])]
+	).filter((name) => !excludedBuiltinToolNameSet.has(name) && !excludedToolNames?.includes(name));
+	const shouldRegisterEvolve =
+		(options.tools === undefined && options.noTools === undefined) ||
+		options.tools?.includes("evolve") === true ||
+		(options.tools !== undefined && profileRequiredToolNames.includes("evolve"));
+	const evolveToolDefinition = shouldRegisterEvolve
+		? createEvolveToolDefinition({
+				appendNote: async (input) => {
+					const note = appendEvolvedNote({
+						agentDir,
+						cwd,
+						projectTrusted: settingsManager.isProjectTrusted(),
+						scope: input.scope,
+						profileId: activeProfile.id,
+						category: input.category,
+						provenance: `session:${sessionManager.getSessionId()}`,
+						content: input.evidence ? `${input.note}\n\nEvidence: ${input.evidence}` : input.note,
+					});
+					return { path: note.sourcePath };
+				},
+			})
+		: undefined;
+	const customTools = [
+		...(options.customTools ?? []).filter((tool) => tool.name !== "evolve"),
+		...(evolveToolDefinition ? [evolveToolDefinition] : []),
+		...(subagentController?.createToolDefinitions() ?? []),
+	];
 
 	let agent: Agent;
 
@@ -450,6 +538,20 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		initialActiveToolNames,
 		allowedToolNames,
 		excludedToolNames,
+		excludedBuiltinToolNames: profileDeniedToolNames,
+		selfEvolutionProtectedPaths: [
+			join(agentDir, "EVOLVED.md"),
+			...["AGENTS.override.md", "AGENTS.md", "AGENTS.MD", "CLAUDE.md", "CLAUDE.MD"].map((fileName) =>
+				join(agentDir, fileName),
+			),
+		],
+		selfEvolutionProtectedRoots: [join(agentDir, "profiles"), join(cwd, CONFIG_DIR_NAME, "profiles")],
+		selfEvolutionQuarantineDir: join(agentDir, "quarantine", "self-evolution"),
+		selfEvolutionEvolvedPaths: {
+			globalPath: join(agentDir, "EVOLVED.md"),
+			...(settingsManager.isProjectTrusted() ? { projectPath: join(cwd, CONFIG_DIR_NAME, "EVOLVED.md") } : {}),
+		},
+		selfEvolutionEvolveTool: evolveToolDefinition,
 		extensionRunnerRef,
 		sessionStartEvent: options.sessionStartEvent,
 		subagentController,
@@ -461,5 +563,6 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		session,
 		extensionsResult,
 		modelFallbackMessage,
+		deniedToolsMessage,
 	};
 }

@@ -510,7 +510,7 @@ function createBuiltinProfile(input: BuiltinProfileInput): ResolvedTaskProfile {
 }
 
 const SAFE_NON_CODING_TOOLS: TaskProfileToolPolicy = {
-	default: ["read", "write", "edit"],
+	default: ["read", "write", "edit", "update_plan"],
 	required: [],
 	denied: ["bash"],
 };
@@ -584,7 +584,7 @@ export const BUILTIN_TASK_PROFILES: readonly ResolvedTaskProfile[] = Object.free
 			examples: ["Fix this failing test", "Implement an API endpoint", "Review this pull request"],
 			keywords: ["code", "bug", "repository", "test", "api", "typescript", "python"],
 		},
-		tools: { default: ["read", "bash", "edit", "write"], required: [], denied: [] },
+		tools: { default: ["read", "bash", "edit", "write", "update_plan"], required: [], denied: [] },
 		guardrails: {
 			...STANDARD_GUARDRAILS,
 			disallowedActions: [],
