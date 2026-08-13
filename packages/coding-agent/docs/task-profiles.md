@@ -65,7 +65,7 @@ Public skill and prompt-template commands are classified from their expanded con
 
 ## Harness descriptors
 
-Harness descriptors are runtime-managed JSON files under `~/.pi/agent/harnesses/`.
+Harness descriptors are runtime-managed JSON files under `~/.diffex/agent/harnesses/`.
 Their IDs use lowercase letters, numbers, and interior hyphens.
 The model cannot author or edit them.
 
@@ -109,8 +109,8 @@ Pinning a profile disables classification entirely.
 
 ## Custom profile files
 
-User profiles are discovered under `~/.pi/agent/profiles/`.
-Profiles in a trusted project are discovered under `.pi/profiles/`.
+User profiles are discovered under `~/.diffex/agent/profiles/`.
+Profiles in a trusted project are discovered under `.diffex/profiles/`.
 Each profile directory contains a `profile.json` manifest and normally a prompt file such as `PROMPT.md`.
 Profiles can also be supplied through `settings.json`, a Diffex package manifest, or an explicit path.
 
@@ -168,7 +168,7 @@ Omit `defaultProfile`, or set it to `"auto"`, to use the automatic lifecycle.
 ## User instructions
 
 `AGENTS.md` and `CLAUDE.md` are independent, user-controlled instruction sources for global and repository guidance.
-Diffex reads applicable files from `~/.pi/agent/`, the current directory, and its ancestors.
+Diffex reads applicable files from `~/.diffex/agent/`, the current directory, and its ancestors.
 When `AGENTS.override.md` exists in a directory, it replaces the `AGENTS.md` variant in that same directory, but it does not suppress `CLAUDE.md`.
 `CLAUDE.md` is loaded for compatibility in every profile, not only the coding profile.
 
@@ -177,8 +177,8 @@ Only the user should change repository and global instruction files.
 
 ## EVOLVED.md
 
-The global `~/.pi/agent/EVOLVED.md` starts as an empty, user-visible file.
-A trusted project can also use `.pi/EVOLVED.md`; Diffex creates that project file only when the first project-scoped lesson is recorded.
+The global `~/.diffex/agent/EVOLVED.md` starts as an empty, user-visible file.
+A trusted project can also use `.diffex/EVOLVED.md`; Diffex creates that project file only when the first project-scoped lesson is recorded.
 The user can inspect and edit either file directly.
 
 The model can append a bounded, structured lesson only through the validated `evolve` tool.
