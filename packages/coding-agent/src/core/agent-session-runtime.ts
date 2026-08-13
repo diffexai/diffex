@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
-import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import type { Api, Model } from "@earendil-works/pi-ai";
+import type { AgentMessage } from "@earendil-works/diffex-agent-core";
+import type { Api, Model } from "@earendil-works/diffex-ai";
 import { stripFrontmatter } from "../utils/frontmatter.ts";
 import { resolvePath } from "../utils/paths.ts";
 import type { AgentSession, PromptOptions } from "./agent-session.ts";

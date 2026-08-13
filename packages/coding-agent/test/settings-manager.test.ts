@@ -167,7 +167,7 @@ describe("SettingsManager", () => {
 
 		it("reads a project default profile over the global default", () => {
 			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ defaultProfile: "research" }));
-			writeFileSync(join(projectDir, ".pi", "settings.json"), JSON.stringify({ defaultProfile: "finance" }));
+			writeFileSync(join(projectDir, ".diffex", "settings.json"), JSON.stringify({ defaultProfile: "finance" }));
 
 			const manager = SettingsManager.create(projectDir, agentDir);
 
@@ -207,7 +207,7 @@ describe("SettingsManager", () => {
 
 		it("merges global and project profile paths with project precedence", () => {
 			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ profiles: ["/global/profiles"] }));
-			writeFileSync(join(projectDir, ".pi", "settings.json"), JSON.stringify({ profiles: ["./profiles"] }));
+			writeFileSync(join(projectDir, ".diffex", "settings.json"), JSON.stringify({ profiles: ["./profiles"] }));
 
 			const manager = SettingsManager.create(projectDir, agentDir);
 
@@ -224,7 +224,7 @@ describe("SettingsManager", () => {
 			expect(JSON.parse(readFileSync(join(agentDir, "settings.json"), "utf-8")).profiles).toEqual([
 				"/global/profiles",
 			]);
-			expect(JSON.parse(readFileSync(join(projectDir, ".pi", "settings.json"), "utf-8")).profiles).toEqual([
+			expect(JSON.parse(readFileSync(join(projectDir, ".diffex", "settings.json"), "utf-8")).profiles).toEqual([
 				"./profiles",
 			]);
 			expect(manager.getProfilePaths()).toEqual(["./profiles"]);

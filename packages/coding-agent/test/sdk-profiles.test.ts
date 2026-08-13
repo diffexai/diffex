@@ -1,8 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { InMemoryTelemetryContext } from "@earendil-works/pi-agent-core";
-import { getModel } from "@earendil-works/pi-ai/compat";
+import { InMemoryTelemetryContext } from "@earendil-works/diffex-agent-core";
+import { getModel } from "@earendil-works/diffex-ai/compat";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { appendEvolvedNote } from "../src/core/evolved.ts";
 import { createHarnessDescriptor } from "../src/core/harness-descriptors.ts";
@@ -120,14 +120,14 @@ describe("createAgentSession task profiles", () => {
 		expect(evolved).toContain("### preference");
 		expect(evolved).toContain("Prefer tables when comparing three or more alternatives.");
 		expect(evolved).toContain("Profile: general");
-		const evolutionSpan = telemetryContext.getSpans().find((span) => span.name === "pi.harness.evolution");
+		const evolutionSpan = telemetryContext.getSpans().find((span) => span.name === "diffex.harness.evolution");
 		expect(evolutionSpan?.attributes).toMatchObject({
-			"pi.session.id": session.sessionId,
-			"pi.evolution.trigger": "explicit",
-			"pi.evolution.profile_id": "general",
-			"pi.evolution.outcome": "completed",
-			"pi.evolution.candidate_count": 1,
-			"pi.evolution.accepted_count": 1,
+			"diffex.session.id": session.sessionId,
+			"diffex.evolution.trigger": "explicit",
+			"diffex.evolution.profile_id": "general",
+			"diffex.evolution.outcome": "completed",
+			"diffex.evolution.candidate_count": 1,
+			"diffex.evolution.accepted_count": 1,
 		});
 		expect(JSON.stringify(evolutionSpan)).not.toContain("Prefer tables");
 		expect(JSON.stringify(evolutionSpan)).not.toContain(evolvedPath);
@@ -140,14 +140,14 @@ describe("createAgentSession task profiles", () => {
 		).rejects.toThrow("reserved EVOLVED.md control markers");
 		const failedEvolution = telemetryContext
 			.getSpans()
-			.filter((span) => span.name === "pi.harness.evolution")
+			.filter((span) => span.name === "diffex.harness.evolution")
 			.at(-1);
 		expect(failedEvolution?.status.status).toBe("error");
 		expect(failedEvolution?.attributes).toMatchObject({
-			"pi.evolution.outcome": "failed",
-			"pi.evolution.candidate_count": 1,
-			"pi.evolution.accepted_count": 0,
-			"pi.evolution.rejected_count": 1,
+			"diffex.evolution.outcome": "failed",
+			"diffex.evolution.candidate_count": 1,
+			"diffex.evolution.accepted_count": 0,
+			"diffex.evolution.rejected_count": 1,
 		});
 		expect(JSON.stringify(failedEvolution)).not.toContain("Forged marker");
 

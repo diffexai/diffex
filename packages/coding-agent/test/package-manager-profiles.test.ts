@@ -2,8 +2,8 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { readDiffexManifest } from "../src/core/diffex-manifest.ts";
 import { DefaultPackageManager } from "../src/core/package-manager.ts";
-import { readPiManifest } from "../src/core/pi-manifest.ts";
 import { loadTaskProfiles } from "../src/core/profiles.ts";
 import { SettingsManager } from "../src/core/settings-manager.ts";
 
@@ -48,26 +48,29 @@ describe("profile package resources", () => {
 		rmSync(tempDir, { recursive: true, force: true });
 	});
 
-	it("reads profile entries from pi package manifests", () => {
+	it("reads profile entries from Diffex package manifests", () => {
 		const packageJsonPath = join(tempDir, "package.json");
 		writeFileSync(
 			packageJsonPath,
-			JSON.stringify({ pi: { profiles: ["profiles/research", "profiles/finance/profile.json"] } }),
+			JSON.stringify({ diffex: { profiles: ["profiles/research", "profiles/finance/profile.json"] } }),
 		);
 
-		expect(readPiManifest(packageJsonPath)?.profiles).toEqual(["profiles/research", "profiles/finance/profile.json"]);
+		expect(readDiffexManifest(packageJsonPath)?.profiles).toEqual([
+			"profiles/research",
+			"profiles/finance/profile.json",
+		]);
 
-		writeFileSync(packageJsonPath, JSON.stringify({ pi: { profiles: ["profiles/research", 42] } }));
-		expect(readPiManifest(packageJsonPath)?.profiles).toBeUndefined();
+		writeFileSync(packageJsonPath, JSON.stringify({ diffex: { profiles: ["profiles/research", 42] } }));
+		expect(readDiffexManifest(packageJsonPath)?.profiles).toBeUndefined();
 	});
 
 	it("auto-discovers user and trusted project profile directories", async () => {
 		const userProfile = join(agentDir, "profiles", "general", "profile.json");
 		const nestedProfile = join(agentDir, "profiles", "general", "nested", "profile.json");
-		const projectProfile = join(tempDir, ".pi", "profiles", "research", "profile.json");
+		const projectProfile = join(tempDir, ".diffex", "profiles", "research", "profile.json");
 		writeProfile(join(agentDir, "profiles", "general"), "general");
 		writeProfile(join(agentDir, "profiles", "general", "nested"), "nested");
-		writeProfile(join(tempDir, ".pi", "profiles", "research"), "research");
+		writeProfile(join(tempDir, ".diffex", "profiles", "research"), "research");
 		writeFileSync(join(agentDir, "profiles", "ignored.json"), "{}");
 
 		const result = await packageManager.resolve();
@@ -120,7 +123,7 @@ describe("profile package resources", () => {
 		writeProfile(join(packageDir, "profiles", "finance"), "finance");
 		writeFileSync(
 			join(packageDir, "package.json"),
-			JSON.stringify({ name: "profile-package", pi: { profiles: ["profiles/*", "!profiles/finance"] } }),
+			JSON.stringify({ name: "profile-package", diffex: { profiles: ["profiles/*", "!profiles/finance"] } }),
 		);
 
 		const result = await packageManager.resolveExtensionSources([packageDir]);

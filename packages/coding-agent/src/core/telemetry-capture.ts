@@ -2,7 +2,7 @@ import {
 	InMemoryTelemetryContext,
 	type SettledTelemetrySpanSnapshot,
 	type TelemetryContext,
-} from "@earendil-works/pi-agent-core";
+} from "@earendil-works/diffex-agent-core";
 
 export type TelemetryCaptureSnapshot = SettledTelemetrySpanSnapshot;
 
@@ -74,43 +74,43 @@ export function readEvolutionTraceSnapshot(
 
 	for (const span of snapshot.spans) {
 		switch (span.name) {
-			case "pi.harness.run":
+			case "diffex.harness.run":
 				runCount += 1;
-				if (span.attributes["pi.operation.outcome"] === "failed" || span.status.status === "error") {
+				if (span.attributes["diffex.operation.outcome"] === "failed" || span.status.status === "error") {
 					failedRunCount += 1;
 				}
-				if (span.attributes["pi.operation.outcome"] === "aborted") abortedRunCount += 1;
+				if (span.attributes["diffex.operation.outcome"] === "aborted") abortedRunCount += 1;
 				break;
-			case "pi.harness.step":
-				if (span.attributes["pi.step.kind"] === "assistant") assistantAttemptCount += 1;
-				if (span.attributes["pi.step.outcome"] === "retry") retryCount += 1;
+			case "diffex.harness.step":
+				if (span.attributes["diffex.step.kind"] === "assistant") assistantAttemptCount += 1;
+				if (span.attributes["diffex.step.outcome"] === "retry") retryCount += 1;
 				if (
-					span.attributes["pi.step.outcome"] === "failed" ||
-					(span.status.status === "error" && span.attributes["pi.step.outcome"] !== "retry")
+					span.attributes["diffex.step.outcome"] === "failed" ||
+					(span.status.status === "error" && span.attributes["diffex.step.outcome"] !== "retry")
 				) {
 					failedStepCount += 1;
 				}
 				break;
-			case "pi.ai.request":
+			case "diffex.ai.request":
 				aiRequestCount += 1;
-				if (span.status.status === "error" || span.attributes["pi.ai.response.stop_reason"] === "error") {
+				if (span.status.status === "error" || span.attributes["diffex.ai.response.stop_reason"] === "error") {
 					failedAiRequestCount += 1;
 				}
 				break;
-			case "pi.harness.tool": {
-				const name = span.attributes["pi.tool.name"];
+			case "diffex.harness.tool": {
+				const name = span.attributes["diffex.tool.name"];
 				if (typeof name !== "string") break;
 				const current = tools.get(name) ?? { callCount: 0, failureCount: 0 };
 				current.callCount += 1;
-				if (span.attributes["pi.tool.is_error"] === true || span.status.status === "error") {
+				if (span.attributes["diffex.tool.is_error"] === true || span.status.status === "error") {
 					current.failureCount += 1;
 				}
 				tools.set(name, current);
 				break;
 			}
-			case "pi.harness.profile_route": {
-				const trigger = span.attributes["pi.routing.trigger"];
-				const outcome = span.attributes["pi.routing.outcome"];
+			case "diffex.harness.profile_route": {
+				const trigger = span.attributes["diffex.routing.trigger"];
+				const outcome = span.attributes["diffex.routing.outcome"];
 				if (
 					outcome !== "bypassed" &&
 					outcome !== "selected" &&
@@ -121,10 +121,10 @@ export function readEvolutionTraceSnapshot(
 				) {
 					break;
 				}
-				const currentHarnessId = span.attributes["pi.routing.current_harness_id"];
-				const targetProfileId = span.attributes["pi.routing.target_profile_id"];
-				const harnessId = span.attributes["pi.routing.harness_id"];
-				const fallback = span.attributes["pi.routing.fallback"];
+				const currentHarnessId = span.attributes["diffex.routing.current_harness_id"];
+				const targetProfileId = span.attributes["diffex.routing.target_profile_id"];
+				const harnessId = span.attributes["diffex.routing.harness_id"];
+				const fallback = span.attributes["diffex.routing.fallback"];
 				routes.push({
 					...(trigger === "initial_turn" || trigger === "future_turn" ? { trigger } : {}),
 					...(typeof currentHarnessId === "string" ? { currentHarnessId } : {}),

@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
+import { CONFIG_DIR_NAME } from "../src/config.ts";
 import { appendEvolvedNote, initializeEvolvedFiles, loadEvolvedNotes } from "../src/core/evolved.ts";
 
 const temporaryDirectories: string[] = [];
@@ -33,7 +34,7 @@ describe("EVOLVED.md", () => {
 		initializeEvolvedFiles(options);
 
 		expect(readFileSync(paths.globalPath, "utf-8")).toBe("User guidance\n");
-		expect(paths.projectPath).toBe(join(options.cwd, ".pi", "EVOLVED.md"));
+		expect(paths.projectPath).toBe(join(options.cwd, CONFIG_DIR_NAME, "EVOLVED.md"));
 		expect(existsSync(paths.projectPath ?? "")).toBe(false);
 	});
 
@@ -41,7 +42,7 @@ describe("EVOLVED.md", () => {
 		const root = temporaryDirectory();
 		const options = { agentDir: join(root, "agent"), cwd: join(root, "project"), projectTrusted: true };
 		mkdirSync(options.cwd, { recursive: true });
-		const projectPath = join(options.cwd, ".pi", "EVOLVED.md");
+		const projectPath = join(options.cwd, CONFIG_DIR_NAME, "EVOLVED.md");
 
 		appendEvolvedNote({
 			...options,
@@ -123,7 +124,7 @@ describe("EVOLVED.md", () => {
 		mkdirSync(external, { recursive: true });
 		const externalPath = join(external, "EVOLVED.md");
 		writeFileSync(externalPath, "External project guidance\n", "utf-8");
-		directorySymlink(external, join(project, ".pi"));
+		directorySymlink(external, join(project, CONFIG_DIR_NAME));
 
 		const loaded = loadEvolvedNotes({ agentDir, cwd: project, projectTrusted: true });
 

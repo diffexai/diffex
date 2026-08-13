@@ -21,7 +21,7 @@ export interface SelfEvolutionProtectionOptions {
 	protectedRoots?: readonly string[];
 	quarantineDir?: string;
 	allowedMutationPath?: string;
-	/** Project config directory name used to scope implicitly protected file names. Default: ".pi". */
+	/** Project config directory name used to scope implicitly protected file names. Default: ".diffex". */
 	configDirName?: string;
 }
 
@@ -502,7 +502,7 @@ function isInstructionScope(candidate: string, options: SelfEvolutionProtectionO
 	const cwd = resolve(options.cwd);
 	const directory = dirname(candidate);
 	if (isPathInside(directory, cwd)) return true;
-	return directory === join(cwd, options.configDirName ?? ".pi");
+	return directory === join(cwd, options.configDirName ?? ".diffex");
 }
 
 function getProtectedPath(path: string, options: SelfEvolutionProtectionOptions): string | undefined {

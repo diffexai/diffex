@@ -19,7 +19,6 @@ import { getHarnessDescriptorsDirectory } from "./harness-descriptors.ts";
 import { convertToLlm } from "./messages.ts";
 import { findInitialModel } from "./model-resolver.ts";
 import { ModelRuntime } from "./model-runtime.ts";
-import type { ResolvedTaskProfile } from "./profiles.ts";
 import { mergeProviderAttributionHeaders } from "./provider-attribution.ts";
 import { DefaultResourceLoader, getProjectContextFileCandidatePaths, type ResourceLoader } from "./resource-loader.ts";
 import { startEvolutionSpan } from "./runtime-telemetry.ts";
@@ -67,8 +66,6 @@ export interface CreateAgentSessionOptions {
 	profile?: string;
 	/** Whether a host should continue automatic task routing for this session. */
 	profileRouting?: "auto" | "pinned";
-	/** Generated profiles that must be available before their package path is rediscovered. */
-	generatedProfiles?: ResolvedTaskProfile[];
 	/** Stable evolved-harness identity used to scope EVOLVED notes. */
 	harnessId?: string;
 
@@ -212,7 +209,6 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			agentDir,
 			settingsManager,
 			profile: selectedProfile,
-			generatedProfiles: options.generatedProfiles,
 		});
 		await resourceLoader.reload();
 		time("resourceLoader.reload");

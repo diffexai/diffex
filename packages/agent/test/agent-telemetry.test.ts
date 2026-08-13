@@ -4,8 +4,8 @@ import {
 	EventStream,
 	type Message,
 	type Model,
-} from "@earendil-works/pi-ai/compat";
-import { InMemoryTelemetryContext } from "@earendil-works/pi-telemetry";
+} from "@earendil-works/diffex-ai";
+import { InMemoryTelemetryContext } from "@earendil-works/diffex-telemetry";
 import { Type } from "typebox";
 import { describe, expect, it } from "vitest";
 import {
@@ -97,8 +97,8 @@ describe("legacy Agent telemetry", () => {
 
 		const operationIds = telemetry
 			.getSpans()
-			.filter((span) => span.name === "pi.harness.turn")
-			.map((span) => span.attributes["pi.operation.id"]);
+			.filter((span) => span.name === "diffex.harness.turn")
+			.map((span) => span.attributes["diffex.operation.id"]);
 		expect(operationIds).toHaveLength(2);
 		expect(operationIds[0]).toMatch(/^legacy-run:/);
 		expect(operationIds[1]).toMatch(/^legacy-run:/);
@@ -119,7 +119,7 @@ describe("legacy Agent telemetry", () => {
 
 		const prompt = agent.prompt("hello");
 		await new Promise((resolve) => setTimeout(resolve, 0));
-		const openRequest = telemetry.getSpans().find((span) => span.name === "pi.ai.request");
+		const openRequest = telemetry.getSpans().find((span) => span.name === "diffex.ai.request");
 		expect(openRequest?.settled).toBe(false);
 
 		const message = assistantMessage([{ type: "text", text: "ok" }], "stop");
@@ -129,18 +129,18 @@ describe("legacy Agent telemetry", () => {
 		await prompt;
 
 		const spans = telemetry.getSpans();
-		const run = spans.find((span) => span.name === "pi.harness.run");
-		const turn = spans.find((span) => span.name === "pi.harness.turn");
-		const step = spans.find((span) => span.name === "pi.harness.step");
-		const request = spans.find((span) => span.name === "pi.ai.request");
-		expect(run?.attributes["pi.operation.id"]).toMatch(/^session-1:[^:]+:run-1$/);
+		const run = spans.find((span) => span.name === "diffex.harness.run");
+		const turn = spans.find((span) => span.name === "diffex.harness.turn");
+		const step = spans.find((span) => span.name === "diffex.harness.step");
+		const request = spans.find((span) => span.name === "diffex.ai.request");
+		expect(run?.attributes["diffex.operation.id"]).toMatch(/^session-1:[^:]+:run-1$/);
 		expect(turn?.parentId).toBe(run?.id);
 		expect(step?.parentId).toBe(turn?.id);
 		expect(request?.parentId).toBe(step?.id);
 		expect(request?.attributes).toMatchObject({
-			"pi.ai.response.stop_reason": "stop",
-			"pi.ai.usage.total_tokens": 6,
-			"pi.ai.stream.chunk_count": 1,
+			"diffex.ai.response.stop_reason": "stop",
+			"diffex.ai.usage.total_tokens": 6,
+			"diffex.ai.stream.chunk_count": 1,
 		});
 		expect(request?.settled).toBe(true);
 	});
@@ -187,10 +187,10 @@ describe("legacy Agent telemetry", () => {
 
 		await agent.prompt("run tool");
 
-		const span = telemetry.getSpans().find((candidate) => candidate.name === "pi.harness.tool");
+		const span = telemetry.getSpans().find((candidate) => candidate.name === "diffex.harness.tool");
 		expect(span?.attributes).toMatchObject({
-			"pi.tool.name": "lookup",
-			"pi.tool.is_error": true,
+			"diffex.tool.name": "lookup",
+			"diffex.tool.is_error": true,
 		});
 		expect(JSON.stringify(span)).not.toContain("do-not-trace");
 		expect(JSON.stringify(span)).not.toContain("secret result");
@@ -238,9 +238,9 @@ describe("legacy Agent telemetry", () => {
 
 		await agent.prompt("run tool update");
 
-		const toolSpan = telemetry.getSpans().find((span) => span.name === "pi.harness.tool");
+		const toolSpan = telemetry.getSpans().find((span) => span.name === "diffex.harness.tool");
 		expect(toolSpan?.status).toEqual({ status: "error" });
-		expect(toolSpan?.attributes["pi.tool.is_error"]).toBe(true);
+		expect(toolSpan?.attributes["diffex.tool.is_error"]).toBe(true);
 		expect(JSON.stringify(telemetry.getSpans())).not.toContain("private listener failure");
 		expect(JSON.stringify(telemetry.getSpans())).not.toContain("private partial");
 	});

@@ -4,7 +4,7 @@ import { findSelfEvolutionPolicyViolation } from "../src/core/self-evolution-pol
 const cwd = "/workspace/project";
 const protectedPaths = [
 	"/workspace/project/AGENTS.md",
-	"/workspace/project/.pi/EVOLVED.md",
+	"/workspace/project/.diffex/EVOLVED.md",
 	"/config/pi/profiles/generated/analysis/PROMPT.md",
 ];
 
@@ -21,8 +21,8 @@ describe("self-evolution policy", () => {
 			)?.path,
 		).toBe("/config/pi/profiles/generated/analysis/PROMPT.md");
 		expect(
-			findSelfEvolutionPolicyViolation("write", { path: ".pi/EVOLVED.md" }, { cwd, protectedPaths: [] })?.path,
-		).toBe("/workspace/project/.pi/EVOLVED.md");
+			findSelfEvolutionPolicyViolation("write", { path: ".diffex/EVOLVED.md" }, { cwd, protectedPaths: [] })?.path,
+		).toBe("/workspace/project/.diffex/EVOLVED.md");
 	});
 
 	it("allows unrelated writes and all dedicated evolution calls", () => {
@@ -34,9 +34,12 @@ describe("self-evolution policy", () => {
 
 	it("blocks mutating shell commands that reference protected files", () => {
 		expect(
-			findSelfEvolutionPolicyViolation("bash", { command: "printf 'new' > .pi/EVOLVED.md" }, { cwd, protectedPaths })
-				?.path,
-		).toBe("/workspace/project/.pi/EVOLVED.md");
+			findSelfEvolutionPolicyViolation(
+				"bash",
+				{ command: "printf 'new' > .diffex/EVOLVED.md" },
+				{ cwd, protectedPaths },
+			)?.path,
+		).toBe("/workspace/project/.diffex/EVOLVED.md");
 		expect(
 			findSelfEvolutionPolicyViolation(
 				"bash",
@@ -58,7 +61,7 @@ describe("self-evolution policy", () => {
 			findSelfEvolutionPolicyViolation("bash", { command: "sed -n '1,40p' AGENTS.md" }, { cwd, protectedPaths }),
 		).toBeUndefined();
 		expect(
-			findSelfEvolutionPolicyViolation("bash", { command: "rg TODO .pi/EVOLVED.md" }, { cwd, protectedPaths }),
+			findSelfEvolutionPolicyViolation("bash", { command: "rg TODO .diffex/EVOLVED.md" }, { cwd, protectedPaths }),
 		).toBeUndefined();
 	});
 
@@ -90,8 +93,8 @@ describe("self-evolution policy", () => {
 			findSelfEvolutionPolicyViolation("write", { path: "/workspace/CLAUDE.md" }, { cwd, protectedPaths: [] })?.path,
 		).toBe("/workspace/CLAUDE.md");
 		expect(
-			findSelfEvolutionPolicyViolation("write", { path: ".pi/EVOLVED.md" }, { cwd, protectedPaths: [] })?.path,
-		).toBe("/workspace/project/.pi/EVOLVED.md");
+			findSelfEvolutionPolicyViolation("write", { path: ".diffex/EVOLVED.md" }, { cwd, protectedPaths: [] })?.path,
+		).toBe("/workspace/project/.diffex/EVOLVED.md");
 		// A same-named file in a subdirectory is not loaded, so scaffolding it stays allowed.
 		expect(
 			findSelfEvolutionPolicyViolation("write", { path: "packages/new-pkg/AGENTS.md" }, { cwd, protectedPaths: [] }),

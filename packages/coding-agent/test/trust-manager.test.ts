@@ -66,18 +66,18 @@ describe("ProjectTrustStore", () => {
 	});
 
 	it("treats profiles and EVOLVED.md as trusted resources but ignores legacy prompt files", () => {
-		const piDir = join(cwd, ".pi");
-		mkdirSync(piDir, { recursive: true });
-		writeFileSync(join(piDir, "SYSTEM.md"), "legacy system prompt");
-		writeFileSync(join(piDir, "APPEND_SYSTEM.md"), "legacy append prompt");
+		const configDir = join(cwd, ".diffex");
+		mkdirSync(configDir, { recursive: true });
+		writeFileSync(join(configDir, "SYSTEM.md"), "legacy system prompt");
+		writeFileSync(join(configDir, "APPEND_SYSTEM.md"), "legacy append prompt");
 
 		expect(hasTrustRequiringProjectResources(cwd)).toBe(false);
 
-		writeFileSync(join(piDir, "EVOLVED.md"), "bounded learned notes");
+		writeFileSync(join(configDir, "EVOLVED.md"), "bounded learned notes");
 		expect(hasTrustRequiringProjectResources(cwd)).toBe(true);
 
-		rmSync(join(piDir, "EVOLVED.md"), { force: true });
-		mkdirSync(join(piDir, "profiles"));
+		rmSync(join(configDir, "EVOLVED.md"), { force: true });
+		mkdirSync(join(configDir, "profiles"));
 		expect(hasTrustRequiringProjectResources(cwd)).toBe(true);
 	});
 });

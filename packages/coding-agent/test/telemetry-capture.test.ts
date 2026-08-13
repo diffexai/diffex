@@ -7,22 +7,22 @@ describe("bounded runtime telemetry capture", () => {
 		const capture = new BoundedTelemetryCapture({ maxSpans: 16 });
 		await capture.context.startSpan(
 			{
-				name: "pi.harness.tool",
+				name: "diffex.harness.tool",
 				attributes: {
-					"pi.tool.name": "read",
-					"pi.tool.is_error": true,
-					"pi.tool.call_id": "call-1",
+					"diffex.tool.name": "read",
+					"diffex.tool.is_error": true,
+					"diffex.tool.call_id": "call-1",
 				},
 			},
 			(span) => span.setStatus({ status: "error" }),
 		);
 		await capture.context.startSpan(
 			{
-				name: "pi.harness.profile_route",
+				name: "diffex.harness.profile_route",
 				attributes: {
-					"pi.routing.outcome": "reused",
-					"pi.routing.target_profile_id": "research",
-					"pi.routing.harness_id": "harness-1",
+					"diffex.routing.outcome": "reused",
+					"diffex.routing.target_profile_id": "research",
+					"diffex.routing.harness_id": "harness-1",
 				},
 			},
 			() => {},
@@ -37,8 +37,8 @@ describe("bounded runtime telemetry capture", () => {
 
 	it("reports when bounded retention makes a snapshot incomplete", async () => {
 		const capture = new BoundedTelemetryCapture({ maxSpans: 1 });
-		await capture.context.startSpan({ name: "pi.harness.run" }, () => {});
-		await capture.context.startSpan({ name: "pi.harness.run" }, () => {});
+		await capture.context.startSpan({ name: "diffex.harness.run" }, () => {});
+		await capture.context.startSpan({ name: "diffex.harness.run" }, () => {});
 
 		const snapshot = readEvolutionTraceSnapshot(capture);
 		expect(snapshot.runCount).toBe(1);
@@ -70,13 +70,13 @@ describe("bounded runtime telemetry capture", () => {
 
 		const [route] = capture.readSettled().spans;
 		expect(route?.attributes).toMatchObject({
-			"pi.routing.trigger": "future_turn",
-			"pi.routing.current_harness_id": "research-harness",
-			"pi.routing.outcome": "declined",
-			"pi.routing.target_profile_id": "finance",
-			"pi.routing.harness_id": "finance-harness",
+			"diffex.routing.trigger": "future_turn",
+			"diffex.routing.current_harness_id": "research-harness",
+			"diffex.routing.outcome": "declined",
+			"diffex.routing.target_profile_id": "finance",
+			"diffex.routing.harness_id": "finance-harness",
 		});
-		expect(Object.keys(route?.attributes ?? {})).not.toContain("pi.routing.reason");
+		expect(Object.keys(route?.attributes ?? {})).not.toContain("diffex.routing.reason");
 		expect(route?.status.status).toBe("ok");
 		expect(readEvolutionTraceSnapshot(capture).routes).toEqual([
 			{

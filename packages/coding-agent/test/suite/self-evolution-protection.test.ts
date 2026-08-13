@@ -1,10 +1,11 @@
 import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AgentTool } from "@earendil-works/pi-agent-core";
-import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "@earendil-works/pi-ai/compat";
+import type { AgentTool } from "@earendil-works/diffex-agent-core";
+import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "@earendil-works/diffex-ai/compat";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it } from "vitest";
+import { CONFIG_DIR_NAME } from "../../src/config.ts";
 import { AuthStorage } from "../../src/core/auth-storage.ts";
 import { createHarnessDescriptor } from "../../src/core/harness-descriptors.ts";
 import { ModelRuntime } from "../../src/core/model-runtime.ts";
@@ -242,8 +243,8 @@ describe("model tool self-evolution protection", () => {
 		});
 		harnesses.push(harness);
 		claudePath = join(harness.tempDir, "CLAUDE.md");
-		evolvedPath = join(harness.tempDir, ".pi", "EVOLVED.md");
-		mkdirSync(join(harness.tempDir, ".pi"), { recursive: true });
+		evolvedPath = join(harness.tempDir, CONFIG_DIR_NAME, "EVOLVED.md");
+		mkdirSync(join(harness.tempDir, CONFIG_DIR_NAME), { recursive: true });
 		writeFileSync(claudePath, "claude instructions\n");
 		writeFileSync(evolvedPath, "evolved notes\n");
 
@@ -478,7 +479,7 @@ describe("model tool self-evolution protection", () => {
 		expect(readFileSync(globalEvolvedPath, "utf-8")).toBe("allowed same-directory evolution\n");
 	});
 
-	it("allows the first project evolve when the protected .pi ancestor is absent", async () => {
+	it(`allows the first project evolve when the protected ${CONFIG_DIR_NAME} ancestor is absent`, async () => {
 		let projectEvolvedPath = "";
 		const evolveTool = createEvolveToolDefinition({
 			appendNote: async () => {
@@ -489,13 +490,13 @@ describe("model tool self-evolution protection", () => {
 		});
 		const harness = await createHarness({
 			customToolDefinitions: [evolveTool],
-			selfEvolutionProtectedRoots: [join(".pi", "profiles")],
-			selfEvolutionEvolvedPaths: { globalPath: "EVOLVED.md", projectPath: join(".pi", "EVOLVED.md") },
+			selfEvolutionProtectedRoots: [join(CONFIG_DIR_NAME, "profiles")],
+			selfEvolutionEvolvedPaths: { globalPath: "EVOLVED.md", projectPath: join(CONFIG_DIR_NAME, "EVOLVED.md") },
 			selfEvolutionEvolveTool: evolveTool,
 		});
 		harnesses.push(harness);
-		projectEvolvedPath = join(harness.tempDir, ".pi", "EVOLVED.md");
-		expect(existsSync(join(harness.tempDir, ".pi"))).toBe(false);
+		projectEvolvedPath = join(harness.tempDir, CONFIG_DIR_NAME, "EVOLVED.md");
+		expect(existsSync(join(harness.tempDir, CONFIG_DIR_NAME))).toBe(false);
 
 		const result = await runModelTool(harness, "evolve", {
 			note: "Durable project lesson",
@@ -507,7 +508,7 @@ describe("model tool self-evolution protection", () => {
 		expect(readFileSync(projectEvolvedPath, "utf-8")).toBe("first project lesson\n");
 	});
 
-	it("preserves the validated project EVOLVED write while rejecting a sibling profile under a new .pi", async () => {
+	it(`preserves the validated project EVOLVED write while rejecting a sibling profile under a new ${CONFIG_DIR_NAME}`, async () => {
 		let projectEvolvedPath = "";
 		let unauthorizedProfilePath = "";
 		const evolveTool = createEvolveToolDefinition({
@@ -521,13 +522,13 @@ describe("model tool self-evolution protection", () => {
 		});
 		const harness = await createHarness({
 			customToolDefinitions: [evolveTool],
-			selfEvolutionProtectedRoots: [join(".pi", "profiles")],
-			selfEvolutionEvolvedPaths: { globalPath: "EVOLVED.md", projectPath: join(".pi", "EVOLVED.md") },
+			selfEvolutionProtectedRoots: [join(CONFIG_DIR_NAME, "profiles")],
+			selfEvolutionEvolvedPaths: { globalPath: "EVOLVED.md", projectPath: join(CONFIG_DIR_NAME, "EVOLVED.md") },
 			selfEvolutionEvolveTool: evolveTool,
 		});
 		harnesses.push(harness);
-		projectEvolvedPath = join(harness.tempDir, ".pi", "EVOLVED.md");
-		unauthorizedProfilePath = join(harness.tempDir, ".pi", "profiles", "unauthorized", "profile.json");
+		projectEvolvedPath = join(harness.tempDir, CONFIG_DIR_NAME, "EVOLVED.md");
+		unauthorizedProfilePath = join(harness.tempDir, CONFIG_DIR_NAME, "profiles", "unauthorized", "profile.json");
 
 		const result = await runModelTool(harness, "evolve", {
 			note: "Durable project lesson",
@@ -638,11 +639,11 @@ describe("model tool self-evolution protection", () => {
 					symlinkSync(externalDir, configDir, "dir");
 				}),
 			],
-			selfEvolutionProtectedPaths: [join(".pi", "EVOLVED.md")],
-			selfEvolutionProtectedRoots: [join(".pi", "profiles")],
+			selfEvolutionProtectedPaths: [join(CONFIG_DIR_NAME, "EVOLVED.md")],
+			selfEvolutionProtectedRoots: [join(CONFIG_DIR_NAME, "profiles")],
 		});
 		harnesses.push(harness);
-		configDir = join(harness.tempDir, ".pi");
+		configDir = join(harness.tempDir, CONFIG_DIR_NAME);
 		mkdirSync(join(configDir, "profiles"), { recursive: true });
 		writeFileSync(join(configDir, "profiles", "profile.json"), "protected profile\n");
 		writeFileSync(join(configDir, "EVOLVED.md"), "protected evolved notes\n");

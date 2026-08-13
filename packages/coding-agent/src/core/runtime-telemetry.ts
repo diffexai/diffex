@@ -4,8 +4,8 @@ import {
 	startAiSpan,
 	startHarnessSpan,
 	type TelemetryContext,
-} from "@earendil-works/pi-agent-core";
-import type { Api, AssistantMessage, Model } from "@earendil-works/pi-ai";
+} from "@earendil-works/diffex-agent-core";
+import type { Api, AssistantMessage, Model } from "@earendil-works/diffex-ai";
 
 export interface ProfileRouteSpanStart {
 	sessionId: string;
@@ -38,23 +38,23 @@ export function startProfileRouteSpan<Result>(
 ): Promise<Result> {
 	return startHarnessSpan(
 		telemetryContext,
-		"pi.harness.profile_route",
+		"diffex.harness.profile_route",
 		{
-			"pi.session.id": start.sessionId,
-			"pi.routing.mode": start.routingMode,
-			"pi.routing.trigger": start.trigger,
-			"pi.routing.current_profile_id": start.currentProfileId,
-			...(start.currentHarnessId ? { "pi.routing.current_harness_id": start.currentHarnessId } : {}),
-			"pi.routing.session_established": start.sessionEstablished,
+			"diffex.session.id": start.sessionId,
+			"diffex.routing.mode": start.routingMode,
+			"diffex.routing.trigger": start.trigger,
+			"diffex.routing.current_profile_id": start.currentProfileId,
+			...(start.currentHarnessId ? { "diffex.routing.current_harness_id": start.currentHarnessId } : {}),
+			"diffex.routing.session_established": start.sessionEstablished,
 		},
 		async (span) => {
 			const complete = (result: ProfileRouteSpanResult): void => {
 				span.setAttributes({
-					"pi.routing.outcome": result.outcome,
-					...(result.targetProfileId ? { "pi.routing.target_profile_id": result.targetProfileId } : {}),
-					...(result.harnessId ? { "pi.routing.harness_id": result.harnessId } : {}),
-					...(result.confidence === undefined ? {} : { "pi.routing.confidence": result.confidence }),
-					...(result.fallback ? { "pi.routing.fallback": result.fallback } : {}),
+					"diffex.routing.outcome": result.outcome,
+					...(result.targetProfileId ? { "diffex.routing.target_profile_id": result.targetProfileId } : {}),
+					...(result.harnessId ? { "diffex.routing.harness_id": result.harnessId } : {}),
+					...(result.confidence === undefined ? {} : { "diffex.routing.confidence": result.confidence }),
+					...(result.fallback ? { "diffex.routing.fallback": result.fallback } : {}),
 				});
 				if (result.outcome === "failed") span.setStatus({ status: "error" });
 			};
@@ -95,22 +95,26 @@ export function startEvolutionSpan<Result>(
 ): Promise<Result> {
 	return startHarnessSpan(
 		telemetryContext,
-		"pi.harness.evolution",
+		"diffex.harness.evolution",
 		{
-			"pi.session.id": start.sessionId,
-			"pi.evolution.trigger": start.trigger,
-			...(start.profileId ? { "pi.evolution.profile_id": start.profileId } : {}),
+			"diffex.session.id": start.sessionId,
+			"diffex.evolution.trigger": start.trigger,
+			...(start.profileId ? { "diffex.evolution.profile_id": start.profileId } : {}),
 		},
 		async (span) => {
 			const complete = (result: EvolutionSpanResult): void => {
 				span.setAttributes({
-					"pi.evolution.outcome": result.outcome,
+					"diffex.evolution.outcome": result.outcome,
 					...(result.candidateCount === undefined
 						? {}
-						: { "pi.evolution.candidate_count": result.candidateCount }),
-					...(result.acceptedCount === undefined ? {} : { "pi.evolution.accepted_count": result.acceptedCount }),
-					...(result.rejectedCount === undefined ? {} : { "pi.evolution.rejected_count": result.rejectedCount }),
-					...(result.scope ? { "pi.evolution.scope": result.scope } : {}),
+						: { "diffex.evolution.candidate_count": result.candidateCount }),
+					...(result.acceptedCount === undefined
+						? {}
+						: { "diffex.evolution.accepted_count": result.acceptedCount }),
+					...(result.rejectedCount === undefined
+						? {}
+						: { "diffex.evolution.rejected_count": result.rejectedCount }),
+					...(result.scope ? { "diffex.evolution.scope": result.scope } : {}),
 				});
 				if (result.outcome === "failed") span.setStatus({ status: "error" });
 			};
@@ -132,13 +136,13 @@ export function traceAiCompletion(
 ): Promise<AssistantMessage> {
 	return startAiSpan(
 		telemetryContext,
-		"pi.ai.request",
+		"diffex.ai.request",
 		{
-			"pi.ai.operation": "stream",
-			"pi.ai.provider": model.provider,
-			"pi.ai.model": model.id,
-			"pi.ai.api": model.api,
-			"pi.ai.streaming": false,
+			"diffex.ai.operation": "stream",
+			"diffex.ai.provider": model.provider,
+			"diffex.ai.model": model.id,
+			"diffex.ai.api": model.api,
+			"diffex.ai.streaming": false,
 		},
 		async (span) => {
 			try {
