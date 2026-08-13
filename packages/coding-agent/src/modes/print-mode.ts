@@ -10,7 +10,7 @@ import type { AssistantMessage, ImageContent } from "@earendil-works/diffex-ai";
 import type { AgentSessionRuntime } from "../core/agent-session-runtime.ts";
 import { flushRawStdout, waitForRawStdoutBackpressure, writeRawStdout } from "../core/output-guard.ts";
 import { killTrackedDetachedChildren } from "../utils/shell.ts";
-import { toJsonEvent } from "./json-event.ts";
+import { toJsonEvent, toJsonProfileSwitchEvent } from "./json-event.ts";
 
 /**
  * Options for print mode.
@@ -44,6 +44,7 @@ export async function runPrintMode(runtimeHost: AgentSessionRuntime, options: Pr
 		disposed = true;
 		unsubscribe?.();
 		unsubscribeBackpressure?.();
+		runtimeHost.setProfileSwitchListener(undefined);
 		await runtimeHost.dispose();
 	};
 
@@ -69,6 +70,13 @@ export async function runPrintMode(runtimeHost: AgentSessionRuntime, options: Pr
 
 	runtimeHost.setRebindSession(async () => {
 		await rebindSession();
+	});
+	runtimeHost.setProfileSwitchListener((event) => {
+		if (mode === "json") {
+			writeRawStdout(`${JSON.stringify(toJsonProfileSwitchEvent(event))}\n`);
+		} else {
+			console.error(event.notice);
+		}
 	});
 
 	const rebindSession = async (): Promise<void> => {

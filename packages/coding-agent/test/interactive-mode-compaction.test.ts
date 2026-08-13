@@ -57,7 +57,7 @@ describe("InteractiveMode compaction events", () => {
 		expect(fakeThis.flushCompactionQueue).toHaveBeenCalledWith({ willRetry: false });
 	});
 
-	test("routes every queued task in order so a second distinct task can replace the profile", async () => {
+	test("delivers every queued task through the runtime host in order", async () => {
 		const originalSession = {
 			clearQueue: vi.fn(),
 			prompt: vi.fn().mockResolvedValue(undefined),
@@ -88,7 +88,7 @@ describe("InteractiveMode compaction events", () => {
 						fakeThis.session = replacementSession;
 						options?.preflightResult?.(true);
 						return {
-							routing: "switched",
+							routing: "bypassed",
 							activeProfileId: text.includes("retirement") ? "finance" : "research",
 						};
 					},
@@ -142,7 +142,7 @@ describe("InteractiveMode compaction events", () => {
 				},
 			) => {
 				options?.preflightResult?.(true);
-				return { routing: "switched", activeProfileId: "finance" };
+				return { routing: "bypassed", activeProfileId: "finance" };
 			},
 		);
 		const fakeThis = {
@@ -191,7 +191,7 @@ describe("InteractiveMode compaction events", () => {
 					throw new Error("second preflight rejected");
 				}
 				options?.preflightResult?.(true);
-				return { routing: "stayed", activeProfileId: "general" };
+				return { routing: "bypassed", activeProfileId: "general" };
 			},
 		);
 		const fakeThis = {
@@ -231,7 +231,7 @@ describe("InteractiveMode compaction events", () => {
 		};
 		const runtimePrompt = vi.fn(async (_text: string, options?: { preflightResult?: (success: boolean) => void }) => {
 			options?.preflightResult?.(true);
-			return { routing: "stayed", activeProfileId: "general" };
+			return { routing: "bypassed", activeProfileId: "general" };
 		});
 		const fakeThis = {
 			compactionQueuedMessages: [
@@ -270,7 +270,7 @@ describe("InteractiveMode compaction events", () => {
 		const runtimePrompt = vi.fn(async (text: string, options?: { preflightResult?: (success: boolean) => void }) => {
 			options?.preflightResult?.(true);
 			if (text === "accepted then fails") throw new Error("response failed after acceptance");
-			return { routing: "stayed", activeProfileId: "general" };
+			return { routing: "bypassed", activeProfileId: "general" };
 		});
 		const fakeThis = {
 			compactionQueuedMessages: [

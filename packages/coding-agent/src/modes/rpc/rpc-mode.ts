@@ -27,7 +27,7 @@ import {
 } from "../../core/output-guard.ts";
 import { killTrackedDetachedChildren } from "../../utils/shell.ts";
 import { type Theme, theme } from "../interactive/theme/theme.ts";
-import { toJsonEvent } from "../json-event.ts";
+import { toJsonEvent, toJsonProfileSwitchEvent } from "../json-event.ts";
 import { attachJsonlLineReader, serializeJsonLine } from "./jsonl.ts";
 import type {
 	RpcCommand,
@@ -60,6 +60,9 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 	const output = (obj: RpcResponse | RpcExtensionUIRequest | object) => {
 		writeRawStdout(serializeJsonLine(obj));
 	};
+	runtimeHost.setProfileSwitchListener((event) => {
+		output(toJsonProfileSwitchEvent(event));
+	});
 
 	const success = <T extends RpcCommand["type"]>(
 		id: string | undefined,
@@ -741,6 +744,7 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 		}
 		unsubscribe?.();
 		unsubscribeBackpressure?.();
+		runtimeHost.setProfileSwitchListener(undefined);
 		await runtimeHost.dispose();
 		detachInput();
 		process.stdin.pause();

@@ -12,6 +12,7 @@ describe("evolve tool", () => {
 				note: "  Prefer primary sources.  ",
 				category: "workflow",
 				scope: "global",
+				appliesTo: "user",
 				evidence: "  The user corrected an uncited claim.  ",
 			},
 			undefined,
@@ -22,6 +23,7 @@ describe("evolve tool", () => {
 			note: "Prefer primary sources.",
 			category: "workflow",
 			scope: "global",
+			appliesTo: "user",
 			evidence: "The user corrected an uncited claim.",
 		});
 		expect(result.details).toEqual({ path: "/agent/EVOLVED.md" });
