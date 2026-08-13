@@ -17,6 +17,14 @@ export {
 	type EditToolInput,
 	type EditToolOptions,
 } from "./edit.ts";
+export {
+	createEvolveTool,
+	createEvolveToolDefinition,
+	type EvolveToolDetails,
+	type EvolveToolInput,
+	type EvolveToolOptions,
+	evolveToolSystemPromptContribution,
+} from "./evolve.ts";
 export { withFileMutationQueue } from "./file-mutation-queue.ts";
 export {
 	createFindTool,
@@ -100,6 +108,11 @@ export const allToolNames: Set<ToolName> = new Set([
 	"find",
 	"ls",
 ]);
+/**
+ * Built-in tools that cannot mutate the filesystem. They are exempt from self-evolution
+ * snapshot/restore, which keeps them eligible for parallel execution.
+ */
+export const readOnlyToolNames: ReadonlySet<ToolName> = new Set(["read", "update_plan", "grep", "find", "ls"]);
 
 export interface ToolsOptions {
 	read?: ReadToolOptions;
