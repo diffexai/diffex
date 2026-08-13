@@ -54,6 +54,9 @@ export interface SubagentRecord {
 	name: string;
 	task: string;
 	status: SubagentStatus;
+	cohortId?: string;
+	attempt?: number;
+	resultId?: string;
 	createdAt: number;
 	updatedAt: number;
 	startedAt?: number;

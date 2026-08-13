@@ -8,13 +8,23 @@ import type {
 } from "../subagents/types.ts";
 import { SUBAGENT_NAME_PATTERN } from "../subagents/types.ts";
 
-const spawnAgentSchema = Type.Object({
-	name: Type.String({
-		description: "Unique lowercase name for the child agent",
-		pattern: SUBAGENT_NAME_PATTERN.source,
-	}),
-	task: Type.String({ description: "Focused task for the child agent", minLength: 1 }),
-});
+const spawnAgentSchema = Type.Object(
+	{
+		name: Type.String({
+			description: "Unique lowercase name for the child agent",
+			pattern: SUBAGENT_NAME_PATTERN.source,
+		}),
+		task: Type.String({ description: "Focused task for the child agent", minLength: 1 }),
+	},
+	{ additionalProperties: false },
+);
+
+const SUBAGENT_COORDINATION_GUIDELINES = [
+	"Start independent subagents concurrently when tasks can run in parallel; maxConcurrent controls admission.",
+	"Hidden subagent_progress messages contain only newly completed attempts plus a current cohort manifest. Briefly report each new completion as progress, not as a final answer.",
+	"When a subagent_progress attempt fails and its manifest still lists that child as unresolved, briefly report the error and partial result, then call agent_action with a corrective message and wake set to true. Only one recovery attempt is allowed. Never retry an interrupted or exhausted child.",
+	"When subagent_progress has cohort_complete set to true, synthesize the cohort results already delivered in earlier progress messages. The completion message intentionally omits earlier raw output. If compaction removed a needed result, retrieve only that result with agents.",
+];
 
 const targetSchema = Type.String({
 	description: "Name of an existing child agent",
@@ -123,6 +133,7 @@ export function createSpawnAgentTool(
 		name: "spawn_agent",
 		label: "Spawn Agent",
 		description: "Start an independent child agent for a focused task and return immediately after acceptance.",
+		promptGuidelines: SUBAGENT_COORDINATION_GUIDELINES,
 		parameters: spawnAgentSchema,
 		executionMode: "parallel",
 		execute: async (toolCallId, { name, task }) => {

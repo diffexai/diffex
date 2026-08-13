@@ -1,4 +1,4 @@
-import type { AssistantMessage } from "@earendil-works/diffex-ai";
+import { type AssistantMessage, uuidv7 } from "@earendil-works/diffex-ai";
 import type { AgentSession } from "../agent-session.ts";
 import type { ToolDefinition } from "../extensions/types.ts";
 import { createAgentActionTool, createAgentsTool, createSpawnAgentTool } from "../tools/subagents.ts";
@@ -45,6 +45,46 @@ interface TransitionFields {
 	readonly error?: string;
 }
 
+type SubagentTerminalStatus = Extract<SubagentStatus, "idle" | "failed" | "interrupted">;
+
+interface CompletedAttempt {
+	readonly result_id: string;
+	readonly name: string;
+	readonly status: SubagentTerminalStatus;
+	readonly attempt: number;
+	readonly result?: string;
+	readonly error?: string;
+	readonly exhausted?: true;
+}
+
+interface CohortChild {
+	readonly name: string;
+	status: SubagentStatus;
+	attempt: number;
+	resultId: string;
+	recoveryPending: boolean;
+}
+
+interface SubagentCohort {
+	readonly id: string;
+	readonly requestKey: string;
+	readonly children: Map<string, CohortChild>;
+	readonly completedAttempts: CompletedAttempt[];
+	completionDelivered: boolean;
+}
+
+interface CohortManifest {
+	readonly cohort_id: string;
+	readonly agents: readonly {
+		readonly name: string;
+		readonly status: SubagentStatus;
+		readonly attempt: number;
+		readonly result_id: string;
+		readonly exhausted?: true;
+	}[];
+	readonly unresolved: readonly string[];
+}
+
 function normalizeError(error: unknown): string {
 	if (error instanceof Error) return error.message;
 	try {
@@ -72,7 +112,7 @@ function getTurnAssistantMessages(session: AgentSession, turnStart: number): Ass
 		.filter((message): message is AssistantMessage => message.role === "assistant");
 }
 
-function isTerminalStatus(status: SubagentStatus): boolean {
+function isTerminalStatus(status: SubagentStatus): status is SubagentTerminalStatus {
 	return status === "idle" || status === "failed" || status === "interrupted";
 }
 
@@ -110,6 +150,22 @@ function captureSpawnOrigin(parent: AgentSession, toolCallId: string): SubagentS
 	});
 }
 
+function getCohortRequestKey(parent: AgentSession, origin: SubagentSpawnOrigin): string {
+	if (origin.type === "direct_tool_call") {
+		return `${origin.type}:${origin.toolCallId}`;
+	}
+	if (origin.type === "programmatic") return `programmatic:${uuidv7()}`;
+
+	const branch = parent.sessionManager.getBranch(origin.assistantEntryId);
+	for (let index = branch.length - 1; index >= 0; index -= 1) {
+		const entry = branch[index];
+		if (entry.type === "message" && entry.message.role === "user") {
+			return `user:${entry.id}`;
+		}
+	}
+	return `context:${origin.contextEntryId ?? origin.assistantEntryId}`;
+}
+
 const MAX_TIMER_MS = 2_147_483_647;
 
 export class SubagentController {
@@ -119,8 +175,15 @@ export class SubagentController {
 	readonly #listeners = new Set<SubagentLifecycleListener>();
 	readonly #waiters = new Set<RevisionWaiter>();
 	readonly #permitQueue: PermitRequest[] = [];
+	readonly #cohorts = new Map<string, SubagentCohort>();
+	readonly #cohortIdsByRequest = new Map<string, string>();
+	readonly #deliveredResultIds = new Set<string>();
+	readonly #pendingDispatchCohorts = new Set<string>();
 	#activePermits = 0;
 	#revision = 0;
+	#dispatchGeneration = 0;
+	#dispatchTimer: ReturnType<typeof setTimeout> | undefined;
+	#dispatchTail = Promise.resolve();
 	#closed = false;
 	#resetting = false;
 	#parent: AgentSession | undefined;
@@ -145,7 +208,7 @@ export class SubagentController {
 				if (!createSession) {
 					throw new Error("Subagent session capture is unavailable");
 				}
-				this.spawn(name, task, createSession);
+				this.spawn(name, task, createSession, origin);
 			}),
 			createAgentActionTool((request) =>
 				request.action === "message"
@@ -193,9 +256,17 @@ export class SubagentController {
 		return record;
 	}
 
-	spawn(name: string, task: string, createSession: CreateSubagentSession): SubagentRecord {
+	spawn(
+		name: string,
+		task: string,
+		createSession: CreateSubagentSession,
+		origin?: SubagentSpawnOrigin,
+	): SubagentRecord {
 		const record = this.reserve(name, task);
 		record.createSession = createSession;
+		if (origin && this.#parent) {
+			this.#registerInitialAttempt(record, origin);
+		}
 		this.#scheduleRun(record, task);
 		return record;
 	}
@@ -417,6 +488,7 @@ export class SubagentController {
 
 		try {
 			this.#closed = true;
+			this.#clearDispatchState();
 			const closedError = this.#closedError();
 			this.#rejectPermitQueue(closedError);
 			const resetCleanup = this.#resetCleanupPromise;
@@ -452,6 +524,7 @@ export class SubagentController {
 
 		try {
 			this.#resetting = true;
+			this.#clearDispatchState();
 			const resetError = this.#resetError();
 			this.#rejectPermitQueue(resetError);
 			const records = this.#detachRecords(resetError);
@@ -510,6 +583,7 @@ export class SubagentController {
 			status,
 			timestamp,
 		}));
+		this.#updateCohort(record);
 	}
 
 	#isValidTransition(previousStatus: SubagentStatus, status: SubagentStatus): boolean {
@@ -721,6 +795,14 @@ export class SubagentController {
 			if (!wake) {
 				throw new Error(`Cannot message ${record.status} subagent without wake: ${name}`);
 			}
+			if (record.status === "failed" && record.cohortId) {
+				if ((record.attempt ?? 1) >= 2) {
+					throw new Error(`Subagent recovery is exhausted: ${name}`);
+				}
+				this.#registerRecoveryAttempt(record);
+			} else if (record.cohortId) {
+				this.#registerFollowUpCohort(record);
+			}
 			this.#scheduleRun(record, message);
 			return { target: name, action: "message", status: "queued", delivery: "prompt" };
 		}
@@ -731,6 +813,9 @@ export class SubagentController {
 		}
 		if (record.status === "idle") {
 			if (wake) {
+				if (record.cohortId) {
+					this.#registerFollowUpCohort(record);
+				}
 				this.#scheduleRun(record, message);
 				return { target: name, action: "message", status: "queued", delivery: "prompt" };
 			}
@@ -787,6 +872,212 @@ export class SubagentController {
 		const run = this.#runPrompt(record, prompt, runController);
 		record.run = run;
 		void run.catch(() => {});
+	}
+
+	#registerInitialAttempt(record: SubagentRecord, origin: SubagentSpawnOrigin): void {
+		const parent = this.#getBoundParent();
+		const requestKey = getCohortRequestKey(parent, origin);
+		const existingId = this.#cohortIdsByRequest.get(requestKey);
+		const existing = existingId ? this.#cohorts.get(existingId) : undefined;
+		const cohort =
+			existing && !existing.completionDelivered
+				? existing
+				: {
+						id: uuidv7(),
+						requestKey,
+						children: new Map<string, CohortChild>(),
+						completedAttempts: [],
+						completionDelivered: false,
+					};
+		if (!existing || existing.completionDelivered) {
+			this.#cohorts.set(cohort.id, cohort);
+			this.#cohortIdsByRequest.set(requestKey, cohort.id);
+		}
+
+		const resultId = uuidv7();
+		record.cohortId = cohort.id;
+		record.attempt = 1;
+		record.resultId = resultId;
+		cohort.children.set(record.name, {
+			name: record.name,
+			status: record.status,
+			attempt: 1,
+			resultId,
+			recoveryPending: false,
+		});
+	}
+
+	#registerRecoveryAttempt(record: SubagentRecord): void {
+		const cohort = record.cohortId ? this.#cohorts.get(record.cohortId) : undefined;
+		const child = cohort?.children.get(record.name);
+		if (!cohort || !child) return;
+
+		const resultId = uuidv7();
+		record.attempt = 2;
+		record.resultId = resultId;
+		child.status = "queued";
+		child.attempt = 2;
+		child.resultId = resultId;
+		child.recoveryPending = false;
+	}
+
+	#registerFollowUpCohort(record: SubagentRecord): void {
+		const requestKey = `follow_up:${uuidv7()}`;
+		const cohort: SubagentCohort = {
+			id: uuidv7(),
+			requestKey,
+			children: new Map<string, CohortChild>(),
+			completedAttempts: [],
+			completionDelivered: false,
+		};
+		const resultId = uuidv7();
+		record.cohortId = cohort.id;
+		record.attempt = 1;
+		record.resultId = resultId;
+		cohort.children.set(record.name, {
+			name: record.name,
+			status: "queued",
+			attempt: 1,
+			resultId,
+			recoveryPending: false,
+		});
+		this.#cohorts.set(cohort.id, cohort);
+		this.#cohortIdsByRequest.set(requestKey, cohort.id);
+	}
+
+	#updateCohort(record: SubagentRecord): void {
+		const cohort = record.cohortId ? this.#cohorts.get(record.cohortId) : undefined;
+		const child = cohort?.children.get(record.name);
+		if (!cohort || !child || !record.resultId || record.attempt === undefined) return;
+
+		child.status = record.status;
+		child.attempt = record.attempt;
+		child.resultId = record.resultId;
+		if (!isTerminalStatus(record.status)) return;
+		if (cohort.completedAttempts.some((attempt) => attempt.result_id === record.resultId)) return;
+
+		const exhausted = record.status === "failed" && record.attempt >= 2;
+		child.recoveryPending = record.status === "failed" && !exhausted;
+		cohort.completedAttempts.push(
+			Object.freeze({
+				result_id: record.resultId,
+				name: record.name,
+				status: record.status,
+				attempt: record.attempt,
+				...(record.finalText === undefined ? {} : { result: record.finalText }),
+				...(record.error === undefined ? {} : { error: record.error }),
+				...(exhausted ? { exhausted: true as const } : {}),
+			}),
+		);
+		this.#scheduleDispatch(cohort.id);
+	}
+
+	#scheduleDispatch(cohortId: string): void {
+		if (this.#closed || this.#resetting || !this.#parent) return;
+		this.#pendingDispatchCohorts.add(cohortId);
+		if (this.#dispatchTimer !== undefined) return;
+
+		const generation = this.#dispatchGeneration;
+		this.#dispatchTimer = setTimeout(() => {
+			this.#dispatchTimer = undefined;
+			const cohortIds = [...this.#pendingDispatchCohorts];
+			this.#pendingDispatchCohorts.clear();
+			this.#dispatchTail = this.#dispatchTail
+				.then(() => this.#dispatchCohorts(cohortIds, generation))
+				.catch(() => {});
+		}, 0);
+	}
+
+	async #dispatchCohorts(cohortIds: readonly string[], generation: number): Promise<void> {
+		for (const cohortId of cohortIds) {
+			if (this.#closed || this.#resetting || generation !== this.#dispatchGeneration) return;
+			const cohort = this.#cohorts.get(cohortId);
+			const parent = this.#parent;
+			if (!cohort || !parent) continue;
+
+			const completedAttempts = cohort.completedAttempts.filter(
+				(attempt) => !this.#deliveredResultIds.has(attempt.result_id),
+			);
+			if (completedAttempts.length > 0) {
+				for (const attempt of completedAttempts) {
+					this.#deliveredResultIds.add(attempt.result_id);
+				}
+				await parent.sendCustomMessage(
+					{
+						customType: "subagent_progress",
+						content: JSON.stringify({
+							cohort_id: cohort.id,
+							cohort_complete: false,
+							completed_attempts: completedAttempts,
+							manifest: this.#createManifest(cohort),
+						}),
+						display: false,
+						details: {
+							cohortId: cohort.id,
+							resultIds: completedAttempts.map((attempt) => attempt.result_id),
+						},
+					},
+					{ triggerTurn: true, deliverAs: "steer" },
+				);
+			}
+
+			if (!cohort.completionDelivered && this.#isCohortComplete(cohort)) {
+				cohort.completionDelivered = true;
+				await parent.sendCustomMessage(
+					{
+						customType: "subagent_progress",
+						content: JSON.stringify({
+							cohort_complete: true,
+							manifest: this.#createManifest(cohort),
+						}),
+						display: false,
+						details: { cohortId: cohort.id, resultIds: [] },
+					},
+					{ triggerTurn: true, deliverAs: "steer" },
+				);
+			}
+		}
+	}
+
+	#createManifest(cohort: SubagentCohort): CohortManifest {
+		const agents = [...cohort.children.values()]
+			.sort((left, right) => left.name.localeCompare(right.name))
+			.map((child) =>
+				Object.freeze({
+					name: child.name,
+					status: child.status,
+					attempt: child.attempt,
+					result_id: child.resultId,
+					...(child.status === "failed" && child.attempt >= 2 ? { exhausted: true as const } : {}),
+				}),
+			);
+		const unresolved = agents
+			.filter((agent) => {
+				const child = cohort.children.get(agent.name);
+				return agent.status === "queued" || agent.status === "running" || child?.recoveryPending === true;
+			})
+			.map((agent) => agent.name);
+		return Object.freeze({
+			cohort_id: cohort.id,
+			agents: Object.freeze(agents),
+			unresolved: Object.freeze(unresolved),
+		});
+	}
+
+	#isCohortComplete(cohort: SubagentCohort): boolean {
+		return this.#createManifest(cohort).unresolved.length === 0;
+	}
+
+	#clearDispatchState(): void {
+		this.#dispatchGeneration += 1;
+		if (this.#dispatchTimer !== undefined) {
+			clearTimeout(this.#dispatchTimer);
+			this.#dispatchTimer = undefined;
+		}
+		this.#pendingDispatchCohorts.clear();
+		this.#cohorts.clear();
+		this.#cohortIdsByRequest.clear();
+		this.#deliveredResultIds.clear();
 	}
 
 	async #runPrompt(record: SubagentRecord, prompt: string, runController: AbortController): Promise<void> {
