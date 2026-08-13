@@ -9,7 +9,13 @@ const SPINNER_VERB_CHANGE_INTERVAL_MS = 5000;
 const SPINNER_VERB_DOT_INTERVAL_MS = 500;
 const SPINNER_VERB_CHANGE_TICKS = SPINNER_VERB_CHANGE_INTERVAL_MS / SPINNER_VERB_DOT_INTERVAL_MS;
 
-export type StatusIndicatorKind = "working" | "retry" | "compaction" | "branchSummary" | "subagentWait";
+export type StatusIndicatorKind =
+	| "working"
+	| "taskBoundary"
+	| "retry"
+	| "compaction"
+	| "branchSummary"
+	| "subagentWait";
 
 export class StatusIndicator extends Loader {
 	readonly kind: StatusIndicatorKind;
@@ -92,6 +98,18 @@ export class WorkingStatusIndicator extends StatusIndicator {
 			clearInterval(this.verbAnimationIntervalId);
 			this.verbAnimationIntervalId = undefined;
 		}
+	}
+}
+
+export class TaskBoundaryStatusIndicator extends StatusIndicator {
+	constructor(ui: TUI, message: string) {
+		super(
+			"taskBoundary",
+			ui,
+			(spinner) => theme.fg("accent", spinner),
+			(text) => theme.fg("muted", text),
+			message,
+		);
 	}
 }
 

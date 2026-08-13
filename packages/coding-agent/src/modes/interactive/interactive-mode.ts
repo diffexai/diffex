@@ -169,6 +169,7 @@ import {
 	RetryStatusIndicator,
 	type StatusIndicator,
 	SubagentWaitStatusIndicator,
+	TaskBoundaryStatusIndicator,
 	WorkingStatusIndicator,
 } from "./components/status-indicator.ts";
 import { SubagentsComponent } from "./components/subagents.ts";
@@ -456,6 +457,7 @@ export class InteractiveMode {
 	private isInitialized = false;
 	private onInputCallback?: (text: string) => void;
 	private pendingUserInputs: string[] = [];
+	private pendingTaskPrompt: { token: object; text: string } | undefined = undefined;
 	private activeStatusIndicator: StatusIndicator | undefined = undefined;
 	private readonly idleStatus = new IdleStatus();
 	private workingMessage: string | undefined = undefined;
@@ -1139,8 +1141,32 @@ export class InteractiveMode {
 	}
 
 	private async promptUser(text: string, options?: PromptOptions): Promise<void> {
+		const taskPromptToken = {};
+		const showTaskRoutingProgress =
+			this.runtimeHost.profileRouting === "auto" &&
+			this.runtimeHost.activeHarness !== undefined &&
+			this.session.isIdle &&
+			!this.isExtensionCommand(text) &&
+			options?.streamingBehavior === undefined &&
+			text.trim().length > 0;
+		let taskPromptPending = showTaskRoutingProgress;
+		if (showTaskRoutingProgress) {
+			this.pendingTaskPrompt = { token: taskPromptToken, text };
+			this.updatePendingMessagesDisplay();
+			this.showTaskRoutingProgress("Checking whether this starts a new task...");
+		}
 		try {
-			const result = await this.runtimeHost.prompt(text, options);
+			const result = await this.runtimeHost.prompt(text, {
+				...options,
+				preflightResult: (success) => {
+					options?.preflightResult?.(success);
+					if (!taskPromptPending || this.pendingTaskPrompt?.token !== taskPromptToken) return;
+					taskPromptPending = false;
+					this.pendingTaskPrompt = undefined;
+					this.updatePendingMessagesDisplay();
+					this.ui.requestRender();
+				},
+			});
 			if (result.routing === "failed") {
 				this.showStatus(`Profile routing unavailable; using ${result.activeProfileId}`);
 			}
@@ -1150,6 +1176,16 @@ export class InteractiveMode {
 			if (restored) this.editor.setText(text);
 			this.showStatus(restored ? "Task switch cancelled; prompt restored" : "Task switch cancelled");
 			this.ui.requestRender();
+		} finally {
+			if (taskPromptPending && this.pendingTaskPrompt?.token === taskPromptToken) {
+				taskPromptPending = false;
+				this.pendingTaskPrompt = undefined;
+				this.updatePendingMessagesDisplay();
+			}
+			if (showTaskRoutingProgress) {
+				this.clearStatusIndicator("taskBoundary");
+				this.ui.requestRender();
+			}
 		}
 	}
 
@@ -2031,6 +2067,7 @@ export class InteractiveMode {
 		this.streamingMessage = undefined;
 		this.pendingTools.clear();
 		this.renderInitialMessages();
+		this.updatePendingMessagesDisplay();
 	}
 
 	/**
@@ -2143,6 +2180,11 @@ export class InteractiveMode {
 				new WorkingStatusIndicator(this.ui, this.workingMessage, this.workingIndicatorOptions),
 			);
 		}
+		this.ui.requestRender();
+	}
+
+	private showTaskRoutingProgress(message: string): void {
+		this.showStatusIndicator(new TaskBoundaryStatusIndicator(this.ui, message));
 		this.ui.requestRender();
 	}
 
@@ -2526,6 +2568,7 @@ export class InteractiveMode {
 	}
 
 	private async resolveTaskBoundary(proposal: TaskBoundaryProposal): Promise<TaskBoundaryResolution> {
+		this.clearStatusIndicator("taskBoundary");
 		const activeHarness = this.runtimeHost.activeHarness;
 		const currentHarnessName =
 			activeHarness?.id === proposal.fromHarnessId ? activeHarness.name : proposal.fromHarnessId;
@@ -2537,8 +2580,15 @@ export class InteractiveMode {
 			currentLabel,
 		]);
 
-		if (selected === targetLabel) return "switch";
-		if (selected === currentLabel) return "stay";
+		if (selected === targetLabel) {
+			const action = targetAction === "Resume" ? "Resuming" : targetAction === "Reuse" ? "Reusing" : "Creating";
+			this.showTaskRoutingProgress(`${action} ${proposal.targetHarnessName}...`);
+			return "switch";
+		}
+		if (selected === currentLabel) {
+			this.showTaskRoutingProgress(`Continuing with ${currentHarnessName}...`);
+			return "stay";
+		}
 		return "cancel";
 	}
 
@@ -4307,8 +4357,12 @@ export class InteractiveMode {
 	private updatePendingMessagesDisplay(): void {
 		this.pendingMessagesContainer.clear();
 		const { steering: steeringMessages, followUp: followUpMessages } = this.getAllQueuedMessages();
-		if (steeringMessages.length > 0 || followUpMessages.length > 0) {
+		if (this.pendingTaskPrompt || steeringMessages.length > 0 || followUpMessages.length > 0) {
 			this.pendingMessagesContainer.addChild(new Spacer(1));
+			if (this.pendingTaskPrompt) {
+				const text = theme.fg("dim", `Pending: ${this.pendingTaskPrompt.text}`);
+				this.pendingMessagesContainer.addChild(new TruncatedText(text, 1, 0));
+			}
 			for (const message of steeringMessages) {
 				const text = theme.fg("dim", `Steering: ${message}`);
 				this.pendingMessagesContainer.addChild(new TruncatedText(text, 1, 0));
@@ -4317,9 +4371,11 @@ export class InteractiveMode {
 				const text = theme.fg("dim", `Follow-up: ${message}`);
 				this.pendingMessagesContainer.addChild(new TruncatedText(text, 1, 0));
 			}
-			const dequeueHint = this.getAppKeyDisplay("app.message.dequeue");
-			const hintText = theme.fg("dim", `↳ ${dequeueHint} to edit all queued messages`);
-			this.pendingMessagesContainer.addChild(new TruncatedText(hintText, 1, 0));
+			if (steeringMessages.length > 0 || followUpMessages.length > 0) {
+				const dequeueHint = this.getAppKeyDisplay("app.message.dequeue");
+				const hintText = theme.fg("dim", `↳ ${dequeueHint} to edit all queued messages`);
+				this.pendingMessagesContainer.addChild(new TruncatedText(hintText, 1, 0));
+			}
 		}
 	}
 
