@@ -4,7 +4,7 @@ import { theme } from "../theme/theme.ts";
 import { CountdownTimer } from "./countdown-timer.ts";
 import { keyText } from "./keybinding-hints.ts";
 
-export type StatusIndicatorKind = "working" | "retry" | "compaction" | "branchSummary";
+export type StatusIndicatorKind = "working" | "taskBoundary" | "retry" | "compaction" | "branchSummary";
 
 export class StatusIndicator extends Loader {
 	readonly kind: StatusIndicatorKind;
@@ -35,6 +35,18 @@ export class WorkingStatusIndicator extends StatusIndicator {
 			(text) => theme.fg("muted", text),
 			message,
 			indicator,
+		);
+	}
+}
+
+export class TaskBoundaryStatusIndicator extends StatusIndicator {
+	constructor(ui: TUI, message: string) {
+		super(
+			"taskBoundary",
+			ui,
+			(spinner) => theme.fg("accent", spinner),
+			(text) => theme.fg("muted", text),
+			message,
 		);
 	}
 }
