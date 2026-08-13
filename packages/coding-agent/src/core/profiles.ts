@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { existsSync, lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
-export type TaskProfileOrigin = "builtin" | "package" | "user" | "generated";
+export type TaskProfileOrigin = "builtin" | "package" | "user";
 
 export interface TaskProfileRouting {
 	description: string;
@@ -483,7 +483,7 @@ export function resolveTaskProfileManifest(
 	const resolvedProfile: ResolvedTaskProfile = {
 		...taskProfile,
 		origin: options.origin,
-		immutable: options.origin !== "generated",
+		immutable: true,
 		hash: computeTaskProfileHash(taskProfile),
 		source: {
 			path: options.sourcePath,
@@ -758,17 +758,15 @@ function normalizeInjectedProfile(value: unknown): ResolveTaskProfileManifestRes
 
 	const rawOrigin = value.origin;
 	const origin: TaskProfileOrigin | undefined =
-		rawOrigin === "builtin" || rawOrigin === "package" || rawOrigin === "user" || rawOrigin === "generated"
-			? rawOrigin
-			: undefined;
+		rawOrigin === "builtin" || rawOrigin === "package" || rawOrigin === "user" ? rawOrigin : undefined;
 	if (!origin) {
 		diagnostics.push({
 			type: "error",
-			message: "injected profile origin must be builtin, package, user, or generated",
+			message: "injected profile origin must be builtin, package, or user",
 			path: validationPath,
 		});
 	}
-	const validationOrigin = origin === "generated" ? "generated" : origin === "package" ? "package" : "user";
+	const validationOrigin = origin === "package" ? "package" : "user";
 	const resolved = resolveTaskProfileManifest(
 		{
 			schemaVersion: value.schemaVersion,
@@ -799,7 +797,7 @@ function normalizeInjectedProfile(value: unknown): ResolveTaskProfileManifestRes
 			path: validationPath,
 		});
 	}
-	const expectedImmutable = origin !== "generated";
+	const expectedImmutable = true;
 	if (value.immutable !== expectedImmutable) {
 		diagnostics.push({
 			type: "error",

@@ -65,13 +65,18 @@ describe("built-in task profiles", () => {
 		expect(BOOTSTRAP_TASK_PROFILE_ID).toBe("general");
 		expect(DEFAULT_TASK_PROFILE_ID).toBe(BOOTSTRAP_TASK_PROFILE_ID);
 		expect(BUILTIN_TASK_PROFILES.every((profile) => profile.immutable && Object.isFrozen(profile))).toBe(true);
-		for (const id of ["general", "finance", "healthcare", "legal", "research"]) {
+		for (const id of ["finance", "healthcare", "legal", "research"]) {
 			expect(BUILTIN_TASK_PROFILES.find((profile) => profile.id === id)?.tools).toEqual({
 				default: ["read", "write", "edit"],
 				required: [],
 				denied: ["bash"],
 			});
 		}
+		expect(BUILTIN_TASK_PROFILES.find((profile) => profile.id === "general")?.tools).toEqual({
+			default: ["read", "bash", "edit", "write"],
+			required: [],
+			denied: [],
+		});
 		expect(BUILTIN_TASK_PROFILES.find((profile) => profile.id === "coding")?.tools.default).toEqual([
 			"read",
 			"bash",

@@ -256,7 +256,6 @@ export interface DefaultResourceLoaderOptions {
 	additionalPromptTemplatePaths?: string[];
 	additionalThemePaths?: string[];
 	additionalProfilePaths?: string[];
-	generatedProfiles?: ResolvedTaskProfile[];
 	profile?: string;
 	extensionFactories?: InlineExtension[];
 	noExtensions?: boolean;
@@ -298,7 +297,6 @@ export class DefaultResourceLoader implements ResourceLoader {
 	private additionalPromptTemplatePaths: string[];
 	private additionalThemePaths: string[];
 	private additionalProfilePaths: string[];
-	private generatedProfiles: ResolvedTaskProfile[];
 	private selectedProfile?: string;
 	private extensionFactories: InlineExtension[];
 	private noExtensions: boolean;
@@ -368,7 +366,6 @@ export class DefaultResourceLoader implements ResourceLoader {
 		this.additionalPromptTemplatePaths = options.additionalPromptTemplatePaths ?? [];
 		this.additionalThemePaths = options.additionalThemePaths ?? [];
 		this.additionalProfilePaths = options.additionalProfilePaths ?? [];
-		this.generatedProfiles = options.generatedProfiles ?? [];
 		this.selectedProfile = options.profile;
 		this.extensionFactories = options.extensionFactories ?? [];
 		this.noExtensions = options.noExtensions ?? false;
@@ -584,7 +581,6 @@ export class DefaultResourceLoader implements ResourceLoader {
 		const cliEnabledProfileResources = getEnabledResources(cliExtensionPaths.profiles);
 
 		const configuredProfileInputs: TaskProfileLoadInput[] = [
-			...this.generatedProfiles.map((profile) => ({ profile })),
 			...this.additionalProfilePaths.map((path) => ({
 				path: this.resolveResourcePath(path),
 				origin: this.profileOriginForPath(path),
@@ -841,10 +837,8 @@ export class DefaultResourceLoader implements ResourceLoader {
 		};
 	}
 
-	private profileOriginForPath(path: string): "user" | "generated" {
-		const resolvedPath = canonicalizePath(this.resolveResourcePath(path));
-		const generatedRoot = canonicalizePath(join(this.agentDir, "profiles", "generated"));
-		return this.isUnderPath(resolvedPath, generatedRoot) ? "generated" : "user";
+	private profileOriginForPath(_path: string): "user" {
+		return "user";
 	}
 
 	private normalizeExtensionPaths(
