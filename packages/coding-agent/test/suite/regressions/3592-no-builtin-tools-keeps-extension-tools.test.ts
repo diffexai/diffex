@@ -77,7 +77,7 @@ describe("regression #3592: no-builtin-tools keeps extension tools enabled", () 
 			session
 				.getAllTools()
 				.map((tool) => tool.name)
-			.sort(),
+				.sort(),
 		).toEqual([
 			"agent_action",
 			"agents",
