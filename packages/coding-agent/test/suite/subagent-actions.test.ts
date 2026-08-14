@@ -73,6 +73,7 @@ describe("subagent actions", () => {
 		const tool = createAgentActionTool(action);
 
 		expect(tool.executionMode).toBe("parallel");
+		expect(tool.parameters).toMatchObject({ type: "object", anyOf: expect.any(Array) });
 		expect(Check(tool.parameters, { target: "worker", action: "message", message: "hello" })).toBe(true);
 		expect(Check(tool.parameters, { target: "worker", action: "message", message: "hello", wake: true })).toBe(true);
 		expect(Check(tool.parameters, { target: "worker", action: "interrupt" })).toBe(true);
