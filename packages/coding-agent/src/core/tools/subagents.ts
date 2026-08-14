@@ -21,24 +21,27 @@ const targetSchema = Type.String({
 	pattern: SUBAGENT_NAME_PATTERN.source,
 });
 
-const agentActionSchema = Type.Union([
-	Type.Object(
-		{
-			target: targetSchema,
-			action: Type.Literal("message"),
-			message: Type.String({ description: "Message for the child agent", minLength: 1 }),
-			wake: Type.Optional(Type.Boolean({ default: false })),
-		},
-		{ additionalProperties: false },
-	),
-	Type.Object(
-		{
-			target: targetSchema,
-			action: Type.Literal("interrupt"),
-		},
-		{ additionalProperties: false },
-	),
-]);
+const agentActionSchema = Type.Union(
+	[
+		Type.Object(
+			{
+				target: targetSchema,
+				action: Type.Literal("message"),
+				message: Type.String({ description: "Message for the child agent", minLength: 1 }),
+				wake: Type.Optional(Type.Boolean({ default: false })),
+			},
+			{ additionalProperties: false },
+		),
+		Type.Object(
+			{
+				target: targetSchema,
+				action: Type.Literal("interrupt"),
+			},
+			{ additionalProperties: false },
+		),
+	],
+	{ type: "object" },
+);
 
 const agentsSchema = Type.Object(
 	{
