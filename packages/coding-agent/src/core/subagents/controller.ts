@@ -879,7 +879,7 @@ export class SubagentController {
 			if (!wake) {
 				throw new Error(`Cannot message ${record.status} subagent without wake: ${name}`);
 			}
-			if (coordinated && record.status === "failed") {
+			if (coordinated && record.status === "failed" && record.coordinatedRun) {
 				if (record.lastRetryCycleId === this.#coordinationCycle) {
 					throw new Error(`Subagent retry limit reached for this parent prompt cycle: ${name}`);
 				}

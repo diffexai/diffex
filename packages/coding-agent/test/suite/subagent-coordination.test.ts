@@ -470,6 +470,69 @@ describe("automatic subagent coordination", () => {
 			);
 	});
 
+	it("leaves retries of failed direct SDK children manually managed", async () => {
+		const { root, harness } = await createRoot();
+		const retryStarted = deferred<void>();
+		const releaseRetry = deferred<void>();
+		let childAttempts = 0;
+		harness.setResponses(
+			Array.from({ length: 8 }, () => async (context: Context) => {
+				if (!hasTool(context, "spawn_agent")) {
+					childAttempts += 1;
+					if (childAttempts === 1) {
+						return fauxAssistantMessage("manual partial output", {
+							stopReason: "error",
+							errorMessage: "manual child failure",
+						});
+					}
+					retryStarted.resolve();
+					await releaseRetry.promise;
+					return fauxAssistantMessage("manual retry result");
+				}
+				if (!hasToolResult(context, "agent_action")) {
+					return fauxAssistantMessage(
+						fauxToolCall("agent_action", {
+							target: "manual",
+							action: "message",
+							message: "retry manually",
+							wake: true,
+						}),
+						{ stopReason: "toolUse" },
+					);
+				}
+				return fauxAssistantMessage("ordinary parent answer");
+			}),
+		);
+		await root
+			.getToolDefinition("spawn_agent")
+			?.execute(
+				"direct-spawn",
+				{ name: "manual", task: "fail manually" },
+				undefined,
+				undefined,
+				{} as ExtensionContext,
+			);
+		await waitFor(() => root.getSubagents()[0]?.status === "failed");
+
+		const prompt = root.prompt("wake the manual child");
+		await retryStarted.promise;
+		await prompt;
+		expect(root.getLastAssistantText()).toBe("ordinary parent answer");
+		expect(root.getSubagents()).toEqual([{ name: "manual", status: "running", task: "fail manually" }]);
+		expect(getHiddenResultMessages(root)).toHaveLength(0);
+
+		releaseRetry.resolve();
+		await root
+			.getToolDefinition("agents")
+			?.execute(
+				"manual-wait",
+				{ timeout_ms: 1_000, targets: ["manual"], until: "all" },
+				undefined,
+				undefined,
+				{} as ExtensionContext,
+			);
+	});
+
 	it("interrupts a frozen batch on cancellation without another provider call", async () => {
 		const { root, harness } = await createRoot();
 		const childrenStarted = new Set<string>();
