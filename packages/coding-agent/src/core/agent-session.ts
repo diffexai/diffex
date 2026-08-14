@@ -106,11 +106,7 @@ import type { SettingsManager } from "./settings-manager.ts";
 import type { SlashCommandInfo } from "./slash-commands.ts";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.ts";
 import type { SubagentController } from "./subagents/controller.ts";
-import type {
-	SubagentBatchResult,
-	SubagentDeliveryBatch,
-	SubagentSummary,
-} from "./subagents/types.ts";
+import type { SubagentBatchResult, SubagentDeliveryBatch, SubagentSummary } from "./subagents/types.ts";
 import { type BuildSystemPromptOptions, buildSystemPrompt } from "./system-prompt.ts";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts";
 import { createAllToolDefinitions } from "./tools/index.ts";

@@ -156,6 +156,7 @@ import {
 	IdleStatus,
 	RetryStatusIndicator,
 	type StatusIndicator,
+	SubagentWaitStatusIndicator,
 	WorkingStatusIndicator,
 } from "./components/status-indicator.ts";
 import { SubagentsComponent } from "./components/subagents.ts";
@@ -3307,6 +3308,30 @@ export class InteractiveMode {
 				await this.checkShutdownRequested();
 				break;
 
+			case "subagent_wait_start":
+				if (this.settingsManager.getShowTerminalProgress()) {
+					this.ui.terminal.setProgress(true);
+				}
+				this.showStatusIndicator(new SubagentWaitStatusIndicator(this.ui, event.names.length));
+				this.ui.requestRender();
+				break;
+
+			case "subagent_notice":
+				this.chatContainer.addChild(new Spacer(1));
+				this.chatContainer.addChild(
+					new Markdown(event.text, this.outputPad, 0, this.getMarkdownThemeWithSettings()),
+				);
+				this.ui.requestRender();
+				break;
+
+			case "subagent_wait_end":
+				if (this.settingsManager.getShowTerminalProgress()) {
+					this.ui.terminal.setProgress(false);
+				}
+				this.clearStatusIndicator("subagentWait");
+				this.ui.requestRender();
+				break;
+
 			case "compaction_start": {
 				if (this.settingsManager.getShowTerminalProgress()) {
 					this.ui.terminal.setProgress(true);
@@ -4236,7 +4261,7 @@ export class InteractiveMode {
 		if (allQueued.length === 0) {
 			this.updatePendingMessagesDisplay();
 			if (options?.abort) {
-				this.agent.abort();
+				void this.session.abort();
 			}
 			return 0;
 		}
@@ -4246,7 +4271,7 @@ export class InteractiveMode {
 		this.editor.setText(combinedText);
 		this.updatePendingMessagesDisplay();
 		if (options?.abort) {
-			this.agent.abort();
+			void this.session.abort();
 		}
 		return allQueued.length;
 	}
