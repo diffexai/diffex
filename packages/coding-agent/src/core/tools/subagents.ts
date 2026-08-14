@@ -125,7 +125,12 @@ export function createSpawnAgentTool(
 	return {
 		name: "spawn_agent",
 		label: "Spawn Agent",
-		description: "Start an independent child agent for a focused task and return immediately after acceptance.",
+		description:
+			"Start an independent child agent asynchronously. The tool returns after acceptance, but the enclosing parent prompt remains active until coordinated child work is delivered.",
+		promptGuidelines: [
+			"After spawning child agents, you may finish the current response. The session waits for the frozen child batch and automatically sends one hidden, name-sorted result message before the parent prompt settles.",
+			"If that hidden result message says a retry is available, analyze the error and partial output. Retry only with agent_action using action message and wake true. One coordinated retry is allowed per failed child in the current parent prompt cycle.",
+		],
 		parameters: spawnAgentSchema,
 		executionMode: "parallel",
 		execute: async (toolCallId, { name, task }) => {

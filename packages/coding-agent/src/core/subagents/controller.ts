@@ -6,7 +6,10 @@ import type {
 	CaptureSubagentSession,
 	CreateSubagentSession,
 	SubagentActionResult,
+	SubagentBatchResult,
+	SubagentBatchWaitOptions,
 	SubagentControllerSnapshot,
+	SubagentDeliveryBatch,
 	SubagentLifecycleEvent,
 	SubagentLifecycleListener,
 	SubagentPermit,
@@ -17,6 +20,7 @@ import type {
 	SubagentSpawnOrigin,
 	SubagentStatus,
 	SubagentSummary,
+	SubagentTerminalStatus,
 	SubagentWaitOptions,
 	SubagentWaitResult,
 } from "./types.ts";
@@ -42,6 +46,15 @@ interface RevisionWaiter {
 interface TransitionFields {
 	readonly finalText?: string;
 	readonly error?: string;
+}
+
+type DeliveryState = "pending" | "frozen" | "consumed";
+
+interface CoordinatedRun {
+	readonly id: number;
+	readonly cycleId: number;
+	readonly attempt: "initial" | "retry";
+	delivery: DeliveryState;
 }
 
 function normalizeError(error: unknown): string {
@@ -82,9 +95,11 @@ interface SubagentRecord {
 	interruptionRequested?: boolean;
 	actionTail?: Promise<void>;
 	cleanupFailures?: unknown[];
+	coordinatedRun?: CoordinatedRun;
+	lastRetryCycleId?: number;
 }
 
-function isTerminalStatus(status: SubagentStatus): boolean {
+function isTerminalStatus(status: SubagentStatus): status is SubagentTerminalStatus {
 	return status === "idle" || status === "failed" || status === "interrupted";
 }
 
@@ -133,6 +148,9 @@ export class SubagentController {
 	readonly #permitQueue: PermitRequest[] = [];
 	#activePermits = 0;
 	#revision = 0;
+	#coordinationCycle = 0;
+	#runSequence = 0;
+	#batchSequence = 0;
 	#closed = false;
 	#resetting = false;
 	#parent: AgentSession | undefined;
@@ -157,14 +175,19 @@ export class SubagentController {
 				if (!createSession) {
 					throw new Error("Subagent session capture is unavailable");
 				}
-				this.spawn(name, task, createSession);
+				this.spawn(name, task, createSession, origin);
 			}),
-			createAgentActionTool((request) =>
-				request.action === "message"
-					? this.message(request.target, request.message, request.wake)
-					: this.interrupt(request.target),
-			),
-			createAgentsTool((options) => this.queryAgents(options)),
+			createAgentActionTool((request) => {
+				const parent = this.#getBoundParent();
+				return request.action === "message"
+					? this.message(request.target, request.message, request.wake, parent.isStreaming)
+					: this.interrupt(request.target);
+			}),
+			createAgentsTool(async (options) => {
+				const result = await this.queryAgents(options);
+				this.#consumeTerminalQueryResults(result);
+				return result;
+			}),
 		];
 		return definitions.map((definition) => definition as unknown as ToolDefinition);
 	}
@@ -175,6 +198,11 @@ export class SubagentController {
 			throw new Error("Subagent controller parent is already bound");
 		}
 		this.#parent = session;
+	}
+
+	beginCoordinationCycle(): void {
+		this.#assertOpen();
+		this.#coordinationCycle += 1;
 	}
 
 	reserve(name: string, task: string): void {
@@ -204,18 +232,21 @@ export class SubagentController {
 		}));
 	}
 
-	spawn(name: string, task: string, createSession: CreateSubagentSession): void {
+	spawn(name: string, task: string, createSession: CreateSubagentSession, origin?: SubagentSpawnOrigin): void {
 		this.reserve(name, task);
 		const record = this.#records.get(name)!;
 		record.createSession = createSession;
+		if (origin?.type === "agent_tool_call") {
+			record.coordinatedRun = this.#createCoordinatedRun("initial");
+		}
 		this.#scheduleRun(record, task);
 	}
 
-	message(name: string, message: string, wake = false): Promise<SubagentActionResult> {
+	message(name: string, message: string, wake = false, coordinated = false): Promise<SubagentActionResult> {
 		if (message.trim().length === 0) {
 			return Promise.reject(new Error("Subagent message must be non-empty"));
 		}
-		return this.#serializeAction(name, () => this.#message(name, message, wake));
+		return this.#serializeAction(name, () => this.#message(name, message, wake, coordinated));
 	}
 
 	interrupt(name: string): Promise<SubagentActionResult> {
@@ -269,6 +300,89 @@ export class SubagentController {
 				}),
 			);
 		return Object.freeze(summaries);
+	}
+
+	freezeUnconsumedBatch(): SubagentDeliveryBatch | undefined {
+		if (this.#closed || this.#resetting) return undefined;
+		const attempts = [...this.#records.values()]
+			.flatMap((record) => {
+				const run = record.coordinatedRun;
+				if (!run || run.delivery !== "pending") return [];
+				run.delivery = "frozen";
+				return [{ name: record.name, runId: run.id }];
+			})
+			.sort((left, right) => left.name.localeCompare(right.name));
+		if (attempts.length === 0) return undefined;
+		return Object.freeze({
+			id: ++this.#batchSequence,
+			attempts: Object.freeze(attempts.map((attempt) => Object.freeze(attempt))),
+		});
+	}
+
+	async waitForBatch(batch: SubagentDeliveryBatch, options: SubagentBatchWaitOptions = {}): Promise<void> {
+		const notified = new Set<string>();
+		let snapshot = this.snapshot();
+		while (true) {
+			if (options.signal?.aborted) throw options.signal.reason;
+			const terminal = batch.attempts
+				.flatMap((attempt) => {
+					if (notified.has(attempt.name)) return [];
+					const result = this.#getBatchResult(attempt.name, attempt.runId);
+					if (!result) return [];
+					const completedAt = this.#records.get(attempt.name)?.completedAt ?? Number.MAX_SAFE_INTEGER;
+					return [{ result, completedAt }];
+				})
+				.sort(
+					(left, right) =>
+						left.completedAt - right.completedAt || left.result.name.localeCompare(right.result.name),
+				);
+			for (const { result } of terminal) {
+				notified.add(result.name);
+				options.onTerminal?.(result);
+			}
+			if (notified.size === batch.attempts.length) return;
+
+			const wait = await this.waitForChange(snapshot.revision, {
+				timeoutMs: MAX_TIMER_MS,
+				signal: options.signal,
+			});
+			if (wait.reason === "disposed" || wait.reason === "reset") {
+				throw wait.reason === "disposed" ? this.#closedError() : this.#resetError();
+			}
+			snapshot = wait.reason === "changed" ? wait.snapshot : this.snapshot();
+		}
+	}
+
+	consumeBatch(batch: SubagentDeliveryBatch): readonly SubagentBatchResult[] {
+		this.#assertOpen();
+		const results = batch.attempts.flatMap((attempt) => {
+			const record = this.#records.get(attempt.name);
+			const run = record?.coordinatedRun;
+			if (!record || !run || run.id !== attempt.runId || run.delivery === "consumed") return [];
+			if (run.delivery !== "frozen") {
+				throw new Error(`Subagent result is not frozen for delivery: ${attempt.name}`);
+			}
+			const result = this.#getBatchResult(attempt.name, attempt.runId);
+			if (!result) {
+				throw new Error(`Subagent result is not terminal: ${attempt.name}`);
+			}
+			run.delivery = "consumed";
+			return [result];
+		});
+		return Object.freeze(results);
+	}
+
+	async interruptBatch(batch: SubagentDeliveryBatch): Promise<void> {
+		const targets = batch.attempts.flatMap((attempt) => {
+			const record = this.#records.get(attempt.name);
+			if (!record?.coordinatedRun || record.coordinatedRun.id !== attempt.runId) return [];
+			return isTerminalStatus(record.status) ? [] : [record.name];
+		});
+		const results = await Promise.allSettled(targets.map((target) => this.interrupt(target)));
+		const failures = results.flatMap((result) => (result.status === "rejected" ? [result.reason] : []));
+		if (failures.length > 0) {
+			throw new AggregateError(failures, "Failed to interrupt coordinated subagents");
+		}
 	}
 
 	async queryAgents(options: SubagentQueryOptions): Promise<SubagentQueryResult> {
@@ -625,6 +739,38 @@ export class SubagentController {
 		return Object.freeze({ timedOut, agents: Object.freeze(agents) });
 	}
 
+	#consumeTerminalQueryResults(result: SubagentQueryResult): void {
+		for (const agent of result.agents) {
+			if (!isTerminalStatus(agent.status)) continue;
+			const run = this.#records.get(agent.name)?.coordinatedRun;
+			if (run) run.delivery = "consumed";
+		}
+	}
+
+	#createCoordinatedRun(attempt: "initial" | "retry"): CoordinatedRun {
+		return {
+			id: ++this.#runSequence,
+			cycleId: this.#coordinationCycle,
+			attempt,
+			delivery: "pending",
+		};
+	}
+
+	#getBatchResult(name: string, runId: number): SubagentBatchResult | undefined {
+		const record = this.#records.get(name);
+		const run = record?.coordinatedRun;
+		if (!record || !run || run.id !== runId || !isTerminalStatus(record.status)) return undefined;
+		const retryAvailable = record.status === "failed" && record.lastRetryCycleId !== run.cycleId;
+		return Object.freeze({
+			name,
+			status: record.status,
+			attempt: run.attempt,
+			retryAvailable,
+			...(record.finalText === undefined ? {} : { result: record.finalText }),
+			...(record.error === undefined ? {} : { error: record.error }),
+		});
+	}
+
 	#queryConditionMet(agents: readonly SubagentResultView[], until: "any" | "all"): boolean {
 		return until === "any"
 			? agents.some((agent) => isTerminalStatus(agent.status))
@@ -719,7 +865,7 @@ export class SubagentController {
 		return result;
 	}
 
-	async #message(name: string, message: string, wake: boolean): Promise<SubagentActionResult> {
+	async #message(name: string, message: string, wake: boolean, coordinated: boolean): Promise<SubagentActionResult> {
 		const record = this.#getRecordForAction(name);
 		while (record.status === "running" && record.session?.isIdle) {
 			await record.run;
@@ -733,6 +879,15 @@ export class SubagentController {
 			if (!wake) {
 				throw new Error(`Cannot message ${record.status} subagent without wake: ${name}`);
 			}
+			if (coordinated && record.status === "failed") {
+				if (record.lastRetryCycleId === this.#coordinationCycle) {
+					throw new Error(`Subagent retry limit reached for this parent prompt cycle: ${name}`);
+				}
+				record.lastRetryCycleId = this.#coordinationCycle;
+				record.coordinatedRun = this.#createCoordinatedRun("retry");
+			} else {
+				record.coordinatedRun = undefined;
+			}
 			this.#scheduleRun(record, message);
 			return { target: name, action: "message", status: "queued", delivery: "prompt" };
 		}
@@ -743,6 +898,7 @@ export class SubagentController {
 		}
 		if (record.status === "idle") {
 			if (wake) {
+				record.coordinatedRun = undefined;
 				this.#scheduleRun(record, message);
 				return { target: name, action: "message", status: "queued", delivery: "prompt" };
 			}

@@ -106,7 +106,11 @@ import type { SettingsManager } from "./settings-manager.ts";
 import type { SlashCommandInfo } from "./slash-commands.ts";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.ts";
 import type { SubagentController } from "./subagents/controller.ts";
-import type { SubagentSummary } from "./subagents/types.ts";
+import type {
+	SubagentBatchResult,
+	SubagentDeliveryBatch,
+	SubagentSummary,
+} from "./subagents/types.ts";
 import { type BuildSystemPromptOptions, buildSystemPrompt } from "./system-prompt.ts";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts";
 import { createAllToolDefinitions } from "./tools/index.ts";
@@ -183,6 +187,16 @@ export type AgentSessionEvent =
 	  }
 	| { type: "summarization_retry_finished" }
 	| { type: "auto_retry_end"; success: boolean; attempt: number; finalError?: string }
+	| { type: "subagent_wait_start"; names: readonly string[] }
+	| { type: "subagent_wait_end"; names: readonly string[]; cancelled: boolean }
+	| {
+			type: "subagent_notice";
+			name: string;
+			status: "idle" | "failed" | "interrupted";
+			attempt: "initial" | "retry";
+			retryAvailable: boolean;
+			text: string;
+	  }
 	| { type: "bash_execution_update"; id?: string; delta: string };
 
 /** Listener function for agent session events */
@@ -383,6 +397,7 @@ export class AgentSession {
 	private _baseSystemPromptOptions!: BuildSystemPromptOptions;
 	private _systemPromptOverride?: string;
 	private readonly _subagentController: SubagentController | undefined;
+	private _subagentWaitAbortController: AbortController | undefined;
 	private _disposePromise: Promise<void> | undefined;
 
 	constructor(config: AgentSessionConfig) {
@@ -1248,6 +1263,96 @@ export class AgentSession {
 		}
 	}
 
+	private _createSubagentNotice(result: SubagentBatchResult): Extract<AgentSessionEvent, { type: "subagent_notice" }> {
+		const text =
+			result.status === "idle"
+				? `${result.name} has finished execution.`
+				: result.status === "interrupted"
+					? `${result.name} was interrupted.`
+					: result.retryAvailable
+						? `${result.name} failed and a retry is being planned.`
+						: `${result.name} failed after one retry.`;
+		return {
+			type: "subagent_notice",
+			name: result.name,
+			status: result.status,
+			attempt: result.attempt,
+			retryAvailable: result.retryAvailable,
+			text,
+		};
+	}
+
+	private _createSubagentResultMessage(results: readonly SubagentBatchResult[]): CustomMessage {
+		const agents = results.map((result) => ({
+			name: result.name,
+			status: result.status,
+			attempt: result.attempt,
+			retry_available: result.retryAvailable,
+			...(result.status === "idle" && result.result !== undefined ? { result: result.result } : {}),
+			...(result.status !== "idle" && result.result !== undefined ? { partial_output: result.result } : {}),
+			...(result.error === undefined ? {} : { error: result.error }),
+		}));
+		const retryTargets = results.filter((result) => result.retryAvailable).map((result) => result.name);
+		return {
+			role: "custom",
+			customType: "subagent_results",
+			content: JSON.stringify({
+				type: "subagent_batch_results",
+				agents,
+				...(retryTargets.length === 0
+					? {}
+					: {
+							retry_instruction:
+								"Analyze each failed child's error and partial output. If a correction can help, call agent_action with action set to message, a corrective message, and wake set to true. Only one coordinated retry is available for each listed child in this parent prompt cycle. You may decline a retry and answer normally.",
+							retry_targets: retryTargets,
+						}),
+			}),
+			display: false,
+			details: { names: results.map((result) => result.name) },
+			timestamp: Date.now(),
+		};
+	}
+
+	private async _waitForSubagentBatch(
+		batch: SubagentDeliveryBatch,
+	): Promise<{ cancelled: boolean; results: readonly SubagentBatchResult[] }> {
+		const controller = this._subagentController;
+		if (!controller) return { cancelled: false, results: Object.freeze([]) };
+
+		const names = Object.freeze(batch.attempts.map((attempt) => attempt.name));
+		const noticed = new Set<string>();
+		const emitNotice = (result: SubagentBatchResult): void => {
+			if (noticed.has(result.name)) return;
+			noticed.add(result.name);
+			this._emit(this._createSubagentNotice(result));
+		};
+		const waitAbortController = new AbortController();
+		this._subagentWaitAbortController = waitAbortController;
+		this._emit({ type: "subagent_wait_start", names });
+
+		let cancelled = false;
+		try {
+			try {
+				await controller.waitForBatch(batch, {
+					signal: waitAbortController.signal,
+					onTerminal: emitNotice,
+				});
+			} catch (error) {
+				if (!waitAbortController.signal.aborted) throw error;
+				cancelled = true;
+				await controller.interruptBatch(batch);
+				await controller.waitForBatch(batch, { onTerminal: emitNotice });
+			}
+			const results = controller.consumeBatch(batch);
+			return { cancelled, results };
+		} finally {
+			if (this._subagentWaitAbortController === waitAbortController) {
+				this._subagentWaitAbortController = undefined;
+			}
+			this._emit({ type: "subagent_wait_end", names, cancelled });
+		}
+	}
+
 	private async _handlePostAgentRun(): Promise<boolean> {
 		const msg = this._lastAssistantMessage;
 		this._lastAssistantMessage = undefined;
@@ -1271,6 +1376,17 @@ export class AgentSession {
 
 		if (await this._checkCompaction(msg)) {
 			return true;
+		}
+
+		const batch = this._subagentController?.freezeUnconsumedBatch();
+		if (batch) {
+			const delivery = await this._waitForSubagentBatch(batch);
+			if (delivery.cancelled) return false;
+			if (delivery.results.length > 0) {
+				const message = this._createSubagentResultMessage(delivery.results);
+				await this.sendCustomMessage(message, { deliverAs: "steer" });
+				return true;
+			}
 		}
 
 		// The agent loop drains both queues before emitting agent_end. Any messages
@@ -1443,6 +1559,7 @@ export class AgentSession {
 		}
 
 		preflightResult?.(true);
+		this._subagentController?.beginCoordinationCycle();
 		await this._runAgentPrompt(messages);
 	}
 
@@ -1723,6 +1840,7 @@ export class AgentSession {
 	 */
 	async abort(): Promise<void> {
 		this.abortRetry();
+		this._subagentWaitAbortController?.abort(new Error("Subagent coordination cancelled"));
 		this.agent.abort();
 		await this.waitForIdle();
 	}

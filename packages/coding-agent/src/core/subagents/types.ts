@@ -85,6 +85,30 @@ export interface SubagentQueryResult {
 	readonly agents: readonly SubagentResultView[];
 }
 
+export type SubagentTerminalStatus = Extract<SubagentStatus, "idle" | "failed" | "interrupted">;
+
+export interface SubagentDeliveryBatch {
+	readonly id: number;
+	readonly attempts: readonly {
+		readonly name: string;
+		readonly runId: number;
+	}[];
+}
+
+export interface SubagentBatchResult {
+	readonly name: string;
+	readonly status: SubagentTerminalStatus;
+	readonly attempt: "initial" | "retry";
+	readonly retryAvailable: boolean;
+	readonly result?: string;
+	readonly error?: string;
+}
+
+export interface SubagentBatchWaitOptions {
+	readonly signal?: AbortSignal;
+	readonly onTerminal?: (result: SubagentBatchResult) => void;
+}
+
 export type SubagentLifecycleEvent =
 	| {
 			readonly type: "subagent_reserved";
