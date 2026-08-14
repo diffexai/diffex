@@ -200,7 +200,9 @@ interface PromptOptions {
 - `true` when the prompt was accepted, queued, or handled immediately
 - `false` when prompt preflight rejected before acceptance
 
-It fires before `prompt()` resolves. `prompt()` still resolves only after the full accepted run finishes, including retries. Failures after acceptance are reported through the normal event and message stream, not through `preflightResult(false)`.
+It fires before `prompt()` resolves.
+`prompt()` still resolves only after the full accepted run finishes, including retries and coordinated child-agent batches.
+Failures after acceptance are reported through the normal event and message stream, not through `preflightResult(false)`.
 
 The `prompt()` method handles prompt templates, extension commands, and message sending:
 
@@ -315,9 +317,18 @@ session.subscribe((event) => {
       // event.toolResults: tool results from this turn
       break;
     
-    // Session events (queue, compaction, retry)
+    // Session events (queue, compaction, retry, child coordination)
     case "queue_update":
       console.log(event.steering, event.followUp);
+      break;
+    case "subagent_wait_start":
+      console.log(`Waiting for: ${event.names.join(", ")}`);
+      break;
+    case "subagent_notice":
+      console.log(event.text);
+      break;
+    case "subagent_wait_end":
+      console.log(`Child wait cancelled: ${event.cancelled}`);
       break;
     case "compaction_start":
     case "compaction_end":
@@ -330,6 +341,12 @@ session.subscribe((event) => {
   }
 });
 ```
+
+`subagent_wait_start` identifies the frozen, name-sorted batch that must finish before the parent settles.
+`subagent_notice` is emitted as each child terminates and contains only the child name, terminal status, attempt kind, retry availability, and deterministic notice text.
+It never contains child results, partial output, or errors.
+`subagent_wait_end` closes the wait and reports whether it was cancelled.
+These lifecycle events are not added to agent messages, persisted as session entries, or included in provider context.
 
 ## Options Reference
 
@@ -514,13 +531,27 @@ const { session } = await createAgentSession({ resourceLoader: loader });
 
 Every root session enables three child-agent coordination tools by default:
 
-- `spawn_agent` starts a child agent asynchronously
+- `spawn_agent` starts a child agent asynchronously, while keeping the enclosing parent prompt active until coordinated work finishes
 - `agent_action` sends, wakes, or interrupts a child agent
 - `agents` lists child status immediately or waits for controller changes
 
 Root sessions run at most four children concurrently by default.
 Set `subagents: { maxConcurrent: number }` to configure that limit, or `subagents: false` to disable child agents and omit all three coordination tools.
 The names `spawn_agent`, `agent_action`, and `agents` are reserved and cannot be supplied through `customTools`.
+
+When the parent finishes an assistant run, the session freezes every unconsumed child attempt spawned through parent model tool calls.
+It waits until every child in that batch is idle, failed, or interrupted, then adds one non-displayed context message with name-sorted results, partial output, errors, and retry availability.
+The parent model continues automatically from that message, so callers do not need to send another user prompt.
+Terminal results returned explicitly by `agents` are marked consumed and are not delivered again.
+
+An initial child failure offers the parent one coordinated retry for that child during the current explicit parent prompt cycle.
+The parent can analyze the delivered error and partial output, then call `agent_action` with `action: "message"` and `wake: true`.
+A second retry in the same cycle is rejected, while a later explicit user prompt starts a fresh cycle.
+The parent may decline the retry and settle normally.
+
+Calling `session.abort()` during a coordinated wait interrupts unfinished children in the frozen batch, emits their interrupted notices, and settles without another provider call.
+Only children spawned by parent model tool calls use automatic coordination.
+Invoking the `spawn_agent` tool definition directly through the SDK leaves that child and its retries manually managed.
 
 Specify which tools to enable:
 

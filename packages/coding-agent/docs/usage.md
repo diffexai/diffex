@@ -63,6 +63,28 @@ Type `/` in the editor to open command completion. Extensions can register custo
 `/subagents` runs immediately, including while the parent agent is working or compacting.
 It displays the current in-memory roster without adding the command or roster to model context.
 
+## Automatic Sub-agent Coordination
+
+`spawn_agent` starts child work asynchronously, so the parent can launch multiple children without waiting between tool calls.
+The enclosing parent prompt remains active after the parent attempts to finish.
+Diffex freezes the children started by that prompt, waits until all of them finish, fail, or are interrupted, and displays a deterministic notice as each child terminates.
+
+After the whole batch is terminal, Diffex gives the parent one hidden, name-sorted context message containing the child results, partial output, errors, and retry availability.
+The parent continues automatically and produces its final response without another user prompt.
+If the parent already retrieved a terminal result with `agents`, Diffex does not deliver that result again.
+
+An initial failure gives the parent one opportunity to send a corrective `agent_action` message with `wake: true`.
+Only one coordinated retry is allowed per child during the current user prompt.
+The parent may decline the retry, and a later explicit user prompt starts a fresh retry cycle.
+
+While Diffex waits, the status indicator remains active and steering or follow-up input stays queued.
+Press Escape to restore queued input to the editor and interrupt unfinished children in the frozen batch.
+Diffex displays interrupted notices and settles without making another parent model call.
+
+Completion notices use assistant styling, but are not conversation messages.
+They are not persisted or included in model context.
+JSON and RPC modes emit the same notices as structured session events.
+
 ## Message Queue
 
 You can submit messages while the agent is still working:
@@ -305,6 +327,6 @@ diffex --exclude-tools ask_question
 
 Diffex keeps the core small and pushes workflow-specific behavior into extensions, skills, prompt templates, and packages.
 
-It intentionally does not include built-in MCP, sub-agents, permission popups, full plan mode, persistent to-dos, or background bash. The built-in `update_plan` tool is only a lightweight progress checklist. You can build or install richer workflows as extensions or packages, or use external tools such as containers and tmux.
+It intentionally does not include built-in MCP, permission popups, full plan mode, persistent to-dos, or background bash. The built-in `update_plan` tool is only a lightweight progress checklist. You can build or install richer workflows as extensions or packages, or use external tools such as containers and tmux.
 
 For the full rationale, read the [blog post](https://mariozechner.at/posts/2025-11-30-pi-coding-agent/).

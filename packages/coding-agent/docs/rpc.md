@@ -75,6 +75,10 @@ Response:
 
 `success: true` means the prompt was accepted, queued, or handled immediately. `success: false` means the prompt was rejected before acceptance. Failures after acceptance are reported through the normal event and message stream, not as a second `response` for the same request id.
 
+Acceptance is not settlement.
+If the parent spawns coordinated children, events continue while RPC mode waits for the frozen child batch and automatically resumes the parent with hidden results.
+Wait for `agent_settled`, not the `prompt` response or the first `agent_end`, before treating the prompt cycle as complete.
+
 The `images` field is optional. Each image uses `ImageContent` format: `{"type": "image", "data": "base64-encoded-data", "mimeType": "image/png"}`.
 
 #### steer
@@ -124,6 +128,8 @@ See [set_follow_up_mode](#set_follow_up_mode) for controlling how follow-up mess
 #### abort
 
 Abort the current agent operation.
+
+During a coordinated child wait, this interrupts every unfinished child in the frozen batch, emits terminal notices and a cancelled wait end event, and settles without another parent provider call.
 
 ```json
 {"type": "abort"}
@@ -850,6 +856,9 @@ Events are streamed to stdout as JSON lines during agent operation. Events do no
 | `tool_execution_update` | Tool execution progress (streaming output) |
 | `tool_execution_end` | Tool completes |
 | `queue_update` | Pending steering/follow-up queue changed |
+| `subagent_wait_start` | Parent begins waiting for a frozen, name-sorted child batch |
+| `subagent_notice` | One child reaches a terminal state; contains deterministic safe metadata only |
+| `subagent_wait_end` | Frozen child batch wait ends or is cancelled |
 | `compaction_start` | Compaction begins |
 | `compaction_end` | Compaction completes |
 | `auto_retry_start` | Auto-retry begins (after transient error) |
@@ -881,7 +890,8 @@ Emitted when one low-level agent run completes. Contains all messages generated 
 
 ### agent_settled
 
-Emitted after the full session-level run settles. At this point Diffex will not continue automatically through retry, compaction retry, or queued follow-up messages.
+Emitted after the full session-level run settles.
+At this point Diffex will not continue automatically through retry, compaction retry, coordinated child delivery, or queued follow-up messages.
 
 ```json
 {"type": "agent_settled"}
@@ -1025,6 +1035,61 @@ Emitted whenever the pending steering or follow-up queue changes.
   "followUp": ["After that, summarize the result"]
 }
 ```
+
+### subagent_wait_start / subagent_notice / subagent_wait_end
+
+When a parent assistant run ends with unconsumed children spawned through parent tool calls, RPC mode emits `subagent_wait_start` with the frozen, name-sorted batch:
+
+```json
+{
+  "type": "subagent_wait_start",
+  "names": ["alpha", "beta"]
+}
+```
+
+Each child emits one `subagent_notice` when its current attempt reaches a terminal state:
+
+```json
+{
+  "type": "subagent_notice",
+  "name": "beta",
+  "status": "idle",
+  "attempt": "initial",
+  "retryAvailable": false,
+  "text": "beta has finished execution."
+}
+```
+
+Notice text is deterministic:
+
+| Condition | Text |
+|-----------|------|
+| Successful completion | `<name> has finished execution.` |
+| Initial failure with a retry available | `<name> failed and a retry is being planned.` |
+| Failure after the coordinated retry | `<name> failed after one retry.` |
+| Interruption | `<name> was interrupted.` |
+
+Notice events never contain child results, partial output, or errors.
+They are not added to agent messages, persisted as session entries, or included in provider context.
+
+After every child is terminal, RPC mode emits the wait end event:
+
+```json
+{
+  "type": "subagent_wait_end",
+  "names": ["alpha", "beta"],
+  "cancelled": false
+}
+```
+
+Diffex then supplies one hidden, non-displayed context message to the parent with name-sorted child results, partial output, errors, and retry availability.
+That payload is model context, not a result-bearing session event.
+The parent continues automatically, and a later `agent_settled` marks completion.
+
+Terminal child results explicitly returned by the `agents` tool are consumed and excluded from automatic delivery.
+An initial failure offers one corrective wake through `agent_action` per child for the current parent prompt cycle.
+A second retry in the same cycle is rejected, while a later explicit user prompt starts a fresh cycle.
+The parent can decline a retry and settle normally.
 
 ### compaction_start / compaction_end
 
