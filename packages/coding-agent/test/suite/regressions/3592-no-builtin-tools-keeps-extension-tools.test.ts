@@ -8,6 +8,7 @@ import {
 	createAgentSessionFromServices,
 	createAgentSessionServices,
 } from "../../../src/core/agent-session-services.ts";
+import { SUBMIT_PLAN_TOOL_NAME } from "../../../src/core/plan-mode.ts";
 import { DefaultResourceLoader } from "../../../src/core/resource-loader.ts";
 import { createAgentSession } from "../../../src/core/sdk.ts";
 import { SessionManager } from "../../../src/core/session-manager.ts";
@@ -105,6 +106,22 @@ describe("regression #3592: no-builtin-tools keeps extension tools enabled", () 
 		expect(session.getAllTools()).toEqual([]);
 		expect(session.getActiveToolNames()).toEqual([]);
 		expect(session.systemPrompt).toContain("Available tools:\n(none)");
+
+		session.setCollaborationMode("plan");
+		expect(session.getAllTools().map((tool) => tool.name)).toEqual([SUBMIT_PLAN_TOOL_NAME]);
+		expect(session.getActiveToolNames()).toEqual([SUBMIT_PLAN_TOOL_NAME]);
+		await session.dispose();
+	});
+
+	it("keeps built-in tools disabled when switching to plan mode", async () => {
+		const session = await createSession({ noTools: "builtin" });
+
+		session.setCollaborationMode("plan");
+		expect(session.getAllTools().map((tool) => tool.name)).toEqual([SUBMIT_PLAN_TOOL_NAME]);
+		expect(session.getActiveToolNames()).toEqual([SUBMIT_PLAN_TOOL_NAME]);
+
+		session.setCollaborationMode("default");
+		expect(session.getActiveToolNames()).toEqual(["dynamic_tool"]);
 		await session.dispose();
 	});
 
