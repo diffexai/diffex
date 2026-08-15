@@ -43,7 +43,9 @@ import {
 	type TUI,
 	TuiAltScreen,
 	TuiMainScreen,
+	truncateToWidth,
 	visibleWidth,
+	wrapTextWithAnsi,
 } from "@earendil-works/diffex-tui";
 import chalk from "chalk";
 import { spawn, spawnSync } from "child_process";
@@ -67,6 +69,8 @@ import {
 } from "../../core/agent-session.ts";
 import {
 	type AgentSessionRuntime,
+	type ProfileSelectionProposal,
+	type ProfileSelectionResolution,
 	SessionImportFileNotFoundError,
 	TaskBoundaryCancelledError,
 	type TaskBoundaryProposal,
@@ -2626,8 +2630,17 @@ export class InteractiveMode {
 		return true;
 	}
 
-	private replaceEditorUi(token: object, component: Component, focus: Component): boolean {
+	private replaceEditorUi(
+		token: object,
+		component: Component,
+		focus: Component,
+		options: { cancel?: () => void; preserveOnSessionRebind?: boolean } = {},
+	): boolean {
 		if (this.activeEditorUi?.token !== token) return false;
+		if (options.cancel) this.activeEditorUi.cancel = options.cancel;
+		if (options.preserveOnSessionRebind !== undefined) {
+			this.activeEditorUi.preserveOnSessionRebind = options.preserveOnSessionRebind;
+		}
 		this.editorContainer.clear();
 		this.editorContainer.addChild(component);
 		this.ui.setFocus(focus);
@@ -2759,6 +2772,93 @@ export class InteractiveMode {
 		controller?.abort();
 	}
 
+	private resolvePlanProfileSelection(
+		proposal: ProfileSelectionProposal,
+		signal: AbortSignal,
+		handoffToken: object,
+		handoff: BorderedLoader,
+		handoffCancel: () => void,
+	): Promise<ProfileSelectionResolution> {
+		return new Promise((resolve) => {
+			if (signal.aborted || this.activeEditorUi?.token !== handoffToken) {
+				resolve({ cancelled: true });
+				return;
+			}
+
+			const clean = (value: string): string => sanitizeSingleLineUiText(value);
+			const labels = proposal.options.map((option, index) => {
+				const summarizeTools = (tools: readonly string[]): string => {
+					const visibleTools = tools.slice(0, 2).map(clean);
+					return `${visibleTools.join(", ")}${tools.length > visibleTools.length ? ` +${tools.length - visibleTools.length}` : ""}`;
+				};
+				const policy: string[] = [];
+				if (option.toolPolicy.required.length > 0) {
+					policy.push(`requires ${summarizeTools(option.toolPolicy.required)}`);
+				}
+				if (option.toolPolicy.denied.length > 0) {
+					policy.push(`no ${summarizeTools(option.toolPolicy.denied)}`);
+				}
+				if (policy.length === 0) {
+					policy.push(
+						option.toolPolicy.default.includes("bash")
+							? "bash enabled"
+							: `tools: ${summarizeTools(option.toolPolicy.default) || "profile defaults"}`,
+					);
+				}
+				const recommended = index === 0 ? " (recommended)" : "";
+				const description = clean(option.description).split(/[,.]/, 1)[0];
+				const optionWidth = Math.max(20, this.ui.terminal.columns - 6);
+				const profileLine = truncateToWidth(
+					`${index + 1}. ${clean(option.name)}${recommended} - ${description}`,
+					optionWidth,
+					"...",
+				);
+				const safeguardLines = wrapTextWithAnsi(
+					`Safeguards: ${clean(option.safeguardSummary)}`,
+					Math.max(1, optionWidth - 3),
+				).map((line) => `   ${line}`);
+				const toolLine = truncateToWidth(`   Tools: ${policy.join("; ")}`, optionWidth, "...");
+				return [profileLine, ...safeguardLines, toolLine].join("\n");
+			});
+			const profileIds = new Map(labels.map((label, index) => [label, proposal.options[index]?.profileId]));
+
+			let settled = false;
+			let selector: ExtensionSelectorComponent | undefined;
+			const restoreHandoff = (): boolean =>
+				this.replaceEditorUi(handoffToken, handoff, handoff, {
+					cancel: handoffCancel,
+					preserveOnSessionRebind: true,
+				});
+			const settle = (resolution: ProfileSelectionResolution, restore: boolean): void => {
+				if (settled) return;
+				settled = true;
+				signal.removeEventListener("abort", onAbort);
+				selector?.dispose();
+				resolve(restore && !restoreHandoff() ? { cancelled: true } : resolution);
+			};
+			const cancelOwner = () => settle({ cancelled: true }, false);
+			const onAbort = () => this.cancelEditorUi(handoffToken);
+			selector = new ExtensionSelectorComponent(
+				"Choose an implementation profile\nThis changes expertise, safeguards, and tool access",
+				labels,
+				(label) => {
+					const profileId = profileIds.get(label);
+					settle(profileId ? { profileId } : { cancelled: true }, true);
+				},
+				() => settle({ cancelled: true }, true),
+			);
+			signal.addEventListener("abort", onAbort, { once: true });
+			if (
+				!this.replaceEditorUi(handoffToken, selector, selector, {
+					cancel: cancelOwner,
+					preserveOnSessionRebind: false,
+				})
+			) {
+				settle({ cancelled: true }, false);
+			}
+		});
+	}
+
 	private openPendingPlanDecision(options: { explicit?: boolean } = {}): void {
 		const plan = this.session.pendingPlan;
 		if (!plan || !this.session.isIdle || this.session.isStreaming || this.planDecisionAbortController) return;
@@ -2787,18 +2887,18 @@ export class InteractiveMode {
 			handoff.dispose();
 			this.closeEditorUi(handoffToken);
 		};
-		handoffToken = this.mountEditorUi(
-			handoff,
-			handoff,
-			() => {
-				if (handoffReleased) return;
-				handoffReleased = true;
-				handoff.dispose();
-			},
-			{ exclusive: true, preserveOnSessionRebind: true },
-		);
+		const handoffCancel = () => {
+			if (handoffReleased) return;
+			handoffReleased = true;
+			handoff.dispose();
+		};
+		handoffToken = this.mountEditorUi(handoff, handoff, handoffCancel, {
+			exclusive: true,
+			preserveOnSessionRebind: true,
+		});
 
 		let preflightAccepted = false;
+		let profileSelectionCancelled = false;
 		let inputOwnershipReleased = false;
 		const releaseInputOwnership = () => {
 			if (inputOwnershipReleased) return;
@@ -2809,6 +2909,17 @@ export class InteractiveMode {
 		try {
 			const prompt = this.runtimeHost.promptPlanContinuation(continuation, {
 				source: "interactive",
+				profileSelectionResolver: async (proposal, signal) => {
+					const resolution = await this.resolvePlanProfileSelection(
+						proposal,
+						signal,
+						handoffToken,
+						handoff,
+						handoffCancel,
+					);
+					profileSelectionCancelled = "cancelled" in resolution;
+					return resolution;
+				},
 				preflightResult: (success) => {
 					preflightAccepted = success;
 					if (success) releaseInputOwnership();
@@ -2823,6 +2934,10 @@ export class InteractiveMode {
 			const message = error instanceof Error ? error.message : String(error);
 			if (preflightAccepted) {
 				this.showError(`Plan implementation failed after it started: ${message}`);
+			} else if (profileSelectionCancelled) {
+				this.showStatus(
+					"Profile selection cancelled. Accepted plan implementation is waiting; use /plan to retry.",
+				);
 			} else {
 				this.showError(
 					`Plan acceptance persisted, but implementation could not start: ${message} Use /plan to retry.`,
