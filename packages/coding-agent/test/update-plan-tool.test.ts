@@ -165,7 +165,7 @@ describe("update_plan tool", () => {
 		).rejects.toThrow("Plan item 1 status must be pending, in_progress, or completed.");
 	});
 
-	test("publishes a DeepSeek-compatible object schema", () => {
+	test("publishes a provider-compatible object schema", () => {
 		const definition = createUpdatePlanToolDefinition();
 		const parameters = definition.parameters as {
 			type?: string;
@@ -238,6 +238,45 @@ describe("update_plan tool", () => {
 		};
 		const updatePlan = sentPayload.tools?.find((tool) => tool.function?.name === "update_plan");
 		expect(updatePlan?.function?.parameters?.type).toBe("object");
+		expect(result.stopReason).toBe("stop");
+	});
+
+	test("sends the object schema through an OpenAI Responses interaction", async () => {
+		const model = getModel("openai", "gpt-5-mini");
+		expect(model).toBeDefined();
+		if (!model) throw new Error("Expected the OpenAI model fixture");
+		let payload: unknown;
+
+		const result = await streamSimple(
+			model,
+			{
+				messages: [{ role: "user", content: "Plan this task", timestamp: Date.now() }],
+				tools: [createUpdatePlanTool()],
+			},
+			{
+				apiKey: "test-key",
+				fetch: async () =>
+					new Response(
+						`data: ${JSON.stringify({
+							type: "response.completed",
+							response: {
+								status: "completed",
+								usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
+							},
+						})}\n\n`,
+						{ status: 200, headers: { "content-type": "text/event-stream" } },
+					),
+				onPayload: (requestPayload) => {
+					payload = requestPayload;
+				},
+			},
+		).result();
+
+		const sentPayload = payload as {
+			tools?: Array<{ name?: string; parameters?: { type?: string } }>;
+		};
+		const updatePlan = sentPayload.tools?.find((tool) => tool.name === "update_plan");
+		expect(updatePlan?.parameters?.type).toBe("object");
 		expect(result.stopReason).toBe("stop");
 	});
 
