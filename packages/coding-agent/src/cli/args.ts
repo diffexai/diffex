@@ -36,6 +36,7 @@ export interface Args {
 	extensions?: string[];
 	noExtensions?: boolean;
 	print?: boolean;
+	plan?: boolean;
 	export?: string;
 	noSkills?: boolean;
 	skills?: string[];
@@ -146,6 +147,8 @@ export function parseArgs(args: string[]): Args {
 				result.messages.push(next);
 				i++;
 			}
+		} else if (arg === "--plan") {
+			result.plan = true;
 		} else if (arg === "--export" && i + 1 < args.length) {
 			result.export = args[++i];
 		} else if ((arg === "--extension" || arg === "-e") && i + 1 < args.length) {
@@ -259,6 +262,7 @@ ${chalk.bold("Options:")}
   --append-system-prompt <text>  Append text or file contents to the system prompt (can be used multiple times)
   --mode <mode>                  Output mode: text (default), json, or rpc
   --print, -p                    Non-interactive mode: process prompt and exit
+  --plan                         Start in plan mode (interactive only)
   --continue, -c                 Continue previous session
   --resume, -r                   Select a session to resume
   --session <path|id>            Use specific session file or partial UUID
@@ -269,12 +273,13 @@ ${chalk.bold("Options:")}
   --name, -n <name>              Set session display name
   --models <patterns>            Comma-separated model patterns for Ctrl+P cycling
                                  Supports globs (anthropic/*, *sonnet*) and fuzzy matching
-  --no-tools, -nt                Disable all tools by default (built-in and extension)
+  --no-tools, -nt                Disable normal tools and plan-mode inspection tools by default
   --no-builtin-tools, -nbt       Disable built-in tools by default but keep extension/custom tools enabled
   --tools, -t <tools>            Comma-separated allowlist of tool names to enable
                                  Applies to built-in, extension, and custom tools
   --exclude-tools, -xt <tools>   Comma-separated denylist of tool names to disable
                                  Applies to built-in, extension, and custom tools
+                                 Plan mode always retains its intrinsic submit_plan tool
   --thinking <level>             Set thinking level: off, minimal, low, medium, high, xhigh, max
   --extension, -e <path>         Load an extension file (can be used multiple times)
   --no-extensions, -ne           Disable extension discovery (explicit -e paths still work)
@@ -295,7 +300,7 @@ ${chalk.bold("Options:")}
   --help, -h                     Show this help
   --version, -v                  Show version number
 
-Extensions can register additional flags (e.g., --plan from plan-mode extension).${extensionFlagsText}
+Extensions can register additional flags.${extensionFlagsText}
 
 ${chalk.bold("Examples:")}
   # Print a provider API key for an external client

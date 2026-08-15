@@ -109,6 +109,14 @@ describe("auth check command", () => {
 		});
 	});
 
+	test("rejects plan mode for auth commands", async () => {
+		const runtime = await createRuntime(AuthStorage.inMemory({ openai: { type: "api_key", key: "test-key" } }));
+
+		await expect(checkProviderAuth(parseArgs(["--provider", "openai", "--plan"]), runtime)).rejects.toThrow(
+			"Auth commands only accept --provider and --model",
+		);
+	});
+
 	test("does not treat an unresolved stored environment reference as configured", async () => {
 		const authPath = join(tempDir, "auth.json");
 		writeFileSync(authPath, JSON.stringify({ openai: { type: "api_key", key: "$MISSING_AUTH_CHECK_KEY" } }), "utf-8");

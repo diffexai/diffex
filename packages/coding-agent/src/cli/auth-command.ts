@@ -102,7 +102,7 @@ export function validateAuthCommandArgs(args: Args, kind: AuthCommandKind): { pr
 		const option = args.unknownFlags.keys().next().value;
 		throw new AuthCommandError(`Unknown option --${option} for "${getAuthCommandName(kind)}".`);
 	}
-	if (args.apiKey !== undefined || args.messages.length > 0 || args.fileArgs.length > 0) {
+	if (args.apiKey !== undefined || args.plan || args.messages.length > 0 || args.fileArgs.length > 0) {
 		throw new AuthCommandError("Auth commands only accept --provider and --model");
 	}
 	if (kind === "check") {
