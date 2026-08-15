@@ -172,6 +172,9 @@ function getMessageFromEntry(entry: SessionEntry): AgentMessage | undefined {
 		// These don't contribute to conversation content
 		case "thinking_level_change":
 		case "model_change":
+		case "collaboration_mode_change":
+		case "plan":
+		case "plan_resolution":
 		case "custom":
 		case "label":
 		case "session_info":
