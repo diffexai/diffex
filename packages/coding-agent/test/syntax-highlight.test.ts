@@ -63,7 +63,7 @@ describe("theme syntax highlighting", () => {
 		const lines = highlightCode("-old\n+new\n", "diff");
 
 		expect(lines[0]).toBe("\x1b[38;2;204;102;102m-old\x1b[39m");
-		expect(lines[1]).toBe("\x1b[38;2;181;189;104m+new\x1b[39m");
+		expect(lines[1]).toBe("\x1b[38;2;88;161;112m+new\x1b[39m");
 	});
 
 	it("keeps cli-highlight default styled scopes mapped to theme styles", () => {
