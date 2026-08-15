@@ -203,13 +203,13 @@ function formatPlanStep(step: unknown, theme: Theme): string {
 	return theme.fg("toolOutput", step);
 }
 
-function formatPlanCall(args: unknown, theme: Theme): string {
+function formatPlanCall(args: unknown, theme: Theme, showInvalidArgs: boolean): string {
 	let text = theme.fg("toolTitle", theme.bold("update_plan"));
 	let details: UpdatePlanToolDetails;
 	try {
 		details = parseUpdatePlanOperation(args);
 	} catch {
-		return `${text}\n${invalidArgText(theme)}`;
+		return showInvalidArgs ? `${text}\n${invalidArgText(theme)}` : text;
 	}
 
 	if (details.explanation !== undefined) {
@@ -247,8 +247,12 @@ export function createUpdatePlanToolDefinition(): ToolDefinition<typeof updatePl
 				details,
 			};
 		},
-		renderCall(args, theme) {
-			return new Text(formatPlanCall(args, theme), 0, 0);
+		renderCall(args, theme, context) {
+			return new Text(
+				formatPlanCall(args, theme, context.argsComplete || context.executionStarted || context.isError),
+				0,
+				0,
+			);
 		},
 		renderResult(result, _options, theme, context) {
 			if (!context.isError) {

@@ -246,6 +246,27 @@ describe("update_plan tool", () => {
 		expect(createUpdatePlanTool().executionMode).toBe("sequential");
 	});
 
+	test("does not render partial update_plan arguments as invalid", () => {
+		const definition = createUpdatePlanToolDefinition() as ToolDefinition;
+		const component = new ToolExecutionComponent(
+			"update_plan",
+			"tool-streaming",
+			{},
+			{},
+			definition,
+			createFakeTui(),
+			process.cwd(),
+		);
+
+		const streaming = stripAnsi(component.render(120).join("\n"));
+		expect(streaming).toContain("update_plan");
+		expect(streaming).not.toContain("[invalid arg]");
+
+		component.setArgsComplete();
+		const complete = stripAnsi(component.render(120).join("\n"));
+		expect(complete).toContain("[invalid arg]");
+	});
+
 	test("renders update explanations and checklists once while suppressing the successful result body", () => {
 		const input = {
 			explanation: "Repository evidence changed.",
