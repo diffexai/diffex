@@ -868,9 +868,16 @@ export class AgentSession {
 				event.message.role === "toolResult"
 			) {
 				// Regular LLM message - persist as SessionMessageEntry
-				this.sessionManager.appendMessage(event.message);
-				if (event.message.role === "user" && event.message === this._activePlanContinuation?.userMessage) {
-					this._activePlanContinuation.persisted = true;
+				const activePlanContinuation = this._activePlanContinuation;
+				if (
+					event.message.role === "user" &&
+					activePlanContinuation !== undefined &&
+					event.message === activePlanContinuation.userMessage
+				) {
+					this.sessionManager.appendPlanContinuationMessage(event.message);
+					activePlanContinuation.persisted = true;
+				} else {
+					this.sessionManager.appendMessage(event.message);
 				}
 			}
 			// Other message types (bashExecution, compactionSummary, branchSummary) are persisted elsewhere
