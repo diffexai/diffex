@@ -337,4 +337,218 @@ describe("AgentSession native plan mode", () => {
 		expect(commandOwnedReplacement).toBe(true);
 	});
 
+	it("serializes queued prompt preflights without letting a later prompt overtake", async () => {
+		let releaseFirstResponse!: () => void;
+		let firstResponseStarted!: () => void;
+		let releaseSecondInput!: () => void;
+		let secondInputStarted!: () => void;
+		let thirdInputStarted!: () => void;
+		const firstResponseGate = new Promise<void>((resolve) => {
+			releaseFirstResponse = resolve;
+		});
+		const firstResponseStartedPromise = new Promise<void>((resolve) => {
+			firstResponseStarted = resolve;
+		});
+		const secondInputGate = new Promise<void>((resolve) => {
+			releaseSecondInput = resolve;
+		});
+		const secondInputStartedPromise = new Promise<void>((resolve) => {
+			secondInputStarted = resolve;
+		});
+		const thirdInputStartedPromise = new Promise<void>((resolve) => {
+			thirdInputStarted = resolve;
+		});
+		const harness = await createHarness({
+			extensionFactories: [
+				(pi) => {
+					pi.on("input", async (event) => {
+						if (event.text === "second prompt") {
+							secondInputStarted();
+							await secondInputGate;
+						} else if (event.text === "third prompt") {
+							thirdInputStarted();
+						}
+					});
+				},
+			],
+		});
+		harnesses.push(harness);
+		harness.setResponses([
+			async () => {
+				firstResponseStarted();
+				await firstResponseGate;
+				return fauxAssistantMessage("first response");
+			},
+			fauxAssistantMessage("second response"),
+			fauxAssistantMessage("third response"),
+		]);
+
+		const firstPrompt = harness.session.prompt("first prompt");
+		await firstResponseStartedPromise;
+		const secondPrompt = harness.session.prompt("second prompt", { streamingBehavior: "followUp" });
+		await secondInputStartedPromise;
+		let thirdSettled = false;
+		const thirdPrompt = harness.session.prompt("third prompt", { streamingBehavior: "followUp" }).finally(() => {
+			thirdSettled = true;
+		});
+		await thirdInputStartedPromise;
+
+		expect(harness.session.isStreaming).toBe(true);
+		expect(harness.session.pendingMessageCount).toBe(0);
+		expect(thirdSettled).toBe(false);
+
+		releaseFirstResponse();
+		await firstPrompt;
+		expect(harness.session.isIdle).toBe(true);
+		expect(harness.session.isStreaming).toBe(true);
+		expect(() => harness.session.setCollaborationMode("plan")).toThrow("Wait for the current operation to finish");
+		expect(thirdSettled).toBe(false);
+
+		releaseSecondInput();
+		await Promise.all([secondPrompt, thirdPrompt]);
+		expect(getUserTexts(harness)).toEqual(["first prompt", "second prompt", "third prompt"]);
+		expect(harness.getPendingResponseCount()).toBe(0);
+		expect(harness.session.isStreaming).toBe(false);
+	});
+
+	it("holds plan resolution while a queued preflight outlives terminal plan submission", async () => {
+		let releaseFirstResponse!: () => void;
+		let firstResponseStarted!: () => void;
+		let releaseInput!: () => void;
+		let inputStarted!: () => void;
+		const firstResponseGate = new Promise<void>((resolve) => {
+			releaseFirstResponse = resolve;
+		});
+		const firstResponseStartedPromise = new Promise<void>((resolve) => {
+			firstResponseStarted = resolve;
+		});
+		const inputGate = new Promise<void>((resolve) => {
+			releaseInput = resolve;
+		});
+		const inputStartedPromise = new Promise<void>((resolve) => {
+			inputStarted = resolve;
+		});
+		const harness = await createHarness({
+			extensionFactories: [
+				(pi) => {
+					pi.on("input", async (event) => {
+						if (event.text !== "queued refinement") return;
+						inputStarted();
+						await inputGate;
+					});
+				},
+			],
+		});
+		harnesses.push(harness);
+		harness.session.setCollaborationMode("plan");
+		harness.setResponses([
+			async () => {
+				firstResponseStarted();
+				await firstResponseGate;
+				return fauxAssistantMessage(
+					fauxToolCall(SUBMIT_PLAN_TOOL_NAME, {
+						title: "Terminal plan",
+						markdown: "1. Stop before the queued refinement can run.",
+					}),
+					{ stopReason: "toolUse" },
+				);
+			},
+			fauxAssistantMessage("This response must remain unused."),
+		]);
+
+		const firstPrompt = harness.session.prompt("submit a plan");
+		await firstResponseStartedPromise;
+		const queuedPrompt = harness.session.prompt("queued refinement", { streamingBehavior: "followUp" });
+		await inputStartedPromise;
+		releaseFirstResponse();
+		await firstPrompt;
+		const plan = harness.session.pendingPlan;
+		if (!plan) throw new Error("Expected a pending plan");
+
+		expect(harness.session.isIdle).toBe(true);
+		expect(harness.session.isStreaming).toBe(true);
+		expect(() => harness.session.resolvePlan(plan.id, "implement")).toThrow(
+			"Wait for the current operation to finish",
+		);
+		expect(() => harness.session.setCollaborationMode("default")).toThrow("Wait for the current operation to finish");
+		expect(harness.session.pendingPlan).toEqual(plan);
+
+		releaseInput();
+		await queuedPrompt;
+		expect(harness.session.pendingPlan).toEqual(plan);
+		expect(getUserTexts(harness)).not.toContain("queued refinement");
+		expect(harness.getPendingResponseCount()).toBe(1);
+		expect(harness.session.isStreaming).toBe(false);
+	});
+
+	it("discards a queued prompt when a plan is submitted while it waits behind an earlier preflight", async () => {
+		let releaseFirstResponse!: () => void;
+		let firstResponseStarted!: () => void;
+		let releaseHandledInput!: () => void;
+		let handledInputStarted!: () => void;
+		let waitingInputStarted!: () => void;
+		const firstResponseGate = new Promise<void>((resolve) => {
+			releaseFirstResponse = resolve;
+		});
+		const firstResponseStartedPromise = new Promise<void>((resolve) => {
+			firstResponseStarted = resolve;
+		});
+		const handledInputGate = new Promise<void>((resolve) => {
+			releaseHandledInput = resolve;
+		});
+		const handledInputStartedPromise = new Promise<void>((resolve) => {
+			handledInputStarted = resolve;
+		});
+		const waitingInputStartedPromise = new Promise<void>((resolve) => {
+			waitingInputStarted = resolve;
+		});
+		const harness = await createHarness({
+			extensionFactories: [
+				(pi) => {
+					pi.on("input", async (event) => {
+						if (event.text === "handled prompt") {
+							handledInputStarted();
+							await handledInputGate;
+							return { action: "handled" as const };
+						}
+						if (event.text === "waiting prompt") waitingInputStarted();
+					});
+				},
+			],
+		});
+		harnesses.push(harness);
+		harness.session.setCollaborationMode("plan");
+		harness.setResponses([
+			async () => {
+				firstResponseStarted();
+				await firstResponseGate;
+				return fauxAssistantMessage(
+					fauxToolCall(SUBMIT_PLAN_TOOL_NAME, {
+						title: "Terminal plan",
+						markdown: "1. Discard every prompt queued behind this planning run.",
+					}),
+					{ stopReason: "toolUse" },
+				);
+			},
+			fauxAssistantMessage("This response must remain unused."),
+		]);
+
+		const firstPrompt = harness.session.prompt("submit a plan");
+		await firstResponseStartedPromise;
+		const handledPrompt = harness.session.prompt("handled prompt", { streamingBehavior: "followUp" });
+		await handledInputStartedPromise;
+		const waitingPrompt = harness.session.prompt("waiting prompt", { streamingBehavior: "followUp" });
+		await waitingInputStartedPromise;
+
+		releaseFirstResponse();
+		await firstPrompt;
+		expect(harness.session.pendingPlan?.title).toBe("Terminal plan");
+
+		releaseHandledInput();
+		await Promise.all([handledPrompt, waitingPrompt]);
+		expect(getUserTexts(harness)).not.toContain("waiting prompt");
+		expect(harness.getPendingResponseCount()).toBe(1);
+		expect(harness.session.isStreaming).toBe(false);
+	});
+
 });
