@@ -86,6 +86,7 @@ export class DiffexWelcomeHeader implements Component {
 	private tick = 0;
 	private interval: ReturnType<typeof setInterval> | undefined;
 	private readonly details = new Text("", 1, 0);
+	private detailsText: string | undefined;
 
 	constructor(ui: TUI, getCollapsedText: () => string, getExpandedText: () => string, expanded = false) {
 		this.ui = ui;
@@ -115,6 +116,7 @@ export class DiffexWelcomeHeader implements Component {
 	}
 
 	render(width: number): string[] {
+		this.updateDetails();
 		if (width < 4) {
 			return [...renderDiffexWelcomeFrame(this.tick, width).map(diffexIntroText), ...this.details.render(width)];
 		}
@@ -149,6 +151,11 @@ export class DiffexWelcomeHeader implements Component {
 	}
 
 	private updateDetails(): void {
-		this.details.setText(this.expanded ? this.getExpandedText() : this.getCollapsedText());
+		const detailsText = this.expanded ? this.getExpandedText() : this.getCollapsedText();
+		if (detailsText === this.detailsText) {
+			return;
+		}
+		this.detailsText = detailsText;
+		this.details.setText(detailsText);
 	}
 }

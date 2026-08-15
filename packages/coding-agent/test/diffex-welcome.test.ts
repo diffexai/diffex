@@ -30,14 +30,9 @@ describe("DiffexWelcomeHeader", () => {
 	test("wraps the intro in a blue boundary box with light logo text", () => {
 		initTheme("dark", false);
 		const ui = { requestRender() {} } as unknown as TUI;
-		const details = [diffexIntroAccent("Diffex") + diffexIntroText(" v1.0.0"), diffexIntroText("~/project")].join(
-			"\n",
-		);
-		const header = new DiffexWelcomeHeader(
-			ui,
-			() => details,
-			() => details,
-		);
+		const getDetails = () =>
+			[diffexIntroAccent("Diffex") + diffexIntroText(" v1.0.0"), diffexIntroText("~/project")].join("\n");
+		const header = new DiffexWelcomeHeader(ui, getDetails, getDetails);
 		header.dispose();
 
 		const rendered = header.render(60);
@@ -50,5 +45,27 @@ describe("DiffexWelcomeHeader", () => {
 		for (const line of rendered) {
 			expect(visibleWidth(line)).toBe(60);
 		}
+	});
+
+	test("refreshes detail colors when the active theme changes", () => {
+		initTheme("dark", false);
+		const ui = { requestRender() {} } as unknown as TUI;
+		const getDetails = () =>
+			[diffexIntroAccent("Diffex") + diffexIntroText(" v1.0.0"), diffexIntroText("~/project")].join("\n");
+		const header = new DiffexWelcomeHeader(ui, getDetails, getDetails);
+		header.dispose();
+
+		const darkDetails = header.render(60).find((line) => line.includes("Diffex"));
+		const darkAccent = theme.getFgAnsi("startupIntroAccent");
+		const darkText = theme.getFgAnsi("startupIntroText");
+		expect(darkDetails).toContain(darkAccent);
+		expect(darkDetails).toContain(darkText);
+
+		initTheme("light", false);
+		const lightDetails = header.render(60).find((line) => line.includes("Diffex"));
+		expect(lightDetails).toContain(theme.getFgAnsi("startupIntroAccent"));
+		expect(lightDetails).toContain(theme.getFgAnsi("startupIntroText"));
+		expect(lightDetails).not.toContain(darkAccent);
+		expect(lightDetails).not.toContain(darkText);
 	});
 });

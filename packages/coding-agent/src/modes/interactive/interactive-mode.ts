@@ -941,16 +941,17 @@ export class InteractiveMode {
 
 		// Add header with keybindings from config (unless silenced)
 		if (this.options.verbose || !this.settingsManager.getQuietStartup()) {
-			const logo = diffexIntroAccent("Diffex") + diffexIntroText(` v${this.version}`);
-			const projectDirectory = diffexIntroText(
-				formatCwdForFooter(this.sessionManager.getCwd(), process.env.HOME || process.env.USERPROFILE),
-			);
-			const headerLines = [logo, projectDirectory, ...this.getStartupWhatsNewLines()];
-			const headerDetails = headerLines.join("\n");
+			const getHeaderDetails = () => {
+				const logo = diffexIntroAccent("Diffex") + diffexIntroText(` v${this.version}`);
+				const projectDirectory = diffexIntroText(
+					formatCwdForFooter(this.sessionManager.getCwd(), process.env.HOME || process.env.USERPROFILE),
+				);
+				return [logo, projectDirectory, ...this.getStartupWhatsNewLines()].join("\n");
+			};
 			this.builtInHeader = new DiffexWelcomeHeader(
 				this.ui,
-				() => headerDetails,
-				() => headerDetails,
+				getHeaderDetails,
+				getHeaderDetails,
 				this.getStartupExpansionState(),
 			);
 
