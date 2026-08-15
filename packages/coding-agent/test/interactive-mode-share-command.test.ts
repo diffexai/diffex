@@ -23,6 +23,13 @@ type ShareCommandContext = {
 	editorContainer: { clear: () => void; addChild: (child: unknown) => void };
 	editor: object;
 	ui: { setFocus: (component: unknown) => void; requestRender: () => void };
+	mountEditorUi: (
+		component: unknown,
+		focusTarget: unknown,
+		cancel: () => void,
+		options?: { exclusive?: boolean; preserveOnSessionRebind?: boolean },
+	) => object;
+	closeEditorUi: (token: object) => boolean;
 	showError: (message: string) => void;
 	showStatus: (message: string) => void;
 };
@@ -63,6 +70,8 @@ function createContext(): {
 			editorContainer: { clear: vi.fn(), addChild: vi.fn() },
 			editor: {},
 			ui: { setFocus: vi.fn(), requestRender: vi.fn() },
+			mountEditorUi: vi.fn(() => ({})),
+			closeEditorUi: vi.fn(() => true),
 			showError,
 			showStatus,
 		},
