@@ -129,6 +129,7 @@ export interface RunFlowContext {
 	showWarning: ReturnType<typeof vi.fn>;
 	showError: ReturnType<typeof vi.fn>;
 	showStatus: ReturnType<typeof vi.fn>;
+	updateTerminalTitle: ReturnType<typeof vi.fn>;
 	openPendingPlanDecision: ReturnType<typeof vi.fn>;
 	promptUser: ReturnType<typeof vi.fn>;
 	getUserInput: ReturnType<typeof vi.fn>;
