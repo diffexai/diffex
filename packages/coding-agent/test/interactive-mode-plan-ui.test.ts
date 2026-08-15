@@ -333,4 +333,336 @@ describe("InteractiveMode plan UI ownership", () => {
 		}
 	});
 
+	test("restores the exclusive handoff after Escape cancels profile selection", async () => {
+		const { terminal, ui, handoff, context, handoffCancel, handoffToken } = createProfileSelectionContext(60);
+		const controller = new AbortController();
+
+		ui.start();
+		try {
+			const selection = resolvePlanProfileSelection.call(
+				context,
+				PROFILE_PROPOSAL,
+				controller.signal,
+				handoffToken,
+				handoff,
+				handoffCancel,
+			);
+			await flushTui(ui, terminal);
+			terminal.sendInput("\x1b");
+
+			expect(await selection).toEqual({ cancelled: true });
+			expect(context.editorContainer.children).toEqual([handoff]);
+			expect(context.activeEditorUi).toMatchObject({
+				token: handoffToken,
+				cancel: handoffCancel,
+				preserveOnSessionRebind: true,
+			});
+		} finally {
+			context.cancelActiveEditorUi();
+			ui.stop();
+		}
+	});
+
+	test("maps truncated duplicate profile names to the selected profile id", async () => {
+		const { terminal, ui, handoff, context, handoffCancel, handoffToken } = createProfileSelectionContext(60);
+		const repeatedName = "Specialized implementation profile ".repeat(4);
+		const proposal: ProfileSelectionProposal = {
+			...PROFILE_PROPOSAL,
+			options: PROFILE_PROPOSAL.options.map((option) => ({
+				...option,
+				name: repeatedName,
+				description: option.description.repeat(4),
+			})),
+		};
+		const controller = new AbortController();
+
+		ui.start();
+		try {
+			const selection = resolvePlanProfileSelection.call(
+				context,
+				proposal,
+				controller.signal,
+				handoffToken,
+				handoff,
+				handoffCancel,
+			);
+			await flushTui(ui, terminal);
+			terminal.sendInput("j");
+			terminal.sendInput("\r");
+
+			expect(await selection).toEqual({ profileId: "coding" });
+		} finally {
+			context.cancelActiveEditorUi();
+			ui.stop();
+		}
+	});
+
+	test.each(["runtime abort", "owner teardown"])("settles profile selection once on %s", async (cause) => {
+		const { terminal, ui, editor, handoff, context, handoffCancel, handoffToken } = createProfileSelectionContext(60);
+		const controller = new AbortController();
+		let settlementCount = 0;
+
+		ui.start();
+		try {
+			const selection = resolvePlanProfileSelection.call(
+				context,
+				PROFILE_PROPOSAL,
+				controller.signal,
+				handoffToken,
+				handoff,
+				handoffCancel,
+			);
+			void selection.then(() => {
+				settlementCount += 1;
+			});
+			await flushTui(ui, terminal);
+
+			if (cause === "runtime abort") controller.abort();
+			else context.cancelActiveEditorUi();
+			expect(await selection).toEqual({ cancelled: true });
+			controller.abort();
+			context.cancelActiveEditorUi();
+			await Promise.resolve();
+
+			expect(settlementCount).toBe(1);
+			expect(context.activeEditorUi).toBeUndefined();
+			expect(context.editorContainer.children).toEqual([editor]);
+			expect(ui.getFocusedComponent()).toBe(editor);
+			expect(handoffCancel).not.toHaveBeenCalled();
+		} finally {
+			context.cancelActiveEditorUi();
+			ui.stop();
+		}
+	});
+
+	test("settles the ambiguous profile selector when session rebind invalidates it", async () => {
+		const { terminal, ui, editor, handoff, context, handoffCancel, handoffToken } = createProfileSelectionContext(60);
+		const rebindContext = Object.assign(context, {
+			renderer: { hasOverlayEntries: false },
+			defaultEditor: editor,
+			cancelPendingPlanDecision: vi.fn(),
+			clearExtensionTerminalInputListeners: vi.fn(),
+			setExtensionFooter: vi.fn(),
+			setExtensionHeader: vi.fn(),
+			clearExtensionWidgets: vi.fn(),
+			footerDataProvider: { clearExtensionStatuses: vi.fn() },
+			footer: { invalidate: vi.fn() },
+			autocompleteProviderWrappers: [] as unknown[],
+			setCustomEditorComponent: (_factory: undefined) => {},
+			setupAutocompleteProvider: vi.fn(),
+			updateTerminalTitle: vi.fn(),
+			workingMessage: undefined as string | undefined,
+			workingVisible: true,
+			setWorkingIndicator: vi.fn(),
+			activeStatusIndicator: undefined as { kind: string; setMessage: (message: string) => void } | undefined,
+			setHiddenThinkingLabel: vi.fn(),
+			editorComponentFactory: undefined as unknown,
+		}) as SessionRebindUiContext;
+		rebindContext.setCustomEditorComponent = (factory) => setCustomEditorComponent.call(rebindContext, factory);
+		const controller = new AbortController();
+
+		ui.start();
+		try {
+			const selection = resolvePlanProfileSelection.call(
+				rebindContext,
+				PROFILE_PROPOSAL,
+				controller.signal,
+				handoffToken,
+				handoff,
+				handoffCancel,
+			);
+			await flushTui(ui, terminal);
+			expect(rebindContext.activeEditorUi?.preserveOnSessionRebind).toBe(false);
+
+			resetExtensionUI.call(rebindContext, { forSessionRebind: true });
+
+			expect(await selection).toEqual({ cancelled: true });
+			expect(rebindContext.activeEditorUi).toBeUndefined();
+			expect(rebindContext.editorContainer.children).toEqual([editor]);
+			expect(ui.getFocusedComponent()).toBe(editor);
+			expect(handoffCancel).not.toHaveBeenCalled();
+		} finally {
+			rebindContext.cancelActiveEditorUi();
+			ui.stop();
+		}
+	});
+
+	test("keeps input locked until the accepted continuation owns the prompt", async () => {
+		const terminal = new VirtualTerminal(60, 24);
+		const ui = new TuiMainScreen(terminal);
+		const editor = new InputRecorder();
+		const editorContainer = new Container();
+		editorContainer.addChild(editor);
+		ui.addChild(editorContainer);
+		ui.setFocus(editor);
+		const continuation = Object.freeze({ message: "Implement the accepted plan." });
+		let preflightResult: ((success: boolean) => void) | undefined;
+		let finishPrompt: ((result: { routing: "selected"; activeProfileId: string }) => void) | undefined;
+		const promptPlanContinuation = vi.fn(
+			(_continuation: unknown, options?: { preflightResult?: (success: boolean) => void }) => {
+				preflightResult = options?.preflightResult;
+				return new Promise<{ routing: "selected"; activeProfileId: string }>((resolve) => {
+					finishPrompt = resolve;
+				});
+			},
+		);
+		const context = installEditorUiMethods({
+			session: {
+				pendingPlan: PLAN,
+				resolvePlan: vi.fn(() => continuation),
+				promptPlanContinuation: vi.fn(),
+			},
+			runtimeHost: { promptPlanContinuation },
+			planDecisionAbortController: undefined as AbortController | undefined,
+			suppressedPlanDecisionId: undefined as string | undefined,
+			editor,
+			editorContainer,
+			ui,
+			showExtensionSelector: vi.fn().mockResolvedValue("Implement"),
+			showStatus: vi.fn(),
+			showError: vi.fn(),
+		});
+		const decisionContext = context as unknown as PlanDecisionContext;
+		decisionContext.startPlanContinuation = (nextContinuation, onPromptOwned) =>
+			startPlanContinuation.call(decisionContext, nextContinuation, onPromptOwned);
+
+		ui.start();
+		try {
+			const decision = showPendingPlanDecision.call(decisionContext, PLAN);
+			await vi.waitFor(() => expect(promptPlanContinuation).toHaveBeenCalledOnce());
+			const blocker = context.editorContainer.children[0];
+			expect(blocker).not.toBe(editor);
+			expect(ui.getFocusedComponent()).toBe(blocker);
+			const rejectedReplacement = new InputRecorder();
+			const rejectedDispose = vi.fn();
+			showSelector.call(context, () => ({
+				component: rejectedReplacement,
+				focus: rejectedReplacement,
+				dispose: rejectedDispose,
+			}));
+			expect(rejectedDispose).toHaveBeenCalledOnce();
+			expect(context.editorContainer.children[0]).toBe(blocker);
+			expect(ui.getFocusedComponent()).toBe(blocker);
+
+			terminal.sendInput("second message\r/clear\r/resume\r");
+			await flushTui(ui, terminal);
+			expect(editor.inputs).toEqual([]);
+			expect(promptPlanContinuation).toHaveBeenCalledWith(continuation, {
+				source: "interactive",
+				profileSelectionResolver: expect.any(Function),
+				preflightResult: expect.any(Function),
+			});
+
+			preflightResult?.(true);
+			expect(ui.getFocusedComponent()).toBe(editor);
+			const acceptedReplacement = new InputRecorder();
+			showSelector.call(context, () => ({ component: acceptedReplacement, focus: acceptedReplacement }));
+			expect(context.editorContainer.children[0]).toBe(acceptedReplacement);
+			expect(ui.getFocusedComponent()).toBe(acceptedReplacement);
+			finishPrompt?.({ routing: "selected", activeProfileId: "coding" });
+			await decision;
+			expect(context.planDecisionAbortController).toBeUndefined();
+		} finally {
+			context.cancelActiveEditorUi();
+			ui.stop();
+		}
+	});
+
+	test("allows before_agent_start UI after synchronous prompt ownership is established", async () => {
+		const terminal = new VirtualTerminal(60, 24);
+		const ui = new TuiMainScreen(terminal);
+		const editor = new InputRecorder();
+		const editorContainer = new Container();
+		editorContainer.addChild(editor);
+		ui.addChild(editorContainer);
+		ui.setFocus(editor);
+		const hookUi = new InputRecorder();
+		let mountHookUi: () => void = () => {
+			throw new Error("Hook UI was not initialized");
+		};
+		const session: PlanDecisionSession = {
+			pendingPlan: undefined,
+			resolvePlan: vi.fn(),
+			promptPlanContinuation: vi.fn(),
+		};
+		const runtimeHost = {
+			promptPlanContinuation: vi.fn(
+				async (_continuation: unknown, options?: { preflightResult?: (success: boolean) => void }) => {
+					session.isStreaming = true;
+					await Promise.resolve();
+					mountHookUi();
+					options?.preflightResult?.(true);
+					return { routing: "selected" as const, activeProfileId: "coding" };
+				},
+			),
+		};
+		const context = installEditorUiMethods({
+			session,
+			runtimeHost,
+			planDecisionAbortController: undefined as AbortController | undefined,
+			suppressedPlanDecisionId: undefined as string | undefined,
+			editor,
+			editorContainer,
+			ui,
+			showExtensionSelector: vi.fn(),
+			showStatus: vi.fn(),
+			showError: vi.fn(),
+		});
+		mountHookUi = () => {
+			showSelector.call(context, () => ({ component: hookUi, focus: hookUi }));
+		};
+		const decisionContext = context as unknown as PlanDecisionContext;
+		decisionContext.startPlanContinuation = (nextContinuation, onPromptOwned) =>
+			startPlanContinuation.call(decisionContext, nextContinuation, onPromptOwned);
+
+		ui.start();
+		try {
+			await decisionContext.startPlanContinuation(Object.freeze({ message: "Implement." }));
+
+			expect(context.editorContainer.children).toEqual([hookUi]);
+			expect(ui.getFocusedComponent()).toBe(hookUi);
+		} finally {
+			context.cancelActiveEditorUi();
+			ui.stop();
+		}
+	});
+
+	test.each([80, 60])("keeps every pending-plan action visible within %i columns", async (width) => {
+		const terminal = new VirtualTerminal(width, 24);
+		const ui = new TuiMainScreen(terminal);
+		const editor = new InputRecorder();
+		const editorContainer = new Container();
+		editorContainer.addChild(editor);
+		ui.addChild(editorContainer);
+		const context = installEditorUiMethods({
+			session: {
+				pendingPlan: PLAN,
+				resolvePlan: vi.fn(),
+				promptPlanContinuation: vi.fn(),
+			},
+			planDecisionAbortController: undefined as AbortController | undefined,
+			suppressedPlanDecisionId: undefined as string | undefined,
+			editor,
+			editorContainer,
+			ui,
+			showStatus: vi.fn(),
+			showError: vi.fn(),
+			toggleToolOutputExpansion: vi.fn(),
+		});
+		const selector = (...args: Parameters<typeof showExtensionSelector>) =>
+			showExtensionSelector.call(context, ...args);
+		Object.assign(context, { showExtensionSelector: selector });
+
+		const decision = showPendingPlanDecision.call(context as unknown as PlanDecisionContext, PLAN);
+		await vi.waitFor(() => expect(context.activeEditorUi).toBeDefined());
+		const lines = context.editorContainer.children[0]?.render(width) ?? [];
+		const rendered = stripAnsi(lines.join("\n"));
+		expect(rendered).toContain("Implement");
+		expect(rendered).toContain("Keep planning");
+		expect(rendered).toContain("Discard");
+		for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+
+		context.planDecisionAbortController?.abort();
+		await decision;
+	});
 });
