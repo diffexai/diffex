@@ -57,8 +57,19 @@ import {
 	getShareViewerUrl,
 	VERSION,
 } from "../../config.ts";
-import { type AgentSession, type AgentSessionEvent, parseSkillBlock } from "../../core/agent-session.ts";
-import { type AgentSessionRuntime, SessionImportFileNotFoundError } from "../../core/agent-session-runtime.ts";
+import {
+	type AgentSession,
+	type AgentSessionEvent,
+	type PromptOptions,
+	parseSkillBlock,
+} from "../../core/agent-session.ts";
+import {
+	type AgentSessionRuntime,
+	SessionImportFileNotFoundError,
+	TaskBoundaryCancelledError,
+	type TaskBoundaryProposal,
+	type TaskBoundaryResolution,
+} from "../../core/agent-session-runtime.ts";
 import {
 	CACHE_TTL_MS,
 	type CacheMiss,
@@ -80,6 +91,7 @@ import type {
 	WorkingIndicatorOptions,
 } from "../../core/extensions/index.ts";
 import { FooterDataProvider, type ReadonlyFooterDataProvider } from "../../core/footer-data-provider.ts";
+import { loadHarnessDescriptors } from "../../core/harness-descriptors.ts";
 import { configureHttpDispatcher, formatHttpIdleTimeoutMs } from "../../core/http-dispatcher.ts";
 import { type AppKeybinding, KeybindingsManager } from "../../core/keybindings.ts";
 import { createCompactionSummaryMessage } from "../../core/messages.ts";
@@ -158,6 +170,7 @@ import {
 	RetryStatusIndicator,
 	type StatusIndicator,
 	SubagentWaitStatusIndicator,
+	TaskBoundaryStatusIndicator,
 	WorkingStatusIndicator,
 } from "./components/status-indicator.ts";
 import { SubagentsComponent } from "./components/subagents.ts";
@@ -434,8 +447,12 @@ export class InteractiveMode {
 	private autocompleteProviderWrappers: AutocompleteProviderFactory[] = [];
 	private fdPath: string | undefined;
 	private editorContainer: Container;
-	private activeSelectorToken?: object;
-	private activeSelectorDispose?: () => void;
+	private activeEditorUi?: {
+		token: object;
+		cancel: () => void;
+		exclusive: boolean;
+		preserveOnSessionRebind: boolean;
+	};
 	private footer: FooterComponent;
 	private footerContainer: Container;
 	private footerDataProvider: FooterDataProvider;
@@ -445,6 +462,7 @@ export class InteractiveMode {
 	private isInitialized = false;
 	private onInputCallback?: (text: string) => void;
 	private pendingUserInputs: string[] = [];
+	private pendingTaskPrompt: { token: object; text: string } | undefined = undefined;
 	private activeStatusIndicator: StatusIndicator | undefined = undefined;
 	private readonly idleStatus = new IdleStatus();
 	private workingMessage: string | undefined = undefined;
@@ -511,9 +529,6 @@ export class InteractiveMode {
 	private shutdownRequested = false;
 
 	// Extension UI state
-	private extensionSelector: ExtensionSelectorComponent | undefined = undefined;
-	private extensionInput: ExtensionInputComponent | undefined = undefined;
-	private extensionEditor: ExtensionEditorComponent | undefined = undefined;
 	private extensionTerminalInputSubscriptions = new Set<{
 		handler: (data: string) => { consume?: boolean; data?: string } | undefined;
 		unsubscribe: () => void;
@@ -569,6 +584,10 @@ export class InteractiveMode {
 		this.runtimeHost.setRebindSession(async () => {
 			await this.rebindCurrentSession({ renderBeforeBind: true });
 		});
+		this.runtimeHost.setProfileSwitchListener((event) => {
+			this.showStatus(event.notice);
+		});
+		this.runtimeHost.setTaskBoundaryResolver((proposal) => this.resolveTaskBoundary(proposal));
 		this.version = VERSION;
 		this.renderer = createInteractiveTui({
 			tuiMode,
@@ -704,6 +723,27 @@ export class InteractiveMode {
 					label: item.id,
 					description: item.provider,
 				}));
+			};
+		}
+
+		const profileCommand = slashCommands.find((command) => command.name === "profile");
+		if (profileCommand) {
+			profileCommand.getArgumentCompletions = (prefix: string): AutocompleteItem[] | null => {
+				const profiles = this.session.resourceLoader.getProfiles().profiles;
+				const items = [
+					{ id: "auto", name: "Automatic routing", description: "Choose a profile for each distinct task" },
+					...profiles.map((profile) => ({
+						id: profile.id,
+						name: profile.name,
+						description: profile.description,
+					})),
+				];
+				return createFuzzyAutocompleteItems(
+					items,
+					prefix,
+					(item) => `${item.id} ${item.name} ${item.description}`,
+					(item) => ({ value: item.id, label: item.id, description: item.name }),
+				);
 			};
 		}
 
@@ -1072,7 +1112,7 @@ export class InteractiveMode {
 		// Process initial messages
 		if (initialMessage) {
 			try {
-				await this.session.prompt(initialMessage, { images: initialImages });
+				await this.promptUser(initialMessage, { images: initialImages });
 			} catch (error: unknown) {
 				const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
 				this.showError(errorMessage);
@@ -1082,7 +1122,7 @@ export class InteractiveMode {
 		if (initialMessages) {
 			for (const message of initialMessages) {
 				try {
-					await this.session.prompt(message);
+					await this.promptUser(message);
 				} catch (error: unknown) {
 					const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
 					this.showError(errorMessage);
@@ -1094,10 +1134,59 @@ export class InteractiveMode {
 		while (true) {
 			const userInput = await this.getUserInput();
 			try {
-				await this.session.prompt(userInput);
+				await this.promptUser(userInput);
 			} catch (error: unknown) {
 				const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
 				this.showError(errorMessage);
+			}
+		}
+	}
+
+	private async promptUser(text: string, options?: PromptOptions): Promise<void> {
+		const taskPromptToken = {};
+		const showTaskRoutingProgress =
+			this.runtimeHost.profileRouting === "auto" &&
+			this.runtimeHost.activeHarness !== undefined &&
+			this.session.isIdle &&
+			!this.isExtensionCommand(text) &&
+			options?.streamingBehavior === undefined &&
+			text.trim().length > 0;
+		let taskPromptPending = showTaskRoutingProgress;
+		if (showTaskRoutingProgress) {
+			this.pendingTaskPrompt = { token: taskPromptToken, text };
+			this.updatePendingMessagesDisplay();
+			this.showTaskRoutingProgress("Checking whether this starts a new task...");
+		}
+		try {
+			const result = await this.runtimeHost.prompt(text, {
+				...options,
+				preflightResult: (success) => {
+					options?.preflightResult?.(success);
+					if (!taskPromptPending || this.pendingTaskPrompt?.token !== taskPromptToken) return;
+					taskPromptPending = false;
+					this.pendingTaskPrompt = undefined;
+					this.updatePendingMessagesDisplay();
+					this.ui.requestRender();
+				},
+			});
+			if (result.routing === "failed") {
+				this.showStatus(`Profile routing unavailable; using ${result.activeProfileId}`);
+			}
+		} catch (error) {
+			if (!(error instanceof TaskBoundaryCancelledError)) throw error;
+			const restored = !this.editor.getText().trim();
+			if (restored) this.editor.setText(text);
+			this.showStatus(restored ? "Task switch cancelled; prompt restored" : "Task switch cancelled");
+			this.ui.requestRender();
+		} finally {
+			if (taskPromptPending && this.pendingTaskPrompt?.token === taskPromptToken) {
+				taskPromptPending = false;
+				this.pendingTaskPrompt = undefined;
+				this.updatePendingMessagesDisplay();
+			}
+			if (showTaskRoutingProgress) {
+				this.clearStatusIndicator("taskBoundary");
+				this.ui.requestRender();
 			}
 		}
 	}
@@ -1980,6 +2069,7 @@ export class InteractiveMode {
 		this.streamingMessage = undefined;
 		this.pendingTools.clear();
 		this.renderInitialMessages();
+		this.updatePendingMessagesDisplay();
 	}
 
 	/**
@@ -2095,6 +2185,11 @@ export class InteractiveMode {
 		this.ui.requestRender();
 	}
 
+	private showTaskRoutingProgress(message: string): void {
+		this.showStatusIndicator(new TaskBoundaryStatusIndicator(this.ui, message));
+		this.ui.requestRender();
+	}
+
 	private setWorkingIndicator(options?: WorkingIndicatorOptions): void {
 		this.workingIndicatorOptions = options;
 		if (this.activeStatusIndicator?.kind === "working") {
@@ -2173,17 +2268,11 @@ export class InteractiveMode {
 		this.renderWidgets();
 	}
 
-	private resetExtensionUI(): void {
-		if (this.extensionSelector) {
-			this.hideExtensionSelector();
+	private resetExtensionUI(options: { forSessionRebind?: boolean } = {}): void {
+		if (!(options.forSessionRebind && this.activeEditorUi?.preserveOnSessionRebind)) {
+			this.cancelActiveEditorUi();
 		}
-		if (this.extensionInput) {
-			this.hideExtensionInput();
-		}
-		if (this.extensionEditor) {
-			this.hideExtensionEditor();
-		}
-		this.ui.hideOverlay();
+		while (this.renderer.hasOverlayEntries) this.ui.hideOverlay();
 		this.clearExtensionTerminalInputListeners();
 		this.setExtensionFooter(undefined);
 		this.setExtensionHeader(undefined);
@@ -2406,6 +2495,73 @@ export class InteractiveMode {
 		};
 	}
 
+	private restoreEditorUi(): void {
+		this.editorContainer.clear();
+		this.editorContainer.addChild(this.editor);
+		this.ui.setFocus(this.editor);
+		this.ui.requestRender();
+	}
+
+	private mountEditorUi(
+		component: Component,
+		focus: Component,
+		cancel: () => void,
+		options: { exclusive?: boolean; preserveOnSessionRebind?: boolean } = {},
+	): object {
+		const token = {};
+		if (this.activeEditorUi?.exclusive) {
+			if (!this.session.isStreaming) {
+				cancel();
+				return token;
+			}
+			this.cancelActiveEditorUi(false);
+		}
+		this.cancelActiveEditorUi(false);
+		this.activeEditorUi = {
+			token,
+			cancel,
+			exclusive: options.exclusive ?? false,
+			preserveOnSessionRebind: options.preserveOnSessionRebind ?? false,
+		};
+		this.editorContainer.clear();
+		this.editorContainer.addChild(component);
+		this.ui.setFocus(focus);
+		this.ui.requestRender();
+		return token;
+	}
+
+	private closeEditorUi(token: object): boolean {
+		if (this.activeEditorUi?.token !== token) return false;
+		this.activeEditorUi = undefined;
+		this.restoreEditorUi();
+		return true;
+	}
+
+	private replaceEditorUi(token: object, component: Component, focus: Component): boolean {
+		if (this.activeEditorUi?.token !== token) return false;
+		this.editorContainer.clear();
+		this.editorContainer.addChild(component);
+		this.ui.setFocus(focus);
+		this.ui.requestRender();
+		return true;
+	}
+
+	private cancelActiveEditorUi(restoreEditor = true): void {
+		const active = this.activeEditorUi;
+		if (!active) return;
+		this.activeEditorUi = undefined;
+		try {
+			active.cancel();
+		} finally {
+			if (restoreEditor) this.restoreEditorUi();
+		}
+	}
+
+	private cancelEditorUi(token: object): void {
+		if (this.activeEditorUi?.token !== token) return;
+		this.cancelActiveEditorUi();
+	}
+
 	/**
 	 * Show a selector for extensions.
 	 */
@@ -2420,46 +2576,40 @@ export class InteractiveMode {
 				return;
 			}
 
-			const onAbort = () => {
-				this.hideExtensionSelector();
-				resolve(undefined);
-			};
-			opts?.signal?.addEventListener("abort", onAbort, { once: true });
-
-			this.extensionSelector = new ExtensionSelectorComponent(
+			let settled = false;
+			let token: object;
+			const selector = new ExtensionSelectorComponent(
 				title,
 				options,
 				(option) => {
+					if (settled) return;
+					settled = true;
 					opts?.signal?.removeEventListener("abort", onAbort);
-					this.hideExtensionSelector();
+					selector.dispose();
+					this.closeEditorUi(token);
 					resolve(option);
 				},
 				() => {
+					if (settled) return;
+					settled = true;
 					opts?.signal?.removeEventListener("abort", onAbort);
-					this.hideExtensionSelector();
+					selector.dispose();
+					this.closeEditorUi(token);
 					resolve(undefined);
 				},
 				{ tui: this.ui, timeout: opts?.timeout, onToggleToolsExpanded: () => this.toggleToolOutputExpansion() },
 			);
-
-			this.disposeActiveSelector();
-			this.editorContainer.clear();
-			this.editorContainer.addChild(this.extensionSelector);
-			this.ui.setFocus(this.extensionSelector);
-			this.ui.requestRender();
+			const cancel = () => {
+				if (settled) return;
+				settled = true;
+				opts?.signal?.removeEventListener("abort", onAbort);
+				selector.dispose();
+				resolve(undefined);
+			};
+			const onAbort = () => this.cancelEditorUi(token);
+			token = this.mountEditorUi(selector, selector, cancel);
+			if (!settled) opts?.signal?.addEventListener("abort", onAbort, { once: true });
 		});
-	}
-
-	/**
-	 * Hide the extension selector.
-	 */
-	private hideExtensionSelector(): void {
-		this.extensionSelector?.dispose();
-		this.editorContainer.clear();
-		this.editorContainer.addChild(this.editor);
-		this.extensionSelector = undefined;
-		this.ui.setFocus(this.editor);
-		this.ui.requestRender();
 	}
 
 	/**
@@ -2472,6 +2622,31 @@ export class InteractiveMode {
 	): Promise<boolean> {
 		const result = await this.showExtensionSelector(`${title}\n${message}`, ["Yes", "No"], opts);
 		return result === "Yes";
+	}
+
+	private async resolveTaskBoundary(proposal: TaskBoundaryProposal): Promise<TaskBoundaryResolution> {
+		this.clearStatusIndicator("taskBoundary");
+		const activeHarness = this.runtimeHost.activeHarness;
+		const currentHarnessName =
+			activeHarness?.id === proposal.fromHarnessId ? activeHarness.name : proposal.fromHarnessId;
+		const targetAction = proposal.decision === "select" ? "Create" : proposal.willResumeSession ? "Resume" : "Reuse";
+		const targetLabel = `${targetAction}: ${proposal.targetHarnessName} (${proposal.toProfileId})`;
+		const currentLabel = `Keep current: ${currentHarnessName} (${proposal.fromProfileId})`;
+		const selected = await this.showExtensionSelector("New task detected\nChoose a harness for this prompt", [
+			targetLabel,
+			currentLabel,
+		]);
+
+		if (selected === targetLabel) {
+			const action = targetAction === "Resume" ? "Resuming" : targetAction === "Reuse" ? "Reusing" : "Creating";
+			this.showTaskRoutingProgress(`${action} ${proposal.targetHarnessName}...`);
+			return "switch";
+		}
+		if (selected === currentLabel) {
+			this.showTaskRoutingProgress(`Continuing with ${currentHarnessName}...`);
+			return "stay";
+		}
+		return "cancel";
 	}
 
 	private async promptForMissingSessionCwd(error: MissingSessionCwdError): Promise<string | undefined> {
@@ -2496,46 +2671,40 @@ export class InteractiveMode {
 				return;
 			}
 
-			const onAbort = () => {
-				this.hideExtensionInput();
-				resolve(undefined);
-			};
-			opts?.signal?.addEventListener("abort", onAbort, { once: true });
-
-			this.extensionInput = new ExtensionInputComponent(
+			let settled = false;
+			let token: object;
+			const input = new ExtensionInputComponent(
 				title,
 				placeholder,
 				(value) => {
+					if (settled) return;
+					settled = true;
 					opts?.signal?.removeEventListener("abort", onAbort);
-					this.hideExtensionInput();
+					input.dispose();
+					this.closeEditorUi(token);
 					resolve(value);
 				},
 				() => {
+					if (settled) return;
+					settled = true;
 					opts?.signal?.removeEventListener("abort", onAbort);
-					this.hideExtensionInput();
+					input.dispose();
+					this.closeEditorUi(token);
 					resolve(undefined);
 				},
 				{ tui: this.ui, timeout: opts?.timeout },
 			);
-
-			this.disposeActiveSelector();
-			this.editorContainer.clear();
-			this.editorContainer.addChild(this.extensionInput);
-			this.ui.setFocus(this.extensionInput);
-			this.ui.requestRender();
+			const cancel = () => {
+				if (settled) return;
+				settled = true;
+				opts?.signal?.removeEventListener("abort", onAbort);
+				input.dispose();
+				resolve(undefined);
+			};
+			const onAbort = () => this.cancelEditorUi(token);
+			token = this.mountEditorUi(input, input, cancel);
+			if (!settled) opts?.signal?.addEventListener("abort", onAbort, { once: true });
 		});
-	}
-
-	/**
-	 * Hide the extension input.
-	 */
-	private hideExtensionInput(): void {
-		this.extensionInput?.dispose();
-		this.editorContainer.clear();
-		this.editorContainer.addChild(this.editor);
-		this.extensionInput = undefined;
-		this.ui.setFocus(this.editor);
-		this.ui.requestRender();
 	}
 
 	/**
@@ -2543,40 +2712,34 @@ export class InteractiveMode {
 	 */
 	private showExtensionEditor(title: string, prefill?: string): Promise<string | undefined> {
 		return new Promise((resolve) => {
-			this.extensionEditor = new ExtensionEditorComponent(
+			let settled = false;
+			let token: object;
+			const editor = new ExtensionEditorComponent(
 				this.ui,
 				this.keybindings,
 				title,
 				prefill,
 				(value) => {
-					this.hideExtensionEditor();
+					if (settled) return;
+					settled = true;
+					this.closeEditorUi(token);
 					resolve(value);
 				},
 				() => {
-					this.hideExtensionEditor();
+					if (settled) return;
+					settled = true;
+					this.closeEditorUi(token);
 					resolve(undefined);
 				},
 				undefined,
 				this.settingsManager.getExternalEditorCommand(),
 			);
-
-			this.disposeActiveSelector();
-			this.editorContainer.clear();
-			this.editorContainer.addChild(this.extensionEditor);
-			this.ui.setFocus(this.extensionEditor);
-			this.ui.requestRender();
+			token = this.mountEditorUi(editor, editor, () => {
+				if (settled) return;
+				settled = true;
+				resolve(undefined);
+			});
 		});
-	}
-
-	/**
-	 * Hide the extension editor.
-	 */
-	private hideExtensionEditor(): void {
-		this.editorContainer.clear();
-		this.editorContainer.addChild(this.editor);
-		this.extensionEditor = undefined;
-		this.ui.setFocus(this.editor);
-		this.ui.requestRender();
 	}
 
 	/**
@@ -2588,9 +2751,12 @@ export class InteractiveMode {
 
 		// Save text from current editor before switching
 		const currentText = this.editor.getText();
+		const preserveExclusiveOwner = this.activeEditorUi?.exclusive === true;
 
-		this.disposeActiveSelector();
-		this.editorContainer.clear();
+		if (!preserveExclusiveOwner) {
+			this.cancelActiveEditorUi(false);
+			this.editorContainer.clear();
+		}
 
 		if (factory) {
 			// Create the custom editor with tui, theme, and keybindings
@@ -2648,9 +2814,11 @@ export class InteractiveMode {
 			this.editor = this.defaultEditor;
 		}
 
-		this.editorContainer.addChild(this.editor as Component);
-		this.ui.setFocus(this.editor as Component);
-		this.ui.requestRender();
+		if (!preserveExclusiveOwner) {
+			this.editorContainer.addChild(this.editor as Component);
+			this.ui.setFocus(this.editor as Component);
+			this.ui.requestRender();
+		}
 	}
 
 	/**
@@ -2680,28 +2848,14 @@ export class InteractiveMode {
 			onHandle?: (handle: OverlayHandle) => void;
 		},
 	): Promise<T> {
-		const savedText = this.editor.getText();
 		const isOverlay = options?.overlay ?? false;
-
-		const restoreEditor = () => {
-			this.editorContainer.clear();
-			this.editorContainer.addChild(this.editor);
-			this.editor.setText(savedText);
-			this.ui.setFocus(this.editor);
-			this.ui.requestRender();
-		};
 
 		return new Promise((resolve, reject) => {
 			let component: Component & { dispose?(): void };
+			let editorToken: object | undefined;
+			let overlayHandle: OverlayHandle | undefined;
 			let closed = false;
-
-			const close = (result: T) => {
-				if (closed) return;
-				closed = true;
-				if (isOverlay) this.ui.hideOverlay();
-				else restoreEditor();
-				// Note: both branches above already call requestRender
-				resolve(result);
+			const dispose = () => {
 				try {
 					component?.dispose?.();
 				} catch {
@@ -2709,9 +2863,21 @@ export class InteractiveMode {
 				}
 			};
 
+			const close = (result: T) => {
+				if (closed) return;
+				closed = true;
+				if (isOverlay) overlayHandle?.hide();
+				else if (editorToken) this.closeEditorUi(editorToken);
+				resolve(result);
+				dispose();
+			};
+
 			Promise.resolve(factory(this.ui, theme, this.keybindings, close))
 				.then((c) => {
-					if (closed) return;
+					if (closed) {
+						c.dispose?.();
+						return;
+					}
 					component = c;
 					if (isOverlay) {
 						// Resolve overlay options - can be static or dynamic function
@@ -2727,20 +2893,24 @@ export class InteractiveMode {
 							const w = (component as { width?: number }).width;
 							return w ? { width: w } : undefined;
 						};
-						const handle = this.ui.showOverlay(component, resolveOptions());
+						overlayHandle = this.ui.showOverlay(component, resolveOptions());
 						// Expose handle to caller for visibility control
-						options?.onHandle?.(handle);
+						options?.onHandle?.(overlayHandle);
 					} else {
-						this.disposeActiveSelector();
-						this.editorContainer.clear();
-						this.editorContainer.addChild(component);
-						this.ui.setFocus(component);
-						this.ui.requestRender();
+						editorToken = this.mountEditorUi(component, component, () => {
+							if (closed) return;
+							closed = true;
+							dispose();
+							reject(new Error("Interactive UI was replaced"));
+						});
 					}
 				})
 				.catch((err) => {
 					if (closed) return;
-					if (!isOverlay) restoreEditor();
+					closed = true;
+					if (overlayHandle) overlayHandle.hide();
+					else if (editorToken) this.closeEditorUi(editorToken);
+					dispose();
 					reject(err);
 				});
 		});
@@ -2914,6 +3084,12 @@ export class InteractiveMode {
 				await this.handleModelCommand(searchTerm);
 				return;
 			}
+			if (text === "/profile" || text.startsWith("/profile ")) {
+				const selection = text.startsWith("/profile ") ? text.slice(9).trim() : undefined;
+				this.editor.setText("");
+				await this.handleProfileCommand(selection);
+				return;
+			}
 			if (text === "/export" || text.startsWith("/export ")) {
 				await this.handleExportCommand(text);
 				this.editor.setText("");
@@ -3049,7 +3225,7 @@ export class InteractiveMode {
 			if (this.session.isStreaming) {
 				this.editor.addToHistory?.(text);
 				this.editor.setText("");
-				await this.session.prompt(text, { streamingBehavior: "steer" });
+				await this.promptUser(text, { streamingBehavior: "steer" });
 				this.updatePendingMessagesDisplay();
 				this.ui.requestRender();
 				return;
@@ -4005,7 +4181,7 @@ export class InteractiveMode {
 		if (this.session.isStreaming) {
 			this.editor.addToHistory?.(text);
 			this.editor.setText("");
-			await this.session.prompt(text, { streamingBehavior: "followUp" });
+			await this.promptUser(text, { streamingBehavior: "followUp" });
 			this.updatePendingMessagesDisplay();
 			this.ui.requestRender();
 		}
@@ -4233,8 +4409,12 @@ export class InteractiveMode {
 	private updatePendingMessagesDisplay(): void {
 		this.pendingMessagesContainer.clear();
 		const { steering: steeringMessages, followUp: followUpMessages } = this.getAllQueuedMessages();
-		if (steeringMessages.length > 0 || followUpMessages.length > 0) {
+		if (this.pendingTaskPrompt || steeringMessages.length > 0 || followUpMessages.length > 0) {
 			this.pendingMessagesContainer.addChild(new Spacer(1));
+			if (this.pendingTaskPrompt) {
+				const text = theme.fg("dim", `Pending: ${this.pendingTaskPrompt.text}`);
+				this.pendingMessagesContainer.addChild(new TruncatedText(text, 1, 0));
+			}
 			for (const message of steeringMessages) {
 				const text = theme.fg("dim", `Steering: ${message}`);
 				this.pendingMessagesContainer.addChild(new TruncatedText(text, 1, 0));
@@ -4243,9 +4423,11 @@ export class InteractiveMode {
 				const text = theme.fg("dim", `Follow-up: ${message}`);
 				this.pendingMessagesContainer.addChild(new TruncatedText(text, 1, 0));
 			}
-			const dequeueHint = this.getAppKeyDisplay("app.message.dequeue");
-			const hintText = theme.fg("dim", `↳ ${dequeueHint} to edit all queued messages`);
-			this.pendingMessagesContainer.addChild(new TruncatedText(hintText, 1, 0));
+			if (steeringMessages.length > 0 || followUpMessages.length > 0) {
+				const dequeueHint = this.getAppKeyDisplay("app.message.dequeue");
+				const hintText = theme.fg("dim", `↳ ${dequeueHint} to edit all queued messages`);
+				this.pendingMessagesContainer.addChild(new TruncatedText(hintText, 1, 0));
+			}
 		}
 	}
 
@@ -4288,7 +4470,7 @@ export class InteractiveMode {
 		return !!extensionRunner.getCommand(commandName);
 	}
 
-	private async flushCompactionQueue(options?: { willRetry?: boolean }): Promise<void> {
+	private async flushCompactionQueue(_options?: { willRetry?: boolean }): Promise<void> {
 		if (this.compactionQueuedMessages.length === 0) {
 			return;
 		}
@@ -4296,75 +4478,70 @@ export class InteractiveMode {
 		const queuedMessages = [...this.compactionQueuedMessages];
 		this.compactionQueuedMessages = [];
 		this.updatePendingMessagesDisplay();
+		let queueRestored = false;
 
-		const restoreQueue = (error: unknown) => {
-			this.session.clearQueue();
-			this.compactionQueuedMessages = queuedMessages;
+		const restoreQueueFrom = (index: number, error: unknown) => {
+			if (queueRestored) return;
+			queueRestored = true;
+			const remaining = queuedMessages.slice(index);
+			this.compactionQueuedMessages = [...remaining, ...this.compactionQueuedMessages];
 			this.updatePendingMessagesDisplay();
 			this.showError(
-				`Failed to send queued message${queuedMessages.length > 1 ? "s" : ""}: ${
+				`Failed to send queued message${remaining.length > 1 ? "s" : ""}: ${
 					error instanceof Error ? error.message : String(error)
 				}`,
 			);
 		};
+		const reportAcceptedFailure = (error: unknown) => {
+			this.showError(
+				`Queued message failed after it was accepted: ${error instanceof Error ? error.message : String(error)}`,
+			);
+		};
 
-		try {
-			if (options?.willRetry) {
-				// When retry is pending, queue messages for the retry turn
-				for (const message of queuedMessages) {
-					if (this.isExtensionCommand(message.text)) {
-						await this.session.prompt(message.text);
-					} else if (message.mode === "followUp") {
-						await this.session.followUp(message.text);
-					} else {
-						await this.session.steer(message.text);
-					}
-				}
-				this.updatePendingMessagesDisplay();
-				return;
-			}
-
-			// Find first non-extension-command message to use as prompt
-			const firstPromptIndex = queuedMessages.findIndex((message) => !this.isExtensionCommand(message.text));
-			if (firstPromptIndex === -1) {
-				// All extension commands - execute them all
-				for (const message of queuedMessages) {
-					await this.session.prompt(message.text);
-				}
-				return;
-			}
-
-			// Execute any extension commands before the first prompt
-			const preCommands = queuedMessages.slice(0, firstPromptIndex);
-			const firstPrompt = queuedMessages[firstPromptIndex];
-			const rest = queuedMessages.slice(firstPromptIndex + 1);
-
-			for (const message of preCommands) {
-				await this.session.prompt(message.text);
-			}
-
-			// Start a prompt when idle, or queue it into a run still finishing compaction.
-			const promptPromise = this.session
-				.prompt(firstPrompt.text, { streamingBehavior: firstPrompt.mode })
-				.catch((error) => {
-					restoreQueue(error);
-				});
-
-			// Queue remaining messages
-			for (const message of rest) {
+		for (let index = 0; index < queuedMessages.length; index++) {
+			const message = queuedMessages[index];
+			try {
 				if (this.isExtensionCommand(message.text)) {
 					await this.session.prompt(message.text);
-				} else if (message.mode === "followUp") {
-					await this.session.followUp(message.text);
-				} else {
-					await this.session.steer(message.text);
+					continue;
 				}
+
+				let resolvePreflight: (didSucceed: boolean) => void = () => {};
+				let preflightResolved = false;
+				let preflightAccepted = false;
+				const preflight = new Promise<boolean>((resolve) => {
+					resolvePreflight = (didSucceed) => {
+						if (preflightResolved) return;
+						preflightResolved = true;
+						preflightAccepted = didSucceed;
+						resolve(didSucceed);
+					};
+				});
+				const promptPromise = this.runtimeHost
+					.prompt(message.text, {
+						streamingBehavior: message.mode,
+						preflightResult: resolvePreflight,
+					})
+					.then(() => resolvePreflight(true))
+					.catch((error) => {
+						resolvePreflight(false);
+						if (preflightAccepted) {
+							reportAcceptedFailure(error);
+						} else {
+							restoreQueueFrom(index, error);
+						}
+					});
+				if (!(await preflight)) {
+					await promptPromise;
+					return;
+				}
+				void promptPromise;
+			} catch (error) {
+				restoreQueueFrom(index, error);
+				return;
 			}
-			this.updatePendingMessagesDisplay();
-			void promptPromise;
-		} catch (error) {
-			restoreQueue(error);
 		}
+		this.updatePendingMessagesDisplay();
 	}
 
 	/** Move pending bash components from pending area to chat */
@@ -4380,13 +4557,6 @@ export class InteractiveMode {
 	// Selectors
 	// =========================================================================
 
-	private disposeActiveSelector(): void {
-		const dispose = this.activeSelectorDispose;
-		this.activeSelectorToken = undefined;
-		this.activeSelectorDispose = undefined;
-		dispose?.();
-	}
-
 	/**
 	 * Shows a selector component in place of the editor.
 	 * @param create Factory that receives a `done` callback and returns the component and focus target
@@ -4394,26 +4564,22 @@ export class InteractiveMode {
 	private showSelector(
 		create: (done: () => void) => { component: Component; focus: Component; dispose?: () => void },
 	): void {
-		const token = {};
+		let token: object;
 		let dispose: (() => void) | undefined;
+		let closed = false;
 		const done = () => {
+			if (closed) return;
+			closed = true;
 			dispose?.();
-			if (this.activeSelectorToken !== token) return;
-			this.activeSelectorToken = undefined;
-			this.activeSelectorDispose = undefined;
-			this.editorContainer.clear();
-			this.editorContainer.addChild(this.editor);
-			this.ui.setFocus(this.editor);
+			this.closeEditorUi(token);
 		};
 		const created = create(done);
 		dispose = created.dispose;
-		this.disposeActiveSelector();
-		this.activeSelectorToken = token;
-		this.activeSelectorDispose = dispose;
-		this.editorContainer.clear();
-		this.editorContainer.addChild(created.component);
-		this.ui.setFocus(created.focus);
-		this.ui.requestRender();
+		token = this.mountEditorUi(created.component, created.focus, () => {
+			if (closed) return;
+			closed = true;
+			dispose?.();
+		});
 	}
 
 	private showSettingsSelector(): void {
@@ -4646,6 +4812,77 @@ export class InteractiveMode {
 		}
 
 		this.showModelSelector(searchTerm);
+	}
+
+	private async handleProfileCommand(selection?: string): Promise<void> {
+		if (this.session.isStreaming) {
+			this.showWarning("Wait for the current response to finish before changing profiles.");
+			return;
+		}
+		if (this.session.isCompacting) {
+			this.showWarning("Wait for compaction to finish before changing profiles.");
+			return;
+		}
+
+		const activeProfile = this.runtimeHost.activeProfile;
+		let requested = selection;
+		if (!requested) {
+			const labels = new Map<string, string>();
+			const autoLabel = `auto - automatic routing${this.runtimeHost.profileRouting === "auto" ? " (active)" : ""}`;
+			labels.set(autoLabel, "auto");
+			for (const profile of this.session.resourceLoader.getProfiles().profiles) {
+				const active = profile.id === activeProfile.id ? " (active)" : "";
+				labels.set(`${profile.id} - ${profile.name}${active}`, profile.id);
+			}
+			const selectedLabel = await this.showExtensionSelector(
+				`Task profile: ${activeProfile.id} (${this.runtimeHost.profileRouting})`,
+				[...labels.keys()],
+			);
+			if (!selectedLabel) return;
+			requested = labels.get(selectedLabel);
+		}
+
+		if (!requested) return;
+		if (requested === "auto") {
+			try {
+				const result = await this.runtimeHost.newSession({ profile: "general", profileRouting: "auto" });
+				if (result.cancelled) {
+					this.showStatus("Automatic profile routing cancelled");
+					return;
+				}
+				this.showStatus("Automatic profile routing enabled from DEFAULT");
+			} catch (error) {
+				this.showError(
+					`Could not enable automatic profile routing: ${error instanceof Error ? error.message : String(error)}`,
+				);
+			}
+			return;
+		}
+
+		const target = this.session.resourceLoader.getProfiles().registry.get(requested);
+		if (!target) {
+			this.showError(`Unknown task profile: ${requested}`);
+			return;
+		}
+		if (target.id === activeProfile.id) {
+			this.runtimeHost.setProfileRouting("pinned");
+			this.showStatus(`Task profile pinned: ${target.id}`);
+			return;
+		}
+
+		try {
+			const result = await this.runtimeHost.newSession({
+				profile: target.id,
+				profileRouting: "pinned",
+			});
+			if (result.cancelled) {
+				this.showStatus("Task profile change cancelled");
+				return;
+			}
+			this.showStatus(`Task profile pinned: ${target.id}`);
+		} catch (error) {
+			this.showError(`Could not change task profile: ${error instanceof Error ? error.message : String(error)}`);
+		}
 	}
 
 	private async findExactModelMatch(searchTerm: string): Promise<Model<any> | undefined> {
@@ -5129,6 +5366,12 @@ export class InteractiveMode {
 	}
 
 	private showSessionSelector(): void {
+		const harnessNames = new Map(
+			loadHarnessDescriptors({ agentDir: this.runtimeHost.services.agentDir }).harnesses.map((harness) => [
+				harness.id,
+				harness.name,
+			]),
+		);
 		this.showSelector((done) => {
 			const selector = new SessionSelectorComponent(
 				(onProgress) =>
@@ -5158,6 +5401,7 @@ export class InteractiveMode {
 					},
 					showRenameHint: true,
 					keybindings: this.keybindings,
+					getHarnessName: (harnessId) => harnessNames.get(harnessId),
 				},
 
 				this.sessionManager.getSessionFile(),
@@ -6050,7 +6294,9 @@ export class InteractiveMode {
 			info += `${theme.fg("dim", "Name:")} ${sessionName}\n`;
 		}
 		info += `${theme.fg("dim", "File:")} ${stats.sessionFile ?? "In-memory"}\n`;
-		info += `${theme.fg("dim", "ID:")} ${stats.sessionId}\n\n`;
+		info += `${theme.fg("dim", "ID:")} ${stats.sessionId}\n`;
+		const activeProfile = this.runtimeHost.activeProfile;
+		info += `${theme.fg("dim", "Profile:")} ${activeProfile.name} (${activeProfile.id}, ${this.runtimeHost.profileRouting})\n\n`;
 		info += `${theme.bold("Messages")}\n`;
 		info += `${theme.fg("dim", "Total:")} ${stats.totalMessages}\n`;
 		info += `${theme.fg("dim", "User:")} ${stats.userMessages}\n`;
@@ -6422,7 +6668,9 @@ export class InteractiveMode {
 	}
 
 	stop(): void {
-		this.disposeActiveSelector();
+		this.runtimeHost.setProfileSwitchListener(undefined);
+		this.runtimeHost.setTaskBoundaryResolver(undefined);
+		this.cancelActiveEditorUi();
 		if (this.settingsManager.getShowTerminalProgress()) {
 			this.ui.terminal.setProgress(false);
 		}

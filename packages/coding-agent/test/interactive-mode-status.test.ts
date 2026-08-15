@@ -51,6 +51,52 @@ class TestFocusableComponent implements Component, Focusable {
 	invalidate(): void {}
 }
 
+interface EditorUiTestContext {
+	activeEditorUi?: {
+		token: object;
+		cancel: () => void;
+		exclusive: boolean;
+		preserveOnSessionRebind: boolean;
+	};
+	session?: { isStreaming: boolean };
+	editorContainer: Container;
+	editor: Component;
+	ui: TUI;
+	restoreEditorUi: () => void;
+	cancelActiveEditorUi: (restoreEditor?: boolean) => void;
+	closeEditorUi: (token: object) => boolean;
+	mountEditorUi: (
+		component: Component,
+		focus: Component,
+		cancel: () => void,
+		options?: { exclusive?: boolean; preserveOnSessionRebind?: boolean },
+	) => object;
+}
+
+const restoreEditorUi = Reflect.get(InteractiveMode.prototype, "restoreEditorUi") as (
+	this: EditorUiTestContext,
+) => void;
+const cancelActiveEditorUi = Reflect.get(InteractiveMode.prototype, "cancelActiveEditorUi") as (
+	this: EditorUiTestContext,
+	restoreEditor?: boolean,
+) => void;
+const closeEditorUi = Reflect.get(InteractiveMode.prototype, "closeEditorUi") as (
+	this: EditorUiTestContext,
+	token: object,
+) => boolean;
+const mountEditorUi = Reflect.get(InteractiveMode.prototype, "mountEditorUi") as (
+	this: EditorUiTestContext,
+	component: Component,
+	focus: Component,
+	cancel: () => void,
+	options?: { exclusive?: boolean; preserveOnSessionRebind?: boolean },
+) => object;
+const showExtensionCustomMethod = Reflect.get(InteractiveMode.prototype, "showExtensionCustom") as <T>(
+	this: EditorUiTestContext & { keybindings: unknown },
+	factory: (tui: TUI, theme: unknown, keybindings: unknown, done: (result: T) => void) => Component,
+	options?: { overlay?: boolean },
+) => Promise<T>;
+
 async function flushTui(tui: TUI, terminal: VirtualTerminal): Promise<void> {
 	tui.requestRender(true);
 	await Promise.resolve();
@@ -312,18 +358,34 @@ describe("InteractiveMode.showExtensionCustom", () => {
 		let closeReplacement: (value: string) => void = () => {
 			throw new Error("closeReplacement was not initialized");
 		};
-		const fakeThis = {
+		const fakeThis: EditorUiTestContext & { keybindings: unknown } = {
 			editor,
 			editorContainer,
 			keybindings: {},
 			ui,
-			disposeActiveSelector: vi.fn(),
+			activeEditorUi: undefined,
+			restoreEditorUi(): void {
+				restoreEditorUi.call(fakeThis);
+			},
+			cancelActiveEditorUi(restoreEditor?: boolean): void {
+				cancelActiveEditorUi.call(fakeThis, restoreEditor);
+			},
+			closeEditorUi(token: object): boolean {
+				return closeEditorUi.call(fakeThis, token);
+			},
+			mountEditorUi(
+				component: Component,
+				focus: Component,
+				cancel: () => void,
+				options?: { exclusive?: boolean; preserveOnSessionRebind?: boolean },
+			): object {
+				return mountEditorUi.call(fakeThis, component, focus, cancel, options);
+			},
 		};
 		const showExtensionCustom = <T>(
 			factory: (tui: TUI, theme: unknown, keybindings: unknown, done: (result: T) => void) => Component,
 			options?: { overlay?: boolean },
-		): Promise<T> =>
-			(InteractiveMode as any).prototype.showExtensionCustom.call(fakeThis, factory, options) as Promise<T>;
+		): Promise<T> => showExtensionCustomMethod.call(fakeThis, factory, options) as Promise<T>;
 
 		editorContainer.addChild(editor);
 		ui.addChild(editorContainer);
