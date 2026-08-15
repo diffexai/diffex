@@ -67,9 +67,10 @@ function extractUserMessageText(content: string | Array<{ type: string; text?: s
 /**
  * Owns the current AgentSession plus its cwd-bound services.
  *
- * Session replacement methods tear down the current runtime first, then create
- * and apply the next runtime. If creation fails, the error is propagated to the
- * caller. The caller is responsible for user-facing error handling.
+ * Session replacement methods reserve the current runtime until the successor
+ * is ready. If creation fails, the error is propagated to the caller and the
+ * current runtime remains valid. The caller is responsible for user-facing
+ * error handling.
  */
 export class AgentSessionRuntime {
 	private rebindSession?: (session: AgentSession) => Promise<void>;
@@ -80,6 +81,9 @@ export class AgentSessionRuntime {
 	private _diagnostics: AgentSessionRuntimeDiagnostic[];
 	private _modelFallbackMessage?: string;
 	private disposePromise: Promise<void> | undefined;
+	private exclusiveRuntimeOperation: object | undefined;
+	private exclusiveRuntimeOperationSettled: Promise<void> = Promise.resolve();
+	private disposeRequested = false;
 
 	constructor(
 		_session: AgentSession,
@@ -129,6 +133,36 @@ export class AgentSessionRuntime {
 	 */
 	setBeforeSessionInvalidate(beforeSessionInvalidate?: () => void): void {
 		this.beforeSessionInvalidate = beforeSessionInvalidate;
+	}
+
+	private async runSessionReplacement<T>(operation: () => Promise<T>): Promise<T> {
+		return this.runExclusiveRuntimeOperation(operation);
+	}
+
+	private async runExclusiveRuntimeOperation<T>(operation: (owner: object) => Promise<T>): Promise<T> {
+		this.assertExclusiveRuntimeIdle();
+		const owner = {};
+		let settleOperation!: () => void;
+		const settled = new Promise<void>((resolveSettled) => {
+			settleOperation = resolveSettled;
+		});
+		this.exclusiveRuntimeOperation = owner;
+		this.exclusiveRuntimeOperationSettled = settled;
+		try {
+			return await operation(owner);
+		} finally {
+			if (this.exclusiveRuntimeOperation === owner) this.exclusiveRuntimeOperation = undefined;
+			settleOperation();
+		}
+	}
+
+	private assertExclusiveRuntimeIdle(): void {
+		if (this.disposeRequested) {
+			throw new Error("Agent session runtime is disposing.");
+		}
+		if (this.exclusiveRuntimeOperation) {
+			throw new Error("Another session replacement or exclusive runtime operation is already in progress.");
+		}
 	}
 
 	private async emitBeforeSwitch(
@@ -219,6 +253,104 @@ export class AgentSessionRuntime {
 		}
 	}
 
+	private async commitReservedRuntime(
+		result: CreateAgentSessionRuntimeResult,
+		outgoingSession: AgentSession,
+		releaseReplacement: () => void,
+		options: {
+			reason: SessionShutdownEvent["reason"];
+			targetSessionFile?: string;
+			withSession?: (ctx: ReplacedSessionContext) => Promise<void>;
+		},
+	): Promise<void> {
+		let shutdownStarted = false;
+		let adopted = false;
+		let hasPostShutdownError = false;
+		let postShutdownError: unknown;
+		const postShutdownDiagnostics: AgentSessionRuntimeDiagnostic[] = [];
+		const recordPostShutdownError = (stage: string, error: unknown): void => {
+			if (!hasPostShutdownError) postShutdownError = error;
+			hasPostShutdownError = true;
+			postShutdownDiagnostics.push({
+				type: "warning",
+				message: `Session replacement ${stage} failed after shutdown began: ${error instanceof Error ? error.message : String(error)}`,
+			});
+		};
+
+		try {
+			shutdownStarted = true;
+			try {
+				await emitSessionShutdownEvent(outgoingSession.extensionRunner, {
+					type: "session_shutdown",
+					reason: options.reason,
+					targetSessionFile: options.targetSessionFile,
+				});
+			} catch (error) {
+				recordPostShutdownError("shutdown hook", error);
+			}
+			try {
+				this.beforeSessionInvalidate?.();
+			} catch (error) {
+				recordPostShutdownError("invalidation", error);
+			}
+			try {
+				outgoingSession.dispose();
+			} catch (error) {
+				recordPostShutdownError("disposal", error);
+			}
+			try {
+				this.apply(result);
+				adopted = true;
+			} catch (error) {
+				recordPostShutdownError("activation", error);
+			}
+			if (!adopted) {
+				this._session = result.session;
+				this._services = result.services;
+				adopted = true;
+			}
+			try {
+				await this.finishSessionReplacement(options.withSession);
+			} catch (error) {
+				recordPostShutdownError("host rebind", error);
+			}
+			this._diagnostics = [...this._diagnostics, ...postShutdownDiagnostics];
+			if (hasPostShutdownError) throw postShutdownError;
+		} finally {
+			if (!shutdownStarted) {
+				releaseReplacement();
+				if (!adopted) {
+					void result.session.dispose();
+				}
+			}
+			// A disposed outgoing session intentionally retains its replacement lease.
+			// This keeps stale references from mutating a SessionManager shared with the adopted runtime.
+		}
+	}
+
+	private async replaceCurrentRuntime(
+		createRuntime: () => Promise<CreateAgentSessionRuntimeResult>,
+		options: {
+			reason: SessionShutdownEvent["reason"];
+			targetSessionFile?: string;
+			withSession?: (ctx: ReplacedSessionContext) => Promise<void>;
+		},
+	): Promise<void> {
+		// Settle any active response first so the aborted turn, including tool
+		// results, is persisted before the outgoing session is replaced.
+		const outgoingSession = this.session;
+		await outgoingSession.abort();
+		const releaseReplacement = outgoingSession.reserveRuntimeReplacement();
+		let result: CreateAgentSessionRuntimeResult;
+		try {
+			result = await createRuntime();
+		} catch (error) {
+			releaseReplacement();
+			throw error;
+		}
+		await this.commitReservedRuntime(result, outgoingSession, releaseReplacement, options);
+	}
+
 	async switchSession(
 		sessionPath: string,
 		options?: {
@@ -227,26 +359,32 @@ export class AgentSessionRuntime {
 			projectTrustContextFactory?: (cwd: string) => ProjectTrustContext;
 		},
 	): Promise<{ cancelled: boolean }> {
-		const beforeResult = await this.emitBeforeSwitch("resume", sessionPath);
-		if (beforeResult.cancelled) {
-			return beforeResult;
-		}
+		return this.runSessionReplacement(async () => {
+			const beforeResult = await this.emitBeforeSwitch("resume", sessionPath);
+			if (beforeResult.cancelled) {
+				return beforeResult;
+			}
 
-		const previousSessionFile = this.session.sessionFile;
-		const sessionManager = SessionManager.open(sessionPath, undefined, options?.cwdOverride);
-		assertSessionCwdExists(sessionManager, this.cwd);
-		await this.teardownCurrent("resume", sessionManager.getSessionFile());
-		this.apply(
-			await this.createRuntime({
-				cwd: sessionManager.getCwd(),
-				agentDir: this.services.agentDir,
-				sessionManager,
-				sessionStartEvent: { type: "session_start", reason: "resume", previousSessionFile },
-				projectTrustContext: options?.projectTrustContextFactory?.(sessionManager.getCwd()),
-			}),
-		);
-		await this.finishSessionReplacement(options?.withSession);
-		return { cancelled: false };
+			const previousSessionFile = this.session.sessionFile;
+			const sessionManager = SessionManager.open(sessionPath, undefined, options?.cwdOverride);
+			assertSessionCwdExists(sessionManager, this.cwd);
+			await this.replaceCurrentRuntime(
+				() =>
+					this.createRuntime({
+						cwd: sessionManager.getCwd(),
+						agentDir: this.services.agentDir,
+						sessionManager,
+						sessionStartEvent: { type: "session_start", reason: "resume", previousSessionFile },
+						projectTrustContext: options?.projectTrustContextFactory?.(sessionManager.getCwd()),
+					}),
+				{
+					reason: "resume",
+					targetSessionFile: sessionManager.getSessionFile(),
+					withSession: options?.withSession,
+				},
+			);
+			return { cancelled: false };
+		});
 	}
 
 	async newSession(options?: {
@@ -254,35 +392,40 @@ export class AgentSessionRuntime {
 		setup?: (sessionManager: SessionManager) => Promise<void>;
 		withSession?: (ctx: ReplacedSessionContext) => Promise<void>;
 	}): Promise<{ cancelled: boolean }> {
-		const beforeResult = await this.emitBeforeSwitch("new");
-		if (beforeResult.cancelled) {
-			return beforeResult;
-		}
+		return this.runSessionReplacement(async () => {
+			const beforeResult = await this.emitBeforeSwitch("new");
+			if (beforeResult.cancelled) {
+				return beforeResult;
+			}
 
-		const previousSessionFile = this.session.sessionFile;
-		const sessionDir = this.session.sessionManager.getSessionDir();
-		const sessionManager = this.session.sessionManager.isPersisted()
-			? SessionManager.create(this.cwd, sessionDir)
-			: SessionManager.inMemory(this.cwd);
-		if (options?.parentSession) {
-			sessionManager.newSession({ parentSession: options.parentSession });
-		}
+			const previousSessionFile = this.session.sessionFile;
+			const sessionDir = this.session.sessionManager.getSessionDir();
+			const sessionManager = this.session.sessionManager.isPersisted()
+				? SessionManager.create(this.cwd, sessionDir)
+				: SessionManager.inMemory(this.cwd);
+			if (options?.parentSession) {
+				sessionManager.newSession({ parentSession: options.parentSession });
+			}
+			if (options?.setup) {
+				await options.setup(sessionManager);
+			}
 
-		await this.teardownCurrent("new", sessionManager.getSessionFile());
-		this.apply(
-			await this.createRuntime({
-				cwd: this.cwd,
-				agentDir: this.services.agentDir,
-				sessionManager,
-				sessionStartEvent: { type: "session_start", reason: "new", previousSessionFile },
-			}),
-		);
-		if (options?.setup) {
-			await options.setup(this.session.sessionManager);
-			this.session.agent.state.messages = this.session.sessionManager.buildSessionContext().messages;
-		}
-		await this.finishSessionReplacement(options?.withSession);
-		return { cancelled: false };
+			await this.replaceCurrentRuntime(
+				() =>
+					this.createRuntime({
+						cwd: this.cwd,
+						agentDir: this.services.agentDir,
+						sessionManager,
+						sessionStartEvent: { type: "session_start", reason: "new", previousSessionFile },
+					}),
+				{
+					reason: "new",
+					targetSessionFile: sessionManager.getSessionFile(),
+					withSession: options?.withSession,
+				},
+			);
+			return { cancelled: false };
+		});
 	}
 
 	async fork(
@@ -423,6 +566,8 @@ export class AgentSessionRuntime {
 
 	dispose(): Promise<void> {
 		if (this.disposePromise) return this.disposePromise;
+		this.disposeRequested = true;
+		const activeOperation = this.exclusiveRuntimeOperationSettled;
 
 		let resolveDispose!: () => void;
 		let rejectDispose!: (reason: unknown) => void;
@@ -431,7 +576,7 @@ export class AgentSessionRuntime {
 			rejectDispose = reject;
 		});
 		this.disposePromise = disposePromise;
-		void this.teardownCurrent("quit").then(resolveDispose, rejectDispose);
+		void activeOperation.then(() => this.teardownCurrent("quit")).then(resolveDispose, rejectDispose);
 		return disposePromise;
 	}
 }
