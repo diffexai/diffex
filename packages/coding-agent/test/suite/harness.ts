@@ -17,8 +17,9 @@ import type {
 import { registerFauxProvider, streamSimple } from "@earendil-works/diffex-ai/compat";
 import { AgentSession, type AgentSessionEvent } from "../../src/core/agent-session.ts";
 import { AuthStorage } from "../../src/core/auth-storage.ts";
-import type { ExtensionRunner, SessionStartEvent } from "../../src/core/extensions/index.ts";
+import type { ExtensionRunner, SessionStartEvent, ToolDefinition } from "../../src/core/extensions/index.ts";
 import { convertToLlm } from "../../src/core/messages.ts";
+import type { CollaborationMode } from "../../src/core/plan-mode.ts";
 import { SessionManager } from "../../src/core/session-manager.ts";
 import type { Settings } from "../../src/core/settings-manager.ts";
 import { SettingsManager } from "../../src/core/settings-manager.ts";
@@ -66,9 +67,12 @@ export interface HarnessOptions {
 	systemPrompt?: string;
 	tools?: AgentTool[];
 	sessionManager?: SessionManager;
+	customToolDefinitions?: ToolDefinition[];
 	initialActiveToolNames?: string[];
+	collaborationMode?: CollaborationMode;
 	allowedToolNames?: string[];
 	excludedToolNames?: string[];
+	excludedBuiltinToolNames?: string[];
 	resourceLoader?: ResourceLoader;
 	extensionFactories?: Array<InlineExtension | CreateTestExtensionsResultInput>;
 	withConfiguredAuth?: boolean;
@@ -181,6 +185,9 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 	const resourceLoader =
 		options.resourceLoader ?? createTestResourceLoader(extensionsResult ? { extensionsResult } : undefined);
 
+	const excludedToolNames = options.excludedBuiltinToolNames
+		? [...new Set([...(options.excludedToolNames ?? []), ...options.excludedBuiltinToolNames])]
+		: options.excludedToolNames;
 	const session = new AgentSession({
 		agent,
 		sessionManager,
@@ -188,10 +195,12 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 		cwd: tempDir,
 		modelRuntime: getModelRuntime(modelRegistry),
 		resourceLoader,
+		customTools: options.customToolDefinitions,
 		baseToolsOverride: toolMap,
 		initialActiveToolNames: options.initialActiveToolNames,
+		collaborationMode: options.collaborationMode,
 		allowedToolNames: options.allowedToolNames,
-		excludedToolNames: options.excludedToolNames,
+		excludedToolNames,
 		extensionRunnerRef,
 		sessionStartEvent: options.sessionStartEvent,
 	});
