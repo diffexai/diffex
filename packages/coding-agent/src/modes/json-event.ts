@@ -13,7 +13,13 @@ type ToJsonEvent<T> = T extends {
 	: T;
 
 /** Session event shape emitted by the JSON and RPC stdout protocols. */
-export type JsonAgentSessionEvent = ToJsonEvent<AgentSessionEvent>;
+type PlanOnlyAgentSessionEvent = Extract<
+	AgentSessionEvent,
+	{ type: "collaboration_mode_changed" | "plan_submitted" | "plan_resolved" }
+>;
+type WireAgentSessionEvent = Exclude<AgentSessionEvent, PlanOnlyAgentSessionEvent>;
+
+export type JsonAgentSessionEvent = ToJsonEvent<WireAgentSessionEvent>;
 
 type MessageUpdateEvent = Extract<AgentSessionEvent, { type: "message_update" }>;
 type JsonMessageUpdateEvent = Extract<JsonAgentSessionEvent, { type: "message_update" }>;
@@ -24,8 +30,16 @@ type JsonMessageUpdateEvent = Extract<JsonAgentSessionEvent, { type: "message_up
  * `message_end` provides the final authoritative message.
  */
 export function toJsonEvent(event: MessageUpdateEvent): JsonMessageUpdateEvent;
-export function toJsonEvent(event: AgentSessionEvent): JsonAgentSessionEvent;
-export function toJsonEvent(event: AgentSessionEvent): JsonAgentSessionEvent {
+export function toJsonEvent(event: AgentSessionEvent): JsonAgentSessionEvent | undefined;
+export function toJsonEvent(event: AgentSessionEvent): JsonAgentSessionEvent | undefined {
+	if (
+		event.type === "collaboration_mode_changed" ||
+		event.type === "plan_submitted" ||
+		event.type === "plan_resolved"
+	) {
+		return undefined;
+	}
+
 	if (event.type !== "message_update") {
 		return event;
 	}

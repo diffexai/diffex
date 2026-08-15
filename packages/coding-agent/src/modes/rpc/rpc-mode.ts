@@ -28,6 +28,10 @@ import {
 import { killTrackedDetachedChildren } from "../../utils/shell.ts";
 import { type Theme, theme } from "../interactive/theme/theme.ts";
 import { toJsonEvent } from "../json-event.ts";
+import {
+	assertNonInteractivePlanModeDisabled,
+	validateNonInteractiveSessionTarget,
+} from "../non-interactive-plan-mode.ts";
 import { attachJsonlLineReader, serializeJsonLine } from "./jsonl.ts";
 import type {
 	RpcCommand,
@@ -52,6 +56,7 @@ export type {
  * Listens for JSON commands on stdin, outputs events and responses on stdout.
  */
 export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<never> {
+	assertNonInteractivePlanModeDisabled(runtimeHost.session);
 	takeOverStdout();
 	let session = runtimeHost.session;
 	let unsubscribe: (() => void) | undefined;
@@ -315,18 +320,30 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 	});
 
 	const rebindSession = async (): Promise<void> => {
-		session = runtimeHost.session;
+		const nextSession = runtimeHost.session;
+		assertNonInteractivePlanModeDisabled(nextSession);
+		session = nextSession;
 		await session.bindExtensions({
 			uiContext: createExtensionUIContext(),
 			mode: "rpc",
 			commandContextActions: {
 				waitForIdle: () => session.waitForIdle(),
-				newSession: async (options) => runtimeHost.newSession(options),
+				newSession: async (options) =>
+					runtimeHost.newSession({
+						...options,
+						validateTarget: validateNonInteractiveSessionTarget,
+					}),
 				fork: async (entryId, forkOptions) => {
-					const result = await runtimeHost.fork(entryId, forkOptions);
+					const result = await runtimeHost.fork(entryId, {
+						...forkOptions,
+						validateTarget: validateNonInteractiveSessionTarget,
+					});
 					return { cancelled: result.cancelled };
 				},
 				navigateTree: async (targetId, options) => {
+					if (session.sessionManager.getEntry(targetId)) {
+						validateNonInteractiveSessionTarget(session.sessionManager, targetId);
+					}
 					const result = await session.navigateTree(targetId, {
 						summarize: options?.summarize,
 						customInstructions: options?.customInstructions,
@@ -336,7 +353,10 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 					return { cancelled: result.cancelled };
 				},
 				switchSession: async (sessionPath, options) => {
-					return runtimeHost.switchSession(sessionPath, options);
+					return runtimeHost.switchSession(sessionPath, {
+						...options,
+						validateTarget: validateNonInteractiveSessionTarget,
+					});
 				},
 				reload: async () => {
 					await session.reload();
@@ -353,7 +373,10 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 		unsubscribe?.();
 		unsubscribeBackpressure?.();
 		unsubscribe = session.subscribe((event) => {
-			output(toJsonEvent(event));
+			const jsonEvent = toJsonEvent(event);
+			if (jsonEvent) {
+				output(jsonEvent);
+			}
 			if (event.type === "agent_settled") {
 				void checkShutdownRequested();
 			}
@@ -382,6 +405,34 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 	await rebindSession();
 	registerSignalHandlers();
 
+	const dispatchPromptCommand = (
+		id: string | undefined,
+		command: "prompt" | "steer" | "follow_up",
+		message: string,
+		images: Extract<RpcCommand, { type: "prompt" }>["images"],
+		streamingBehavior?: "steer" | "followUp",
+	): void => {
+		assertNonInteractivePlanModeDisabled(session);
+		let preflightSucceeded = false;
+		void runtimeHost
+			.prompt(message, {
+				images,
+				streamingBehavior,
+				source: "rpc",
+				preflightResult: (didSucceed) => {
+					if (didSucceed && !preflightSucceeded) {
+						preflightSucceeded = true;
+						output(success(id, command));
+					}
+				},
+			})
+			.catch((promptError) => {
+				if (!preflightSucceeded) {
+					output(error(id, command, promptError instanceof Error ? promptError.message : String(promptError)));
+				}
+			});
+	};
+
 	// Handle a single command
 	const handleCommand = async (command: RpcCommand): Promise<RpcResponse | undefined> => {
 		const id = command.id;
@@ -394,35 +445,18 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 			case "prompt": {
 				// Start prompt handling immediately, but emit the authoritative response only after
 				// prompt preflight succeeds. Queued and immediately handled prompts also count as success.
-				let preflightSucceeded = false;
-				void session
-					.prompt(command.message, {
-						images: command.images,
-						streamingBehavior: command.streamingBehavior,
-						source: "rpc",
-						preflightResult: (didSucceed) => {
-							if (didSucceed) {
-								preflightSucceeded = true;
-								output(success(id, "prompt"));
-							}
-						},
-					})
-					.catch((e) => {
-						if (!preflightSucceeded) {
-							output(error(id, "prompt", e.message));
-						}
-					});
+				dispatchPromptCommand(id, "prompt", command.message, command.images, command.streamingBehavior);
 				return undefined;
 			}
 
 			case "steer": {
-				await session.steer(command.message, command.images);
-				return success(id, "steer");
+				dispatchPromptCommand(id, "steer", command.message, command.images, "steer");
+				return undefined;
 			}
 
 			case "follow_up": {
-				await session.followUp(command.message, command.images);
-				return success(id, "follow_up");
+				dispatchPromptCommand(id, "follow_up", command.message, command.images, "followUp");
+				return undefined;
 			}
 
 			case "abort": {
@@ -431,7 +465,10 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 			}
 
 			case "new_session": {
-				const options = command.parentSession ? { parentSession: command.parentSession } : undefined;
+				const options = {
+					...(command.parentSession ? { parentSession: command.parentSession } : {}),
+					validateTarget: validateNonInteractiveSessionTarget,
+				};
 				const result = await runtimeHost.newSession(options);
 				if (!result.cancelled) {
 					await rebindSession();
@@ -599,7 +636,9 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 			}
 
 			case "switch_session": {
-				const result = await runtimeHost.switchSession(command.sessionPath);
+				const result = await runtimeHost.switchSession(command.sessionPath, {
+					validateTarget: validateNonInteractiveSessionTarget,
+				});
 				if (!result.cancelled) {
 					await rebindSession();
 				}
@@ -607,7 +646,9 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 			}
 
 			case "fork": {
-				const result = await runtimeHost.fork(command.entryId);
+				const result = await runtimeHost.fork(command.entryId, {
+					validateTarget: validateNonInteractiveSessionTarget,
+				});
 				if (!result.cancelled) {
 					await rebindSession();
 				}
@@ -619,7 +660,10 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 				if (!leafId) {
 					return error(id, "clone", "Cannot clone session: no current entry selected");
 				}
-				const result = await runtimeHost.fork(leafId, { position: "at" });
+				const result = await runtimeHost.fork(leafId, {
+					position: "at",
+					validateTarget: validateNonInteractiveSessionTarget,
+				});
 				if (!result.cancelled) {
 					await rebindSession();
 				}
