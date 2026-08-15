@@ -77,6 +77,7 @@ type LoadedResourcesContext = {
 
 type RebindContext = {
 	unsubscribe?: () => void;
+	session: { readonly pendingPlanContinuation: unknown };
 	applyRuntimeSettings: () => void;
 	renderCurrentSessionState: () => void;
 	bindCurrentSessionExtensions: () => Promise<void>;
@@ -84,6 +85,7 @@ type RebindContext = {
 	updateAvailableProviderCount: () => Promise<void>;
 	updateEditorBorderColor: () => void;
 	updateTerminalTitle: () => void;
+	openPendingPlanDecision: () => void;
 };
 
 type ReloadCommandContext = {
@@ -287,6 +289,7 @@ describe("regression #5943: session_start transient UI", () => {
 
 		try {
 			const context: RebindContext = {
+				session: harness.session,
 				applyRuntimeSettings: () => events.push("apply"),
 				renderCurrentSessionState: () => events.push("render"),
 				bindCurrentSessionExtensions: async () => {
@@ -300,6 +303,7 @@ describe("regression #5943: session_start transient UI", () => {
 				updateAvailableProviderCount: async () => {},
 				updateEditorBorderColor: () => {},
 				updateTerminalTitle: () => {},
+				openPendingPlanDecision: () => {},
 			};
 
 			await interactiveModePrototype.rebindCurrentSession.call(context, { renderBeforeBind: true });
@@ -328,6 +332,7 @@ describe("regression #5943: session_start transient UI", () => {
 
 		try {
 			const context: RebindContext = {
+				session: harness.session,
 				applyRuntimeSettings: () => {},
 				renderCurrentSessionState: () => events.push("render"),
 				bindCurrentSessionExtensions: async () => {
@@ -349,6 +354,7 @@ describe("regression #5943: session_start transient UI", () => {
 				updateAvailableProviderCount: async () => {},
 				updateEditorBorderColor: () => {},
 				updateTerminalTitle: () => {},
+				openPendingPlanDecision: () => {},
 			};
 
 			await interactiveModePrototype.rebindCurrentSession.call(context, { renderBeforeBind: true });
@@ -380,6 +386,7 @@ describe("regression #5943: session_start transient UI", () => {
 
 		try {
 			const context: RebindContext = {
+				session: harness.session,
 				applyRuntimeSettings: () => {},
 				renderCurrentSessionState: () => events.push("render"),
 				bindCurrentSessionExtensions: async () => {
@@ -401,6 +408,7 @@ describe("regression #5943: session_start transient UI", () => {
 				updateAvailableProviderCount: async () => {},
 				updateEditorBorderColor: () => {},
 				updateTerminalTitle: () => {},
+				openPendingPlanDecision: () => {},
 			};
 
 			await interactiveModePrototype.rebindCurrentSession.call(context, { renderBeforeBind: true });

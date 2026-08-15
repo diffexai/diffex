@@ -98,7 +98,8 @@ export class FooterComponent implements Component {
 		const modelName = state.model?.id || "no-model";
 		const thinkingLevel = state.thinkingLevel || "off";
 		const windowDisplay = `${formatTokens(contextWindow)} window`;
-		let statsLine = `${modelName} ${thinkingLevel} • ${contextPercentStr} • ${windowDisplay}`;
+		const planStatus = this.session.collaborationMode === "plan" ? "[plan] " : "";
+		let statsLine = `${planStatus}${modelName} ${thinkingLevel} • ${contextPercentStr} • ${windowDisplay}`;
 
 		if (visibleWidth(statsLine) > width) {
 			statsLine = truncateToWidth(statsLine, width, "...");
