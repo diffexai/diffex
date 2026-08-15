@@ -362,6 +362,8 @@ class TreeList implements Component {
 				entry.type === "custom" ||
 				entry.type === "model_change" ||
 				entry.type === "thinking_level_change" ||
+				entry.type === "collaboration_mode_change" ||
+				entry.type === "plan_resolution" ||
 				entry.type === "session_info";
 
 			switch (this.filterMode) {
@@ -605,6 +607,15 @@ class TreeList implements Component {
 			case "thinking_level_change":
 				parts.push("thinking", entry.thinkingLevel);
 				break;
+			case "collaboration_mode_change":
+				parts.push("collaboration mode", entry.mode);
+				break;
+			case "plan":
+				parts.push("plan", entry.plan.title, entry.plan.markdown);
+				break;
+			case "plan_resolution":
+				parts.push("plan resolution", entry.resolution, entry.planId);
+				break;
 			case "custom":
 				parts.push("custom", entry.customType);
 				break;
@@ -835,6 +846,15 @@ class TreeList implements Component {
 			case "thinking_level_change":
 				result = theme.fg("dim", `[thinking: ${entry.thinkingLevel}]`);
 				break;
+			case "collaboration_mode_change":
+				result = theme.fg("dim", `[collaboration mode: ${entry.mode}]`);
+				break;
+			case "plan":
+				result = theme.fg("accent", "[plan]: ") + normalize(entry.plan.title);
+				break;
+			case "plan_resolution":
+				result = theme.fg("dim", `[plan resolution: ${entry.resolution}]`);
+				break;
 			case "custom":
 				result = theme.fg("dim", `[custom: ${entry.customType}]`);
 				break;
@@ -918,6 +938,15 @@ class TreeList implements Component {
 				break;
 			case "branch_summary":
 				text = entry.summary;
+				break;
+			case "collaboration_mode_change":
+				text = `Collaboration mode: ${entry.mode}`;
+				break;
+			case "plan":
+				text = `${entry.plan.title}\n\n${entry.plan.markdown}`;
+				break;
+			case "plan_resolution":
+				text = `Plan ${entry.planId}: ${entry.resolution}`;
 				break;
 		}
 

@@ -25,6 +25,7 @@ function createSession(options: {
 	compactionUsage?: AssistantUsage;
 	toolUsage?: AssistantUsage;
 	usingSubscription?: boolean;
+	collaborationMode?: "default" | "plan";
 }): AgentSession {
 	const usage = options.usage;
 	const entries: Array<Record<string, unknown>> = [];
@@ -82,6 +83,7 @@ function createSession(options: {
 		modelRuntime: {
 			isUsingSubscription: () => options.usingSubscription ?? false,
 		},
+		collaborationMode: options.collaborationMode ?? "default",
 	};
 
 	return session as unknown as AgentSession;
@@ -171,5 +173,19 @@ describe("FooterComponent width handling", () => {
 		const footer = new FooterComponent(session, createFooterData(1));
 
 		expect(stripAnsi(footer.render(120).join("\n"))).not.toContain("/tmp/project");
+	});
+
+	it("keeps the plan-mode status visible at 60 columns", () => {
+		const session = createSession({
+			sessionName: "",
+			modelId: "claude-opus-4-1",
+			thinkingLevel: "high",
+			collaborationMode: "plan",
+		});
+		const footer = new FooterComponent(session, createFooterData(1));
+
+		const statsLine = stripAnsi(footer.render(60)[0]);
+		expect(statsLine.startsWith("[plan] ")).toBe(true);
+		expect(visibleWidth(statsLine)).toBeLessThanOrEqual(60);
 	});
 });

@@ -154,6 +154,7 @@ import {
 	formatAuthSelectorProviderType,
 	OAuthSelectorComponent,
 } from "./components/oauth-selector.ts";
+import { PlanMessageComponent } from "./components/plan-message.ts";
 import { ScopedModelsSelectorComponent } from "./components/scoped-models-selector.ts";
 import { SessionSelectorComponent } from "./components/session-selector.ts";
 import { SettingsSelectorComponent } from "./components/settings-selector.ts";
@@ -225,7 +226,7 @@ type CompactionQueuedMessage = {
 	mode: "steer" | "followUp";
 };
 
-type RenderSessionItem = AgentMessage | Extract<SessionEntry, { type: "custom" }>;
+type RenderSessionItem = AgentMessage | Extract<SessionEntry, { type: "custom" | "plan" }>;
 
 function isCustomSessionEntry(item: RenderSessionItem): item is Extract<SessionEntry, { type: "custom" }> {
 	return "type" in item && item.type === "custom";
@@ -1080,6 +1081,22 @@ export class InteractiveMode {
 
 		// Show startup warnings
 		const { migratedProviders, modelFallbackMessage, initialMessage, initialImages, initialMessages } = this.options;
+		const preserveStartupMessages = (messages: string[], imageCount = 0, notice?: string): void => {
+			if (messages.length === 0 && imageCount === 0 && !notice) return;
+			const waitingText = messages.join("\n\n");
+			const existingText = this.editor.getText();
+			if (waitingText) {
+				this.editor.setText(existingText.trim() ? `${existingText}\n\n${waitingText}` : waitingText);
+			}
+			const promptNotice = messages.length
+				? `${messages.length} startup ${messages.length === 1 ? "prompt is" : "prompts are"} waiting in the editor${notice ? "." : " for plan resolution."}`
+				: "";
+			const imageNotice = imageCount
+				? `${imageCount} attached startup ${imageCount === 1 ? "image" : "images"} must be reattached ${notice ? "before sending" : "after plan resolution"}.`
+				: "";
+			this.showStatus([notice, promptNotice, imageNotice].filter(Boolean).join(" "));
+			this.ui.requestRender();
+		};
 
 		if (migratedProviders && migratedProviders.length > 0) {
 			this.showWarning(`Migrated credentials to auth.json: ${migratedProviders.join(", ")}`);
@@ -1097,25 +1114,42 @@ export class InteractiveMode {
 		void this.maybeWarnAboutAnthropicSubscriptionAuth();
 
 		// Process initial messages
-		if (initialMessage) {
-			try {
-				await this.promptUser(initialMessage, { images: initialImages });
-			} catch (error: unknown) {
-				const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
-				this.showError(errorMessage);
-			}
-		}
-
-		if (initialMessages) {
-			for (const message of initialMessages) {
+		const pendingPlanContinuation = this.session.pendingPlanContinuation;
+		if (this.session.pendingPlan || pendingPlanContinuation) {
+			preserveStartupMessages(
+				[...(initialMessage ? [initialMessage] : []), ...(initialMessages ?? [])],
+				initialImages?.length,
+				pendingPlanContinuation ? "Accepted plan implementation is waiting. Use /plan to retry." : undefined,
+			);
+		} else {
+			if (initialMessage) {
 				try {
-					await this.promptUser(message);
+					await this.promptUser(initialMessage, { images: initialImages });
 				} catch (error: unknown) {
 					const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
 					this.showError(errorMessage);
 				}
 			}
+
+			if (this.session.pendingPlan) {
+				preserveStartupMessages(initialMessages ?? []);
+			} else if (initialMessages) {
+				for (let index = 0; index < initialMessages.length; index++) {
+					const message = initialMessages[index];
+					try {
+						await this.promptUser(message);
+					} catch (error: unknown) {
+						const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
+						this.showError(errorMessage);
+					}
+					if (this.session.pendingPlan) {
+						preserveStartupMessages(initialMessages.slice(index + 1));
+						break;
+					}
+				}
+			}
 		}
+		this.openPendingPlanDecision();
 
 		// Main interactive loop
 		while (true) {
@@ -1126,6 +1160,7 @@ export class InteractiveMode {
 				const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
 				this.showError(errorMessage);
 			}
+			this.openPendingPlanDecision();
 		}
 	}
 
@@ -1906,6 +1941,7 @@ export class InteractiveMode {
 
 					this.chatContainer.clear();
 					this.renderInitialMessages();
+					this.openPendingPlanDecision();
 					if (result.editorText && !this.editor.getText().trim()) {
 						this.editor.setText(result.editorText);
 					}
@@ -1992,6 +2028,12 @@ export class InteractiveMode {
 		await this.updateAvailableProviderCount();
 		this.updateEditorBorderColor();
 		this.updateTerminalTitle();
+		if (options.renderBeforeBind) {
+			if (this.session.pendingPlanContinuation && !this.activeEditorUi?.preserveOnSessionRebind) {
+				this.showStatus("Accepted plan implementation is waiting. Use /plan to retry.");
+			}
+			this.openPendingPlanDecision();
+		}
 	}
 
 	private async handleFatalRuntimeError(prefix: string, error: unknown): Promise<never> {
@@ -2560,6 +2602,18 @@ export class InteractiveMode {
 	): Promise<boolean> {
 		const result = await this.showExtensionSelector(`${title}\n${message}`, ["Yes", "No"], opts);
 		return result === "Yes";
+	}
+
+	private renderPlanArtifact(plan: PlanArtifact): void {
+		this.chatContainer.addChild(
+			new PlanMessageComponent(
+				plan,
+				this.getMarkdownThemeWithSettings(),
+				this.outputPad,
+				this.getMarkdownTransformers(),
+			),
+		);
+		this.ui.requestRender();
 	}
 
 	private cancelPendingPlanDecision(): void {
@@ -3321,9 +3375,13 @@ export class InteractiveMode {
 			if (this.session.isStreaming) {
 				this.editor.addToHistory?.(text);
 				this.editor.setText("");
-				await this.promptUser(text, { streamingBehavior: "steer" });
-				this.updatePendingMessagesDisplay();
-				this.ui.requestRender();
+				try {
+					await this.promptUser(text, { streamingBehavior: "steer" });
+				} finally {
+					this.updatePendingMessagesDisplay();
+					this.ui.requestRender();
+					this.openPendingPlanDecision();
+				}
 				return;
 			}
 
@@ -3397,6 +3455,19 @@ export class InteractiveMode {
 			case "thinking_level_changed":
 				this.footer.invalidate();
 				this.updateEditorBorderColor();
+				break;
+
+			case "collaboration_mode_changed":
+				this.ui.requestRender();
+				break;
+
+			case "plan_submitted":
+				this.renderPlanArtifact(event.plan);
+				break;
+
+			case "plan_resolved":
+				if (this.suppressedPlanDecisionId === event.planId) this.suppressedPlanDecisionId = undefined;
+				this.ui.requestRender();
 				break;
 
 			case "message_start":
@@ -3891,6 +3962,10 @@ export class InteractiveMode {
 				this.addCustomEntryToChat(item);
 				continue;
 			}
+			if ("type" in item && item.type === "plan") {
+				this.renderPlanArtifact(item.plan);
+				continue;
+			}
 
 			const message = item;
 			// Assistant messages need special handling for tool calls
@@ -3965,12 +4040,16 @@ export class InteractiveMode {
 		options: { updateFooter?: boolean; populateHistory?: boolean } = {},
 	): void {
 		const items = entries.flatMap((entry): RenderSessionItem[] => {
-			if (entry.type === "custom") {
+			if (entry.type === "custom" || entry.type === "plan") {
 				return [entry];
 			}
 			return sessionEntryToContextMessages(entry);
 		});
 		this.renderSessionItems(items, options);
+		const pendingPlan = this.session.pendingPlan;
+		if (pendingPlan && !entries.some((entry) => entry.type === "plan" && entry.plan.id === pendingPlan.id)) {
+			this.renderPlanArtifact(pendingPlan);
+		}
 	}
 
 	/**
@@ -5345,6 +5424,7 @@ export class InteractiveMode {
 						// Update UI
 						this.chatContainer.clear();
 						this.renderInitialMessages();
+						this.openPendingPlanDecision();
 						if (result.editorText && !this.editor.getText().trim()) {
 							this.editor.setText(result.editorText);
 						}

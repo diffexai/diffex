@@ -3,7 +3,10 @@ import { setKeybindings, visibleWidth } from "@earendil-works/diffex-tui";
 import { beforeAll, beforeEach, describe, expect, test } from "vitest";
 import { KeybindingsManager } from "../src/core/keybindings.ts";
 import type {
+	CollaborationModeChangeEntry,
 	ModelChangeEntry,
+	PlanEntry,
+	PlanResolutionEntry,
 	SessionEntry,
 	SessionMessageEntry,
 	SessionTreeNode,
@@ -97,6 +100,41 @@ function modelChange(id: string, parentId: string | null): ModelChangeEntry {
 	};
 }
 
+function collaborationModeChange(id: string, parentId: string | null): CollaborationModeChangeEntry {
+	return {
+		type: "collaboration_mode_change",
+		id,
+		parentId,
+		timestamp: new Date().toISOString(),
+		mode: "plan",
+	};
+}
+
+function planEntry(id: string, parentId: string | null): PlanEntry {
+	return {
+		type: "plan",
+		id,
+		parentId,
+		timestamp: new Date().toISOString(),
+		plan: {
+			id: "plan-1",
+			title: "Add native plan mode",
+			markdown: "Inspect the decision-ready implementation path.",
+		},
+	};
+}
+
+function planResolution(id: string, parentId: string | null): PlanResolutionEntry {
+	return {
+		type: "plan_resolution",
+		id,
+		parentId,
+		timestamp: new Date().toISOString(),
+		planId: "plan-1",
+		resolution: "implement",
+	};
+}
+
 // Helper to build a tree from entries using parentId relationships
 function buildTree(entries: Array<SessionEntry>): SessionTreeNode[] {
 	if (entries.length === 0) return [];
@@ -139,6 +177,63 @@ describe("TreeSelectorComponent", () => {
 		const rendered = selector.getTreeList().render(80).map(stripVTControlCharacters).join("\n");
 		expect(rendered).toContain("> ");
 		expect(rendered).not.toContain("›");
+	});
+
+	describe("plan entries", () => {
+		function buildPlanTree(): SessionTreeNode[] {
+			return buildTree([
+				userMessage("user-1", null, "Plan this change"),
+				collaborationModeChange("mode-1", "user-1"),
+				planEntry("plan-entry-1", "mode-1"),
+				planResolution("resolution-1", "plan-entry-1"),
+				assistantMessage("asst-1", "resolution-1", "Implementation started"),
+			]);
+		}
+
+		test("hides plan bookkeeping while keeping the submitted plan in default and no-tools views", () => {
+			const selector = new TreeSelectorComponent(
+				buildPlanTree(),
+				"asst-1",
+				24,
+				() => {},
+				() => {},
+			);
+			const list = selector.getTreeList();
+
+			for (const key of [undefined, "\x14"] as const) {
+				if (key) selector.handleInput(key);
+				const rendered = stripVTControlCharacters(list.render(200).join("\n"));
+				expect(rendered).toContain("[plan]: Add native plan mode");
+				expect(rendered).not.toContain("[collaboration mode: plan]");
+				expect(rendered).not.toContain("[plan resolution: implement]");
+			}
+		});
+
+		test("renders all plan state, searches plan content, and copies the selected plan", () => {
+			const selector = new TreeSelectorComponent(
+				buildPlanTree(),
+				"asst-1",
+				24,
+				() => {},
+				() => {},
+			);
+			const list = selector.getTreeList();
+			let copied: string | undefined;
+			selector.onCopy = (text) => {
+				copied = text;
+			};
+
+			selector.handleInput("\x01");
+			const rendered = stripVTControlCharacters(list.render(200).join("\n"));
+			expect(rendered).toContain("[collaboration mode: plan]");
+			expect(rendered).toContain("[plan]: Add native plan mode");
+			expect(rendered).toContain("[plan resolution: implement]");
+
+			selector.handleInput("decision-ready");
+			expect(list.getSelectedNode()?.entry.id).toBe("plan-entry-1");
+			selector.handleInput("\x18");
+			expect(copied).toBe("Add native plan mode\n\nInspect the decision-ready implementation path.");
+		});
 	});
 
 	describe("initial selection with metadata entries", () => {
