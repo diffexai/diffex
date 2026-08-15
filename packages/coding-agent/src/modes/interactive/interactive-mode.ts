@@ -60,6 +60,7 @@ import {
 import {
 	type AgentSession,
 	type AgentSessionEvent,
+	type PlanContinuation,
 	type PromptOptions,
 	parseSkillBlock,
 } from "../../core/agent-session.ts";
@@ -102,6 +103,7 @@ import {
 } from "../../core/model-resolver.ts";
 import { CredentialSynchronizationError } from "../../core/model-runtime.ts";
 import { DefaultPackageManager } from "../../core/package-manager.ts";
+import type { PlanArtifact } from "../../core/plan-mode.ts";
 import type { ResourceDiagnostic } from "../../core/resource-loader.ts";
 import { formatMissingSessionCwdPrompt, MissingSessionCwdError } from "../../core/session-cwd.ts";
 import { type SessionEntry, SessionManager, sessionEntryToContextMessages } from "../../core/session-manager.ts";
@@ -488,6 +490,8 @@ export class InteractiveMode {
 
 	// Tool execution tracking: toolCallId -> component
 	private pendingTools = new Map<string, ToolExecutionComponent>();
+	private planDecisionAbortController: AbortController | undefined = undefined;
+	private suppressedPlanDecisionId: string | undefined = undefined;
 
 	// Tool output expansion state
 	private toolOutputExpanded = false;
@@ -579,7 +583,8 @@ export class InteractiveMode {
 		this.options = { ...options, tuiMode };
 		this.autoTrustOnReloadCwd = options.autoTrustOnReloadCwd;
 		this.runtimeHost.setBeforeSessionInvalidate(() => {
-			this.resetExtensionUI();
+			this.suppressedPlanDecisionId = undefined;
+			this.resetExtensionUI({ forSessionRebind: true });
 		});
 		this.runtimeHost.setRebindSession(async () => {
 			await this.rebindCurrentSession({ renderBeforeBind: true });
@@ -743,6 +748,22 @@ export class InteractiveMode {
 					prefix,
 					(item) => `${item.id} ${item.name} ${item.description}`,
 					(item) => ({ value: item.id, label: item.id, description: item.name }),
+				);
+			};
+		}
+
+		const planCommand = slashCommands.find((command) => command.name === "plan");
+		if (planCommand) {
+			planCommand.getArgumentCompletions = (prefix: string): AutocompleteItem[] | null => {
+				const options = [
+					{ value: "on", label: "on", description: "Enable plan mode" },
+					{ value: "off", label: "off", description: "Disable plan mode" },
+				];
+				return createFuzzyAutocompleteItems(
+					options,
+					prefix,
+					(option) => `${option.value} ${option.description}`,
+					(option) => option,
 				);
 			};
 		}
@@ -2269,6 +2290,7 @@ export class InteractiveMode {
 	}
 
 	private resetExtensionUI(options: { forSessionRebind?: boolean } = {}): void {
+		this.cancelPendingPlanDecision();
 		if (!(options.forSessionRebind && this.activeEditorUi?.preserveOnSessionRebind)) {
 			this.cancelActiveEditorUi();
 		}
@@ -2647,6 +2669,189 @@ export class InteractiveMode {
 			return "stay";
 		}
 		return "cancel";
+	}
+
+	private cancelPendingPlanDecision(): void {
+		const controller = this.planDecisionAbortController;
+		this.planDecisionAbortController = undefined;
+		controller?.abort();
+	}
+
+	private openPendingPlanDecision(options: { explicit?: boolean } = {}): void {
+		const plan = this.session.pendingPlan;
+		if (!plan || !this.session.isIdle || this.session.isStreaming || this.planDecisionAbortController) return;
+		if (this.activeEditorUi || this.renderer.hasOverlayEntries) return;
+		if (!options.explicit && this.suppressedPlanDecisionId === plan.id) return;
+
+		this.suppressedPlanDecisionId = undefined;
+		void this.showPendingPlanDecision(plan).catch((error: unknown) => {
+			const retryHint =
+				this.session.pendingPlan?.id === plan.id ? " The plan remains pending; use /plan to retry." : "";
+			this.showError(
+				`Failed to resolve plan: ${error instanceof Error ? error.message : String(error)}${retryHint}`,
+			);
+		});
+	}
+
+	private async startPlanContinuation(continuation: PlanContinuation, onPromptOwned?: () => void): Promise<void> {
+		const handoff = new BorderedLoader(this.ui, theme, "Starting implementation...", {
+			cancellable: false,
+		});
+		let handoffReleased = false;
+		let handoffToken: object;
+		const releaseHandoff = () => {
+			if (handoffReleased) return;
+			handoffReleased = true;
+			handoff.dispose();
+			this.closeEditorUi(handoffToken);
+		};
+		handoffToken = this.mountEditorUi(
+			handoff,
+			handoff,
+			() => {
+				if (handoffReleased) return;
+				handoffReleased = true;
+				handoff.dispose();
+			},
+			{ exclusive: true, preserveOnSessionRebind: true },
+		);
+
+		let preflightAccepted = false;
+		let inputOwnershipReleased = false;
+		const releaseInputOwnership = () => {
+			if (inputOwnershipReleased) return;
+			inputOwnershipReleased = true;
+			releaseHandoff();
+			onPromptOwned?.();
+		};
+		try {
+			const prompt = this.runtimeHost.promptPlanContinuation(continuation, {
+				source: "interactive",
+				preflightResult: (success) => {
+					preflightAccepted = success;
+					if (success) releaseInputOwnership();
+				},
+			});
+			await prompt;
+			if (this.session.pendingPlanContinuation) {
+				this.showError("Plan acceptance persisted, but implementation did not start. Use /plan to retry.");
+				this.ui.requestRender();
+			}
+		} catch (error: unknown) {
+			const message = error instanceof Error ? error.message : String(error);
+			if (preflightAccepted) {
+				this.showError(`Plan implementation failed after it started: ${message}`);
+			} else {
+				this.showError(
+					`Plan acceptance persisted, but implementation could not start: ${message} Use /plan to retry.`,
+				);
+			}
+			this.ui.requestRender();
+		} finally {
+			releaseHandoff();
+		}
+	}
+
+	private async showPendingPlanDecision(plan: PlanArtifact): Promise<void> {
+		const session = this.session;
+		if (session.pendingPlan?.id !== plan.id || this.planDecisionAbortController) return;
+
+		const decisionController = new AbortController();
+		const releaseDecision = () => {
+			if (this.planDecisionAbortController !== decisionController) return;
+			this.planDecisionAbortController = undefined;
+		};
+		this.planDecisionAbortController = decisionController;
+		const implement = "Implement";
+		const keepPlanning = "Keep planning";
+		const discard = "Discard";
+
+		try {
+			const selected = await this.showExtensionSelector(
+				"Plan ready\nReview the submitted plan above, then choose an action",
+				[implement, keepPlanning, discard],
+				{ signal: decisionController.signal },
+			);
+			if (decisionController.signal.aborted || this.session !== session || session.pendingPlan?.id !== plan.id) {
+				return;
+			}
+
+			if (selected === undefined || selected === keepPlanning) {
+				this.suppressedPlanDecisionId = plan.id;
+				this.showStatus("Plan remains pending. Use /plan to reopen it.");
+				return;
+			}
+
+			if (selected === discard) {
+				session.resolvePlan(plan.id, "discard");
+				this.showStatus("Plan discarded; plan mode disabled");
+				return;
+			}
+
+			const continuation = session.resolvePlan(plan.id, "implement");
+			if (!continuation) {
+				this.showError("Plan acceptance persisted, but no implementation prompt was returned.");
+				return;
+			}
+			await this.startPlanContinuation(continuation, releaseDecision);
+		} finally {
+			releaseDecision();
+		}
+	}
+
+	private async handlePlanCommand(argument?: string): Promise<void> {
+		if (argument !== undefined && argument !== "on" && argument !== "off") {
+			this.showError("Usage: /plan [on|off]");
+			return;
+		}
+
+		const continuation = this.session.pendingPlanContinuation;
+		if (continuation) {
+			if (argument === undefined) {
+				await this.startPlanContinuation(continuation);
+				return;
+			}
+			this.showError("Accepted plan implementation is waiting. Use /plan to retry it first.");
+			return;
+		}
+
+		if (argument === undefined && this.session.collaborationMode === "plan" && this.session.pendingPlan) {
+			this.openPendingPlanDecision({ explicit: true });
+			return;
+		}
+
+		const targetMode =
+			argument === "on"
+				? "plan"
+				: argument === "off"
+					? "default"
+					: this.session.collaborationMode === "plan"
+						? "default"
+						: "plan";
+
+		try {
+			if (targetMode === "default" && this.session.pendingPlan) {
+				const plan = this.session.pendingPlan;
+				const confirmed = await this.showExtensionConfirm(
+					"Discard pending plan",
+					"Disable plan mode and discard the pending plan?",
+				);
+				if (!confirmed) return;
+				this.session.resolvePlan(plan.id, "discard");
+				this.showStatus("Plan discarded; plan mode disabled");
+				return;
+			}
+
+			if (this.session.collaborationMode === targetMode) {
+				this.showStatus(`Plan mode is already ${targetMode === "plan" ? "enabled" : "disabled"}`);
+				return;
+			}
+
+			this.session.setCollaborationMode(targetMode);
+			this.showStatus(`Plan mode ${targetMode === "plan" ? "enabled" : "disabled"}`);
+		} catch (error: unknown) {
+			this.showError(`Failed to change plan mode: ${error instanceof Error ? error.message : String(error)}`);
+		}
 	}
 
 	private async promptForMissingSessionCwd(error: MissingSessionCwdError): Promise<string | undefined> {
@@ -3088,6 +3293,12 @@ export class InteractiveMode {
 				const selection = text.startsWith("/profile ") ? text.slice(9).trim() : undefined;
 				this.editor.setText("");
 				await this.handleProfileCommand(selection);
+				return;
+			}
+			if (text === "/plan" || text.startsWith("/plan ")) {
+				const argument = text.slice("/plan".length).trim() || undefined;
+				this.editor.setText("");
+				await this.handlePlanCommand(argument);
 				return;
 			}
 			if (text === "/export" || text.startsWith("/export ")) {
@@ -5770,39 +5981,24 @@ export class InteractiveMode {
 	}
 
 	private showAmbientAuthDialog(providerOption: AuthSelectorProvider): void {
-		const restoreEditor = () => {
-			this.editorContainer.clear();
-			this.editorContainer.addChild(this.editor);
-			this.ui.setFocus(this.editor);
-			this.ui.requestRender();
-		};
-
+		let token: object;
 		const dialog = new LoginDialogComponent(
 			this.ui,
 			providerOption.id,
-			() => restoreEditor(),
+			() => this.closeEditorUi(token),
 			providerOption.name,
 			`${providerOption.name} setup`,
 		);
 		dialog.showInfo(`${providerOption.method?.name ?? "Authentication"} is configured outside Diffex.`, [], true);
-
-		this.editorContainer.clear();
-		this.editorContainer.addChild(dialog);
-		this.ui.setFocus(dialog);
-		this.ui.requestRender();
+		token = this.mountEditorUi(dialog, dialog, () => {});
 	}
 
 	private async showApiKeyLoginDialog(providerId: string, providerName: string): Promise<void> {
+		const session = this.session;
 		const previousModel = this.session.model;
-
-		const dialog = new LoginDialogComponent(
-			this.ui,
-			providerId,
-			(_success, _message) => {
-				// Completion handled below
-			},
-			providerName,
-		);
+		const ownershipController = new AbortController();
+		let token: object;
+		const dialog = new LoginDialogComponent(this.ui, providerId, () => this.closeEditorUi(token), providerName);
 
 		if (providerId === "amazon-bedrock") {
 			dialog.showDetails([
@@ -5812,24 +6008,19 @@ export class InteractiveMode {
 			]);
 		}
 
-		this.editorContainer.clear();
-		this.editorContainer.addChild(dialog);
-		this.ui.setFocus(dialog);
-		this.ui.requestRender();
-
-		const restoreEditor = () => {
-			this.editorContainer.clear();
-			this.editorContainer.addChild(this.editor);
-			this.ui.setFocus(this.editor);
-			this.ui.requestRender();
-		};
+		token = this.mountEditorUi(dialog, dialog, () => ownershipController.abort());
 
 		try {
-			await this.loginProvider(dialog, providerId, "api_key");
-			restoreEditor();
+			await this.loginProvider(dialog, providerId, "api_key", token, ownershipController.signal);
+			if (ownershipController.signal.aborted || this.session !== session) {
+				this.closeEditorUi(token);
+				return;
+			}
 			await this.completeProviderAuthentication(providerId, providerName, "api_key", previousModel);
+			this.closeEditorUi(token);
 		} catch (error: unknown) {
-			restoreEditor();
+			this.closeEditorUi(token);
+			if (ownershipController.signal.aborted) return;
 			const errorMsg = error instanceof Error ? error.message : String(error);
 			if (error instanceof CredentialSynchronizationError) {
 				this.showError(
@@ -5844,48 +6035,70 @@ export class InteractiveMode {
 	private showAuthSelect(
 		dialog: LoginDialogComponent,
 		prompt: Extract<AuthPrompt, { type: "select" }>,
+		editorToken: object,
+		ownershipSignal: AbortSignal,
 	): Promise<string> {
 		return new Promise((resolve, reject) => {
-			const restoreDialog = () => {
-				this.editorContainer.clear();
-				this.editorContainer.addChild(dialog);
-				this.ui.setFocus(dialog);
-				this.ui.requestRender();
-			};
+			let settled = false;
 			const labels = prompt.options.map((option) => option.label);
 			const selector = new ExtensionSelectorComponent(
 				prompt.message,
 				labels,
 				(optionLabel) => {
-					restoreDialog();
+					if (settled) return;
+					settled = true;
+					ownershipSignal.removeEventListener("abort", onAbort);
+					selector.dispose();
+					if (!this.replaceEditorUi(editorToken, dialog, dialog)) {
+						reject(new Error("Login cancelled"));
+						return;
+					}
 					const id = prompt.options.find((option) => option.label === optionLabel)?.id;
 					if (id) resolve(id);
 					else reject(new Error("Login cancelled"));
 				},
 				() => {
-					restoreDialog();
+					if (settled) return;
+					settled = true;
+					ownershipSignal.removeEventListener("abort", onAbort);
+					selector.dispose();
+					this.replaceEditorUi(editorToken, dialog, dialog);
 					reject(new Error("Login cancelled"));
 				},
 			);
-			this.editorContainer.clear();
-			this.editorContainer.addChild(selector);
-			this.ui.setFocus(selector);
-			this.ui.requestRender();
+			const onAbort = () => {
+				if (settled) return;
+				settled = true;
+				selector.dispose();
+				reject(new Error("Login cancelled"));
+			};
+			if (ownershipSignal.aborted) {
+				onAbort();
+				return;
+			}
+			ownershipSignal.addEventListener("abort", onAbort, { once: true });
+			if (!this.replaceEditorUi(editorToken, selector, selector)) onAbort();
 		});
 	}
 
-	private async showAuthPrompt(dialog: LoginDialogComponent, prompt: AuthPrompt): Promise<string> {
+	private async showAuthPrompt(
+		dialog: LoginDialogComponent,
+		prompt: AuthPrompt,
+		editorToken: object,
+		ownershipSignal: AbortSignal,
+	): Promise<string> {
 		let response: Promise<string>;
 		if (prompt.type === "select") {
-			response = this.showAuthSelect(dialog, prompt);
+			response = this.showAuthSelect(dialog, prompt, editorToken, ownershipSignal);
 		} else if (prompt.type === "manual_code") {
 			response = dialog.showManualInput(prompt.message);
 		} else {
 			response = dialog.showPrompt(prompt.message, prompt.placeholder);
 		}
-		if (!prompt.signal) return response;
-		if (prompt.signal.aborted) throw new Error("Login cancelled");
-		const signal = prompt.signal;
+		const signal = AbortSignal.any(
+			prompt.signal ? [dialog.signal, ownershipSignal, prompt.signal] : [dialog.signal, ownershipSignal],
+		);
+		if (signal.aborted) throw new Error("Login cancelled");
 		let onAbort: (() => void) | undefined;
 		const aborted = new Promise<string>((_resolve, reject) => {
 			onAbort = () => reject(new Error("Login cancelled"));
@@ -5915,35 +6128,35 @@ export class InteractiveMode {
 		dialog: LoginDialogComponent,
 		providerId: string,
 		method: "api_key" | "oauth",
+		editorToken: object,
+		ownershipSignal: AbortSignal,
 	): Promise<void> {
 		await this.session.modelRuntime.login(providerId, method, {
-			signal: dialog.signal,
-			prompt: (prompt) => this.showAuthPrompt(dialog, prompt),
+			signal: AbortSignal.any([dialog.signal, ownershipSignal]),
+			prompt: (prompt) => this.showAuthPrompt(dialog, prompt, editorToken, ownershipSignal),
 			notify: (event) => this.notifyAuthDialog(dialog, event),
 		});
 	}
 
 	private async showLoginDialog(providerId: string, providerName: string): Promise<void> {
+		const session = this.session;
 		const previousModel = this.session.model;
-		const dialog = new LoginDialogComponent(this.ui, providerId, (_success, _message) => {}, providerName);
-		this.editorContainer.clear();
-		this.editorContainer.addChild(dialog);
-		this.ui.setFocus(dialog);
-		this.ui.requestRender();
-
-		const restoreEditor = () => {
-			this.editorContainer.clear();
-			this.editorContainer.addChild(this.editor);
-			this.ui.setFocus(this.editor);
-			this.ui.requestRender();
-		};
+		const ownershipController = new AbortController();
+		let token: object;
+		const dialog = new LoginDialogComponent(this.ui, providerId, () => this.closeEditorUi(token), providerName);
+		token = this.mountEditorUi(dialog, dialog, () => ownershipController.abort());
 
 		try {
-			await this.loginProvider(dialog, providerId, "oauth");
-			restoreEditor();
+			await this.loginProvider(dialog, providerId, "oauth", token, ownershipController.signal);
+			if (ownershipController.signal.aborted || this.session !== session) {
+				this.closeEditorUi(token);
+				return;
+			}
 			await this.completeProviderAuthentication(providerId, providerName, "oauth", previousModel);
+			this.closeEditorUi(token);
 		} catch (error: unknown) {
-			restoreEditor();
+			this.closeEditorUi(token);
+			if (ownershipController.signal.aborted) return;
 			const errorMsg = error instanceof Error ? error.message : String(error);
 			if (error instanceof CredentialSynchronizationError) {
 				this.showError(
@@ -6162,30 +6375,35 @@ export class InteractiveMode {
 
 		// Show cancellable loader, replacing the editor
 		const loader = new BorderedLoader(this.ui, theme, "Creating gist...");
-		this.editorContainer.clear();
-		this.editorContainer.addChild(loader);
-		this.ui.setFocus(loader);
-		this.ui.requestRender();
-
-		const restoreEditor = () => {
+		let proc: ReturnType<typeof spawn> | null = null;
+		let cancelled = false;
+		let cleanedUp = false;
+		const cleanup = () => {
+			if (cleanedUp) return;
+			cleanedUp = true;
 			loader.dispose();
-			this.editorContainer.clear();
-			this.editorContainer.addChild(this.editor);
-			this.ui.setFocus(this.editor);
 			try {
 				fs.unlinkSync(tmpFile);
 			} catch {
 				// Ignore cleanup errors
 			}
 		};
-
-		// Create a secret gist asynchronously
-		let proc: ReturnType<typeof spawn> | null = null;
+		const loaderToken = this.mountEditorUi(loader, loader, () => {
+			cancelled = true;
+			proc?.kill();
+			cleanup();
+		});
+		if (cancelled) return;
+		const closeLoader = () => {
+			const closed = this.closeEditorUi(loaderToken);
+			cleanup();
+			return closed;
+		};
 
 		loader.onAbort = () => {
+			cancelled = true;
 			proc?.kill();
-			restoreEditor();
-			this.showStatus("Share cancelled");
+			if (closeLoader()) this.showStatus("Share cancelled");
 		};
 
 		try {
@@ -6202,9 +6420,9 @@ export class InteractiveMode {
 				proc.on("close", (code) => resolve({ stdout, stderr, code }));
 			});
 
-			if (loader.signal.aborted) return;
+			if (cancelled || loader.signal.aborted) return;
 
-			restoreEditor();
+			closeLoader();
 
 			if (result.code !== 0) {
 				const errorMsg = result.stderr?.trim() || "Unknown error";
@@ -6228,8 +6446,8 @@ export class InteractiveMode {
 				previewUrl === directGistUrl ? `Gist: ${gistUrl}` : `Share URL: ${previewUrl}\nGist: ${gistUrl}`,
 			);
 		} catch (error: unknown) {
-			if (!loader.signal.aborted) {
-				restoreEditor();
+			if (!cancelled && !loader.signal.aborted) {
+				closeLoader();
 				this.showError(`Failed to create gist: ${error instanceof Error ? error.message : "Unknown error"}`);
 			}
 		}
@@ -6670,6 +6888,7 @@ export class InteractiveMode {
 	stop(): void {
 		this.runtimeHost.setProfileSwitchListener(undefined);
 		this.runtimeHost.setTaskBoundaryResolver(undefined);
+		this.cancelPendingPlanDecision();
 		this.cancelActiveEditorUi();
 		if (this.settingsManager.getShowTerminalProgress()) {
 			this.ui.terminal.setProgress(false);
