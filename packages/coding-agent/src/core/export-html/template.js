@@ -357,6 +357,9 @@
           case 'thinking_level_change':
             parts.push('thinking', entry.thinkingLevel);
             break;
+          case 'plan':
+            parts.push('plan', entry.plan.title, entry.plan.markdown);
+            break;
         }
 
         return parts.join(' ').toLowerCase();
@@ -385,7 +388,14 @@
           }
 
           // Apply filter mode
-          const isSettingsEntry = ['label', 'custom', 'model_change', 'thinking_level_change'].includes(entry.type);
+          const isSettingsEntry = [
+            'label',
+            'custom',
+            'model_change',
+            'thinking_level_change',
+            'collaboration_mode_change',
+            'plan_resolution'
+          ].includes(entry.type);
           let passesFilter = true;
 
           switch (filterMode) {
@@ -696,6 +706,12 @@
             return labelHtml + `<span class="tree-muted">[model: ${escapeHtml(entry.modelId)}]</span>`;
           case 'thinking_level_change':
             return labelHtml + `<span class="tree-muted">[thinking: ${escapeHtml(entry.thinkingLevel)}]</span>`;
+          case 'collaboration_mode_change':
+            return labelHtml + `<span class="tree-muted">[mode: ${escapeHtml(entry.mode)}]</span>`;
+          case 'plan_resolution':
+            return labelHtml + `<span class="tree-muted">[plan resolution: ${escapeHtml(entry.resolution)}]</span>`;
+          case 'plan':
+            return labelHtml + `<span class="tree-custom">[plan]:</span> ${escapeHtml(truncate(normalize(entry.plan.title)))}`;
           default:
             return labelHtml + `<span class="tree-muted">[${escapeHtml(entry.type)}]</span>`;
         }
@@ -1303,6 +1319,13 @@
           return `<div class="branch-summary" id="${entryDomId}">${tsHtml}
             <div class="branch-summary-header">Branch Summary</div>
             <div class="markdown-content">${safeMarkedParse(entry.summary)}</div>
+          </div>`;
+        }
+
+        if (entry.type === 'plan') {
+          return `<div class="branch-summary" id="${entryDomId}">${copyBtnHtml}${tsHtml}
+            <div class="branch-summary-header">Plan: ${escapeHtml(entry.plan.title)}</div>
+            <div class="markdown-content">${safeMarkedParse(entry.plan.markdown)}</div>
           </div>`;
         }
 
