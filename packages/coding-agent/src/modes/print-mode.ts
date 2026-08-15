@@ -11,6 +11,10 @@ import type { AgentSessionRuntime } from "../core/agent-session-runtime.ts";
 import { flushRawStdout, waitForRawStdoutBackpressure, writeRawStdout } from "../core/output-guard.ts";
 import { killTrackedDetachedChildren } from "../utils/shell.ts";
 import { toJsonEvent } from "./json-event.ts";
+import {
+	assertNonInteractivePlanModeDisabled,
+	validateNonInteractiveSessionTarget,
+} from "./non-interactive-plan-mode.ts";
 
 /**
  * Options for print mode.
@@ -31,6 +35,7 @@ export interface PrintModeOptions {
  * Sends prompts to the agent and outputs the result.
  */
 export async function runPrintMode(runtimeHost: AgentSessionRuntime, options: PrintModeOptions): Promise<number> {
+	assertNonInteractivePlanModeDisabled(runtimeHost.session);
 	const { mode, messages = [], initialMessage, initialImages } = options;
 	let exitCode = 0;
 	let session = runtimeHost.session;
@@ -72,17 +77,29 @@ export async function runPrintMode(runtimeHost: AgentSessionRuntime, options: Pr
 	});
 
 	const rebindSession = async (): Promise<void> => {
-		session = runtimeHost.session;
+		const nextSession = runtimeHost.session;
+		assertNonInteractivePlanModeDisabled(nextSession);
+		session = nextSession;
 		await session.bindExtensions({
 			mode: mode === "json" ? "json" : "print",
 			commandContextActions: {
 				waitForIdle: () => session.waitForIdle(),
-				newSession: async (newSessionOptions) => runtimeHost.newSession(newSessionOptions),
+				newSession: async (newSessionOptions) =>
+					runtimeHost.newSession({
+						...newSessionOptions,
+						validateTarget: validateNonInteractiveSessionTarget,
+					}),
 				fork: async (entryId, forkOptions) => {
-					const result = await runtimeHost.fork(entryId, forkOptions);
+					const result = await runtimeHost.fork(entryId, {
+						...forkOptions,
+						validateTarget: validateNonInteractiveSessionTarget,
+					});
 					return { cancelled: result.cancelled };
 				},
 				navigateTree: async (targetId, navigateOptions) => {
+					if (session.sessionManager.getEntry(targetId)) {
+						validateNonInteractiveSessionTarget(session.sessionManager, targetId);
+					}
 					const result = await session.navigateTree(targetId, {
 						summarize: navigateOptions?.summarize,
 						customInstructions: navigateOptions?.customInstructions,
@@ -92,7 +109,10 @@ export async function runPrintMode(runtimeHost: AgentSessionRuntime, options: Pr
 					return { cancelled: result.cancelled };
 				},
 				switchSession: async (sessionPath, switchOptions) => {
-					return runtimeHost.switchSession(sessionPath, switchOptions);
+					return runtimeHost.switchSession(sessionPath, {
+						...switchOptions,
+						validateTarget: validateNonInteractiveSessionTarget,
+					});
 				},
 				reload: async () => {
 					await session.reload();
@@ -107,7 +127,10 @@ export async function runPrintMode(runtimeHost: AgentSessionRuntime, options: Pr
 		unsubscribeBackpressure?.();
 		unsubscribe = session.subscribe((event) => {
 			if (mode === "json") {
-				writeRawStdout(`${JSON.stringify(toJsonEvent(event))}\n`);
+				const jsonEvent = toJsonEvent(event);
+				if (jsonEvent) {
+					writeRawStdout(`${JSON.stringify(jsonEvent)}\n`);
+				}
 			}
 		});
 		unsubscribeBackpressure =
@@ -129,11 +152,15 @@ export async function runPrintMode(runtimeHost: AgentSessionRuntime, options: Pr
 		await rebindSession();
 
 		if (initialMessage) {
-			await session.prompt(initialMessage, { images: initialImages });
+			assertNonInteractivePlanModeDisabled(session);
+			await runtimeHost.prompt(initialMessage, { images: initialImages });
+			assertNonInteractivePlanModeDisabled(session);
 		}
 
 		for (const message of messages) {
-			await session.prompt(message);
+			assertNonInteractivePlanModeDisabled(session);
+			await runtimeHost.prompt(message);
+			assertNonInteractivePlanModeDisabled(session);
 		}
 
 		if (mode === "text") {
