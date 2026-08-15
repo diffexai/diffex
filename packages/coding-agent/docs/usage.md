@@ -11,7 +11,7 @@ The interface has four main areas:
 - **Startup header** - shortcuts, loaded context files, prompt templates, skills, and extensions
 - **Messages** - user messages, assistant responses, tool calls, tool results, notifications, errors, and extension UI
 - **Editor** - where you type; border color indicates the current thinking level
-- **Footer** - working directory, session name, token/cache usage, cost, context usage, and current model. Totals include assistant responses, usage reported by tools, and summary generation.
+- **Footer** - the built-in footer keeps the active profile, routing mode, and harness visible above the current model, thinking level, and context usage.
 
 The editor can be replaced temporarily by built-in UI such as `/settings` or by custom extension UI.
 
@@ -40,6 +40,7 @@ Type `/` in the editor to open command completion. Extensions can register custo
 | [`/llama`](llama-cpp.md) | Download, load, and unload llama.cpp router models |
 | `/model` | Switch models |
 | `/scoped-models` | Enable/disable models for Ctrl+P cycling |
+| `/plan [on\|off]` | Toggle plan mode, set it explicitly, or reopen a pending plan |
 | `/settings` | Thinking level, theme, message delivery, transport |
 | `/resume` | Pick from previous sessions |
 | `/new` | Start a new session |
@@ -84,6 +85,34 @@ Diffex displays interrupted notices and settles without making another parent mo
 Completion notices use assistant styling, but are not conversation messages.
 They are not persisted or included in model context.
 JSON and RPC modes emit the same notices as structured session events.
+
+## Plan Mode
+
+Start an interactive planning session with `diffex --plan`, toggle it with `/plan`, or set it explicitly with `/plan on` or `/plan off`.
+Plan mode can be changed only while the session is idle.
+
+Plan mode exposes `submit_plan` and canonical `read`, `grep`, `find`, and `ls` repository inspection tools when caller restrictions and the active task profile permit them.
+Extension tools, SDK custom tools, shell execution, and file mutation tools are unavailable until the plan is accepted or discarded.
+`submit_plan` is intrinsic to plan mode and remains available even when caller tool filters disable every inspection tool.
+Automatic task-profile routing pauses for planning prompts.
+In automatic mode, choosing Implement routes every accepted task before execution, even when a harness is already active.
+The router may keep the active harness for a continuation, reuse a related harness, or switch to a newly selected task harness.
+Diffex asks which profile should govern implementation only when the router finds a high-confidence ambiguity among specialized profiles.
+The chooser shows each option's description, safeguards, and tool-policy summary.
+The choice determines the implementation profile's expertise, safeguards, and tool access.
+The recommended option receives initial focus but is not selected automatically.
+Canceling the choice leaves the accepted implementation pending; use `/plan` to retry.
+A malformed, low-confidence, or failed route also leaves the accepted implementation pending instead of silently falling back to another profile.
+A pinned profile bypasses automatic routing and implements the plan in place.
+Pin a profile before planning when its guardrails must apply during planning itself.
+
+`submit_plan` ends the planning turn and creates a Markdown plan artifact.
+The artifact remains pending in the session until you implement or discard it.
+Collaboration-mode changes, submitted plans, and their resolutions are persisted in the session, so the active branch restores the correct mode, pending plan, or accepted implementation handoff after resume or tree navigation.
+
+The `--plan` startup flag is supported only in interactive mode.
+Diffex rejects it in print, JSON, and RPC modes because those modes cannot resolve a pending plan.
+The same restriction applies when a resumed session's active branch is in plan mode or has an accepted implementation waiting to start.
 
 ## Message Queue
 
@@ -200,7 +229,10 @@ See [Diffex Packages](packages.md) for package sources and security notes.
 | `-p`, `--print` | Print response and exit |
 | `--mode json` | Output all events as JSON lines; see [JSON mode](json.md) |
 | `--mode rpc` | RPC mode over stdin/stdout; see [RPC mode](rpc.md) |
+| `--plan` | Start interactive mode with native plan mode active |
 | `--export <in> [out]` | Export a session to HTML |
+
+Do not combine `--plan` with `-p`, `--mode json`, or `--mode rpc`.
 
 In print mode, Diffex also reads piped stdin and merges it into the initial prompt:
 
@@ -238,9 +270,11 @@ cat README.md | diffex -p "Summarize this text"
 | `--tools <list>`, `-t <list>` | Allowlist specific built-in, extension, and custom tools |
 | `--exclude-tools <list>`, `-xt <list>` | Disable specific built-in, extension, and custom tools |
 | `--no-builtin-tools`, `-nbt` | Disable built-in tools but keep extension/custom tools enabled |
-| `--no-tools`, `-nt` | Disable all tools |
+| `--no-tools`, `-nt` | Disable all normal-mode tools and plan-mode inspection tools |
 
-Built-in tools: `read`, `bash`, `edit`, `write`, `update_plan`, `grep`, `find`, `ls`.
+Normal-mode built-in tools: `read`, `bash`, `edit`, `write`, `update_plan`, `grep`, `find`, `ls`.
+Plan mode exposes `submit_plan` plus the permitted canonical subset of `read`, `grep`, `find`, and `ls`.
+Tool allowlists and denylists constrain the inspection subset, but `submit_plan` remains available as an intrinsic plan-mode tool.
 
 ### Resource Options
 
@@ -295,6 +329,9 @@ diffex @code.ts @test.ts "Review these files"
 # Interactive with initial prompt
 diffex "List all .ts files in src/"
 
+# Interactive read-only planning
+diffex --plan "Design the implementation before changing anything"
+
 # Non-interactive
 diffex -p "Summarize this codebase"
 
@@ -327,6 +364,6 @@ diffex --exclude-tools ask_question
 
 Diffex keeps the core small and pushes workflow-specific behavior into extensions, skills, prompt templates, and packages.
 
-It intentionally does not include built-in MCP, permission popups, full plan mode, persistent to-dos, or background bash. The built-in `update_plan` tool is only a lightweight progress checklist. You can build or install richer workflows as extensions or packages, or use external tools such as containers and tmux.
+It includes a constrained native plan mode and session-scoped sub-agents while leaving MCP, permission popups, persistent to-dos, and background bash to extensions, packages, or external tools such as containers and tmux. The built-in `update_plan` tool remains a lightweight progress checklist.
 
 For the full rationale, read the [blog post](https://mariozechner.at/posts/2025-11-30-pi-coding-agent/).

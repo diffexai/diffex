@@ -1,8 +1,13 @@
-# Plan Mode Extension
+# Legacy Plan Mode Extension
+
+This historical example predates native plan mode and is incompatible with current Diffex.
+It reuses the now-reserved `--plan` and `/plan` interfaces, so do not load it.
+Use the native plan mode documented in [Usage](../../../docs/usage.md#plan-mode).
+The remaining sections describe the legacy extension's historical behavior only.
 
 Read-only exploration mode for safe code analysis.
 
-## Features
+## Historical Features
 
 - **Built-in write tools disabled**: Disables edit/write while preserving other active tools
 - **Bash allowlist**: Only read-only bash commands are allowed
@@ -11,13 +16,13 @@ Read-only exploration mode for safe code analysis.
 - **[DONE:n] markers**: Explicit step completion tracking
 - **Session persistence**: State survives session resume
 
-## Commands
+## Historical Commands
 
 - `/plan` - Toggle plan mode
 - `/todos` - Show current plan progress
 - `Ctrl+Alt+P` - Toggle plan mode (shortcut)
 
-## Usage
+## Historical Usage
 
 1. Enable plan mode with `/plan` or `--plan` flag
 2. Ask the agent to analyze code and create a plan
@@ -34,7 +39,7 @@ Plan:
 5. During execution, the agent marks steps complete with `[DONE:n]` tags
 6. Progress widget shows completion status
 
-## How It Works
+## Historical Implementation
 
 ### Plan Mode (Read-Only)
 - Built-in edit/write tools disabled
