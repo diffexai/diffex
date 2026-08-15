@@ -10,6 +10,7 @@ import type { ExtensionRunner, LoadExtensionsResult, SessionStartEvent, ToolDefi
 import { convertToLlm } from "./messages.ts";
 import { findInitialModel } from "./model-resolver.ts";
 import { ModelRuntime } from "./model-runtime.ts";
+import type { CollaborationMode } from "./plan-mode.ts";
 import { mergeProviderAttributionHeaders } from "./provider-attribution.ts";
 import type { ResourceLoader } from "./resource-loader.ts";
 import { DefaultResourceLoader } from "./resource-loader.ts";
@@ -62,13 +63,17 @@ export interface CreateAgentSessionOptions {
 	thinkingLevel?: ThinkingLevel;
 	/** Models available for cycling (Ctrl+P in interactive mode) */
 	scopedModels?: Array<{ model: Model<any>; thinkingLevel?: ThinkingLevel }>;
+	/** Collaboration policy. Existing sessions restore their latest persisted mode by default. */
+	collaborationMode?: CollaborationMode;
 
 	/**
 	 * Optional default tool suppression mode when no explicit allowlist is provided.
 	 *
-	 * - "all": start with no tools enabled
-	 * - "builtin": disable the default built-in tools (read, bash, edit, write, update_plan)
+	 * - "all": start with no normal-mode or plan-mode inspection tools enabled
+	 * - "builtin": disable all built-in tools
 	 *   but keep extension/custom tools enabled
+	 *
+	 * Plan mode always retains its intrinsic `submit_plan` tool.
 	 */
 	noTools?: "all" | "builtin";
 	/**
@@ -77,9 +82,13 @@ export interface CreateAgentSessionOptions {
 	 * When omitted, Diffex enables the default built-in tools (read, bash, edit, write, update_plan)
 	 * and leaves extension/custom tools enabled unless `noTools` changes that default.
 	 * When provided, only the listed tool names are enabled.
+	 * Plan mode always retains its intrinsic `submit_plan` tool.
 	 */
 	tools?: string[];
-	/** Optional denylist of tool names to disable. Applies after `tools` when both are provided. */
+	/**
+	 * Optional denylist of tool names to disable. Applies after `tools` when both are provided.
+	 * Plan mode always retains its intrinsic `submit_plan` tool.
+	 */
 	excludeTools?: string[];
 	/** Custom tools to register (in addition to built-in tools). */
 	customTools?: ToolDefinition[];
@@ -448,6 +457,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		customTools,
 		modelRuntime,
 		initialActiveToolNames,
+		collaborationMode: options.collaborationMode,
 		allowedToolNames,
 		excludedToolNames,
 		extensionRunnerRef,

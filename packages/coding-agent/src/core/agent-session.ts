@@ -14,6 +14,7 @@
  */
 
 import { AsyncLocalStorage } from "node:async_hooks";
+import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname } from "node:path";
 import type {
@@ -99,6 +100,16 @@ import { emitSessionShutdownEvent } from "./extensions/runner.ts";
 import type { BashExecutionMessage, CustomMessage } from "./messages.ts";
 import { ModelRegistry } from "./model-registry.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
+import {
+	type CollaborationMode,
+	createPlanImplementationPrompt,
+	createSubmitPlanToolDefinition,
+	type PlanArtifact,
+	type PlanResolution,
+	parsePlanArtifact,
+	SUBMIT_PLAN_TOOL_NAME,
+	type SubmitPlanInput,
+} from "./plan-mode.ts";
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.ts";
 import type { ResourceExtensionPaths, ResourceLoader } from "./resource-loader.ts";
 import type { BranchSummaryEntry, CompactionEntry, SessionEntry, SessionManager } from "./session-manager.ts";
@@ -144,11 +155,7 @@ export function parseSkillBlock(text: string): ParsedSkillBlock | null {
 /** Session-specific events that extend the core AgentEvent */
 export type AgentSessionEvent =
 	| Exclude<AgentEvent, { type: "agent_end" }>
-	| {
-			type: "agent_end";
-			messages: AgentMessage[];
-			willRetry: boolean;
-	  }
+	| { type: "agent_end"; messages: AgentMessage[]; willRetry: boolean }
 	| { type: "agent_settled" }
 	| {
 			type: "queue_update";
@@ -159,6 +166,9 @@ export type AgentSessionEvent =
 	| { type: "entry_appended"; entry: SessionEntry }
 	| { type: "session_info_changed"; name: string | undefined }
 	| { type: "thinking_level_changed"; level: ThinkingLevel }
+	| { type: "collaboration_mode_changed"; mode: CollaborationMode }
+	| { type: "plan_submitted"; plan: PlanArtifact }
+	| { type: "plan_resolved"; planId: string; resolution: PlanResolution }
 	| {
 			type: "compaction_end";
 			reason: "manual" | "threshold" | "overflow";
@@ -224,6 +234,8 @@ export interface AgentSessionConfig {
 	modelRuntime: ModelRuntime;
 	/** Initial active built-in tool names. Default: [read, bash, edit, write, update_plan] */
 	initialActiveToolNames?: string[];
+	/** Initial collaboration mode restored from the session or selected by the caller. */
+	collaborationMode?: CollaborationMode;
 	/** Optional allowlist of tool names. When provided, only these tool names are exposed. */
 	allowedToolNames?: string[];
 	/** Optional denylist of tool names. When provided, these tool names are not exposed. */
@@ -263,6 +275,19 @@ export interface PromptOptions {
 	/** Source of input for extension input event handlers. Defaults to "interactive". */
 	source?: InputSource;
 	/** Internal hook used by RPC mode to observe prompt preflight acceptance or rejection. */
+	preflightResult?: (success: boolean) => void;
+}
+
+/** One-shot implementation continuation returned after a pending plan is accepted. */
+export interface PlanContinuation {
+	readonly message: string;
+}
+
+/** Host metadata for submitting an accepted plan continuation. */
+export interface PlanContinuationPromptOptions {
+	/** Source reported to extension lifecycle events. */
+	source?: InputSource;
+	/** Called once prompt ownership is accepted or rejected. */
 	preflightResult?: (success: boolean) => void;
 }
 
@@ -326,6 +351,8 @@ const THINKING_LEVELS: ThinkingLevel[] = ["off", "minimal", "low", "medium", "hi
 const CURRENT_PLAN_RESTORATION_CUSTOM_TYPE = "diffex.current-plan-restoration";
 const CURRENT_PLAN_RESTORATION_REMINDER =
 	"Reminder: restored context is not proof of completion. Verify current state before claiming work is done.";
+const PLAN_READ_ONLY_TOOL_NAMES = ["read", "grep", "find", "ls"] as const;
+const PLAN_TOOL_NAMES = [...PLAN_READ_ONLY_TOOL_NAMES, SUBMIT_PLAN_TOOL_NAME] as const;
 
 // ============================================================================
 // AgentSession Class
@@ -386,6 +413,10 @@ export class AgentSession {
 	private _cwd: string;
 	private _extensionRunnerRef?: { current?: ExtensionRunner };
 	private _initialActiveToolNames?: string[];
+	private _collaborationMode: CollaborationMode;
+	private _pendingPlan: PlanArtifact | undefined;
+	private _pendingPlanContinuation: PlanContinuation | undefined;
+	private _normalActiveToolNames: string[] = [];
 	private _allowedToolNames?: Set<string>;
 	private _excludedToolNames?: Set<string>;
 	private _baseToolsOverride?: Record<string, AgentTool>;
@@ -404,6 +435,10 @@ export class AgentSession {
 	private _toolDefinitions: Map<string, ToolDefinitionEntry> = new Map();
 	private _toolPromptSnippets: Map<string, string> = new Map();
 	private _toolPromptGuidelines: Map<string, string[]> = new Map();
+	private _planToolRegistry: Map<string, AgentTool> = new Map();
+	private _planToolDefinitions: Map<string, ToolDefinitionEntry> = new Map();
+	private _planToolPromptSnippets: Map<string, string> = new Map();
+	private _planToolPromptGuidelines: Map<string, string[]> = new Map();
 
 	// Base system prompt (without extension appends) - used to apply fresh appends each turn
 	private _baseSystemPrompt = "";
@@ -425,6 +460,27 @@ export class AgentSession {
 		this._modelRuntime = config.modelRuntime;
 		this._extensionRunnerRef = config.extensionRunnerRef;
 		this._initialActiveToolNames = config.initialActiveToolNames;
+		const persistedCollaboration = this.sessionManager.buildSessionContext();
+		const collaborationMode = config.collaborationMode ?? persistedCollaboration.collaborationMode;
+		if (collaborationMode !== "default" && collaborationMode !== "plan") {
+			throw new Error(`Invalid collaboration mode: ${String(collaborationMode)}`);
+		}
+		const pendingPlan = persistedCollaboration.pendingPlan;
+		const pendingPlanContinuation = persistedCollaboration.pendingPlanContinuation;
+		if (pendingPlan && collaborationMode !== "plan") {
+			throw new Error("Cannot leave plan mode while the session has a pending plan.");
+		}
+		if (pendingPlanContinuation && collaborationMode !== "default") {
+			throw new Error("Cannot change collaboration mode while an accepted plan continuation is pending.");
+		}
+		if (collaborationMode !== persistedCollaboration.collaborationMode) {
+			this.sessionManager.appendCollaborationModeChange(collaborationMode);
+		}
+		this._collaborationMode = collaborationMode;
+		this._pendingPlan = pendingPlan ? Object.freeze({ ...pendingPlan }) : undefined;
+		this._pendingPlanContinuation = pendingPlanContinuation
+			? Object.freeze({ message: createPlanImplementationPrompt(pendingPlanContinuation) })
+			: undefined;
 		this._allowedToolNames = config.allowedToolNames ? new Set(config.allowedToolNames) : undefined;
 		this._excludedToolNames = config.excludedToolNames ? new Set(config.excludedToolNames) : undefined;
 		this._baseToolsOverride = config.baseToolsOverride;
@@ -512,6 +568,14 @@ export class AgentSession {
 		}
 	}
 
+	private _isPlanToolContext(tools: readonly AgentTool[] | undefined): boolean {
+		return (
+			tools?.some(
+				(tool) => tool.name === SUBMIT_PLAN_TOOL_NAME && this._planToolRegistry.get(tool.name) === tool,
+			) === true
+		);
+	}
+
 	/**
 	 * Install tool hooks once on the Agent instance.
 	 *
@@ -521,7 +585,20 @@ export class AgentSession {
 	 * happens here instead of in wrappers.
 	 */
 	private _installAgentToolHooks(): void {
-		this.agent.beforeToolCall = async ({ toolCall, args }) => {
+		this.agent.beforeToolCall = async ({ toolCall, args, context }) => {
+			const isPlanToolContext = this._collaborationMode === "plan" || this._isPlanToolContext(context.tools);
+			if (isPlanToolContext) {
+				const expectedTool = this._planToolRegistry.get(toolCall.name);
+				const activeTool = context.tools?.find((tool) => tool.name === toolCall.name);
+				if (!expectedTool || activeTool !== expectedTool) {
+					return {
+						block: true,
+						reason: `Tool ${toolCall.name} is not available in plan mode.`,
+					};
+				}
+				return undefined;
+			}
+
 			const runner = this._extensionRunner;
 			if (!runner.hasHandlers("tool_call")) {
 				return undefined;
@@ -542,9 +619,10 @@ export class AgentSession {
 			}
 		};
 
-		this.agent.afterToolCall = async ({ toolCall, args, result, isError }) => {
+		this.agent.afterToolCall = async ({ toolCall, args, result, isError, context }) => {
+			const isPlanToolContext = this._collaborationMode === "plan" || this._isPlanToolContext(context.tools);
 			const runner = this._extensionRunner;
-			const hookResult = runner.hasHandlers("tool_result")
+			const hookResult = !isPlanToolContext && runner.hasHandlers("tool_result")
 				? await runner.emitToolResult({
 						type: "tool_result",
 						toolName: toolCall.name,
@@ -1127,12 +1205,32 @@ export class AgentSession {
 		return this.agent.state.thinkingLevel;
 	}
 
-	/** Whether the session is currently processing an agent run or post-run continuation. */
-	get isStreaming(): boolean {
-		return this._isAgentRunActive;
+	/** Current collaboration policy. */
+	get collaborationMode(): CollaborationMode {
+		return this._collaborationMode;
 	}
 
-	/** Whether the session has no active agent run, retry, auto-compaction, or queued continuation. */
+	/** Submitted plan awaiting a user decision, if any. */
+	get pendingPlan(): PlanArtifact | undefined {
+		return this._pendingPlan ? { ...this._pendingPlan } : undefined;
+	}
+
+	/** Accepted plan implementation awaiting its exact one-shot user turn, if any. */
+	get pendingPlanContinuation(): PlanContinuation | undefined {
+		return this._pendingPlanContinuation;
+	}
+
+	/** Whether the session is preparing or processing an agent run or post-run continuation. */
+	get isStreaming(): boolean {
+		return (
+			this._activeExtensionCommandOperation !== undefined ||
+			this._promptPreflightLeases.size > 0 ||
+			this._promptLease !== undefined ||
+			this._isAgentRunActive
+		);
+	}
+
+	/** Whether the session has no active agent run or post-run continuation. */
 	get isIdle(): boolean {
 		return !this._isAgentRunActive;
 	}
@@ -1159,7 +1257,8 @@ export class AgentSession {
 	 * Get all configured tools with name, description, parameter schema, prompt guidelines, and source metadata.
 	 */
 	getAllTools(): ToolInfo[] {
-		return Array.from(this._toolDefinitions.values()).map(({ definition, sourceInfo }) => ({
+		const definitions = this._collaborationMode === "plan" ? this._planToolDefinitions : this._toolDefinitions;
+		return Array.from(definitions.values()).map(({ definition, sourceInfo }) => ({
 			name: definition.name,
 			description: definition.description,
 			parameters: definition.parameters,
@@ -1169,7 +1268,31 @@ export class AgentSession {
 	}
 
 	getToolDefinition(name: string): ToolDefinition | undefined {
-		return this._toolDefinitions.get(name)?.definition;
+		const definitions = this._collaborationMode === "plan" ? this._planToolDefinitions : this._toolDefinitions;
+		return definitions.get(name)?.definition;
+	}
+
+	private _applyActiveTools(toolNames: readonly string[], registry: ReadonlyMap<string, AgentTool>): void {
+		const tools: AgentTool[] = [];
+		const validToolNames: string[] = [];
+		for (const name of toolNames) {
+			const tool = registry.get(name);
+			if (tool && !validToolNames.includes(name)) {
+				tools.push(tool);
+				validToolNames.push(name);
+			}
+		}
+		this.agent.state.tools = tools;
+		this._baseSystemPrompt = this._rebuildSystemPrompt(validToolNames);
+		this.agent.state.systemPrompt = this._systemPromptOverride ?? this._baseSystemPrompt;
+	}
+
+	private _applyToolsForCollaborationMode(): void {
+		if (this._collaborationMode === "plan") {
+			this._applyActiveTools(PLAN_TOOL_NAMES, this._planToolRegistry);
+			return;
+		}
+		this._applyActiveTools(this._normalActiveToolNames, this._toolRegistry);
 	}
 
 	/** Current in-memory child-agent roster, sorted by name. */
@@ -1184,20 +1307,152 @@ export class AgentSession {
 	 * Changes take effect on the next agent turn.
 	 */
 	setActiveToolsByName(toolNames: string[]): void {
-		const tools: AgentTool[] = [];
+		this._assertRuntimeReplacementAvailable();
 		const validToolNames: string[] = [];
 		for (const name of toolNames) {
 			const tool = this._toolRegistry.get(name);
-			if (tool) {
-				tools.push(tool);
+			if (tool && !validToolNames.includes(name)) {
 				validToolNames.push(name);
 			}
+			}
 		}
-		this.agent.state.tools = tools;
+		this._normalActiveToolNames = validToolNames;
+		this._applyToolsForCollaborationMode();
+	}
 
-		// Rebuild base system prompt with new tool set
-		this._baseSystemPrompt = this._rebuildSystemPrompt(validToolNames);
-		this.agent.state.systemPrompt = this._systemPromptOverride ?? this._baseSystemPrompt;
+	/**
+	 * Change collaboration policy while the session is idle.
+	 * A submitted plan must be resolved before leaving plan mode.
+	 */
+	setCollaborationMode(mode: CollaborationMode): void {
+		this._assertRuntimeReplacementAvailable();
+		if (mode !== "default" && mode !== "plan") {
+			throw new Error(`Invalid collaboration mode: ${String(mode)}`);
+		}
+		if (mode === this._collaborationMode) return;
+		if (this._pendingPlanContinuation) {
+			throw new Error("Submit the pending plan continuation before changing collaboration mode.");
+		}
+		if (
+			this._promptLease !== undefined ||
+			this._promptPreflightLeases.size > 0 ||
+			!this.isIdle ||
+			this.isCompacting ||
+			this.isRetrying ||
+			this.isBashRunning
+		) {
+			throw new Error("Wait for the current operation to finish before changing collaboration mode.");
+		}
+		if (this.agent.hasQueuedMessages() || this._pendingNextTurnMessages.length > 0) {
+			throw new Error("Clear queued messages before changing collaboration mode.");
+		}
+		if (mode === "default" && this._pendingPlan) {
+			throw new Error("Resolve the pending plan before leaving plan mode.");
+		}
+		this._setCollaborationMode(mode);
+	}
+
+	private _setCollaborationMode(mode: CollaborationMode): void {
+		if (mode === this._collaborationMode) return;
+		this._applyCollaborationModeTransition(mode, () => {
+			this.sessionManager.appendCollaborationModeChange(mode);
+		});
+		if (mode === "plan") this._pendingPlanContinuation = undefined;
+		this._emit({ type: "collaboration_mode_changed", mode });
+	}
+
+	private _applyCollaborationModeTransition(mode: CollaborationMode, persist: () => void): void {
+		const previousMode = this._collaborationMode;
+		const previousTools = this.agent.state.tools.slice();
+		const previousBaseSystemPrompt = this._baseSystemPrompt;
+		const previousSystemPrompt = this.agent.state.systemPrompt;
+		const previousBaseSystemPromptOptions = this._baseSystemPromptOptions;
+		this._collaborationMode = mode;
+		try {
+			this._applyToolsForCollaborationMode();
+			persist();
+		} catch (error) {
+			this._collaborationMode = previousMode;
+			this.agent.state.tools = previousTools;
+			this._baseSystemPrompt = previousBaseSystemPrompt;
+			this.agent.state.systemPrompt = previousSystemPrompt;
+			this._baseSystemPromptOptions = previousBaseSystemPromptOptions;
+			throw error;
+		}
+	}
+
+	private _restoreCollaborationState(
+		mode: CollaborationMode,
+		pendingPlan: PlanArtifact | undefined,
+		pendingPlanContinuation: PlanArtifact | undefined,
+	): void {
+		const modeChanged = mode !== this._collaborationMode;
+		this._collaborationMode = mode;
+		this._pendingPlan = pendingPlan ? Object.freeze({ ...pendingPlan }) : undefined;
+		this._pendingPlanContinuation = pendingPlanContinuation
+			? Object.freeze({ message: createPlanImplementationPrompt(pendingPlanContinuation) })
+			: undefined;
+		this._applyToolsForCollaborationMode();
+		if (modeChanged) {
+			this._emit({ type: "collaboration_mode_changed", mode });
+		}
+	}
+
+	private _submitPlan(input: SubmitPlanInput): PlanArtifact {
+		if (this._collaborationMode !== "plan") {
+			throw new Error("Plans can only be submitted in plan mode.");
+		}
+
+		const plan = parsePlanArtifact({
+			id: randomUUID(),
+			title: input.title,
+			markdown: input.markdown,
+		});
+		if (!plan) throw new Error("Invalid plan artifact.");
+		this.sessionManager.appendPlan(plan);
+		this._pendingPlan = plan;
+		this._pendingPlanContinuation = undefined;
+		if (this._activePromptLease) this._activePromptLease.planSubmitted = true;
+		this._emit({ type: "plan_submitted", plan });
+		return plan;
+	}
+
+	/** Durably resolve the current plan and return any same-session continuation for the host to submit. */
+	resolvePlan(planId: string, resolution: PlanResolution): PlanContinuation | undefined {
+		this._assertRuntimeReplacementAvailable();
+		const plan = this._pendingPlan;
+		if (!plan || plan.id !== planId) {
+			throw new Error("Plan is not pending.");
+		}
+		if (resolution !== "implement" && resolution !== "discard") {
+			throw new Error("Invalid plan resolution.");
+		}
+		if (
+			this._promptLease !== undefined ||
+			this._promptPreflightLeases.size > 0 ||
+			this._isAgentRunActive ||
+			this.isCompacting ||
+			this.isRetrying ||
+			this.isBashRunning
+		) {
+			throw new Error("Wait for the current operation to finish before resolving the plan.");
+		}
+
+		const previousMode = this._collaborationMode;
+		this._applyCollaborationModeTransition("default", () => {
+			this.sessionManager.appendPlanResolution(plan.id, resolution);
+		});
+
+		this._pendingPlan = undefined;
+		this.clearQueue();
+		this._pendingNextTurnMessages = [];
+		this._pendingPlanContinuation =
+			resolution === "implement" ? Object.freeze({ message: createPlanImplementationPrompt(plan) }) : undefined;
+		this._emit({ type: "plan_resolved", planId: plan.id, resolution });
+		if (previousMode !== "default") {
+			this._emit({ type: "collaboration_mode_changed", mode: "default" });
+		}
+		return this._pendingPlanContinuation;
 	}
 
 	/** Whether compaction or branch summarization is currently running */
@@ -1280,18 +1535,23 @@ export class AgentSession {
 	}
 
 	private _rebuildSystemPrompt(toolNames: string[]): string {
-		const validToolNames = toolNames.filter((name) => this._toolRegistry.has(name));
+		const toolRegistry = this._collaborationMode === "plan" ? this._planToolRegistry : this._toolRegistry;
+		const promptSnippets =
+			this._collaborationMode === "plan" ? this._planToolPromptSnippets : this._toolPromptSnippets;
+		const promptGuidelines =
+			this._collaborationMode === "plan" ? this._planToolPromptGuidelines : this._toolPromptGuidelines;
+		const validToolNames = toolNames.filter((name) => toolRegistry.has(name));
 		const toolSnippets: Record<string, string> = {};
-		const promptGuidelines: string[] = [];
+		const activePromptGuidelines: string[] = [];
 		for (const name of validToolNames) {
-			const snippet = this._toolPromptSnippets.get(name);
+			const snippet = promptSnippets.get(name);
 			if (snippet) {
 				toolSnippets[name] = snippet;
 			}
 
-			const toolGuidelines = this._toolPromptGuidelines.get(name);
+			const toolGuidelines = promptGuidelines.get(name);
 			if (toolGuidelines) {
-				promptGuidelines.push(...toolGuidelines);
+				activePromptGuidelines.push(...toolGuidelines);
 			}
 		}
 
@@ -1308,9 +1568,10 @@ export class AgentSession {
 			contextFiles: loadedContextFiles,
 			customPrompt: loaderSystemPrompt,
 			appendSystemPrompt,
+			collaborationMode: this._collaborationMode,
 			selectedTools: validToolNames,
 			toolSnippets,
-			promptGuidelines,
+			promptGuidelines: activePromptGuidelines,
 		};
 		return buildSystemPrompt(this._baseSystemPromptOptions);
 	}
@@ -2888,7 +3149,7 @@ export class AgentSession {
 
 	private _refreshToolRegistry(options?: { activeToolNames?: string[]; includeAllExtensionTools?: boolean }): void {
 		const previousRegistryNames = new Set(this._toolRegistry.keys());
-		const previousActiveToolNames = this.getActiveToolNames();
+		const previousActiveToolNames = [...this._normalActiveToolNames];
 		const allowedToolNames = this._allowedToolNames;
 		const excludedToolNames = this._excludedToolNames;
 		const isAllowedTool = (name: string): boolean =>
@@ -2946,6 +3207,57 @@ export class AgentSession {
 					sourceInfo: createSyntheticSourceInfo(`<builtin:${definition.name}>`, { source: "builtin" }),
 				})),
 			runner,
+		);
+		const planModeDefinitions = [createSubmitPlanToolDefinition({ submitPlan: (input) => this._submitPlan(input) })];
+		const registeredPlanModeTools = planModeDefinitions.map((definition) => ({
+			definition,
+			sourceInfo: createSyntheticSourceInfo(`<builtin:${definition.name}>`, { source: "builtin" }),
+		}));
+		const wrappedPlanModeTools = wrapRegisteredTools(registeredPlanModeTools, runner);
+
+		const planDefinitionRegistry = new Map<string, ToolDefinitionEntry>();
+		const planToolRegistry = new Map<string, AgentTool>();
+		if (!this._baseToolsOverride) {
+			const registeredPlanBuiltinTools = PLAN_READ_ONLY_TOOL_NAMES.filter((name) => isAllowedTool(name))
+				.map((name) => ({
+					definition: this._baseToolDefinitions.get(name),
+					sourceInfo: createSyntheticSourceInfo(`<builtin:${name}>`, { source: "builtin" }),
+				}))
+				.filter(
+					(entry): entry is { definition: ToolDefinition; sourceInfo: SourceInfo } =>
+						entry.definition !== undefined,
+				);
+			const wrappedPlanBuiltinTools = wrapRegisteredTools(registeredPlanBuiltinTools, runner);
+			for (let i = 0; i < registeredPlanBuiltinTools.length; i++) {
+				const registered = registeredPlanBuiltinTools[i];
+				const tool = wrappedPlanBuiltinTools[i];
+				planDefinitionRegistry.set(registered.definition.name, registered);
+				planToolRegistry.set(tool.name, tool);
+			}
+		}
+		for (let i = 0; i < registeredPlanModeTools.length; i++) {
+			const registered = registeredPlanModeTools[i];
+			const tool = wrappedPlanModeTools[i];
+			planDefinitionRegistry.set(registered.definition.name, registered);
+			planToolRegistry.set(tool.name, tool);
+		}
+		this._planToolDefinitions = planDefinitionRegistry;
+		this._planToolRegistry = planToolRegistry;
+		this._planToolPromptSnippets = new Map(
+			Array.from(planDefinitionRegistry.values())
+				.map(({ definition }) => {
+					const snippet = this._normalizePromptSnippet(definition.promptSnippet);
+					return snippet ? ([definition.name, snippet] as const) : undefined;
+				})
+				.filter((entry): entry is readonly [string, string] => entry !== undefined),
+		);
+		this._planToolPromptGuidelines = new Map(
+			Array.from(planDefinitionRegistry.values())
+				.map(({ definition }) => {
+					const guidelines = this._normalizePromptGuidelines(definition.promptGuidelines);
+					return guidelines.length > 0 ? ([definition.name, guidelines] as const) : undefined;
+				})
+				.filter((entry): entry is readonly [string, string[]] => entry !== undefined),
 		);
 
 		const toolRegistry = new Map(wrappedBuiltInTools.map((tool) => [tool.name, tool]));
@@ -3037,30 +3349,38 @@ export class AgentSession {
 	}
 
 	async reload(options?: { beforeSessionStart?: () => void | Promise<void> }): Promise<void> {
-		await this._subagentController?.reset();
-		const oldRunner = this._extensionRunner;
-		const previousFlagValues = oldRunner.getFlagValues();
-		await emitSessionShutdownEvent(oldRunner, { type: "session_shutdown", reason: "reload" });
-		oldRunner.invalidate();
-		await this.settingsManager.reload();
-		this.syncQueueModesFromSettings();
-		resetApiProviders();
-		await this._resourceLoader.reload();
-		this._buildRuntime({
-			activeToolNames: this.getActiveToolNames(),
-			flagValues: previousFlagValues,
-			includeAllExtensionTools: true,
-		});
+		if (this._promptPreflightLeases.size > 0) {
+			throw new Error("Wait for the current prompt to finish before reloading the session runtime.");
+		}
+		const releaseMutation = this._beginRuntimeMutation();
+		try {
+			await this._subagentController?.reset();
+			const oldRunner = this._extensionRunner;
+			const previousFlagValues = oldRunner.getFlagValues();
+			await emitSessionShutdownEvent(oldRunner, { type: "session_shutdown", reason: "reload" });
+			oldRunner.invalidate();
+			await this.settingsManager.reload();
+			this.syncQueueModesFromSettings();
+			resetApiProviders();
+			await this._resourceLoader.reload();
+			this._buildRuntime({
+				activeToolNames: [...this._normalActiveToolNames],
+				flagValues: previousFlagValues,
+				includeAllExtensionTools: true,
+			});
 
-		const hasBindings =
-			this._extensionUIContext ||
-			this._extensionCommandContextActions ||
-			this._extensionShutdownHandler ||
-			this._extensionErrorListener;
-		if (hasBindings) {
-			await options?.beforeSessionStart?.();
-			await this._extensionRunner.emit({ type: "session_start", reason: "reload" });
-			await this.extendResourcesFromExtensions("reload");
+			const hasBindings =
+				this._extensionUIContext ||
+				this._extensionCommandContextActions ||
+				this._extensionShutdownHandler ||
+				this._extensionErrorListener;
+			if (hasBindings) {
+				await options?.beforeSessionStart?.();
+				await this._extensionRunner.emit({ type: "session_start", reason: "reload" });
+				await this.extendResourcesFromExtensions("reload");
+			}
+		} finally {
+			releaseMutation();
 		}
 	}
 
@@ -3536,6 +3856,11 @@ export class AgentSession {
 			// Update agent state
 			const sessionContext = this.sessionManager.buildSessionContext();
 			this.agent.state.messages = sessionContext.messages;
+			this._restoreCollaborationState(
+				sessionContext.collaborationMode,
+				sessionContext.pendingPlan,
+				sessionContext.pendingPlanContinuation,
+			);
 
 			// Emit session_tree event
 			await this._extensionRunner.emit({

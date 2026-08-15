@@ -3,6 +3,7 @@
  */
 
 import { getDocsPath, getExamplesPath, getReadmePath } from "../config.ts";
+import type { CollaborationMode } from "./plan-mode.ts";
 import { formatSkillsForPrompt, type Skill } from "./skills.ts";
 
 export interface BuildSystemPromptOptions {
@@ -10,6 +11,8 @@ export interface BuildSystemPromptOptions {
 	customPrompt?: string;
 	/** Tools to include in prompt. Default: [read, bash, edit, write, update_plan] */
 	selectedTools?: string[];
+	/** Active collaboration policy for this session. */
+	collaborationMode?: CollaborationMode;
 	/** Optional one-line tool snippets keyed by tool name. */
 	toolSnippets?: Record<string, string>;
 	/** Additional guideline bullets appended to the default system prompt guidelines. */
@@ -42,12 +45,27 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 
 	const contextFiles = providedContextFiles ?? [];
 	const skills = providedSkills ?? [];
+	const planModeRules =
+		options.collaborationMode === "plan"
+			? `
+Plan mode is active:
+- Plan implementation requests instead of executing them. Do not modify files or external state.
+- Inspect the relevant repository context before asking questions. Resolve discoverable facts with read-only tools.
+- Ask concise ordinary questions only for material user preferences or tradeoffs, and distinguish them from discoverable facts.
+- Stabilize both user intent and implementation detail before submitting a plan.
+- Submit only a decision-complete plan covering relevant interfaces, tests, and explicit assumptions.
+- Finish by calling submit_plan with the complete plan.
+- Call submit_plan by itself, without other tool calls in the same response.`
+			: "";
 
 	if (customPrompt) {
 		let prompt = customPrompt;
 
 		if (appendSection) {
 			prompt += appendSection;
+		}
+		if (planModeRules) {
+			prompt += `${planModeRules}\nNo other tools are available in plan mode.`;
 		}
 
 		// Append project context files
@@ -123,7 +141,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 Available tools:
 ${toolsList}
 
-In addition to the tools above, you may have access to other custom tools depending on the project.
+${options.collaborationMode === "plan" ? "No other tools are available in plan mode." : "In addition to the tools above, you may have access to other custom tools depending on the project."}
 
 Guidelines:
 ${guidelines}
@@ -139,6 +157,9 @@ Diffex documentation (read only when the user asks about Diffex itself, its SDK,
 
 	if (appendSection) {
 		prompt += appendSection;
+	}
+	if (planModeRules) {
+		prompt += planModeRules;
 	}
 
 	// Append project context files
