@@ -34,6 +34,7 @@ import {
 	Markdown,
 	matchesKey,
 	ProcessTerminal,
+	SELECTED_LIST_PREFIX,
 	Spacer,
 	setKeybindings,
 	Text,
@@ -596,6 +597,8 @@ export class InteractiveMode {
 		this.defaultEditor = new CustomEditor(this.ui, getEditorTheme(), this.keybindings, {
 			paddingX: editorPaddingX,
 			autocompleteMaxVisible,
+			prompt: SELECTED_LIST_PREFIX,
+			promptStyle: (text) => theme.fg("selectionAccent", text),
 			placeholder: "Ask Diffex to do something for you.",
 			placeholderStyle: (text) => theme.fg("muted", text),
 		});
