@@ -1,25 +1,18 @@
+import { createHash } from "node:crypto";
 import { lstat, mkdtemp, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { TextDecoder } from "node:util";
+import { TextDecoder, TextEncoder } from "node:util";
 import Type, { type Static } from "typebox";
 import { Check } from "typebox/value";
 
-export const HARNESS_STATE_SCHEMA_VERSION = 1 as const;
-
 const SystemPromptSchema = Type.Readonly(Type.String({ pattern: "^(?!\\uFEFF)(?=[\\s\\S]*\\S)[\\s\\S]*$" }));
 
-export const HarnessStateSchema = Type.Object(
-	{
-		schemaVersion: Type.Readonly(Type.Literal(HARNESS_STATE_SCHEMA_VERSION)),
-		systemPrompt: SystemPromptSchema,
-	},
-	{ additionalProperties: false },
-);
+export const HarnessStateSchema = Type.Object({ systemPrompt: SystemPromptSchema }, { additionalProperties: false });
 export type HarnessState = Static<typeof HarnessStateSchema>;
 
 export const HarnessStateManifestSchema = Type.Object(
-	{ schemaVersion: Type.Readonly(Type.Literal(HARNESS_STATE_SCHEMA_VERSION)) },
+	{ contentHash: Type.Readonly(Type.String({ pattern: "^sha256:[0-9a-f]{64}$" })) },
 	{ additionalProperties: false },
 );
 export type HarnessStateManifest = Static<typeof HarnessStateManifestSchema>;
@@ -27,8 +20,12 @@ export type HarnessStateManifest = Static<typeof HarnessStateManifestSchema>;
 const MANIFEST_NAME = "manifest.json";
 const PROMPT_NAME = "EVOLVE.md";
 const BUNDLE_ENTRY_NAMES = [MANIFEST_NAME, PROMPT_NAME] as const;
-const CANONICAL_MANIFEST = '{"schemaVersion":1}\n';
 const UTF8_DECODER = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
+const UTF8_ENCODER = new TextEncoder();
+
+function computeContentHash(bytes: Uint8Array): string {
+	return `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
+}
 
 function decodeBundleFile(bytes: Uint8Array, filePath: string): string {
 	let value: string;
@@ -79,9 +76,13 @@ export async function loadHarnessState(bundlePath: string): Promise<HarnessState
 	const promptPath = join(bundlePath, PROMPT_NAME);
 	const manifestText = decodeBundleFile(await readFile(manifestPath), manifestPath);
 	const manifest = parseManifest(manifestText, manifestPath);
-	const systemPrompt = decodeBundleFile(await readFile(promptPath), promptPath);
-	const state = { schemaVersion: manifest.schemaVersion, systemPrompt };
+	const promptBytes = await readFile(promptPath);
+	const systemPrompt = decodeBundleFile(promptBytes, promptPath);
+	const state = { systemPrompt };
 	if (!Check(HarnessStateSchema, state)) throw new Error(`Invalid harness state prompt at "${promptPath}"`);
+	if (manifest.contentHash !== computeContentHash(promptBytes)) {
+		throw new Error(`Harness state content hash mismatch at "${promptPath}"`);
+	}
 	return state;
 }
 
@@ -98,6 +99,8 @@ async function assertDestinationAbsent(destinationPath: string): Promise<void> {
 export async function saveHarnessState(state: unknown, destinationPath: string): Promise<void> {
 	if (!Check(HarnessStateSchema, state)) throw new Error("Invalid harness state to save");
 	const systemPrompt = state.systemPrompt;
+	const promptBytes = UTF8_ENCODER.encode(systemPrompt);
+	const manifest = `${JSON.stringify({ contentHash: computeContentHash(promptBytes) })}\n`;
 	const absoluteDestinationPath = resolve(destinationPath);
 	const parentPath = dirname(absoluteDestinationPath);
 	const parentStats = await stat(parentPath);
@@ -109,8 +112,8 @@ export async function saveHarnessState(state: unknown, destinationPath: string):
 	let temporaryPath: string | undefined;
 	try {
 		temporaryPath = await mkdtemp(join(parentPath, `.${basename(absoluteDestinationPath)}.harness-state.tmp-`));
-		await writeFile(join(temporaryPath, MANIFEST_NAME), CANONICAL_MANIFEST, "utf8");
-		await writeFile(join(temporaryPath, PROMPT_NAME), systemPrompt, "utf8");
+		await writeFile(join(temporaryPath, MANIFEST_NAME), manifest, "utf8");
+		await writeFile(join(temporaryPath, PROMPT_NAME), promptBytes);
 		await assertDestinationAbsent(absoluteDestinationPath);
 		await rename(temporaryPath, absoluteDestinationPath);
 		temporaryPath = undefined;
