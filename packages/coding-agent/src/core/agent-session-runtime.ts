@@ -430,94 +430,105 @@ export class AgentSessionRuntime {
 
 	async fork(
 		entryId: string,
-		options?: { position?: "before" | "at"; withSession?: (ctx: ReplacedSessionContext) => Promise<void> },
+		options?: {
+			position?: "before" | "at";
+			withSession?: (ctx: ReplacedSessionContext) => Promise<void>;
+		},
 	): Promise<{ cancelled: boolean; selectedText?: string }> {
-		const position = options?.position ?? "before";
-		const beforeResult = await this.emitBeforeFork(entryId, { position });
-		if (beforeResult.cancelled) {
-			return { cancelled: true };
-		}
-		let targetLeafId: string | null;
-		let selectedText: string | undefined;
+		return this.runSessionReplacement(async () => {
+			const position = options?.position ?? "before";
+			const beforeResult = await this.emitBeforeFork(entryId, { position });
+			if (beforeResult.cancelled) {
+				return { cancelled: true };
+			}
+			let targetLeafId: string | null;
+			let selectedText: string | undefined;
 
-		const selectedEntry = this.session.sessionManager.getEntry(entryId);
-		if (!selectedEntry) {
-			throw new Error("Invalid entry ID for forking");
-		}
-
-		if (position === "at") {
-			targetLeafId = selectedEntry.id;
-		} else {
-			if (selectedEntry.type !== "message" || selectedEntry.message.role !== "user") {
+			const selectedEntry = this.session.sessionManager.getEntry(entryId);
+			if (!selectedEntry) {
 				throw new Error("Invalid entry ID for forking");
 			}
-			targetLeafId = selectedEntry.parentId;
-			selectedText = extractUserMessageText(selectedEntry.message.content);
-		}
 
-		const previousSessionFile = this.session.sessionFile;
-		if (this.session.sessionManager.isPersisted()) {
-			const currentSessionFile = this.session.sessionFile;
-			if (!currentSessionFile) {
-				throw new Error("Persisted session is missing a session file");
+			if (position === "at") {
+				targetLeafId = selectedEntry.id;
+			} else {
+				if (selectedEntry.type !== "message" || selectedEntry.message.role !== "user") {
+					throw new Error("Invalid entry ID for forking");
+				}
+				targetLeafId = selectedEntry.parentId;
+				selectedText = extractUserMessageText(selectedEntry.message.content);
 			}
-			const sessionDir = this.session.sessionManager.getSessionDir();
-			if (!targetLeafId) {
-				const sessionManager = SessionManager.create(this.cwd, sessionDir);
-				sessionManager.newSession({ parentSession: currentSessionFile });
-				await this.teardownCurrent("fork", sessionManager.getSessionFile());
-				this.apply(
-					await this.createRuntime({
+			const previousSessionFile = this.session.sessionFile;
+			if (this.session.sessionManager.isPersisted()) {
+				const currentSessionFile = this.session.sessionFile;
+				if (!currentSessionFile) {
+					throw new Error("Persisted session is missing a session file");
+				}
+				const sessionDir = this.session.sessionManager.getSessionDir();
+				if (!targetLeafId) {
+					const sessionManager = SessionManager.create(this.cwd, sessionDir);
+					sessionManager.newSession({ parentSession: currentSessionFile });
+					await this.replaceCurrentRuntime(
+						() =>
+							this.createRuntime({
+								cwd: this.cwd,
+								agentDir: this.services.agentDir,
+								sessionManager,
+								sessionStartEvent: { type: "session_start", reason: "fork", previousSessionFile },
+							}),
+						{
+							reason: "fork",
+							targetSessionFile: sessionManager.getSessionFile(),
+							withSession: options?.withSession,
+						},
+					);
+					return { cancelled: false, selectedText };
+				}
+
+				if (!existsSync(currentSessionFile)) {
+					throw new Error(
+						"This session has not been saved yet. Wait for the first assistant response before cloning or forking it.",
+					);
+				}
+				const sessionManager = SessionManager.open(currentSessionFile, sessionDir);
+				const forkedSessionPath = sessionManager.createBranchedSession(targetLeafId);
+				if (!forkedSessionPath) {
+					throw new Error("Failed to create forked session");
+				}
+				await this.replaceCurrentRuntime(
+					() =>
+						this.createRuntime({
+							cwd: sessionManager.getCwd(),
+							agentDir: this.services.agentDir,
+							sessionManager,
+							sessionStartEvent: { type: "session_start", reason: "fork", previousSessionFile },
+						}),
+					{
+						reason: "fork",
+						targetSessionFile: sessionManager.getSessionFile(),
+						withSession: options?.withSession,
+					},
+				);
+				return { cancelled: false, selectedText };
+			}
+
+			const sessionManager = this.session.sessionManager.createInMemoryBranch(targetLeafId);
+			await this.replaceCurrentRuntime(
+				() =>
+					this.createRuntime({
 						cwd: this.cwd,
 						agentDir: this.services.agentDir,
 						sessionManager,
 						sessionStartEvent: { type: "session_start", reason: "fork", previousSessionFile },
 					}),
-				);
-				await this.finishSessionReplacement(options?.withSession);
-				return { cancelled: false, selectedText };
-			}
-
-			if (!existsSync(currentSessionFile)) {
-				throw new Error(
-					"This session has not been saved yet. Wait for the first assistant response before cloning or forking it.",
-				);
-			}
-			const sessionManager = SessionManager.open(currentSessionFile, sessionDir);
-			const forkedSessionPath = sessionManager.createBranchedSession(targetLeafId);
-			if (!forkedSessionPath) {
-				throw new Error("Failed to create forked session");
-			}
-			await this.teardownCurrent("fork", sessionManager.getSessionFile());
-			this.apply(
-				await this.createRuntime({
-					cwd: sessionManager.getCwd(),
-					agentDir: this.services.agentDir,
-					sessionManager,
-					sessionStartEvent: { type: "session_start", reason: "fork", previousSessionFile },
-				}),
+				{
+					reason: "fork",
+					targetSessionFile: sessionManager.getSessionFile(),
+					withSession: options?.withSession,
+				},
 			);
-			await this.finishSessionReplacement(options?.withSession);
 			return { cancelled: false, selectedText };
-		}
-
-		const sessionManager = this.session.sessionManager;
-		if (!targetLeafId) {
-			sessionManager.newSession({ parentSession: this.session.sessionFile });
-		} else {
-			sessionManager.createBranchedSession(targetLeafId);
-		}
-		await this.teardownCurrent("fork", sessionManager.getSessionFile());
-		this.apply(
-			await this.createRuntime({
-				cwd: this.cwd,
-				agentDir: this.services.agentDir,
-				sessionManager,
-				sessionStartEvent: { type: "session_start", reason: "fork", previousSessionFile },
-			}),
-		);
-		await this.finishSessionReplacement(options?.withSession);
-		return { cancelled: false, selectedText };
+		});
 	}
 
 	/**
@@ -528,40 +539,45 @@ export class AgentSessionRuntime {
 	 * @throws {MissingSessionCwdError} When the imported session cwd cannot be resolved and no override is provided.
 	 */
 	async importFromJsonl(inputPath: string, cwdOverride?: string): Promise<{ cancelled: boolean }> {
-		const resolvedPath = resolvePath(inputPath);
-		if (!existsSync(resolvedPath)) {
-			throw new SessionImportFileNotFoundError(resolvedPath);
-		}
+		return this.runSessionReplacement(async () => {
+			const resolvedPath = resolvePath(inputPath);
+			if (!existsSync(resolvedPath)) {
+				throw new SessionImportFileNotFoundError(resolvedPath);
+			}
 
-		const sessionDir = this.session.sessionManager.getSessionDir();
-		if (!existsSync(sessionDir)) {
-			mkdirSync(sessionDir, { recursive: true });
-		}
+			const sessionDir = this.session.sessionManager.getSessionDir();
+			if (!existsSync(sessionDir)) {
+				mkdirSync(sessionDir, { recursive: true });
+			}
 
-		const destinationPath = join(sessionDir, basename(resolvedPath));
-		const beforeResult = await this.emitBeforeSwitch("resume", destinationPath);
-		if (beforeResult.cancelled) {
-			return beforeResult;
-		}
+			const destinationPath = join(sessionDir, basename(resolvedPath));
+			const beforeResult = await this.emitBeforeSwitch("resume", destinationPath);
+			if (beforeResult.cancelled) {
+				return beforeResult;
+			}
 
-		const previousSessionFile = this.session.sessionFile;
-		if (resolve(destinationPath) !== resolvedPath) {
-			copyFileSync(resolvedPath, destinationPath);
-		}
+			const previousSessionFile = this.session.sessionFile;
+			if (resolve(destinationPath) !== resolvedPath) {
+				copyFileSync(resolvedPath, destinationPath);
+			}
 
-		const sessionManager = SessionManager.open(destinationPath, sessionDir, cwdOverride);
-		assertSessionCwdExists(sessionManager, this.cwd);
-		await this.teardownCurrent("resume", sessionManager.getSessionFile());
-		this.apply(
-			await this.createRuntime({
-				cwd: sessionManager.getCwd(),
-				agentDir: this.services.agentDir,
-				sessionManager,
-				sessionStartEvent: { type: "session_start", reason: "resume", previousSessionFile },
-			}),
-		);
-		await this.finishSessionReplacement();
-		return { cancelled: false };
+			const sessionManager = SessionManager.open(destinationPath, sessionDir, cwdOverride);
+			assertSessionCwdExists(sessionManager, this.cwd);
+			await this.replaceCurrentRuntime(
+				() =>
+					this.createRuntime({
+						cwd: sessionManager.getCwd(),
+						agentDir: this.services.agentDir,
+						sessionManager,
+						sessionStartEvent: { type: "session_start", reason: "resume", previousSessionFile },
+					}),
+				{
+					reason: "resume",
+					targetSessionFile: sessionManager.getSessionFile(),
+				},
+			);
+			return { cancelled: false };
+		});
 	}
 
 	dispose(): Promise<void> {
