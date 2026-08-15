@@ -94,8 +94,16 @@ interface AgentSession {
   agent: Agent;
   model: Model | undefined;
   thinkingLevel: ThinkingLevel;
+  collaborationMode: "default" | "plan";
+  pendingPlan: PlanArtifact | undefined;
+  pendingPlanContinuation: PlanContinuation | undefined;
   messages: AgentMessage[];
   isStreaming: boolean;
+
+  // Native plan-mode control
+  setCollaborationMode(mode: "default" | "plan"): void;
+  resolvePlan(planId: string, resolution: PlanResolution): PlanContinuation | undefined;
+  promptPlanContinuation(continuation: PlanContinuation, options?: PlanContinuationPromptOptions): Promise<void>;
 
   // In-place tree navigation within the current session file
   navigateTree(targetId: string, options?: { summarize?: boolean; customInstructions?: string; replaceInstructions?: boolean; label?: string }): Promise<{ editorText?: string; cancelled: boolean }>;
@@ -203,6 +211,8 @@ interface PromptOptions {
 It fires before `prompt()` resolves.
 `prompt()` still resolves only after the full accepted run finishes, including retries and coordinated child-agent batches.
 Failures after acceptance are reported through the normal event and message stream, not through `preflightResult(false)`.
+Prompt ownership is acquired synchronously before asynchronous preflight, and `session.isStreaming` remains true from that point through run settlement.
+Another prompt submitted during that interval must specify `streamingBehavior` and is queued rather than starting a concurrent preflight.
 
 The `prompt()` method handles prompt templates, extension commands, and message sending:
 
@@ -329,6 +339,15 @@ session.subscribe((event) => {
       break;
     case "subagent_wait_end":
       console.log(`Child wait cancelled: ${event.cancelled}`);
+      break;
+    case "collaboration_mode_changed":
+      console.log(`Mode: ${event.mode}`);
+      break;
+    case "plan_submitted":
+      console.log(`Plan ready: ${event.plan.title}`);
+      break;
+    case "plan_resolved":
+      console.log(event.planId, event.resolution);
       break;
     case "compaction_start":
     case "compaction_end":
@@ -527,6 +546,72 @@ const { session } = await createAgentSession({ resourceLoader: loader });
 
 > See [examples/sdk/03-custom-prompt.ts](../examples/sdk/03-custom-prompt.ts)
 
+### Native Plan Mode
+
+Set `collaborationMode: "plan"` when creating a session, or call `session.setCollaborationMode("plan")` while the session is idle.
+Existing persistent sessions restore the collaboration mode, any pending plan, and any accepted implementation awaiting its initial turn from the active branch unless the caller supplies a compatible override.
+
+```typescript
+import {
+  createAgentSession,
+  type PlanArtifact,
+} from "@earendil-works/diffex-coding-agent";
+
+const { session } = await createAgentSession({
+  collaborationMode: "plan",
+});
+
+async function implementSubmittedPlan(plan: PlanArtifact) {
+  const continuation = session.resolvePlan(plan.id, "implement");
+  if (continuation) {
+    await session.promptPlanContinuation(continuation);
+  }
+}
+```
+
+Plan mode exposes `submit_plan` plus the canonical subset of `read`, `grep`, `find`, and `ls` permitted by the SDK tool policy and the active task profile.
+The planning tools replace the normal, extension, and SDK tool registry for the duration of plan mode.
+`submit_plan` is intrinsic to plan mode and remains available even when `tools`, `excludeTools`, or `noTools` disables every inspection tool.
+`AgentSessionRuntime` pauses automatic task-profile routing for planning prompts.
+In automatic mode, submit the accepted token through `runtime.promptPlanContinuation()` so the runtime routes every accepted task before execution, including when a harness is already active.
+The route may stay on the active harness, reuse a related harness, or select and activate a new harness.
+Only a high-confidence ambiguity among specialized profiles calls the per-request `profileSelectionResolver`.
+The resolver receives 2-3 trusted, recommended-first `ProfileSelectionOption` values.
+Each option includes its profile description, a bounded `safeguardSummary`, and its exact `toolPolicy` so the host can present the guardrail and tool consequences.
+The resolver must return `{ profileId }` for one offered option or `{ cancelled: true }`; the runtime never selects the recommended option automatically.
+Missing, canceled, invalid, or aborted selection rejects before implementation starts and preserves `session.pendingPlanContinuation` for retry.
+Malformed output, low confidence, or router failure also rejects without choosing a fallback profile and preserves the continuation for retry.
+A pinned profile bypasses automatic routing and implements the plan in place without calling the resolver.
+Pin a profile before planning when its guardrails must apply during planning itself.
+
+```typescript
+await runtime.promptPlanContinuation(continuation, {
+  profileSelectionResolver: async (proposal, signal) => {
+    const profileId = await chooseImplementationProfile(proposal.options, signal);
+    return profileId ? { profileId } : { cancelled: true };
+  },
+});
+```
+
+`submit_plan` creates a `PlanArtifact` with `id`, `title`, and `markdown`.
+It ends the planning turn and exposes the artifact through `session.pendingPlan` and the `plan_submitted` event.
+Mode changes, plan artifacts, and plan resolutions are persisted in the session tree.
+Wait for the submitting agent run to settle before resolving a plan through `AgentSession` directly.
+
+Resolve the artifact with `session.resolvePlan(plan.id, "implement")` or `session.resolvePlan(plan.id, "discard")`.
+Implement and discard persist the resolution, clear the pending plan, and return the session to default mode.
+Implement returns an opaque, one-shot `PlanContinuation`, while discard returns `undefined`.
+A bare `AgentSession` host may submit the token through `session.promptPlanContinuation()` to implement it with the currently loaded profile.
+An `AgentSessionRuntime` host should use `runtime.promptPlanContinuation()` so automatic routing can activate an initial harness before execution.
+The current token is also available from `session.pendingPlanContinuation`, including after a persistent session resumes between acceptance and implementation startup.
+The session rejects stale or reused continuations and bypasses extension commands, template expansion, and input transformation for the trusted implementation handoff.
+Authentication, compaction, and `before_agent_start` processing still apply, and the continuation remains retryable until the agent run is accepted.
+The resolution is committed before the host starts that continuation, and the accepted implementation remains replayable until its trusted initial user message is persisted.
+A later failure after that persistence boundary does not restore the resolved plan or continuation.
+Diffex refuses to leave plan mode directly while a plan remains pending.
+
+Subscribe to `collaboration_mode_changed`, `plan_submitted`, and `plan_resolved` to keep a host UI synchronized.
+
 ### Tools
 
 Every root session enables three child-agent coordination tools by default:
@@ -561,6 +646,8 @@ Specify which tools to enable:
 - `noTools: "builtin"` disables default built-ins while keeping extension, custom, and coordination tools enabled
 - A `tools` allowlist must explicitly include each coordination tool that should remain available
 - `excludeTools` disables specific built-in, extension, custom, or coordination tool names after any `tools` allowlist is applied
+
+These filters also constrain the plan-mode inspection subset, but they never remove the intrinsic `submit_plan` tool while plan mode is active.
 
 The `edit` tool returns `details.diff` for Diffex's TUI display and `details.patch` as a standard unified patch for SDK consumers.
 The `update_plan` tool returns `details.plan` with the full ordered checklist snapshot.
@@ -1241,6 +1328,9 @@ getPackageDir
 getReadmePath
 getDocsPath
 getExamplesPath
+buildAcceptedPlanProfileRouterPrompt
+parseAcceptedPlanProfileRouteDecision
+routeAcceptedPlanProfile
 
 // Session management
 SessionManager
@@ -1255,6 +1345,21 @@ createGrepTool, createFindTool, createLsTool
 // Types
 type CreateAgentSessionOptions
 type CreateAgentSessionResult
+type CollaborationMode
+type PlanArtifact
+type PlanResolution
+type PlanContinuation
+type PlanContinuationPromptOptions
+type RuntimePlanContinuationPromptOptions
+type AcceptedPlanProfileRouteDecision
+type AmbiguousProfileRouteDecision
+type ProfileSelectionOption
+type ProfileSelectionProposal
+type ProfileSelectionResolution
+type ProfileSelectionResolver
+type CollaborationModeChangeEntry
+type PlanEntry
+type PlanResolutionEntry
 type ExtensionFactory
 type InlineExtension
 type ExtensionAPI

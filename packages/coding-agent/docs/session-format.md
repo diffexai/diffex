@@ -226,6 +226,47 @@ Emitted when the user changes the thinking/reasoning level.
 {"type":"thinking_level_change","id":"e5f6g7h8","parentId":"d4e5f6g7","timestamp":"2024-12-03T14:06:00.000Z","thinkingLevel":"high"}
 ```
 
+### CollaborationModeChangeEntry
+
+Records an explicit change between default and plan collaboration modes.
+
+```json
+{"type":"collaboration_mode_change","id":"a6b7c8d9","parentId":"e5f6g7h8","timestamp":"2024-12-03T14:07:00.000Z","mode":"plan"}
+```
+
+The `mode` field is either `"default"` or `"plan"`.
+
+### PlanEntry
+
+Created when the planning agent submits a plan for host resolution.
+
+```json
+{"type":"plan","id":"b7c8d9e0","parentId":"a6b7c8d9","timestamp":"2024-12-03T14:08:00.000Z","plan":{"id":"08d4f214-96b3-4ea7-9530-fdb52ef4cd8d","title":"Add account export","markdown":"## Implementation\n\n1. Add the export endpoint.\n2. Add coverage."}}
+```
+
+The nested plan artifact contains an opaque `id`, a concise `title`, and its complete Markdown body.
+
+### PlanResolutionEntry
+
+Created when the host chooses to implement or discard a pending plan.
+
+```json
+{"type":"plan_resolution","id":"c8d9e0f1","parentId":"b7c8d9e0","timestamp":"2024-12-03T14:09:00.000Z","planId":"08d4f214-96b3-4ea7-9530-fdb52ef4cd8d","resolution":"implement"}
+```
+
+The `resolution` field is either `"implement"` or `"discard"`.
+Either resolution clears the matching pending plan and returns the replayed collaboration mode to `"default"`.
+An implement resolution creates a pending implementation continuation until its trusted initial user message is appended, while discard leaves no continuation.
+This implicit return to default does not append a separate `collaboration_mode_change` entry.
+
+Collaboration mode, pending-plan state, and pending implementation continuation state are replayed from the complete active branch, including entries before a compaction checkpoint.
+Branching to an implement resolution restores its pending continuation until the trusted implementation user message, branching before a resolution makes that branch's matching plan pending again, and branching before the plan removes it from replayed state.
+These three entry types carry session state and never become LLM messages.
+
+Plan artifacts and their lifecycle are validated both when entries are appended and when a session is loaded.
+A plan must follow a plan-mode entry, a resolution must match the pending plan, and a branch cannot change collaboration mode while a plan or implementation continuation remains pending.
+Invalid artifacts, broken parent chains in plan-aware sessions, and inconsistent plan transitions reject the session instead of restoring mutation-capable default mode.
+
 ### CompactionEntry
 
 Created when context is compacted. Stores a summary of earlier messages.
@@ -331,13 +372,14 @@ Entries form a tree:
 
 `buildSessionContext()` builds on that entry list to produce the message list for the LLM:
 
-1. Extracts current model and thinking level settings from the full path
+1. Extracts the current model, thinking level, collaboration mode, pending plan, and pending implementation continuation from the full path
 2. Converts selected entries to messages:
    - `message` -> stored `AgentMessage`
    - `compaction` -> `compactionSummary` plus `retainedTail` when present
    - `branch_summary` -> `branchSummary`
    - `custom_message` -> `CustomMessage`
    - `custom` -> no context message
+   - `collaboration_mode_change`, `plan`, and `plan_resolution` -> no context message
 
 This makes newer compactions act like self-contained checkpoints. `retainedTail` is optional only so older sessions that only store `firstKeptEntryId` continue to load correctly.
 
@@ -379,6 +421,15 @@ for (const line of lines) {
     case "thinking_level_change":
       console.log(`[${entry.id}] Thinking: ${entry.thinkingLevel}`);
       break;
+    case "collaboration_mode_change":
+      console.log(`[${entry.id}] Collaboration mode: ${entry.mode}`);
+      break;
+    case "plan":
+      console.log(`[${entry.id}] Pending plan: ${entry.plan.title}`);
+      break;
+    case "plan_resolution":
+      console.log(`[${entry.id}] Plan ${entry.planId}: ${entry.resolution}`);
+      break;
   }
 }
 ```
@@ -407,6 +458,9 @@ Key methods for working with sessions programmatically.
 - `appendMessage(message)` - Add message
 - `appendThinkingLevelChange(level)` - Record thinking change
 - `appendModelChange(provider, modelId)` - Record model change
+- `appendCollaborationModeChange(mode)` - Record a default or plan collaboration-mode change
+- `appendPlan(plan)` - Record a submitted plan artifact
+- `appendPlanResolution(planId, resolution)` - Record an implement or discard resolution
 - `appendCompaction(summary, firstKeptEntryId, tokensBefore, details?, fromHook?)` - Add compaction
 - `appendCustomEntry(customType, data?)` - Extension state (not in context)
 - `appendSessionInfo(name)` - Set session display name
@@ -427,7 +481,7 @@ Key methods for working with sessions programmatically.
 
 ### Instance Methods - Context & Info
 - `buildContextEntries()` - Get active branch entries with compaction applied
-- `buildSessionContext()` - Get messages, thinkingLevel, and model for LLM
+- `buildSessionContext()` - Get messages, thinking level, model, collaboration mode, pending plan, and pending implementation continuation for the active branch
 - `getEntries()` - All entries (excluding header)
 - `getHeader()` - Session header metadata
 - `getSessionName()` - Get display name from latest session_info entry

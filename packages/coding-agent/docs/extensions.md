@@ -1610,7 +1610,7 @@ Register a keyboard shortcut. See [keybindings.md](keybindings.md) for the short
 
 ```typescript
 diffex.registerShortcut("ctrl+shift+p", {
-  description: "Toggle plan mode",
+  description: "Toggle project summary",
   handler: async (ctx) => {
     ctx.ui.notify("Toggled!");
   },
@@ -1622,15 +1622,15 @@ diffex.registerShortcut("ctrl+shift+p", {
 Register a CLI flag.
 
 ```typescript
-diffex.registerFlag("plan", {
-  description: "Start in plan mode",
+diffex.registerFlag("audit", {
+  description: "Enable additional audit checks",
   type: "boolean",
   default: false,
 });
 
 // Check value
-if (diffex.getFlag("plan")) {
-  // Plan mode enabled
+if (diffex.getFlag("audit")) {
+  // Additional audit checks enabled
 }
 ```
 
@@ -2047,6 +2047,8 @@ diffex.registerTool({
 ### Overriding Built-in Tools
 
 Extensions can override built-in tools (`read`, `bash`, `edit`, `write`, `update_plan`, `grep`, `find`, `ls`) by registering a tool with the same name. Interactive mode displays a warning when this happens.
+
+Native plan mode is an exception: while it is active, extension and SDK tools cannot override the canonical `read`, `grep`, `find`, `ls`, or `submit_plan` tool identities.
 
 ```bash
 # Extension's read tool replaces built-in read
@@ -2960,7 +2962,7 @@ All examples in [examples/extensions/](../examples/extensions/).
 | `timed-confirm.ts` | Dialogs with timeout | `ui.confirm` with timeout/signal |
 | `mac-system-theme.ts` | Auto-switch theme | `setTheme`, `exec` |
 | **Complex Extensions** |||
-| `plan-mode/` | Full plan mode implementation | All event types, `registerCommand`, `registerShortcut`, `registerFlag`, `setStatus`, `setWidget`, `sendMessage`, `setActiveTools` |
+| `plan-mode/` | Legacy example that is incompatible with native plan mode | Historical extension APIs only; do not load it |
 | `preset.ts` | Saveable presets (model, tools, thinking) | `registerCommand`, `registerShortcut`, `registerFlag`, `setModel`, `setActiveTools`, `setThinkingLevel`, `appendEntry` |
 | `tools.ts` | Toggle tools on/off UI | `registerCommand`, `setActiveTools`, `SettingsList`, session events |
 | **Remote & Sandbox** |||

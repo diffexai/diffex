@@ -14,7 +14,7 @@
 
 Diffex is a minimal terminal coding harness. Adapt Diffex to your workflows, not the other way around, without having to fork and modify Diffex internals. Extend it with TypeScript [Extensions](#extensions), [Skills](#skills), [Prompt Templates](#prompt-templates), and [Themes](#themes). Put your extensions, skills, prompt templates, and themes in [Diffex Packages](#diffex-packages) and share them with others via npm or git.
 
-Diffex ships with powerful defaults, including session-scoped sub-agents, but skips features like plan mode. You can ask Diffex to build other workflows or install a third party Diffex package that matches them.
+Diffex ships with powerful defaults, including a native read-only plan mode and session-scoped sub-agents. You can build other workflows or install a third-party Diffex package that provides them.
 
 Diffex runs in four modes: interactive, print or JSON, RPC for process integration, and an SDK for embedding in your own apps.
 
@@ -39,6 +39,7 @@ Example upstream `pi-mono` work sessions are published here:
 - [Quick Start](#quick-start)
 - [Providers & Models](#providers--models)
 - [Interactive Mode](#interactive-mode)
+  - [Plan Mode](#plan-mode)
   - [Editor](#editor)
   - [Commands](#commands)
   - [Keyboard Shortcuts](#keyboard-shortcuts)
@@ -147,9 +148,31 @@ The interface from top to bottom:
 - **Startup header** - Shows shortcuts (`/hotkeys` for all), loaded AGENTS.md files, prompt templates, skills, and extensions
 - **Messages** - Your messages, assistant responses, tool calls and results, notifications, errors, and extension UI
 - **Editor** - Where you type; border color indicates thinking level
-- **Footer** - Working directory, session name, total token/cache usage (`↑` input, `↓` output, `R` cache read, `W` cache write, `CH` latest cache hit rate), cost, context usage, current model. Totals include assistant responses, usage reported by tools, and summary generation.
+- **Footer** - The built-in footer keeps the active profile, routing mode, and harness visible above the current model, thinking level, and context usage.
 
 The editor can be temporarily replaced by other UI, like built-in `/settings` or custom UI from extensions (e.g., a Q&A tool that lets the user answer model questions in a structured format). [Extensions](#extensions) can also replace the editor, add widgets above/below it, a status line, custom footer, or overlays.
+
+### Plan Mode
+
+Run `diffex --plan` to start an interactive session in plan mode, or use `/plan [on|off]` while Diffex is idle.
+Plan mode exposes `submit_plan` and the canonical subset of `read`, `grep`, `find`, and `ls` permitted by caller restrictions and the active task profile.
+The agent can inspect the repository, but it cannot run commands, edit files, or call extension and SDK tools.
+`submit_plan` is intrinsic to plan mode and remains available even when caller tool filters disable every inspection tool.
+Automatic task-profile routing pauses for planning prompts.
+In automatic mode, choosing Implement routes every accepted task before execution, even when a harness is already active.
+The router may keep the active harness for a continuation, reuse a related harness, or switch to a newly selected task harness.
+Diffex asks which profile should govern implementation only when the router finds a high-confidence ambiguity among specialized profiles.
+The chooser shows each option's description, safeguards, and tool-policy summary.
+The choice determines the implementation profile's expertise, safeguards, and tool access.
+The recommended option receives initial focus but is not selected automatically.
+Canceling the choice leaves the accepted implementation pending; use `/plan` to retry.
+A malformed, low-confidence, or failed route also leaves the accepted implementation pending instead of silently falling back to another profile.
+A pinned profile bypasses automatic routing and implements the plan in place.
+Pin a profile before planning when its guardrails must apply during planning itself.
+
+Submitting a plan ends the planning turn and stores the plan in the session until you implement or discard it.
+Pending plans and collaboration-mode changes survive session resume and tree navigation.
+The `--plan` flag is supported only in interactive mode.
 
 ### Editor
 
@@ -174,6 +197,7 @@ Type `/` in the editor to trigger commands. [Extensions](#extensions) can regist
 | [`/llama`](docs/llama-cpp.md) | Download, load, and unload llama.cpp router models |
 | `/model` | Switch models |
 | `/scoped-models` | Enable/disable models for Ctrl+P cycling |
+| `/plan [on\|off]` | Toggle plan mode, set it explicitly, or reopen a pending plan |
 | `/settings` | Thinking level, theme, message delivery, transport |
 | `/resume` | Pick from previous sessions |
 | `/new` | Start a new session |
@@ -384,7 +408,7 @@ The default export can also be `async`. Diffex waits for async extension factori
 
 **What's possible:**
 - Custom tools (or replace built-in tools entirely)
-- Alternative sub-agent workflows and plan mode
+- Alternative sub-agent, planning, and custom workflows
 - Custom compaction and summarization
 - Permission gates and path protection
 - Custom editors and UI components
@@ -501,7 +525,7 @@ Diffex is aggressively extensible so it doesn't have to dictate your workflow. F
 
 **No permission popups.** Run in a container, or build your own confirmation flow with [extensions](#extensions) inline with your environment and security requirements.
 
-**No plan mode.** The built-in `update_plan` tool is only a lightweight progress checklist. For approval workflows, read-only planning phases, or richer planning modes, write plans to files, build an [extension](#extensions), or install a package.
+**Native plan mode stays read-only.** It uses a fixed planning tool set and requires explicit resolution before implementation begins.
 
 **No persistent built-in to-dos.** Use a TODO.md file, or build your own with [extensions](#extensions).
 
@@ -544,7 +568,10 @@ diffex config                    # Enable/disable package resources
 | `-p`, `--print` | Print response and exit |
 | `--mode json` | Output all events as JSON lines (see [docs/json.md](docs/json.md)) |
 | `--mode rpc` | RPC mode for process integration (see [docs/rpc.md](docs/rpc.md)) |
+| `--plan` | Start interactive mode with native plan mode active |
 | `--export <in> [out]` | Export session to HTML |
+
+Diffex rejects `--plan` with `-p`, `--mode json`, and `--mode rpc` because those hosts cannot resolve a submitted plan interactively.
 
 In print mode, Diffex also reads piped stdin and merges it into the initial prompt:
 
@@ -582,9 +609,10 @@ cat README.md | diffex -p "Summarize this text"
 | `--tools <list>`, `-t <list>` | Allowlist specific tool names across built-in, extension, and custom tools |
 | `--exclude-tools <list>`, `-xt <list>` | Disable specific tool names across built-in, extension, and custom tools |
 | `--no-builtin-tools`, `-nbt` | Disable built-in tools by default but keep extension/custom tools enabled |
-| `--no-tools`, `-nt` | Disable all tools by default |
+| `--no-tools`, `-nt` | Disable all normal-mode tools and plan-mode inspection tools by default |
 
 Available built-in tools: `read`, `bash`, `edit`, `write`, `update_plan`, `grep`, `find`, `ls`
+Tool allowlists and denylists also constrain plan-mode inspection tools, but the intrinsic `submit_plan` tool remains available in plan mode.
 
 ### Resource Options
 
@@ -630,6 +658,9 @@ diffex @code.ts @test.ts "Review these files"
 ```bash
 # Interactive with initial prompt
 diffex "List all .ts files in src/"
+
+# Interactive read-only planning
+diffex --plan "Design the implementation before changing anything"
 
 # Non-interactive
 diffex -p "Summarize this codebase"

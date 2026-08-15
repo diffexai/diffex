@@ -4,25 +4,34 @@
 diffex --mode json "Your prompt"
 ```
 
-Outputs all session events as JSON lines to stdout. Useful for integrating Diffex into other tools or custom UIs.
+Outputs the session events supported by the JSON wire protocol as JSON lines to stdout.
+This mode is useful for integrating Diffex into other tools or custom UIs.
 
 ## Event Types
 
-Wire events use `JsonAgentSessionEvent`. It matches
-[`AgentSessionEvent`](https://github.com/diffexai/diffex/blob/main/packages/coding-agent/src/core/agent-session.ts)
-except that streaming message updates omit cumulative snapshots:
+Wire events use `JsonAgentSessionEvent`, which matches [`AgentSessionEvent`](https://github.com/diffexai/diffex/blob/main/packages/coding-agent/src/core/agent-session.ts) except for plan-only lifecycle events and cumulative streaming snapshots.
 
 ```typescript
 type WithoutPartial<T> = T extends { partial: unknown } ? Omit<T, "partial"> : T;
 
 type JsonAgentSessionEvent =
-  | Exclude<AgentSessionEvent, { type: "message_update" }>
+  | Exclude<
+      AgentSessionEvent,
+      {
+        type:
+          | "message_update"
+          | "collaboration_mode_changed"
+          | "plan_submitted"
+          | "plan_resolved";
+      }
+    >
   | {
       type: "message_update";
       assistantMessageEvent: WithoutPartial<AssistantMessageEvent>;
     };
 ```
 
+The plan-only `collaboration_mode_changed`, `plan_submitted`, and `plan_resolved` events are available to direct `AgentSession` subscribers but are omitted because JSON mode cannot host plan resolution.
 `queue_update` emits the full pending steering and follow-up queues whenever they change. `compaction_start` and `compaction_end` cover both manual and automatic compaction.
 
 Other base events come from

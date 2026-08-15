@@ -757,7 +757,7 @@ ctx.ui.setStatus("my-ext", ctx.ui.theme.fg("accent", "● active"));
 ctx.ui.setStatus("my-ext", undefined);
 ```
 
-**Examples:** [status-line.ts](../examples/extensions/status-line.ts), [plan-mode/index.ts](../examples/extensions/plan-mode/index.ts), [preset.ts](../examples/extensions/preset.ts)
+**Examples:** [status-line.ts](../examples/extensions/status-line.ts), [model-status.ts](../examples/extensions/model-status.ts), [preset.ts](../examples/extensions/preset.ts)
 
 ### Pattern 4b: Working Indicator Customization
 
@@ -817,7 +817,7 @@ ctx.ui.setWidget("my-widget", (_tui, theme) => {
 ctx.ui.setWidget("my-widget", undefined);
 ```
 
-**Examples:** [plan-mode/index.ts](../examples/extensions/plan-mode/index.ts)
+**Examples:** [widget-placement.ts](../examples/extensions/widget-placement.ts), [todo.ts](../examples/extensions/todo.ts)
 
 ### Pattern 6: Custom Footer
 
@@ -934,7 +934,7 @@ export default function (diffex: ExtensionAPI) {
 - **Selection UI**: [examples/extensions/preset.ts](../examples/extensions/preset.ts) - SelectList with DynamicBorder framing
 - **Async with cancel**: [examples/extensions/qna.ts](../examples/extensions/qna.ts) - BorderedLoader for LLM calls
 - **Settings toggles**: [examples/extensions/tools.ts](../examples/extensions/tools.ts) - SettingsList for tool enable/disable
-- **Status indicators**: [examples/extensions/plan-mode/index.ts](../examples/extensions/plan-mode/index.ts) - setStatus and setWidget
+- **Status indicators**: [examples/extensions/status-line.ts](../examples/extensions/status-line.ts) - setStatus with session events
 - **Working indicator**: [examples/extensions/working-indicator.ts](../examples/extensions/working-indicator.ts) - setWorkingIndicator
 - **Custom footer**: [examples/extensions/custom-footer.ts](../examples/extensions/custom-footer.ts) - setFooter with stats
 - **Custom editor**: [examples/extensions/modal-editor.ts](../examples/extensions/modal-editor.ts) - Vim-like modal editing
