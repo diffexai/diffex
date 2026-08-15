@@ -73,7 +73,7 @@ function formatReadLineRange(args: ReadRenderArgs | undefined, theme: Theme): st
 	if (args?.offset === undefined && args?.limit === undefined) return "";
 	const startLine = args.offset ?? 1;
 	const endLine = args.limit !== undefined ? startLine + args.limit - 1 : "";
-	return theme.fg("warning", `:${startLine}${endLine ? `-${endLine}` : ""}`);
+	return theme.fg("accent", `:${startLine}${endLine ? `-${endLine}` : ""}`);
 }
 
 function formatReadCall(args: ReadRenderArgs | undefined, theme: Theme, cwd: string): string {

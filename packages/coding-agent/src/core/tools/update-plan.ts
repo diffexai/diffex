@@ -186,9 +186,9 @@ function formatPlanSummary(plan: readonly UpdatePlanItem[]): string {
 function formatPlanMarker(status: unknown, theme: Theme): string {
 	switch (status) {
 		case "completed":
-			return theme.fg("success", "[x]");
+			return theme.fg("toolOutput", "[x]");
 		case "in_progress":
-			return theme.fg("warning", "[>]");
+			return theme.fg("toolOutput", "[>]");
 		case "pending":
 			return theme.fg("toolOutput", "[ ]");
 		default:
