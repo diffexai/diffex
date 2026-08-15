@@ -6,6 +6,7 @@ import {
 	closeSync,
 	createReadStream,
 	existsSync,
+	fstatSync,
 	mkdirSync,
 	openSync,
 	readdirSync,
@@ -432,7 +433,7 @@ function applyPlanLifecycleEntry(state: PlanLifecycleState, entry: SessionEntry)
 	return state;
 }
 
-function validateSessionPlanLifecycle(entries: SessionEntry[]): void {
+function validateSessionEntries(entries: SessionEntry[]): void {
 	const seenIds = new Set<string>();
 	for (const entry of entries) {
 		if (seenIds.has(entry.id)) {
@@ -440,10 +441,6 @@ function validateSessionPlanLifecycle(entries: SessionEntry[]): void {
 		}
 		seenIds.add(entry.id);
 	}
-	const hasPlanLifecycleEntries = entries.some(
-		(entry) =>
-			entry.type === "collaboration_mode_change" || entry.type === "plan" || entry.type === "plan_resolution",
-	);
 	const stateById = new Map<string, PlanLifecycleState>();
 	for (const entry of entries) {
 		const parentState =
@@ -455,13 +452,39 @@ function validateSessionPlanLifecycle(entries: SessionEntry[]): void {
 					}
 				: stateById.get(entry.parentId);
 		if (!parentState) {
-			if (hasPlanLifecycleEntries) {
-				throw new Error(`Session entry ${entry.id} has a missing parent in a plan-aware session.`);
-			}
-			continue;
+			throw new Error(`Session entry ${entry.id} has a missing parent ${String(entry.parentId)}.`);
 		}
 		stateById.set(entry.id, applyPlanLifecycleEntry(parentState, entry));
 	}
+}
+
+interface SessionEntryIndex {
+	byId: Map<string, SessionEntry>;
+	labelsById: Map<string, string>;
+	labelTimestampsById: Map<string, string>;
+	leafId: string | null;
+}
+
+function buildSessionEntryIndex(fileEntries: FileEntry[]): SessionEntryIndex {
+	const byId = new Map<string, SessionEntry>();
+	const labelsById = new Map<string, string>();
+	const labelTimestampsById = new Map<string, string>();
+	let leafId: string | null = null;
+	for (const entry of fileEntries) {
+		if (entry.type === "session") continue;
+		byId.set(entry.id, entry);
+		leafId = entry.id;
+		if (entry.type === "label") {
+			if (entry.label) {
+				labelsById.set(entry.targetId, entry.label);
+				labelTimestampsById.set(entry.targetId, entry.timestamp);
+			} else {
+				labelsById.delete(entry.targetId);
+				labelTimestampsById.delete(entry.targetId);
+			}
+		}
+	}
+	return { byId, labelsById, labelTimestampsById, leafId };
 }
 
 function getSessionContextSettings(
@@ -633,40 +656,61 @@ function parseSessionEntryLine(line: string): FileEntry | null {
 	return entry.type === "session" ? normalizeSessionHeader(entry) : entry;
 }
 
-/** Exported for testing */
-export function loadEntriesFromFile(filePath: string): FileEntry[] {
-	const resolvedFilePath = normalizePath(filePath);
-	if (!existsSync(resolvedFilePath)) return [];
-
-	const entries: FileEntry[] = [];
-	const fd = openSync(resolvedFilePath, "r");
+function parseStrictSessionEntryLine(
+	line: string,
+	lineNumber: number,
+	allowIncompleteFinalAppend: boolean,
+): FileEntry | null {
+	if (!line.trim()) return null;
+	let parsed: unknown;
 	try {
-		const decoder = new StringDecoder("utf8");
-		const buffer = Buffer.allocUnsafe(SESSION_READ_BUFFER_SIZE);
-		let pending = "";
-
-		while (true) {
-			const bytesRead = readSync(fd, buffer, 0, buffer.length, null);
-			if (bytesRead === 0) break;
-
-			pending += decoder.write(buffer.subarray(0, bytesRead));
-			let lineStart = 0;
-			let newlineIndex = pending.indexOf("\n", lineStart);
-			while (newlineIndex !== -1) {
-				const entry = parseSessionEntryLine(pending.slice(lineStart, newlineIndex));
-				if (entry) entries.push(entry);
-				lineStart = newlineIndex + 1;
-				newlineIndex = pending.indexOf("\n", lineStart);
-			}
-			pending = pending.slice(lineStart);
-		}
-
-		pending += decoder.end();
-		const finalEntry = parseSessionEntryLine(pending);
-		if (finalEntry) entries.push(finalEntry);
-	} finally {
-		closeSync(fd);
+		parsed = JSON.parse(line);
+	} catch {
+		if (allowIncompleteFinalAppend) return null;
+		throw new Error(`Session contains a malformed JSONL record at line ${lineNumber}.`);
 	}
+	if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+		throw new Error(`Session contains an invalid JSONL object at line ${lineNumber}.`);
+	}
+	const entry = parsed as FileEntry;
+	if (entry.type === "plan") {
+		const plan = parsePlanArtifact(entry.plan);
+		if (!plan) throw new Error("Session contains an invalid persisted plan artifact.");
+		return { ...entry, plan };
+	}
+	return entry.type === "session" ? normalizeSessionHeader(entry) : entry;
+}
+
+function loadEntriesFromDescriptor(fd: number): FileEntry[] {
+	const entries: FileEntry[] = [];
+	const decoder = new StringDecoder("utf8");
+	const buffer = Buffer.allocUnsafe(SESSION_READ_BUFFER_SIZE);
+	let pending = "";
+	let lineNumber = 1;
+
+	while (true) {
+		const bytesRead = readSync(fd, buffer, 0, buffer.length, null);
+		if (bytesRead === 0) break;
+
+		pending += decoder.write(buffer.subarray(0, bytesRead));
+		let lineStart = 0;
+		let newlineIndex = pending.indexOf("\n", lineStart);
+		while (newlineIndex !== -1) {
+			const entry = parseStrictSessionEntryLine(pending.slice(lineStart, newlineIndex), lineNumber, false);
+			if (entry) entries.push(entry);
+			lineNumber++;
+			lineStart = newlineIndex + 1;
+			newlineIndex = pending.indexOf("\n", lineStart);
+		}
+		pending = pending.slice(lineStart);
+	}
+
+	pending += decoder.end();
+	// A process can terminate after writing only part of the final append. Recover
+	// that one case only after a complete header has already been read. Complete
+	// malformed records, including a malformed final record ending in LF, fail.
+	const finalEntry = parseStrictSessionEntryLine(pending, lineNumber, entries[0]?.type === "session");
+	if (finalEntry) entries.push(finalEntry);
 
 	// Validate session header
 	if (entries.length === 0) return entries;
@@ -678,9 +722,35 @@ export function loadEntriesFromFile(filePath: string): FileEntry[] {
 	return entries;
 }
 
+/** Exported for testing */
+export function loadEntriesFromFile(filePath: string): FileEntry[] {
+	const resolvedFilePath = normalizePath(filePath);
+	if (!existsSync(resolvedFilePath)) return [];
+
+	const fd = openSync(resolvedFilePath, "r");
+	try {
+		return loadEntriesFromDescriptor(fd);
+	} finally {
+		closeSync(fd);
+	}
+}
+
+function sessionFileEndsWithLineFeed(filePath: string): boolean {
+	const fd = openSync(filePath, "r");
+	try {
+		const stats = fstatSync(fd);
+		if (stats.size === 0) return true;
+		const finalByte = Buffer.allocUnsafe(1);
+		return readSync(fd, finalByte, 0, 1, stats.size - 1) === 1 && finalByte[0] === 0x0a;
+	} finally {
+		closeSync(fd);
+	}
+}
+
 /**
  * Inspect a physical line while searching for the first parsed session entry.
- * Blank and malformed lines are skipped to match loadEntriesFromFile().
+ * Blank and malformed lines are skipped only for bounded header discovery.
+ * The authoritative full load rejects every complete malformed record.
  * Returns undefined to keep scanning, null for a parsed non-header entry, or the header.
  */
 function parseSessionHeaderCandidate(line: string): SessionHeader | null | undefined {
@@ -1015,41 +1085,72 @@ export class SessionManager {
 		this._setSessionFile(sessionFile);
 	}
 
+	private _rewriteFileEntries(sessionFile: string, fileEntries: FileEntry[]): void {
+		if (!this.persist) return;
+		const fd = openSync(sessionFile, "w");
+		try {
+			for (const entry of fileEntries) {
+				writeFileSync(fd, `${JSON.stringify(entry)}\n`);
+			}
+		} finally {
+			closeSync(fd);
+		}
+	}
+
 	private _setSessionFile(sessionFile: string, preloadedFileEntries?: FileEntry[]): void {
-		this.sessionFile = resolvePath(sessionFile);
-		if (existsSync(this.sessionFile)) {
-			this.fileEntries = preloadedFileEntries ?? loadEntriesFromFile(this.sessionFile);
+		const nextSessionFile = resolvePath(sessionFile);
+		const targetExists = existsSync(nextSessionFile);
+		if (preloadedFileEntries !== undefined || targetExists) {
+			const nextFileEntries = preloadedFileEntries ?? loadEntriesFromFile(nextSessionFile);
 
 			// If file was empty, initialize it with a valid session header. If it was
 			// non-empty but did not parse as a Diffex session, fail without modifying it.
-			if (this.fileEntries.length === 0) {
-				const explicitPath = this.sessionFile;
-				if (statSync(explicitPath).size > 0) {
-					throw new Error(`Session file is not a valid Diffex session: ${explicitPath}`);
+			if (nextFileEntries.length === 0) {
+				if (statSync(nextSessionFile).size > 0) {
+					throw new Error(`Session file is not a valid Diffex session: ${nextSessionFile}`);
 				}
-				this.newSession();
-				this.sessionFile = explicitPath;
-				this._rewriteFile();
+				const nextSessionId = createSessionId();
+				const header: SessionHeader = {
+					type: "session",
+					version: CURRENT_SESSION_VERSION,
+					id: nextSessionId,
+					timestamp: new Date().toISOString(),
+					cwd: this.cwd,
+				};
+				const initializedEntries: FileEntry[] = [header];
+				const index = buildSessionEntryIndex(initializedEntries);
+				this._rewriteFileEntries(nextSessionFile, initializedEntries);
+				this.sessionFile = nextSessionFile;
+				this.fileEntries = initializedEntries;
+				this.sessionId = nextSessionId;
+				this.byId = index.byId;
+				this.labelsById = index.labelsById;
+				this.labelTimestampsById = index.labelTimestampsById;
+				this.leafId = index.leafId;
 				this.flushed = true;
 				return;
 			}
 
-			const header = this.fileEntries.find((e) => e.type === "session") as SessionHeader | undefined;
-			this.sessionId = header?.id ?? createSessionId();
-
-			if (migrateToCurrentVersion(this.fileEntries)) {
-				this._rewriteFile();
+			const header = nextFileEntries.find((entry) => entry.type === "session") as SessionHeader | undefined;
+			const nextSessionId = header?.id ?? createSessionId();
+			const migrated = migrateToCurrentVersion(nextFileEntries);
+			validateSessionEntries(nextFileEntries.filter((entry): entry is SessionEntry => entry.type !== "session"));
+			const index = buildSessionEntryIndex(nextFileEntries);
+			if (migrated || (targetExists && !sessionFileEndsWithLineFeed(nextSessionFile))) {
+				this._rewriteFileEntries(nextSessionFile, nextFileEntries);
 			}
 
-			validateSessionPlanLifecycle(
-				this.fileEntries.filter((entry): entry is SessionEntry => entry.type !== "session"),
-			);
-			this._buildIndex();
+			this.sessionFile = nextSessionFile;
+			this.fileEntries = nextFileEntries;
+			this.sessionId = nextSessionId;
+			this.byId = index.byId;
+			this.labelsById = index.labelsById;
+			this.labelTimestampsById = index.labelTimestampsById;
+			this.leafId = index.leafId;
 			this.flushed = true;
 		} else {
-			const explicitPath = this.sessionFile;
 			this.newSession();
-			this.sessionFile = explicitPath; // preserve explicit path from --session flag
+			this.sessionFile = nextSessionFile; // preserve explicit path from --session flag
 		}
 	}
 
@@ -1082,36 +1183,16 @@ export class SessionManager {
 	}
 
 	private _buildIndex(): void {
-		this.byId.clear();
-		this.labelsById.clear();
-		this.labelTimestampsById.clear();
-		this.leafId = null;
-		for (const entry of this.fileEntries) {
-			if (entry.type === "session") continue;
-			this.byId.set(entry.id, entry);
-			this.leafId = entry.id;
-			if (entry.type === "label") {
-				if (entry.label) {
-					this.labelsById.set(entry.targetId, entry.label);
-					this.labelTimestampsById.set(entry.targetId, entry.timestamp);
-				} else {
-					this.labelsById.delete(entry.targetId);
-					this.labelTimestampsById.delete(entry.targetId);
-				}
-			}
-		}
+		const index = buildSessionEntryIndex(this.fileEntries);
+		this.byId = index.byId;
+		this.labelsById = index.labelsById;
+		this.labelTimestampsById = index.labelTimestampsById;
+		this.leafId = index.leafId;
 	}
 
 	private _rewriteFile(): void {
 		if (!this.persist || !this.sessionFile) return;
-		const fd = openSync(this.sessionFile, "w");
-		try {
-			for (const entry of this.fileEntries) {
-				writeFileSync(fd, `${JSON.stringify(entry)}\n`);
-			}
-		} finally {
-			closeSync(fd);
-		}
+		this._rewriteFileEntries(this.sessionFile, this.fileEntries);
 	}
 
 	isPersisted(): boolean {

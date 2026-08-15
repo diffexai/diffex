@@ -49,10 +49,10 @@ describe("loadEntriesFromFile", () => {
 		expect(loadEntriesFromFile(file)).toEqual([]);
 	});
 
-	it("returns empty array for malformed JSON", () => {
+	it("rejects malformed nonblank JSON", () => {
 		const file = join(tempDir, "malformed.jsonl");
 		writeFileSync(file, "not json\n");
-		expect(loadEntriesFromFile(file)).toEqual([]);
+		expect(() => loadEntriesFromFile(file)).toThrow("malformed JSONL record at line 1");
 	});
 
 	it("loads valid session file", () => {
@@ -68,22 +68,19 @@ describe("loadEntriesFromFile", () => {
 		expect(entries[1].type).toBe("message");
 	});
 
-	it("skips malformed lines but keeps valid ones", () => {
+	it("rejects malformed records inside an otherwise valid session", () => {
 		const file = join(tempDir, "mixed.jsonl");
 		writeFileSync(
 			file,
 			'{"type":"session","id":"abc","timestamp":"2025-01-01T00:00:00Z","cwd":"/tmp"}\n' +
 				"not valid json\n" +
-				"null\n[]\n" +
 				'{"type":"message","id":"1","parentId":null,"timestamp":"2025-01-01T00:00:01Z","message":{"role":"user","content":"hi","timestamp":1}}\n',
 		);
-		const entries = loadEntriesFromFile(file);
-		expect(entries).toHaveLength(2);
+		expect(() => loadEntriesFromFile(file)).toThrow("malformed JSONL record at line 2");
 	});
 
 	it.each([
 		["leading blank lines", "\n  \n", "leading-blank"],
-		["leading malformed lines", "not json\n{broken json\n", "leading-malformed"],
 		["a multi-buffer header", "", "a".repeat(8192)],
 	])("reads cwd from a session with %s", (_description, prefix, sessionId) => {
 		const file = join(tempDir, "header.jsonl");
@@ -95,30 +92,57 @@ describe("loadEntriesFromFile", () => {
 		expect(sessionManager.getCwd()).toBe(storedCwd);
 	});
 
-	it("opens compatible sessions beyond the discovery scan limit", () => {
+	it("opens compatible sessions with headers beyond the discovery scan limit", () => {
 		const storedCwd = join(tempDir, "stored-project");
 		const overrideCwd = join(tempDir, "override-project");
-		const cases = [
-			{ name: "large-header", id: "a".repeat(HEADER_SCAN_LIMIT_BYTES + 1), prefix: "" },
-			{
-				name: "large-prefix",
-				id: "large-prefix",
-				prefix: `${"x".repeat(HEADER_SCAN_LIMIT_BYTES + 1)}\n`,
-			},
-		];
-
-		for (const { name, id, prefix } of cases) {
-			const file = join(tempDir, `${name}.jsonl`);
-			writeSessionHeader(file, storedCwd, id, prefix);
-			for (const cwdOverride of [undefined, overrideCwd]) {
-				const sessionManager = SessionManager.open(file, tempDir, cwdOverride);
-				expect(sessionManager.getSessionId()).toBe(id);
-				expect(sessionManager.getCwd()).toBe(cwdOverride ?? storedCwd);
-			}
+		const id = "a".repeat(HEADER_SCAN_LIMIT_BYTES + 1);
+		const file = join(tempDir, "large-header.jsonl");
+		writeSessionHeader(file, storedCwd, id);
+		for (const cwdOverride of [undefined, overrideCwd]) {
+			const sessionManager = SessionManager.open(file, tempDir, cwdOverride);
+			expect(sessionManager.getSessionId()).toBe(id);
+			expect(sessionManager.getCwd()).toBe(cwdOverride ?? storedCwd);
 		}
 	});
 
-	it("opens session files larger than Node's max string length", () => {
+	it("rejects malformed records before a valid header", () => {
+		const file = join(tempDir, "leading-malformed.jsonl");
+		writeSessionHeader(file, tempDir, "session-id", "not json\n");
+
+		expect(() => SessionManager.open(file, tempDir)).toThrow("malformed JSONL record at line 1");
+	});
+
+	it("recovers from an incomplete final append without accepting interior corruption", () => {
+		const file = join(tempDir, "incomplete-final-append.jsonl");
+		const completePrefix =
+			'{"type":"session","version":3,"id":"abc","timestamp":"2025-01-01T00:00:00Z","cwd":"/tmp"}\n' +
+			'{"type":"message","id":"1","parentId":null,"timestamp":"2025-01-01T00:00:01Z","message":{"role":"user","content":"hi","timestamp":1}}\n';
+		const partialAppend = '{"type":"message","id":"partial"';
+		writeFileSync(file, completePrefix + partialAppend);
+
+		expect(loadEntriesFromFile(file)).toHaveLength(2);
+		const recovered = SessionManager.open(file, tempDir);
+		expect(recovered.getEntries()).toHaveLength(1);
+		recovered.appendMessage({ role: "user", content: "after recovery", timestamp: 2 });
+		expect(SessionManager.open(file, tempDir).getEntries()).toHaveLength(2);
+		expect(readFileSync(file, "utf8")).not.toContain(partialAppend);
+
+		const malformedFile = join(tempDir, "complete-malformed-final-record.jsonl");
+		writeFileSync(malformedFile, `${completePrefix}${partialAppend}\n`);
+		expect(() => loadEntriesFromFile(malformedFile)).toThrow("malformed JSONL record at line 3");
+	});
+
+	it("rejects complete non-object JSONL records", () => {
+		const file = join(tempDir, "non-object-record.jsonl");
+		writeFileSync(
+			file,
+			'{"type":"session","version":3,"id":"abc","timestamp":"2025-01-01T00:00:00Z","cwd":"/tmp"}\nnull\n',
+		);
+
+		expect(() => loadEntriesFromFile(file)).toThrow("invalid JSONL object at line 2");
+	});
+
+	it("does not treat sparse-file holes as blank JSONL records", () => {
 		const file = join(tempDir, "large.jsonl");
 		writeFileSync(
 			file,
@@ -141,10 +165,7 @@ describe("loadEntriesFromFile", () => {
 			'{"type":"message","id":"1","parentId":null,"timestamp":"2025-01-01T00:00:01Z","message":{"role":"user","content":"hi","timestamp":1}}\n',
 		);
 
-		const sessionManager = SessionManager.open(file, tempDir);
-		expect(sessionManager.getSessionId()).toBe("abc");
-		expect(sessionManager.getEntries()).toHaveLength(1);
-		expect(sessionManager.buildSessionContext().messages).toEqual([{ role: "user", content: "hi", timestamp: 1 }]);
+		expect(() => SessionManager.open(file, tempDir)).toThrow("malformed JSONL record at line 2");
 	});
 });
 
@@ -481,6 +502,78 @@ describe("SessionManager.setSessionFile with corrupted files", () => {
 		writeFileSync(duplicateFile, `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`);
 
 		expect(() => SessionManager.open(duplicateFile, tempDir)).toThrow("duplicate entry ID duplicate");
+	});
+
+	it("rejects current-format orphan entries before plan mode can make the session unloadable", () => {
+		const orphanFile = join(tempDir, "orphan-entry.jsonl");
+		const entries = [
+			{
+				type: "session",
+				version: 3,
+				id: "orphan-session",
+				timestamp: "2025-01-01T00:00:00Z",
+				cwd: tempDir,
+			},
+			{
+				type: "custom",
+				id: "root",
+				parentId: null,
+				timestamp: "2025-01-01T00:00:01Z",
+				customType: "root",
+			},
+			{
+				type: "custom",
+				id: "orphan",
+				parentId: "missing",
+				timestamp: "2025-01-01T00:00:02Z",
+				customType: "orphan",
+			},
+		];
+		writeFileSync(orphanFile, `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`);
+
+		expect(() => SessionManager.open(orphanFile, tempDir)).toThrow(
+			"Session entry orphan has a missing parent missing.",
+		);
+	});
+
+	it("leaves the current session intact when switching to an invalid target", () => {
+		const session = SessionManager.inMemory(tempDir);
+		const currentEntryId = session.appendMessage({ role: "user", content: "current", timestamp: 1 });
+		const currentSessionId = session.getSessionId();
+		const currentEntries = session.getEntries();
+		const targets = [
+			{
+				name: "malformed",
+				content:
+					'{"type":"session","version":3,"id":"malformed-target","timestamp":"2025-01-01T00:00:00Z","cwd":"/tmp"}\n' +
+					"not json\n",
+			},
+			{
+				name: "duplicate",
+				content:
+					'{"type":"session","version":3,"id":"duplicate-target","timestamp":"2025-01-01T00:00:00Z","cwd":"/tmp"}\n' +
+					'{"type":"custom","id":"duplicate","parentId":null,"timestamp":"2025-01-01T00:00:01Z","customType":"first"}\n' +
+					'{"type":"custom","id":"duplicate","parentId":null,"timestamp":"2025-01-01T00:00:02Z","customType":"second"}\n',
+			},
+			{
+				name: "lifecycle",
+				content:
+					'{"type":"session","version":3,"id":"lifecycle-target","timestamp":"2025-01-01T00:00:00Z","cwd":"/tmp"}\n' +
+					'{"type":"plan","id":"invalid-plan","parentId":null,"timestamp":"2025-01-01T00:00:01Z","plan":{"id":"plan","title":"Invalid","markdown":"No mode"}}\n',
+			},
+		];
+
+		for (const target of targets) {
+			const targetFile = join(tempDir, `${target.name}.jsonl`);
+			writeFileSync(targetFile, target.content);
+
+			expect(() => session.setSessionFile(targetFile)).toThrow();
+			expect(session.getSessionFile()).toBeUndefined();
+			expect(session.getSessionId()).toBe(currentSessionId);
+			expect(session.getEntries()).toEqual(currentEntries);
+			expect(session.getLeafId()).toBe(currentEntryId);
+			expect(session.getEntry(currentEntryId)).toEqual(currentEntries[0]);
+		}
 	});
 
 	it("preserves explicit session file path when recovering from corrupted file", () => {
