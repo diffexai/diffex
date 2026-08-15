@@ -19,8 +19,15 @@ import {
 	createHarnessDescriptor,
 	loadHarnessDescriptors,
 	type ResolvedHarnessDescriptor,
+	removeHarnessDescriptor,
 } from "./harness-descriptors.ts";
-import { routeTaskBoundary, routeTaskProfile, shouldEvaluateTaskBoundary } from "./profile-router.ts";
+import {
+	type AmbiguousProfileRouteDecision,
+	routeAcceptedPlanProfile,
+	routeTaskBoundary,
+	routeTaskProfile,
+	shouldEvaluateTaskBoundary,
+} from "./profile-router.ts";
 import type { ResolvedTaskProfile } from "./profiles.ts";
 import { expandPromptTemplate } from "./prompt-templates.ts";
 import { startProfileRouteSpan, traceAiCompletion } from "./runtime-telemetry.ts";
@@ -82,6 +89,34 @@ export interface ProfileSwitchEvent {
 	harnessName: string;
 	reused: boolean;
 	notice: string;
+}
+
+export interface ProfileSelectionOption {
+	readonly profileId: string;
+	readonly name: string;
+	readonly description: string;
+	readonly safeguardSummary: string;
+	readonly toolPolicy: {
+		readonly default: readonly string[];
+		readonly required: readonly string[];
+		readonly denied: readonly string[];
+	};
+}
+
+export interface ProfileSelectionProposal {
+	readonly trigger: "accepted_plan";
+	/** Ordered with the router's recommended profile first. */
+	readonly options: readonly ProfileSelectionOption[];
+}
+
+export type ProfileSelectionResolution = { profileId: string } | { cancelled: true };
+export type ProfileSelectionResolver = (
+	proposal: ProfileSelectionProposal,
+	signal: AbortSignal,
+) => Promise<ProfileSelectionResolution>;
+
+export interface RuntimePlanContinuationPromptOptions extends PlanContinuationPromptOptions {
+	profileSelectionResolver?: ProfileSelectionResolver;
 }
 
 /** Content-free task-boundary proposal presented by a host before a future prompt is delivered. */
@@ -166,6 +201,7 @@ function extractUserMessageText(content: string | Array<{ type: string; text?: s
 
 const ROUTING_CONTEXT_MAX_CHARS = 6_000;
 const ROUTING_TIMEOUT_MS = 15_000;
+const PROFILE_SELECTION_SAFEGUARD_MAX_CHARS = 72;
 const MAX_LEGACY_SESSION_ANCESTRY_DEPTH = 64;
 const BUILTIN_SLASH_COMMAND_NAMES = new Set(BUILTIN_SLASH_COMMANDS.map((command) => command.name));
 const ROUTE_FALLBACK_TELEMETRY = {
@@ -173,6 +209,29 @@ const ROUTE_FALLBACK_TELEMETRY = {
 	"invalid-output": "invalid_output",
 	"low-confidence": "low_confidence",
 } as const;
+
+function buildProfileSelectionSafeguardSummary(profile: ResolvedTaskProfile): string {
+	const safeguards: string[] = [];
+	if (profile.guardrails.highStakes) safeguards.push("High stakes");
+	if (profile.guardrails.requireCurrentSources) safeguards.push("current sources");
+	if (profile.guardrails.requireHumanReview) safeguards.push("human review");
+	if (safeguards.length === 0) safeguards.push("Standard safeguards");
+
+	const enabled = new Set([...profile.tools.default, ...profile.tools.required]);
+	const denied = new Set(profile.tools.denied);
+	const consequentialTools = ["bash", "edit", "write"];
+	const unavailable = consequentialTools.filter((tool) => denied.has(tool));
+	const available = consequentialTools.filter((tool) => enabled.has(tool) && !denied.has(tool));
+	const toolSummary =
+		unavailable.length > 0
+			? `${unavailable.join("/")} unavailable`
+			: available.length > 0
+				? `${available.join("/")} available`
+				: "read-focused tools";
+	const summary = `${safeguards.join("; ")}; ${toolSummary}.`;
+	if (summary.length <= PROFILE_SELECTION_SAFEGUARD_MAX_CHARS) return summary;
+	return `${summary.slice(0, PROFILE_SELECTION_SAFEGUARD_MAX_CHARS - 3).trimEnd()}...`;
+}
 
 /**
  * Expand public skill/template resources for classification only.
@@ -324,6 +383,12 @@ export class AgentSessionRuntime {
 	private promptPreparationQueue: Promise<void> = Promise.resolve();
 	private exclusiveRuntimeOperation: object | undefined;
 	private exclusiveRuntimeOperationSettled: Promise<void> = Promise.resolve();
+	private readonly acceptedPlanAmbiguities = new WeakMap<
+		PlanContinuation,
+		{ decision: AmbiguousProfileRouteDecision; proposal: ProfileSelectionProposal }
+	>();
+	private readonly routedPlanContinuations = new WeakSet<PlanContinuation>();
+	private profileSelectionAbortController: AbortController | undefined;
 	private disposeRequested = false;
 
 	constructor(
@@ -1802,6 +1867,7 @@ export class AgentSessionRuntime {
 		profile: ResolvedTaskProfile,
 		expectedSession: AgentSession,
 		exclusiveOperation?: object,
+		beforeCommit?: () => void,
 	): Promise<boolean> {
 		const activate = async () => {
 			const sessionManager = expectedSession.sessionManager;
@@ -1831,6 +1897,7 @@ export class AgentSessionRuntime {
 				targetSessionFile: sessionManager.getSessionFile(),
 				profileRouting: "auto",
 				harnessId: harness.id,
+				beforeCommit,
 				restoreRejectedMetadata: () => sessionManager.setProfileMetadata(previousProfile),
 			});
 			if (!activated) return false;
@@ -1845,9 +1912,119 @@ export class AgentSessionRuntime {
 		return this.runSessionReplacement(activate);
 	}
 
+	private createAcceptedPlanProfileSelectionProposal(
+		decision: AmbiguousProfileRouteDecision,
+		profiles: readonly ResolvedTaskProfile[],
+	): ProfileSelectionProposal {
+		const options = decision.profileIds.map((profileId) => {
+			const profile = profiles.find((candidate) => candidate.id === profileId);
+			if (!profile) throw new Error(`Ambiguous profile route referenced unknown profile "${profileId}"`);
+			return Object.freeze({
+				profileId: profile.id,
+				name: profile.name,
+				description: profile.description,
+				safeguardSummary: buildProfileSelectionSafeguardSummary(profile),
+				toolPolicy: Object.freeze({
+					default: Object.freeze([...profile.tools.default]),
+					required: Object.freeze([...profile.tools.required]),
+					denied: Object.freeze([...profile.tools.denied]),
+				}),
+			});
+		});
+		return Object.freeze({
+			trigger: "accepted_plan",
+			options: Object.freeze(options),
+		});
+	}
+
+	private async resolveAcceptedPlanProfileSelection(
+		proposal: ProfileSelectionProposal,
+		profiles: readonly ResolvedTaskProfile[],
+		resolver: ProfileSelectionResolver | undefined,
+	): Promise<ResolvedTaskProfile> {
+		const { options } = proposal;
+		if (!resolver) {
+			throw new Error(
+				`Accepted plan requires choosing between ${options.map((option) => option.name).join(" and ")}, but no profile selection resolver was provided.`,
+			);
+		}
+
+		const abortController = new AbortController();
+		this.profileSelectionAbortController = abortController;
+		const abortError = new Error("Agent session runtime disposal started while profile selection was pending.");
+		let rejectAborted!: (error: Error) => void;
+		const aborted = new Promise<never>((_resolve, reject) => {
+			rejectAborted = reject;
+		});
+		const onAbort = (): void => rejectAborted(abortError);
+		abortController.signal.addEventListener("abort", onAbort, { once: true });
+		let resolution: ProfileSelectionResolution;
+		try {
+			resolution = await Promise.race([resolver(proposal, abortController.signal), aborted]);
+		} finally {
+			abortController.signal.removeEventListener("abort", onAbort);
+			if (this.profileSelectionAbortController === abortController) {
+				this.profileSelectionAbortController = undefined;
+			}
+		}
+
+		if (typeof resolution !== "object" || resolution === null) {
+			throw new Error("Profile selection resolver returned an invalid resolution.");
+		}
+		if ("cancelled" in resolution && resolution.cancelled === true) {
+			throw new Error("Accepted-plan profile selection was cancelled.");
+		}
+		if (!("profileId" in resolution) || typeof resolution.profileId !== "string") {
+			throw new Error("Profile selection resolver returned an invalid resolution.");
+		}
+		const selected = options.find((option) => option.profileId === resolution.profileId);
+		if (!selected) {
+			throw new Error(`Profile selection resolver chose unavailable profile "${resolution.profileId}".`);
+		}
+		const profile = profiles.find((candidate) => candidate.id === selected.profileId);
+		if (!profile) throw new Error(`Selected profile "${selected.profileId}" is no longer available.`);
+		return profile;
+	}
+
+	private assertAcceptedPlanRouteState(
+		startingSession: AgentSession,
+		expectedContinuation: PlanContinuation | undefined,
+		exclusiveOperation: object | undefined,
+		message: string,
+	): void {
+		if (
+			this.session !== startingSession ||
+			startingSession.pendingPlanContinuation !== expectedContinuation ||
+			startingSession.collaborationMode !== "default" ||
+			this.disposeRequested ||
+			this.exclusiveRuntimeOperation !== exclusiveOperation
+		) {
+			throw new Error(message);
+		}
+	}
+
+	private cleanupUnadoptedHarnessDescriptor(
+		harness: ResolvedHarnessDescriptor | undefined,
+		startingSession: AgentSession,
+	): void {
+		if (!harness || this.session !== startingSession || this._activeHarness?.id === harness.id) return;
+		try {
+			removeHarnessDescriptor(this.services.agentDir, harness);
+		} catch (error) {
+			this.appendDiagnostic(
+				`Could not remove unadopted harness descriptor ${harness.sourcePath}: ${error instanceof Error ? error.message : String(error)}`,
+			);
+		}
+	}
+
 	private async resolveHarnessAfterInitialTurn(
 		prompt: string,
-		options?: { requireActivation?: boolean; exclusiveOperation?: object },
+		options?: {
+			requireActivation?: boolean;
+			exclusiveOperation?: object;
+			profileSelectionResolver?: ProfileSelectionResolver;
+			expectedContinuation?: PlanContinuation;
+		},
 	): Promise<RuntimePromptResult> {
 		const startingSession = this.session;
 		const previousProfileId = this.activeProfile.id;
@@ -1865,6 +2042,8 @@ export class AgentSessionRuntime {
 					const profiles = this.services.resourceLoader
 						.getProfiles()
 						.profiles.filter((profile) => profile.origin === "builtin" && profile.immutable);
+					const currentHarness = options?.requireActivation ? this._activeHarness : undefined;
+					const currentProfile = currentHarness ? this.activeProfile : undefined;
 					const loadedHarnesses = loadHarnessDescriptors({
 						agentDir: this.services.agentDir,
 						notes: this.services.resourceLoader.getEvolvedNotes().evolvedNotes,
@@ -1874,17 +2053,28 @@ export class AgentSessionRuntime {
 					}
 					const reusableHarnesses = loadedHarnesses.harnesses.filter(
 						(harness) =>
-							harness.harnessNoteCount > 0 && profiles.some((profile) => profile.id === harness.baseProfileId),
+							harness.id !== currentHarness?.id &&
+							harness.harnessNoteCount > 0 &&
+							profiles.some((profile) => profile.id === harness.baseProfileId),
 					);
-					const decision = await routeTaskProfile(
-						{
-							prompt,
-							recentTaskContext: buildRecentTaskContext(this.session.messages),
-							candidates: profiles,
-							harnesses: reusableHarnesses,
-						},
-						(routerPrompt) => this.completeProfileRoute(routerPrompt, routeContext),
-					);
+					const routeInput = {
+						prompt,
+						recentTaskContext: buildRecentTaskContext(this.session.messages),
+						candidates: profiles,
+						harnesses: reusableHarnesses,
+						...(currentHarness && currentProfile ? { currentHarness, currentProfile } : {}),
+					};
+					const cachedAmbiguity = options?.expectedContinuation
+						? this.acceptedPlanAmbiguities.get(options.expectedContinuation)
+						: undefined;
+					const decision = options?.requireActivation
+						? (cachedAmbiguity?.decision ??
+							(await routeAcceptedPlanProfile(routeInput, (routerPrompt) =>
+								this.completeProfileRoute(routerPrompt, routeContext),
+							)))
+						: await routeTaskProfile(routeInput, (routerPrompt) =>
+								this.completeProfileRoute(routerPrompt, routeContext),
+							);
 					if (this.session !== startingSession) {
 						throw new Error("Session changed while initial task routing was pending");
 					}
@@ -1899,18 +2089,106 @@ export class AgentSessionRuntime {
 					if (this.disposeRequested) {
 						throw new Error("Agent session runtime disposal started while task routing was pending");
 					}
-					if (decision.fallback) {
-						const detail = decision.fallbackDetail ? `: ${decision.fallbackDetail}` : "";
-						this.appendDiagnostic(`Task profile router used ${decision.fallback} fallback${detail}`, true);
+					if (options?.requireActivation) {
+						this.assertAcceptedPlanRouteState(
+							startingSession,
+							options.expectedContinuation,
+							options.exclusiveOperation,
+							"Session changed while accepted-plan routing was pending.",
+						);
+					}
+					const decisionFallback =
+						"fallback" in decision &&
+						(decision.fallback === "completion-error" ||
+							decision.fallback === "invalid-output" ||
+							decision.fallback === "low-confidence")
+							? decision.fallback
+							: undefined;
+					if (decisionFallback) {
+						const detail =
+							"fallbackDetail" in decision && typeof decision.fallbackDetail === "string"
+								? `: ${decision.fallbackDetail}`
+								: "";
+						this.appendDiagnostic(`Task profile router used ${decisionFallback} fallback${detail}`, true);
+					}
+					if (decision.decision === "unresolved") {
+						throw new Error(
+							`Accepted-plan profile routing could not choose a profile safely (${decision.fallback}). Retry the implementation when routing is available.`,
+						);
+					}
+					if (decision.decision === "stay") {
+						if (
+							!currentHarness ||
+							this._activeHarness?.id !== decision.harnessId ||
+							this.activeProfile.id !== decision.profileId
+						) {
+							throw new Error("Accepted-plan router selected a stale active harness.");
+						}
+						complete({
+							outcome: "stayed",
+							targetProfileId: decision.profileId,
+							harnessId: decision.harnessId,
+							confidence: decision.confidence,
+						});
+						return {
+							routing: "bypassed",
+							activeProfileId: decision.profileId,
+							harnessId: currentHarness.id,
+							harnessRevision: currentHarness.revision,
+							reason: decision.reason,
+						};
 					}
 
 					let harness: ResolvedHarnessDescriptor;
-					if (decision.decision === "reuse") {
+					let createdHarness: ResolvedHarnessDescriptor | undefined;
+					let profile: ResolvedTaskProfile;
+					let routeReason = decision.reason;
+					if (decision.decision === "ambiguous") {
+						const expectedContinuation = options?.expectedContinuation;
+						if (!expectedContinuation) {
+							throw new Error("Accepted-plan ambiguity is missing its continuation identity.");
+						}
+						const ambiguity = cachedAmbiguity ?? {
+							decision,
+							proposal: this.createAcceptedPlanProfileSelectionProposal(decision, profiles),
+						};
+						if (!cachedAmbiguity) this.acceptedPlanAmbiguities.set(expectedContinuation, ambiguity);
+						profile = await this.resolveAcceptedPlanProfileSelection(
+							ambiguity.proposal,
+							profiles,
+							options?.profileSelectionResolver,
+						);
+						this.assertAcceptedPlanRouteState(
+							startingSession,
+							options?.expectedContinuation,
+							options?.exclusiveOperation,
+							"Session changed while accepted-plan profile selection was pending.",
+						);
+						routeReason = `The user selected the ${profile.name} profile after an ambiguous accepted-plan route.`;
+						harness = createHarnessDescriptor({
+							agentDir: this.services.agentDir,
+							name: decision.harnessName,
+							description: decision.harnessDescription,
+							baseProfileId: profile.id,
+							notes: this.services.resourceLoader.getEvolvedNotes().evolvedNotes,
+						});
+						createdHarness = harness;
+					} else if (decision.decision === "reuse") {
 						const existingHarness = reusableHarnesses.find((candidate) => candidate.id === decision.harnessId);
 						if (!existingHarness)
 							throw new Error(`Profile router selected unknown harness "${decision.harnessId}"`);
 						harness = existingHarness;
+						const reusedProfile = profiles.find((candidate) => candidate.id === harness.baseProfileId);
+						if (!reusedProfile) {
+							throw new Error(`Harness references unknown immutable profile "${harness.baseProfileId}"`);
+						}
+						profile = reusedProfile;
 					} else {
+						const selectedProfile = profiles.find((candidate) => candidate.id === decision.profileId);
+						if (!selectedProfile) {
+							throw new Error(`Profile router selected unknown immutable profile "${decision.profileId}"`);
+						}
+						profile = selectedProfile;
 						harness = createHarnessDescriptor({
 							agentDir: this.services.agentDir,
 							name: decision.harnessName ?? "General task",
@@ -1918,16 +2196,31 @@ export class AgentSessionRuntime {
 							baseProfileId: decision.profileId,
 							notes: this.services.resourceLoader.getEvolvedNotes().evolvedNotes,
 						});
+						createdHarness = harness;
 					}
-					const profile = profiles.find((candidate) => candidate.id === harness.baseProfileId);
-					if (!profile) throw new Error(`Harness references unknown immutable profile "${harness.baseProfileId}"`);
-					const activated = await this.activateHarness(
-						harness,
-						profile,
-						startingSession,
-						options?.exclusiveOperation,
-					);
+					let activated: boolean;
+					try {
+						activated = await this.activateHarness(
+							harness,
+							profile,
+							startingSession,
+							options?.exclusiveOperation,
+							options?.requireActivation
+								? () =>
+										this.assertAcceptedPlanRouteState(
+											startingSession,
+											options.expectedContinuation,
+											options.exclusiveOperation,
+											"Session changed immediately before accepted-plan harness activation.",
+										)
+								: undefined,
+						);
+					} catch (error) {
+						this.cleanupUnadoptedHarnessDescriptor(createdHarness, startingSession);
+						throw error;
+					}
 					if (!activated) {
+						this.cleanupUnadoptedHarnessDescriptor(createdHarness, startingSession);
 						this.harnessResolutionClaimed = false;
 						if (options?.requireActivation) {
 							throw new Error("Session changed while accepted-plan harness activation was pending");
@@ -1944,7 +2237,7 @@ export class AgentSessionRuntime {
 						this.profileSwitchListener?.({
 							fromProfileId: previousProfileId,
 							toProfileId: profile.id,
-							reason: decision.reason,
+							reason: routeReason,
 							harnessId: harness.id,
 							harnessRevision: harness.revision,
 							harnessName: harness.name,
@@ -1963,14 +2256,14 @@ export class AgentSessionRuntime {
 						harnessId: harness.id,
 						harnessRevision: harness.revision,
 						notice,
-						reason: decision.reason,
+						reason: routeReason,
 					};
 					complete({
 						outcome: result.routing,
 						targetProfileId: profile.id,
 						harnessId: harness.id,
 						confidence: decision.confidence,
-						...(decision.fallback ? { fallback: ROUTE_FALLBACK_TELEMETRY[decision.fallback] } : {}),
+						...(decisionFallback ? { fallback: ROUTE_FALLBACK_TELEMETRY[decisionFallback] } : {}),
 					});
 					return result;
 				} catch (error) {
@@ -2000,8 +2293,9 @@ export class AgentSessionRuntime {
 	/** Route and submit an accepted plan through its task-scoped implementation harness exactly once. */
 	async promptPlanContinuation(
 		continuation: PlanContinuation,
-		options?: PlanContinuationPromptOptions,
+		options?: RuntimePlanContinuationPromptOptions,
 	): Promise<RuntimePromptResult> {
+		const { profileSelectionResolver, ...promptOptions } = options ?? {};
 		let preflightReported = false;
 		const reportPreflight = (success: boolean): void => {
 			if (preflightReported) return;
@@ -2023,6 +2317,10 @@ export class AgentSessionRuntime {
 					if (this.session !== entrySession || entrySession.pendingPlanContinuation !== continuation) {
 						throw new Error("Session changed while the plan continuation was waiting to be routed.");
 					}
+					const acceptedPlan = entrySession.sessionManager.buildSessionContext().pendingPlanContinuation;
+					if (!acceptedPlan) {
+						throw new Error("Accepted plan artifact is no longer available for implementation routing.");
+					}
 
 					let result: RuntimePromptResult = {
 						routing: "bypassed",
@@ -2031,11 +2329,18 @@ export class AgentSessionRuntime {
 							? { harnessId: this._activeHarness.id, harnessRevision: this._activeHarness.revision }
 							: {}),
 					};
-					if (this._profileRouting === "auto" && this._activeHarness === undefined) {
-						result = await this.resolveHarnessAfterInitialTurn(continuation.message, {
-							requireActivation: true,
-							exclusiveOperation,
-						});
+					const requiresRouting =
+						this._profileRouting === "auto" && !this.routedPlanContinuations.has(continuation);
+					if (requiresRouting) {
+						result = await this.resolveHarnessAfterInitialTurn(
+							`${acceptedPlan.title}\n\n${acceptedPlan.markdown}`,
+							{
+								requireActivation: true,
+								exclusiveOperation,
+								profileSelectionResolver,
+								expectedContinuation: continuation,
+							},
+						);
 					}
 
 					const activeContinuation = this.session.pendingPlanContinuation;
@@ -2045,9 +2350,10 @@ export class AgentSessionRuntime {
 					if (this.disposeRequested) {
 						throw new Error("Agent session runtime disposal started before implementation prompt ownership.");
 					}
+					if (requiresRouting) this.routedPlanContinuations.add(activeContinuation);
 					return this.startSessionPlanContinuation(
 						activeContinuation,
-						{ ...options, preflightResult: reportPreflight },
+						{ ...promptOptions, preflightResult: reportPreflight },
 						result,
 					);
 				}),
@@ -2055,6 +2361,10 @@ export class AgentSessionRuntime {
 			await prepared.completion;
 			return prepared.result;
 		} catch (error) {
+			const reboundContinuation = this.session.pendingPlanContinuation;
+			if (this.session !== entrySession && this._activeHarness && reboundContinuation) {
+				this.routedPlanContinuations.add(reboundContinuation);
+			}
 			reportPreflight(false);
 			throw error;
 		}
@@ -2106,6 +2416,7 @@ export class AgentSessionRuntime {
 	dispose(): Promise<void> {
 		if (this.disposePromise) return this.disposePromise;
 		this.disposeRequested = true;
+		this.profileSelectionAbortController?.abort();
 
 		let resolveDispose!: () => void;
 		let rejectDispose!: (reason: unknown) => void;
