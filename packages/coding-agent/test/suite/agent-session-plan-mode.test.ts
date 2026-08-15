@@ -551,4 +551,438 @@ describe("AgentSession native plan mode", () => {
 		expect(harness.session.isStreaming).toBe(false);
 	});
 
+	it("rejects navigation before queued and next-turn messages can cross collaboration branches", async () => {
+		const harness = await createHarness();
+		harnesses.push(harness);
+		harness.setResponses([fauxAssistantMessage("default response")]);
+		await harness.session.prompt("Create a default branch.");
+		const defaultLeafId = harness.sessionManager.getLeafId();
+		if (!defaultLeafId) throw new Error("Expected a default branch leaf");
+		harness.session.setCollaborationMode("plan");
+		const planLeafId = harness.sessionManager.getLeafId();
+
+		await harness.session.followUp("queued plan-era follow-up");
+		await expect(harness.session.navigateTree(defaultLeafId)).rejects.toThrow("Clear queued messages");
+		expect(harness.sessionManager.getLeafId()).toBe(planLeafId);
+		expect(harness.session.collaborationMode).toBe("plan");
+
+		harness.session.clearQueue();
+		await harness.session.sendCustomMessage(
+			{ customType: "next-turn", content: "queued plan-era context", display: false, details: undefined },
+			{ deliverAs: "nextTurn" },
+		);
+		await expect(harness.session.navigateTree(defaultLeafId)).rejects.toThrow("Clear queued messages");
+		expect(harness.sessionManager.getLeafId()).toBe(planLeafId);
+		expect(harness.session.collaborationMode).toBe("plan");
+	});
+
+	it("stops after successful submission, clears queues, and lets failed submissions be repaired", async () => {
+		const harness = await createHarness();
+		harnesses.push(harness);
+		harness.session.setCollaborationMode("plan");
+		harness.session.subscribe((event) => {
+			if (event.type === "plan_submitted") {
+				void harness.session.followUp("This queued message must not run after plan submission.");
+			}
+		});
+		harness.setResponses([
+			fauxAssistantMessage(fauxToolCall(SUBMIT_PLAN_TOOL_NAME, { markdown: "Missing title" }), {
+				stopReason: "toolUse",
+			}),
+			fauxAssistantMessage(
+				fauxToolCall(SUBMIT_PLAN_TOOL_NAME, { title: "unsafe\u001b[31m", markdown: "Unsafe title" }),
+				{ stopReason: "toolUse" },
+			),
+			fauxAssistantMessage(
+				fauxToolCall(SUBMIT_PLAN_TOOL_NAME, {
+					title: "Safe\n plan",
+					markdown: "1. Stop after the successful submission.",
+				}),
+				{ stopReason: "toolUse" },
+			),
+			fauxAssistantMessage("This response must remain unused."),
+		]);
+
+		await harness.session.prompt("Submit the final plan.");
+
+		expect(harness.session.pendingPlan?.title).toBe("Safe plan");
+		expect(harness.session.pendingMessageCount).toBe(0);
+		expect(harness.getPendingResponseCount()).toBe(1);
+		expect(getUserTexts(harness)).not.toContain("This queued message must not run after plan submission.");
+		expect(harness.eventsOfType("agent_end").at(-1)).toMatchObject({ willRetry: false });
+	});
+
+	it("stops post-run retry continuation after a successful submission", async () => {
+		const harness = await createHarness({
+			settings: { retry: { enabled: true, maxRetries: 3, baseDelayMs: 1 } },
+		});
+		harnesses.push(harness);
+		harness.session.setCollaborationMode("plan");
+		harness.session.subscribe((event) => {
+			if (event.type === "plan_submitted") {
+				void harness.session.followUp("This retry-era queue entry must remain unused.");
+			}
+		});
+		harness.setResponses([
+			fauxAssistantMessage("", { stopReason: "error", errorMessage: "overloaded_error" }),
+			fauxAssistantMessage(
+				fauxToolCall(SUBMIT_PLAN_TOOL_NAME, {
+					title: "Retry plan",
+					markdown: "1. Stop after this retry submits the plan.",
+				}),
+				{ stopReason: "toolUse" },
+			),
+			fauxAssistantMessage("This response must remain unused."),
+		]);
+
+		await harness.session.prompt("Retry and submit the plan.");
+
+		expect(harness.session.pendingPlan?.title).toBe("Retry plan");
+		expect(harness.session.pendingMessageCount).toBe(0);
+		expect(harness.getPendingResponseCount()).toBe(1);
+		expect(getUserTexts(harness)).not.toContain("This retry-era queue entry must remain unused.");
+		expect(harness.eventsOfType("auto_retry_start")).toHaveLength(1);
+	});
+
+	it("allows a submitted draft to be replaced before resolution", async () => {
+		const harness = await createHarness();
+		harnesses.push(harness);
+		harness.session.setCollaborationMode("plan");
+		const submitTool = harness.session.agent.state.tools.find((tool) => tool.name === SUBMIT_PLAN_TOOL_NAME);
+		if (!submitTool) throw new Error("submit_plan is unavailable");
+
+		await submitTool.execute("draft-1", { title: "First draft", markdown: "1. First version." });
+		const firstId = harness.session.pendingPlan?.id;
+		await submitTool.execute("draft-2", { title: "Second draft", markdown: "1. Replacement version." });
+
+		expect(harness.session.pendingPlan).toMatchObject({ title: "Second draft" });
+		expect(harness.session.pendingPlan?.id).not.toBe(firstId);
+		expect(harness.sessionManager.getEntries().filter((entry) => entry.type === "plan")).toHaveLength(2);
+	});
+
+	it("resolves durably, rolls back persistence failures, and returns an explicit continuation token", async () => {
+		const inspectedPromptModes: Array<CollaborationMode | undefined> = [];
+		const harness = await createHarness({
+			extensionFactories: [
+				(pi) => {
+					pi.registerCommand("inspect-prompt-mode", {
+						description: "Capture the collaboration mode in system prompt options",
+						handler: async (_args, ctx) => {
+							inspectedPromptModes.push(ctx.getSystemPromptOptions().collaborationMode);
+						},
+					});
+				},
+			],
+		});
+		harnesses.push(harness);
+		const modePersistEntry = vi.spyOn(harness.sessionManager, "_persist").mockImplementationOnce(() => {
+			throw new Error("persistence failed");
+		});
+		expect(() => harness.session.setCollaborationMode("plan")).toThrow("persistence failed");
+		expect(harness.session.collaborationMode).toBe("default");
+		await harness.session.prompt("/inspect-prompt-mode");
+		expect(inspectedPromptModes.at(-1)).toBe("default");
+		modePersistEntry.mockRestore();
+
+		harness.session.setCollaborationMode("plan");
+		const submitTool = harness.session.agent.state.tools.find((tool) => tool.name === SUBMIT_PLAN_TOOL_NAME);
+		if (!submitTool) throw new Error("submit_plan is unavailable");
+		await submitTool.execute("draft", {
+			title: "Implementation plan",
+			markdown: "1. Implement the API.\n2. Add tests.",
+		});
+		const plan = harness.session.pendingPlan;
+		if (!plan) throw new Error("plan was not submitted");
+		await harness.session.followUp("discard this stale queue entry");
+		expect(harness.session.isIdle).toBe(true);
+		expect(() => harness.session.setCollaborationMode("default")).toThrow("Clear queued messages");
+
+		const persistEntry = vi.spyOn(harness.sessionManager, "_persist").mockImplementationOnce(() => {
+			throw new Error("persistence failed");
+		});
+		expect(() => harness.session.resolvePlan(plan.id, "implement")).toThrow("persistence failed");
+		expect(harness.session.pendingPlan).toEqual(plan);
+		expect(harness.session.collaborationMode).toBe("plan");
+		expect(harness.session.getActiveToolNames()).toEqual(SAFE_PLAN_TOOLS);
+		expect(harness.session.pendingMessageCount).toBe(1);
+		await harness.session.prompt("/inspect-prompt-mode");
+		expect(inspectedPromptModes.at(-1)).toBe("plan");
+		persistEntry.mockRestore();
+
+		const continuation = harness.session.resolvePlan(plan.id, "implement");
+
+		expect(continuation?.message).toContain("# Implementation plan");
+		expect(harness.session.pendingPlanContinuation).toBe(continuation);
+		expect(harness.session.pendingPlan).toBeUndefined();
+		expect(harness.session.collaborationMode).toBe("default");
+		expect(harness.session.pendingMessageCount).toBe(0);
+		expect(harness.sessionManager.getEntries().filter((entry) => entry.type === "plan_resolution")).toEqual([
+			expect.objectContaining({ planId: plan.id, resolution: "implement" }),
+		]);
+		expect(harness.sessionManager.buildSessionContext().pendingPlanContinuation).toEqual(plan);
+	});
+
+	it.each(["handled", "transform"] as const)(
+		"submits an accepted plan through a one-shot trusted continuation despite a %s input hook",
+		async (inputAction) => {
+			let inputHookCalls = 0;
+			let beforeAgentStartCalls = 0;
+			const harness = await createHarness({
+				extensionFactories: [
+					(pi) => {
+						pi.on("input", () => {
+							inputHookCalls++;
+							return inputAction === "handled"
+								? { action: "handled" as const }
+								: { action: "transform" as const, text: "intercepted implementation" };
+						});
+						pi.on("before_agent_start", () => {
+							beforeAgentStartCalls++;
+						});
+					},
+				],
+			});
+			harnesses.push(harness);
+			harness.session.setCollaborationMode("plan");
+			const submitTool = harness.session.agent.state.tools.find((tool) => tool.name === SUBMIT_PLAN_TOOL_NAME);
+			if (!submitTool) throw new Error("submit_plan is unavailable");
+			await submitTool.execute("draft", { title: "Trusted plan", markdown: "1. Implement exactly this." });
+			const plan = harness.session.pendingPlan;
+			if (!plan) throw new Error("plan was not submitted");
+			const continuation = harness.session.resolvePlan(plan.id, "implement");
+			if (!continuation) throw new Error("Expected an implementation continuation");
+			harness.setResponses([fauxAssistantMessage("implemented")]);
+			let streamingWhenAccepted = false;
+
+			await harness.session.promptPlanContinuation(continuation, {
+				source: "interactive",
+				preflightResult: (success) => {
+					if (success) streamingWhenAccepted = harness.session.isStreaming;
+				},
+			});
+
+			expect(inputHookCalls).toBe(0);
+			expect(beforeAgentStartCalls).toBe(1);
+			expect(streamingWhenAccepted).toBe(true);
+			expect(getUserTexts(harness)).toContain(continuation.message);
+			expect(getUserTexts(harness)).not.toContain("intercepted implementation");
+			expect(harness.sessionManager.buildSessionContext().pendingPlanContinuation).toBeUndefined();
+			await expect(harness.session.promptPlanContinuation(continuation)).rejects.toThrow(
+				"Plan continuation is no longer pending",
+			);
+		},
+	);
+
+	it("restores an unstarted accepted continuation and rejects competing prompts and mode changes", async () => {
+		const filesystemHarness = await createHarness();
+		harnesses.push(filesystemHarness);
+		const sessionPath = join(filesystemHarness.tempDir, "pending-plan-continuation.jsonl");
+		const timestamp = new Date().toISOString();
+		const plan: PlanArtifact = {
+			id: "accepted-plan",
+			title: "Accepted plan",
+			markdown: "1. Resume this implementation after restart.",
+		};
+		writeFileSync(
+			sessionPath,
+			`${[
+				{
+					type: "session",
+					version: 3,
+					id: "pending-plan-continuation-session",
+					timestamp,
+					cwd: filesystemHarness.tempDir,
+				},
+				{
+					type: "collaboration_mode_change",
+					id: "mode-entry",
+					parentId: null,
+					timestamp,
+					mode: "plan",
+				},
+				{ type: "plan", id: "plan-entry", parentId: "mode-entry", timestamp, plan },
+				{
+					type: "plan_resolution",
+					id: "resolution-entry",
+					parentId: "plan-entry",
+					timestamp,
+					planId: plan.id,
+					resolution: "implement",
+				},
+			]
+				.map((entry) => JSON.stringify(entry))
+				.join("\n")}\n`,
+		);
+		const restoredManager = SessionManager.open(sessionPath);
+		const restoredHarness = await createHarness({ sessionManager: restoredManager });
+		harnesses.push(restoredHarness);
+
+		const continuation = restoredHarness.session.pendingPlanContinuation;
+		expect(continuation?.message).toContain("# Accepted plan");
+		expect(restoredManager.buildSessionContext().pendingPlanContinuation).toEqual(plan);
+		let preflightAccepted = true;
+		await expect(
+			restoredHarness.session.prompt("replace the accepted implementation", {
+				preflightResult: (accepted) => {
+					preflightAccepted = accepted;
+				},
+			}),
+		).rejects.toThrow("Submit the pending plan continuation");
+		expect(preflightAccepted).toBe(false);
+		expect(() => restoredHarness.session.setCollaborationMode("plan")).toThrow(
+			"Submit the pending plan continuation",
+		);
+		expect(restoredHarness.session.pendingPlanContinuation).toBe(continuation);
+	});
+
+	it("persists the exact trusted continuation user turn and clears replay state", async () => {
+		const manager = SessionManager.inMemory();
+		const plan: PlanArtifact = {
+			id: "trusted-continuation-plan",
+			title: "Trusted continuation",
+			markdown: "1. Persist this exact accepted implementation turn.",
+		};
+		manager.appendCollaborationModeChange("plan");
+		manager.appendPlan(plan);
+		manager.appendPlanResolution(plan.id, "implement");
+		const messageEndRoles: AgentMessage["role"][] = [];
+		let nestedMutationAttempts = 0;
+		const harness = await createHarness({
+			sessionManager: manager,
+			extensionFactories: [
+				(pi) => {
+					pi.on("message_start", (event) => {
+						if (event.message.role !== "user" || !Array.isArray(event.message.content)) return;
+						const firstPart = event.message.content[0];
+						if (firstPart?.type !== "text") return;
+						nestedMutationAttempts++;
+						firstPart.text = "intercepted nested continuation";
+					});
+					pi.on("message_end", (event) => {
+						messageEndRoles.push(event.message.role);
+						if (event.message.role !== "user") return undefined;
+						return {
+							message: {
+								...event.message,
+								role: "custom",
+								customType: "intercepted-continuation",
+								display: true,
+							} as AgentMessage,
+						};
+					});
+				},
+			],
+		});
+		harnesses.push(harness);
+		const continuation = harness.session.pendingPlanContinuation;
+		if (!continuation) throw new Error("Expected a restored plan continuation");
+		harness.setResponses([fauxAssistantMessage("implemented")]);
+
+		await harness.session.promptPlanContinuation(continuation);
+
+		expect(nestedMutationAttempts).toBe(1);
+		expect(messageEndRoles).not.toContain("user");
+		expect(messageEndRoles).toContain("assistant");
+		expect(getUserTexts(harness).at(-1)).toBe(continuation.message);
+		expect(manager.buildSessionContext().pendingPlanContinuation).toBeUndefined();
+		expect(harness.session.pendingPlanContinuation).toBeUndefined();
+
+		const replayedHarness = await createHarness({ sessionManager: manager });
+		harnesses.push(replayedHarness);
+		expect(replayedHarness.session.pendingPlanContinuation).toBeUndefined();
+	});
+
+	it("restores the same continuation token when the initial user message is not persisted", async () => {
+		const manager = SessionManager.inMemory();
+		const plan: PlanArtifact = {
+			id: "retryable-continuation-plan",
+			title: "Retryable continuation",
+			markdown: "1. Keep the accepted turn retryable until its user message is durable.",
+		};
+		manager.appendCollaborationModeChange("plan");
+		manager.appendPlan(plan);
+		manager.appendPlanResolution(plan.id, "implement");
+		const harness = await createHarness({ sessionManager: manager });
+		harnesses.push(harness);
+		const continuation = harness.session.pendingPlanContinuation;
+		if (!continuation) throw new Error("Expected a restored plan continuation");
+		harness.setResponses([fauxAssistantMessage("implemented after retry")]);
+		const persistEntry = vi.spyOn(manager, "_persist").mockImplementationOnce(() => {
+			throw new Error("user message persistence failed");
+		});
+
+		await expect(harness.session.promptPlanContinuation(continuation)).rejects.toThrow(
+			"Plan continuation user message was not persisted",
+		);
+		expect(harness.session.pendingPlanContinuation).toBe(continuation);
+		expect(manager.buildSessionContext().pendingPlanContinuation).toEqual(plan);
+		expect(harness.getPendingResponseCount()).toBe(1);
+		expect(getUserTexts(harness)).not.toContain(continuation.message);
+
+		persistEntry.mockRestore();
+		await harness.session.promptPlanContinuation(continuation);
+		expect(harness.session.pendingPlanContinuation).toBeUndefined();
+		expect(manager.buildSessionContext().pendingPlanContinuation).toBeUndefined();
+		expect(getUserTexts(harness).filter((text) => text === continuation.message)).toHaveLength(1);
+	});
+
+	it("rejects competing prompts until the trusted continuation user message is persisted", async () => {
+		let releaseAgentStart!: () => void;
+		let agentStartEntered!: () => void;
+		const agentStartGate = new Promise<void>((resolve) => {
+			releaseAgentStart = resolve;
+		});
+		const agentStartEnteredPromise = new Promise<void>((resolve) => {
+			agentStartEntered = resolve;
+		});
+		const manager = SessionManager.inMemory();
+		const plan: PlanArtifact = {
+			id: "continuation-pre-persistence-plan",
+			title: "Continuation persistence gate",
+			markdown: "1. Persist the trusted user turn before accepting competing input.",
+		};
+		manager.appendCollaborationModeChange("plan");
+		manager.appendPlan(plan);
+		manager.appendPlanResolution(plan.id, "implement");
+		const harness = await createHarness({
+			sessionManager: manager,
+			extensionFactories: [
+				(pi) => {
+					pi.on("agent_start", async () => {
+						agentStartEntered();
+						await agentStartGate;
+					});
+				},
+			],
+		});
+		harnesses.push(harness);
+		const continuation = harness.session.pendingPlanContinuation;
+		if (!continuation) throw new Error("Expected a restored plan continuation");
+		harness.setResponses([fauxAssistantMessage("implemented")]);
+
+		const implementation = harness.session.promptPlanContinuation(continuation);
+		await agentStartEnteredPromise;
+		await expect(harness.session.prompt("competing prompt", { streamingBehavior: "followUp" })).rejects.toThrow(
+			"Submit the pending plan continuation",
+		);
+
+		releaseAgentStart();
+		await implementation;
+		expect(getUserTexts(harness)).not.toContain("competing prompt");
+	});
+
+	it("discards synchronously without producing a continuation", async () => {
+		const harness = await createHarness();
+		harnesses.push(harness);
+		harness.session.setCollaborationMode("plan");
+		const submitTool = harness.session.agent.state.tools.find((tool) => tool.name === SUBMIT_PLAN_TOOL_NAME);
+		if (!submitTool) throw new Error("submit_plan is unavailable");
+		await submitTool.execute("draft", { title: "Discarded plan", markdown: "1. Discard this." });
+		const plan = harness.session.pendingPlan;
+		if (!plan) throw new Error("plan was not submitted");
+
+		expect(harness.session.resolvePlan(plan.id, "discard")).toBeUndefined();
+		expect(harness.session.pendingPlan).toBeUndefined();
+		expect(harness.session.collaborationMode).toBe("default");
+	});
 });
