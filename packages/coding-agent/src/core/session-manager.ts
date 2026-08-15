@@ -1570,6 +1570,27 @@ export class SessionManager {
 	}
 
 	/**
+	 * Create an independent in-memory session containing the selected branch.
+	 * The source manager is not mutated, so callers can prepare a replacement
+	 * runtime without changing the live session before activation succeeds.
+	 */
+	createInMemoryBranch(leafId: string | null): SessionManager {
+		if (this.persist) {
+			throw new Error("In-memory branches can only be created from an in-memory session");
+		}
+		if (leafId === null) {
+			return SessionManager.inMemory(this.cwd);
+		}
+
+		const branch = SessionManager.inMemory(this.cwd);
+		branch.fileEntries = [...this.fileEntries];
+		branch.sessionId = this.sessionId;
+		branch._buildIndex();
+		branch.createBranchedSession(leafId);
+		return branch;
+	}
+
+	/**
 	 * Start a new branch with a summary of the abandoned path.
 	 * Same as branch(), but also appends a branch_summary entry that captures
 	 * context from the abandoned conversation path.
