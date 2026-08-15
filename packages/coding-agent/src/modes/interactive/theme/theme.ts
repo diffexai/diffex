@@ -39,6 +39,7 @@ const ThemeJsonSchema = Type.Object({
 		border: ColorValueSchema,
 		borderAccent: ColorValueSchema,
 		borderMuted: ColorValueSchema,
+		editorBorder: Type.Optional(ColorValueSchema),
 		success: ColorValueSchema,
 		error: ColorValueSchema,
 		warning: ColorValueSchema,
@@ -117,6 +118,7 @@ export type ThemeColor =
 	| "border"
 	| "borderAccent"
 	| "borderMuted"
+	| "editorBorder"
 	| "success"
 	| "error"
 	| "warning"
@@ -337,6 +339,7 @@ function withThemeColorFallbacks(colors: ThemeJson["colors"]): ThemeJson["colors
 	startupIntroAccent: ColorValue;
 	selectionAccent: ColorValue;
 	autocompleteSelected: ColorValue;
+	editorBorder: ColorValue;
 } {
 	const startupIntroAccent = colors.startupIntroAccent ?? colors.mdLink;
 	const selectionAccent = colors.selectionAccent ?? colors.autocompleteSelected ?? startupIntroAccent;
@@ -348,6 +351,7 @@ function withThemeColorFallbacks(colors: ThemeJson["colors"]): ThemeJson["colors
 		startupIntroAccent,
 		selectionAccent,
 		autocompleteSelected: colors.autocompleteSelected ?? selectionAccent,
+		editorBorder: colors.editorBorder ?? colors.borderMuted,
 	};
 }
 
@@ -438,7 +442,7 @@ export class Theme {
 	}
 
 	getThinkingBorderColor(level: ThinkingLevel): (str: string) => string {
-		// Map thinking levels to dedicated theme colors
+		// Retained for extension compatibility. The built-in editor no longer uses thinking colors.
 		switch (level) {
 			case "off":
 				return (str: string) => this.fg("thinkingOff", str);
@@ -1320,7 +1324,7 @@ export function getSelectListTheme(): SelectListTheme {
 
 export function getEditorTheme(): EditorTheme {
 	return {
-		borderColor: (text: string) => theme.fg("borderMuted", text),
+		borderColor: (text: string) => theme.fg("editorBorder", text),
 		selectList: getSelectListTheme(),
 	};
 }

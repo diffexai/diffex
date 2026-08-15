@@ -235,6 +235,7 @@ export interface EditorOptions {
 	autocompleteMaxVisible?: number;
 	prompt?: string;
 	promptStyle?: (text: string) => string;
+	concealedInputPrefix?: string;
 	placeholder?: string;
 	placeholderStyle?: (text: string) => string;
 }
@@ -287,6 +288,7 @@ export class Editor implements Component, Focusable {
 	private paddingX: number = 0;
 	private prompt: string = "";
 	private promptStyle: (text: string) => string = (text) => text;
+	private concealedInputPrefix: string = "";
 	private placeholder: string = "";
 	private placeholderStyle: (text: string) => string = (text) => text;
 	private cursorBlinkVisible = true;
@@ -363,6 +365,7 @@ export class Editor implements Component, Focusable {
 		this.autocompleteMaxVisible = Number.isFinite(maxVisible) ? Math.max(3, Math.min(20, Math.floor(maxVisible))) : 5;
 		this.prompt = options.prompt ?? "";
 		this.promptStyle = options.promptStyle ?? ((text) => text);
+		this.concealedInputPrefix = options.concealedInputPrefix ?? "";
 		this.placeholder = options.placeholder ?? "";
 		this.placeholderStyle = options.placeholderStyle ?? ((text) => text);
 	}
@@ -984,8 +987,14 @@ export class Editor implements Component, Focusable {
 
 		// Process each logical line
 		for (let i = 0; i < this.state.lines.length; i++) {
-			const line = this.state.lines[i] || "";
+			const logicalLine = this.state.lines[i] || "";
+			const concealedPrefixLength =
+				i === 0 && this.concealedInputPrefix && logicalLine.startsWith(this.concealedInputPrefix)
+					? this.concealedInputPrefix.length
+					: 0;
+			const line = logicalLine.slice(concealedPrefixLength);
 			const isCurrentLine = i === this.state.cursorLine;
+			const cursorPos = Math.max(0, this.state.cursorCol - concealedPrefixLength);
 			const lineVisibleWidth = visibleWidth(line);
 
 			if (lineVisibleWidth <= contentWidth) {
@@ -994,7 +1003,7 @@ export class Editor implements Component, Focusable {
 					layoutLines.push({
 						text: line,
 						hasCursor: true,
-						cursorPos: this.state.cursorCol,
+						cursorPos,
 					});
 				} else {
 					layoutLines.push({
@@ -1010,7 +1019,6 @@ export class Editor implements Component, Focusable {
 					const chunk = chunks[chunkIndex];
 					if (!chunk) continue;
 
-					const cursorPos = this.state.cursorCol;
 					const isLastChunk = chunkIndex === chunks.length - 1;
 
 					// Determine if cursor is in this chunk
@@ -1812,20 +1820,25 @@ export class Editor implements Component, Focusable {
 		const visualLines: Array<{ logicalLine: number; startCol: number; length: number }> = [];
 
 		for (let i = 0; i < this.state.lines.length; i++) {
-			const line = this.state.lines[i] || "";
+			const logicalLine = this.state.lines[i] || "";
+			const concealedPrefixLength =
+				i === 0 && this.concealedInputPrefix && logicalLine.startsWith(this.concealedInputPrefix)
+					? this.concealedInputPrefix.length
+					: 0;
+			const line = logicalLine.slice(concealedPrefixLength);
 			const lineVisWidth = visibleWidth(line);
 			if (line.length === 0) {
 				// Empty line still takes one visual line
-				visualLines.push({ logicalLine: i, startCol: 0, length: 0 });
+				visualLines.push({ logicalLine: i, startCol: concealedPrefixLength, length: 0 });
 			} else if (lineVisWidth <= width) {
-				visualLines.push({ logicalLine: i, startCol: 0, length: line.length });
+				visualLines.push({ logicalLine: i, startCol: concealedPrefixLength, length: line.length });
 			} else {
 				// Line needs wrapping - use word-aware wrapping
 				const chunks = wordWrapLine(line, width, [...this.segment(line, "grapheme")]);
 				for (const chunk of chunks) {
 					visualLines.push({
 						logicalLine: i,
-						startCol: chunk.startIndex,
+						startCol: concealedPrefixLength + chunk.startIndex,
 						length: chunk.endIndex - chunk.startIndex,
 					});
 				}

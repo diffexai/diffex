@@ -84,4 +84,27 @@ describe("Editor placeholder cursor", () => {
 		assert.ok(contentLines.slice(1).every((line) => line.startsWith("  ")));
 		assert.ok(contentLines.every((line) => !line.startsWith("123")));
 	});
+
+	it("conceals a stored input prefix without affecting deletion", () => {
+		const changes: string[] = [];
+		const editor = new Editor(createTestTui(), defaultEditorTheme, {
+			prompt: "! ",
+			concealedInputPrefix: "!",
+		});
+		editor.onChange = (text) => changes.push(text);
+		editor.setText("!pwd");
+
+		assert.strictEqual(editor.getText(), "!pwd");
+		assert.strictEqual(stripVTControlCharacters(editor.render(80)[1]!).trimEnd(), "! pwd");
+
+		editor.handleInput("\x7f");
+		editor.handleInput("\x7f");
+		editor.handleInput("\x7f");
+		assert.strictEqual(editor.getText(), "!");
+		assert.strictEqual(stripVTControlCharacters(editor.render(80)[1]!).trimEnd(), "!");
+
+		editor.handleInput("\x7f");
+		assert.strictEqual(editor.getText(), "");
+		assert.strictEqual(changes.at(-1), "");
+	});
 });

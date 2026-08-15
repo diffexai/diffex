@@ -25,6 +25,7 @@
 		"border": "blue",
 		"borderAccent": "teal",
 		"borderMuted": "lightGray",
+		"editorBorder": "#3C597A",
 		"success": "green",
 		"error": "red",
 		"warning": "yellow",
@@ -82,7 +83,7 @@
 		"thinkingXhigh": "#8b008b",
 		"thinkingMax": "#af005f",
 
-		"bashMode": "green"
+		"bashMode": "red"
 	},
 	"export": {
 		"pageBg": "#f8f8f8",

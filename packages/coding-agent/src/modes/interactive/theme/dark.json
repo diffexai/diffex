@@ -26,6 +26,7 @@
 		"border": "blue",
 		"borderAccent": "cyan",
 		"borderMuted": "darkGray",
+		"editorBorder": "startupIntroAccent",
 		"success": "green",
 		"error": "red",
 		"warning": "yellow",
@@ -83,7 +84,7 @@
 		"thinkingXhigh": "#d183e8",
 		"thinkingMax": "#ff5fff",
 
-		"bashMode": "green"
+		"bashMode": "red"
 	},
 	"export": {
 		"pageBg": "#18181e",

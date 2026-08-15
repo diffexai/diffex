@@ -243,3 +243,40 @@ describe("selection theme", () => {
 		expect(legacyTheme.getFgAnsi("selectionAccent")).toBe(legacyTheme.getFgAnsi("autocompleteSelected"));
 	});
 });
+
+describe("editor border theme", () => {
+	it("keeps the editor border independent from thinking colors", () => {
+		setCapabilities({ images: null, trueColor: true, hyperlinks: false });
+		initTheme("dark", false);
+
+		const expected = "\x1b[38;2;137;180;250m";
+		expect(theme.getFgAnsi("editorBorder")).toBe(expected);
+		expect(getEditorTheme().borderColor("line")).toBe(`${expected}line\x1b[39m`);
+		expect(theme.getThinkingBorderColor("low")("line")).not.toBe(`${expected}line\x1b[39m`);
+		expect(theme.getBashModeBorderColor()("line")).toBe("\x1b[38;2;204;102;102mline\x1b[39m");
+	});
+
+	it("uses the fixed light theme color", () => {
+		setCapabilities({ images: null, trueColor: true, hyperlinks: false });
+		initTheme("light", false);
+
+		expect(theme.getFgAnsi("editorBorder")).toBe("\x1b[38;2;60;89;122m");
+		expect(theme.getBashModeBorderColor()("line")).toBe("\x1b[38;2;170;85;85mline\x1b[39m");
+	});
+
+	it("falls back to borderMuted for existing custom themes", () => {
+		const themeJson = JSON.parse(
+			readFileSync(new URL("../src/modes/interactive/theme/dark.json", import.meta.url), "utf8"),
+		) as { name: string; colors: Record<string, unknown> };
+		themeJson.name = "legacy-editor-border-theme";
+		delete themeJson.colors.editorBorder;
+		const testDir = mkdtempSync(join(tmpdir(), "diffex-editor-border-theme-"));
+		tempDirs.push(testDir);
+		const themePath = join(testDir, "legacy-editor-border-theme.json");
+		writeFileSync(themePath, JSON.stringify(themeJson));
+
+		const legacyTheme = loadThemeFromPath(themePath, "truecolor");
+
+		expect(legacyTheme.getFgAnsi("editorBorder")).toBe(legacyTheme.getFgAnsi("borderMuted"));
+	});
+});

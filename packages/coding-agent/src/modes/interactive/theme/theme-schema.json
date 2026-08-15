@@ -34,7 +34,7 @@
 		},
 		"colors": {
 			"type": "object",
-			"description": "Theme color definitions (thinkingMax, scrollbarThumb, startupIntroText, startupIntroAccent, selectionAccent, and autocompleteSelected are optional and use compatible fallbacks)",
+			"description": "Theme color definitions (editorBorder, thinkingMax, scrollbarThumb, startupIntroText, startupIntroAccent, selectionAccent, and autocompleteSelected are optional and use compatible fallbacks)",
 			"required": [
 				"accent",
 				"border",
@@ -104,6 +104,10 @@
 				"borderMuted": {
 					"$ref": "#/$defs/colorValue",
 					"description": "Subtle borders"
+				},
+				"editorBorder": {
+					"$ref": "#/$defs/colorValue",
+					"description": "Editor border color (optional, falls back to borderMuted)"
 				},
 				"success": {
 					"$ref": "#/$defs/colorValue",
