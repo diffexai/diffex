@@ -334,6 +334,12 @@ interface PromptPreflightLease {
 	discardedByPlanSubmission: boolean;
 }
 
+interface ActivePlanContinuation {
+	continuation: PlanContinuation;
+	userMessage: AgentMessage;
+	persisted: boolean;
+}
+
 function estimateMessagesTokens(messages: AgentMessage[]): number {
 	let tokens = 0;
 	for (const message of messages) {
@@ -370,6 +376,7 @@ export class AgentSession {
 	private _eventListeners: AgentSessionEventListener[] = [];
 	private _isAgentRunActive = false;
 	private _promptLease: PromptLease | undefined;
+	private _activePromptLease: PromptLease | undefined;
 	private readonly _promptPreflightLeases = new Set<PromptPreflightLease>();
 	private readonly _extensionCommandContext = new AsyncLocalStorage<object>();
 	private _activeExtensionCommandOperation: object | undefined;
@@ -416,6 +423,7 @@ export class AgentSession {
 	private _collaborationMode: CollaborationMode;
 	private _pendingPlan: PlanArtifact | undefined;
 	private _pendingPlanContinuation: PlanContinuation | undefined;
+	private _activePlanContinuation: ActivePlanContinuation | undefined;
 	private _normalActiveToolNames: string[] = [];
 	private _allowedToolNames?: Set<string>;
 	private _excludedToolNames?: Set<string>;
@@ -495,6 +503,7 @@ export class AgentSession {
 		this._installAgentToolHooks();
 		this._installAgentContextRestoration();
 		this._installAgentNextTurnRefresh();
+		this._installAgentPlanStop();
 
 		this._buildRuntime({
 			activeToolNames: this._initialActiveToolNames,
@@ -733,6 +742,14 @@ export class AgentSession {
 		return [...messages, restoredContext];
 	}
 
+	private _installAgentPlanStop(): void {
+		const previousShouldStopAfterTurn = this.agent.shouldStopAfterTurn;
+		this.agent.shouldStopAfterTurn = async (context, signal) => {
+			if (this._activePromptLease?.planSubmitted) return true;
+			return (await previousShouldStopAfterTurn?.(context, signal)) === true;
+		};
+	}
+
 	// =========================================================================
 	// Event Subscription
 	// =========================================================================
@@ -821,7 +838,7 @@ export class AgentSession {
 		// Emit to extensions first
 		await this._emitExtensionEvent(event);
 
-		// Notify all listeners
+		// Notify all listeners.
 		this._emit(event.type === "agent_end" ? { ...event, willRetry: this._willRetryAfterAgentEnd(event) } : event);
 
 		// Handle session persistence
@@ -842,6 +859,9 @@ export class AgentSession {
 			) {
 				// Regular LLM message - persist as SessionMessageEntry
 				this.sessionManager.appendMessage(event.message);
+				if (event.message.role === "user" && event.message === this._activePlanContinuation?.userMessage) {
+					this._activePlanContinuation.persisted = true;
+				}
 			}
 			// Other message types (bashExecution, compactionSummary, branchSummary) are persisted elsewhere
 
@@ -952,7 +972,12 @@ export class AgentSession {
 				type: "message_end",
 				message: event.message,
 			};
-			const replacement = await this._extensionRunner.emitMessageEnd(extensionEvent);
+			// The accepted-plan continuation is already the result of an explicit user decision.
+			// Preserve that exact initial user message as the durable replay-consumption boundary.
+			const replacement =
+				event.message === this._activePlanContinuation?.userMessage
+					? undefined
+					: await this._extensionRunner.emitMessageEnd(extensionEvent);
 			if (replacement) {
 				// Untyped extension handlers can return messages with null/missing content;
 				// normalize so it never enters agent state or session history.
@@ -1580,18 +1605,59 @@ export class AgentSession {
 	// Prompting
 	// =========================================================================
 
-	private async _runAgentPrompt(messages: AgentMessage | AgentMessage[]): Promise<void> {
+	private _acquirePromptLease(): PromptLease {
+		if (this._promptLease || this._isAgentRunActive) {
+			throw new Error("Agent is already preparing or processing another prompt.");
+		}
+		const lease: PromptLease = { planSubmitted: false };
+		this._promptLease = lease;
+		return lease;
+	}
+
+	private _releasePromptLease(lease: PromptLease): void {
+		if (this._promptLease === lease) this._promptLease = undefined;
+	}
+
+	private _isPromptBusyFor(lease: PromptLease | undefined): boolean {
+		return this._isAgentRunActive || (this._promptLease !== undefined && this._promptLease !== lease);
+	}
+
+	private _getEarlierPromptPreflight(lease: PromptPreflightLease): PromptPreflightLease | undefined {
+		for (const candidate of this._promptPreflightLeases) {
+			if (candidate === lease) return undefined;
+			return candidate;
+		}
+		return undefined;
+	}
+
+	private async _runAgentPrompt(messages: AgentMessage | AgentMessage[], lease: PromptLease): Promise<void> {
+		if (this._promptLease !== lease || this._activePromptLease) {
+			throw new Error("Prompt ownership was lost before the agent run started.");
+		}
+		this._activePromptLease = lease;
 		this._agentRunAborted = false;
 		this._isAgentRunActive = true;
 		try {
 			await this.agent.prompt(messages);
-			while (await this._handlePostAgentRun()) {
-				await this.agent.continue();
+			if (!lease.planSubmitted) {
+				while (await this._handlePostAgentRun()) {
+					await this.agent.continue();
+					if (lease.planSubmitted) break;
+				}
 			}
 		} finally {
-			this._systemPromptOverride = undefined;
-			this._flushPendingBashMessages();
-			await this._emitAgentSettled();
+			try {
+				if (lease.planSubmitted) {
+					this._lastAssistantMessage = undefined;
+					this.clearQueue();
+				}
+				this._systemPromptOverride = undefined;
+				this._flushPendingBashMessages();
+			} finally {
+				if (this._activePromptLease === lease) this._activePromptLease = undefined;
+				this._releasePromptLease(lease);
+				await this._emitAgentSettled();
+			}
 		}
 	}
 
@@ -1739,20 +1805,115 @@ export class AgentSession {
 	 * @throws Error if no model selected or no API key available (when not streaming)
 	 */
 	async prompt(text: string, options?: PromptOptions): Promise<void> {
+		if (this._pendingPlanContinuation || (this._activePlanContinuation && !this._activePlanContinuation.persisted)) {
+			try {
+				options?.preflightResult?.(false);
+			} catch {
+				// Observation callbacks must not replace the authoritative rejection.
+			}
+			throw new Error("Submit the pending plan continuation before sending another prompt.");
+		}
+		if ((options?.expandPromptTemplates ?? true) && text.startsWith("/")) {
+			const spaceIndex = text.indexOf(" ");
+			const commandName = spaceIndex === -1 ? text.slice(1) : text.slice(1, spaceIndex);
+			if (this._extensionRunner.getCommand(commandName)) {
+				let success = false;
+				let commandOperation: object | undefined;
+				try {
+					this._assertRuntimeReplacementAvailable();
+					commandOperation = {};
+					this._activeExtensionCommandOperation = commandOperation;
+					await this._extensionCommandContext.run(commandOperation, () => this._tryExecuteExtensionCommand(text));
+					success = true;
+				} finally {
+					if (this._activeExtensionCommandOperation === commandOperation) {
+						this._activeExtensionCommandOperation = undefined;
+					}
+					try {
+						options?.preflightResult?.(success);
+					} catch {
+						// Observation callbacks must not alter extension command control flow.
+					}
+				}
+				return;
+			}
+		}
+		await this._prompt(text, options);
+	}
+
+	/** Submit the exact one-shot continuation returned by resolvePlan("implement"). */
+	async promptPlanContinuation(
+		continuation: PlanContinuation,
+		options?: PlanContinuationPromptOptions,
+	): Promise<void> {
+		if (this._pendingPlanContinuation !== continuation) {
+			try {
+				options?.preflightResult?.(false);
+			} catch {
+				// Observation callbacks must not replace the authoritative rejection.
+			}
+			throw new Error("Plan continuation is no longer pending.");
+		}
+		await this._prompt(
+			continuation.message,
+			{
+				expandPromptTemplates: false,
+				source: options?.source,
+				preflightResult: options?.preflightResult,
+			},
+			continuation,
+		);
+	}
+
+	private async _prompt(
+		text: string,
+		options: PromptOptions | undefined,
+		trustedContinuation?: PlanContinuation,
+	): Promise<void> {
+		let settlePreflight!: () => void;
+		const preflightLease: PromptPreflightLease = {
+			settled: new Promise<void>((resolve) => {
+				settlePreflight = resolve;
+			}),
+			settle: () => settlePreflight(),
+			discardedByPlanSubmission: false,
+		};
+		this._promptPreflightLeases.add(preflightLease);
+		let preflightReleased = false;
+		const releasePreflight = (): void => {
+			if (preflightReleased) return;
+			preflightReleased = true;
+			this._promptPreflightLeases.delete(preflightLease);
+			preflightLease.settle();
+		};
+		const queuedBehindLease = this._isPromptBusyFor(undefined) ? this._promptLease : undefined;
 		const expandPromptTemplates = options?.expandPromptTemplates ?? true;
 		const preflightResult = options?.preflightResult;
 		let messages: AgentMessage[] | undefined;
+		let promptLease: PromptLease | undefined;
+		let leaseTransferred = false;
+		let preflightReported = false;
+		const reportPreflight = (success: boolean): void => {
+			if (preflightReported) return;
+			preflightReported = true;
+			try {
+				preflightResult?.(success);
+			} catch {
+				// Observation callbacks must not interrupt an accepted run or mask its rejection.
+			}
+		};
+		const discardAfterTerminalPlanSubmission = (): boolean => {
+			if (!queuedBehindLease?.planSubmitted) return false;
+			preflightLease.discardedByPlanSubmission = true;
+			releasePreflight();
+			reportPreflight(true);
+			return true;
+		};
 
 		try {
-			// Handle extension commands first (execute immediately, even during streaming)
-			// Extension commands manage their own LLM interaction via diffex.sendMessage()
-			if (expandPromptTemplates && text.startsWith("/")) {
-				const handled = await this._tryExecuteExtensionCommand(text);
-				if (handled) {
-					// Extension command executed, no prompt to send
-					preflightResult?.(true);
-					return;
-				}
+			this._assertRuntimeReplacementAvailable();
+			if (!this._isAgentRunActive && !this._promptLease && !this._getEarlierPromptPreflight(preflightLease)) {
+				promptLease = this._acquirePromptLease();
 			}
 
 			if (this._compactionAbortController !== undefined) {
@@ -1764,15 +1925,16 @@ export class AgentSession {
 			// Emit input event for extension interception (before skill/template expansion)
 			let currentText = text;
 			let currentImages = options?.images;
-			if (this._extensionRunner.hasHandlers("input")) {
+			if (!trustedContinuation && this._extensionRunner.hasHandlers("input")) {
 				const inputResult = await this._extensionRunner.emitInput(
 					currentText,
 					currentImages,
 					options?.source ?? "interactive",
-					this.isStreaming ? options?.streamingBehavior : undefined,
+					this._isPromptBusyFor(promptLease) ? options?.streamingBehavior : undefined,
 				);
 				if (inputResult.action === "handled") {
-					preflightResult?.(true);
+					releasePreflight();
+					reportPreflight(true);
 					return;
 				}
 				if (inputResult.action === "transform") {
@@ -1787,9 +1949,25 @@ export class AgentSession {
 				expandedText = this._expandSkillCommand(expandedText);
 				expandedText = expandPromptTemplate(expandedText, [...this.promptTemplates]);
 			}
+			if (discardAfterTerminalPlanSubmission()) return;
+			while (true) {
+				const earlierPreflight = this._getEarlierPromptPreflight(preflightLease);
+				if (!earlierPreflight) break;
+				await earlierPreflight.settled;
+				if (earlierPreflight.discardedByPlanSubmission) {
+					preflightLease.discardedByPlanSubmission = true;
+					releasePreflight();
+					reportPreflight(true);
+					return;
+				}
+			}
+			if (discardAfterTerminalPlanSubmission()) return;
 
 			// If streaming, queue via steer() or followUp() based on option
-			if (this.isStreaming) {
+			if (this._isPromptBusyFor(promptLease)) {
+				if (trustedContinuation) {
+					throw new Error("Agent is already preparing or processing another prompt.");
+				}
 				if (!options?.streamingBehavior) {
 					throw new Error(
 						"Agent is already processing. Specify streamingBehavior ('steer' or 'followUp') to queue the message.",
@@ -1800,9 +1978,12 @@ export class AgentSession {
 				} else {
 					await this._queueSteer(expandedText, currentImages);
 				}
-				preflightResult?.(true);
+				releasePreflight();
+				reportPreflight(true);
 				return;
 			}
+
+			promptLease ??= this._acquirePromptLease();
 
 			// Flush any pending bash messages before the new prompt
 			this._flushPendingBashMessages();
@@ -1884,17 +2065,50 @@ export class AgentSession {
 				this._systemPromptOverride = undefined;
 				this.agent.state.systemPrompt = this._baseSystemPrompt;
 			}
+
+			if (trustedContinuation) {
+				if (this._pendingPlanContinuation !== trustedContinuation) {
+					throw new Error("Plan continuation is no longer pending.");
+				}
+				const userMessage = messages[0];
+				if (!userMessage || userMessage.role !== "user") {
+					throw new Error("Plan continuation did not produce an initial user message.");
+				}
+				if (Array.isArray(userMessage.content)) {
+					for (const part of userMessage.content) Object.freeze(part);
+					Object.freeze(userMessage.content);
+				}
+				Object.freeze(userMessage);
+				this._activePlanContinuation = { continuation: trustedContinuation, userMessage, persisted: false };
+				this._pendingPlanContinuation = undefined;
+			}
+
+			const run = this._runAgentPrompt(messages, promptLease);
+			leaseTransferred = true;
+			releasePreflight();
+			reportPreflight(true);
+			await run;
+			if (trustedContinuation && !this._activePlanContinuation?.persisted) {
+				throw new Error("Plan continuation user message was not persisted. Retry the pending continuation.");
+			}
 		} catch (error) {
-			preflightResult?.(false);
+			reportPreflight(false);
 			throw error;
+		} finally {
+			const activePlanContinuation = this._activePlanContinuation;
+			if (trustedContinuation && activePlanContinuation?.continuation === trustedContinuation) {
+				if (!activePlanContinuation.persisted && !this._pendingPlanContinuation) {
+					const replayContext = this.sessionManager.buildSessionContext();
+					if (replayContext.pendingPlanContinuation) {
+						this._pendingPlanContinuation = trustedContinuation;
+						this.agent.state.messages = replayContext.messages;
+					}
+				}
+				this._activePlanContinuation = undefined;
+			}
+			if (promptLease && !leaseTransferred) this._releasePromptLease(promptLease);
+			releasePreflight();
 		}
-
-		if (!messages) {
-			return;
-		}
-
-		preflightResult?.(true);
-		await this._runAgentPrompt(messages);
 	}
 
 	/**
@@ -2084,7 +2298,7 @@ export class AgentSession {
 				this.agent.steer(appMessage);
 			}
 		} else if (options?.triggerTurn) {
-			await this._runAgentPrompt(appMessage);
+			await this._runAgentPrompt(appMessage, this._acquirePromptLease());
 		} else {
 			this.agent.state.messages.push(appMessage);
 			this.sessionManager.appendCustomMessageEntry(
