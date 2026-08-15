@@ -8,9 +8,11 @@ import {
 	type Focusable,
 	getKeybindings,
 	Input,
+	SELECTED_LIST_PREFIX,
 	Spacer,
 	Text,
 	truncateToWidth,
+	UNSELECTED_LIST_PREFIX,
 	visibleWidth,
 } from "@earendil-works/diffex-tui";
 import { KeybindingsManager } from "../../../core/keybindings.ts";
@@ -473,7 +475,7 @@ class SessionList implements Component, Focusable {
 			}
 
 			// Cursor
-			const cursor = isSelected ? theme.fg("accent", "› ") : "  ";
+			const cursor = isSelected ? theme.fg("selectionAccent", SELECTED_LIST_PREFIX) : UNSELECTED_LIST_PREFIX;
 
 			// Calculate available width for message
 			const prefixWidth = visibleWidth(prefix);

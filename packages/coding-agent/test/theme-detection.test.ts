@@ -9,6 +9,7 @@ import {
 	detectTerminalThemeForAuto,
 	getEditorTheme,
 	getSelectListTheme,
+	getSettingsListTheme,
 	getThemeByName,
 	getThemeForRgbColor,
 	initTheme,
@@ -186,30 +187,31 @@ describe("theme setting helpers", () => {
 	});
 });
 
-describe("editor autocomplete theme", () => {
-	it("uses Diffex blue for slash-command selection without changing generic selectors", () => {
+describe("selection theme", () => {
+	it("uses Diffex blue for every shared selector", () => {
 		setCapabilities({ images: null, trueColor: true, hyperlinks: false });
 		initTheme("dark", false);
 
 		expect(theme.getFgAnsi("startupIntroText")).toBe("\x1b[38;2;205;214;244m");
 		expect(theme.getFgAnsi("startupIntroAccent")).toBe("\x1b[38;2;137;180;250m");
 		expect(theme.getFgAnsi("thinkingMedium")).toBe(theme.getFgAnsi("startupIntroAccent"));
+		expect(theme.getFgAnsi("selectionAccent")).toBe(theme.getFgAnsi("startupIntroAccent"));
 		expect(getEditorTheme().selectList.selectedText("command")).toBe(
-			`${theme.getFgAnsi("autocompleteSelected")}command\x1b[39m`,
+			`${theme.getFgAnsi("selectionAccent")}command\x1b[39m`,
 		);
-		expect(getEditorTheme().selectList.selectedPrefix("> ")).toBe(
-			`${theme.getFgAnsi("autocompleteSelected")}> \x1b[39m`,
-		);
-		expect(getSelectListTheme().selectedText("command")).toBe(`${theme.getFgAnsi("accent")}command\x1b[39m`);
+		expect(getEditorTheme().selectList.selectedPrefix("> ")).toBe(`${theme.getFgAnsi("selectionAccent")}> \x1b[39m`);
+		expect(getSelectListTheme().selectedText("command")).toBe(`${theme.getFgAnsi("selectionAccent")}command\x1b[39m`);
+		expect(getSettingsListTheme().cursor).toBe(`${theme.getFgAnsi("selectionAccent")}> \x1b[39m`);
 	});
 
-	it("falls back for legacy themes without startup intro tokens", () => {
+	it("falls back for themes without selection or startup intro tokens", () => {
 		const themeJson = JSON.parse(
 			readFileSync(new URL("../src/modes/interactive/theme/dark.json", import.meta.url), "utf8"),
 		) as { name: string; colors: Record<string, unknown> };
 		themeJson.name = "legacy-startup-intro-theme";
 		delete themeJson.colors.startupIntroText;
 		delete themeJson.colors.startupIntroAccent;
+		delete themeJson.colors.selectionAccent;
 		delete themeJson.colors.autocompleteSelected;
 		const testDir = mkdtempSync(join(tmpdir(), "diffex-startup-intro-theme-"));
 		tempDirs.push(testDir);
@@ -220,6 +222,24 @@ describe("editor autocomplete theme", () => {
 
 		expect(legacyTheme.getFgAnsi("startupIntroText")).toBe(legacyTheme.getFgAnsi("text"));
 		expect(legacyTheme.getFgAnsi("startupIntroAccent")).toBe(legacyTheme.getFgAnsi("mdLink"));
-		expect(legacyTheme.getFgAnsi("autocompleteSelected")).toBe(legacyTheme.getFgAnsi("startupIntroAccent"));
+		expect(legacyTheme.getFgAnsi("selectionAccent")).toBe(legacyTheme.getFgAnsi("startupIntroAccent"));
+		expect(legacyTheme.getFgAnsi("autocompleteSelected")).toBe(legacyTheme.getFgAnsi("selectionAccent"));
+	});
+
+	it("uses the legacy autocomplete color as the selection fallback", () => {
+		const themeJson = JSON.parse(
+			readFileSync(new URL("../src/modes/interactive/theme/dark.json", import.meta.url), "utf8"),
+		) as { name: string; colors: Record<string, unknown> };
+		themeJson.name = "legacy-autocomplete-selection-theme";
+		delete themeJson.colors.selectionAccent;
+		themeJson.colors.autocompleteSelected = "#123456";
+		const testDir = mkdtempSync(join(tmpdir(), "diffex-legacy-selection-theme-"));
+		tempDirs.push(testDir);
+		const themePath = join(testDir, "legacy-autocomplete-selection-theme.json");
+		writeFileSync(themePath, JSON.stringify(themeJson));
+
+		const legacyTheme = loadThemeFromPath(themePath, "truecolor");
+
+		expect(legacyTheme.getFgAnsi("selectionAccent")).toBe(legacyTheme.getFgAnsi("autocompleteSelected"));
 	});
 });

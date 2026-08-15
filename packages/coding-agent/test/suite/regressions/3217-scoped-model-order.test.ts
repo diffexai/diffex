@@ -1,4 +1,4 @@
-import { setKeybindings, type TUI } from "@earendil-works/diffex-tui";
+import { SELECTED_LIST_PREFIX, setKeybindings, type TUI } from "@earendil-works/diffex-tui";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { KeybindingsManager } from "../../../src/core/keybindings.ts";
 import { ModelSelectorComponent } from "../../../src/modes/interactive/components/model-selector.ts";
@@ -95,7 +95,11 @@ describe("issue #3217 scoped model ordering", () => {
 			.split("\n")
 			.filter((line) => line.includes(`[${modelOne.provider}]`));
 		const orderedIds = renderedLines.slice(0, 3).map((line) => {
-			const [modelId] = line.trim().replace(/^→\s*/, "").split(" [");
+			const trimmed = line.trim();
+			const modelLine = trimmed.startsWith(SELECTED_LIST_PREFIX)
+				? trimmed.slice(SELECTED_LIST_PREFIX.length)
+				: trimmed;
+			const [modelId] = modelLine.split(" [");
 			return modelId?.trim() ?? "";
 		});
 

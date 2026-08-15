@@ -3,6 +3,7 @@ import { getKeybindings } from "../keybindings.ts";
 import type { Component } from "../tui.ts";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../utils.ts";
 import { Input } from "./input.ts";
+import { UNSELECTED_LIST_PREFIX } from "./select-list.ts";
 
 export interface SettingItem {
 	/** Unique identifier for this setting */
@@ -126,7 +127,7 @@ export class SettingsList implements Component {
 			if (!item) continue;
 
 			const isSelected = i === this.selectedIndex;
-			const prefix = isSelected ? this.theme.cursor : "  ";
+			const prefix = isSelected ? this.theme.cursor : UNSELECTED_LIST_PREFIX;
 			const prefixWidth = visibleWidth(prefix);
 
 			// Pad label to align values

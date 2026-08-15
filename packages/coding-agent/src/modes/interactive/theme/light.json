@@ -34,7 +34,7 @@
 		"thinkingText": "mediumGray",
 		"startupIntroText": "startupIntroText",
 		"startupIntroAccent": "startupIntroAccent",
-		"autocompleteSelected": "startupIntroAccent",
+		"selectionAccent": "startupIntroAccent",
 
 		"selectedBg": "selectedBg",
 		"scrollbarThumb": "selectedBg",

@@ -5,9 +5,11 @@ import {
 	fuzzyFilter,
 	getKeybindings,
 	Input,
+	SELECTED_LIST_PREFIX,
 	Spacer,
 	Text,
 	type TUI,
+	UNSELECTED_LIST_PREFIX,
 } from "@earendil-works/diffex-tui";
 import type { ModelRuntime } from "../../../core/model-runtime.ts";
 import type { SettingsManager } from "../../../core/settings-manager.ts";
@@ -274,13 +276,13 @@ export class ModelSelectorComponent extends Container implements Focusable {
 
 			let line = "";
 			if (isSelected) {
-				const prefix = theme.fg("accent", "→ ");
+				const prefix = theme.fg("selectionAccent", SELECTED_LIST_PREFIX);
 				const modelText = `${item.id}`;
 				const providerBadge = theme.fg("muted", `[${item.provider}]`);
 				const checkmark = isCurrent ? theme.fg("success", " ✓") : "";
-				line = `${prefix + theme.fg("accent", modelText)} ${providerBadge}${checkmark}`;
+				line = `${prefix + theme.fg("selectionAccent", modelText)} ${providerBadge}${checkmark}`;
 			} else {
-				const modelText = `  ${item.id}`;
+				const modelText = `${UNSELECTED_LIST_PREFIX}${item.id}`;
 				const providerBadge = theme.fg("muted", `[${item.provider}]`);
 				const checkmark = isCurrent ? theme.fg("success", " ✓") : "";
 				line = `${modelText} ${providerBadge}${checkmark}`;

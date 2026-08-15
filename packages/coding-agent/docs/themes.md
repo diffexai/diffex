@@ -72,7 +72,7 @@ vim ~/.diffex/agent/themes/my-theme.json
     "thinkingText": "secondary",
     "startupIntroText": "#CDD6F4",
     "startupIntroAccent": "#89B4FA",
-    "autocompleteSelected": "#89B4FA",
+    "selectionAccent": "#89B4FA",
     "selectedBg": "#2d2d30",
     "scrollbarThumb": "#555566",
     "userMessageBg": "#2d2d30",
@@ -145,21 +145,21 @@ vim ~/.diffex/agent/themes/my-theme.json
 - `name` is required, must be unique, and must not contain `/`.
 - `vars` is optional. Define reusable colors here, then reference them in `colors`.
 - `colors` must define all 51 required tokens.
-  `thinkingMax`, `scrollbarThumb`, `startupIntroText`, `startupIntroAccent`, and `autocompleteSelected` are optional compatibility tokens with fallbacks.
+  `thinkingMax`, `scrollbarThumb`, `startupIntroText`, `startupIntroAccent`, `selectionAccent`, and `autocompleteSelected` are optional compatibility tokens with fallbacks.
 
 The `$schema` field enables editor auto-completion and validation.
 
 ## Color Tokens
 
 Every theme must define all 51 required color tokens.
-`thinkingMax`, `scrollbarThumb`, `startupIntroText`, `startupIntroAccent`, and `autocompleteSelected` are optional for compatibility with existing themes.
-When omitted, they use `thinkingXhigh`, `selectedBg`, `text`, `mdLink`, and `startupIntroAccent`, respectively.
+`thinkingMax`, `scrollbarThumb`, `startupIntroText`, `startupIntroAccent`, `selectionAccent`, and `autocompleteSelected` are optional for compatibility with existing themes.
+When omitted, they use `thinkingXhigh`, `selectedBg`, `text`, `mdLink`, `autocompleteSelected` or `startupIntroAccent`, and `selectionAccent`, respectively.
 
 ### Core UI (11 colors)
 
 | Token | Purpose |
 |-------|---------|
-| `accent` | Primary accent (logo, selected items, cursor) |
+| `accent` | Primary accent for titles, active controls, and status elements |
 | `border` | Normal borders |
 | `borderAccent` | Highlighted borders |
 | `borderMuted` | Subtle borders (editor) |
@@ -171,13 +171,14 @@ When omitted, they use `thinkingXhigh`, `selectedBg`, `text`, `mdLink`, and `sta
 | `text` | Default text (usually `""`) |
 | `thinkingText` | Thinking block text |
 
-### Startup Intro And Autocomplete (3 optional)
+### Startup Intro And Selection (4 optional)
 
 | Token | Purpose |
 |-------|---------|
 | `startupIntroText` | Startup logo art, version, directory, and changelog preview text; optional, falls back to `text` |
 | `startupIntroAccent` | Startup title and boundary box; optional, falls back to `mdLink` |
-| `autocompleteSelected` | Editor autocomplete selected row; optional, falls back to `startupIntroAccent` |
+| `selectionAccent` | Selected row prefix and primary text; optional, falls back to `autocompleteSelected`, then `startupIntroAccent` |
+| `autocompleteSelected` | Legacy autocomplete selection color; optional, falls back to `selectionAccent` |
 
 ### Backgrounds & Content (11 required, 1 optional)
 

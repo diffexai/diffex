@@ -5,8 +5,8 @@ import { truncateToWidth, visibleWidth } from "../utils.ts";
 const DEFAULT_PRIMARY_COLUMN_WIDTH = 32;
 const PRIMARY_COLUMN_GAP = 2;
 const MIN_DESCRIPTION_WIDTH = 10;
-const SELECTED_PREFIX = "> ";
-const UNSELECTED_PREFIX = "  ";
+export const SELECTED_LIST_PREFIX = "> ";
+export const UNSELECTED_LIST_PREFIX = "  ";
 
 const normalizeToSingleLine = (text: string): string => text.replace(/[\r\n]+/g, " ").trim();
 const clamp = (value: number, min: number, max: number): number => Math.max(min, Math.min(value, max));
@@ -138,7 +138,7 @@ export class SelectList implements Component {
 		descriptionSingleLine: string | undefined,
 		primaryColumnWidth: number,
 	): string {
-		const prefix = isSelected ? SELECTED_PREFIX : UNSELECTED_PREFIX;
+		const prefix = isSelected ? SELECTED_LIST_PREFIX : UNSELECTED_LIST_PREFIX;
 		const prefixWidth = visibleWidth(prefix);
 
 		if (descriptionSingleLine && width > 40) {

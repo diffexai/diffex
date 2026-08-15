@@ -1,4 +1,13 @@
-import { type Component, Container, getKeybindings, Spacer, Text, truncateToWidth } from "@earendil-works/diffex-tui";
+import {
+	type Component,
+	Container,
+	getKeybindings,
+	SELECTED_LIST_PREFIX,
+	Spacer,
+	Text,
+	truncateToWidth,
+	UNSELECTED_LIST_PREFIX,
+} from "@earendil-works/diffex-tui";
 import { theme } from "../theme/theme.ts";
 import { DynamicBorder } from "./dynamic-border.ts";
 
@@ -54,10 +63,11 @@ class UserMessageList implements Component {
 			const normalizedMessage = message.text.replace(/\n/g, " ").trim();
 
 			// First line: cursor + message
-			const cursor = isSelected ? theme.fg("accent", "› ") : "  ";
+			const cursor = isSelected ? theme.fg("selectionAccent", SELECTED_LIST_PREFIX) : UNSELECTED_LIST_PREFIX;
 			const maxMsgWidth = width - 2; // Account for cursor (2 chars)
 			const truncatedMsg = truncateToWidth(normalizedMessage, maxMsgWidth);
-			const messageLine = cursor + (isSelected ? theme.bold(truncatedMsg) : truncatedMsg);
+			const messageLine =
+				cursor + (isSelected ? theme.bold(theme.fg("selectionAccent", truncatedMsg)) : truncatedMsg);
 
 			lines.push(messageLine);
 

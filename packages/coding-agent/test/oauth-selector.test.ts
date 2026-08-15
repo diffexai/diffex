@@ -80,6 +80,8 @@ describe("OAuthSelectorComponent", () => {
 		);
 
 		const output = stripAnsi(selector.render(120).join("\n"));
+		expect(output).toContain("> Google");
+		expect(output).not.toContain("→");
 		expect(output).toContain("unconfigured");
 		expect(output).not.toContain("✓ configured");
 	});

@@ -20,11 +20,13 @@ export { Loader, type LoaderIndicatorOptions } from "./components/loader.ts";
 export { type DefaultTextStyle, Markdown, type MarkdownOptions, type MarkdownTheme } from "./components/markdown.ts";
 export { ScrollView, type ScrollViewOptions, type ScrollViewScrollbar } from "./components/scroll-view.ts";
 export {
+	SELECTED_LIST_PREFIX,
 	type SelectItem,
 	SelectList,
 	type SelectListLayoutOptions,
 	type SelectListTheme,
 	type SelectListTruncatePrimaryContext,
+	UNSELECTED_LIST_PREFIX,
 } from "./components/select-list.ts";
 export { type SettingItem, SettingsList, type SettingsListTheme } from "./components/settings-list.ts";
 export { Spacer } from "./components/spacer.ts";

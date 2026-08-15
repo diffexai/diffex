@@ -27,6 +27,8 @@ describe("TrustSelectorComponent", () => {
 
 		expect(output).toContain("Saved decision: trusted (/project)");
 		expect(output).toContain("Current session: trusted");
+		expect(output).toContain("> Trust ✓");
+		expect(output).not.toContain("→");
 		expect(output).toContain("Trust ✓");
 		expect(output).not.toContain("Do not trust ✓");
 	});

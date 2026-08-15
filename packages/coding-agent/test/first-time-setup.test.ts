@@ -5,6 +5,25 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { shouldRunFirstTimeSetup } from "../src/cli/startup-ui.ts";
 import { ENV_AGENT_DIR } from "../src/config.ts";
 import { SettingsManager } from "../src/core/settings-manager.ts";
+import { FirstTimeSetupComponent } from "../src/modes/interactive/components/first-time-setup.ts";
+import { initTheme } from "../src/modes/interactive/theme/theme.ts";
+import { stripAnsi } from "../src/utils/ansi.ts";
+
+describe("FirstTimeSetupComponent", () => {
+	it("uses the shared greater-than selection marker", () => {
+		initTheme("dark", false);
+		const component = new FirstTimeSetupComponent({
+			detectedTheme: "dark",
+			onThemePreview: () => {},
+			onSubmit: () => {},
+			onCancel: () => {},
+		});
+
+		const output = stripAnsi(component.render(80).join("\n"));
+		expect(output).toContain("> Dark");
+		expect(output).not.toContain("→");
+	});
+});
 
 describe("shouldRunFirstTimeSetup", () => {
 	const originalPiExperimental = process.env.DIFFEX_EXPERIMENTAL;

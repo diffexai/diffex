@@ -6,6 +6,7 @@ import {
 	getCapabilities,
 	type MarkdownTheme,
 	type RgbColor,
+	SELECTED_LIST_PREFIX,
 	type SelectListTheme,
 	type SettingsListTheme,
 } from "@earendil-works/diffex-tui";
@@ -33,7 +34,7 @@ const ThemeJsonSchema = Type.Object({
 	name: Type.String(),
 	vars: Type.Optional(Type.Record(Type.String(), ColorValueSchema)),
 	colors: Type.Object({
-		// Core UI (11 required, 3 optional)
+		// Core UI (11 required, 4 optional)
 		accent: ColorValueSchema,
 		border: ColorValueSchema,
 		borderAccent: ColorValueSchema,
@@ -47,6 +48,7 @@ const ThemeJsonSchema = Type.Object({
 		thinkingText: ColorValueSchema,
 		startupIntroText: Type.Optional(ColorValueSchema),
 		startupIntroAccent: Type.Optional(ColorValueSchema),
+		selectionAccent: Type.Optional(ColorValueSchema),
 		autocompleteSelected: Type.Optional(ColorValueSchema),
 		// Backgrounds & Content Text (11 required, 1 optional)
 		selectedBg: ColorValueSchema,
@@ -124,6 +126,7 @@ export type ThemeColor =
 	| "thinkingText"
 	| "startupIntroText"
 	| "startupIntroAccent"
+	| "selectionAccent"
 	| "autocompleteSelected"
 	| "userMessageText"
 	| "customMessageText"
@@ -332,16 +335,19 @@ function withThemeColorFallbacks(colors: ThemeJson["colors"]): ThemeJson["colors
 	scrollbarThumb: ColorValue;
 	startupIntroText: ColorValue;
 	startupIntroAccent: ColorValue;
+	selectionAccent: ColorValue;
 	autocompleteSelected: ColorValue;
 } {
 	const startupIntroAccent = colors.startupIntroAccent ?? colors.mdLink;
+	const selectionAccent = colors.selectionAccent ?? colors.autocompleteSelected ?? startupIntroAccent;
 	return {
 		...colors,
 		thinkingMax: colors.thinkingMax ?? colors.thinkingXhigh,
 		scrollbarThumb: colors.scrollbarThumb ?? colors.selectedBg,
 		startupIntroText: colors.startupIntroText ?? colors.text,
 		startupIntroAccent,
-		autocompleteSelected: colors.autocompleteSelected ?? startupIntroAccent,
+		selectionAccent,
+		autocompleteSelected: colors.autocompleteSelected ?? selectionAccent,
 	};
 }
 
@@ -1304,8 +1310,8 @@ export function getMarkdownTheme(): MarkdownTheme {
 
 export function getSelectListTheme(): SelectListTheme {
 	return {
-		selectedPrefix: (text: string) => theme.fg("accent", text),
-		selectedText: (text: string) => theme.fg("accent", text),
+		selectedPrefix: (text: string) => theme.fg("selectionAccent", text),
+		selectedText: (text: string) => theme.fg("selectionAccent", text),
 		description: (text: string) => theme.fg("muted", text),
 		scrollInfo: (text: string) => theme.fg("muted", text),
 		noMatch: (text: string) => theme.fg("muted", text),
@@ -1313,23 +1319,21 @@ export function getSelectListTheme(): SelectListTheme {
 }
 
 export function getEditorTheme(): EditorTheme {
-	const selectList = getSelectListTheme();
 	return {
 		borderColor: (text: string) => theme.fg("borderMuted", text),
-		selectList: {
-			...selectList,
-			selectedPrefix: (text: string) => theme.fg("autocompleteSelected", text),
-			selectedText: (text: string) => theme.fg("autocompleteSelected", text),
-		},
+		selectList: getSelectListTheme(),
 	};
 }
 
 export function getSettingsListTheme(): SettingsListTheme {
 	return {
-		label: (text: string, selected: boolean) => (selected ? theme.fg("accent", text) : text),
-		value: (text: string, selected: boolean) => (selected ? theme.fg("accent", text) : theme.fg("muted", text)),
+		label: (text: string, selected: boolean) => (selected ? theme.fg("selectionAccent", text) : text),
+		value: (text: string, selected: boolean) =>
+			selected ? theme.fg("selectionAccent", text) : theme.fg("muted", text),
 		description: (text: string) => theme.fg("dim", text),
-		cursor: theme.fg("accent", "→ "),
+		get cursor() {
+			return theme.fg("selectionAccent", SELECTED_LIST_PREFIX);
+		},
 		hint: (text: string) => theme.fg("dim", text),
 	};
 }

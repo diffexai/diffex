@@ -1,4 +1,11 @@
-import { Container, getKeybindings, Spacer, Text } from "@earendil-works/diffex-tui";
+import {
+	Container,
+	getKeybindings,
+	SELECTED_LIST_PREFIX,
+	Spacer,
+	Text,
+	UNSELECTED_LIST_PREFIX,
+} from "@earendil-works/diffex-tui";
 import { type TerminalTheme, theme } from "../theme/theme.ts";
 import { DIFFEX_LOGO_ART } from "./diffex-welcome.ts";
 import { DynamicBorder } from "./dynamic-border.ts";
@@ -99,8 +106,8 @@ export class FirstTimeSetupComponent extends Container {
 	private addOptionList(labels: string[], selectedIndex: number): void {
 		for (let i = 0; i < labels.length; i++) {
 			const isSelected = i === selectedIndex;
-			const prefix = isSelected ? theme.fg("accent", "→ ") : "  ";
-			const label = isSelected ? theme.fg("accent", labels[i]) : theme.fg("text", labels[i]);
+			const prefix = isSelected ? theme.fg("selectionAccent", SELECTED_LIST_PREFIX) : UNSELECTED_LIST_PREFIX;
+			const label = isSelected ? theme.fg("selectionAccent", labels[i]) : theme.fg("text", labels[i]);
 			this.addChild(new Text(`${prefix}${label}`, 1, 0));
 		}
 	}

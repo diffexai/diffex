@@ -3,7 +3,15 @@
  * Displays a list of string options with keyboard navigation.
  */
 
-import { Container, getKeybindings, Spacer, Text, type TUI } from "@earendil-works/diffex-tui";
+import {
+	Container,
+	getKeybindings,
+	SELECTED_LIST_PREFIX,
+	Spacer,
+	Text,
+	type TUI,
+	UNSELECTED_LIST_PREFIX,
+} from "@earendil-works/diffex-tui";
 import { theme } from "../theme/theme.ts";
 import { CountdownTimer } from "./countdown-timer.ts";
 import { DynamicBorder } from "./dynamic-border.ts";
@@ -82,8 +90,8 @@ export class ExtensionSelectorComponent extends Container {
 		for (let i = 0; i < this.options.length; i++) {
 			const isSelected = i === this.selectedIndex;
 			const text = isSelected
-				? theme.fg("accent", "→ ") + theme.fg("accent", this.options[i])
-				: `  ${theme.fg("text", this.options[i])}`;
+				? theme.fg("selectionAccent", SELECTED_LIST_PREFIX) + theme.fg("selectionAccent", this.options[i])
+				: `${UNSELECTED_LIST_PREFIX}${theme.fg("text", this.options[i])}`;
 			this.listContainer.addChild(new Text(text, 1, 0));
 		}
 	}

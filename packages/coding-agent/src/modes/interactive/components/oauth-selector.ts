@@ -5,8 +5,10 @@ import {
 	fuzzyFilter,
 	getKeybindings,
 	Input,
+	SELECTED_LIST_PREFIX,
 	Spacer,
 	TruncatedText,
+	UNSELECTED_LIST_PREFIX,
 } from "@earendil-works/diffex-tui";
 import { theme } from "../theme/theme.ts";
 import { DynamicBorder } from "./dynamic-border.ts";
@@ -133,11 +135,11 @@ export class OAuthSelectorComponent extends Container implements Focusable {
 				: "";
 			let line = "";
 			if (isSelected) {
-				const prefix = theme.fg("accent", "→ ");
-				const text = theme.fg("accent", provider.name);
+				const prefix = theme.fg("selectionAccent", SELECTED_LIST_PREFIX);
+				const text = theme.fg("selectionAccent", provider.name);
 				line = prefix + text + authTypeLabel + statusIndicator;
 			} else {
-				const text = `  ${theme.fg("text", provider.name)}`;
+				const text = `${UNSELECTED_LIST_PREFIX}${theme.fg("text", provider.name)}`;
 				line = text + authTypeLabel + statusIndicator;
 			}
 

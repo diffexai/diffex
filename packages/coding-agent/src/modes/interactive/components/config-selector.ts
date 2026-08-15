@@ -11,8 +11,10 @@ import {
 	getKeybindings,
 	Input,
 	matchesKey,
+	SELECTED_LIST_PREFIX,
 	Spacer,
 	truncateToWidth,
+	UNSELECTED_LIST_PREFIX,
 	visibleWidth,
 } from "@earendil-works/diffex-tui";
 import { CONFIG_DIR_NAME } from "../../../config.ts";
@@ -426,10 +428,14 @@ class ResourceList implements Component, Focusable {
 			} else {
 				// Resource item (cursor only on items)
 				const item = entry.item;
-				const cursor = isSelected ? "> " : "  ";
+				const cursor = isSelected ? theme.fg("selectionAccent", SELECTED_LIST_PREFIX) : UNSELECTED_LIST_PREFIX;
 				const dimmed = this.isDimmedItem(item);
 				const nameText = isSelected && !dimmed ? theme.bold(item.displayName) : item.displayName;
-				const name = dimmed ? theme.fg("dim", nameText) : nameText;
+				const name = dimmed
+					? theme.fg("dim", nameText)
+					: isSelected
+						? theme.fg("selectionAccent", nameText)
+						: nameText;
 				lines.push(
 					truncateToWidth(
 						`${cursor}    ${this.renderCheckbox(item)} ${name}${this.getItemSuffix(item)}`,

@@ -126,6 +126,21 @@ function buildTree(entries: Array<SessionEntry>): SessionTreeNode[] {
 }
 
 describe("TreeSelectorComponent", () => {
+	test("uses the shared greater-than selection marker", () => {
+		const tree = buildTree([userMessage("user-1", null, "hello")]);
+		const selector = new TreeSelectorComponent(
+			tree,
+			"user-1",
+			24,
+			() => {},
+			() => {},
+		);
+
+		const rendered = selector.getTreeList().render(80).map(stripVTControlCharacters).join("\n");
+		expect(rendered).toContain("> ");
+		expect(rendered).not.toContain("›");
+	});
+
 	describe("initial selection with metadata entries", () => {
 		test("focuses nearest visible ancestor when currentLeafId is a model_change with sibling branch", () => {
 			// Tree structure:

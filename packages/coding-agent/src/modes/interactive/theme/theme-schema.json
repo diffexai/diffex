@@ -34,7 +34,7 @@
 		},
 		"colors": {
 			"type": "object",
-			"description": "Theme color definitions (thinkingMax, scrollbarThumb, startupIntroText, startupIntroAccent, and autocompleteSelected are optional and use compatible fallbacks)",
+			"description": "Theme color definitions (thinkingMax, scrollbarThumb, startupIntroText, startupIntroAccent, selectionAccent, and autocompleteSelected are optional and use compatible fallbacks)",
 			"required": [
 				"accent",
 				"border",
@@ -141,9 +141,13 @@
 					"$ref": "#/$defs/colorValue",
 					"description": "Startup intro title and boundary color (optional, falls back to mdLink)"
 				},
+				"selectionAccent": {
+					"$ref": "#/$defs/colorValue",
+					"description": "Selected row prefix and primary text (optional, falls back to autocompleteSelected, then startupIntroAccent)"
+				},
 				"autocompleteSelected": {
 					"$ref": "#/$defs/colorValue",
-					"description": "Editor autocomplete selected row foreground (optional, falls back to startupIntroAccent)"
+					"description": "Legacy editor autocomplete selection foreground (optional, falls back to selectionAccent)"
 				},
 				"selectedBg": {
 					"$ref": "#/$defs/colorValue",
