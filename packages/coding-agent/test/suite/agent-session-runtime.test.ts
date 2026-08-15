@@ -10,10 +10,11 @@ import {
 	createAgentSessionFromServices,
 	createAgentSessionRuntime,
 	createAgentSessionServices,
+	type ValidateSessionTarget,
 } from "../../src/core/agent-session-runtime.ts";
 import { AuthStorage } from "../../src/core/auth-storage.ts";
 import { ModelRuntime } from "../../src/core/model-runtime.ts";
-import { SessionManager } from "../../src/core/session-manager.ts";
+import { buildSessionContext, SessionManager } from "../../src/core/session-manager.ts";
 import type {
 	AgentToolResult,
 	ExtensionAPI,
@@ -45,7 +46,13 @@ describe("AgentSessionRuntime characterization", () => {
 
 	async function createRuntimeForTest(
 		extensionFactory: ExtensionFactory,
-		options?: { cwd?: string; bootstrapModel?: boolean; bootstrapThinkingLevel?: boolean },
+		options?: {
+			cwd?: string;
+			persist?: boolean;
+			bootstrapModel?: boolean;
+			bootstrapThinkingLevel?: boolean;
+			beforeCreateRuntime?: (sessionManager: SessionManager, requestNumber: number) => Promise<void> | void;
+		},
 	) {
 		const tempDir =
 			options?.cwd ?? join(tmpdir(), `pi-runtime-suite-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -93,7 +100,10 @@ describe("AgentSessionRuntime characterization", () => {
 				noThemes: true,
 			},
 		};
+		let runtimeRequestCount = 0;
 		const createRuntime: CreateAgentSessionRuntimeFactory = async ({ cwd, sessionManager, sessionStartEvent }) => {
+			runtimeRequestCount += 1;
+			await options?.beforeCreateRuntime?.(sessionManager, runtimeRequestCount);
 			const services = await createAgentSessionServices({
 				...runtimeOptions,
 				cwd,
@@ -113,7 +123,7 @@ describe("AgentSessionRuntime characterization", () => {
 		const runtime = await createAgentSessionRuntime(createRuntime, {
 			cwd: tempDir,
 			agentDir: tempDir,
-			sessionManager: SessionManager.create(tempDir),
+			sessionManager: options?.persist === false ? SessionManager.inMemory(tempDir) : SessionManager.create(tempDir),
 		});
 		await runtime.session.bindExtensions({});
 
@@ -395,6 +405,147 @@ describe("AgentSessionRuntime characterization", () => {
 		expect(invalidations).toBe(1);
 	});
 
+	it("keeps a disposed in-memory session leased through fork activation", async () => {
+		const { runtime } = await createRuntimeForTest(() => {}, { persist: false });
+		await runtime.session.prompt("hello");
+		const outgoingSession = runtime.session;
+		const outgoingManager = outgoingSession.sessionManager;
+		const outgoingLeafId = outgoingManager.getLeafId();
+		const outgoingEntries = outgoingManager.getEntries();
+		const userMessage = outgoingSession.getUserMessagesForForking()[0];
+		if (!userMessage) throw new Error("Expected a user message to fork");
+		let mutationError: unknown;
+		let mutationFinished!: () => void;
+		const mutationFinishedPromise = new Promise<void>((resolve) => {
+			mutationFinished = resolve;
+		});
+		runtime.setBeforeSessionInvalidate(() => {
+			queueMicrotask(() => {
+				try {
+					outgoingSession.setCollaborationMode("plan");
+				} catch (error) {
+					mutationError = error;
+				} finally {
+					mutationFinished();
+				}
+			});
+		});
+
+		const result = await runtime.fork(userMessage.entryId, { position: "at" });
+		await mutationFinishedPromise;
+		runtime.setBeforeSessionInvalidate(undefined);
+
+		expect(result.cancelled).toBe(false);
+		expect(runtime.session).not.toBe(outgoingSession);
+		expect(runtime.session.sessionManager).not.toBe(outgoingManager);
+		expect(runtime.session.collaborationMode).toBe("default");
+		expect(outgoingManager.getLeafId()).toBe(outgoingLeafId);
+		expect(outgoingManager.getEntries()).toEqual(outgoingEntries);
+		expect(mutationError).toBeInstanceOf(Error);
+		expect((mutationError as Error).message).toMatch(/replacement/i);
+	});
+
+	it("preserves the live in-memory session when fork runtime creation fails", async () => {
+		const { runtime } = await createRuntimeForTest(() => {}, {
+			persist: false,
+			beforeCreateRuntime: (_sessionManager, requestNumber) => {
+				if (requestNumber === 2) throw new Error("candidate creation failed");
+			},
+		});
+		await runtime.session.prompt("hello");
+		const outgoingSession = runtime.session;
+		const outgoingManager = outgoingSession.sessionManager;
+		const outgoingSessionId = outgoingManager.getSessionId();
+		const outgoingLeafId = outgoingManager.getLeafId();
+		const outgoingEntries = outgoingManager.getEntries();
+		expect(outgoingManager.createInMemoryBranch(null).getHeader()?.profile).toEqual(
+			outgoingManager.getHeader()?.profile,
+		);
+		const userMessage = outgoingSession.getUserMessagesForForking()[0];
+		if (!userMessage) throw new Error("Expected a user message to fork");
+
+		await expect(runtime.fork(userMessage.entryId, { position: "at" })).rejects.toThrow("candidate creation failed");
+
+		expect(runtime.session).toBe(outgoingSession);
+		expect(runtime.session.sessionManager).toBe(outgoingManager);
+		expect(outgoingManager.getSessionId()).toBe(outgoingSessionId);
+		expect(outgoingManager.getLeafId()).toBe(outgoingLeafId);
+		expect(outgoingManager.getEntries()).toEqual(outgoingEntries);
+		expect(() => outgoingSession.setCollaborationMode("plan")).not.toThrow();
+		outgoingSession.setCollaborationMode("default");
+	});
+
+	it("rejects runtime prompts until delayed session rebind completes", async () => {
+		const { runtime } = await createRuntimeForTest(() => {});
+		let rebindStarted!: () => void;
+		let releaseRebind!: () => void;
+		const rebindStartedPromise = new Promise<void>((resolve) => {
+			rebindStarted = resolve;
+		});
+		const rebindGate = new Promise<void>((resolve) => {
+			releaseRebind = resolve;
+		});
+		runtime.setRebindSession(async (session) => {
+			rebindStarted();
+			await rebindGate;
+			await session.bindExtensions({});
+		});
+
+		const replacement = runtime.newSession();
+		await rebindStartedPromise;
+		const replacementSession = runtime.session;
+		await expect(runtime.prompt("too early")).rejects.toThrow(/replacement/i);
+		expect(replacementSession.messages).toEqual([]);
+
+		releaseRebind();
+		await replacement;
+		await runtime.prompt("after rebind");
+		expect(runtime.session.messages.some((message) => JSON.stringify(message).includes("after rebind"))).toBe(true);
+	});
+
+	it.each(["invalidation", "activation"] as const)(
+		"adopts and rebinds the prepared runtime when %s fails after shutdown starts",
+		async (failureStage) => {
+			const { runtime } = await createRuntimeForTest(() => {});
+			const outgoingSession = runtime.session;
+			let reboundSession = runtime.session;
+			runtime.setRebindSession(async (session) => {
+				reboundSession = session;
+				await session.bindExtensions({});
+			});
+			if (failureStage === "invalidation") {
+				runtime.setBeforeSessionInvalidate(() => {
+					throw new Error("invalidation failed");
+				});
+			}
+
+			const replacement = runtime.newSession({
+				setup:
+					failureStage === "activation"
+						? async (sessionManager) => {
+								const setProfileMetadata = sessionManager.setProfileMetadata.bind(sessionManager);
+								let metadataWrites = 0;
+								sessionManager.setProfileMetadata = (profile) => {
+									metadataWrites += 1;
+									if (metadataWrites === 2) throw new Error("activation failed");
+									setProfileMetadata(profile);
+								};
+							}
+						: undefined,
+			});
+			await expect(replacement).rejects.toThrow(`${failureStage} failed`);
+			runtime.setBeforeSessionInvalidate(undefined);
+
+			expect(runtime.session).not.toBe(outgoingSession);
+			expect(reboundSession).toBe(runtime.session);
+			expect(() => outgoingSession.setCollaborationMode("plan")).toThrow(/replacement/i);
+			await runtime.prompt("candidate remains live");
+			expect(
+				runtime.session.messages.some((message) => JSON.stringify(message).includes("candidate remains live")),
+			).toBe(true);
+		},
+	);
+
 	it("emits session_before_switch and session_start for new and resume flows", async () => {
 		const events: RecordedSessionEvent[] = [];
 		const { runtime } = await createRuntimeForTest((pi: ExtensionAPI) => {
@@ -522,6 +673,82 @@ describe("AgentSessionRuntime characterization", () => {
 		const cancelAtResult = await runtime.fork("missing-entry", { position: "at" });
 		expect(cancelAtResult).toEqual({ cancelled: true });
 		expect(events).toEqual([{ type: "session_before_fork", entryId: "missing-entry", position: "at" }]);
+	});
+
+	it("validates switch and fork targets before replacing or mutating the current session", async () => {
+		const { runtime, tempDir } = await createRuntimeForTest(() => {});
+		await runtime.session.prompt("hello");
+		const currentSession = runtime.session;
+		const currentManager = currentSession.sessionManager;
+		const defaultLeafId = currentManager.getLeafId();
+		if (!defaultLeafId) throw new Error("Expected a current session leaf");
+
+		const targetManager = SessionManager.create(tempDir, join(tempDir, "target-sessions"));
+		targetManager.appendCollaborationModeChange("plan");
+		targetManager.appendPlan({ id: "target-plan", title: "Target plan", markdown: "1. Keep planning." });
+		targetManager.appendMessage(fauxAssistantMessage("persist target"));
+		const targetSessionFile = targetManager.getSessionFile();
+		if (!targetSessionFile) throw new Error("Expected a target session file");
+
+		const validateTarget: ValidateSessionTarget = (sessionManager, leafId) => {
+			if (buildSessionContext(sessionManager.getEntries(), leafId).collaborationMode === "plan") {
+				throw new Error("Cannot activate a plan-mode target");
+			}
+		};
+
+		await expect(runtime.switchSession(targetSessionFile, { validateTarget })).rejects.toThrow(
+			"Cannot activate a plan-mode target",
+		);
+		expect(runtime.session).toBe(currentSession);
+		expect(currentManager.getLeafId()).toBe(defaultLeafId);
+
+		currentManager.appendCollaborationModeChange("plan");
+		currentManager.appendPlan({ id: "branch-plan", title: "Branch plan", markdown: "1. Keep planning." });
+		const planLeafId = currentManager.getLeafId();
+		if (!planLeafId) throw new Error("Expected a plan branch leaf");
+		currentManager.branch(defaultLeafId);
+
+		await expect(runtime.fork(planLeafId, { position: "at", validateTarget })).rejects.toThrow(
+			"Cannot activate a plan-mode target",
+		);
+		expect(runtime.session).toBe(currentSession);
+		expect(currentManager.getLeafId()).toBe(defaultLeafId);
+	});
+
+	it("runs new-session setup and validates its complete context before replacing the current session", async () => {
+		const { runtime } = await createRuntimeForTest(() => {});
+		await runtime.session.prompt("hello");
+		const currentSession = runtime.session;
+		const currentLeafId = currentSession.sessionManager.getLeafId();
+		let targetManager: SessionManager | undefined;
+
+		const validateTarget: ValidateSessionTarget = (sessionManager, leafId) => {
+			targetManager = sessionManager;
+			const context = buildSessionContext(sessionManager.getEntries(), leafId);
+			expect(context.collaborationMode).toBe("plan");
+			expect(context.pendingPlan?.id).toBe("invalid-target-plan");
+			throw new Error("Cannot activate plan mode");
+		};
+
+		await expect(
+			runtime.newSession({
+				setup: async (sessionManager) => {
+					sessionManager.appendCollaborationModeChange("plan");
+					sessionManager.appendPlan({
+						id: "invalid-target-plan",
+						title: "Invalid target plan",
+						markdown: "1. Keep the active session intact.",
+					});
+				},
+				validateTarget,
+			}),
+		).rejects.toThrow("Cannot activate plan mode");
+
+		expect(targetManager).toBeDefined();
+		expect(targetManager).not.toBe(currentSession.sessionManager);
+		expect(runtime.session).toBe(currentSession);
+		expect(currentSession.sessionManager.getLeafId()).toBe(currentLeafId);
+		expect(currentSession.collaborationMode).toBe("default");
 	});
 
 	it("reports why an unflushed session cannot be forked", async () => {
