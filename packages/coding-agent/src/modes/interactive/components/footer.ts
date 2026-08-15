@@ -1,5 +1,5 @@
 import { isAbsolute, relative, resolve, sep } from "node:path";
-import { type Component, truncateToWidth, visibleWidth } from "@earendil-works/diffex-tui";
+import { type Component, stripTerminalSequences, truncateToWidth, visibleWidth } from "@earendil-works/diffex-tui";
 import type { AgentSession } from "../../../core/agent-session.ts";
 import type { ReadonlyFooterDataProvider } from "../../../core/footer-data-provider.ts";
 import { theme } from "../theme/theme.ts";
@@ -9,10 +9,9 @@ import { theme } from "../theme/theme.ts";
  * Removes newlines, tabs, carriage returns, and other control characters.
  */
 function sanitizeStatusText(text: string): string {
-	// Replace newlines, tabs, carriage returns with space, then collapse multiple spaces
-	return text
-		.replace(/[\r\n\t]/g, " ")
-		.replace(/ +/g, " ")
+	return stripTerminalSequences(text)
+		.replace(/[\u0000-\u001F\u007F-\u009F]/g, " ")
+		.replace(/\s+/gu, " ")
 		.trim();
 }
 
@@ -41,6 +40,58 @@ export function formatCwdForFooter(cwd: string, home: string | undefined): strin
 	return relativeToHome === "" ? "~" : `~${sep}${relativeToHome}`;
 }
 
+export interface FooterTaskContext {
+	profileName: string;
+	profileRouting: "auto" | "pinned";
+	harnessName?: string;
+}
+
+/** Persistent task context shown above either the built-in or an extension footer. */
+export class FooterTaskContextComponent implements Component {
+	private session: AgentSession;
+	private readonly getTaskContext: () => FooterTaskContext;
+
+	constructor(session: AgentSession, getTaskContext: () => FooterTaskContext) {
+		this.session = session;
+		this.getTaskContext = getTaskContext;
+	}
+
+	setSession(session: AgentSession): void {
+		this.session = session;
+	}
+
+	invalidate(): void {}
+
+	render(width: number): string[] {
+		const taskContext = this.getTaskContext();
+		const planStatus = this.session.collaborationMode === "plan" ? "[plan] " : "";
+		const profileName = sanitizeStatusText(taskContext.profileName) || "unknown";
+		const harnessName = sanitizeStatusText(taskContext.harnessName ?? "not selected") || "not selected";
+		const profilePrefix = `${planStatus}Profile: `;
+		const middle = ` (${taskContext.profileRouting}) • Harness: `;
+		const fixedWidth = visibleWidth(profilePrefix) + visibleWidth(middle);
+		const availableValueWidth = width - fixedWidth;
+		let contextLine: string;
+
+		if (availableValueWidth >= 2) {
+			const profileDesiredWidth = visibleWidth(profileName);
+			const harnessDesiredWidth = visibleWidth(harnessName);
+			let profileWidth = Math.min(profileDesiredWidth, Math.max(1, Math.floor(availableValueWidth / 2)));
+			let harnessWidth = Math.min(harnessDesiredWidth, Math.max(1, availableValueWidth - profileWidth));
+			let remainingWidth = availableValueWidth - profileWidth - harnessWidth;
+			const additionalProfileWidth = Math.min(remainingWidth, profileDesiredWidth - profileWidth);
+			profileWidth += additionalProfileWidth;
+			remainingWidth -= additionalProfileWidth;
+			harnessWidth += Math.min(remainingWidth, harnessDesiredWidth - harnessWidth);
+			contextLine = `${profilePrefix}${truncateToWidth(profileName, profileWidth, "...")}${middle}${truncateToWidth(harnessName, harnessWidth, "...")}`;
+		} else {
+			contextLine = truncateToWidth(`${profilePrefix}${profileName}${middle}${harnessName}`, width, "...");
+		}
+
+		return [theme.fg("dim", contextLine)];
+	}
+}
+
 /**
  * Footer component that shows model, thinking, and context usage.
  * Gets context usage from the session and extension statuses from provider.
@@ -48,14 +99,17 @@ export function formatCwdForFooter(cwd: string, home: string | undefined): strin
 export class FooterComponent implements Component {
 	private session: AgentSession;
 	private footerData: ReadonlyFooterDataProvider;
+	private readonly taskContext: FooterTaskContextComponent;
 
-	constructor(session: AgentSession, footerData: ReadonlyFooterDataProvider) {
+	constructor(session: AgentSession, footerData: ReadonlyFooterDataProvider, getTaskContext: () => FooterTaskContext) {
 		this.session = session;
 		this.footerData = footerData;
+		this.taskContext = new FooterTaskContextComponent(session, getTaskContext);
 	}
 
 	setSession(session: AgentSession): void {
 		this.session = session;
+		this.taskContext.setSession(session);
 	}
 
 	/**
@@ -98,14 +152,13 @@ export class FooterComponent implements Component {
 		const modelName = state.model?.id || "no-model";
 		const thinkingLevel = state.thinkingLevel || "off";
 		const windowDisplay = `${formatTokens(contextWindow)} window`;
-		const planStatus = this.session.collaborationMode === "plan" ? "[plan] " : "";
-		let statsLine = `${planStatus}${modelName} ${thinkingLevel} • ${contextPercentStr} • ${windowDisplay}`;
+		let statsLine = `${modelName} ${thinkingLevel} • ${contextPercentStr} • ${windowDisplay}`;
 
 		if (visibleWidth(statsLine) > width) {
 			statsLine = truncateToWidth(statsLine, width, "...");
 		}
 
-		const lines = [theme.fg("dim", statsLine)];
+		const lines = [...this.taskContext.render(width), theme.fg("dim", statsLine)];
 
 		// Add extension statuses on a single line, sorted by key alphabetically
 		const extensionStatuses = this.footerData.getExtensionStatuses();

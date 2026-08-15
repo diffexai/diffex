@@ -37,6 +37,7 @@ import {
 	SELECTED_LIST_PREFIX,
 	Spacer,
 	setKeybindings,
+	stripTerminalSequences,
 	Text,
 	TruncatedText,
 	type TUI,
@@ -151,8 +152,8 @@ import { EarendilAnnouncementComponent } from "./components/earendil-announcemen
 import { ExtensionEditorComponent } from "./components/extension-editor.ts";
 import { ExtensionInputComponent } from "./components/extension-input.ts";
 import { ExtensionSelectorComponent } from "./components/extension-selector.ts";
-import { FooterComponent, formatCwdForFooter, formatTokens } from "./components/footer.ts";
-import { formatKeyText, keyDisplayText } from "./components/keybinding-hints.ts";
+import { FooterComponent, FooterTaskContextComponent, formatCwdForFooter, formatTokens } from "./components/footer.ts";
+import { formatKeyText, keyDisplayText, keyText } from "./components/keybinding-hints.ts";
 import { LoginDialogComponent } from "./components/login-dialog.ts";
 import { createMermaidMarkdownTransformer } from "./components/mermaid.ts";
 import { ModelSelectorComponent } from "./components/model-selector.ts";
@@ -248,6 +249,13 @@ function isDeadTerminalError(error: unknown): boolean {
 	}
 	const code = (error as NodeJS.ErrnoException).code;
 	return code !== undefined && DEAD_TERMINAL_ERROR_CODES.has(code);
+}
+
+function sanitizeSingleLineUiText(value: string): string {
+	return stripTerminalSequences(value)
+		.replace(/[\u0000-\u001F\u007F-\u009F]/g, " ")
+		.replace(/\s+/gu, " ")
+		.trim();
 }
 
 const ANTHROPIC_SUBSCRIPTION_AUTH_WARNING =
@@ -457,6 +465,7 @@ export class InteractiveMode {
 		preserveOnSessionRebind: boolean;
 	};
 	private footer: FooterComponent;
+	private footerTaskContext: FooterTaskContextComponent;
 	private footerContainer: Container;
 	private footerDataProvider: FooterDataProvider;
 	// Stored so the same manager can be injected into custom editors, selectors, and extension UI.
@@ -591,7 +600,7 @@ export class InteractiveMode {
 			await this.rebindCurrentSession({ renderBeforeBind: true });
 		});
 		this.runtimeHost.setProfileSwitchListener((event) => {
-			this.showStatus(event.notice);
+			this.showStatus(sanitizeSingleLineUiText(event.notice));
 		});
 		this.runtimeHost.setTaskBoundaryResolver((proposal) => this.resolveTaskBoundary(proposal));
 		this.version = VERSION;
@@ -632,7 +641,13 @@ export class InteractiveMode {
 		this.editorContainer = new Container();
 		this.editorContainer.addChild(this.editor as Component);
 		this.footerDataProvider = new FooterDataProvider(this.sessionManager.getCwd());
-		this.footer = new FooterComponent(this.session, this.footerDataProvider);
+		const getFooterTaskContext = () => ({
+			profileName: this.runtimeHost.activeProfile.name,
+			profileRouting: this.runtimeHost.profileRouting,
+			...(this.runtimeHost.activeHarness ? { harnessName: this.runtimeHost.activeHarness.name } : {}),
+		});
+		this.footerTaskContext = new FooterTaskContextComponent(this.session, getFooterTaskContext);
+		this.footer = new FooterComponent(this.session, this.footerDataProvider, getFooterTaskContext);
 		this.footerContainer = new Container();
 		this.footerContainer.addChild(this.footer);
 
@@ -740,8 +755,8 @@ export class InteractiveMode {
 					{ id: "auto", name: "Automatic routing", description: "Choose a profile for each distinct task" },
 					...profiles.map((profile) => ({
 						id: profile.id,
-						name: profile.name,
-						description: profile.description,
+						name: sanitizeSingleLineUiText(profile.name),
+						description: sanitizeSingleLineUiText(profile.description),
 					})),
 				];
 				return createFuzzyAutocompleteItems(
@@ -2024,7 +2039,7 @@ export class InteractiveMode {
 					if (result.editorText && !this.editor.getText().trim()) {
 						this.editor.setText(result.editorText);
 					}
-					this.showStatus("Navigated to selected point");
+					this.showTreeNavigationStatus();
 					void this.flushCompactionQueue({ willRetry: false });
 					return { cancelled: false };
 				},
@@ -2055,6 +2070,14 @@ export class InteractiveMode {
 		this.showStartupNoticesIfNeeded();
 	}
 
+	private showTreeNavigationStatus(): void {
+		this.showStatus(
+			this.session.pendingPlanContinuation
+				? "Navigated to selected point. Accepted plan implementation is waiting; use /plan to retry."
+				: "Navigated to selected point",
+		);
+	}
+
 	private applyFullscreenScrollbarSetting(): void {
 		this.transcriptScrollView?.setScrollbar(this.settingsManager.getFullscreenScrollbar());
 	}
@@ -2063,6 +2086,7 @@ export class InteractiveMode {
 		configureHttpDispatcher(this.settingsManager.getHttpIdleTimeoutMs());
 		this.applyFullscreenScrollbarSetting();
 		this.footer.setSession(this.session);
+		this.footerTaskContext.setSession(this.session);
 		this.footerDataProvider.setCwd(this.sessionManager.getCwd());
 		this.hideThinkingBlock = this.settingsManager.getHideThinkingBlock();
 		this.outputPad = this.settingsManager.getOutputPad();
@@ -2410,6 +2434,7 @@ export class InteractiveMode {
 		if (factory) {
 			// Create and add custom footer, passing the data provider
 			this.customFooter = factory(this.ui, theme, this.footerDataProvider);
+			this.footerContainer.addChild(this.footerTaskContext);
 			this.footerContainer.addChild(this.customFooter);
 		} else {
 			// Restore built-in footer
@@ -2692,10 +2717,13 @@ export class InteractiveMode {
 		this.clearStatusIndicator("taskBoundary");
 		const activeHarness = this.runtimeHost.activeHarness;
 		const currentHarnessName =
-			activeHarness?.id === proposal.fromHarnessId ? activeHarness.name : proposal.fromHarnessId;
+			activeHarness?.id === proposal.fromHarnessId
+				? sanitizeSingleLineUiText(activeHarness.name)
+				: sanitizeSingleLineUiText(proposal.fromHarnessId);
+		const targetHarnessName = sanitizeSingleLineUiText(proposal.targetHarnessName);
 		const targetAction = proposal.decision === "select" ? "Create" : proposal.willResumeSession ? "Resume" : "Reuse";
-		const targetLabel = `${targetAction}: ${proposal.targetHarnessName} (${proposal.toProfileId})`;
-		const currentLabel = `Keep current: ${currentHarnessName} (${proposal.fromProfileId})`;
+		const targetLabel = `${targetAction}: ${targetHarnessName} (${sanitizeSingleLineUiText(proposal.toProfileId)})`;
+		const currentLabel = `Keep current: ${currentHarnessName} (${sanitizeSingleLineUiText(proposal.fromProfileId)})`;
 		const selected = await this.showExtensionSelector("New task detected\nChoose a harness for this prompt", [
 			targetLabel,
 			currentLabel,
@@ -2703,7 +2731,7 @@ export class InteractiveMode {
 
 		if (selected === targetLabel) {
 			const action = targetAction === "Resume" ? "Resuming" : targetAction === "Reuse" ? "Reusing" : "Creating";
-			this.showTaskRoutingProgress(`${action} ${proposal.targetHarnessName}...`);
+			this.showTaskRoutingProgress(`${action} ${targetHarnessName}...`);
 			return "switch";
 		}
 		if (selected === currentLabel) {
@@ -5122,7 +5150,7 @@ export class InteractiveMode {
 			labels.set(autoLabel, "auto");
 			for (const profile of this.session.resourceLoader.getProfiles().profiles) {
 				const active = profile.id === activeProfile.id ? " (active)" : "";
-				labels.set(`${profile.id} - ${profile.name}${active}`, profile.id);
+				labels.set(`${profile.id} - ${sanitizeSingleLineUiText(profile.name)}${active}`, profile.id);
 			}
 			const selectedLabel = await this.showExtensionSelector(
 				`Task profile: ${activeProfile.id} (${this.runtimeHost.profileRouting})`,
@@ -5618,7 +5646,7 @@ export class InteractiveMode {
 						if (result.editorText && !this.editor.getText().trim()) {
 							this.editor.setText(result.editorText);
 						}
-						this.showStatus("Navigated to selected point");
+						this.showTreeNavigationStatus();
 						void this.flushCompactionQueue({ willRetry: false });
 					} catch (error) {
 						this.showError(error instanceof Error ? error.message : String(error));
@@ -5660,7 +5688,7 @@ export class InteractiveMode {
 		const harnessNames = new Map(
 			loadHarnessDescriptors({ agentDir: this.runtimeHost.services.agentDir }).harnesses.map((harness) => [
 				harness.id,
-				harness.name,
+				sanitizeSingleLineUiText(harness.name),
 			]),
 		);
 		this.showSelector((done) => {
@@ -6594,7 +6622,9 @@ export class InteractiveMode {
 		info += `${theme.fg("dim", "File:")} ${stats.sessionFile ?? "In-memory"}\n`;
 		info += `${theme.fg("dim", "ID:")} ${stats.sessionId}\n`;
 		const activeProfile = this.runtimeHost.activeProfile;
-		info += `${theme.fg("dim", "Profile:")} ${activeProfile.name} (${activeProfile.id}, ${this.runtimeHost.profileRouting})\n\n`;
+		info += `${theme.fg("dim", "Profile:")} ${sanitizeSingleLineUiText(activeProfile.name)} (${sanitizeSingleLineUiText(activeProfile.id)}, ${this.runtimeHost.profileRouting})\n`;
+		const activeHarness = this.runtimeHost.activeHarness;
+		info += `${theme.fg("dim", "Harness:")} ${activeHarness ? `${sanitizeSingleLineUiText(activeHarness.name)} (${sanitizeSingleLineUiText(activeHarness.id)})` : "not selected"}\n\n`;
 		info += `${theme.bold("Messages")}\n`;
 		info += `${theme.fg("dim", "Total:")} ${stats.totalMessages}\n`;
 		info += `${theme.fg("dim", "User:")} ${stats.userMessages}\n`;
