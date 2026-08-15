@@ -394,6 +394,7 @@ export class AgentSession {
 	private _systemPromptOverride?: string;
 	private readonly _subagentController: SubagentController | undefined;
 	private _subagentWaitAbortController: AbortController | undefined;
+	private _agentRunAborted = false;
 	private _disposePromise: Promise<void> | undefined;
 
 	constructor(config: AgentSessionConfig) {
@@ -1246,6 +1247,7 @@ export class AgentSession {
 	// =========================================================================
 
 	private async _runAgentPrompt(messages: AgentMessage | AgentMessage[]): Promise<void> {
+		this._agentRunAborted = false;
 		this._isAgentRunActive = true;
 		try {
 			await this.agent.prompt(messages);
@@ -1324,6 +1326,9 @@ export class AgentSession {
 		};
 		const waitAbortController = new AbortController();
 		this._subagentWaitAbortController = waitAbortController;
+		if (this._agentRunAborted) {
+			waitAbortController.abort(new Error("Subagent coordination cancelled"));
+		}
 		this._emit({ type: "subagent_wait_start", names });
 
 		let cancelled = false;
@@ -1836,6 +1841,7 @@ export class AgentSession {
 	 */
 	async abort(): Promise<void> {
 		this.abortRetry();
+		if (this._isAgentRunActive) this._agentRunAborted = true;
 		this._subagentWaitAbortController?.abort(new Error("Subagent coordination cancelled"));
 		this.agent.abort();
 		await this.waitForIdle();

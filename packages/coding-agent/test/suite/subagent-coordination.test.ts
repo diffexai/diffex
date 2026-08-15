@@ -533,6 +533,54 @@ describe("automatic subagent coordination", () => {
 			);
 	});
 
+	it("preserves cancellation before the subagent wait is installed", async () => {
+		const { root, harness } = await createRoot();
+		const childStarted = deferred<void>();
+		const abortStarted = deferred<void>();
+		const lifecycle: Array<{ type: "start" } | { type: "end"; cancelled: boolean }> = [];
+		let abortPromise: Promise<void> | undefined;
+		let parentCalls = 0;
+		root.subscribe((event) => {
+			if (event.type === "agent_end" && !abortPromise) {
+				abortPromise = root.abort();
+				abortStarted.resolve();
+			}
+			if (event.type === "subagent_wait_start") lifecycle.push({ type: "start" });
+			if (event.type === "subagent_wait_end") lifecycle.push({ type: "end", cancelled: event.cancelled });
+		});
+		harness.setResponses(
+			Array.from({ length: 6 }, () => async (context: Context, options?: SimpleStreamOptions) => {
+				if (!hasTool(context, "spawn_agent")) {
+					childStarted.resolve();
+					return await new Promise<ReturnType<typeof fauxAssistantMessage>>((resolve) => {
+						options?.signal?.addEventListener(
+							"abort",
+							() => resolve(fauxAssistantMessage("child partial", { stopReason: "aborted" })),
+							{ once: true },
+						);
+					});
+				}
+				parentCalls += 1;
+				if (!hasToolResult(context, "spawn_agent")) {
+					return fauxAssistantMessage(fauxToolCall("spawn_agent", { name: "worker", task: "wait forever" }), {
+						stopReason: "toolUse",
+					});
+				}
+				return fauxAssistantMessage("attempted finish before cancellation");
+			}),
+		);
+
+		const prompt = root.prompt("cancel before post-run coordination");
+		await Promise.all([childStarted.promise, abortStarted.promise]);
+		await prompt;
+		await abortPromise;
+
+		expect(parentCalls).toBe(2);
+		expect(lifecycle).toEqual([{ type: "start" }, { type: "end", cancelled: true }]);
+		expect(root.getSubagents()).toEqual([{ name: "worker", status: "interrupted", task: "wait forever" }]);
+		expect(getHiddenResultMessages(root)).toHaveLength(0);
+	});
+
 	it("interrupts a frozen batch on cancellation without another provider call", async () => {
 		const { root, harness } = await createRoot();
 		const childrenStarted = new Set<string>();
