@@ -13,6 +13,7 @@
  * Modes use this class and add their own I/O layer on top.
  */
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname } from "node:path";
 import type {
@@ -298,6 +299,16 @@ interface ToolDefinitionEntry {
 	sourceInfo: SourceInfo;
 }
 
+interface PromptLease {
+	planSubmitted: boolean;
+}
+
+interface PromptPreflightLease {
+	settled: Promise<void>;
+	settle: () => void;
+	discardedByPlanSubmission: boolean;
+}
+
 function estimateMessagesTokens(messages: AgentMessage[]): number {
 	let tokens = 0;
 	for (const message of messages) {
@@ -331,6 +342,12 @@ export class AgentSession {
 	private _unsubscribeAgent?: () => void;
 	private _eventListeners: AgentSessionEventListener[] = [];
 	private _isAgentRunActive = false;
+	private _promptLease: PromptLease | undefined;
+	private readonly _promptPreflightLeases = new Set<PromptPreflightLease>();
+	private readonly _extensionCommandContext = new AsyncLocalStorage<object>();
+	private _activeExtensionCommandOperation: object | undefined;
+	private _runtimeReplacementLease: object | undefined;
+	private readonly _runtimeMutationLeases = new Set<object>();
 	private _idleWaitPromise: Promise<void> | undefined;
 	private _resolveIdleWait: (() => void) | undefined;
 
@@ -644,8 +661,17 @@ export class AgentSession {
 
 	/** Emit an event to all listeners */
 	private _emit(event: AgentSessionEvent): void {
-		for (const l of this._eventListeners) {
-			l(event);
+		for (const listener of [...this._eventListeners]) {
+			try {
+				const result: unknown = listener(event);
+				if (result instanceof Promise) {
+					void result.catch(() => {
+						// Subscriber failures must not alter session state or agent control flow.
+					});
+				}
+			} catch {
+				// Subscriber failures must not alter session state or agent control flow.
+			}
 		}
 	}
 
@@ -916,6 +942,51 @@ export class AgentSession {
 		}
 	}
 
+	private _assertRuntimeReplacementAvailable(): void {
+		if (
+			this._activeExtensionCommandOperation &&
+			this._extensionCommandContext.getStore() !== this._activeExtensionCommandOperation
+		) {
+			throw new Error("Extension command execution is in progress.");
+		}
+		if (this._runtimeReplacementLease) {
+			throw new Error("Session runtime replacement is in progress.");
+		}
+	}
+
+	private _beginRuntimeMutation(): () => void {
+		this._assertRuntimeReplacementAvailable();
+		const lease = {};
+		this._runtimeMutationLeases.add(lease);
+		return () => {
+			this._runtimeMutationLeases.delete(lease);
+		};
+	}
+
+	/** Reserve this idle session for shutdown and runtime replacement. The returned release is idempotent. */
+	reserveRuntimeReplacement(): () => void {
+		this._assertRuntimeReplacementAvailable();
+		if (
+			this._promptLease ||
+			this._promptPreflightLeases.size > 0 ||
+			!this.isIdle ||
+			this.isCompacting ||
+			this.isRetrying ||
+			this.isBashRunning ||
+			this._runtimeMutationLeases.size > 0
+		) {
+			throw new Error("Wait for the current operation to finish before replacing the session runtime.");
+		}
+		if (this.agent.hasQueuedMessages() || this._pendingNextTurnMessages.length > 0) {
+			throw new Error("Clear queued messages before replacing the session runtime.");
+		}
+		const lease = {};
+		this._runtimeReplacementLease = lease;
+		return () => {
+			if (this._runtimeReplacementLease === lease) this._runtimeReplacementLease = undefined;
+		};
+	}
+
 	/**
 	 * Remove all listeners and disconnect from agent.
 	 * Call this when completely done with the session.
@@ -1175,6 +1246,7 @@ export class AgentSession {
 
 	/** Update scoped models for cycling */
 	setScopedModels(scopedModels: Array<{ model: Model<any>; thinkingLevel?: ThinkingLevel }>): void {
+		this._assertRuntimeReplacementAvailable();
 		this._scopedModels = scopedModels;
 	}
 
@@ -1633,6 +1705,7 @@ export class AgentSession {
 	 * @throws Error if text is an extension command
 	 */
 	async steer(text: string, images?: ImageContent[]): Promise<void> {
+		this._assertRuntimeReplacementAvailable();
 		// Check for extension commands (cannot be queued)
 		if (text.startsWith("/")) {
 			this._throwIfExtensionCommand(text);
@@ -1653,6 +1726,7 @@ export class AgentSession {
 	 * @throws Error if text is an extension command
 	 */
 	async followUp(text: string, images?: ImageContent[]): Promise<void> {
+		this._assertRuntimeReplacementAvailable();
 		// Check for extension commands (cannot be queued)
 		if (text.startsWith("/")) {
 			this._throwIfExtensionCommand(text);
@@ -1730,6 +1804,7 @@ export class AgentSession {
 		message: Pick<CustomMessage<T>, "customType" | "content" | "display" | "details">,
 		options?: { triggerTurn?: boolean; deliverAs?: "steer" | "followUp" | "nextTurn" },
 	): Promise<void> {
+		this._assertRuntimeReplacementAvailable();
 		const appMessage = {
 			role: "custom" as const,
 			customType: message.customType,
@@ -1773,6 +1848,7 @@ export class AgentSession {
 		content: string | (TextContent | ImageContent)[],
 		options?: { deliverAs?: "steer" | "followUp" },
 	): Promise<void> {
+		this._assertRuntimeReplacementAvailable();
 		// Normalize content to text string + optional images
 		let text: string;
 		let images: ImageContent[] | undefined;
@@ -1878,20 +1954,25 @@ export class AgentSession {
 	 * @throws Error if no auth is configured for the model
 	 */
 	async setModel(model: Model<any>): Promise<void> {
-		if (!(await this._modelRuntime.checkAuth(model.provider))) {
-			throw new Error(`No API key for ${model.provider}/${model.id}`);
+		const releaseMutation = this._beginRuntimeMutation();
+		try {
+			if (!(await this._modelRuntime.checkAuth(model.provider))) {
+				throw new Error(`No API key for ${model.provider}/${model.id}`);
+			}
+
+			const previousModel = this.model;
+			const thinkingLevel = this._getThinkingLevelForModelSwitch();
+			this.agent.state.model = model;
+			this.sessionManager.appendModelChange(model.provider, model.id);
+			this.settingsManager.setDefaultModelAndProvider(model.provider, model.id);
+
+			// Re-clamp thinking level for new model's capabilities
+			this.setThinkingLevel(thinkingLevel);
+
+			await this._emitModelSelect(model, previousModel, "set");
+		} finally {
+			releaseMutation();
 		}
-
-		const previousModel = this.model;
-		const thinkingLevel = this._getThinkingLevelForModelSwitch();
-		this.agent.state.model = model;
-		this.sessionManager.appendModelChange(model.provider, model.id);
-		this.settingsManager.setDefaultModelAndProvider(model.provider, model.id);
-
-		// Re-clamp thinking level for new model's capabilities
-		this.setThinkingLevel(thinkingLevel);
-
-		await this._emitModelSelect(model, previousModel, "set");
 	}
 
 	/**
@@ -1901,10 +1982,15 @@ export class AgentSession {
 	 * @returns The new model info, or undefined if only one model available
 	 */
 	async cycleModel(direction: "forward" | "backward" = "forward"): Promise<ModelCycleResult | undefined> {
-		if (this._scopedModels.length > 0) {
-			return this._cycleScopedModel(direction);
+		const releaseMutation = this._beginRuntimeMutation();
+		try {
+			if (this._scopedModels.length > 0) {
+				return await this._cycleScopedModel(direction);
+			}
+			return await this._cycleAvailableModel(direction);
+		} finally {
+			releaseMutation();
 		}
-		return this._cycleAvailableModel(direction);
 	}
 
 	private async _cycleScopedModel(direction: "forward" | "backward"): Promise<ModelCycleResult | undefined> {
@@ -1976,6 +2062,7 @@ export class AgentSession {
 	 * Saves to session and settings only if the level actually changes.
 	 */
 	setThinkingLevel(level: ThinkingLevel): void {
+		this._assertRuntimeReplacementAvailable();
 		const availableLevels = this.getAvailableThinkingLevels();
 		const effectiveLevel = availableLevels.includes(level) ? level : this._clampThinkingLevel(level, availableLevels);
 
@@ -2004,6 +2091,7 @@ export class AgentSession {
 	 * @returns New level, or undefined if model doesn't support thinking
 	 */
 	cycleThinkingLevel(): ThinkingLevel | undefined {
+		this._assertRuntimeReplacementAvailable();
 		if (!this.supportsThinking()) return undefined;
 
 		const levels = this.getAvailableThinkingLevels();
@@ -2059,6 +2147,7 @@ export class AgentSession {
 	 * Saves to settings.
 	 */
 	setSteeringMode(mode: "all" | "one-at-a-time"): void {
+		this._assertRuntimeReplacementAvailable();
 		this.agent.steeringMode = mode;
 		this.settingsManager.setSteeringMode(mode);
 	}
@@ -2068,6 +2157,7 @@ export class AgentSession {
 	 * Saves to settings.
 	 */
 	setFollowUpMode(mode: "all" | "one-at-a-time"): void {
+		this._assertRuntimeReplacementAvailable();
 		this.agent.followUpMode = mode;
 		this.settingsManager.setFollowUpMode(mode);
 	}
@@ -2086,14 +2176,24 @@ export class AgentSession {
 	}
 
 	private async _compact(customInstructions?: string): Promise<CompactionResult> {
-		await this.abort();
-		if (this._disposePromise) {
-			throw new Error("Compaction cancelled");
+		if (this._promptPreflightLeases.size > 0) {
+			throw new Error("Wait for the current prompt to finish before compacting the session.");
+		}
+		const releaseMutation = this._beginRuntimeMutation();
+		try {
+			await this.abort();
+			if (this._disposePromise) {
+				throw new Error("Compaction cancelled");
+			}
+		} catch (error) {
+			releaseMutation();
+			throw error;
 		}
 		this._compactionAbortController = new AbortController();
 		this._emit({ type: "compaction_start", reason: "manual" });
 
 		try {
+			const effectiveCustomInstructions = this._compactionInstructions(customInstructions);
 			if (!this.model) {
 				throw new Error(formatNoModelSelectedMessage());
 			}
@@ -2211,6 +2311,7 @@ export class AgentSession {
 			throw error;
 		} finally {
 			this._compactionAbortController = undefined;
+			releaseMutation();
 		}
 	}
 
@@ -2545,6 +2646,7 @@ export class AgentSession {
 	 * Toggle auto-compaction setting.
 	 */
 	setAutoCompactionEnabled(enabled: boolean): void {
+		this._assertRuntimeReplacementAvailable();
 		this.settingsManager.setCompactionEnabled(enabled);
 	}
 
@@ -2554,28 +2656,33 @@ export class AgentSession {
 	}
 
 	async bindExtensions(bindings: ExtensionBindings): Promise<void> {
-		if (bindings.uiContext !== undefined) {
-			this._extensionUIContext = bindings.uiContext;
-		}
-		if (bindings.mode !== undefined) {
-			this._extensionMode = bindings.mode;
-		}
-		if (bindings.commandContextActions !== undefined) {
-			this._extensionCommandContextActions = bindings.commandContextActions;
-		}
-		if (bindings.abortHandler !== undefined) {
-			this._extensionAbortHandler = bindings.abortHandler;
-		}
-		if (bindings.shutdownHandler !== undefined) {
-			this._extensionShutdownHandler = bindings.shutdownHandler;
-		}
-		if (bindings.onError !== undefined) {
-			this._extensionErrorListener = bindings.onError;
-		}
+		const releaseMutation = this._beginRuntimeMutation();
+		try {
+			if (bindings.uiContext !== undefined) {
+				this._extensionUIContext = bindings.uiContext;
+			}
+			if (bindings.mode !== undefined) {
+				this._extensionMode = bindings.mode;
+			}
+			if (bindings.commandContextActions !== undefined) {
+				this._extensionCommandContextActions = bindings.commandContextActions;
+			}
+			if (bindings.abortHandler !== undefined) {
+				this._extensionAbortHandler = bindings.abortHandler;
+			}
+			if (bindings.shutdownHandler !== undefined) {
+				this._extensionShutdownHandler = bindings.shutdownHandler;
+			}
+			if (bindings.onError !== undefined) {
+				this._extensionErrorListener = bindings.onError;
+			}
 
-		this._applyExtensionBindings(this._extensionRunner);
-		await this._extensionRunner.emit(this._sessionStartEvent);
-		await this.extendResourcesFromExtensions(this._sessionStartEvent.reason === "reload" ? "reload" : "startup");
+			this._applyExtensionBindings(this._extensionRunner);
+			await this._extensionRunner.emit(this._sessionStartEvent);
+			await this.extendResourcesFromExtensions(this._sessionStartEvent.reason === "reload" ? "reload" : "startup");
+		} finally {
+			releaseMutation();
+		}
 	}
 
 	private async extendResourcesFromExtensions(reason: "startup" | "reload"): Promise<void> {
@@ -3079,6 +3186,7 @@ export class AgentSession {
 	 * Toggle auto-retry setting.
 	 */
 	setAutoRetryEnabled(enabled: boolean): void {
+		this._assertRuntimeReplacementAvailable();
 		this.settingsManager.setRetryEnabled(enabled);
 	}
 
@@ -3108,6 +3216,7 @@ export class AgentSession {
 		onChunk?: (chunk: string) => void,
 		options?: { excludeFromContext?: boolean; id?: string; operations?: BashOperations },
 	): Promise<BashResult> {
+		this._assertRuntimeReplacementAvailable();
 		const abortController = new AbortController();
 		this._bashAbortControllers.add(abortController);
 
@@ -3142,6 +3251,7 @@ export class AgentSession {
 	 * Used by executeBash and by extensions that handle bash execution themselves.
 	 */
 	recordBashResult(command: string, result: BashResult, options?: { excludeFromContext?: boolean }): void {
+		this._assertRuntimeReplacementAvailable();
 		const bashMessage: BashExecutionMessage = {
 			role: "bashExecution",
 			command,
@@ -3212,6 +3322,7 @@ export class AgentSession {
 	 * Set a display name for the current session.
 	 */
 	setSessionName(name: string): void {
+		this._assertRuntimeReplacementAvailable();
 		this.sessionManager.appendSessionInfo(name);
 		const event = { type: "session_info_changed", name: this.sessionManager.getSessionName() } as const;
 		this._emit(event);
@@ -3244,8 +3355,19 @@ export class AgentSession {
 		targetId: string,
 		options: { summarize?: boolean; customInstructions?: string; replaceInstructions?: boolean; label?: string },
 	): Promise<{ editorText?: string; cancelled: boolean; aborted?: boolean; summaryEntry?: BranchSummaryEntry }> {
-		if (this.isStreaming) {
+		this._assertRuntimeReplacementAvailable();
+		if (
+			this._promptLease !== undefined ||
+			this._promptPreflightLeases.size > 0 ||
+			this.isStreaming ||
+			this.isCompacting ||
+			this.isRetrying ||
+			this.isBashRunning
+		) {
 			throw new Error("Wait for the current response to finish before navigating the session tree.");
+		}
+		if (this.agent.hasQueuedMessages() || this._pendingNextTurnMessages.length > 0) {
+			throw new Error("Clear queued messages before navigating the session tree.");
 		}
 
 		const oldLeafId = this.sessionManager.getLeafId();
