@@ -199,7 +199,16 @@ export function createAgentsTool(
 			});
 			const details: AgentsDetails = Object.freeze({
 				timed_out: result.timedOut,
-				agents: result.agents,
+				agents: Object.freeze(
+					result.agents.map((agent) =>
+						Object.freeze({
+							name: agent.name,
+							status: agent.status,
+							...(agent.result === undefined ? {} : { result: agent.result }),
+							...(agent.error === undefined ? {} : { error: agent.error }),
+						}),
+					),
+				),
 			});
 			return {
 				content: [{ type: "text", text: JSON.stringify(details) }],

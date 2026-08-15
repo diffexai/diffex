@@ -9,7 +9,12 @@ import type {
 	SubagentQueryResult,
 } from "../../src/core/subagents/types.ts";
 import { type AgentsRequest, createAgentsTool } from "../../src/core/tools/subagents.ts";
-import { createSubagentTestHarness, type SubagentTestHarness } from "./subagent-harness.ts";
+import {
+	createSubagentTestHarness,
+	deferred,
+	type SubagentTestHarness,
+	waitForStatus,
+} from "./subagent-harness.ts";
 
 type AgentsTool = ReturnType<typeof createAgentsTool>;
 
@@ -299,6 +304,59 @@ describe("subagent queries", () => {
 			timedOut: false,
 			agents: [{ name: "worker", status: "idle", result: "racing result" }],
 		});
+	});
+
+	it("only consumes the coordinated attempt returned by a racing agents query", async () => {
+		const { harness, controller: subject, createSession } = await setup();
+		const releaseRetry = deferred<void>();
+		harness.setResponses([
+			fauxAssistantMessage("initial partial", {
+				stopReason: "error",
+				errorMessage: "initial failure",
+			}),
+			async () => {
+				await releaseRetry.promise;
+				return fauxAssistantMessage("retry result");
+			},
+		]);
+		subject.beginCoordinationCycle();
+		subject.spawn("worker", "fail once", createSession, {
+			type: "agent_tool_call",
+			toolCallId: "spawn-worker",
+			assistantEntryId: "assistant-entry",
+			contextEntryId: null,
+		});
+		await waitForStatus(subject, "worker", "failed");
+
+		const agentsTool = subject.createToolDefinitions().find((tool) => tool.name === "agents") as
+			| AgentsTool
+			| undefined;
+		if (!agentsTool) throw new Error("agents tool is unavailable");
+
+		const retry = subject.message("worker", "correct the failure", true, true);
+		const explicitQuery = executeAgents(agentsTool, { timeout_ms: 0 });
+		const [, explicitResult] = await Promise.all([retry, explicitQuery]);
+		expect(explicitResult.details).toEqual({
+			timed_out: false,
+			agents: [
+				{ name: "worker", status: "failed", result: "initial partial", error: "initial failure" },
+			],
+		});
+
+		releaseRetry.resolve();
+		await waitForStatus(subject, "worker", "idle");
+		const retryBatch = subject.freezeUnconsumedBatch();
+		if (!retryBatch) throw new Error("retry batch was consumed by the stale query");
+		expect(retryBatch).toMatchObject({ attempts: [{ name: "worker" }] });
+		expect(subject.consumeBatch(retryBatch)).toEqual([
+			{
+				name: "worker",
+				status: "idle",
+				attempt: "retry",
+				retryAvailable: false,
+				result: "retry result",
+			},
+		]);
 	});
 
 	it("keeps lifecycle snapshots and events free of results and errors", async () => {

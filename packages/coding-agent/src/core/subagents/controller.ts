@@ -15,6 +15,7 @@ import type {
 	SubagentPermit,
 	SubagentQueryOptions,
 	SubagentQueryResult,
+	SubagentQueryResultView,
 	SubagentResultView,
 	SubagentSnapshot,
 	SubagentSpawnOrigin,
@@ -723,7 +724,7 @@ export class SubagentController {
 		snapshot: SubagentControllerSnapshot,
 		targets: ReadonlySet<string>,
 	): SubagentQueryResult {
-		const agents = snapshot.agents.flatMap((agent): SubagentResultView[] => {
+		const agents = snapshot.agents.flatMap((agent): SubagentQueryResultView[] => {
 			if (!targets.has(agent.name)) return [];
 			const record = this.#records.get(agent.name);
 			if (!record) return [];
@@ -731,6 +732,7 @@ export class SubagentController {
 				Object.freeze({
 					name: agent.name,
 					status: agent.status,
+					...(record.coordinatedRun === undefined ? {} : { runId: record.coordinatedRun.id }),
 					...(record.finalText === undefined ? {} : { result: record.finalText }),
 					...(record.error === undefined ? {} : { error: record.error }),
 				}),
@@ -743,7 +745,7 @@ export class SubagentController {
 		for (const agent of result.agents) {
 			if (!isTerminalStatus(agent.status)) continue;
 			const run = this.#records.get(agent.name)?.coordinatedRun;
-			if (run) run.delivery = "consumed";
+			if (run && run.id === agent.runId) run.delivery = "consumed";
 		}
 	}
 

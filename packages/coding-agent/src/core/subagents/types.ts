@@ -80,9 +80,13 @@ export interface SubagentResultView {
 	readonly error?: string;
 }
 
+export interface SubagentQueryResultView extends SubagentResultView {
+	readonly runId?: number;
+}
+
 export interface SubagentQueryResult {
 	readonly timedOut: boolean;
-	readonly agents: readonly SubagentResultView[];
+	readonly agents: readonly SubagentQueryResultView[];
 }
 
 export type SubagentTerminalStatus = Extract<SubagentStatus, "idle" | "failed" | "interrupted">;
