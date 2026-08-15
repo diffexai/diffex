@@ -21,26 +21,17 @@ const targetSchema = Type.String({
 	pattern: SUBAGENT_NAME_PATTERN.source,
 });
 
-const agentActionSchema = Type.Union(
-	[
-		Type.Object(
-			{
-				target: targetSchema,
-				action: Type.Literal("message"),
-				message: Type.String({ description: "Message for the child agent", minLength: 1 }),
-				wake: Type.Optional(Type.Boolean({ default: false })),
-			},
-			{ additionalProperties: false },
-		),
-		Type.Object(
-			{
-				target: targetSchema,
-				action: Type.Literal("interrupt"),
-			},
-			{ additionalProperties: false },
-		),
-	],
-	{ type: "object" },
+const agentActionSchema = Type.Object(
+	{
+		target: targetSchema,
+		action: Type.Unsafe<AgentActionRequest["action"]>({
+			type: "string",
+			enum: ["message", "interrupt"],
+		}),
+		message: Type.Optional(Type.String({ description: "Message for the child agent", minLength: 1 })),
+		wake: Type.Optional(Type.Boolean({ default: false })),
+	},
+	{ additionalProperties: false },
 );
 
 const agentsSchema = Type.Object(
@@ -161,16 +152,25 @@ export function createAgentActionTool(
 			if (!SUBAGENT_NAME_PATTERN.test(request.target)) {
 				throw new Error(`Invalid subagent name: ${request.target}`);
 			}
+			let normalized: AgentActionRequest;
 			if (request.action === "interrupt") {
 				if ("message" in request || "wake" in request) {
 					throw new Error("Interrupt actions do not accept message fields");
 				}
-			} else if (request.message.trim().length === 0) {
-				throw new Error("Subagent message must be non-empty");
+				normalized = { target: request.target, action: request.action };
+			} else {
+				const message = request.message;
+				if (message === undefined || message.trim().length === 0) {
+					throw new Error("Subagent message must be non-empty");
+				}
+				normalized = {
+					target: request.target,
+					action: request.action,
+					message,
+					wake: request.wake ?? false,
+				};
 			}
 
-			const normalized: AgentActionRequest =
-				request.action === "message" ? { ...request, wake: request.wake ?? false } : request;
 			const details = await action(normalized);
 			return {
 				content: [{ type: "text", text: `Completed ${details.action} action for ${details.target}` }],

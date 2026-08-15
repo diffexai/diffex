@@ -73,13 +73,25 @@ describe("subagent actions", () => {
 		const tool = createAgentActionTool(action);
 
 		expect(tool.executionMode).toBe("parallel");
-		expect(tool.parameters).toMatchObject({ type: "object", anyOf: expect.any(Array) });
+		expect(tool.parameters).toMatchObject({
+			type: "object",
+			additionalProperties: false,
+			properties: {
+				target: { type: "string" },
+				action: { type: "string", enum: ["message", "interrupt"] },
+				message: { type: "string" },
+				wake: { type: "boolean" },
+			},
+		});
+		for (const keyword of ["oneOf", "anyOf", "allOf", "enum", "const", "not"]) {
+			expect(tool.parameters).not.toHaveProperty(keyword);
+		}
 		expect(Check(tool.parameters, { target: "worker", action: "message", message: "hello" })).toBe(true);
 		expect(Check(tool.parameters, { target: "worker", action: "message", message: "hello", wake: true })).toBe(true);
 		expect(Check(tool.parameters, { target: "worker", action: "interrupt" })).toBe(true);
 		expect(Check(tool.parameters, { target: "Invalid", action: "interrupt" })).toBe(false);
-		expect(Check(tool.parameters, { target: "worker", action: "interrupt", wake: true })).toBe(false);
-		expect(Check(tool.parameters, { target: "worker", action: "interrupt", message: "no" })).toBe(false);
+		expect(Check(tool.parameters, { target: "worker", action: "interrupt", wake: true })).toBe(true);
+		expect(Check(tool.parameters, { target: "worker", action: "interrupt", message: "no" })).toBe(true);
 
 		const result = await executeAction(tool, { target: "worker", action: "message", message: privateMessage });
 		expect(action).toHaveBeenCalledWith({
@@ -104,6 +116,9 @@ describe("subagent actions", () => {
 			"Invalid subagent name: Invalid",
 		);
 		await expect(executeAction(tool, { target: "worker", action: "message", message: "   " })).rejects.toThrow(
+			"Subagent message must be non-empty",
+		);
+		await expect(executeAction(tool, { target: "worker", action: "message" } as AgentActionRequest)).rejects.toThrow(
 			"Subagent message must be non-empty",
 		);
 		await expect(
