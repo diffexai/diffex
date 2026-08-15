@@ -556,7 +556,11 @@ export class Editor implements Component, Focusable {
 
 			if (shouldShowPlaceholder) {
 				const marker = emitCursorMarker ? CURSOR_MARKER : "";
-				displayText = marker + this.placeholderStyle(sliceByColumn(this.placeholder, 0, contentWidth, true));
+				const placeholder = sliceByColumn(this.placeholder, 0, contentWidth, true);
+				const firstGrapheme = [...this.segment(placeholder, "grapheme")][0]?.segment;
+				const cursorGrapheme = firstGrapheme ?? " ";
+				const rest = firstGrapheme ? placeholder.slice(firstGrapheme.length) : "";
+				displayText = marker + this.placeholderStyle(`\x1b[7m${cursorGrapheme}\x1b[27m${rest}`);
 				lineVisibleWidth = visibleWidth(displayText);
 			}
 			// Add cursor if this line has it
