@@ -74,6 +74,7 @@ describe("loadEntriesFromFile", () => {
 			file,
 			'{"type":"session","id":"abc","timestamp":"2025-01-01T00:00:00Z","cwd":"/tmp"}\n' +
 				"not valid json\n" +
+				"null\n[]\n" +
 				'{"type":"message","id":"1","parentId":null,"timestamp":"2025-01-01T00:00:01Z","message":{"role":"user","content":"hi","timestamp":1}}\n',
 		);
 		const entries = loadEntriesFromFile(file);
@@ -297,6 +298,69 @@ describe("SessionManager custom flat session directory", () => {
 	});
 });
 
+describe("SessionManager plan persistence", () => {
+	let tempDir: string;
+
+	beforeEach(() => {
+		tempDir = join(tmpdir(), `session-plan-${Date.now()}`);
+		mkdirSync(tempDir, { recursive: true });
+	});
+
+	afterEach(() => {
+		rmSync(tempDir, { recursive: true, force: true });
+	});
+
+	it("round-trips collaboration mode, a pending plan, and its resolution through JSONL", () => {
+		const plan = {
+			id: "plan-1",
+			title: "Persist plan mode",
+			markdown: "## Steps\n\n1. Persist the plan.\n2. Resolve it.",
+		};
+		const session = SessionManager.create(tempDir, tempDir);
+		session.appendCollaborationModeChange("plan");
+		session.appendPlan(plan);
+		session.appendMessage({
+			role: "assistant",
+			content: [{ type: "text", text: "Plan submitted." }],
+			api: "anthropic-messages",
+			provider: "anthropic",
+			model: "test",
+			usage: {
+				input: 1,
+				output: 1,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 2,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+			stopReason: "stop",
+			timestamp: Date.now(),
+		});
+		const sessionFile = session.getSessionFile();
+		if (!sessionFile) throw new Error("Expected a persisted session file");
+
+		const pending = SessionManager.open(sessionFile, tempDir);
+		expect(pending.getEntries().map((entry) => entry.type)).toEqual(["collaboration_mode_change", "plan", "message"]);
+		expect(pending.buildSessionContext()).toMatchObject({
+			collaborationMode: "plan",
+			pendingPlan: plan,
+		});
+
+		pending.appendPlanResolution(plan.id, "implement");
+		const resolved = SessionManager.open(sessionFile, tempDir);
+		expect(resolved.getEntries().map((entry) => entry.type)).toEqual([
+			"collaboration_mode_change",
+			"plan",
+			"message",
+			"plan_resolution",
+		]);
+		expect(resolved.buildSessionContext()).toMatchObject({
+			collaborationMode: "default",
+			pendingPlan: undefined,
+		});
+	});
+});
+
 describe("SessionManager.setSessionFile with corrupted files", () => {
 	let tempDir: string;
 
@@ -350,6 +414,73 @@ describe("SessionManager.setSessionFile with corrupted files", () => {
 			`Session file is not a valid Diffex session: ${nonSessionFile}`,
 		);
 		expect(readFileSync(nonSessionFile, "utf-8")).toBe(originalContent);
+	});
+
+	it("rejects duplicate entry IDs in an ordinary session before indexing", () => {
+		const duplicateFile = join(tempDir, "duplicate-entry.jsonl");
+		const entries = [
+			{
+				type: "session",
+				version: 3,
+				id: "duplicate-session",
+				timestamp: "2025-01-01T00:00:00Z",
+				cwd: tempDir,
+			},
+			{
+				type: "custom",
+				id: "duplicate",
+				parentId: null,
+				timestamp: "2025-01-01T00:00:01Z",
+				customType: "first",
+			},
+			{
+				type: "custom",
+				id: "duplicate",
+				parentId: null,
+				timestamp: "2025-01-01T00:00:02Z",
+				customType: "second",
+			},
+		];
+		writeFileSync(duplicateFile, `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`);
+
+		expect(() => SessionManager.open(duplicateFile, tempDir)).toThrow("duplicate entry ID duplicate");
+	});
+
+	it("rejects duplicate entry IDs before a plan-mode entry can be overwritten", () => {
+		const duplicateFile = join(tempDir, "duplicate-plan-entry.jsonl");
+		const entries = [
+			{
+				type: "session",
+				version: 3,
+				id: "duplicate-plan-session",
+				timestamp: "2025-01-01T00:00:00Z",
+				cwd: tempDir,
+			},
+			{
+				type: "collaboration_mode_change",
+				id: "duplicate",
+				parentId: null,
+				timestamp: "2025-01-01T00:00:01Z",
+				mode: "plan",
+			},
+			{
+				type: "custom",
+				id: "duplicate",
+				parentId: null,
+				timestamp: "2025-01-01T00:00:02Z",
+				customType: "overwrite-plan-mode",
+			},
+			{
+				type: "custom",
+				id: "child",
+				parentId: "duplicate",
+				timestamp: "2025-01-01T00:00:03Z",
+				customType: "would-fail-open",
+			},
+		];
+		writeFileSync(duplicateFile, `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`);
+
+		expect(() => SessionManager.open(duplicateFile, tempDir)).toThrow("duplicate entry ID duplicate");
 	});
 
 	it("preserves explicit session file path when recovering from corrupted file", () => {

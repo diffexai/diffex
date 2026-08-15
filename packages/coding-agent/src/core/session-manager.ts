@@ -26,6 +26,7 @@ import {
 	createCompactionSummaryMessage,
 	createCustomMessage,
 } from "./messages.ts";
+import { type CollaborationMode, type PlanArtifact, type PlanResolution, parsePlanArtifact } from "./plan-mode.ts";
 
 export const CURRENT_SESSION_VERSION = 3;
 
@@ -64,6 +65,22 @@ export interface ModelChangeEntry extends SessionEntryBase {
 	type: "model_change";
 	provider: string;
 	modelId: string;
+}
+
+export interface CollaborationModeChangeEntry extends SessionEntryBase {
+	type: "collaboration_mode_change";
+	mode: CollaborationMode;
+}
+
+export interface PlanEntry extends SessionEntryBase {
+	type: "plan";
+	plan: PlanArtifact;
+}
+
+export interface PlanResolutionEntry extends SessionEntryBase {
+	type: "plan_resolution";
+	planId: string;
+	resolution: PlanResolution;
 }
 
 export interface CompactionEntry<T = unknown> extends SessionEntryBase {
@@ -145,6 +162,9 @@ export type SessionEntry =
 	| SessionMessageEntry
 	| ThinkingLevelChangeEntry
 	| ModelChangeEntry
+	| CollaborationModeChangeEntry
+	| PlanEntry
+	| PlanResolutionEntry
 	| CompactionEntry
 	| BranchSummaryEntry
 	| CustomEntry
@@ -169,6 +189,9 @@ export interface SessionContext {
 	messages: AgentMessage[];
 	thinkingLevel: string;
 	model: { provider: string; modelId: string } | null;
+	collaborationMode: CollaborationMode;
+	pendingPlan: PlanArtifact | undefined;
+	pendingPlanContinuation: PlanArtifact | undefined;
 }
 
 export interface SessionInfo {
@@ -359,9 +382,98 @@ function buildSessionPath(
 	return path;
 }
 
-function getSessionContextSettings(path: SessionEntry[]): Pick<SessionContext, "thinkingLevel" | "model"> {
+interface PlanLifecycleState {
+	collaborationMode: CollaborationMode;
+	pendingPlan: PlanArtifact | undefined;
+	pendingPlanContinuation: PlanArtifact | undefined;
+}
+
+function applyPlanLifecycleEntry(state: PlanLifecycleState, entry: SessionEntry): PlanLifecycleState {
+	if (entry.type === "collaboration_mode_change") {
+		if (entry.mode !== "default" && entry.mode !== "plan") {
+			throw new Error(`Invalid collaboration mode at session entry ${entry.id}.`);
+		}
+		if (entry.mode === "default" && state.pendingPlan) {
+			throw new Error(`Cannot leave plan mode with a pending plan at session entry ${entry.id}.`);
+		}
+		if (state.pendingPlanContinuation) {
+			throw new Error(
+				`Cannot change collaboration mode with a pending plan continuation at session entry ${entry.id}.`,
+			);
+		}
+		return { ...state, collaborationMode: entry.mode };
+	}
+	if (entry.type === "plan") {
+		const plan = parsePlanArtifact(entry.plan);
+		if (!plan) {
+			throw new Error(`Invalid plan artifact at session entry ${entry.id}.`);
+		}
+		if (state.collaborationMode !== "plan") {
+			throw new Error(`Plan entry ${entry.id} is outside plan mode.`);
+		}
+		return { collaborationMode: "plan", pendingPlan: plan, pendingPlanContinuation: undefined };
+	}
+	if (entry.type === "plan_resolution") {
+		if (entry.resolution !== "implement" && entry.resolution !== "discard") {
+			throw new Error(`Invalid plan resolution at session entry ${entry.id}.`);
+		}
+		if (state.collaborationMode !== "plan" || !state.pendingPlan || state.pendingPlan.id !== entry.planId) {
+			throw new Error(`Plan resolution ${entry.id} does not match the pending plan.`);
+		}
+		return {
+			collaborationMode: "default",
+			pendingPlan: undefined,
+			pendingPlanContinuation: entry.resolution === "implement" ? state.pendingPlan : undefined,
+		};
+	}
+	if (entry.type === "message" && entry.message.role === "user" && state.pendingPlanContinuation) {
+		return { ...state, pendingPlanContinuation: undefined };
+	}
+	return state;
+}
+
+function validateSessionPlanLifecycle(entries: SessionEntry[]): void {
+	const seenIds = new Set<string>();
+	for (const entry of entries) {
+		if (seenIds.has(entry.id)) {
+			throw new Error(`Session contains duplicate entry ID ${entry.id}.`);
+		}
+		seenIds.add(entry.id);
+	}
+	const hasPlanLifecycleEntries = entries.some(
+		(entry) =>
+			entry.type === "collaboration_mode_change" || entry.type === "plan" || entry.type === "plan_resolution",
+	);
+	const stateById = new Map<string, PlanLifecycleState>();
+	for (const entry of entries) {
+		const parentState =
+			entry.parentId === null
+				? {
+						collaborationMode: "default" as const,
+						pendingPlan: undefined,
+						pendingPlanContinuation: undefined,
+					}
+				: stateById.get(entry.parentId);
+		if (!parentState) {
+			if (hasPlanLifecycleEntries) {
+				throw new Error(`Session entry ${entry.id} has a missing parent in a plan-aware session.`);
+			}
+			continue;
+		}
+		stateById.set(entry.id, applyPlanLifecycleEntry(parentState, entry));
+	}
+}
+
+function getSessionContextSettings(
+	path: SessionEntry[],
+): Pick<SessionContext, "thinkingLevel" | "model" | "collaborationMode" | "pendingPlan" | "pendingPlanContinuation"> {
 	let thinkingLevel = "off";
 	let model: { provider: string; modelId: string } | null = null;
+	let planState: PlanLifecycleState = {
+		collaborationMode: "default",
+		pendingPlan: undefined,
+		pendingPlanContinuation: undefined,
+	};
 
 	for (const entry of path) {
 		if (entry.type === "thinking_level_change") {
@@ -371,9 +483,10 @@ function getSessionContextSettings(path: SessionEntry[]): Pick<SessionContext, "
 		} else if (entry.type === "message" && entry.message.role === "assistant") {
 			model = { provider: entry.message.provider, modelId: entry.message.model };
 		}
+		planState = applyPlanLifecycleEntry(planState, entry);
 	}
 
-	return { thinkingLevel, model };
+	return { thinkingLevel, model, ...planState };
 }
 
 /**
@@ -464,9 +577,10 @@ export function buildSessionContext(
 	byId?: Map<string, SessionEntry>,
 ): SessionContext {
 	const path = buildSessionPath(entries, leafId, byId);
-	const { thinkingLevel, model } = getSessionContextSettings(path);
+	const { thinkingLevel, model, collaborationMode, pendingPlan, pendingPlanContinuation } =
+		getSessionContextSettings(path);
 	const messages = buildContextEntries(entries, leafId, byId).flatMap(sessionEntryToContextMessages);
-	return { messages, thinkingLevel, model };
+	return { messages, thinkingLevel, model, collaborationMode, pendingPlan, pendingPlanContinuation };
 }
 
 /**
@@ -502,12 +616,21 @@ class SessionHeaderScanLimitError extends Error {
 
 function parseSessionEntryLine(line: string): FileEntry | null {
 	if (!line.trim()) return null;
+	let parsed: unknown;
 	try {
-		return JSON.parse(line) as FileEntry;
+		parsed = JSON.parse(line);
 	} catch {
 		// Skip malformed lines
 		return null;
 	}
+	if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
+	const entry = parsed as FileEntry;
+	if (entry.type === "plan") {
+		const plan = parsePlanArtifact(entry.plan);
+		if (!plan) throw new Error("Session contains an invalid persisted plan artifact.");
+		return { ...entry, plan };
+	}
+	return entry.type === "session" ? normalizeSessionHeader(entry) : entry;
 }
 
 /** Exported for testing */
@@ -918,6 +1041,9 @@ export class SessionManager {
 				this._rewriteFile();
 			}
 
+			validateSessionPlanLifecycle(
+				this.fileEntries.filter((entry): entry is SessionEntry => entry.type !== "session"),
+			);
 			this._buildIndex();
 			this.flushed = true;
 		} else {
@@ -1042,10 +1168,18 @@ export class SessionManager {
 	}
 
 	private _appendEntry(entry: SessionEntry): void {
+		const previousLeafId = this.leafId;
 		this.fileEntries.push(entry);
 		this.byId.set(entry.id, entry);
 		this.leafId = entry.id;
-		this._persist(entry);
+		try {
+			this._persist(entry);
+		} catch (error) {
+			this.fileEntries.pop();
+			this.byId.delete(entry.id);
+			this.leafId = previousLeafId;
+			throw error;
+		}
 	}
 
 	/** Append a message as child of current leaf, then advance leaf. Returns entry id.
@@ -1088,6 +1222,68 @@ export class SessionManager {
 			timestamp: new Date().toISOString(),
 			provider,
 			modelId,
+		};
+		this._appendEntry(entry);
+		return entry.id;
+	}
+
+	/** Append a collaboration mode change as child of current leaf, then advance leaf. Returns entry id. */
+	appendCollaborationModeChange(mode: CollaborationMode): string {
+		if (mode !== "default" && mode !== "plan") {
+			throw new Error(`Invalid collaboration mode: ${String(mode)}`);
+		}
+		const context = this.buildSessionContext();
+		if (mode === "default" && context.pendingPlan) {
+			throw new Error("Resolve the pending plan before leaving plan mode.");
+		}
+		if (context.pendingPlanContinuation) {
+			throw new Error("Submit the pending plan continuation before changing collaboration mode.");
+		}
+		const entry: CollaborationModeChangeEntry = {
+			type: "collaboration_mode_change",
+			id: generateId(this.byId),
+			parentId: this.leafId,
+			timestamp: new Date().toISOString(),
+			mode,
+		};
+		this._appendEntry(entry);
+		return entry.id;
+	}
+
+	/** Append a submitted plan as child of current leaf, then advance leaf. Returns entry id. */
+	appendPlan(plan: PlanArtifact): string {
+		const normalizedPlan = parsePlanArtifact(plan);
+		if (!normalizedPlan) throw new Error("Invalid plan artifact.");
+		if (this.buildSessionContext().collaborationMode !== "plan") {
+			throw new Error("Plans can only be appended in plan mode.");
+		}
+		const entry: PlanEntry = {
+			type: "plan",
+			id: generateId(this.byId),
+			parentId: this.leafId,
+			timestamp: new Date().toISOString(),
+			plan: normalizedPlan,
+		};
+		this._appendEntry(entry);
+		return entry.id;
+	}
+
+	/** Append a plan resolution as child of current leaf, then advance leaf. Returns entry id. */
+	appendPlanResolution(planId: string, resolution: PlanResolution): string {
+		if (resolution !== "implement" && resolution !== "discard") {
+			throw new Error("Invalid plan resolution.");
+		}
+		const pendingPlan = this.buildSessionContext().pendingPlan;
+		if (!pendingPlan || pendingPlan.id !== planId) {
+			throw new Error("Plan resolution does not match the pending plan.");
+		}
+		const entry: PlanResolutionEntry = {
+			type: "plan_resolution",
+			id: generateId(this.byId),
+			parentId: this.leafId,
+			timestamp: new Date().toISOString(),
+			planId,
+			resolution,
 		};
 		this._appendEntry(entry);
 		return entry.id;
