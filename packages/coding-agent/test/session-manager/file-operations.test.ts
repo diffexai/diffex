@@ -3,6 +3,7 @@ import { appendFileSync, closeSync, mkdirSync, openSync, readFileSync, rmSync, w
 import { tmpdir } from "os";
 import { join } from "path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { createPlanImplementationPrompt } from "../../src/core/plan-mode.ts";
 import { findMostRecentSession, loadEntriesFromFile, SessionManager } from "../../src/core/session-manager.ts";
 
 const HEADER_SCAN_LIMIT_BYTES = 1024 * 1024;
@@ -380,6 +381,39 @@ describe("SessionManager plan persistence", () => {
 			pendingPlan: undefined,
 		});
 	});
+
+	it("only consumes an accepted plan through the exact continuation append API", () => {
+		const plan = {
+			id: "plan-continuation",
+			title: "Use the trusted continuation",
+			markdown: "## Steps\n\n1. Implement it.",
+		};
+		const session = SessionManager.inMemory(tempDir);
+		session.appendCollaborationModeChange("plan");
+		session.appendPlan(plan);
+		session.appendPlanResolution(plan.id, "implement");
+
+		expect(() => session.appendMessage({ role: "user", content: "unrelated prompt", timestamp: Date.now() })).toThrow(
+			"appendPlanContinuationMessage",
+		);
+		expect(session.buildSessionContext().pendingPlanContinuation).toEqual(plan);
+
+		expect(() =>
+			session.appendPlanContinuationMessage({
+				role: "user",
+				content: [{ type: "text", text: "wrong continuation" }],
+				timestamp: Date.now(),
+			}),
+		).toThrow("does not match the pending plan continuation");
+		expect(session.buildSessionContext().pendingPlanContinuation).toEqual(plan);
+
+		session.appendPlanContinuationMessage({
+			role: "user",
+			content: [{ type: "text", text: createPlanImplementationPrompt(plan) }],
+			timestamp: Date.now(),
+		});
+		expect(session.buildSessionContext().pendingPlanContinuation).toBeUndefined();
+	});
 });
 
 describe("SessionManager.setSessionFile with corrupted files", () => {
@@ -533,6 +567,37 @@ describe("SessionManager.setSessionFile with corrupted files", () => {
 
 		expect(() => SessionManager.open(orphanFile, tempDir)).toThrow(
 			"Session entry orphan has a missing parent missing.",
+		);
+	});
+
+	it("rejects a persisted user message that bypasses the accepted-plan continuation API", () => {
+		const sessionFile = join(tempDir, "bypassed-plan-continuation.jsonl");
+		const timestamp = "2025-01-01T00:00:00Z";
+		const plan = { id: "accepted-plan", title: "Accepted", markdown: "1. Implement this." };
+		const entries = [
+			{ type: "session", version: 3, id: "bypassed-continuation", timestamp, cwd: tempDir },
+			{ type: "collaboration_mode_change", id: "mode", parentId: null, timestamp, mode: "plan" },
+			{ type: "plan", id: "plan", parentId: "mode", timestamp, plan },
+			{
+				type: "plan_resolution",
+				id: "resolution",
+				parentId: "plan",
+				timestamp,
+				planId: plan.id,
+				resolution: "implement",
+			},
+			{
+				type: "message",
+				id: "untrusted-user",
+				parentId: "resolution",
+				timestamp,
+				message: { role: "user", content: "unrelated", timestamp: 1 },
+			},
+		];
+		writeFileSync(sessionFile, `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`);
+
+		expect(() => SessionManager.open(sessionFile, tempDir)).toThrow(
+			"User message untrusted-user does not match the pending plan continuation.",
 		);
 	});
 

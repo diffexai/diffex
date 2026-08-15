@@ -27,7 +27,13 @@ import {
 	createCompactionSummaryMessage,
 	createCustomMessage,
 } from "./messages.ts";
-import { type CollaborationMode, type PlanArtifact, type PlanResolution, parsePlanArtifact } from "./plan-mode.ts";
+import {
+	type CollaborationMode,
+	createPlanImplementationPrompt,
+	type PlanArtifact,
+	type PlanResolution,
+	parsePlanArtifact,
+} from "./plan-mode.ts";
 
 export const CURRENT_SESSION_VERSION = 3;
 
@@ -428,9 +434,18 @@ function applyPlanLifecycleEntry(state: PlanLifecycleState, entry: SessionEntry)
 		};
 	}
 	if (entry.type === "message" && entry.message.role === "user" && state.pendingPlanContinuation) {
+		if (!isExactPlanContinuationMessage(entry.message, state.pendingPlanContinuation)) {
+			throw new Error(`User message ${entry.id} does not match the pending plan continuation.`);
+		}
 		return { ...state, pendingPlanContinuation: undefined };
 	}
 	return state;
+}
+
+function isExactPlanContinuationMessage(message: Message, plan: PlanArtifact): boolean {
+	if (message.role !== "user" || !Array.isArray(message.content) || message.content.length !== 1) return false;
+	const content = message.content[0];
+	return content.type === "text" && content.text === createPlanImplementationPrompt(plan);
 }
 
 function validateSessionEntries(entries: SessionEntry[]): void {
@@ -1269,7 +1284,7 @@ export class SessionManager {
 	 * so it is easier to find them.
 	 * These need to be appended via appendCompaction() and appendBranchSummary() methods.
 	 */
-	appendMessage(message: Message | CustomMessage | BashExecutionMessage): string {
+	private _appendMessage(message: Message | CustomMessage | BashExecutionMessage): string {
 		const entry: SessionMessageEntry = {
 			type: "message",
 			id: generateId(this.byId),
@@ -1279,6 +1294,27 @@ export class SessionManager {
 		};
 		this._appendEntry(entry);
 		return entry.id;
+	}
+
+	appendMessage(message: Message | CustomMessage | BashExecutionMessage): string {
+		if (message.role === "user" && this.buildSessionContext().pendingPlanContinuation) {
+			throw new Error(
+				"A plan continuation is pending. Persist it with appendPlanContinuationMessage before appending another user message.",
+			);
+		}
+		return this._appendMessage(message);
+	}
+
+	/** Persist the exact one-shot user message for the currently accepted plan. */
+	appendPlanContinuationMessage(message: Message): string {
+		const pendingPlanContinuation = this.buildSessionContext().pendingPlanContinuation;
+		if (!pendingPlanContinuation) {
+			throw new Error("No plan continuation is pending.");
+		}
+		if (!isExactPlanContinuationMessage(message, pendingPlanContinuation)) {
+			throw new Error("The user message does not match the pending plan continuation.");
+		}
+		return this._appendMessage(message);
 	}
 
 	/** Append a thinking level change as child of current leaf, then advance leaf. Returns entry id. */
