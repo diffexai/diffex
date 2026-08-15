@@ -47,6 +47,7 @@ import { applyHttpProxySettings, configureHttpDispatcher } from "./core/http-dis
 import { resolveCliModel, resolveModelScope, type ScopedModel } from "./core/model-resolver.ts";
 import { ModelRuntime } from "./core/model-runtime.ts";
 import { restoreStdout, takeOverStdout } from "./core/output-guard.ts";
+import type { CollaborationMode } from "./core/plan-mode.ts";
 import { type AppMode, resolveProjectTrusted } from "./core/project-trust.ts";
 import type { CreateAgentSessionOptions } from "./core/sdk.ts";
 import {
@@ -63,6 +64,10 @@ import { builtInExtensions } from "./extensions/index.ts";
 import { runMigrations, showDeprecationWarnings } from "./migrations.ts";
 import { InteractiveMode, runPrintMode, runRpcMode } from "./modes/index.ts";
 import { initTheme, stopThemeWatcher } from "./modes/interactive/theme/theme.ts";
+import {
+	isNonInteractivePlanStateUnsupported,
+	NON_INTERACTIVE_PLAN_MODE_ERROR,
+} from "./modes/non-interactive-plan-mode.ts";
 import { handleConfigCommand, handlePackageCommand } from "./package-manager-cli.ts";
 import { isLocalPath, normalizePath, resolvePath } from "./utils/paths.ts";
 import { cleanupWindowsSelfUpdateQuarantine } from "./utils/windows-self-update.ts";
@@ -126,6 +131,10 @@ function resolveAppMode(parsed: Args, stdinIsTTY: boolean, stdoutIsTTY: boolean)
 		return "print";
 	}
 	return "interactive";
+}
+
+export function appModeSupportsCollaborationMode(appMode: AppMode, collaborationMode: CollaborationMode): boolean {
+	return collaborationMode !== "plan" || appMode === "interactive";
 }
 
 function toPrintOutputMode(appMode: AppMode): Exclude<Mode, "rpc"> {
@@ -622,6 +631,10 @@ export async function main(args: string[], options?: MainOptions) {
 		console.log(VERSION);
 		process.exit(0);
 	}
+	if (parsed.plan && parsed.export) {
+		console.error(chalk.red("Error: --plan is only supported in interactive mode"));
+		process.exit(1);
+	}
 
 	if (parsed.export) {
 		let result: string;
@@ -638,6 +651,10 @@ export async function main(args: string[], options?: MainOptions) {
 	}
 
 	let appMode = resolveAppMode(parsed, process.stdin.isTTY, process.stdout.isTTY);
+	if (parsed.plan && !appModeSupportsCollaborationMode(appMode, "plan") && !isPlainRuntimeMetadataCommand(parsed)) {
+		console.error(chalk.red("Error: --plan is only supported in interactive mode"));
+		process.exit(1);
+	}
 	const shouldTakeOverStdout = appMode !== "interactive" && !isPlainRuntimeMetadataCommand(parsed);
 	if (shouldTakeOverStdout) {
 		takeOverStdout();
@@ -688,6 +705,14 @@ export async function main(args: string[], options?: MainOptions) {
 			console.error(chalk.red(new MissingSessionCwdError(missingSessionCwdIssue).message));
 			process.exit(1);
 		}
+	}
+	if (
+		appMode !== "interactive" &&
+		!isPlainRuntimeMetadataCommand(parsed) &&
+		isNonInteractivePlanStateUnsupported(sessionManager.buildSessionContext())
+	) {
+		console.error(chalk.red(`Error: ${NON_INTERACTIVE_PLAN_MODE_ERROR}`));
+		process.exit(1);
 	}
 	if (parsed.name !== undefined) {
 		const name = parsed.name.trim();
@@ -827,6 +852,8 @@ export async function main(args: string[], options?: MainOptions) {
 			excludeTools: sessionOptions.excludeTools,
 			noTools: sessionOptions.noTools,
 			customTools: sessionOptions.customTools,
+			collaborationMode:
+				isInitialRuntime && parsed.plan && !isPlainRuntimeMetadataCommand(parsed) ? "plan" : undefined,
 		});
 		const cliThinkingOverride = parsed.thinking !== undefined || cliThinkingFromModel;
 		if (created.session.model && cliThinkingOverride) {
@@ -874,6 +901,10 @@ export async function main(args: string[], options?: MainOptions) {
 		}
 	}
 	time("readPipedStdin");
+	if (appMode !== "interactive" && isNonInteractivePlanStateUnsupported(session)) {
+		console.error(chalk.red(`Error: ${NON_INTERACTIVE_PLAN_MODE_ERROR}`));
+		process.exit(1);
+	}
 
 	const { initialMessage, initialImages } = await prepareInitialMessage(
 		parsed,

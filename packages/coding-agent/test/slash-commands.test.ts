@@ -17,4 +17,12 @@ describe("BUILTIN_SLASH_COMMANDS", () => {
 			description: "Show sub-agents in the current session",
 		});
 	});
+
+	it("registers plan mode with optional on/off arguments", () => {
+		expect(BUILTIN_SLASH_COMMANDS).toContainEqual({
+			name: "plan",
+			description: "Toggle plan mode",
+			argumentHint: "[on|off]",
+		});
+	});
 });

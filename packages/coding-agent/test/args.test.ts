@@ -60,6 +60,14 @@ describe("parseArgs", () => {
 		});
 	});
 
+	describe("--plan flag", () => {
+		test("parses --plan as a built-in flag", () => {
+			const result = parseArgs(["--plan"]);
+			expect(result.plan).toBe(true);
+			expect(result.unknownFlags.size).toBe(0);
+		});
+	});
+
 	describe("--continue flag", () => {
 		test("parses --continue flag", () => {
 			const result = parseArgs(["--continue"]);

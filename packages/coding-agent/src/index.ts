@@ -19,6 +19,8 @@ export {
 	type AgentSessionEventListener,
 	type ModelCycleResult,
 	type ParsedSkillBlock,
+	type PlanContinuation,
+	type PlanContinuationPromptOptions,
 	type PromptOptions,
 	parseSkillBlock,
 	type SessionStats,
@@ -196,6 +198,11 @@ export type {
 	ResolvedResource,
 } from "./core/package-manager.ts";
 export { DefaultPackageManager } from "./core/package-manager.ts";
+export type {
+	CollaborationMode,
+	PlanArtifact,
+	PlanResolution,
+} from "./core/plan-mode.ts";
 export type { ResourceCollision, ResourceDiagnostic, ResourceLoader } from "./core/resource-loader.ts";
 export { DefaultResourceLoader, loadProjectContextFiles } from "./core/resource-loader.ts";
 // SDK for programmatic usage
@@ -226,12 +233,14 @@ export {
 	createUpdatePlanTool,
 	createWriteTool,
 	type PromptTemplate,
+	type RuntimePlanContinuationPromptOptions,
 	type SubagentOptions,
 } from "./core/sdk.ts";
 export {
 	type BranchSummaryEntry,
 	buildContextEntries,
 	buildSessionContext,
+	type CollaborationModeChangeEntry,
 	type CompactionEntry,
 	CURRENT_SESSION_VERSION,
 	type CustomEntry,
@@ -241,6 +250,8 @@ export {
 	type ModelChangeEntry,
 	migrateSessionEntries,
 	type NewSessionOptions,
+	type PlanEntry,
+	type PlanResolutionEntry,
 	parseSessionEntries,
 	type SessionContext,
 	type SessionEntry,
