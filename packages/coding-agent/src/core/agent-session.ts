@@ -694,6 +694,7 @@ export class AgentSession {
 		// When a user message starts, check if it's from either queue and remove it BEFORE emitting
 		// This ensures the UI sees the updated queue state
 		if (event.type === "message_start" && event.message.role === "user") {
+			this._subagentController?.beginCoordinationCycle();
 			this._overflowRecoveryAttempted = false;
 			const messageText = contentText(event.message.content, "");
 			if (messageText) {
@@ -1560,7 +1561,6 @@ export class AgentSession {
 		}
 
 		preflightResult?.(true);
-		this._subagentController?.beginCoordinationCycle();
 		await this._runAgentPrompt(messages);
 	}
 

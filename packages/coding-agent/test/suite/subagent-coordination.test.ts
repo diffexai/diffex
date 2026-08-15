@@ -374,6 +374,121 @@ describe("automatic subagent coordination", () => {
 		expect(root.getLastAssistantText()).toBe("later cycle synthesis");
 	});
 
+	it.each(["steer", "followUp"] as const)(
+		"starts a fresh retry cycle when queued %s input is delivered",
+		async (delivery) => {
+			const { root, harness } = await createRoot();
+			const readyForQueuedInput = deferred<void>();
+			const releaseParent = deferred<void>();
+			const queuedInput = `new cycle via ${delivery}`;
+			let childAttempts = 0;
+			harness.setResponses(
+				Array.from({ length: 24 }, () => async (context: Context) => {
+					if (!hasTool(context, "spawn_agent")) {
+						childAttempts += 1;
+						if (childAttempts <= 2) {
+							return fauxAssistantMessage(`partial ${childAttempts}`, {
+								stopReason: "error",
+								errorMessage: `failure ${childAttempts}`,
+							});
+						}
+						return fauxAssistantMessage("queued retry succeeded");
+					}
+
+					let queuedInputIndex = -1;
+					for (let index = context.messages.length - 1; index >= 0; index -= 1) {
+						const message = context.messages[index];
+						if (message?.role === "user" && getMessageText(message) === queuedInput) {
+							queuedInputIndex = index;
+							break;
+						}
+					}
+					if (queuedInputIndex >= 0) {
+						const recentContext = {
+							...context,
+							messages: context.messages.slice(queuedInputIndex + 1),
+						};
+						const recentBatches = getBatchPayloads(recentContext);
+						if (
+							recentBatches.some((batch) =>
+								batch.agents.some((agent) => agent.result === "queued retry succeeded"),
+							)
+						) {
+							return fauxAssistantMessage("queued cycle synthesis");
+						}
+						if (getToolResultCount(recentContext, "agent_action") === 0) {
+							return fauxAssistantMessage(
+								fauxToolCall("agent_action", {
+									target: "worker",
+									action: "message",
+									message: "correction from queued input",
+									wake: true,
+								}),
+								{ stopReason: "toolUse" },
+							);
+						}
+						return fauxAssistantMessage("attempted queued finish");
+					}
+
+					const batches = getBatchPayloads(context);
+					const actionResults = getToolResultCount(context, "agent_action");
+					if (batches.length === 2 && actionResults === 1) {
+						return fauxAssistantMessage(
+							fauxToolCall("agent_action", {
+								target: "worker",
+								action: "message",
+								message: "exhaust this cycle",
+								wake: true,
+							}),
+							{ stopReason: "toolUse" },
+						);
+					}
+					if (actionResults === 2) {
+						readyForQueuedInput.resolve();
+						await releaseParent.promise;
+						return fauxAssistantMessage("retry exhausted before queued input");
+					}
+					if (batches.length === 1 && actionResults === 0) {
+						return fauxAssistantMessage(
+							fauxToolCall("agent_action", {
+								target: "worker",
+								action: "message",
+								message: "first correction",
+								wake: true,
+							}),
+							{ stopReason: "toolUse" },
+						);
+					}
+					if (!hasToolResult(context, "spawn_agent")) {
+						return fauxAssistantMessage(fauxToolCall("spawn_agent", { name: "worker", task: "fail twice" }), {
+							stopReason: "toolUse",
+						});
+					}
+					return fauxAssistantMessage("attempted initial finish");
+				}),
+			);
+
+			const prompt = root.prompt("exhaust retry before queued input");
+			await readyForQueuedInput.promise;
+			if (delivery === "steer") {
+				await root.steer(queuedInput);
+			} else {
+				await root.followUp(queuedInput);
+			}
+			releaseParent.resolve();
+			await prompt;
+
+			expect(childAttempts).toBe(3);
+			expect(root.getLastAssistantText()).toBe("queued cycle synthesis");
+			const actionResults = root.messages.filter(
+				(message) => message.role === "toolResult" && message.toolName === "agent_action",
+			);
+			expect(actionResults).toHaveLength(3);
+			expect(actionResults[1]).toMatchObject({ isError: true });
+			expect(actionResults[2]).toMatchObject({ isError: false });
+		},
+	);
+
 	it("settles when the parent declines the offered retry", async () => {
 		const { root, harness } = await createRoot();
 		harness.setResponses(

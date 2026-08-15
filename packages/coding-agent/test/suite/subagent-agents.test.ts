@@ -9,12 +9,7 @@ import type {
 	SubagentQueryResult,
 } from "../../src/core/subagents/types.ts";
 import { type AgentsRequest, createAgentsTool } from "../../src/core/tools/subagents.ts";
-import {
-	createSubagentTestHarness,
-	deferred,
-	type SubagentTestHarness,
-	waitForStatus,
-} from "./subagent-harness.ts";
+import { createSubagentTestHarness, deferred, type SubagentTestHarness, waitForStatus } from "./subagent-harness.ts";
 
 type AgentsTool = ReturnType<typeof createAgentsTool>;
 
@@ -338,9 +333,7 @@ describe("subagent queries", () => {
 		const [, explicitResult] = await Promise.all([retry, explicitQuery]);
 		expect(explicitResult.details).toEqual({
 			timed_out: false,
-			agents: [
-				{ name: "worker", status: "failed", result: "initial partial", error: "initial failure" },
-			],
+			agents: [{ name: "worker", status: "failed", result: "initial partial", error: "initial failure" }],
 		});
 
 		releaseRetry.resolve();
