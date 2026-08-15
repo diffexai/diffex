@@ -85,15 +85,11 @@ export async function loadHarnessState(bundlePath: string): Promise<HarnessState
 	return state;
 }
 
-function isMissingEntryError(error: unknown): boolean {
-	return error instanceof Error && "code" in error && error.code === "ENOENT";
-}
-
 async function assertDestinationAbsent(destinationPath: string): Promise<void> {
 	try {
 		await lstat(destinationPath);
 	} catch (error) {
-		if (isMissingEntryError(error)) return;
+		if (error instanceof Error && "code" in error && error.code === "ENOENT") return;
 		throw error;
 	}
 	throw new Error(`Harness state destination "${destinationPath}" already exists`);
