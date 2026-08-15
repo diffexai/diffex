@@ -41,28 +41,23 @@ const updatePlanItemSchema = Type.Object(
 	{ additionalProperties: false },
 );
 
-const updatePlanSchema = Type.Unsafe<UpdatePlanToolInput>({
-	type: "object",
-	anyOf: [
-		Type.Object(
-			{
-				plan: Type.Array(updatePlanItemSchema, {
-					minItems: 1,
-					description: "Full ordered plan snapshot.",
-				}),
-				explanation: Type.Optional(Type.String({ description: "Reason for a material plan change." })),
-			},
-			{ additionalProperties: false },
+const updatePlanSchema = Type.Object(
+	{
+		plan: Type.Optional(
+			Type.Array(updatePlanItemSchema, {
+				minItems: 1,
+				description: "Full ordered plan snapshot. Provide exactly one operation: plan or clear.",
+			}),
 		),
-		Type.Object(
-			{
-				clear: Type.Literal(true, { description: "Explicitly abandon and clear the current plan." }),
-				explanation: Type.Optional(Type.String({ description: "Reason for clearing the plan." })),
-			},
-			{ additionalProperties: false },
+		clear: Type.Optional(
+			Type.Literal(true, {
+				description: "Explicitly abandon and clear the current plan. Provide exactly one operation: plan or clear.",
+			}),
 		),
-	],
-});
+		explanation: Type.Optional(Type.String({ description: "Reason for changing or clearing the plan." })),
+	},
+	{ additionalProperties: false },
+);
 
 export const updatePlanToolSystemPromptContribution = {
 	snippet: "track progress with an ordered task checklist",
