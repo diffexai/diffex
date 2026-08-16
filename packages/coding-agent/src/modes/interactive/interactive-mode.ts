@@ -1945,7 +1945,7 @@ export class InteractiveMode {
 					if (result.editorText && !this.editor.getText().trim()) {
 						this.editor.setText(result.editorText);
 					}
-					this.showStatus("Navigated to selected point");
+					this.showTreeNavigationStatus();
 					void this.flushCompactionQueue({ willRetry: false });
 					return { cancelled: false };
 				},
@@ -1974,6 +1974,14 @@ export class InteractiveMode {
 		this.setupExtensionShortcuts(extensionRunner);
 		this.showLoadedResources({ force: false, showDiagnosticsWhenQuiet: true });
 		this.showStartupNoticesIfNeeded();
+	}
+
+	private showTreeNavigationStatus(): void {
+		this.showStatus(
+			this.session.pendingPlanContinuation
+				? "Navigated to selected point. Accepted plan implementation is waiting; use /plan to retry."
+				: "Navigated to selected point",
+		);
 	}
 
 	private applyFullscreenScrollbarSetting(): void {
@@ -5428,7 +5436,7 @@ export class InteractiveMode {
 						if (result.editorText && !this.editor.getText().trim()) {
 							this.editor.setText(result.editorText);
 						}
-						this.showStatus("Navigated to selected point");
+						this.showTreeNavigationStatus();
 						void this.flushCompactionQueue({ willRetry: false });
 					} catch (error) {
 						this.showError(error instanceof Error ? error.message : String(error));
