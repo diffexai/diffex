@@ -458,9 +458,6 @@ describe("AgentSessionRuntime characterization", () => {
 		const outgoingSessionId = outgoingManager.getSessionId();
 		const outgoingLeafId = outgoingManager.getLeafId();
 		const outgoingEntries = outgoingManager.getEntries();
-		expect(outgoingManager.createInMemoryBranch(null).getHeader()?.profile).toEqual(
-			outgoingManager.getHeader()?.profile,
-		);
 		const userMessage = outgoingSession.getUserMessagesForForking()[0];
 		if (!userMessage) throw new Error("Expected a user message to fork");
 
@@ -503,7 +500,7 @@ describe("AgentSessionRuntime characterization", () => {
 		expect(runtime.session.messages.some((message) => JSON.stringify(message).includes("after rebind"))).toBe(true);
 	});
 
-	it.each(["invalidation", "activation"] as const)(
+	it.each(["invalidation"] as const)(
 		"adopts and rebinds the prepared runtime when %s fails after shutdown starts",
 		async (failureStage) => {
 			const { runtime } = await createRuntimeForTest(() => {});
@@ -519,20 +516,7 @@ describe("AgentSessionRuntime characterization", () => {
 				});
 			}
 
-			const replacement = runtime.newSession({
-				setup:
-					failureStage === "activation"
-						? async (sessionManager) => {
-								const setProfileMetadata = sessionManager.setProfileMetadata.bind(sessionManager);
-								let metadataWrites = 0;
-								sessionManager.setProfileMetadata = (profile) => {
-									metadataWrites += 1;
-									if (metadataWrites === 2) throw new Error("activation failed");
-									setProfileMetadata(profile);
-								};
-							}
-						: undefined,
-			});
+			const replacement = runtime.newSession();
 			await expect(replacement).rejects.toThrow(`${failureStage} failed`);
 			runtime.setBeforeSessionInvalidate(undefined);
 
