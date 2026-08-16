@@ -7,11 +7,24 @@ import {
 	SettingsSelectorComponent,
 } from "../src/modes/interactive/components/settings-selector.ts";
 import { initTheme } from "../src/modes/interactive/theme/theme.ts";
+import { stripAnsi } from "../src/utils/ansi.ts";
 
 describe("SettingsSelectorComponent", () => {
 	beforeAll(() => {
 		initTheme("dark");
 		setKeybindings(new KeybindingsManager());
+	});
+
+	it("keeps thinking effort out of settings", () => {
+		const selector = new SettingsSelectorComponent(
+			{
+				warnings: {},
+				availableThemes: [],
+			} as unknown as SettingsConfig,
+			{} as SettingsCallbacks,
+		);
+
+		expect(stripAnsi(selector.render(120).join("\n"))).not.toContain("Thinking level");
 	});
 
 	it("cycles through fullscreen scrollbar modes", () => {
@@ -20,7 +33,6 @@ describe("SettingsSelectorComponent", () => {
 			{
 				fullscreenScrollbar: "auto",
 				warnings: {},
-				availableThinkingLevels: [],
 				availableThemes: [],
 			} as unknown as SettingsConfig,
 			{ onFullscreenScrollbarChange: onChange } as unknown as SettingsCallbacks,
