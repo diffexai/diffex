@@ -9,6 +9,7 @@ const XtermTerminal = xterm.Terminal;
  * Virtual terminal for testing using xterm.js for accurate terminal emulation
  */
 export class VirtualTerminal implements Terminal {
+	readonly focusReportingSupported: boolean = true;
 	private xterm: XtermTerminalType;
 	private inputHandler?: (data: string) => void;
 	private resizeHandler?: () => void;

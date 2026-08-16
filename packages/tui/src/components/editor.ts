@@ -448,7 +448,13 @@ export class Editor implements Component, Focusable {
 		if (this.cursorBlinkTimer) return;
 		this.cursorBlinkTimer = setTimeout(() => {
 			this.cursorBlinkTimer = undefined;
-			if (!this.focused || !this.isEditorEmpty() || this.placeholder.length === 0 || this.autocompleteState) {
+			if (
+				!this.focused ||
+				!this.tui.isTerminalFocused() ||
+				!this.isEditorEmpty() ||
+				this.placeholder.length === 0 ||
+				this.autocompleteState
+			) {
 				this.cursorBlinkVisible = true;
 				return;
 			}
@@ -584,7 +590,11 @@ export class Editor implements Component, Focusable {
 		// autocomplete (e.g. slash-command menu) is visible.
 		const emitCursorMarker = this.focused;
 		this.updateCursorBlink(
-			this.focused && this.isEditorEmpty() && this.placeholder.length > 0 && !this.autocompleteState,
+			this.focused &&
+				this.tui.isTerminalFocused() &&
+				this.isEditorEmpty() &&
+				this.placeholder.length > 0 &&
+				!this.autocompleteState,
 		);
 
 		for (let visibleLineIndex = 0; visibleLineIndex < visibleLines.length; visibleLineIndex++) {

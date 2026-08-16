@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import { createRequire } from "node:module";
 import * as path from "node:path";
@@ -54,6 +55,29 @@ export function normalizeAppleTerminalInput(data: string, isAppleTerminal: boole
 	return normalizeNativeShiftEnterInput(data, isAppleTerminal, isShiftPressed);
 }
 
+function probeTmuxFocusEvents(): boolean {
+	try {
+		return (
+			execFileSync("tmux", ["show-options", "-gv", "focus-events"], {
+				encoding: "utf8",
+				timeout: 250,
+				stdio: ["ignore", "pipe", "ignore"],
+			}).trim() === "on"
+		);
+	} catch {
+		return false;
+	}
+}
+
+export function detectTerminalFocusReportingSupport(
+	environment: NodeJS.ProcessEnv = process.env,
+	tmuxFocusEventsEnabled: () => boolean = probeTmuxFocusEvents,
+): boolean {
+	const term = environment.TERM?.toLowerCase() ?? "";
+	if (!environment.TMUX && !term.startsWith("tmux")) return true;
+	return tmuxFocusEventsEnabled();
+}
+
 /**
  * Minimal terminal interface for TUI
  */
@@ -81,6 +105,9 @@ export interface Terminal {
 
 	// Whether Kitty keyboard protocol is active
 	get kittyProtocolActive(): boolean;
+
+	// Whether terminal focus changes can be reported reliably
+	readonly focusReportingSupported?: boolean;
 
 	// Cursor positioning (relative to current position)
 	moveBy(lines: number): void; // Move cursor up (negative) or down (positive) by N lines
@@ -110,6 +137,7 @@ export class ProcessTerminal implements Terminal {
 	private resizeHandler?: () => void;
 	private _kittyProtocolActive = false;
 	private _modifyOtherKeysActive = false;
+	readonly focusReportingSupported = detectTerminalFocusReportingSupport();
 	private keyboardProtocolPushed = false;
 	private keyboardProtocolNegotiationBuffer = "";
 	private keyboardProtocolBufferFlushTimer?: ReturnType<typeof setTimeout>;

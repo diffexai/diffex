@@ -2,6 +2,16 @@
 
 Diffex uses the [Kitty keyboard protocol](https://sw.kovidgoyal.net/kitty/keyboard-protocol/) for reliable modifier key detection. Most modern terminals support this protocol, but some require configuration.
 
+## Terminal focus and tmux
+
+Diffex uses terminal focus reporting to pause cursor animation when its terminal window or pane is not active. When reliable focus reporting is unavailable, the placeholder cursor remains static. To receive pane focus changes inside tmux and keep the focused-pane animation, add this to `~/.tmux.conf`:
+
+```tmux
+set -g focus-events on
+```
+
+Detach and reattach existing tmux clients after changing this option.
+
 ## Kitty, iTerm2
 
 Work out of the box.

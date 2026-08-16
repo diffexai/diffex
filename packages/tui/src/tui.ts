@@ -248,6 +248,10 @@ export class Container implements Component {
  * TUI - Main class for managing terminal UI with differential rendering
  */
 const SEGMENT_RESET = "\x1b[0m\x1b]8;;\x07";
+const ENABLE_FOCUS_REPORTING = "\x1b[?1004h";
+const DISABLE_FOCUS_REPORTING = "\x1b[?1004l";
+const FOCUS_IN = "\x1b[I";
+const FOCUS_OUT = "\x1b[O";
 
 /** Composite overlay content into a terminal line at a fixed column. */
 export function compositeTuiLine(
@@ -299,6 +303,7 @@ export interface TUI extends Component {
 	clear(): void;
 	getShowHardwareCursor(): boolean;
 	setShowHardwareCursor(enabled: boolean): void;
+	isTerminalFocused(): boolean;
 	getClearOnShrink(): boolean;
 	setClearOnShrink(enabled: boolean): void;
 	setFocus(component: Component | null): void;
@@ -343,6 +348,7 @@ export abstract class TuiBase extends Container implements TUI {
 	private static readonly MIN_RENDER_INTERVAL_MS = 16;
 	private showHardwareCursor = process.env.DIFFEX_HARDWARE_CURSOR === "1";
 	private clearOnShrink = process.env.DIFFEX_CLEAR_ON_SHRINK === "1";
+	private terminalFocused = true;
 	protected fullRedrawCount = 0;
 	protected stopped = false;
 	private pendingOsc11BackgroundReplies = 0;
@@ -363,6 +369,7 @@ export abstract class TuiBase extends Container implements TUI {
 	constructor(terminal: Terminal, showHardwareCursor?: boolean, logDirectory?: string) {
 		super();
 		this.terminal = terminal;
+		this.terminalFocused = terminal.focusReportingSupported !== false;
 		this.logDirectory =
 			logDirectory ?? process.env.DIFFEX_CODING_AGENT_DIR ?? path.join(os.homedir(), ".diffex", "agent");
 		if (showHardwareCursor !== undefined) {
@@ -377,6 +384,8 @@ export abstract class TuiBase extends Container implements TUI {
 	protected beforeTerminalStart(): void {}
 
 	protected afterTerminalStart(): void {}
+
+	protected onTerminalFocusChanged(_focused: boolean): void {}
 
 	protected beforeTerminalStop(_options: TuiStopOptions): void {}
 
@@ -397,6 +406,10 @@ export abstract class TuiBase extends Container implements TUI {
 			this.terminal.hideCursor();
 		}
 		this.requestRender();
+	}
+
+	isTerminalFocused(): boolean {
+		return this.terminalFocused;
 	}
 
 	getClearOnShrink(): boolean {
@@ -691,11 +704,13 @@ export abstract class TuiBase extends Container implements TUI {
 
 	start(): void {
 		this.stopped = false;
+		this.terminalFocused = this.terminal.focusReportingSupported !== false;
 		this.beforeTerminalStart();
 		this.terminal.start(
 			(data) => this.handleTerminalInput(data),
 			() => this.requestRender(),
 		);
+		this.terminal.write(ENABLE_FOCUS_REPORTING);
 		this.afterTerminalStart();
 		this.terminal.hideCursor();
 		if (this.terminalColorSchemeNotificationsEnabled) {
@@ -746,6 +761,7 @@ export abstract class TuiBase extends Container implements TUI {
 	stop(options: TuiStopOptions = {}): void {
 		this.stopped = true;
 		this.cancelRenderTimer();
+		this.terminal.write(DISABLE_FOCUS_REPORTING);
 		if (this.terminalColorSchemeNotificationsEnabled) {
 			this.terminal.write("\x1b[?2031l");
 		}
@@ -818,6 +834,9 @@ export abstract class TuiBase extends Container implements TUI {
 	}
 
 	private handleTerminalInput(data: string): void {
+		if (this.consumeTerminalFocusEvent(data)) {
+			return;
+		}
 		if (this.consumeOsc11BackgroundResponse(data)) {
 			return;
 		}
@@ -893,6 +912,17 @@ export abstract class TuiBase extends Container implements TUI {
 			// where even setTimeout(0) can take a full 16 ms tick on Windows.
 			this.requestImmediateRender();
 		}
+	}
+
+	private consumeTerminalFocusEvent(data: string): boolean {
+		if (data !== FOCUS_IN && data !== FOCUS_OUT) return false;
+		const focused = data === FOCUS_IN;
+		if (this.terminalFocused !== focused) {
+			this.terminalFocused = focused;
+			this.onTerminalFocusChanged(focused);
+			this.requestRender();
+		}
+		return true;
 	}
 
 	private consumeOsc11BackgroundResponse(data: string): boolean {

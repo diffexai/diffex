@@ -577,7 +577,7 @@ export class TuiMainScreen extends TuiBase implements TUI {
 		}
 
 		this.hardwareCursorRow = targetRow;
-		if (this.getShowHardwareCursor()) {
+		if (this.getShowHardwareCursor() && this.isTerminalFocused()) {
 			this.terminal.showCursor();
 		} else {
 			this.terminal.hideCursor();

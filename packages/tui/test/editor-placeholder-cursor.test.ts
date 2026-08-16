@@ -5,10 +5,11 @@ import { Editor } from "../src/components/editor.ts";
 import { CURSOR_MARKER, type TUI } from "../src/tui.ts";
 import { defaultEditorTheme } from "./test-themes.ts";
 
-function createTestTui(requestRender: () => void = () => {}): TUI {
+function createTestTui(requestRender: () => void = () => {}, isTerminalFocused: () => boolean = () => true): TUI {
 	return {
 		terminal: { rows: 24 },
 		requestRender,
+		isTerminalFocused,
 	} as unknown as TUI;
 }
 
@@ -64,6 +65,52 @@ describe("Editor placeholder cursor", () => {
 			mock.timers.tick(500);
 			assert.strictEqual(renderRequests, 2);
 			assert.ok(editor.render(80)[1]!.startsWith(`\x1b[34m> \x1b[39m${CURSOR_MARKER}\x1b[7mA\x1b[0m`));
+		} finally {
+			editor.focused = false;
+			editor.render(80);
+			mock.timers.reset();
+		}
+	});
+
+	it("keeps the cursor visible without blinking while the terminal is unfocused", () => {
+		mock.timers.enable({ apis: ["setTimeout"] });
+		let renderRequests = 0;
+		let terminalFocused = true;
+		const editor = new Editor(
+			createTestTui(
+				() => {
+					renderRequests++;
+				},
+				() => terminalFocused,
+			),
+			defaultEditorTheme,
+			{
+				prompt: "> ",
+				placeholder: "Ask Diffex to do something for you.",
+				placeholderStyle: (text) => `\x1b[90m${text}\x1b[39m`,
+			},
+		);
+		editor.focused = true;
+
+		try {
+			assert.ok(editor.render(80)[1]!.includes("\x1b[7mA\x1b[0m"));
+			mock.timers.tick(500);
+			assert.strictEqual(renderRequests, 1);
+			assert.ok(!editor.render(80)[1]!.includes("\x1b[7mA\x1b[0m"));
+
+			terminalFocused = false;
+			mock.timers.tick(500);
+			assert.strictEqual(renderRequests, 1);
+			assert.ok(editor.render(80)[1]!.includes("\x1b[7mA\x1b[0m"));
+			mock.timers.tick(1000);
+			assert.strictEqual(renderRequests, 1);
+			assert.ok(editor.render(80)[1]!.includes("\x1b[7mA\x1b[0m"));
+
+			terminalFocused = true;
+			editor.render(80);
+			mock.timers.tick(500);
+			assert.strictEqual(renderRequests, 2);
+			assert.ok(!editor.render(80)[1]!.includes("\x1b[7mA\x1b[0m"));
 		} finally {
 			editor.focused = false;
 			editor.render(80);

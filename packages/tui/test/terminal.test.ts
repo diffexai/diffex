@@ -1,7 +1,12 @@
 import assert from "node:assert";
 import { describe, it, mock } from "node:test";
 import { setKittyProtocolActive } from "../src/keys.ts";
-import { normalizeAppleTerminalInput, normalizeNativeShiftEnterInput, ProcessTerminal } from "../src/terminal.ts";
+import {
+	detectTerminalFocusReportingSupport,
+	normalizeAppleTerminalInput,
+	normalizeNativeShiftEnterInput,
+	ProcessTerminal,
+} from "../src/terminal.ts";
 
 describe("normalizeNativeShiftEnterInput", () => {
 	it("rewrites Return to CSI-u Shift+Enter when native Shift detection is enabled and Shift is pressed", () => {
@@ -38,6 +43,26 @@ describe("normalizeAppleTerminalInput", () => {
 	it("leaves non-Return input unchanged", () => {
 		assert.equal(normalizeAppleTerminalInput("\x1b[13;2u", true, true), "\x1b[13;2u");
 		assert.equal(normalizeAppleTerminalInput("a", true, true), "a");
+	});
+});
+
+describe("detectTerminalFocusReportingSupport", () => {
+	it("uses terminal focus reporting outside tmux", () => {
+		assert.strictEqual(
+			detectTerminalFocusReportingSupport({ TERM: "xterm-256color" }, () => false),
+			true,
+		);
+	});
+
+	it("requires tmux focus events inside tmux", () => {
+		assert.strictEqual(
+			detectTerminalFocusReportingSupport({ TMUX: "/tmp/tmux/default,1,0" }, () => false),
+			false,
+		);
+		assert.strictEqual(
+			detectTerminalFocusReportingSupport({ TMUX: "/tmp/tmux/default,1,0" }, () => true),
+			true,
+		);
 	});
 });
 

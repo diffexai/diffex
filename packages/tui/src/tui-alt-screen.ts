@@ -45,11 +45,9 @@ const ENTER_ALT_SCREEN = "\x1b[?1049h";
 const EXIT_ALT_SCREEN = "\x1b[?1049l";
 const DISABLE_AUTOWRAP = "\x1b[?7l";
 const ENABLE_AUTOWRAP = "\x1b[?7h";
-const ENABLE_BUTTON_MOTION_MOUSE = "\x1b[?1000h\x1b[?1002h\x1b[?1004h\x1b[?1006h";
-const ENABLE_ALL_MOTION_MOUSE = "\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1004h\x1b[?1006h";
-const DISABLE_MOUSE = "\x1b[?1006l\x1b[?1004l\x1b[?1003l\x1b[?1002l\x1b[?1000l";
-const FOCUS_IN = "\x1b[I";
-const FOCUS_OUT = "\x1b[O";
+const ENABLE_BUTTON_MOTION_MOUSE = "\x1b[?1000h\x1b[?1002h\x1b[?1006h";
+const ENABLE_ALL_MOTION_MOUSE = "\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h";
+const DISABLE_MOUSE = "\x1b[?1006l\x1b[?1003l\x1b[?1002l\x1b[?1000l";
 const BEGIN_SYNCHRONIZED_OUTPUT = "\x1b[?2026h";
 const END_SYNCHRONIZED_OUTPUT = "\x1b[?2026l";
 const OSC133_ZONE_PREFIX = /^(?:\x1b\]133;[ABC](?:\x07|\x1b\\))+/;
@@ -249,6 +247,24 @@ export class TuiAltScreen extends TuiBase implements ViewportTUI {
 		);
 	}
 
+	protected override onTerminalFocusChanged(focused: boolean): void {
+		if (focused) return;
+		const hadActiveSelection = this.selectionPressActive;
+		this.selectionPressActive = false;
+		this.stopSelectionAutoScroll();
+		this.stopScrollbarHover();
+		this.stopScrollbarDrag();
+		this.pressedUrl = undefined;
+		this.selectionDragged = false;
+		if (hadActiveSelection) {
+			this.selectionAnchor = undefined;
+			this.selectionFocus = undefined;
+			this.selectionGranularity = "character";
+			this.selectionInitialRange = undefined;
+		}
+		this.lastClick = undefined;
+	}
+
 	protected override beforeTerminalStop(_options: TuiStopOptions): void {
 		this.stopSelectionAutoScroll();
 		this.selectionPressActive = false;
@@ -383,26 +399,6 @@ export class TuiAltScreen extends TuiBase implements ViewportTUI {
 	}
 
 	private handleViewportInput(data: string): { consume?: boolean } | undefined {
-		if (data === FOCUS_OUT) {
-			const hadActiveSelection = this.selectionPressActive;
-			this.selectionPressActive = false;
-			this.stopSelectionAutoScroll();
-			this.stopScrollbarHover();
-			this.stopScrollbarDrag();
-			this.pressedUrl = undefined;
-			this.selectionDragged = false;
-			if (hadActiveSelection) {
-				this.selectionAnchor = undefined;
-				this.selectionFocus = undefined;
-				this.selectionGranularity = "character";
-				this.selectionInitialRange = undefined;
-			}
-			this.lastClick = undefined;
-			this.requestRender();
-			return { consume: true };
-		}
-		if (data === FOCUS_IN) return { consume: true };
-
 		const wheelEvent = this.parseWheelEvent(data);
 		if (wheelEvent) {
 			this.routeWheel(wheelEvent);
@@ -1032,7 +1028,7 @@ export class TuiAltScreen extends TuiBase implements ViewportTUI {
 
 		if (cursorPos) {
 			buffer += `\x1b[${cursorPos.row + 1};${Math.min(width, cursorPos.col) + 1}H`;
-			buffer += this.getShowHardwareCursor() ? "\x1b[?25h" : "\x1b[?25l";
+			buffer += this.getShowHardwareCursor() && this.isTerminalFocused() ? "\x1b[?25h" : "\x1b[?25l";
 		} else {
 			buffer += "\x1b[?25l";
 		}
