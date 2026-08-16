@@ -11,6 +11,7 @@ import {
 	type StreamingSubmitContext,
 	setupEditorSubmitHandler,
 	showPendingPlanDecision,
+	togglePlanMode,
 } from "./interactive-mode-plan-test-utils.ts";
 
 beforeAll(() => initTheme("dark"));
@@ -151,6 +152,34 @@ describe("InteractiveMode plan resolution", () => {
 			preflightResult: expect.any(Function),
 		});
 		expect(reboundSession.pendingPlanContinuation).toBeUndefined();
+	});
+
+	test("toggles plan mode on and off for the keyboard shortcut", async () => {
+		const context = createDecisionContext(undefined);
+		context.session.pendingPlan = undefined;
+		context.session.collaborationMode = "default";
+
+		await togglePlanMode.call(context);
+		expect(context.session.setCollaborationMode).toHaveBeenLastCalledWith("plan");
+		expect(context.showStatus).toHaveBeenLastCalledWith("Plan mode enabled");
+
+		await togglePlanMode.call(context);
+		expect(context.session.setCollaborationMode).toHaveBeenLastCalledWith("default");
+		expect(context.showStatus).toHaveBeenLastCalledWith("Plan mode disabled");
+	});
+
+	test("confirms before the keyboard shortcut discards a pending plan", async () => {
+		const context = createDecisionContext(undefined);
+		context.showExtensionConfirm.mockResolvedValue(true);
+
+		await togglePlanMode.call(context);
+
+		expect(context.showExtensionConfirm).toHaveBeenCalledWith(
+			"Discard pending plan",
+			"Disable plan mode and discard the pending plan?",
+		);
+		expect(context.session.resolvePlan).toHaveBeenCalledWith(PLAN.id, "discard");
+		expect(context.showStatus).toHaveBeenLastCalledWith("Plan discarded; plan mode disabled");
 	});
 
 	test("activates plan mode and returns slash-command instructions as the prompt", async () => {

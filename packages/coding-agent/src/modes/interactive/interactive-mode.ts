@@ -2737,6 +2737,39 @@ export class InteractiveMode {
 		}
 	}
 
+	private async togglePlanMode(): Promise<void> {
+		const continuation = this.session.pendingPlanContinuation;
+		if (continuation) {
+			this.showError("Accepted plan implementation is waiting. Use /plan to retry it first.");
+			return;
+		}
+
+		try {
+			if (this.session.collaborationMode === "plan") {
+				if (this.session.pendingPlan) {
+					const plan = this.session.pendingPlan;
+					const confirmed = await this.showExtensionConfirm(
+						"Discard pending plan",
+						"Disable plan mode and discard the pending plan?",
+					);
+					if (!confirmed) return;
+					this.session.resolvePlan(plan.id, "discard");
+					this.showStatus("Plan discarded; plan mode disabled");
+					return;
+				}
+
+				this.session.setCollaborationMode("default");
+				this.showStatus("Plan mode disabled");
+				return;
+			}
+
+			this.session.setCollaborationMode("plan");
+			this.showStatus("Plan mode enabled");
+		} catch (error: unknown) {
+			this.showError(`Failed to toggle plan mode: ${error instanceof Error ? error.message : String(error)}`);
+		}
+	}
+
 	private async handlePlanCommand(instructions?: string): Promise<string | undefined> {
 		const continuation = this.session.pendingPlanContinuation;
 		if (continuation) {
@@ -3096,7 +3129,7 @@ export class InteractiveMode {
 		this.defaultEditor.onAction("app.clear", () => this.handleCtrlC());
 		this.defaultEditor.onCtrlD = () => this.handleCtrlD();
 		this.defaultEditor.onAction("app.suspend", () => this.handleCtrlZ());
-		this.defaultEditor.onAction("app.thinking.cycle", () => this.cycleThinkingLevel());
+		this.defaultEditor.onAction("app.plan.toggle", () => void this.togglePlanMode());
 		this.defaultEditor.onAction("app.model.cycleForward", () => this.cycleModel("forward"));
 		this.defaultEditor.onAction("app.model.cycleBackward", () => this.cycleModel("backward"));
 
@@ -3429,7 +3462,7 @@ export class InteractiveMode {
 				break;
 
 			case "collaboration_mode_changed":
-				this.ui.requestRender();
+				this.updateEditorBorderColor();
 				break;
 
 			case "plan_submitted":
@@ -4350,21 +4383,12 @@ export class InteractiveMode {
 	private updateEditorBorderColor(): void {
 		if (this.isBashMode) {
 			this.editor.borderColor = theme.getBashModeBorderColor();
+		} else if (this.session.collaborationMode === "plan") {
+			this.editor.borderColor = theme.getPlanModeBorderColor();
 		} else {
 			this.editor.borderColor = getEditorTheme().borderColor;
 		}
 		this.ui.requestRender();
-	}
-
-	private cycleThinkingLevel(): void {
-		const newLevel = this.session.cycleThinkingLevel();
-		if (newLevel === undefined) {
-			this.showStatus("Current model does not support thinking");
-		} else {
-			this.footer.invalidate();
-			this.updateEditorBorderColor();
-			this.showStatus(`Thinking level: ${newLevel}`);
-		}
 	}
 
 	private async cycleModel(direction: "forward" | "backward"): Promise<void> {
@@ -6508,7 +6532,7 @@ export class InteractiveMode {
 		const clear = this.getAppKeyDisplay("app.clear");
 		const exit = this.getAppKeyDisplay("app.exit");
 		const suspend = this.getAppKeyDisplay("app.suspend");
-		const cycleThinkingLevel = this.getAppKeyDisplay("app.thinking.cycle");
+		const togglePlanMode = this.getAppKeyDisplay("app.plan.toggle");
 		const cycleModelForward = this.getAppKeyDisplay("app.model.cycleForward");
 		const selectModel = this.getAppKeyDisplay("app.model.select");
 		const expandTools = this.getAppKeyDisplay("app.tools.expand");
@@ -6553,7 +6577,7 @@ export class InteractiveMode {
 | \`${clear}\` | Clear editor (first) / exit (second) |
 | \`${exit}\` | Exit (when editor is empty) |
 | \`${suspend}\` | Suspend to background |
-| \`${cycleThinkingLevel}\` | Cycle thinking level |
+| \`${togglePlanMode}\` | Toggle plan mode |
 | \`${cycleModelForward}\` / \`${cycleModelBackward}\` | Cycle models |
 | \`${selectModel}\` | Open model selector |
 | \`${expandTools}\` | Toggle tool output expansion |

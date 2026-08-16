@@ -97,8 +97,9 @@ const ThemeJsonSchema = Type.Object({
 		thinkingHigh: ColorValueSchema,
 		thinkingXhigh: ColorValueSchema,
 		thinkingMax: Type.Optional(ColorValueSchema),
-		// Bash Mode (1 color)
+		// Mode Borders (1 required, 1 optional)
 		bashMode: ColorValueSchema,
+		planMode: Type.Optional(ColorValueSchema),
 	}),
 	export: Type.Optional(
 		Type.Object({
@@ -164,7 +165,8 @@ export type ThemeColor =
 	| "thinkingHigh"
 	| "thinkingXhigh"
 	| "thinkingMax"
-	| "bashMode";
+	| "bashMode"
+	| "planMode";
 
 export type ThemeBg =
 	| "selectedBg"
@@ -340,6 +342,7 @@ function withThemeColorFallbacks(colors: ThemeJson["colors"]): ThemeJson["colors
 	selectionAccent: ColorValue;
 	autocompleteSelected: ColorValue;
 	editorBorder: ColorValue;
+	planMode: ColorValue;
 } {
 	const startupIntroAccent = colors.startupIntroAccent ?? colors.mdLink;
 	const selectionAccent = colors.selectionAccent ?? colors.autocompleteSelected ?? startupIntroAccent;
@@ -352,6 +355,7 @@ function withThemeColorFallbacks(colors: ThemeJson["colors"]): ThemeJson["colors
 		selectionAccent,
 		autocompleteSelected: colors.autocompleteSelected ?? selectionAccent,
 		editorBorder: colors.editorBorder ?? colors.borderMuted,
+		planMode: colors.planMode ?? "#6FB01C",
 	};
 }
 
@@ -465,6 +469,10 @@ export class Theme {
 
 	getBashModeBorderColor(): (str: string) => string {
 		return (str: string) => this.fg("bashMode", str);
+	}
+
+	getPlanModeBorderColor(): (str: string) => string {
+		return (str: string) => this.fg("planMode", str);
 	}
 }
 

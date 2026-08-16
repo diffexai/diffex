@@ -83,7 +83,8 @@
 		"thinkingXhigh": "#8b008b",
 		"thinkingMax": "#af005f",
 
-		"bashMode": "red"
+		"bashMode": "red",
+		"planMode": "#6FB01C"
 	},
 	"export": {
 		"pageBg": "#f8f8f8",

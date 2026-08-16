@@ -22,6 +22,13 @@ describe("keybindings migration", () => {
 		return agentDir;
 	}
 
+	it("binds Shift+Tab to plan mode instead of thinking effort", () => {
+		const keybindings = new KeybindingsManager();
+
+		expect(keybindings.getKeys("app.plan.toggle")).toEqual(["shift+tab"]);
+		expect(keybindings.getEffectiveConfig()).not.toHaveProperty("app.thinking.cycle");
+	});
+
 	it("rewrites old key names to namespaced ids", () => {
 		const agentDir = createAgentDir({
 			cursorUp: ["up", "ctrl+p"],

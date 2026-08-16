@@ -28,6 +28,7 @@ export interface PlanDecisionContext {
 	planDecisionAbortController?: AbortController;
 	suppressedPlanDecisionId?: string;
 	showExtensionSelector: ReturnType<typeof vi.fn>;
+	showExtensionConfirm: ReturnType<typeof vi.fn>;
 	openPendingPlanDecision: ReturnType<typeof vi.fn>;
 	showStatus: ReturnType<typeof vi.fn>;
 	showError: ReturnType<typeof vi.fn>;
@@ -71,6 +72,10 @@ export const startPlanContinuation = Reflect.get(InteractiveMode.prototype, "sta
 	this: PlanDecisionContext,
 	continuation: PlanContinuation,
 	onPromptOwned?: () => void,
+) => Promise<void>;
+
+export const togglePlanMode = Reflect.get(InteractiveMode.prototype, "togglePlanMode") as (
+	this: PlanDecisionContext,
 ) => Promise<void>;
 
 export const handlePlanCommand = Reflect.get(InteractiveMode.prototype, "handlePlanCommand") as (
@@ -410,6 +415,7 @@ export function createDecisionContext(selection: string | undefined): PlanDecisi
 		planDecisionAbortController: undefined,
 		suppressedPlanDecisionId: undefined,
 		showExtensionSelector: vi.fn().mockResolvedValue(selection),
+		showExtensionConfirm: vi.fn().mockResolvedValue(false),
 		openPendingPlanDecision: vi.fn(),
 		showStatus: vi.fn(),
 		showError: vi.fn(),
