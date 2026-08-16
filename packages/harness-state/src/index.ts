@@ -6,15 +6,31 @@ import Type, { type Static } from "typebox";
 import { Check } from "typebox/value";
 
 const SystemPromptSchema = Type.Readonly(Type.String({ pattern: "^(?!\\uFEFF)(?=[\\s\\S]*\\S)[\\s\\S]*$" }));
+const ContentHashSchema = Type.Readonly(Type.String({ pattern: "^sha256:[0-9a-f]{64}$" }));
 
 export const HarnessStateSchema = Type.Object({ systemPrompt: SystemPromptSchema }, { additionalProperties: false });
 export type HarnessState = Static<typeof HarnessStateSchema>;
 
+const HarnessStateSaveOptionsSchema = Type.Object(
+	{ base: Type.Optional(ContentHashSchema) },
+	{ additionalProperties: false },
+);
+export type HarnessStateSaveOptions = Static<typeof HarnessStateSaveOptionsSchema>;
+
 export const HarnessStateManifestSchema = Type.Object(
-	{ contentHash: Type.Readonly(Type.String({ pattern: "^sha256:[0-9a-f]{64}$" })) },
+	{ contentHash: ContentHashSchema, base: ContentHashSchema },
 	{ additionalProperties: false },
 );
 export type HarnessStateManifest = Static<typeof HarnessStateManifestSchema>;
+
+export const HarnessStateBundleSchema = Type.Object(
+	{
+		state: Type.Readonly(HarnessStateSchema),
+		manifest: Type.Readonly(HarnessStateManifestSchema),
+	},
+	{ additionalProperties: false },
+);
+export type HarnessStateBundle = Static<typeof HarnessStateBundleSchema>;
 
 const MANIFEST_NAME = "manifest.json";
 const PROMPT_NAME = "EVOLVE.md";
@@ -69,7 +85,7 @@ async function inspectBundleDirectory(bundlePath: string): Promise<void> {
 	}
 }
 
-export async function loadHarnessState(bundlePath: string): Promise<HarnessState> {
+export async function loadHarnessState(bundlePath: string): Promise<HarnessStateBundle> {
 	await inspectBundleDirectory(bundlePath);
 	const manifestPath = join(bundlePath, MANIFEST_NAME);
 	const promptPath = join(bundlePath, PROMPT_NAME);
@@ -82,7 +98,7 @@ export async function loadHarnessState(bundlePath: string): Promise<HarnessState
 	if (manifest.contentHash !== computeContentHash(promptBytes)) {
 		throw new Error(`Harness state content hash mismatch at "${promptPath}"`);
 	}
-	return state;
+	return { state, manifest };
 }
 
 async function assertDestinationAbsent(destinationPath: string): Promise<void> {
@@ -95,11 +111,18 @@ async function assertDestinationAbsent(destinationPath: string): Promise<void> {
 	throw new Error(`Harness state destination "${destinationPath}" already exists`);
 }
 
-export async function saveHarnessState(state: unknown, destinationPath: string): Promise<void> {
+export async function saveHarnessState(
+	state: unknown,
+	destinationPath: string,
+	options: HarnessStateSaveOptions = {},
+): Promise<HarnessStateBundle> {
 	if (!Check(HarnessStateSchema, state)) throw new Error("Invalid harness state to save");
+	if (!Check(HarnessStateSaveOptionsSchema, options)) throw new Error("Invalid harness state save options");
 	const systemPrompt = state.systemPrompt;
 	const promptBytes = UTF8_ENCODER.encode(systemPrompt);
-	const manifest = `${JSON.stringify({ contentHash: computeContentHash(promptBytes) })}\n`;
+	const contentHash = computeContentHash(promptBytes);
+	const manifest = { contentHash, base: options.base ?? contentHash };
+	const manifestText = `${JSON.stringify(manifest)}\n`;
 	const absoluteDestinationPath = resolve(destinationPath);
 	const parentPath = dirname(absoluteDestinationPath);
 	const parentStats = await stat(parentPath);
@@ -111,7 +134,7 @@ export async function saveHarnessState(state: unknown, destinationPath: string):
 	let temporaryPath: string | undefined;
 	try {
 		temporaryPath = await mkdtemp(join(parentPath, `.${basename(absoluteDestinationPath)}.harness-state.tmp-`));
-		await writeFile(join(temporaryPath, MANIFEST_NAME), manifest, "utf8");
+		await writeFile(join(temporaryPath, MANIFEST_NAME), manifestText, "utf8");
 		await writeFile(join(temporaryPath, PROMPT_NAME), promptBytes);
 		await assertDestinationAbsent(absoluteDestinationPath);
 		await rename(temporaryPath, absoluteDestinationPath);
@@ -124,4 +147,5 @@ export async function saveHarnessState(state: unknown, destinationPath: string):
 		}
 		throw error;
 	}
+	return { state, manifest };
 }

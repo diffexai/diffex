@@ -6,18 +6,25 @@ import { Check } from "typebox/value";
 import { afterEach, describe, expect, test } from "vitest";
 import {
 	type HarnessState,
+	type HarnessStateBundle,
+	HarnessStateBundleSchema,
 	type HarnessStateManifest,
 	HarnessStateManifestSchema,
+	type HarnessStateSaveOptions,
 	HarnessStateSchema,
 	loadHarnessState,
 	saveHarnessState,
 } from "../src/index.ts";
 
+const EXTERNAL_BASE = `sha256:${"0".repeat(64)}`;
 const temporaryRoots: string[] = [];
 
-function createManifest(prompt: string): string {
-	const digest = createHash("sha256").update(prompt, "utf8").digest("hex");
-	return `{"contentHash":"sha256:${digest}"}\n`;
+function computeContentHash(prompt: string): string {
+	return `sha256:${createHash("sha256").update(prompt, "utf8").digest("hex")}`;
+}
+
+function createManifest(prompt: string, base = computeContentHash(prompt)): string {
+	return `${JSON.stringify({ contentHash: computeContentHash(prompt), base })}\n`;
 }
 
 afterEach(async () => {
@@ -53,29 +60,37 @@ async function pathExists(path: string): Promise<boolean> {
 	}
 }
 
-function assertReadonlyTypes(state: HarnessState, manifest: HarnessStateManifest): void {
+function assertReadonlyTypes(
+	state: HarnessState,
+	manifest: HarnessStateManifest,
+	options: HarnessStateSaveOptions,
+	bundle: HarnessStateBundle,
+): void {
 	// @ts-expect-error HarnessState fields are readonly.
 	state.systemPrompt = "changed";
 	// @ts-expect-error HarnessStateManifest fields are readonly.
 	manifest.contentHash = "sha256:changed";
+	// @ts-expect-error HarnessStateManifest fields are readonly.
+	manifest.base = "sha256:changed";
+	// @ts-expect-error HarnessStateSaveOptions fields are readonly.
+	options.base = "sha256:changed";
+	// @ts-expect-error HarnessStateBundle fields are readonly.
+	bundle.state = state;
+	// @ts-expect-error HarnessStateBundle fields are readonly.
+	bundle.manifest = manifest;
 }
 void assertReadonlyTypes;
 
 describe("schemas", () => {
 	test("exports strict schemas with readonly inferred fields", () => {
-		expect(Check(HarnessStateSchema, { systemPrompt: "Work carefully." })).toBe(true);
-		expect(
-			Check(HarnessStateManifestSchema, {
-				contentHash: "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-			}),
-		).toBe(true);
+		const state = { systemPrompt: "Work carefully." };
+		const manifest = { contentHash: computeContentHash(state.systemPrompt), base: EXTERNAL_BASE };
+		expect(Check(HarnessStateSchema, state)).toBe(true);
+		expect(Check(HarnessStateManifestSchema, manifest)).toBe(true);
+		expect(Check(HarnessStateBundleSchema, { state, manifest })).toBe(true);
 		expect(Check(HarnessStateSchema, { systemPrompt: "Work.", extra: true })).toBe(false);
-		expect(
-			Check(HarnessStateManifestSchema, {
-				contentHash: "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-				extra: true,
-			}),
-		).toBe(false);
+		expect(Check(HarnessStateManifestSchema, { ...manifest, extra: true })).toBe(false);
+		expect(Check(HarnessStateBundleSchema, { state, manifest, extra: true })).toBe(false);
 	});
 
 	test.each([
@@ -92,6 +107,15 @@ describe("schemas", () => {
 		["uppercase digest", { contentHash: "sha256:0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF" }],
 		["missing content hash", {}],
 	] as const)("rejects %s", (_label, manifest) => {
+		expect(Check(HarnessStateManifestSchema, { base: EXTERNAL_BASE, ...manifest })).toBe(false);
+	});
+
+	test.each([
+		["missing base", { contentHash: computeContentHash("Work.") }],
+		["wrong base algorithm", { contentHash: computeContentHash("Work."), base: "sha1:0123456789abcdef" }],
+		["short base", { contentHash: computeContentHash("Work."), base: "sha256:0123456789abcdef" }],
+		["uppercase base", { contentHash: computeContentHash("Work."), base: `sha256:${"A".repeat(64)}` }],
+	] as const)("rejects a manifest with %s", (_label, manifest) => {
 		expect(Check(HarnessStateManifestSchema, manifest)).toBe(false);
 	});
 });
@@ -106,17 +130,44 @@ describe("saving and round trips", () => {
 	] as const)("preserves %s prompt content verbatim", async (_label, systemPrompt) => {
 		const root = await createTemporaryRoot();
 		const destination = join(root, "saved-state");
-		await saveHarnessState({ systemPrompt }, destination);
+		const state = { systemPrompt };
+		const manifest = { contentHash: computeContentHash(systemPrompt), base: EXTERNAL_BASE };
+		const saved = await saveHarnessState(state, destination, { base: EXTERNAL_BASE });
 
-		expect(await readFile(join(destination, "manifest.json"), "utf8")).toBe(createManifest(systemPrompt));
+		expect(await readFile(join(destination, "manifest.json"), "utf8")).toBe(
+			createManifest(systemPrompt, EXTERNAL_BASE),
+		);
 		expect(await readFile(join(destination, "EVOLVE.md"), "utf8")).toBe(systemPrompt);
-		expect(await loadHarnessState(destination)).toEqual({ systemPrompt });
+		expect(saved).toEqual({ state, manifest });
+		expect(await loadHarnessState(destination)).toEqual(saved);
+	});
+
+	test("uses the computed content hash as the base for a root state", async () => {
+		const root = await createTemporaryRoot();
+		const destination = join(root, "root-state");
+		const state = { systemPrompt: "Root harness.\n" };
+		const contentHash = computeContentHash(state.systemPrompt);
+
+		const saved = await saveHarnessState(state, destination);
+
+		expect(saved).toEqual({ state, manifest: { contentHash, base: contentHash } });
+		expect(await readFile(join(destination, "manifest.json"), "utf8")).toBe(createManifest(state.systemPrompt));
+		expect(await loadHarnessState(destination)).toEqual(saved);
 	});
 
 	test("validates state before filesystem access", async () => {
 		const root = await createTemporaryRoot();
 		const destination = join(root, "missing-parent", "state");
 		await expect(saveHarnessState({ systemPrompt: "   " }, destination)).rejects.toThrow(/invalid harness state/i);
+		expect(await pathExists(destination)).toBe(false);
+	});
+
+	test("validates an explicit base before filesystem access", async () => {
+		const root = await createTemporaryRoot();
+		const destination = join(root, "missing-parent", "state");
+		await expect(saveHarnessState({ systemPrompt: "Valid." }, destination, { base: "sha256:short" })).rejects.toThrow(
+			/invalid harness state save options/i,
+		);
 		expect(await pathExists(destination)).toBe(false);
 	});
 
@@ -274,9 +325,17 @@ describe("bundle data validation", () => {
 	});
 
 	test.each([
-		["wrong algorithm", '{"contentHash":"sha1:0123456789abcdef0123456789abcdef01234567"}\n'],
+		[
+			"wrong algorithm",
+			`{"contentHash":"sha1:0123456789abcdef0123456789abcdef01234567","base":"${EXTERNAL_BASE}"}\n`,
+		],
 		["unknown field", `${createManifest("Act carefully.\n").trimEnd().slice(0, -1)},"extra":true}\n`],
-		["missing content hash", "{}\n"],
+		["missing content hash", `{"base":"${EXTERNAL_BASE}"}\n`],
+		["missing base", `{"contentHash":"${computeContentHash("Act carefully.\n")}"}\n`],
+		[
+			"wrong base algorithm",
+			`{"contentHash":"${computeContentHash("Act carefully.\n")}","base":"sha1:0123456789abcdef"}\n`,
+		],
 		["non-object", "[]\n"],
 	] as const)("rejects a manifest with %s", async (_label, manifest) => {
 		const root = await createTemporaryRoot();
