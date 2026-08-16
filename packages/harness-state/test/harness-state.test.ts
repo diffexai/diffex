@@ -9,13 +9,10 @@ import {
 	type HarnessStateManifest,
 	HarnessStateManifestSchema,
 	HarnessStateSchema,
-	loadDefaultHarnessState,
 	loadHarnessState,
 	saveHarnessState,
 } from "../src/index.ts";
 
-const DEFAULT_PROMPT =
-	"You are an expert coding assistant operating inside Diffex, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.\n\nGuidelines:\n- Be concise in your responses\n- Show file paths clearly when working with files\n";
 const temporaryRoots: string[] = [];
 
 function createManifest(prompt: string): string {
@@ -96,14 +93,6 @@ describe("schemas", () => {
 		["missing content hash", {}],
 	] as const)("rejects %s", (_label, manifest) => {
 		expect(Check(HarnessStateManifestSchema, manifest)).toBe(false);
-	});
-});
-
-describe("default bundle", () => {
-	test("loads the exact clean default through normal validation", async () => {
-		const state = await loadDefaultHarnessState();
-		expect(state).toEqual({ systemPrompt: DEFAULT_PROMPT });
-		expect(Object.isFrozen(state)).toBe(false);
 	});
 });
 

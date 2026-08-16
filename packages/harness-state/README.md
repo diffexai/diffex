@@ -27,7 +27,8 @@ Both files must be fatal, BOM-free UTF-8. The manifest must contain only `conten
 - `HarnessStateSchema` and `HarnessStateManifestSchema` are strict TypeBox schemas. Their inferred `HarnessState` and `HarnessStateManifest` types expose readonly fields.
 - `loadHarnessState(bundlePath)` validates a bundle, verifies its content hash, and returns its flat logical state without normalizing the prompt.
 - `saveHarnessState(state, destinationPath)` validates the state, derives its content hash, stages a canonical two-file bundle beside the destination, and renames it into place. The parent must already be a directory, any existing destination entry is rejected, and a failed save attempts to remove its owned staging directory.
-- `loadDefaultHarnessState()` loads the packaged clean-default bundle through `loadHarnessState()`.
+
+The package does not include or select a default harness. Callers must provide an explicit bundle path or state.
 
 Invalid state, layout, encoding, manifest, or prompt data rejects with an ordinary descriptive `Error`. JSON syntax failures retain the original syntax error as their cause. Other filesystem errors propagate unchanged.
 

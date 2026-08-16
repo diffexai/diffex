@@ -18,7 +18,7 @@
 	],
 	"scripts": {
 		"clean": "shx rm -rf dist",
-		"build": "tsgo -p tsconfig.build.json && shx rm -rf dist/default && shx cp -r src/default dist/default",
+		"build": "tsgo -p tsconfig.build.json && shx rm -rf dist/default",
 		"test": "vitest --run"
 	},
 	"engines": {

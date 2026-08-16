@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import { lstat, mkdtemp, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { TextDecoder, TextEncoder } from "node:util";
 import Type, { type Static } from "typebox";
 import { Check } from "typebox/value";
@@ -125,8 +124,4 @@ export async function saveHarnessState(state: unknown, destinationPath: string):
 		}
 		throw error;
 	}
-}
-
-export async function loadDefaultHarnessState(): Promise<HarnessState> {
-	return loadHarnessState(fileURLToPath(new URL("./default", import.meta.url)));
 }
