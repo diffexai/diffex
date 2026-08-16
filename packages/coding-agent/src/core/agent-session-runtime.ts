@@ -1,13 +1,8 @@
-import { randomUUID } from "node:crypto";
-import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
-import type { AgentMessage } from "@earendil-works/diffex-agent-core";
-import type { Api, Model } from "@earendil-works/diffex-ai";
-import { stripFrontmatter } from "../utils/frontmatter.ts";
 import { resolvePath } from "../utils/paths.ts";
 import type { AgentSession, PlanContinuation, PlanContinuationPromptOptions, PromptOptions } from "./agent-session.ts";
 import type { AgentSessionRuntimeDiagnostic, AgentSessionServices } from "./agent-session-services.ts";
-import { loadEvolvedNotes } from "./evolved.ts";
 import type {
 	ProjectTrustContext,
 	ReplacedSessionContext,
@@ -15,27 +10,9 @@ import type {
 	SessionStartEvent,
 } from "./extensions/index.ts";
 import { emitSessionShutdownEvent } from "./extensions/runner.ts";
-import {
-	createHarnessDescriptor,
-	loadHarnessDescriptors,
-	type ResolvedHarnessDescriptor,
-} from "./harness-descriptors.ts";
-import { routeTaskBoundary, routeTaskProfile, shouldEvaluateTaskBoundary } from "./profile-router.ts";
-import type { ResolvedTaskProfile } from "./profiles.ts";
-import { expandPromptTemplate } from "./prompt-templates.ts";
-import { startProfileRouteSpan, traceAiCompletion } from "./runtime-telemetry.ts";
 import type { CreateAgentSessionResult } from "./sdk.ts";
 import { assertSessionCwdExists } from "./session-cwd.ts";
-import {
-	type DiscoveredRelatedSession,
-	mergeRelatedSessionReferences,
-	normalizeRelatedSessionReferences,
-	type RelatedSessionReference,
-	readSessionHeaderForDiscovery,
-	SessionManager,
-	type SessionProfileMetadata,
-} from "./session-manager.ts";
-import { BUILTIN_SLASH_COMMANDS } from "./slash-commands.ts";
+import { SessionManager } from "./session-manager.ts";
 
 /**
  * Result returned by runtime creation.
@@ -48,76 +25,11 @@ export interface CreateAgentSessionRuntimeResult extends CreateAgentSessionResul
 	diagnostics: AgentSessionRuntimeDiagnostic[];
 }
 
-export type ProfileRoutingMode = "auto" | "pinned";
-
-/** Resolve CLI/runtime profile precedence without treating the `auto` sentinel as a pinned profile. */
-export function resolveProfileRoutingMode(
-	selectedProfile: string | undefined,
-	requestedMode: ProfileRoutingMode | undefined,
-	settingsDefaultProfile: string | undefined,
-): ProfileRoutingMode {
-	if (selectedProfile?.trim() === "auto") return "auto";
-	if (requestedMode) return requestedMode;
-	if (selectedProfile?.trim()) return "pinned";
-	const normalizedDefault = settingsDefaultProfile?.trim();
-	return normalizedDefault && normalizedDefault !== "auto" ? "pinned" : "auto";
-}
-
-export interface RuntimePromptResult {
-	routing: "bypassed" | "selected" | "reused" | "failed";
-	activeProfileId: string;
-	previousProfileId?: string;
-	harnessId?: string;
-	harnessRevision?: string;
-	notice?: string;
-	reason?: string;
-}
-
-export interface ProfileSwitchEvent {
-	fromProfileId: string;
-	toProfileId: string;
-	reason: string;
-	harnessId: string;
-	harnessRevision: string;
-	harnessName: string;
-	reused: boolean;
-	notice: string;
-}
-
-/** Content-free task-boundary proposal presented by a host before a future prompt is delivered. */
-export interface TaskBoundaryProposal {
-	decision: "reuse" | "select";
-	fromProfileId: string;
-	fromHarnessId: string;
-	toProfileId: string;
-	targetHarnessId?: string;
-	targetHarnessRevision?: string;
-	targetHarnessName: string;
-	/** True when accepting reuse will reopen a prior transcript instead of starting a new root session. */
-	willResumeSession: boolean;
-	confidence: number;
-}
-
-export type TaskBoundaryResolution = "switch" | "stay" | "cancel";
-export type TaskBoundaryResolver = (proposal: TaskBoundaryProposal) => Promise<TaskBoundaryResolution>;
 export type ValidateSessionTarget = (sessionManager: SessionManager, leafId: string | null) => void;
 
-export class TaskBoundaryCancelledError extends Error {
-	constructor(message = "Task boundary switch cancelled") {
-		super(message);
-		this.name = "TaskBoundaryCancelledError";
-	}
-}
-
 interface PreparedRuntimePrompt {
-	result: RuntimePromptResult;
 	completion: Promise<void>;
 	accepted: boolean;
-	cancelledError?: TaskBoundaryCancelledError;
-	resolution?: {
-		prompt: string;
-		messageCountBefore: number;
-	};
 }
 
 /**
@@ -131,11 +43,6 @@ export type CreateAgentSessionRuntimeFactory = (options: {
 	cwd: string;
 	agentDir: string;
 	sessionManager: SessionManager;
-	profile?: string;
-	profileRouting?: ProfileRoutingMode;
-	harnessId?: string;
-	telemetryContext?: AgentSessionServices["telemetryContext"];
-	telemetryCapture?: AgentSessionServices["telemetryCapture"];
 	sessionStartEvent?: SessionStartEvent;
 	projectTrustContext?: ProjectTrustContext;
 }) => Promise<CreateAgentSessionRuntimeResult>;
@@ -164,150 +71,15 @@ function extractUserMessageText(content: string | Array<{ type: string; text?: s
 		.join("");
 }
 
-const ROUTING_CONTEXT_MAX_CHARS = 6_000;
-const ROUTING_TIMEOUT_MS = 15_000;
-const MAX_LEGACY_SESSION_ANCESTRY_DEPTH = 64;
-const BUILTIN_SLASH_COMMAND_NAMES = new Set(BUILTIN_SLASH_COMMANDS.map((command) => command.name));
-const ROUTE_FALLBACK_TELEMETRY = {
-	"completion-error": "completion_error",
-	"invalid-output": "invalid_output",
-	"low-confidence": "low_confidence",
-} as const;
-
-/**
- * Expand public skill/template resources for classification only.
- *
- * The original prompt is still delivered to AgentSession, so extension input
- * hooks and canonical expansion execute exactly once. Extension and built-in
- * commands retain precedence over colliding resources.
- */
-export function resolvePromptForProfileRouting(session: AgentSession, text: string): string | undefined {
-	if (!text.startsWith("/")) return text;
-	const commandMatch = text.match(/^\/([^\s]+)(?:\s|$)/);
-	const commandName = commandMatch?.[1];
-	if (!commandName) return undefined;
-	if (BUILTIN_SLASH_COMMAND_NAMES.has(commandName) || session.extensionRunner.getCommand(commandName)) {
-		return undefined;
-	}
-
-	if (commandName.startsWith("skill:")) {
-		const skillName = commandName.slice("skill:".length);
-		const skill = session.resourceLoader.getSkills().skills.find((candidate) => candidate.name === skillName);
-		if (!skill) return undefined;
-		try {
-			const args = text.slice(commandMatch[0].length).trim();
-			const body = stripFrontmatter(readFileSync(skill.filePath, "utf-8")).trim();
-			const block = `<skill name="${skill.name}" location="${skill.filePath}">\nReferences are relative to ${skill.baseDir}.\n\n${body}\n</skill>`;
-			return args ? `${block}\n\n${args}` : block;
-		} catch {
-			return undefined;
-		}
-	}
-
-	const expanded = expandPromptTemplate(text, [...session.promptTemplates]);
-	return expanded === text ? undefined : expanded;
-}
-
-function extractRoutingMessageText(message: AgentMessage): string | undefined {
-	if (message.role !== "user" && message.role !== "assistant") {
-		return undefined;
-	}
-	const content = message.content;
-	if (typeof content === "string") {
-		return content.trim() || undefined;
-	}
-	const text = content
-		.filter((part) => part.type === "text")
-		.map((part) => part.text)
-		.join("\n")
-		.trim();
-	return text || undefined;
-}
-
-/** Build a bounded router excerpt that excludes custom messages and tool output. */
-export function buildRecentTaskContext(messages: readonly AgentMessage[]): string {
-	const excerpts: string[] = [];
-	let remaining = ROUTING_CONTEXT_MAX_CHARS;
-	for (let index = messages.length - 1; index >= 0 && remaining > 0; index -= 1) {
-		const message = messages[index];
-		if (!message) continue;
-		const text = extractRoutingMessageText(message);
-		if (!text) continue;
-		const label = message.role === "user" ? "User" : "Assistant";
-		const prefix = `${label}: `;
-		const available = Math.max(0, remaining - prefix.length);
-		if (available === 0) break;
-		const excerpt = text.length > available ? text.slice(text.length - available) : text;
-		excerpts.unshift(`${prefix}${excerpt}`);
-		remaining -= prefix.length + excerpt.length;
-	}
-	return excerpts.join("\n\n");
-}
-
-/**
- * Recover task-transition references from sessions created before task switches
- * stopped overloading parentSession. True same-harness forks remain ancestry only.
- */
-function getLegacyRelatedSessions(sessionManager: SessionManager): RelatedSessionReference[] {
-	const references: RelatedSessionReference[] = [];
-	const seenPaths = new Set<string>();
-	const activeHarnessId = sessionManager.getHeader()?.profile?.harnessId;
-	let parentSession = sessionManager.getHeader()?.parentSession;
-
-	for (let depth = 0; depth < MAX_LEGACY_SESSION_ANCESTRY_DEPTH && parentSession; depth += 1) {
-		let parentPath: string;
-		try {
-			parentPath = resolvePath(parentSession);
-		} catch {
-			break;
-		}
-		if (seenPaths.has(parentPath)) break;
-		seenPaths.add(parentPath);
-
-		const header = readSessionHeaderForDiscovery(parentPath);
-		if (!header) break;
-		const harnessId = header.profile?.harnessId;
-		if (
-			typeof header.id === "string" &&
-			typeof harnessId === "string" &&
-			harnessId.trim() &&
-			harnessId.trim() !== activeHarnessId
-		) {
-			references.push({ sessionId: header.id, harnessId: harnessId.trim() });
-		}
-		parentSession = typeof header.parentSession === "string" ? header.parentSession : undefined;
-	}
-
-	return normalizeRelatedSessionReferences(references, sessionManager.getSessionId());
-}
-
-function getProfileSelection(sessionManager: SessionManager): {
-	profile?: string;
-	profileRouting?: ProfileRoutingMode;
-	harnessId?: string;
-	harnessRevision?: string;
-} {
-	const metadata = sessionManager.getHeader()?.profile;
-	if (!metadata) return {};
-	return {
-		profile: metadata.source ?? metadata.id,
-		profileRouting: metadata.routing,
-		harnessId: metadata.harnessId,
-		harnessRevision: metadata.harnessRevision,
-	};
-}
-
 /**
  * Owns the current AgentSession plus its cwd-bound services.
  *
- * Session replacement methods preserve task-profile state across runtime
- * changes. Errors are propagated to the caller for user-facing handling.
+ * Session replacement methods serialize against in-flight prompts and plan
+ * continuations. Errors are propagated to the caller for user-facing handling.
  */
 export class AgentSessionRuntime {
 	private rebindSession?: (session: AgentSession) => Promise<void>;
 	private beforeSessionInvalidate?: () => void;
-	private profileSwitchListener?: (event: ProfileSwitchEvent) => void;
-	private taskBoundaryResolver?: TaskBoundaryResolver;
 	private _session: AgentSession;
 	private _services: AgentSessionServices;
 	private readonly createRuntime: CreateAgentSessionRuntimeFactory;
@@ -315,12 +87,6 @@ export class AgentSessionRuntime {
 	private replacementDiagnostics: AgentSessionRuntimeDiagnostic[] = [];
 	private _modelFallbackMessage?: string;
 	private disposePromise: Promise<void> | undefined;
-	private _profileRouting: ProfileRoutingMode;
-	private _activeHarness?: ResolvedHarnessDescriptor;
-	private readonly liveHarnessSessions = new Map<string, SessionManager>();
-	private harnessResolutionClaimed = false;
-	private harnessResolutionGate?: Promise<void>;
-	private settleHarnessResolutionGate?: () => void;
 	private promptPreparationQueue: Promise<void> = Promise.resolve();
 	private exclusiveRuntimeOperation: object | undefined;
 	private exclusiveRuntimeOperationSettled: Promise<void> = Promise.resolve();
@@ -332,18 +98,12 @@ export class AgentSessionRuntime {
 		createRuntime: CreateAgentSessionRuntimeFactory,
 		_diagnostics: AgentSessionRuntimeDiagnostic[] = [],
 		_modelFallbackMessage?: string,
-		profileRouting?: ProfileRoutingMode,
-		harnessId?: string,
 	) {
 		this._session = _session;
 		this._services = _services;
 		this.createRuntime = createRuntime;
 		this._diagnostics = _diagnostics;
 		this._modelFallbackMessage = _modelFallbackMessage;
-		this._profileRouting = profileRouting ?? _session.sessionManager.getHeader()?.profile?.routing ?? "auto";
-		this.restoreHarness(harnessId ?? _session.sessionManager.getHeader()?.profile?.harnessId);
-		this.syncProfileMetadata();
-		this.rememberActiveHarnessSession();
 	}
 
 	get services(): AgentSessionServices {
@@ -366,38 +126,8 @@ export class AgentSessionRuntime {
 		return this._modelFallbackMessage;
 	}
 
-	get activeProfile(): ResolvedTaskProfile {
-		return this.services.resourceLoader.getActiveProfile();
-	}
-
-	get profileRouting(): ProfileRoutingMode {
-		return this._profileRouting;
-	}
-
-	get activeHarness(): ResolvedHarnessDescriptor | undefined {
-		return this._activeHarness;
-	}
-
-	setProfileRouting(mode: ProfileRoutingMode): void {
-		this._profileRouting = mode;
-		this.syncProfileMetadata();
-	}
-
-	private getCurrentProfileSelection(): string {
-		const profile = this.activeProfile;
-		return profile.origin === "builtin" ? profile.id : profile.source.path;
-	}
-
 	setRebindSession(rebindSession?: (session: AgentSession) => Promise<void>): void {
 		this.rebindSession = rebindSession;
-	}
-
-	setProfileSwitchListener(listener?: (event: ProfileSwitchEvent) => void): void {
-		this.profileSwitchListener = listener;
-	}
-
-	setTaskBoundaryResolver(resolver?: TaskBoundaryResolver): void {
-		this.taskBoundaryResolver = resolver;
 	}
 
 	/**
@@ -484,89 +214,6 @@ export class AgentSessionRuntime {
 		}
 	}
 
-	private syncProfileMetadata(profile = this.activeProfile): void {
-		this.session.sessionManager.setProfileMetadata({
-			id: profile.id,
-			hash: profile.hash,
-			...(profile.origin === "builtin" ? {} : { source: profile.source.path }),
-			routing: this._profileRouting,
-			...(this._activeHarness
-				? { harnessId: this._activeHarness.id, harnessRevision: this._activeHarness.revision }
-				: {}),
-		});
-	}
-
-	private rememberActiveHarnessSession(): void {
-		const harnessId = this._activeHarness?.id;
-		if (harnessId && !this.session.sessionManager.isPersisted()) {
-			this.liveHarnessSessions.set(harnessId, this.session.sessionManager);
-		}
-	}
-
-	private getCurrentSessionReference(): RelatedSessionReference | undefined {
-		const harnessId = this._activeHarness?.id;
-		if (!harnessId) return undefined;
-		return { sessionId: this.session.sessionManager.getSessionId(), harnessId };
-	}
-
-	private getRelatedSessionReferences(): RelatedSessionReference[] {
-		const sessionManager = this.session.sessionManager;
-		return mergeRelatedSessionReferences(
-			sessionManager.getRelatedSessions(),
-			getLegacyRelatedSessions(sessionManager),
-			sessionManager.getSessionId(),
-		);
-	}
-
-	private getTransitionRelatedSessions(): RelatedSessionReference[] {
-		const current = this.getCurrentSessionReference();
-		return mergeRelatedSessionReferences(this.getRelatedSessionReferences(), current ? [current] : []);
-	}
-
-	private restoreHarness(harnessId: string | undefined): void {
-		this._activeHarness = undefined;
-		if (!harnessId) return;
-		const loaded = loadHarnessDescriptors({
-			agentDir: this.services.agentDir,
-			notes: this.services.resourceLoader.getEvolvedNotes().evolvedNotes,
-		});
-		for (const diagnostic of loaded.diagnostics) {
-			this.appendDiagnostic(`Could not load harness descriptor ${diagnostic.path}: ${diagnostic.message}`);
-		}
-		const harness = loaded.harnesses.find((candidate) => candidate.id === harnessId);
-		if (!harness) {
-			this.appendDiagnostic(
-				`Could not restore harness "${harnessId}"; this session will use one-time routing again.`,
-			);
-			return;
-		}
-		if (this.activeProfile.id !== harness.baseProfileId) {
-			this.appendDiagnostic(
-				`Could not restore harness "${harnessId}" because its base profile "${harness.baseProfileId}" does not match active profile "${this.activeProfile.id}"; this session will use one-time routing again.`,
-			);
-			return;
-		}
-		this._activeHarness = harness;
-	}
-
-	private getSessionProfileSelection(sessionManager: SessionManager): ReturnType<typeof getProfileSelection> {
-		const selection = getProfileSelection(sessionManager);
-		if (!selection.harnessId) return selection;
-		const loaded = loadHarnessDescriptors({ agentDir: this.services.agentDir });
-		for (const diagnostic of loaded.diagnostics) {
-			this.appendDiagnostic(`Could not load harness descriptor ${diagnostic.path}: ${diagnostic.message}`);
-		}
-		const harness = loaded.harnesses.find((candidate) => candidate.id === selection.harnessId);
-		if (harness) return { ...selection, profile: harness.baseProfileId };
-		this.appendDiagnostic(
-			`Could not restore harness "${selection.harnessId}"; ${selection.profileRouting === "auto" ? "falling back to DEFAULT" : "keeping the pinned profile"}.`,
-		);
-		return {
-			profile: selection.profileRouting === "auto" ? "general" : selection.profile,
-			profileRouting: selection.profileRouting,
-		};
-	}
-
 	private async teardownCurrent(reason: SessionShutdownEvent["reason"], targetSessionFile?: string): Promise<void> {
 		const session = this.session;
 		const failures: unknown[] = [];
@@ -605,24 +252,12 @@ export class AgentSessionRuntime {
 		}
 	}
 
-	private apply(
-		result: CreateAgentSessionRuntimeResult,
-		profileRouting?: ProfileRoutingMode,
-		harnessId?: string,
-	): void {
+	private apply(result: CreateAgentSessionRuntimeResult): void {
 		this._session = result.session;
 		this._services = result.services;
 		this._diagnostics = [...result.diagnostics, ...this.replacementDiagnostics];
-		if (result.deniedToolsMessage) {
-			this._diagnostics.push({ type: "warning", message: result.deniedToolsMessage });
-		}
 		this.replacementDiagnostics = [];
 		this._modelFallbackMessage = result.modelFallbackMessage;
-		this._profileRouting = result.session.sessionManager.getHeader()?.profile?.routing ?? profileRouting ?? "auto";
-		this.restoreHarness(harnessId ?? result.session.sessionManager.getHeader()?.profile?.harnessId);
-		this.harnessResolutionClaimed = this._activeHarness !== undefined;
-		this.syncProfileMetadata();
-		this.rememberActiveHarnessSession();
 	}
 
 	private async finishSessionReplacement(withSession?: (ctx: ReplacedSessionContext) => Promise<void>): Promise<void> {
@@ -641,8 +276,6 @@ export class AgentSessionRuntime {
 		options: {
 			reason: SessionShutdownEvent["reason"];
 			targetSessionFile?: string;
-			profileRouting?: ProfileRoutingMode;
-			harnessId?: string;
 			beforeCommit?: () => void;
 			restoreRejectedMetadata?: () => void;
 			withSession?: (ctx: ReplacedSessionContext) => Promise<void>;
@@ -684,7 +317,7 @@ export class AgentSessionRuntime {
 				recordPostShutdownError("disposal", error);
 			}
 			try {
-				this.apply(result, options.profileRouting, options.harnessId);
+				this.apply(result);
 			} catch (error) {
 				recordPostShutdownError("activation", error);
 			}
@@ -724,8 +357,6 @@ export class AgentSessionRuntime {
 		options: {
 			reason: SessionShutdownEvent["reason"];
 			targetSessionFile?: string;
-			profileRouting?: ProfileRoutingMode;
-			harnessId?: string;
 			restoreRejectedMetadata?: () => void;
 			withSession?: (ctx: ReplacedSessionContext) => Promise<void>;
 		},
@@ -744,57 +375,6 @@ export class AgentSessionRuntime {
 			throw error;
 		}
 		await this.commitReservedRuntime(result, outgoingSession, releaseReplacement, options);
-	}
-
-	private isPreparedRuntimeActivationValid(expectedSession: AgentSession, expectedLeafId: string | null): boolean {
-		if (this.session !== expectedSession) {
-			throw new Error("Session changed while the replacement runtime was being prepared");
-		}
-		return (
-			!this.disposeRequested &&
-			expectedSession.collaborationMode !== "plan" &&
-			expectedSession.sessionManager.getLeafId() === expectedLeafId
-		);
-	}
-
-	private async activatePreparedRuntime(
-		result: CreateAgentSessionRuntimeResult,
-		expectedSession: AgentSession,
-		options: {
-			expectedLeafId: string | null;
-			reason: SessionShutdownEvent["reason"];
-			targetSessionFile?: string;
-			profileRouting: ProfileRoutingMode;
-			harnessId: string;
-			beforeCommit?: () => void;
-			restoreRejectedMetadata?: () => void;
-		},
-	): Promise<boolean> {
-		const disposeRejectedRuntime = (): void => {
-			try {
-				result.session.dispose();
-			} finally {
-				options.restoreRejectedMetadata?.();
-			}
-		};
-		if (!this.isPreparedRuntimeActivationValid(expectedSession, options.expectedLeafId)) {
-			disposeRejectedRuntime();
-			return false;
-		}
-		await expectedSession.abort();
-		if (!this.isPreparedRuntimeActivationValid(expectedSession, options.expectedLeafId)) {
-			disposeRejectedRuntime();
-			return false;
-		}
-		let releaseReplacement: () => void;
-		try {
-			releaseReplacement = expectedSession.reserveRuntimeReplacement();
-		} catch (error) {
-			disposeRejectedRuntime();
-			throw error;
-		}
-		await this.commitReservedRuntime(result, expectedSession, releaseReplacement, options);
-		return true;
 	}
 
 	async switchSession(
@@ -816,26 +396,18 @@ export class AgentSessionRuntime {
 			const sessionManager = SessionManager.open(sessionPath, undefined, options?.cwdOverride);
 			assertSessionCwdExists(sessionManager, this.cwd);
 			options?.validateTarget?.(sessionManager, sessionManager.getLeafId());
-			const profileSelection = this.getSessionProfileSelection(sessionManager);
 			await this.replaceCurrentRuntime(
 				() =>
 					this.createRuntime({
 						cwd: sessionManager.getCwd(),
 						agentDir: this.services.agentDir,
 						sessionManager,
-						profile: profileSelection.profile,
-						profileRouting: profileSelection.profileRouting,
-						harnessId: profileSelection.harnessId,
-						telemetryContext: this.services.telemetryContext,
-						telemetryCapture: this.services.telemetryCapture,
 						sessionStartEvent: { type: "session_start", reason: "resume", previousSessionFile },
 						projectTrustContext: options?.projectTrustContextFactory?.(sessionManager.getCwd()),
 					}),
 				{
 					reason: "resume",
 					targetSessionFile: sessionManager.getSessionFile(),
-					profileRouting: profileSelection.profileRouting,
-					harnessId: profileSelection.harnessId,
 					withSession: options?.withSession,
 				},
 			);
@@ -845,9 +417,6 @@ export class AgentSessionRuntime {
 
 	async newSession(options?: {
 		parentSession?: string;
-		profile?: string;
-		profileRouting?: ProfileRoutingMode;
-		harnessId?: string;
 		setup?: (sessionManager: SessionManager) => Promise<void>;
 		withSession?: (ctx: ReplacedSessionContext) => Promise<void>;
 		validateTarget?: ValidateSessionTarget;
@@ -863,17 +432,9 @@ export class AgentSessionRuntime {
 			const sessionManager = this.session.sessionManager.isPersisted()
 				? SessionManager.create(this.cwd, sessionDir)
 				: SessionManager.inMemory(this.cwd);
-			const isProfileTransition = options?.profile !== undefined || options?.harnessId !== undefined;
-			const inheritedRelatedSessions = isProfileTransition
-				? this.getTransitionRelatedSessions()
-				: this.getRelatedSessionReferences();
-			if (inheritedRelatedSessions.length > 0) {
-				sessionManager.setRelatedSessions(inheritedRelatedSessions);
-			}
 			if (options?.parentSession) {
 				sessionManager.newSession({
 					parentSession: options.parentSession,
-					relatedSessions: inheritedRelatedSessions,
 				});
 			}
 			if (options?.setup) {
@@ -881,27 +442,12 @@ export class AgentSessionRuntime {
 			}
 			options?.validateTarget?.(sessionManager, sessionManager.getLeafId());
 
-			const targetRouting = options?.profileRouting ?? this._profileRouting;
-			const targetHarness = options?.harnessId
-				? loadHarnessDescriptors({ agentDir: this.services.agentDir }).harnesses.find(
-						(harness) => harness.id === options.harnessId,
-					)
-				: undefined;
-			const targetHarnessId = targetHarness?.id;
-			const targetProfile =
-				targetHarness?.baseProfileId ??
-				(targetRouting === "auto" ? "general" : (options?.profile ?? this.getCurrentProfileSelection()));
 			await this.replaceCurrentRuntime(
 				() =>
 					this.createRuntime({
 						cwd: this.cwd,
 						agentDir: this.services.agentDir,
 						sessionManager,
-						profile: targetProfile,
-						profileRouting: targetRouting,
-						harnessId: targetHarnessId,
-						telemetryContext: this.services.telemetryContext,
-						telemetryCapture: this.services.telemetryCapture,
 						sessionStartEvent: {
 							type: "session_start",
 							reason: "new",
@@ -911,8 +457,6 @@ export class AgentSessionRuntime {
 				{
 					reason: "new",
 					targetSessionFile: sessionManager.getSessionFile(),
-					profileRouting: targetRouting,
-					harnessId: targetHarnessId,
 					withSession: options?.withSession,
 				},
 			);
@@ -963,28 +507,18 @@ export class AgentSessionRuntime {
 				if (!targetLeafId) {
 					const sessionManager = SessionManager.create(this.cwd, sessionDir, {
 						parentSession: currentSessionFile,
-						relatedSessions: this.getRelatedSessionReferences(),
 					});
-					const targetRouting = this._profileRouting;
-					const targetProfile = this.getCurrentProfileSelection();
 					await this.replaceCurrentRuntime(
 						() =>
 							this.createRuntime({
 								cwd: this.cwd,
 								agentDir: this.services.agentDir,
 								sessionManager,
-								profile: targetProfile,
-								profileRouting: targetRouting,
-								harnessId: this._activeHarness?.id,
-								telemetryContext: this.services.telemetryContext,
-								telemetryCapture: this.services.telemetryCapture,
 								sessionStartEvent: { type: "session_start", reason: "fork", previousSessionFile },
 							}),
 						{
 							reason: "fork",
 							targetSessionFile: sessionManager.getSessionFile(),
-							profileRouting: targetRouting,
-							harnessId: this._activeHarness?.id,
 							withSession: options?.withSession,
 						},
 					);
@@ -1001,25 +535,17 @@ export class AgentSessionRuntime {
 				if (!forkedSessionPath) {
 					throw new Error("Failed to create forked session");
 				}
-				const profileSelection = this.getSessionProfileSelection(sessionManager);
 				await this.replaceCurrentRuntime(
 					() =>
 						this.createRuntime({
 							cwd: sessionManager.getCwd(),
 							agentDir: this.services.agentDir,
 							sessionManager,
-							profile: profileSelection.profile,
-							profileRouting: profileSelection.profileRouting,
-							harnessId: profileSelection.harnessId,
-							telemetryContext: this.services.telemetryContext,
-							telemetryCapture: this.services.telemetryCapture,
 							sessionStartEvent: { type: "session_start", reason: "fork", previousSessionFile },
 						}),
 					{
 						reason: "fork",
 						targetSessionFile: sessionManager.getSessionFile(),
-						profileRouting: profileSelection.profileRouting,
-						harnessId: profileSelection.harnessId,
 						withSession: options?.withSession,
 					},
 				);
@@ -1027,26 +553,17 @@ export class AgentSessionRuntime {
 			}
 
 			const sessionManager = this.session.sessionManager.createInMemoryBranch(targetLeafId);
-			const targetRouting = this._profileRouting;
-			const targetProfile = this.getCurrentProfileSelection();
 			await this.replaceCurrentRuntime(
 				() =>
 					this.createRuntime({
 						cwd: this.cwd,
 						agentDir: this.services.agentDir,
 						sessionManager,
-						profile: targetProfile,
-						profileRouting: targetRouting,
-						harnessId: this._activeHarness?.id,
-						telemetryContext: this.services.telemetryContext,
-						telemetryCapture: this.services.telemetryCapture,
 						sessionStartEvent: { type: "session_start", reason: "fork", previousSessionFile },
 					}),
 				{
 					reason: "fork",
 					targetSessionFile: sessionManager.getSessionFile(),
-					profileRouting: targetRouting,
-					harnessId: this._activeHarness?.id,
 					withSession: options?.withSession,
 				},
 			);
@@ -1086,88 +603,21 @@ export class AgentSessionRuntime {
 
 			const sessionManager = SessionManager.open(destinationPath, sessionDir, cwdOverride);
 			assertSessionCwdExists(sessionManager, this.cwd);
-			const profileSelection = this.getSessionProfileSelection(sessionManager);
 			await this.replaceCurrentRuntime(
 				() =>
 					this.createRuntime({
 						cwd: sessionManager.getCwd(),
 						agentDir: this.services.agentDir,
 						sessionManager,
-						profile: profileSelection.profile,
-						profileRouting: profileSelection.profileRouting,
-						harnessId: profileSelection.harnessId,
-						telemetryContext: this.services.telemetryContext,
-						telemetryCapture: this.services.telemetryCapture,
 						sessionStartEvent: { type: "session_start", reason: "resume", previousSessionFile },
 					}),
 				{
 					reason: "resume",
 					targetSessionFile: sessionManager.getSessionFile(),
-					profileRouting: profileSelection.profileRouting,
-					harnessId: profileSelection.harnessId,
 				},
 			);
 			return { cancelled: false };
 		});
-	}
-
-	/** Use the active model unless the user explicitly configures a dedicated router model. */
-	private resolveProfileRouterModel(sessionModel: Model<Api>): Model<Api> {
-		const configured = this.services.settingsManager.getRouterModel();
-		if (configured) {
-			const [provider, ...rest] = configured.split("/");
-			const id = rest.join("/") || provider;
-			const match = this.session.modelRuntime
-				.getModels(rest.length > 0 ? provider : undefined)
-				.find((candidate) => candidate.id === id);
-			if (match) return match;
-		}
-		return sessionModel;
-	}
-
-	private async completeProfileRoute(
-		routerPrompt: string,
-		telemetryContext: AgentSessionServices["telemetryContext"],
-	): Promise<string> {
-		const sessionModel = this.session.model;
-		if (!sessionModel) {
-			throw new Error("No model is selected for task profile routing");
-		}
-		const model = this.resolveProfileRouterModel(sessionModel);
-		const response = await traceAiCompletion(telemetryContext, model, (childContext) =>
-			this.session.modelRuntime.completeSimple(
-				model,
-				{
-					systemPrompt: "Route the task using the requested JSON schema. Return JSON only.",
-					messages: [
-						{
-							role: "user",
-							content: [{ type: "text", text: routerPrompt }],
-							timestamp: Date.now(),
-						},
-					],
-				},
-				{
-					maxTokens: 1_200,
-					cacheRetention: "none",
-					sessionId: randomUUID(),
-					signal: AbortSignal.timeout(ROUTING_TIMEOUT_MS),
-					telemetryContext: childContext,
-				},
-			),
-		);
-		if (response.stopReason === "error" || response.stopReason === "aborted") {
-			throw new Error(response.errorMessage ?? `Profile router request ${response.stopReason}`);
-		}
-		const output = response.content
-			.filter((part) => part.type === "text")
-			.map((part) => part.text)
-			.join("")
-			.trim();
-		if (!output) {
-			throw new Error("Profile router returned no text");
-		}
-		return output;
 	}
 
 	private enqueuePromptPreparation(operation: () => Promise<PreparedRuntimePrompt>): Promise<PreparedRuntimePrompt> {
@@ -1179,11 +629,7 @@ export class AgentSessionRuntime {
 		return queued;
 	}
 
-	private async startSessionPrompt(
-		text: string,
-		options: PromptOptions | undefined,
-		result: RuntimePromptResult,
-	): Promise<PreparedRuntimePrompt> {
+	private async startSessionPrompt(text: string, options: PromptOptions | undefined): Promise<PreparedRuntimePrompt> {
 		let settlePreflight: ((success: boolean) => void) | undefined;
 		const preflight = new Promise<boolean>((resolvePreflight) => {
 			settlePreflight = resolvePreflight;
@@ -1209,13 +655,12 @@ export class AgentSessionRuntime {
 			() => settle(false),
 		);
 		const accepted = await preflight;
-		return { result, completion, accepted };
+		return { completion, accepted };
 	}
 
 	private async startSessionPlanContinuation(
 		continuation: PlanContinuation,
 		options: PlanContinuationPromptOptions | undefined,
-		result: RuntimePromptResult,
 	): Promise<PreparedRuntimePrompt> {
 		let settlePreflight: ((success: boolean) => void) | undefined;
 		const preflight = new Promise<boolean>((resolvePreflight) => {
@@ -1242,766 +687,19 @@ export class AgentSessionRuntime {
 			() => settle(false),
 		);
 		const accepted = await preflight;
-		return { result, completion, accepted };
-	}
-
-	private cancelPreparedPrompt(options: PromptOptions | undefined, message?: string): PreparedRuntimePrompt {
-		options?.preflightResult?.(false);
-		return {
-			result: {
-				routing: "failed",
-				activeProfileId: this.activeProfile.id,
-				...(this._activeHarness
-					? { harnessId: this._activeHarness.id, harnessRevision: this._activeHarness.revision }
-					: {}),
-			},
-			completion: Promise.resolve(),
-			accepted: false,
-			cancelledError: new TaskBoundaryCancelledError(message),
-		};
-	}
-
-	private async startIndependentHarnessSession(
-		harness: ResolvedHarnessDescriptor,
-		profile: ResolvedTaskProfile,
-		expectedSession: AgentSession,
-	): Promise<boolean> {
-		return this.runSessionReplacement(async () => {
-			const expectedLeafId = expectedSession.sessionManager.getLeafId();
-			const previousSessionFile = this.session.sessionFile;
-			const relatedSessions = this.getTransitionRelatedSessions();
-			const sessionDir = this.session.sessionManager.getSessionDir();
-			const sessionManager = this.session.sessionManager.isPersisted()
-				? SessionManager.create(this.cwd, sessionDir, { relatedSessions })
-				: SessionManager.inMemory(this.cwd, { relatedSessions });
-			const nextRuntime = await this.createRuntime({
-				cwd: this.cwd,
-				agentDir: this.services.agentDir,
-				sessionManager,
-				profile: profile.id,
-				profileRouting: "auto",
-				harnessId: harness.id,
-				telemetryContext: this.services.telemetryContext,
-				telemetryCapture: this.services.telemetryCapture,
-				sessionStartEvent: { type: "session_start", reason: "new", previousSessionFile },
-			});
-			const nextSessionReference: RelatedSessionReference = {
-				sessionId: sessionManager.getSessionId(),
-				harnessId: harness.id,
-			};
-			const activated = await this.activatePreparedRuntime(nextRuntime, expectedSession, {
-				expectedLeafId,
-				reason: "new",
-				targetSessionFile: sessionManager.getSessionFile(),
-				profileRouting: "auto",
-				harnessId: harness.id,
-				beforeCommit: () => expectedSession.sessionManager.mergeRelatedSessions([nextSessionReference]),
-			});
-			if (!activated) return false;
-			return true;
-		});
-	}
-
-	private findHarnessSessionTarget(
-		harnessId: string,
-	):
-		| { sessionId: string; discovered: DiscoveredRelatedSession }
-		| { sessionId: string; sessionManager: SessionManager }
-		| undefined {
-		const persisted = this.session.sessionManager
-			.discoverRelatedSessions(this.getRelatedSessionReferences())
-			.find((session) => session.harnessId === harnessId);
-		if (persisted) return { sessionId: persisted.sessionId, discovered: persisted };
-		const sessionManager = this.liveHarnessSessions.get(harnessId);
-		return sessionManager ? { sessionId: sessionManager.getSessionId(), sessionManager } : undefined;
-	}
-
-	private async resumeHarnessSession(
-		harness: ResolvedHarnessDescriptor,
-		profile: ResolvedTaskProfile,
-		expectedSessionId: string,
-		expectedSession: AgentSession,
-	): Promise<boolean> {
-		return this.runSessionReplacement(async () => {
-			const expectedLeafId = expectedSession.sessionManager.getLeafId();
-			const outgoingSession = this.session.sessionManager;
-			const outgoingSessionFile = this.session.sessionFile;
-			const relatedSessions = this.getTransitionRelatedSessions();
-			const target = this.findHarnessSessionTarget(harness.id);
-			if (!target || target.sessionId !== expectedSessionId) {
-				throw new Error(`The previous session for harness "${harness.id}" changed before it could be resumed`);
-			}
-			const targetSessionManager =
-				"discovered" in target
-					? outgoingSession.openDiscoveredRelatedSession(target.discovered)
-					: target.sessionManager;
-			if (targetSessionManager.getHeader()?.profile?.harnessId !== harness.id) {
-				throw new Error(`Previous session no longer belongs to harness "${harness.id}"`);
-			}
-			const targetContext = targetSessionManager.buildSessionContext();
-			if (
-				targetContext.collaborationMode === "plan" ||
-				targetContext.pendingPlan ||
-				targetContext.pendingPlanContinuation
-			) {
-				throw new Error(
-					`Cannot automatically resume harness "${harness.id}" while its session is in plan mode, has a pending plan, or has a pending plan continuation`,
-				);
-			}
-
-			const nextRuntime = await this.createRuntime({
-				cwd: targetSessionManager.getCwd(),
-				agentDir: this.services.agentDir,
-				sessionManager: targetSessionManager,
-				profile: profile.id,
-				profileRouting: "auto",
-				harnessId: harness.id,
-				telemetryContext: this.services.telemetryContext,
-				telemetryCapture: this.services.telemetryCapture,
-				sessionStartEvent: { type: "session_start", reason: "resume", previousSessionFile: outgoingSessionFile },
-			});
-			const activated = await this.activatePreparedRuntime(nextRuntime, expectedSession, {
-				expectedLeafId,
-				reason: "resume",
-				targetSessionFile: targetSessionManager.getSessionFile(),
-				profileRouting: "auto",
-				harnessId: harness.id,
-				beforeCommit: () => targetSessionManager.mergeRelatedSessions(relatedSessions),
-			});
-			if (!activated) return false;
-			return true;
-		});
-	}
-
-	private getReusableHarnesses(
-		harnesses: readonly ResolvedHarnessDescriptor[],
-		profiles: readonly ResolvedTaskProfile[],
-		currentHarnessId: string,
-		relatedHarnessIds: ReadonlySet<string>,
-	): ResolvedHarnessDescriptor[] {
-		const validById = new Map(
-			harnesses
-				.filter(
-					(harness) =>
-						harness.id !== currentHarnessId && profiles.some((profile) => profile.id === harness.baseProfileId),
-				)
-				.map((harness) => [harness.id, harness]),
-		);
-		const reusable: ResolvedHarnessDescriptor[] = [];
-		const seen = new Set<string>();
-		const add = (harness: ResolvedHarnessDescriptor | undefined): void => {
-			if (!harness || seen.has(harness.id)) return;
-			seen.add(harness.id);
-			reusable.push(harness);
-		};
-
-		for (const harnessId of relatedHarnessIds) add(validById.get(harnessId));
-		for (const harnessId of this.liveHarnessSessions.keys()) add(validById.get(harnessId));
-		for (const harness of harnesses) {
-			if (harness.harnessNoteCount > 0) add(validById.get(harness.id));
-		}
-		return reusable;
-	}
-
-	private revalidateReusableHarness(
-		expectedHarness: ResolvedHarnessDescriptor,
-	): ResolvedHarnessDescriptor | undefined {
-		const currentNotes = loadEvolvedNotes({
-			agentDir: this.services.agentDir,
-			cwd: this.cwd,
-			projectTrusted: this.services.settingsManager.isProjectTrusted(),
-		});
-		for (const diagnostic of currentNotes.diagnostics) {
-			this.appendDiagnostic(`Could not refresh evolved notes ${diagnostic.path}: ${diagnostic.message}`);
-		}
-		const refreshedHarnesses = loadHarnessDescriptors({
-			agentDir: this.services.agentDir,
-			notes: currentNotes.notes,
-		});
-		for (const diagnostic of refreshedHarnesses.diagnostics) {
-			this.appendDiagnostic(`Could not refresh harness descriptor ${diagnostic.path}: ${diagnostic.message}`);
-		}
-		const refreshedHarness = refreshedHarnesses.harnesses.find((harness) => harness.id === expectedHarness.id);
-		if (
-			!refreshedHarness ||
-			refreshedHarness.baseProfileId !== expectedHarness.baseProfileId ||
-			refreshedHarness.revision !== expectedHarness.revision
-		) {
-			return undefined;
-		}
-		return refreshedHarness;
-	}
-
-	private async prepareFutureTaskPrompt(
-		text: string,
-		routingPrompt: string,
-		options: PromptOptions | undefined,
-	): Promise<PreparedRuntimePrompt> {
-		const resolver = this.taskBoundaryResolver;
-		const currentHarness = this._activeHarness;
-		const currentProfile = this.activeProfile;
-		if (!resolver || !currentHarness) {
-			return this.startSessionPrompt(text, options, {
-				routing: "bypassed",
-				activeProfileId: currentProfile.id,
-				harnessId: currentHarness?.id,
-				harnessRevision: currentHarness?.revision,
-			});
-		}
-		if (text.trim().length === 0) {
-			return this.startSessionPrompt(text, options, {
-				routing: "bypassed",
-				activeProfileId: currentProfile.id,
-				harnessId: currentHarness.id,
-				harnessRevision: currentHarness.revision,
-			});
-		}
-
-		const profiles = this.services.resourceLoader
-			.getProfiles()
-			.profiles.filter((profile) => profile.origin === "builtin" && profile.immutable);
-		const loadedHarnesses = loadHarnessDescriptors({
-			agentDir: this.services.agentDir,
-			notes: this.services.resourceLoader.getEvolvedNotes().evolvedNotes,
-		});
-		for (const diagnostic of loadedHarnesses.diagnostics) {
-			this.appendDiagnostic(`Could not load harness descriptor ${diagnostic.path}: ${diagnostic.message}`);
-		}
-		const relatedSessions = this.session.sessionManager.discoverRelatedSessions(this.getRelatedSessionReferences());
-		const reusableHarnesses = this.getReusableHarnesses(
-			loadedHarnesses.harnesses,
-			profiles,
-			currentHarness.id,
-			new Set(relatedSessions.map((reference) => reference.harnessId)),
-		);
-		const input = {
-			prompt: routingPrompt,
-			recentTaskContext: buildRecentTaskContext(this.session.messages),
-			candidates: profiles,
-			harnesses: reusableHarnesses,
-			currentProfile,
-			currentHarness,
-		};
-		if (!shouldEvaluateTaskBoundary(input)) {
-			return this.startSessionPrompt(text, options, {
-				routing: "bypassed",
-				activeProfileId: currentProfile.id,
-				harnessId: currentHarness.id,
-				harnessRevision: currentHarness.revision,
-			});
-		}
-
-		const startingSession = this.session;
-		return startProfileRouteSpan(
-			this.services.telemetryContext,
-			{
-				sessionId: this.session.sessionManager.getSessionId(),
-				routingMode: this._profileRouting,
-				trigger: "future_turn",
-				currentProfileId: currentProfile.id,
-				currentHarnessId: currentHarness.id,
-				sessionEstablished: true,
-			},
-			async ({ context: routeContext, complete }) => {
-				const decision = await routeTaskBoundary(input, (routerPrompt) =>
-					this.completeProfileRoute(routerPrompt, routeContext),
-				);
-				const continueInCurrentPlanMode = (): Promise<PreparedRuntimePrompt> | undefined => {
-					if (startingSession.collaborationMode !== "plan") return undefined;
-					const activeProfile = this.activeProfile;
-					complete({
-						outcome: "stayed",
-						targetProfileId: activeProfile.id,
-						harnessId: currentHarness.id,
-						confidence: decision.confidence,
-					});
-					return this.startSessionPrompt(text, options, {
-						routing: "bypassed",
-						activeProfileId: activeProfile.id,
-						harnessId: currentHarness.id,
-						harnessRevision: currentHarness.revision,
-					});
-				};
-				if (this.session !== startingSession || this._activeHarness?.id !== currentHarness.id) {
-					complete({ outcome: "failed", targetProfileId: currentProfile.id, harnessId: currentHarness.id });
-					return this.cancelPreparedPrompt(options, "Session changed while task boundary routing was pending");
-				}
-				const planPromptAfterRouting = continueInCurrentPlanMode();
-				if (planPromptAfterRouting) return planPromptAfterRouting;
-				if (decision.fallback) {
-					const detail = decision.fallbackDetail ? `: ${decision.fallbackDetail}` : "";
-					this.appendDiagnostic(`Task boundary router used ${decision.fallback} fallback${detail}`, true);
-				}
-				if (decision.decision === "stay") {
-					complete({
-						outcome: "stayed",
-						targetProfileId: currentProfile.id,
-						harnessId: currentHarness.id,
-						confidence: decision.confidence,
-						...(decision.fallback ? { fallback: ROUTE_FALLBACK_TELEMETRY[decision.fallback] } : {}),
-					});
-					return this.startSessionPrompt(text, options, {
-						routing: "bypassed",
-						activeProfileId: currentProfile.id,
-						harnessId: currentHarness.id,
-						harnessRevision: currentHarness.revision,
-					});
-				}
-
-				const targetHarness =
-					decision.decision === "reuse"
-						? reusableHarnesses.find((harness) => harness.id === decision.harnessId)
-						: undefined;
-				const targetProfile = profiles.find(
-					(profile) => profile.id === (targetHarness?.baseProfileId ?? decision.profileId),
-				);
-				if (!targetProfile || (decision.decision === "reuse" && !targetHarness)) {
-					complete({ outcome: "failed", targetProfileId: currentProfile.id, harnessId: currentHarness.id });
-					return this.cancelPreparedPrompt(options, "Task boundary target is no longer available");
-				}
-				const proposedTargetSession = targetHarness ? this.findHarnessSessionTarget(targetHarness.id) : undefined;
-				const proposal: TaskBoundaryProposal = {
-					decision: decision.decision,
-					fromProfileId: currentProfile.id,
-					fromHarnessId: currentHarness.id,
-					toProfileId: targetProfile.id,
-					targetHarnessName: targetHarness?.name ?? decision.harnessName ?? "New task",
-					willResumeSession: proposedTargetSession !== undefined,
-					confidence: decision.confidence,
-					...(targetHarness
-						? { targetHarnessId: targetHarness.id, targetHarnessRevision: targetHarness.revision }
-						: {}),
-				};
-				let resolution: TaskBoundaryResolution;
-				try {
-					resolution = await resolver(proposal);
-				} catch (error) {
-					const message = error instanceof Error ? error.message : String(error);
-					this.appendDiagnostic(`Task boundary confirmation failed: ${message}`);
-					complete({ outcome: "failed", targetProfileId: currentProfile.id, harnessId: currentHarness.id });
-					return this.cancelPreparedPrompt(options, `Task boundary confirmation failed: ${message}`);
-				}
-				if (this.session !== startingSession || this._activeHarness?.id !== currentHarness.id) {
-					complete({ outcome: "failed", targetProfileId: currentProfile.id, harnessId: currentHarness.id });
-					return this.cancelPreparedPrompt(
-						options,
-						"Session changed while task boundary confirmation was pending",
-					);
-				}
-				const planPromptAfterConfirmation = continueInCurrentPlanMode();
-				if (planPromptAfterConfirmation) return planPromptAfterConfirmation;
-				if (resolution === "stay") {
-					complete({
-						outcome: "declined",
-						targetProfileId: currentProfile.id,
-						harnessId: currentHarness.id,
-						confidence: decision.confidence,
-					});
-					return this.startSessionPrompt(text, options, {
-						routing: "bypassed",
-						activeProfileId: currentProfile.id,
-						harnessId: currentHarness.id,
-						harnessRevision: currentHarness.revision,
-					});
-				}
-				if (resolution !== "switch") {
-					complete({
-						outcome: "declined",
-						targetProfileId: currentProfile.id,
-						harnessId: currentHarness.id,
-						confidence: decision.confidence,
-					});
-					return this.cancelPreparedPrompt(options);
-				}
-
-				let validatedTargetHarness = targetHarness;
-				if (targetHarness) {
-					validatedTargetHarness = this.revalidateReusableHarness(targetHarness);
-					if (!validatedTargetHarness) {
-						complete({ outcome: "failed", targetProfileId: currentProfile.id, harnessId: currentHarness.id });
-						return this.cancelPreparedPrompt(
-							options,
-							"The selected harness changed while confirmation was pending",
-						);
-					}
-				}
-
-				let harness: ResolvedHarnessDescriptor;
-				try {
-					const switchReason = proposedTargetSession ? "resume" : "new";
-					const targetSessionFile =
-						proposedTargetSession && "discovered" in proposedTargetSession
-							? proposedTargetSession.discovered.sessionPath
-							: undefined;
-					const beforeResult = await this.emitBeforeSwitch(switchReason, targetSessionFile);
-					if (this.session !== startingSession || this._activeHarness?.id !== currentHarness.id) {
-						complete({ outcome: "failed", targetProfileId: currentProfile.id, harnessId: currentHarness.id });
-						return this.cancelPreparedPrompt(
-							options,
-							"Session changed while the task boundary switch was pending",
-						);
-					}
-					const planPromptAfterSwitchHook = continueInCurrentPlanMode();
-					if (planPromptAfterSwitchHook) return planPromptAfterSwitchHook;
-					if (beforeResult.cancelled) {
-						complete({ outcome: "failed", targetProfileId: currentProfile.id, harnessId: currentHarness.id });
-						return this.cancelPreparedPrompt(options, "Task boundary switch was blocked by a session hook");
-					}
-					if (targetHarness) {
-						validatedTargetHarness = this.revalidateReusableHarness(targetHarness);
-						if (!validatedTargetHarness) {
-							complete({ outcome: "failed", targetProfileId: currentProfile.id, harnessId: currentHarness.id });
-							return this.cancelPreparedPrompt(
-								options,
-								"The selected harness changed while the session switch was pending",
-							);
-						}
-					}
-					harness =
-						validatedTargetHarness ??
-						createHarnessDescriptor({
-							agentDir: this.services.agentDir,
-							name: decision.harnessName ?? "New task",
-							description: decision.harnessDescription ?? "Harness for a new task.",
-							baseProfileId: targetProfile.id,
-							notes: this.services.resourceLoader.getEvolvedNotes().evolvedNotes,
-						});
-					const activated =
-						validatedTargetHarness && proposedTargetSession
-							? await this.resumeHarnessSession(
-									harness,
-									targetProfile,
-									proposedTargetSession.sessionId,
-									startingSession,
-								)
-							: await this.startIndependentHarnessSession(harness, targetProfile, startingSession);
-					if (!activated) {
-						const planPromptAfterRuntimeCreation = continueInCurrentPlanMode();
-						if (planPromptAfterRuntimeCreation) return planPromptAfterRuntimeCreation;
-						throw new Error("Task boundary session changed before activation");
-					}
-					const activeHarness = this._activeHarness;
-					if (!activeHarness || activeHarness.id !== harness.id) {
-						throw new Error(`Harness "${harness.id}" was not restored after the session switch`);
-					}
-					harness = activeHarness;
-				} catch (error) {
-					if (this.session === startingSession) {
-						const planPromptAfterSwitchFailure = continueInCurrentPlanMode();
-						if (planPromptAfterSwitchFailure) return planPromptAfterSwitchFailure;
-					}
-					const message = error instanceof Error ? error.message : String(error);
-					complete({ outcome: "failed", targetProfileId: currentProfile.id, harnessId: currentHarness.id });
-					return this.cancelPreparedPrompt(options, `Task boundary switch failed: ${message}`);
-				}
-
-				const activeProfile = this.activeProfile;
-				const reused = decision.decision === "reuse";
-				const notice = reused
-					? proposedTargetSession
-						? `Resumed harness "${harness.name}" in its previous session at revision ${harness.revision.slice(0, 12)}.`
-						: `Found existing harness "${harness.name}" for this task. Started an independent session at revision ${harness.revision.slice(0, 12)}.`
-					: `Created harness "${harness.name}" using the ${activeProfile.name} prompt profile.`;
-				try {
-					this.profileSwitchListener?.({
-						fromProfileId: currentProfile.id,
-						toProfileId: activeProfile.id,
-						reason: decision.reason,
-						harnessId: harness.id,
-						harnessRevision: harness.revision,
-						harnessName: harness.name,
-						reused,
-						notice,
-					});
-				} catch (error) {
-					this.appendDiagnostic(
-						`Task profile switch listener failed: ${error instanceof Error ? error.message : String(error)}`,
-					);
-				}
-				complete({
-					outcome: reused ? "reused" : "selected",
-					targetProfileId: activeProfile.id,
-					harnessId: harness.id,
-					confidence: decision.confidence,
-				});
-				return this.startSessionPrompt(text, options, {
-					routing: reused ? "reused" : "selected",
-					activeProfileId: activeProfile.id,
-					previousProfileId: currentProfile.id,
-					harnessId: harness.id,
-					harnessRevision: harness.revision,
-					notice,
-					reason: decision.reason,
-				});
-			},
-		);
+		return { completion, accepted };
 	}
 
 	private async preparePrompt(text: string, options: PromptOptions | undefined): Promise<PreparedRuntimePrompt> {
 		this.assertExclusiveRuntimeIdle();
-		if (this.session.collaborationMode === "plan") {
-			return this.startSessionPrompt(text, options, {
-				routing: "bypassed",
-				activeProfileId: this.activeProfile.id,
-				...(this._activeHarness
-					? { harnessId: this._activeHarness.id, harnessRevision: this._activeHarness.revision }
-					: {}),
-			});
-		}
-		const routingPrompt = resolvePromptForProfileRouting(this.session, text);
-		if (
-			this._profileRouting === "auto" &&
-			this._activeHarness === undefined &&
-			this.harnessResolutionClaimed &&
-			routingPrompt !== undefined &&
-			!this.session.isStreaming
-		) {
-			await this.harnessResolutionGate;
-		}
-		if (
-			this._profileRouting === "pinned" ||
-			(this._activeHarness === undefined && this.harnessResolutionClaimed) ||
-			routingPrompt === undefined
-		) {
-			return this.startSessionPrompt(text, options, {
-				routing: "bypassed",
-				activeProfileId: this.activeProfile.id,
-				...(this._activeHarness
-					? { harnessId: this._activeHarness.id, harnessRevision: this._activeHarness.revision }
-					: {}),
-			});
-		}
-		if (this._activeHarness !== undefined) {
-			if (this.session.isStreaming || this.session.isCompacting || options?.streamingBehavior !== undefined) {
-				return this.startSessionPrompt(text, options, {
-					routing: "bypassed",
-					activeProfileId: this.activeProfile.id,
-					harnessId: this._activeHarness.id,
-					harnessRevision: this._activeHarness.revision,
-				});
-			}
-			return this.prepareFutureTaskPrompt(text, routingPrompt, options);
-		}
-
-		this.harnessResolutionClaimed = true;
-		this.harnessResolutionGate = new Promise<void>((resolveGate) => {
-			this.settleHarnessResolutionGate = resolveGate;
-		});
-		const messageCountBefore = this.session.messages.filter(
-			(message) => message.role === "user" || message.role === "assistant",
-		).length;
-		const prepared = await this.startSessionPrompt(text, options, {
-			routing: "bypassed",
-			activeProfileId: this.activeProfile.id,
-		});
-		return { ...prepared, resolution: { prompt: routingPrompt, messageCountBefore } };
+		return this.startSessionPrompt(text, options);
 	}
 
-	private async activateHarness(
-		harness: ResolvedHarnessDescriptor,
-		profile: ResolvedTaskProfile,
-		expectedSession: AgentSession,
-		exclusiveOperation?: object,
-	): Promise<boolean> {
-		const activate = async () => {
-			const sessionManager = expectedSession.sessionManager;
-			const expectedLeafId = sessionManager.getLeafId();
-			const storedProfile = sessionManager.getHeader()?.profile;
-			const previousProfile: SessionProfileMetadata | undefined = storedProfile ? { ...storedProfile } : undefined;
-			let nextRuntime: CreateAgentSessionRuntimeResult;
-			try {
-				nextRuntime = await this.createRuntime({
-					cwd: this.cwd,
-					agentDir: this.services.agentDir,
-					sessionManager,
-					profile: profile.id,
-					profileRouting: "auto",
-					harnessId: harness.id,
-					telemetryContext: this.services.telemetryContext,
-					telemetryCapture: this.services.telemetryCapture,
-					sessionStartEvent: { type: "session_start", reason: "new" },
-				});
-			} catch (error) {
-				sessionManager.setProfileMetadata(previousProfile);
-				throw error;
-			}
-			const activated = await this.activatePreparedRuntime(nextRuntime, expectedSession, {
-				expectedLeafId,
-				reason: "new",
-				targetSessionFile: sessionManager.getSessionFile(),
-				profileRouting: "auto",
-				harnessId: harness.id,
-				restoreRejectedMetadata: () => sessionManager.setProfileMetadata(previousProfile),
-			});
-			if (!activated) return false;
-			return true;
-		};
-		if (exclusiveOperation) {
-			if (this.exclusiveRuntimeOperation !== exclusiveOperation) {
-				throw new Error("Plan continuation routing lost exclusive runtime ownership.");
-			}
-			return activate();
-		}
-		return this.runSessionReplacement(activate);
-	}
-
-	private async resolveHarnessAfterInitialTurn(
-		prompt: string,
-		options?: { requireActivation?: boolean; exclusiveOperation?: object },
-	): Promise<RuntimePromptResult> {
-		const startingSession = this.session;
-		const previousProfileId = this.activeProfile.id;
-		return startProfileRouteSpan(
-			this.services.telemetryContext,
-			{
-				sessionId: this.session.sessionManager.getSessionId(),
-				routingMode: this._profileRouting,
-				trigger: "initial_turn",
-				currentProfileId: previousProfileId,
-				sessionEstablished: true,
-			},
-			async ({ context: routeContext, complete }) => {
-				try {
-					const profiles = this.services.resourceLoader
-						.getProfiles()
-						.profiles.filter((profile) => profile.origin === "builtin" && profile.immutable);
-					const loadedHarnesses = loadHarnessDescriptors({
-						agentDir: this.services.agentDir,
-						notes: this.services.resourceLoader.getEvolvedNotes().evolvedNotes,
-					});
-					for (const diagnostic of loadedHarnesses.diagnostics) {
-						this.appendDiagnostic(`Could not load harness descriptor ${diagnostic.path}: ${diagnostic.message}`);
-					}
-					const reusableHarnesses = loadedHarnesses.harnesses.filter(
-						(harness) =>
-							harness.harnessNoteCount > 0 && profiles.some((profile) => profile.id === harness.baseProfileId),
-					);
-					const decision = await routeTaskProfile(
-						{
-							prompt,
-							recentTaskContext: buildRecentTaskContext(this.session.messages),
-							candidates: profiles,
-							harnesses: reusableHarnesses,
-						},
-						(routerPrompt) => this.completeProfileRoute(routerPrompt, routeContext),
-					);
-					if (this.session !== startingSession) {
-						throw new Error("Session changed while initial task routing was pending");
-					}
-					if (startingSession.collaborationMode === "plan") {
-						if (options?.requireActivation) {
-							throw new Error("Plan mode resumed while accepted-plan routing was pending");
-						}
-						this.harnessResolutionClaimed = false;
-						complete({ outcome: "stayed", targetProfileId: previousProfileId, confidence: decision.confidence });
-						return { routing: "bypassed", activeProfileId: previousProfileId };
-					}
-					if (this.disposeRequested) {
-						throw new Error("Agent session runtime disposal started while task routing was pending");
-					}
-					if (decision.fallback) {
-						const detail = decision.fallbackDetail ? `: ${decision.fallbackDetail}` : "";
-						this.appendDiagnostic(`Task profile router used ${decision.fallback} fallback${detail}`, true);
-					}
-
-					let harness: ResolvedHarnessDescriptor;
-					if (decision.decision === "reuse") {
-						const existingHarness = reusableHarnesses.find((candidate) => candidate.id === decision.harnessId);
-						if (!existingHarness)
-							throw new Error(`Profile router selected unknown harness "${decision.harnessId}"`);
-						harness = existingHarness;
-					} else {
-						harness = createHarnessDescriptor({
-							agentDir: this.services.agentDir,
-							name: decision.harnessName ?? "General task",
-							description: decision.harnessDescription ?? "Harness for the current task.",
-							baseProfileId: decision.profileId,
-							notes: this.services.resourceLoader.getEvolvedNotes().evolvedNotes,
-						});
-					}
-					const profile = profiles.find((candidate) => candidate.id === harness.baseProfileId);
-					if (!profile) throw new Error(`Harness references unknown immutable profile "${harness.baseProfileId}"`);
-					const activated = await this.activateHarness(
-						harness,
-						profile,
-						startingSession,
-						options?.exclusiveOperation,
-					);
-					if (!activated) {
-						this.harnessResolutionClaimed = false;
-						if (options?.requireActivation) {
-							throw new Error("Session changed while accepted-plan harness activation was pending");
-						}
-						complete({ outcome: "stayed", targetProfileId: previousProfileId, confidence: decision.confidence });
-						return { routing: "bypassed", activeProfileId: previousProfileId };
-					}
-
-					const reused = decision.decision === "reuse";
-					const notice = reused
-						? `Found evolved harness "${harness.name}" for this task. Switched to revision ${harness.revision.slice(0, 12)}.`
-						: `Created harness "${harness.name}" using the ${profile.name} prompt profile.`;
-					try {
-						this.profileSwitchListener?.({
-							fromProfileId: previousProfileId,
-							toProfileId: profile.id,
-							reason: decision.reason,
-							harnessId: harness.id,
-							harnessRevision: harness.revision,
-							harnessName: harness.name,
-							reused,
-							notice,
-						});
-					} catch (error) {
-						this.appendDiagnostic(
-							`Task profile switch listener failed: ${error instanceof Error ? error.message : String(error)}`,
-						);
-					}
-					const result: RuntimePromptResult = {
-						routing: reused ? "reused" : "selected",
-						activeProfileId: profile.id,
-						previousProfileId,
-						harnessId: harness.id,
-						harnessRevision: harness.revision,
-						notice,
-						reason: decision.reason,
-					};
-					complete({
-						outcome: result.routing,
-						targetProfileId: profile.id,
-						harnessId: harness.id,
-						confidence: decision.confidence,
-						...(decision.fallback ? { fallback: ROUTE_FALLBACK_TELEMETRY[decision.fallback] } : {}),
-					});
-					return result;
-				} catch (error) {
-					if (
-						!options?.requireActivation &&
-						this.session === startingSession &&
-						startingSession.collaborationMode === "plan"
-					) {
-						this.harnessResolutionClaimed = false;
-						complete({ outcome: "stayed", targetProfileId: previousProfileId });
-						return { routing: "bypassed", activeProfileId: previousProfileId };
-					}
-					const message = error instanceof Error ? error.message : String(error);
-					this.appendDiagnostic(
-						options?.requireActivation
-							? `Task profile routing failed before accepted-plan implementation: ${message}`
-							: `Task profile routing failed; continuing with "${previousProfileId}": ${message}`,
-					);
-					complete({ outcome: "failed", targetProfileId: previousProfileId });
-					if (options?.requireActivation) throw error;
-					return { routing: "failed", activeProfileId: previousProfileId, reason: message };
-				}
-			},
-		);
-	}
-
-	/** Route and submit an accepted plan through its task-scoped implementation harness exactly once. */
+	/** Submit an accepted plan's implementation prompt exactly once, under exclusive runtime ownership. */
 	async promptPlanContinuation(
 		continuation: PlanContinuation,
 		options?: PlanContinuationPromptOptions,
-	): Promise<RuntimePromptResult> {
+	): Promise<void> {
 		let preflightReported = false;
 		const reportPreflight = (success: boolean): void => {
 			if (preflightReported) return;
@@ -2019,41 +717,25 @@ export class AgentSessionRuntime {
 				throw new Error("Plan continuation is no longer pending.");
 			}
 			const prepared = await this.enqueuePromptPreparation(() =>
-				this.runExclusiveRuntimeOperation(async (exclusiveOperation) => {
+				this.runExclusiveRuntimeOperation(async () => {
 					if (this.session !== entrySession || entrySession.pendingPlanContinuation !== continuation) {
-						throw new Error("Session changed while the plan continuation was waiting to be routed.");
-					}
-
-					let result: RuntimePromptResult = {
-						routing: "bypassed",
-						activeProfileId: this.activeProfile.id,
-						...(this._activeHarness
-							? { harnessId: this._activeHarness.id, harnessRevision: this._activeHarness.revision }
-							: {}),
-					};
-					if (this._profileRouting === "auto" && this._activeHarness === undefined) {
-						result = await this.resolveHarnessAfterInitialTurn(continuation.message, {
-							requireActivation: true,
-							exclusiveOperation,
-						});
+						throw new Error("Session changed while the plan continuation was waiting to be submitted.");
 					}
 
 					const activeContinuation = this.session.pendingPlanContinuation;
 					if (!activeContinuation) {
-						throw new Error("Plan continuation was lost while activating its implementation harness.");
+						throw new Error("Plan continuation was lost while preparing its implementation prompt.");
 					}
 					if (this.disposeRequested) {
 						throw new Error("Agent session runtime disposal started before implementation prompt ownership.");
 					}
-					return this.startSessionPlanContinuation(
-						activeContinuation,
-						{ ...options, preflightResult: reportPreflight },
-						result,
-					);
+					return this.startSessionPlanContinuation(activeContinuation, {
+						...options,
+						preflightResult: reportPreflight,
+					});
 				}),
 			);
 			await prepared.completion;
-			return prepared.result;
 		} catch (error) {
 			reportPreflight(false);
 			throw error;
@@ -2061,7 +743,7 @@ export class AgentSessionRuntime {
 	}
 
 	/** Run the accepted first task on DEFAULT, then resolve this session's harness exactly once. */
-	async prompt(text: string, options?: PromptOptions): Promise<RuntimePromptResult> {
+	async prompt(text: string, options?: PromptOptions): Promise<void> {
 		this.assertExclusiveRuntimeIdle();
 		const entrySession = this.session;
 		const prepared = await this.enqueuePromptPreparation(() => {
@@ -2077,30 +759,7 @@ export class AgentSessionRuntime {
 			}
 			return this.preparePrompt(text, options);
 		});
-		if (prepared.cancelledError) throw prepared.cancelledError;
-		try {
-			await prepared.completion;
-		} catch (error) {
-			if (prepared.resolution) {
-				this.harnessResolutionClaimed = false;
-				this.settleHarnessResolutionGate?.();
-			}
-			throw error;
-		}
-		if (!prepared.resolution) return prepared.result;
-		const messageCountAfter = this.session.messages.filter(
-			(message) => message.role === "user" || message.role === "assistant",
-		).length;
-		if (!prepared.accepted || messageCountAfter <= prepared.resolution.messageCountBefore) {
-			this.harnessResolutionClaimed = false;
-			this.settleHarnessResolutionGate?.();
-			return prepared.result;
-		}
-		try {
-			return await this.resolveHarnessAfterInitialTurn(prepared.resolution.prompt);
-		} finally {
-			this.settleHarnessResolutionGate?.();
-		}
+		await prepared.completion;
 	}
 
 	dispose(): Promise<void> {
@@ -2134,56 +793,17 @@ export async function createAgentSessionRuntime(
 		cwd: string;
 		agentDir: string;
 		sessionManager: SessionManager;
-		profile?: string;
-		profileRouting?: ProfileRoutingMode;
-		harnessId?: string;
-		telemetryContext?: AgentSessionServices["telemetryContext"];
-		telemetryCapture?: AgentSessionServices["telemetryCapture"];
 		sessionStartEvent?: SessionStartEvent;
 	},
 ): Promise<AgentSessionRuntime> {
 	assertSessionCwdExists(options.sessionManager, options.cwd);
-	const persistedSelection = getProfileSelection(options.sessionManager);
-	const requestedRouting = options.profileRouting ?? persistedSelection.profileRouting ?? "auto";
-	const requestedHarnessId = options.harnessId ?? persistedSelection.harnessId;
-	const loadedHarnesses = requestedHarnessId
-		? loadHarnessDescriptors({ agentDir: options.agentDir })
-		: { harnesses: [], diagnostics: [] };
-	const restoredHarness = loadedHarnesses.harnesses.find((harness) => harness.id === requestedHarnessId);
-	const harnessId = restoredHarness?.id;
-	const profile =
-		restoredHarness?.baseProfileId ??
-		(requestedRouting === "auto" ? "general" : (options.profile ?? persistedSelection.profile));
-	const result = await createRuntime({
-		...options,
-		profile,
-		profileRouting: requestedRouting,
-		harnessId,
-	});
-	const profileRouting = result.session.sessionManager.getHeader()?.profile?.routing ?? requestedRouting ?? "auto";
-	const diagnostics = result.deniedToolsMessage
-		? [...result.diagnostics, { type: "warning" as const, message: result.deniedToolsMessage }]
-		: result.diagnostics;
-	for (const diagnostic of loadedHarnesses.diagnostics) {
-		diagnostics.push({
-			type: "warning",
-			message: `Could not load harness descriptor ${diagnostic.path}: ${diagnostic.message}`,
-		});
-	}
-	if (requestedHarnessId && !restoredHarness) {
-		diagnostics.push({
-			type: "warning",
-			message: `Could not restore harness "${requestedHarnessId}"; ${requestedRouting === "auto" ? "falling back to DEFAULT" : "keeping the pinned profile"}.`,
-		});
-	}
+	const result = await createRuntime(options);
 	return new AgentSessionRuntime(
 		result.session,
 		result.services,
 		createRuntime,
-		diagnostics,
+		result.diagnostics,
 		result.modelFallbackMessage,
-		profileRouting,
-		harnessId,
 	);
 }
 

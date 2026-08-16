@@ -640,18 +640,19 @@ export class AgentSession {
 		this.agent.afterToolCall = async ({ toolCall, args, result, isError, context }) => {
 			const isPlanToolContext = this._collaborationMode === "plan" || this._isPlanToolContext(context.tools);
 			const runner = this._extensionRunner;
-			const hookResult = !isPlanToolContext && runner.hasHandlers("tool_result")
-				? await runner.emitToolResult({
-						type: "tool_result",
-						toolName: toolCall.name,
-						toolCallId: toolCall.id,
-						input: args as Record<string, unknown>,
-						content: result.content,
-						details: result.details,
-						isError,
-						usage: result.usage,
-					})
-				: undefined;
+			const hookResult =
+				!isPlanToolContext && runner.hasHandlers("tool_result")
+					? await runner.emitToolResult({
+							type: "tool_result",
+							toolName: toolCall.name,
+							toolCallId: toolCall.id,
+							input: args as Record<string, unknown>,
+							content: result.content,
+							details: result.details,
+							isError,
+							usage: result.usage,
+						})
+					: undefined;
 
 			const content = hookResult?.content ?? result.content ?? [];
 			// Runs after the extension hook so images injected or replaced by extensions are normalized too.
