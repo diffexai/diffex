@@ -121,7 +121,7 @@ describe("regression #3592: no-builtin-tools keeps extension tools enabled", () 
 		expect(session.getActiveToolNames()).toEqual([SUBMIT_PLAN_TOOL_NAME]);
 
 		session.setCollaborationMode("default");
-		expect(session.getActiveToolNames()).toEqual(["dynamic_tool"]);
+		expect(session.getActiveToolNames()).toEqual(["spawn_agent", "agent_action", "agents", "dynamic_tool"]);
 		await session.dispose();
 	});
 
