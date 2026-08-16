@@ -719,22 +719,6 @@ export class InteractiveMode {
 			};
 		}
 
-		const planCommand = slashCommands.find((command) => command.name === "plan");
-		if (planCommand) {
-			planCommand.getArgumentCompletions = (prefix: string): AutocompleteItem[] | null => {
-				const options = [
-					{ value: "on", label: "on", description: "Enable plan mode" },
-					{ value: "off", label: "off", description: "Disable plan mode" },
-				];
-				return createFuzzyAutocompleteItems(
-					options,
-					prefix,
-					(option) => `${option.value} ${option.description}`,
-					(option) => option,
-				);
-			};
-		}
-
 		const loginCommand = slashCommands.find((command) => command.name === "login");
 		if (loginCommand) {
 			loginCommand.getArgumentCompletions = (prefix: string): AutocompleteItem[] | null => {
@@ -2752,58 +2736,35 @@ export class InteractiveMode {
 		}
 	}
 
-	private async handlePlanCommand(argument?: string): Promise<void> {
-		if (argument !== undefined && argument !== "on" && argument !== "off") {
-			this.showError("Usage: /plan [on|off]");
-			return;
-		}
-
+	private async handlePlanCommand(instructions?: string): Promise<string | undefined> {
 		const continuation = this.session.pendingPlanContinuation;
 		if (continuation) {
-			if (argument === undefined) {
+			if (instructions === undefined) {
 				await this.startPlanContinuation(continuation);
-				return;
+			} else {
+				this.showError("Accepted plan implementation is waiting. Use /plan to retry it first.");
 			}
-			this.showError("Accepted plan implementation is waiting. Use /plan to retry it first.");
-			return;
+			return undefined;
 		}
 
-		if (argument === undefined && this.session.collaborationMode === "plan" && this.session.pendingPlan) {
-			this.openPendingPlanDecision({ explicit: true });
-			return;
+		if (this.session.pendingPlan) {
+			if (instructions === undefined) {
+				this.openPendingPlanDecision({ explicit: true });
+			} else {
+				this.showError("Resolve the pending plan before starting another planning prompt.");
+			}
+			return undefined;
 		}
-
-		const targetMode =
-			argument === "on"
-				? "plan"
-				: argument === "off"
-					? "default"
-					: this.session.collaborationMode === "plan"
-						? "default"
-						: "plan";
 
 		try {
-			if (targetMode === "default" && this.session.pendingPlan) {
-				const plan = this.session.pendingPlan;
-				const confirmed = await this.showExtensionConfirm(
-					"Discard pending plan",
-					"Disable plan mode and discard the pending plan?",
-				);
-				if (!confirmed) return;
-				this.session.resolvePlan(plan.id, "discard");
-				this.showStatus("Plan discarded; plan mode disabled");
-				return;
+			if (this.session.collaborationMode !== "plan") {
+				this.session.setCollaborationMode("plan");
+				this.showStatus("Plan mode enabled");
 			}
-
-			if (this.session.collaborationMode === targetMode) {
-				this.showStatus(`Plan mode is already ${targetMode === "plan" ? "enabled" : "disabled"}`);
-				return;
-			}
-
-			this.session.setCollaborationMode(targetMode);
-			this.showStatus(`Plan mode ${targetMode === "plan" ? "enabled" : "disabled"}`);
+			return instructions;
 		} catch (error: unknown) {
-			this.showError(`Failed to change plan mode: ${error instanceof Error ? error.message : String(error)}`);
+			this.showError(`Failed to enable plan mode: ${error instanceof Error ? error.message : String(error)}`);
+			return undefined;
 		}
 	}
 
@@ -3242,12 +3203,6 @@ export class InteractiveMode {
 				await this.handleModelCommand(searchTerm);
 				return;
 			}
-			if (text === "/plan" || text.startsWith("/plan ")) {
-				const argument = text.slice("/plan".length).trim() || undefined;
-				this.editor.setText("");
-				await this.handlePlanCommand(argument);
-				return;
-			}
 			if (text === "/export" || text.startsWith("/export ")) {
 				await this.handleExportCommand(text);
 				this.editor.setText("");
@@ -3364,6 +3319,13 @@ export class InteractiveMode {
 				this.editor.setText("");
 				await this.shutdown();
 				return;
+			}
+			if (text === "/plan" || text.startsWith("/plan ")) {
+				const instructions = text.slice("/plan".length).trim() || undefined;
+				this.editor.setText("");
+				const planningPrompt = await this.handlePlanCommand(instructions);
+				if (planningPrompt === undefined) return;
+				text = planningPrompt;
 			}
 
 			// Queue input during compaction (extension commands execute immediately)

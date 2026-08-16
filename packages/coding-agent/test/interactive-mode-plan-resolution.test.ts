@@ -128,8 +128,10 @@ describe("InteractiveMode plan resolution", () => {
 		const reboundSession: PlanDecisionSession = {
 			pendingPlan: undefined,
 			pendingPlanContinuation: restoredContinuation,
+			collaborationMode: "default",
 			resolvePlan: vi.fn(),
 			promptPlanContinuation: vi.fn(),
+			setCollaborationMode: vi.fn(),
 		};
 		context.session = reboundSession;
 		context.runtimeHost.promptPlanContinuation.mockImplementation(
@@ -151,19 +153,53 @@ describe("InteractiveMode plan resolution", () => {
 		expect(reboundSession.pendingPlanContinuation).toBeUndefined();
 	});
 
-	test.each(["on", "off"])("blocks /plan %s while an accepted continuation is pending", async (argument) => {
+	test("activates plan mode and returns slash-command instructions as the prompt", async () => {
+		const context = createDecisionContext(undefined);
+		context.session.pendingPlan = undefined;
+		context.session.collaborationMode = "default";
+
+		const prompt = await handlePlanCommand.call(context, "inspect the authentication flow");
+
+		expect(context.session.setCollaborationMode).toHaveBeenCalledWith("plan");
+		expect(context.showStatus).toHaveBeenCalledWith("Plan mode enabled");
+		expect(prompt).toBe("inspect the authentication flow");
+	});
+
+	test("keeps bare /plan active instead of toggling plan mode off", async () => {
+		const context = createDecisionContext(undefined);
+		context.session.pendingPlan = undefined;
+
+		const prompt = await handlePlanCommand.call(context);
+
+		expect(context.session.setCollaborationMode).not.toHaveBeenCalled();
+		expect(prompt).toBeUndefined();
+	});
+
+	test.each(["on", "off"])("treats former /plan %s controls as planning instructions", async (instructions) => {
+		const context = createDecisionContext(undefined);
+		context.session.pendingPlan = undefined;
+		context.session.collaborationMode = "default";
+
+		const prompt = await handlePlanCommand.call(context, instructions);
+
+		expect(context.session.setCollaborationMode).toHaveBeenCalledWith("plan");
+		expect(prompt).toBe(instructions);
+	});
+
+	test("blocks new /plan instructions while an accepted continuation is pending", async () => {
 		const context = createDecisionContext(undefined);
 		const continuation = Object.freeze({ message: "Implement the accepted plan." });
 		context.session.pendingPlan = undefined;
 		context.session.pendingPlanContinuation = continuation;
 
-		await handlePlanCommand.call(context, argument);
+		const prompt = await handlePlanCommand.call(context, "revise the implementation");
 
 		expect(context.runtimeHost.promptPlanContinuation).not.toHaveBeenCalled();
 		expect(context.showError).toHaveBeenCalledWith(
 			"Accepted plan implementation is waiting. Use /plan to retry it first.",
 		);
 		expect(context.session.pendingPlanContinuation).toBe(continuation);
+		expect(prompt).toBeUndefined();
 	});
 
 	test("does not leave a handoff loader mounted when durable plan acceptance fails", async () => {

@@ -15,9 +15,11 @@ export const PLAN: PlanArtifact = {
 export interface PlanDecisionSession {
 	pendingPlan: PlanArtifact | undefined;
 	pendingPlanContinuation?: PlanContinuation;
+	collaborationMode: "default" | "plan";
 	isStreaming?: boolean;
 	resolvePlan: ReturnType<typeof vi.fn>;
 	promptPlanContinuation: ReturnType<typeof vi.fn>;
+	setCollaborationMode: ReturnType<typeof vi.fn>;
 }
 
 export interface PlanDecisionContext {
@@ -26,6 +28,7 @@ export interface PlanDecisionContext {
 	planDecisionAbortController?: AbortController;
 	suppressedPlanDecisionId?: string;
 	showExtensionSelector: ReturnType<typeof vi.fn>;
+	openPendingPlanDecision: ReturnType<typeof vi.fn>;
 	showStatus: ReturnType<typeof vi.fn>;
 	showError: ReturnType<typeof vi.fn>;
 	mountEditorUi: ReturnType<typeof vi.fn>;
@@ -72,8 +75,8 @@ export const startPlanContinuation = Reflect.get(InteractiveMode.prototype, "sta
 
 export const handlePlanCommand = Reflect.get(InteractiveMode.prototype, "handlePlanCommand") as (
 	this: PlanDecisionContext,
-	argument?: string,
-) => Promise<void>;
+	instructions?: string,
+) => Promise<string | undefined>;
 
 export const handleEvent = Reflect.get(InteractiveMode.prototype, "handleEvent") as (
 	this: PlanSubmittedEventContext,
@@ -386,8 +389,12 @@ export function createProfileSelectionContext(width: number) {
 export function createDecisionContext(selection: string | undefined): PlanDecisionContext {
 	const session: PlanDecisionSession = {
 		pendingPlan: PLAN,
+		collaborationMode: "plan",
 		resolvePlan: vi.fn(),
 		promptPlanContinuation: vi.fn(),
+		setCollaborationMode: vi.fn((mode: "default" | "plan") => {
+			session.collaborationMode = mode;
+		}),
 	};
 	const context: PlanDecisionContext = {
 		session,
@@ -403,6 +410,7 @@ export function createDecisionContext(selection: string | undefined): PlanDecisi
 		planDecisionAbortController: undefined,
 		suppressedPlanDecisionId: undefined,
 		showExtensionSelector: vi.fn().mockResolvedValue(selection),
+		openPendingPlanDecision: vi.fn(),
 		showStatus: vi.fn(),
 		showError: vi.fn(),
 		mountEditorUi: vi.fn(() => ({})),

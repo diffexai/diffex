@@ -18,11 +18,11 @@ describe("BUILTIN_SLASH_COMMANDS", () => {
 		});
 	});
 
-	it("registers plan mode with optional on/off arguments", () => {
+	it("registers plan mode with optional instructions", () => {
 		expect(BUILTIN_SLASH_COMMANDS).toContainEqual({
 			name: "plan",
-			description: "Toggle plan mode",
-			argumentHint: "[on|off]",
+			description: "Start a planning prompt",
+			argumentHint: "[instructions]",
 		});
 	});
 });
