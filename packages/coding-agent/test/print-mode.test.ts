@@ -39,7 +39,6 @@ type FakeRuntimeHost = {
 	switchSession: ReturnType<typeof vi.fn>;
 	dispose: ReturnType<typeof vi.fn>;
 	setRebindSession: ReturnType<typeof vi.fn>;
-	setProfileSwitchListener: ReturnType<typeof vi.fn>;
 	commandContextActions?: ExtensionCommandContextActions;
 };
 
@@ -70,7 +69,6 @@ function createAssistantMessage(options?: {
 
 function createRuntimeHost(
 	assistantMessage: AssistantMessage,
-	emitProfileSwitch = false,
 	activationTarget?: { sessionManager: SessionManager; leafId: string | null },
 ): FakeRuntimeHost {
 	const extensionRunner: FakeExtensionRunner = {
@@ -130,31 +128,12 @@ function createRuntimeHost(
 			await session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
 		}),
 		setRebindSession: vi.fn(),
-		setProfileSwitchListener: vi.fn(),
 	};
 	session.bindExtensions.mockImplementation(
 		async (options: { commandContextActions?: ExtensionCommandContextActions }) => {
 			runtimeHost.commandContextActions = options.commandContextActions;
 		},
 	);
-	runtimeHost.setProfileSwitchListener.mockImplementation((listener) => {
-		if (listener && emitProfileSwitch) {
-			runtimeHost.prompt.mockImplementationOnce(async (text: string, options?: unknown) => {
-				if (options === undefined) await session.prompt(text);
-				else await session.prompt(text, options);
-				listener({
-					fromProfileId: "general",
-					toProfileId: "research",
-					reason: "private reason",
-					harnessId: "evidence-review-a1b2c3",
-					harnessRevision: "abcdef1234567890",
-					harnessName: "Evidence review",
-					reused: true,
-					notice: 'Found evolved harness "Evidence review" for this task. Switched to revision abcdef123456.',
-				});
-			});
-		}
-	});
 	return runtimeHost;
 }
 
@@ -223,7 +202,7 @@ describe("runPrintMode", () => {
 		"rejects a lifecycle-invalid %s extension target before mutation",
 		async (action) => {
 			const activationTarget = createLifecycleInvalidTarget();
-			const runtimeHost = createRuntimeHost(createAssistantMessage({ text: "done" }), false, activationTarget);
+			const runtimeHost = createRuntimeHost(createAssistantMessage({ text: "done" }), activationTarget);
 
 			const exitCode = await runPrintMode(runtimeHost as unknown as Parameters<typeof runPrintMode>[0], {
 				mode: "text",
@@ -251,7 +230,7 @@ describe("runPrintMode", () => {
 		"rejects an accepted-plan continuation %s extension target before mutation",
 		async (action) => {
 			const activationTarget = createPendingPlanContinuationTarget();
-			const runtimeHost = createRuntimeHost(createAssistantMessage({ text: "done" }), false, activationTarget);
+			const runtimeHost = createRuntimeHost(createAssistantMessage({ text: "done" }), activationTarget);
 
 			const exitCode = await runPrintMode(runtimeHost as unknown as Parameters<typeof runPrintMode>[0], {
 				mode: "text",
@@ -328,47 +307,6 @@ describe("runPrintMode", () => {
 		expect(session.prompt).toHaveBeenCalledWith("hello");
 		expect(session.extensionRunner.emit).toHaveBeenCalledTimes(1);
 		expect(session.extensionRunner.emit).toHaveBeenCalledWith({ type: "session_shutdown", reason: "quit" });
-	});
-
-	it("writes a harness notice to stderr without corrupting text stdout", async () => {
-		const runtimeHost = createRuntimeHost(createAssistantMessage({ text: "done" }), true);
-		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-
-		const exitCode = await runPrintMode(runtimeHost as unknown as Parameters<typeof runPrintMode>[0], {
-			mode: "text",
-			initialMessage: "Review evidence",
-		});
-
-		expect(exitCode).toBe(0);
-		expect(errorSpy).toHaveBeenCalledWith(
-			'Found evolved harness "Evidence review" for this task. Switched to revision abcdef123456.',
-		);
-	});
-
-	it("emits a typed reason-free harness event in json mode", async () => {
-		const runtimeHost = createRuntimeHost(createAssistantMessage({ text: "done" }), true);
-		const output: string[] = [];
-		const outputSpy = vi.spyOn(process.stdout, "write").mockImplementation(((
-			chunk: string | Uint8Array,
-			callbackOrEncoding?: BufferEncoding | (() => void),
-			callback?: () => void,
-		) => {
-			output.push(String(chunk));
-			if (typeof callbackOrEncoding === "function") callbackOrEncoding();
-			else callback?.();
-			return true;
-		}) as typeof process.stdout.write);
-
-		const exitCode = await runPrintMode(runtimeHost as unknown as Parameters<typeof runPrintMode>[0], {
-			mode: "json",
-			initialMessage: "Review evidence",
-		});
-
-		expect(exitCode).toBe(0);
-		expect(output.join("")).toContain('"type":"profile_switch"');
-		expect(output.join("")).toContain('"harnessId":"evidence-review-a1b2c3"');
-		expect(output.join("")).not.toContain("private reason");
-		outputSpy.mockRestore();
 	});
 
 	it("suppresses native plan lifecycle events in json mode", async () => {

@@ -17,8 +17,8 @@ import type { ExtensionCommandContextActions } from "../src/core/extensions/type
 import { SUBMIT_PLAN_TOOL_NAME } from "../src/core/plan-mode.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
 import { SettingsManager } from "../src/core/settings-manager.ts";
+import type { JsonAgentSessionEvent } from "../src/modes/json-event.ts";
 import { runRpcMode } from "../src/modes/rpc/rpc-mode.ts";
-import type { RpcEvent } from "../src/modes/rpc/rpc-types.ts";
 import { createInMemoryModelRegistry, getModelRuntime } from "./model-runtime-test-utils.ts";
 import { createTestResourceLoader } from "./utilities.ts";
 
@@ -375,7 +375,7 @@ describe("RPC prompt response semantics", () => {
 
 	it("keeps native plan lifecycle events off the RPC wire", async () => {
 		type PlanLifecycleRpcEvent = Extract<
-			RpcEvent,
+			JsonAgentSessionEvent,
 			{ type: "collaboration_mode_changed" | "plan_submitted" | "plan_resolved" }
 		>;
 		expectTypeOf<PlanLifecycleRpcEvent>().toEqualTypeOf<never>();
