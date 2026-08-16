@@ -1339,7 +1339,6 @@ export class AgentSession {
 			if (tool && !validToolNames.includes(name)) {
 				validToolNames.push(name);
 			}
-			}
 		}
 		this._normalActiveToolNames = validToolNames;
 		this._applyToolsForCollaborationMode();
@@ -2668,7 +2667,6 @@ export class AgentSession {
 		this._emit({ type: "compaction_start", reason: "manual" });
 
 		try {
-			const effectiveCustomInstructions = this._compactionInstructions(customInstructions);
 			if (!this.model) {
 				throw new Error(formatNoModelSelectedMessage());
 			}
