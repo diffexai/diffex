@@ -64,13 +64,7 @@ import {
 	type PromptOptions,
 	parseSkillBlock,
 } from "../../core/agent-session.ts";
-import {
-	type AgentSessionRuntime,
-	SessionImportFileNotFoundError,
-	TaskBoundaryCancelledError,
-	type TaskBoundaryProposal,
-	type TaskBoundaryResolution,
-} from "../../core/agent-session-runtime.ts";
+import { type AgentSessionRuntime, SessionImportFileNotFoundError } from "../../core/agent-session-runtime.ts";
 import {
 	CACHE_TTL_MS,
 	type CacheMiss,
@@ -92,7 +86,6 @@ import type {
 	WorkingIndicatorOptions,
 } from "../../core/extensions/index.ts";
 import { FooterDataProvider, type ReadonlyFooterDataProvider } from "../../core/footer-data-provider.ts";
-import { loadHarnessDescriptors } from "../../core/harness-descriptors.ts";
 import { configureHttpDispatcher, formatHttpIdleTimeoutMs } from "../../core/http-dispatcher.ts";
 import { type AppKeybinding, KeybindingsManager } from "../../core/keybindings.ts";
 import { createCompactionSummaryMessage } from "../../core/messages.ts";
@@ -172,7 +165,6 @@ import {
 	RetryStatusIndicator,
 	type StatusIndicator,
 	SubagentWaitStatusIndicator,
-	TaskBoundaryStatusIndicator,
 	WorkingStatusIndicator,
 } from "./components/status-indicator.ts";
 import { SubagentsComponent } from "./components/subagents.ts";
@@ -464,7 +456,6 @@ export class InteractiveMode {
 	private isInitialized = false;
 	private onInputCallback?: (text: string) => void;
 	private pendingUserInputs: string[] = [];
-	private pendingTaskPrompt: { token: object; text: string } | undefined = undefined;
 	private activeStatusIndicator: StatusIndicator | undefined = undefined;
 	private readonly idleStatus = new IdleStatus();
 	private workingMessage: string | undefined = undefined;
@@ -589,10 +580,6 @@ export class InteractiveMode {
 		this.runtimeHost.setRebindSession(async () => {
 			await this.rebindCurrentSession({ renderBeforeBind: true });
 		});
-		this.runtimeHost.setProfileSwitchListener((event) => {
-			this.showStatus(event.notice);
-		});
-		this.runtimeHost.setTaskBoundaryResolver((proposal) => this.resolveTaskBoundary(proposal));
 		this.version = VERSION;
 		this.renderer = createInteractiveTui({
 			tuiMode,
@@ -728,27 +715,6 @@ export class InteractiveMode {
 					label: item.id,
 					description: item.provider,
 				}));
-			};
-		}
-
-		const profileCommand = slashCommands.find((command) => command.name === "profile");
-		if (profileCommand) {
-			profileCommand.getArgumentCompletions = (prefix: string): AutocompleteItem[] | null => {
-				const profiles = this.session.resourceLoader.getProfiles().profiles;
-				const items = [
-					{ id: "auto", name: "Automatic routing", description: "Choose a profile for each distinct task" },
-					...profiles.map((profile) => ({
-						id: profile.id,
-						name: profile.name,
-						description: profile.description,
-					})),
-				];
-				return createFuzzyAutocompleteItems(
-					items,
-					prefix,
-					(item) => `${item.id} ${item.name} ${item.description}`,
-					(item) => ({ value: item.id, label: item.id, description: item.name }),
-				);
 			};
 		}
 
@@ -1164,52 +1130,7 @@ export class InteractiveMode {
 	}
 
 	private async promptUser(text: string, options?: PromptOptions): Promise<void> {
-		const taskPromptToken = {};
-		const showTaskRoutingProgress =
-			this.runtimeHost.profileRouting === "auto" &&
-			this.runtimeHost.activeHarness !== undefined &&
-			this.session.isIdle &&
-			!this.isExtensionCommand(text) &&
-			options?.streamingBehavior === undefined &&
-			text.trim().length > 0;
-		let taskPromptPending = showTaskRoutingProgress;
-		if (showTaskRoutingProgress) {
-			this.pendingTaskPrompt = { token: taskPromptToken, text };
-			this.updatePendingMessagesDisplay();
-			this.showTaskRoutingProgress("Checking whether this starts a new task...");
-		}
-		try {
-			const result = await this.runtimeHost.prompt(text, {
-				...options,
-				preflightResult: (success) => {
-					options?.preflightResult?.(success);
-					if (!taskPromptPending || this.pendingTaskPrompt?.token !== taskPromptToken) return;
-					taskPromptPending = false;
-					this.pendingTaskPrompt = undefined;
-					this.updatePendingMessagesDisplay();
-					this.ui.requestRender();
-				},
-			});
-			if (result.routing === "failed") {
-				this.showStatus(`Profile routing unavailable; using ${result.activeProfileId}`);
-			}
-		} catch (error) {
-			if (!(error instanceof TaskBoundaryCancelledError)) throw error;
-			const restored = !this.editor.getText().trim();
-			if (restored) this.editor.setText(text);
-			this.showStatus(restored ? "Task switch cancelled; prompt restored" : "Task switch cancelled");
-			this.ui.requestRender();
-		} finally {
-			if (taskPromptPending && this.pendingTaskPrompt?.token === taskPromptToken) {
-				taskPromptPending = false;
-				this.pendingTaskPrompt = undefined;
-				this.updatePendingMessagesDisplay();
-			}
-			if (showTaskRoutingProgress) {
-				this.clearStatusIndicator("taskBoundary");
-				this.ui.requestRender();
-			}
-		}
+		await this.runtimeHost.prompt(text, options);
 	}
 
 	private async checkForPackageUpdates(): Promise<string[]> {
@@ -2206,11 +2127,6 @@ export class InteractiveMode {
 		this.ui.requestRender();
 	}
 
-	private showTaskRoutingProgress(message: string): void {
-		this.showStatusIndicator(new TaskBoundaryStatusIndicator(this.ui, message));
-		this.ui.requestRender();
-	}
-
 	private setWorkingIndicator(options?: WorkingIndicatorOptions): void {
 		this.workingIndicatorOptions = options;
 		if (this.activeStatusIndicator?.kind === "working") {
@@ -2644,31 +2560,6 @@ export class InteractiveMode {
 	): Promise<boolean> {
 		const result = await this.showExtensionSelector(`${title}\n${message}`, ["Yes", "No"], opts);
 		return result === "Yes";
-	}
-
-	private async resolveTaskBoundary(proposal: TaskBoundaryProposal): Promise<TaskBoundaryResolution> {
-		this.clearStatusIndicator("taskBoundary");
-		const activeHarness = this.runtimeHost.activeHarness;
-		const currentHarnessName =
-			activeHarness?.id === proposal.fromHarnessId ? activeHarness.name : proposal.fromHarnessId;
-		const targetAction = proposal.decision === "select" ? "Create" : proposal.willResumeSession ? "Resume" : "Reuse";
-		const targetLabel = `${targetAction}: ${proposal.targetHarnessName} (${proposal.toProfileId})`;
-		const currentLabel = `Keep current: ${currentHarnessName} (${proposal.fromProfileId})`;
-		const selected = await this.showExtensionSelector("New task detected\nChoose a harness for this prompt", [
-			targetLabel,
-			currentLabel,
-		]);
-
-		if (selected === targetLabel) {
-			const action = targetAction === "Resume" ? "Resuming" : targetAction === "Reuse" ? "Reusing" : "Creating";
-			this.showTaskRoutingProgress(`${action} ${proposal.targetHarnessName}...`);
-			return "switch";
-		}
-		if (selected === currentLabel) {
-			this.showTaskRoutingProgress(`Continuing with ${currentHarnessName}...`);
-			return "stay";
-		}
-		return "cancel";
 	}
 
 	private cancelPendingPlanDecision(): void {
@@ -3287,12 +3178,6 @@ export class InteractiveMode {
 				const searchTerm = text.startsWith("/model ") ? text.slice(7).trim() : undefined;
 				this.editor.setText("");
 				await this.handleModelCommand(searchTerm);
-				return;
-			}
-			if (text === "/profile" || text.startsWith("/profile ")) {
-				const selection = text.startsWith("/profile ") ? text.slice(9).trim() : undefined;
-				this.editor.setText("");
-				await this.handleProfileCommand(selection);
 				return;
 			}
 			if (text === "/plan" || text.startsWith("/plan ")) {
@@ -4620,12 +4505,8 @@ export class InteractiveMode {
 	private updatePendingMessagesDisplay(): void {
 		this.pendingMessagesContainer.clear();
 		const { steering: steeringMessages, followUp: followUpMessages } = this.getAllQueuedMessages();
-		if (this.pendingTaskPrompt || steeringMessages.length > 0 || followUpMessages.length > 0) {
+		if (steeringMessages.length > 0 || followUpMessages.length > 0) {
 			this.pendingMessagesContainer.addChild(new Spacer(1));
-			if (this.pendingTaskPrompt) {
-				const text = theme.fg("dim", `Pending: ${this.pendingTaskPrompt.text}`);
-				this.pendingMessagesContainer.addChild(new TruncatedText(text, 1, 0));
-			}
 			for (const message of steeringMessages) {
 				const text = theme.fg("dim", `Steering: ${message}`);
 				this.pendingMessagesContainer.addChild(new TruncatedText(text, 1, 0));
@@ -5023,77 +4904,6 @@ export class InteractiveMode {
 		}
 
 		this.showModelSelector(searchTerm);
-	}
-
-	private async handleProfileCommand(selection?: string): Promise<void> {
-		if (this.session.isStreaming) {
-			this.showWarning("Wait for the current response to finish before changing profiles.");
-			return;
-		}
-		if (this.session.isCompacting) {
-			this.showWarning("Wait for compaction to finish before changing profiles.");
-			return;
-		}
-
-		const activeProfile = this.runtimeHost.activeProfile;
-		let requested = selection;
-		if (!requested) {
-			const labels = new Map<string, string>();
-			const autoLabel = `auto - automatic routing${this.runtimeHost.profileRouting === "auto" ? " (active)" : ""}`;
-			labels.set(autoLabel, "auto");
-			for (const profile of this.session.resourceLoader.getProfiles().profiles) {
-				const active = profile.id === activeProfile.id ? " (active)" : "";
-				labels.set(`${profile.id} - ${profile.name}${active}`, profile.id);
-			}
-			const selectedLabel = await this.showExtensionSelector(
-				`Task profile: ${activeProfile.id} (${this.runtimeHost.profileRouting})`,
-				[...labels.keys()],
-			);
-			if (!selectedLabel) return;
-			requested = labels.get(selectedLabel);
-		}
-
-		if (!requested) return;
-		if (requested === "auto") {
-			try {
-				const result = await this.runtimeHost.newSession({ profile: "general", profileRouting: "auto" });
-				if (result.cancelled) {
-					this.showStatus("Automatic profile routing cancelled");
-					return;
-				}
-				this.showStatus("Automatic profile routing enabled from DEFAULT");
-			} catch (error) {
-				this.showError(
-					`Could not enable automatic profile routing: ${error instanceof Error ? error.message : String(error)}`,
-				);
-			}
-			return;
-		}
-
-		const target = this.session.resourceLoader.getProfiles().registry.get(requested);
-		if (!target) {
-			this.showError(`Unknown task profile: ${requested}`);
-			return;
-		}
-		if (target.id === activeProfile.id) {
-			this.runtimeHost.setProfileRouting("pinned");
-			this.showStatus(`Task profile pinned: ${target.id}`);
-			return;
-		}
-
-		try {
-			const result = await this.runtimeHost.newSession({
-				profile: target.id,
-				profileRouting: "pinned",
-			});
-			if (result.cancelled) {
-				this.showStatus("Task profile change cancelled");
-				return;
-			}
-			this.showStatus(`Task profile pinned: ${target.id}`);
-		} catch (error) {
-			this.showError(`Could not change task profile: ${error instanceof Error ? error.message : String(error)}`);
-		}
 	}
 
 	private async findExactModelMatch(searchTerm: string): Promise<Model<any> | undefined> {
@@ -5577,12 +5387,6 @@ export class InteractiveMode {
 	}
 
 	private showSessionSelector(): void {
-		const harnessNames = new Map(
-			loadHarnessDescriptors({ agentDir: this.runtimeHost.services.agentDir }).harnesses.map((harness) => [
-				harness.id,
-				harness.name,
-			]),
-		);
 		this.showSelector((done) => {
 			const selector = new SessionSelectorComponent(
 				(onProgress) =>
@@ -5612,7 +5416,6 @@ export class InteractiveMode {
 					},
 					showRenameHint: true,
 					keybindings: this.keybindings,
-					getHarnessName: (harnessId) => harnessNames.get(harnessId),
 				},
 
 				this.sessionManager.getSessionFile(),
@@ -6512,9 +6315,7 @@ export class InteractiveMode {
 			info += `${theme.fg("dim", "Name:")} ${sessionName}\n`;
 		}
 		info += `${theme.fg("dim", "File:")} ${stats.sessionFile ?? "In-memory"}\n`;
-		info += `${theme.fg("dim", "ID:")} ${stats.sessionId}\n`;
-		const activeProfile = this.runtimeHost.activeProfile;
-		info += `${theme.fg("dim", "Profile:")} ${activeProfile.name} (${activeProfile.id}, ${this.runtimeHost.profileRouting})\n\n`;
+		info += `${theme.fg("dim", "ID:")} ${stats.sessionId}\n\n`;
 		info += `${theme.bold("Messages")}\n`;
 		info += `${theme.fg("dim", "Total:")} ${stats.totalMessages}\n`;
 		info += `${theme.fg("dim", "User:")} ${stats.userMessages}\n`;
@@ -6886,8 +6687,6 @@ export class InteractiveMode {
 	}
 
 	stop(): void {
-		this.runtimeHost.setProfileSwitchListener(undefined);
-		this.runtimeHost.setTaskBoundaryResolver(undefined);
 		this.cancelPendingPlanDecision();
 		this.cancelActiveEditorUi();
 		if (this.settingsManager.getShowTerminalProgress()) {
