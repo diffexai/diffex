@@ -630,7 +630,7 @@ function parseSessionEntryLine(line: string): FileEntry | null {
 		if (!plan) throw new Error("Session contains an invalid persisted plan artifact.");
 		return { ...entry, plan };
 	}
-	return entry.type === "session" ? normalizeSessionHeader(entry) : entry;
+	return entry;
 }
 
 /** Exported for testing */
