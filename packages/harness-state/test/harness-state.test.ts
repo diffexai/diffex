@@ -19,12 +19,12 @@ import {
 const EXTERNAL_BASE = `sha256:${"0".repeat(64)}`;
 const temporaryRoots: string[] = [];
 
-function computeContentHash(prompt: string): string {
-	return `sha256:${createHash("sha256").update(prompt, "utf8").digest("hex")}`;
+function computeContentHash(memory: string): string {
+	return `sha256:${createHash("sha256").update(memory, "utf8").digest("hex")}`;
 }
 
-function createManifest(prompt: string, base = computeContentHash(prompt)): string {
-	return `${JSON.stringify({ contentHash: computeContentHash(prompt), base })}\n`;
+function createManifest(memory: string, base = computeContentHash(memory)): string {
+	return `${JSON.stringify({ contentHash: computeContentHash(memory), base })}\n`;
 }
 
 afterEach(async () => {
@@ -40,13 +40,13 @@ async function createTemporaryRoot(): Promise<string> {
 async function createBundle(
 	root: string,
 	name = "state",
-	manifest: string | Uint8Array = createManifest("Act carefully.\n"),
-	prompt: string | Uint8Array = "Act carefully.\n",
+	manifest: string | Uint8Array = createManifest("Prefer focused changes.\n"),
+	memory: string | Uint8Array = "Prefer focused changes.\n",
 ): Promise<string> {
 	const bundlePath = join(root, name);
 	await mkdir(bundlePath);
 	await writeFile(join(bundlePath, "manifest.json"), manifest);
-	await writeFile(join(bundlePath, "EVOLVE.md"), prompt);
+	await writeFile(join(bundlePath, "EVOLVE.md"), memory);
 	return bundlePath;
 }
 
@@ -67,7 +67,7 @@ function assertReadonlyTypes(
 	bundle: HarnessStateBundle,
 ): void {
 	// @ts-expect-error HarnessState fields are readonly.
-	state.systemPrompt = "changed";
+	state.memory = "changed";
 	// @ts-expect-error HarnessStateManifest fields are readonly.
 	manifest.contentHash = "sha256:changed";
 	// @ts-expect-error HarnessStateManifest fields are readonly.
@@ -83,20 +83,20 @@ void assertReadonlyTypes;
 
 describe("schemas", () => {
 	test("exports strict schemas with readonly inferred fields", () => {
-		const state = { systemPrompt: "Work carefully." };
-		const manifest = { contentHash: computeContentHash(state.systemPrompt), base: EXTERNAL_BASE };
+		const state = { memory: "Focused changes produced better results." };
+		const manifest = { contentHash: computeContentHash(state.memory), base: EXTERNAL_BASE };
 		expect(Check(HarnessStateSchema, state)).toBe(true);
 		expect(Check(HarnessStateManifestSchema, manifest)).toBe(true);
 		expect(Check(HarnessStateBundleSchema, { state, manifest })).toBe(true);
-		expect(Check(HarnessStateSchema, { systemPrompt: "Work.", extra: true })).toBe(false);
+		expect(Check(HarnessStateSchema, { memory: "Prefer focused changes.", extra: true })).toBe(false);
 		expect(Check(HarnessStateManifestSchema, { ...manifest, extra: true })).toBe(false);
 		expect(Check(HarnessStateBundleSchema, { state, manifest, extra: true })).toBe(false);
 	});
 
 	test.each([
-		["blank prompt", { systemPrompt: "" }],
-		["whitespace-only prompt", { systemPrompt: " \t\r\n" }],
-		["leading U+FEFF prompt", { systemPrompt: "\uFEFFWork." }],
+		["blank memory", { memory: "" }],
+		["whitespace-only memory", { memory: " \t\r\n" }],
+		["leading U+FEFF memory", { memory: "\uFEFFObservation." }],
 	] as const)("rejects %s", (_label, state) => {
 		expect(Check(HarnessStateSchema, state)).toBe(false);
 	});
@@ -127,17 +127,15 @@ describe("saving and round trips", () => {
 		["CRLF", "First line\r\nSecond line\r\n"],
 		["multiline", "One\n\nThree\nFour"],
 		["trailing whitespace", "Keep this exactly.  \n\t "],
-	] as const)("preserves %s prompt content verbatim", async (_label, systemPrompt) => {
+	] as const)("preserves %s memory content verbatim", async (_label, memory) => {
 		const root = await createTemporaryRoot();
 		const destination = join(root, "saved-state");
-		const state = { systemPrompt };
-		const manifest = { contentHash: computeContentHash(systemPrompt), base: EXTERNAL_BASE };
+		const state = { memory };
+		const manifest = { contentHash: computeContentHash(memory), base: EXTERNAL_BASE };
 		const saved = await saveHarnessState(state, destination, { base: EXTERNAL_BASE });
 
-		expect(await readFile(join(destination, "manifest.json"), "utf8")).toBe(
-			createManifest(systemPrompt, EXTERNAL_BASE),
-		);
-		expect(await readFile(join(destination, "EVOLVE.md"), "utf8")).toBe(systemPrompt);
+		expect(await readFile(join(destination, "manifest.json"), "utf8")).toBe(createManifest(memory, EXTERNAL_BASE));
+		expect(await readFile(join(destination, "EVOLVE.md"), "utf8")).toBe(memory);
 		expect(saved).toEqual({ state, manifest });
 		expect(await loadHarnessState(destination)).toEqual(saved);
 	});
@@ -145,29 +143,29 @@ describe("saving and round trips", () => {
 	test("uses the computed content hash as the base for a root state", async () => {
 		const root = await createTemporaryRoot();
 		const destination = join(root, "root-state");
-		const state = { systemPrompt: "Root harness.\n" };
-		const contentHash = computeContentHash(state.systemPrompt);
+		const state = { memory: "Initial evolution notes.\n" };
+		const contentHash = computeContentHash(state.memory);
 
 		const saved = await saveHarnessState(state, destination);
 
 		expect(saved).toEqual({ state, manifest: { contentHash, base: contentHash } });
-		expect(await readFile(join(destination, "manifest.json"), "utf8")).toBe(createManifest(state.systemPrompt));
+		expect(await readFile(join(destination, "manifest.json"), "utf8")).toBe(createManifest(state.memory));
 		expect(await loadHarnessState(destination)).toEqual(saved);
 	});
 
 	test("validates state before filesystem access", async () => {
 		const root = await createTemporaryRoot();
 		const destination = join(root, "missing-parent", "state");
-		await expect(saveHarnessState({ systemPrompt: "   " }, destination)).rejects.toThrow(/invalid harness state/i);
+		await expect(saveHarnessState({ memory: "   " }, destination)).rejects.toThrow(/invalid harness state/i);
 		expect(await pathExists(destination)).toBe(false);
 	});
 
 	test("validates an explicit base before filesystem access", async () => {
 		const root = await createTemporaryRoot();
 		const destination = join(root, "missing-parent", "state");
-		await expect(saveHarnessState({ systemPrompt: "Valid." }, destination, { base: "sha256:short" })).rejects.toThrow(
-			/invalid harness state save options/i,
-		);
+		await expect(
+			saveHarnessState({ memory: "Valid observation." }, destination, { base: "sha256:short" }),
+		).rejects.toThrow(/invalid harness state save options/i);
 		expect(await pathExists(destination)).toBe(false);
 	});
 
@@ -175,7 +173,7 @@ describe("saving and round trips", () => {
 		const root = await createTemporaryRoot();
 		const parentFile = join(root, "parent-file");
 		await writeFile(parentFile, "not a directory");
-		await expect(saveHarnessState({ systemPrompt: "Valid." }, join(parentFile, "state"))).rejects.toThrow();
+		await expect(saveHarnessState({ memory: "Valid observation." }, join(parentFile, "state"))).rejects.toThrow();
 	});
 
 	test.each(["file", "directory"] as const)("refuses to overwrite an existing %s destination", async (kind) => {
@@ -184,7 +182,7 @@ describe("saving and round trips", () => {
 		if (kind === "file") await writeFile(destination, "original");
 		else await mkdir(destination);
 
-		await expect(saveHarnessState({ systemPrompt: "Replacement." }, destination)).rejects.toThrow(/already exists/i);
+		await expect(saveHarnessState({ memory: "Replacement notes." }, destination)).rejects.toThrow(/already exists/i);
 		if (kind === "file") expect(await readFile(destination, "utf8")).toBe("original");
 		else expect(await readdir(destination)).toEqual([]);
 	});
@@ -193,14 +191,14 @@ describe("saving and round trips", () => {
 		const root = await createTemporaryRoot();
 		const destination = join(root, "state");
 		await symlink(join(root, "missing-target"), destination, process.platform === "win32" ? "junction" : "dir");
-		await expect(saveHarnessState({ systemPrompt: "Replacement." }, destination)).rejects.toThrow(/already exists/i);
+		await expect(saveHarnessState({ memory: "Replacement notes." }, destination)).rejects.toThrow(/already exists/i);
 	});
 
 	test("cleans its staged directory after a late failure without exposing a partial bundle", async () => {
 		const root = await createTemporaryRoot();
 		const destination = join(root, "state");
 		const temporaryPrefix = `.${basename(destination)}.harness-state.tmp-`;
-		const saving = saveHarnessState({ systemPrompt: "x".repeat(16 * 1024 * 1024) }, destination).then(
+		const saving = saveHarnessState({ memory: "x".repeat(16 * 1024 * 1024) }, destination).then(
 			() => ({ ok: true as const }),
 			(error: unknown) => ({ ok: false as const, error }),
 		);
@@ -301,7 +299,8 @@ describe("bundle data validation", () => {
 	test.each(["manifest.json", "EVOLVE.md"] as const)("rejects a UTF-8 BOM in %s", async (entryName) => {
 		const root = await createTemporaryRoot();
 		const bundlePath = await createBundle(root);
-		const validContent = entryName === "manifest.json" ? createManifest("Act carefully.\n") : "Valid prompt.";
+		const validContent =
+			entryName === "manifest.json" ? createManifest("Prefer focused changes.\n") : "Valid memory.";
 		await writeFile(
 			join(bundlePath, entryName),
 			Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(validContent)]),
@@ -346,14 +345,14 @@ describe("bundle data validation", () => {
 	test.each([
 		["blank", ""],
 		["whitespace-only", " \t\r\n"],
-		["leading U+FEFF", "\uFEFFPrompt."],
-	] as const)("rejects a %s prompt", async (_label, prompt) => {
+		["leading U+FEFF", "\uFEFFObservation."],
+	] as const)("rejects a %s memory", async (_label, memory) => {
 		const root = await createTemporaryRoot();
-		const bundlePath = await createBundle(root, "state", createManifest(String(prompt)), prompt);
+		const bundlePath = await createBundle(root, "state", createManifest(String(memory)), memory);
 		await expect(loadHarnessState(bundlePath)).rejects.toThrow(/EVOLVE\.md/i);
 	});
 
-	test("rejects prompt content that does not match the manifest hash", async () => {
+	test("rejects memory content that does not match the manifest hash", async () => {
 		const root = await createTemporaryRoot();
 		const bundlePath = await createBundle(root, "state", createManifest("Original."), "Changed.");
 		await expect(loadHarnessState(bundlePath)).rejects.toThrow(/content hash mismatch/i);
