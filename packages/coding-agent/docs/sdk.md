@@ -569,29 +569,9 @@ async function implementSubmittedPlan(plan: PlanArtifact) {
 }
 ```
 
-Plan mode exposes `submit_plan` plus the canonical subset of `read`, `grep`, `find`, and `ls` permitted by the SDK tool policy and the active task profile.
+Plan mode exposes `submit_plan` plus the canonical subset of `read`, `grep`, `find`, and `ls` permitted by the SDK tool policy.
 The planning tools replace the normal, extension, and SDK tool registry for the duration of plan mode.
 `submit_plan` is intrinsic to plan mode and remains available even when `tools`, `excludeTools`, or `noTools` disables every inspection tool.
-`AgentSessionRuntime` pauses automatic task-profile routing for planning prompts.
-In automatic mode, submit the accepted token through `runtime.promptPlanContinuation()` so the runtime routes every accepted task before execution, including when a harness is already active.
-The route may stay on the active harness, reuse a related harness, or select and activate a new harness.
-Only a high-confidence ambiguity among specialized profiles calls the per-request `profileSelectionResolver`.
-The resolver receives 2-3 trusted, recommended-first `ProfileSelectionOption` values.
-Each option includes its profile description, a bounded `safeguardSummary`, and its exact `toolPolicy` so the host can present the guardrail and tool consequences.
-The resolver must return `{ profileId }` for one offered option or `{ cancelled: true }`; the runtime never selects the recommended option automatically.
-Missing, canceled, invalid, or aborted selection rejects before implementation starts and preserves `session.pendingPlanContinuation` for retry.
-Malformed output, low confidence, or router failure also rejects without choosing a fallback profile and preserves the continuation for retry.
-A pinned profile bypasses automatic routing and implements the plan in place without calling the resolver.
-Pin a profile before planning when its guardrails must apply during planning itself.
-
-```typescript
-await runtime.promptPlanContinuation(continuation, {
-  profileSelectionResolver: async (proposal, signal) => {
-    const profileId = await chooseImplementationProfile(proposal.options, signal);
-    return profileId ? { profileId } : { cancelled: true };
-  },
-});
-```
 
 `submit_plan` creates a `PlanArtifact` with `id`, `title`, and `markdown`.
 It ends the planning turn and exposes the artifact through `session.pendingPlan` and the `plan_submitted` event.
@@ -601,8 +581,8 @@ Wait for the submitting agent run to settle before resolving a plan through `Age
 Resolve the artifact with `session.resolvePlan(plan.id, "implement")` or `session.resolvePlan(plan.id, "discard")`.
 Implement and discard persist the resolution, clear the pending plan, and return the session to default mode.
 Implement returns an opaque, one-shot `PlanContinuation`, while discard returns `undefined`.
-A bare `AgentSession` host may submit the token through `session.promptPlanContinuation()` to implement it with the currently loaded profile.
-An `AgentSessionRuntime` host should use `runtime.promptPlanContinuation()` so automatic routing can activate an initial harness before execution.
+A bare `AgentSession` host may submit the token through `session.promptPlanContinuation()`.
+An `AgentSessionRuntime` host should use `runtime.promptPlanContinuation()` so the implementation prompt runs under exclusive runtime ownership.
 The current token is also available from `session.pendingPlanContinuation`, including after a persistent session resumes between acceptance and implementation startup.
 The session rejects stale or reused continuations and bypasses extension commands, template expansion, and input transformation for the trusted implementation handoff.
 Authentication, compaction, and `before_agent_start` processing still apply, and the continuation remains retryable until the agent run is accepted.
@@ -1350,13 +1330,6 @@ type PlanArtifact
 type PlanResolution
 type PlanContinuation
 type PlanContinuationPromptOptions
-type RuntimePlanContinuationPromptOptions
-type AcceptedPlanProfileRouteDecision
-type AmbiguousProfileRouteDecision
-type ProfileSelectionOption
-type ProfileSelectionProposal
-type ProfileSelectionResolution
-type ProfileSelectionResolver
 type CollaborationModeChangeEntry
 type PlanEntry
 type PlanResolutionEntry

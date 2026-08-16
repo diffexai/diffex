@@ -11,7 +11,7 @@ The interface has four main areas:
 - **Startup header** - shortcuts, loaded context files, prompt templates, skills, and extensions
 - **Messages** - user messages, assistant responses, tool calls, tool results, notifications, errors, and extension UI
 - **Editor** - where you type; border color indicates the current thinking level
-- **Footer** - the built-in footer keeps the active profile, routing mode, and harness visible above the current model, thinking level, and context usage.
+- **Footer** - the built-in footer keeps the current model, thinking level, and context usage visible.
 
 The editor can be replaced temporarily by built-in UI such as `/settings` or by custom extension UI.
 
@@ -91,21 +91,9 @@ JSON and RPC modes emit the same notices as structured session events.
 Start an interactive planning session with `diffex --plan`, toggle it with `/plan`, or set it explicitly with `/plan on` or `/plan off`.
 Plan mode can be changed only while the session is idle.
 
-Plan mode exposes `submit_plan` and canonical `read`, `grep`, `find`, and `ls` repository inspection tools when caller restrictions and the active task profile permit them.
+Plan mode exposes `submit_plan` and canonical `read`, `grep`, `find`, and `ls` repository inspection tools when caller restrictions permit them.
 Extension tools, SDK custom tools, shell execution, and file mutation tools are unavailable until the plan is accepted or discarded.
 `submit_plan` is intrinsic to plan mode and remains available even when caller tool filters disable every inspection tool.
-Automatic task-profile routing pauses for planning prompts.
-In automatic mode, choosing Implement routes every accepted task before execution, even when a harness is already active.
-The router may keep the active harness for a continuation, reuse a related harness, or switch to a newly selected task harness.
-Diffex asks which profile should govern implementation only when the router finds a high-confidence ambiguity among specialized profiles.
-The chooser shows each option's description, safeguards, and tool-policy summary.
-The choice determines the implementation profile's expertise, safeguards, and tool access.
-The recommended option receives initial focus but is not selected automatically.
-Canceling the choice leaves the accepted implementation pending; use `/plan` to retry.
-A malformed, low-confidence, or failed route also leaves the accepted implementation pending instead of silently falling back to another profile.
-A pinned profile bypasses automatic routing and implements the plan in place.
-Pin a profile before planning when its guardrails must apply during planning itself.
-
 `submit_plan` ends the planning turn and creates a Markdown plan artifact.
 The artifact remains pending in the session until you implement or discard it.
 Collaboration-mode changes, submitted plans, and their resolutions are persisted in the session, so the active branch restores the correct mode, pending plan, or accepted implementation handoff after resume or tree navigation.
