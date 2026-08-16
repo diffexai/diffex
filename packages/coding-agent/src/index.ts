@@ -233,7 +233,6 @@ export {
 	createUpdatePlanTool,
 	createWriteTool,
 	type PromptTemplate,
-	type RuntimePlanContinuationPromptOptions,
 	type SubagentOptions,
 } from "./core/sdk.ts";
 export {

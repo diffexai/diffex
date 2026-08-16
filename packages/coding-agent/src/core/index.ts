@@ -18,11 +18,6 @@ export {
 	type CreateAgentSessionRuntimeFactory,
 	type CreateAgentSessionRuntimeResult,
 	createAgentSessionRuntime,
-	type ProfileSelectionOption,
-	type ProfileSelectionProposal,
-	type ProfileSelectionResolution,
-	type ProfileSelectionResolver,
-	type RuntimePlanContinuationPromptOptions,
 } from "./agent-session-runtime.ts";
 export {
 	type AgentSessionRuntimeDiagnostic,
@@ -85,9 +80,9 @@ export {
 	type WorkingIndicatorOptions,
 } from "./extensions/index.ts";
 export type { CollaborationMode, PlanArtifact, PlanResolution } from "./plan-mode.ts";
-export {
-	type CollaborationModeChangeEntry,
-	type PlanEntry,
-	type PlanResolutionEntry,
+export type {
+	CollaborationModeChangeEntry,
+	PlanEntry,
+	PlanResolutionEntry,
 } from "./session-manager.ts";
 export { createSyntheticSourceInfo } from "./source-info.ts";
