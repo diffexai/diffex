@@ -241,6 +241,13 @@ export interface AgentSessionConfig {
 	/** Optional denylist of tool names. When provided, these tool names are not exposed. */
 	excludedToolNames?: string[];
 	/**
+	 * True when the caller disabled the built-in tool defaults.
+	 *
+	 * Plan mode's canonical read-only tools are built-ins, so they stay unavailable too and
+	 * planning is left with `submit_plan` alone.
+	 */
+	builtinToolsDisabled?: boolean;
+	/**
 	 * Override base tools (useful for custom runtimes).
 	 *
 	 * These are synthesized into minimal ToolDefinitions internally so AgentSession can keep
@@ -427,6 +434,7 @@ export class AgentSession {
 	private _normalActiveToolNames: string[] = [];
 	private _allowedToolNames?: Set<string>;
 	private _excludedToolNames?: Set<string>;
+	private _builtinToolsDisabled: boolean;
 	private _baseToolsOverride?: Record<string, AgentTool>;
 	private _sessionStartEvent: SessionStartEvent;
 	private _extensionUIContext?: ExtensionUIContext;
@@ -491,6 +499,7 @@ export class AgentSession {
 			: undefined;
 		this._allowedToolNames = config.allowedToolNames ? new Set(config.allowedToolNames) : undefined;
 		this._excludedToolNames = config.excludedToolNames ? new Set(config.excludedToolNames) : undefined;
+		this._builtinToolsDisabled = config.builtinToolsDisabled ?? false;
 		this._baseToolsOverride = config.baseToolsOverride;
 		this._sessionStartEvent = config.sessionStartEvent ?? { type: "session_start", reason: "startup" };
 		this._subagentController = config.subagentController;
@@ -3429,7 +3438,7 @@ export class AgentSession {
 
 		const planDefinitionRegistry = new Map<string, ToolDefinitionEntry>();
 		const planToolRegistry = new Map<string, AgentTool>();
-		if (!this._baseToolsOverride) {
+		if (!this._baseToolsOverride && !this._builtinToolsDisabled) {
 			const registeredPlanBuiltinTools = PLAN_READ_ONLY_TOOL_NAMES.filter((name) => isAllowedTool(name))
 				.map((name) => ({
 					definition: this._baseToolDefinitions.get(name),

@@ -460,6 +460,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		collaborationMode: options.collaborationMode,
 		allowedToolNames,
 		excludedToolNames,
+		builtinToolsDisabled: options.noTools !== undefined,
 		extensionRunnerRef,
 		sessionStartEvent: options.sessionStartEvent,
 		subagentController,
