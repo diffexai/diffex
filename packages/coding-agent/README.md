@@ -147,14 +147,15 @@ The interface from top to bottom:
 
 - **Startup header** - Shows shortcuts (`/hotkeys` for all), loaded AGENTS.md files, prompt templates, skills, and extensions
 - **Messages** - Your messages, assistant responses, tool calls and results, notifications, errors, and extension UI
-- **Editor** - Where you type; border color indicates thinking level
+- **Editor** - Where you type; border color indicates plan mode or shell mode
 - **Footer** - The built-in footer keeps the current model, thinking level, and context usage visible.
 
 The editor can be temporarily replaced by other UI, like built-in `/settings` or custom UI from extensions (e.g., a Q&A tool that lets the user answer model questions in a structured format). [Extensions](#extensions) can also replace the editor, add widgets above/below it, a status line, custom footer, or overlays.
 
 ### Plan Mode
 
-Run `diffex --plan` to start an interactive session in plan mode, or use `/plan [on|off]` while Diffex is idle.
+Run `diffex --plan` to start an interactive session in plan mode, submit `/plan [instructions]`, or press Shift+Tab and type instructions in the editor.
+Shift+Tab toggles plan mode while the editor border uses `#6FB01C` to show that planning is active.
 Plan mode exposes `submit_plan` and the canonical subset of `read`, `grep`, `find`, and `ls` permitted by caller restrictions.
 The agent can inspect the repository, but it cannot run commands, edit files, or call extension and SDK tools.
 `submit_plan` is intrinsic to plan mode and remains available even when caller tool filters disable every inspection tool.
@@ -186,10 +187,10 @@ Type `/` in the editor to trigger commands. [Extensions](#extensions) can regist
 |---------|-------------|
 | `/login`, `/logout` | Manage provider credentials |
 | [`/llama`](docs/llama-cpp.md) | Download, load, and unload llama.cpp router models |
-| `/model` | Switch models |
+| `/model` | Switch models, then select thinking effort |
 | `/scoped-models` | Enable/disable models for Ctrl+P cycling |
-| `/plan [on\|off]` | Toggle plan mode, set it explicitly, or reopen a pending plan |
-| `/settings` | Thinking level, theme, message delivery, transport |
+| `/plan [instructions]` | Activate plan mode and optionally submit planning instructions, or reopen/retry a pending plan |
+| `/settings` | Theme, message delivery, transport |
 | `/resume` | Pick from previous sessions |
 | `/new` | Start a new session |
 | `/name <name>` | Set session display name |
@@ -226,7 +227,7 @@ See `/hotkeys` for the full list. Customize via `~/.diffex/agent/keybindings.jso
 | Escape twice | Open `/tree` |
 | Ctrl+L | Open model selector |
 | Ctrl+P / Shift+Ctrl+P | Cycle scoped models forward/backward |
-| Shift+Tab | Cycle thinking level |
+| Shift+Tab | Toggle plan mode |
 | Ctrl+O | Collapse/expand tool output |
 | Ctrl+T | Collapse/expand thinking blocks |
 | Ctrl+X | Copy the last assistant message |

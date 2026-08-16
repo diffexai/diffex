@@ -372,7 +372,8 @@ export class Theme {
 	private mode: ColorMode;
 
 	constructor(
-		fgColors: Record<ThemeColor, string | number>,
+		fgColors: Record<Exclude<ThemeColor, "thinkingMax" | "planMode">, string | number> &
+			Partial<Record<"thinkingMax" | "planMode", string | number>>,
 		bgColors: Record<Exclude<ThemeBg, "scrollbarThumb">, string | number> &
 			Partial<Record<"scrollbarThumb", string | number>>,
 		mode: ColorMode,
@@ -383,7 +384,11 @@ export class Theme {
 		this.sourceInfo = options.sourceInfo;
 		this.mode = mode;
 		this.fgColors = new Map();
-		const colors = { ...fgColors, thinkingMax: fgColors.thinkingMax ?? fgColors.thinkingXhigh };
+		const colors = {
+			...fgColors,
+			thinkingMax: fgColors.thinkingMax ?? fgColors.thinkingXhigh,
+			planMode: fgColors.planMode ?? "#6FB01C",
+		};
 		for (const [key, value] of Object.entries(colors) as [ThemeColor, string | number][]) {
 			this.fgColors.set(key, fgAnsi(value, mode));
 		}

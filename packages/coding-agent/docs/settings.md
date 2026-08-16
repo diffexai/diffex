@@ -25,6 +25,8 @@ Use `/trust` in interactive mode to save a project trust decision for future ses
 
 ### Model & Thinking
 
+In interactive mode, `/model` selects both the model and its thinking effort.
+
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
 | `defaultProvider` | string | - | Default provider (e.g., `"anthropic"`, `"openai"`) |

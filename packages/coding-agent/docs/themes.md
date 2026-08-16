@@ -114,7 +114,8 @@ vim ~/.diffex/agent/themes/my-theme.json
     "thinkingHigh": "#ff00ff",
     "thinkingXhigh": "#ff0000",
     "thinkingMax": "#ff0088",
-    "bashMode": "#ffaa00"
+    "bashMode": "#ffaa00",
+    "planMode": "#6FB01C"
   }
 }
 ```
@@ -145,15 +146,15 @@ vim ~/.diffex/agent/themes/my-theme.json
 - `name` is required, must be unique, and must not contain `/`.
 - `vars` is optional. Define reusable colors here, then reference them in `colors`.
 - `colors` must define all 51 required tokens.
-  `thinkingMax`, `scrollbarThumb`, `startupIntroText`, `startupIntroAccent`, `selectionAccent`, and `autocompleteSelected` are optional compatibility tokens with fallbacks.
+  `planMode`, `thinkingMax`, `scrollbarThumb`, `startupIntroText`, `startupIntroAccent`, `selectionAccent`, and `autocompleteSelected` are optional compatibility tokens with fallbacks.
 
 The `$schema` field enables editor auto-completion and validation.
 
 ## Color Tokens
 
 Every theme must define all 51 required color tokens.
-`thinkingMax`, `scrollbarThumb`, `startupIntroText`, `startupIntroAccent`, `selectionAccent`, and `autocompleteSelected` are optional for compatibility with existing themes.
-When omitted, they use `thinkingXhigh`, `selectedBg`, `text`, `mdLink`, `autocompleteSelected` or `startupIntroAccent`, and `selectionAccent`, respectively.
+`planMode`, `thinkingMax`, `scrollbarThumb`, `startupIntroText`, `startupIntroAccent`, `selectionAccent`, and `autocompleteSelected` are optional for compatibility with existing themes.
+When omitted, `planMode` defaults to `#6FB01C`; the remaining tokens use `thinkingXhigh`, `selectedBg`, `text`, `mdLink`, `autocompleteSelected` or `startupIntroAccent`, and `selectionAccent`, respectively.
 
 ### Core UI (11 colors)
 
@@ -234,9 +235,9 @@ When omitted, they use `thinkingXhigh`, `selectedBg`, `text`, `mdLink`, `autocom
 | `syntaxOperator` | Operators |
 | `syntaxPunctuation` | Punctuation |
 
-### Thinking Level Borders (6 required, 1 optional)
+### Thinking Level Colors (6 required, 1 optional)
 
-Editor border colors indicating thinking level (visual hierarchy from subtle to prominent):
+Legacy thinking-level colors exposed through the theme API for extensions. The built-in editor no longer changes its border by thinking effort:
 
 | Token | Purpose |
 |-------|---------|
@@ -248,11 +249,12 @@ Editor border colors indicating thinking level (visual hierarchy from subtle to 
 | `thinkingXhigh` | Extra high thinking |
 | `thinkingMax` | Maximum thinking; optional, falls back to `thinkingXhigh` |
 
-### Bash Mode (1 color)
+### Mode Borders (1 required, 1 optional)
 
 | Token | Purpose |
 |-------|---------|
 | `bashMode` | Editor border in bash mode (`!` prefix) |
+| `planMode` | Editor border in plan mode; optional, defaults to `#6FB01C` |
 
 ### HTML Export (optional)
 

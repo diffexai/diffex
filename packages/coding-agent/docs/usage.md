@@ -10,7 +10,7 @@ The interface has four main areas:
 
 - **Startup header** - shortcuts, loaded context files, prompt templates, skills, and extensions
 - **Messages** - user messages, assistant responses, tool calls, tool results, notifications, errors, and extension UI
-- **Editor** - where you type; border color indicates the current thinking level
+- **Editor** - where you type; border color indicates plan mode or shell mode
 - **Footer** - the built-in footer keeps the current model, thinking level, and context usage visible.
 
 The editor can be replaced temporarily by built-in UI such as `/settings` or by custom extension UI.
@@ -38,10 +38,10 @@ Type `/` in the editor to open command completion. Extensions can register custo
 |---------|-------------|
 | `/login`, `/logout` | Manage OAuth or API-key credentials |
 | [`/llama`](llama-cpp.md) | Download, load, and unload llama.cpp router models |
-| `/model` | Switch models |
+| `/model` | Switch models, then select thinking effort |
 | `/scoped-models` | Enable/disable models for Ctrl+P cycling |
-| `/plan [on\|off]` | Toggle plan mode, set it explicitly, or reopen a pending plan |
-| `/settings` | Thinking level, theme, message delivery, transport |
+| `/plan [instructions]` | Activate plan mode and optionally submit planning instructions, or reopen/retry a pending plan |
+| `/settings` | Theme, message delivery, transport |
 | `/resume` | Pick from previous sessions |
 | `/new` | Start a new session |
 | `/name <name>` | Set session display name |
@@ -88,8 +88,9 @@ JSON and RPC modes emit the same notices as structured session events.
 
 ## Plan Mode
 
-Start an interactive planning session with `diffex --plan`, toggle it with `/plan`, or set it explicitly with `/plan on` or `/plan off`.
-Plan mode can be changed only while the session is idle.
+Start an interactive planning session with `diffex --plan`, submit `/plan [instructions]`, or press Shift+Tab and type instructions in the editor.
+A bare `/plan` activates planning without submitting a prompt. Shift+Tab toggles plan mode while the session is idle.
+The editor border changes to `#6FB01C` while plan mode is active.
 
 Plan mode exposes `submit_plan` and canonical `read`, `grep`, `find`, and `ls` repository inspection tools when caller restrictions permit them.
 Extension tools, SDK custom tools, shell execution, and file mutation tools are unavailable until the plan is accepted or discarded.

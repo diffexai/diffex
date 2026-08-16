@@ -340,7 +340,7 @@ user sends another prompt ◄─────────────────
   ├─► thinking_level_select (if model change changes/clamps thinking level)
   └─► model_select
 
-thinking level changes (settings, keybinding, diffex.setThinkingLevel())
+thinking level changes (/model effort selection, diffex.setThinkingLevel())
   └─► thinking_level_select
 
 exit (Ctrl+C, Ctrl+D, SIGHUP, SIGTERM)
@@ -744,7 +744,7 @@ diffex.on("thinking_level_select", async (event, ctx) => {
 });
 ```
 
-Use this to update extension UI when `diffex.setThinkingLevel()`, model changes, or built-in thinking-level controls change the active thinking level.
+Use this to update extension UI when `diffex.setThinkingLevel()`, model changes, or `/model` effort selection changes the active thinking level.
 
 ### Tool Events
 

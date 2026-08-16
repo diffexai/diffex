@@ -136,14 +136,14 @@ This routing remains configurable through the ordinary action bindings. For exam
 | `app.session.delete` | `ctrl+d` | Delete session |
 | `app.session.deleteNoninvasive` | `ctrl+backspace` | Delete session when query is empty |
 
-### Models and Thinking
+### Models, Planning, and Thinking
 
 | Keybinding id | Default | Description |
 |--------|---------|-------------|
-| `app.model.select` | `ctrl+l` | Open model selector |
+| `app.model.select` | `ctrl+l` | Open model selector, followed by thinking effort selection |
 | `app.model.cycleForward` | `ctrl+p` | Cycle to next model |
 | `app.model.cycleBackward` | `shift+ctrl+p` | Cycle to previous model |
-| `app.thinking.cycle` | `shift+tab` | Cycle thinking level |
+| `app.plan.toggle` | `shift+tab` | Toggle plan mode |
 | `app.thinking.toggle` | `ctrl+t` | Collapse or expand thinking blocks |
 
 ### Display and Message Queue
