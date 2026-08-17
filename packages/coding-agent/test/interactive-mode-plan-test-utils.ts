@@ -158,6 +158,7 @@ export interface StreamingSubmitContext {
 		isCompacting: boolean;
 		isStreaming: boolean;
 	};
+	handlePlanCommand: ReturnType<typeof vi.fn>;
 	promptUser: ReturnType<typeof vi.fn>;
 	updatePendingMessagesDisplay: ReturnType<typeof vi.fn>;
 	openPendingPlanDecision: ReturnType<typeof vi.fn>;

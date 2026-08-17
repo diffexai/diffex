@@ -310,6 +310,28 @@ describe("InteractiveMode plan resolution", () => {
 		expect(context.showPendingPlanDecision).not.toHaveBeenCalled();
 	});
 
+	test("keeps the /plan command in history while dispatching only its instructions", async () => {
+		const context: StreamingSubmitContext = {
+			defaultEditor: {},
+			editor: { addToHistory: vi.fn(), setText: vi.fn() },
+			session: { isCompacting: false, isStreaming: true },
+			handlePlanCommand: vi.fn().mockResolvedValue("inspect the authentication flow"),
+			promptUser: vi.fn().mockResolvedValue(undefined),
+			updatePendingMessagesDisplay: vi.fn(),
+			openPendingPlanDecision: vi.fn(),
+			ui: { requestRender: vi.fn() },
+		};
+		setupEditorSubmitHandler.call(context);
+		if (!context.defaultEditor.onSubmit) throw new Error("Submit handler was not installed");
+
+		await context.defaultEditor.onSubmit("/plan inspect the authentication flow");
+
+		expect(context.editor.addToHistory).toHaveBeenCalledWith("/plan inspect the authentication flow");
+		expect(context.promptUser).toHaveBeenCalledWith("inspect the authentication flow", {
+			streamingBehavior: "steer",
+		});
+	});
+
 	test("retries pending-plan admission after the last streaming submission preflight settles", async () => {
 		const session = {
 			isCompacting: false,
@@ -329,6 +351,7 @@ describe("InteractiveMode plan resolution", () => {
 			defaultEditor: {},
 			editor: { addToHistory: vi.fn(), setText: vi.fn() },
 			session,
+			handlePlanCommand: vi.fn(),
 			promptUser: vi.fn(
 				() =>
 					new Promise<void>((resolve) => {
