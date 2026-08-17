@@ -158,8 +158,13 @@ export interface StreamingSubmitContext {
 		isCompacting: boolean;
 		isStreaming: boolean;
 	};
+	flushPendingBashComponents: ReturnType<typeof vi.fn>;
 	handlePlanCommand: ReturnType<typeof vi.fn>;
+	isExtensionCommand: ReturnType<typeof vi.fn>;
+	onInputCallback?: ReturnType<typeof vi.fn>;
+	pendingUserInputs: string[];
 	promptUser: ReturnType<typeof vi.fn>;
+	queueCompactionMessage: ReturnType<typeof vi.fn>;
 	updatePendingMessagesDisplay: ReturnType<typeof vi.fn>;
 	openPendingPlanDecision: ReturnType<typeof vi.fn>;
 	ui: { requestRender: ReturnType<typeof vi.fn> };

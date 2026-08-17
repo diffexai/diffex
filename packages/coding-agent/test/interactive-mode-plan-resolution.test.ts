@@ -311,12 +311,18 @@ describe("InteractiveMode plan resolution", () => {
 	});
 
 	test("keeps the /plan command in history while dispatching only its instructions", async () => {
+		const onInputCallback = vi.fn();
 		const context: StreamingSubmitContext = {
 			defaultEditor: {},
 			editor: { addToHistory: vi.fn(), setText: vi.fn() },
-			session: { isCompacting: false, isStreaming: true },
+			session: { isCompacting: false, isStreaming: false },
+			flushPendingBashComponents: vi.fn(),
 			handlePlanCommand: vi.fn().mockResolvedValue("inspect the authentication flow"),
-			promptUser: vi.fn().mockResolvedValue(undefined),
+			isExtensionCommand: vi.fn(),
+			onInputCallback,
+			pendingUserInputs: [],
+			promptUser: vi.fn(),
+			queueCompactionMessage: vi.fn(),
 			updatePendingMessagesDisplay: vi.fn(),
 			openPendingPlanDecision: vi.fn(),
 			ui: { requestRender: vi.fn() },
@@ -327,9 +333,34 @@ describe("InteractiveMode plan resolution", () => {
 		await context.defaultEditor.onSubmit("/plan inspect the authentication flow");
 
 		expect(context.editor.addToHistory).toHaveBeenCalledWith("/plan inspect the authentication flow");
-		expect(context.promptUser).toHaveBeenCalledWith("inspect the authentication flow", {
-			streamingBehavior: "steer",
-		});
+		expect(onInputCallback).toHaveBeenCalledWith("inspect the authentication flow");
+	});
+
+	test("preserves /plan history while compaction queues transformed instructions", async () => {
+		const context: StreamingSubmitContext = {
+			defaultEditor: {},
+			editor: { addToHistory: vi.fn(), setText: vi.fn() },
+			session: { isCompacting: true, isStreaming: false },
+			flushPendingBashComponents: vi.fn(),
+			handlePlanCommand: vi.fn().mockResolvedValue("inspect the authentication flow"),
+			isExtensionCommand: vi.fn().mockReturnValue(false),
+			pendingUserInputs: [],
+			promptUser: vi.fn(),
+			queueCompactionMessage: vi.fn(),
+			updatePendingMessagesDisplay: vi.fn(),
+			openPendingPlanDecision: vi.fn(),
+			ui: { requestRender: vi.fn() },
+		};
+		setupEditorSubmitHandler.call(context);
+		if (!context.defaultEditor.onSubmit) throw new Error("Submit handler was not installed");
+
+		await context.defaultEditor.onSubmit("/plan inspect the authentication flow");
+
+		expect(context.queueCompactionMessage).toHaveBeenCalledWith(
+			"inspect the authentication flow",
+			"steer",
+			"/plan inspect the authentication flow",
+		);
 	});
 
 	test("retries pending-plan admission after the last streaming submission preflight settles", async () => {
@@ -351,13 +382,17 @@ describe("InteractiveMode plan resolution", () => {
 			defaultEditor: {},
 			editor: { addToHistory: vi.fn(), setText: vi.fn() },
 			session,
+			flushPendingBashComponents: vi.fn(),
 			handlePlanCommand: vi.fn(),
+			isExtensionCommand: vi.fn(),
+			pendingUserInputs: [],
 			promptUser: vi.fn(
 				() =>
 					new Promise<void>((resolve) => {
 						releases.push(resolve);
 					}),
 			),
+			queueCompactionMessage: vi.fn(),
 			updatePendingMessagesDisplay: vi.fn(),
 			openPendingPlanDecision: vi.fn(() => openPendingPlanDecision.call(openContext)),
 			ui: { requestRender: vi.fn() },
