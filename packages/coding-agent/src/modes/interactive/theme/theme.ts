@@ -355,7 +355,7 @@ function withThemeColorFallbacks(colors: ThemeJson["colors"]): ThemeJson["colors
 		selectionAccent,
 		autocompleteSelected: colors.autocompleteSelected ?? selectionAccent,
 		editorBorder: colors.editorBorder ?? colors.borderMuted,
-		planMode: colors.planMode ?? "#6FB01C",
+		planMode: colors.planMode ?? colors.toolDiffAdded,
 	};
 }
 
@@ -387,7 +387,7 @@ export class Theme {
 		const colors = {
 			...fgColors,
 			thinkingMax: fgColors.thinkingMax ?? fgColors.thinkingXhigh,
-			planMode: fgColors.planMode ?? "#6FB01C",
+			planMode: fgColors.planMode ?? fgColors.toolDiffAdded,
 		};
 		for (const [key, value] of Object.entries(colors) as [ThemeColor, string | number][]) {
 			this.fgColors.set(key, fgAnsi(value, mode));

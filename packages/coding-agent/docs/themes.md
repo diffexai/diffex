@@ -56,7 +56,8 @@ vim ~/.diffex/agent/themes/my-theme.json
   "name": "my-theme",
   "vars": {
     "primary": "#00aaff",
-    "secondary": 242
+    "secondary": 242,
+    "green": "#00ff00"
   },
   "colors": {
     "accent": "primary",
@@ -115,7 +116,7 @@ vim ~/.diffex/agent/themes/my-theme.json
     "thinkingXhigh": "#ff0000",
     "thinkingMax": "#ff0088",
     "bashMode": "#ffaa00",
-    "planMode": "#6FB01C"
+    "planMode": "green"
   }
 }
 ```
@@ -154,7 +155,7 @@ The `$schema` field enables editor auto-completion and validation.
 
 Every theme must define all 51 required color tokens.
 `planMode`, `thinkingMax`, `scrollbarThumb`, `startupIntroText`, `startupIntroAccent`, `selectionAccent`, and `autocompleteSelected` are optional for compatibility with existing themes.
-When omitted, `planMode` defaults to `#6FB01C`; the remaining tokens use `thinkingXhigh`, `selectedBg`, `text`, `mdLink`, `autocompleteSelected` or `startupIntroAccent`, and `selectionAccent`, respectively.
+When omitted, `planMode` uses `toolDiffAdded`; the remaining tokens use `thinkingXhigh`, `selectedBg`, `text`, `mdLink`, `autocompleteSelected` or `startupIntroAccent`, and `selectionAccent`, respectively.
 
 ### Core UI (11 colors)
 
@@ -254,7 +255,7 @@ Legacy thinking-level colors exposed through the theme API for extensions. The b
 | Token | Purpose |
 |-------|---------|
 | `bashMode` | Editor border in bash mode (`!` prefix) |
-| `planMode` | Editor border in plan mode; optional, defaults to `#6FB01C` |
+| `planMode` | Editor border and prompt pointer in plan mode; optional, falls back to `toolDiffAdded` |
 
 ### HTML Export (optional)
 

@@ -85,7 +85,7 @@
 		"thinkingMax": "#ff5fff",
 
 		"bashMode": "red",
-		"planMode": "#6FB01C"
+		"planMode": "green"
 	},
 	"export": {
 		"pageBg": "#18181e",

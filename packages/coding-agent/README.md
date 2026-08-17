@@ -155,7 +155,7 @@ The editor can be temporarily replaced by other UI, like built-in `/settings` or
 ### Plan Mode
 
 Run `diffex --plan` to start an interactive session in plan mode, submit `/plan [instructions]`, or press Shift+Tab and type instructions in the editor.
-Shift+Tab toggles plan mode while the editor border uses `#6FB01C` to show that planning is active.
+Shift+Tab toggles plan mode while the editor border and prompt pointer turn green to show that planning is active.
 Plan mode exposes `submit_plan` and the canonical subset of `read`, `grep`, `find`, and `ls` permitted by caller restrictions.
 The agent can inspect the repository, but it cannot run commands, edit files, or call extension and SDK tools.
 `submit_plan` is intrinsic to plan mode and remains available even when caller tool filters disable every inspection tool.

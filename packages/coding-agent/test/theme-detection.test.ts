@@ -254,7 +254,7 @@ describe("editor border theme", () => {
 		expect(getEditorTheme().borderColor("line")).toBe(`${expected}line\x1b[39m`);
 		expect(theme.getThinkingBorderColor("low")("line")).not.toBe(`${expected}line\x1b[39m`);
 		expect(theme.getBashModeBorderColor()("line")).toBe("\x1b[38;2;204;102;102mline\x1b[39m");
-		expect(theme.getPlanModeBorderColor()("line")).toBe("\x1b[38;2;111;176;28mline\x1b[39m");
+		expect(theme.getPlanModeBorderColor()("line")).toBe("\x1b[38;2;88;161;112mline\x1b[39m");
 	});
 
 	it("uses the fixed light theme color", () => {
@@ -263,7 +263,7 @@ describe("editor border theme", () => {
 
 		expect(theme.getFgAnsi("editorBorder")).toBe("\x1b[38;2;60;89;122m");
 		expect(theme.getBashModeBorderColor()("line")).toBe("\x1b[38;2;170;85;85mline\x1b[39m");
-		expect(theme.getPlanModeBorderColor()("line")).toBe("\x1b[38;2;111;176;28mline\x1b[39m");
+		expect(theme.getPlanModeBorderColor()("line")).toBe("\x1b[38;2;88;132;88mline\x1b[39m");
 	});
 
 	it("falls back to borderMuted for existing custom themes", () => {
@@ -281,6 +281,6 @@ describe("editor border theme", () => {
 		const legacyTheme = loadThemeFromPath(themePath, "truecolor");
 
 		expect(legacyTheme.getFgAnsi("editorBorder")).toBe(legacyTheme.getFgAnsi("borderMuted"));
-		expect(legacyTheme.getPlanModeBorderColor()("line")).toBe("\x1b[38;2;111;176;28mline\x1b[39m");
+		expect(legacyTheme.getFgAnsi("planMode")).toBe(legacyTheme.getFgAnsi("toolDiffAdded"));
 	});
 });

@@ -323,7 +323,7 @@
 				},
 				"planMode": {
 					"$ref": "#/$defs/colorValue",
-					"description": "Editor border color in plan mode (optional, defaults to #6FB01C)"
+					"description": "Editor border and prompt color in plan mode (optional, falls back to toolDiffAdded)"
 				}
 			},
 			"additionalProperties": false

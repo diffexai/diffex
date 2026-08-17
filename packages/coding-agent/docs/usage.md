@@ -90,7 +90,7 @@ JSON and RPC modes emit the same notices as structured session events.
 
 Start an interactive planning session with `diffex --plan`, submit `/plan [instructions]`, or press Shift+Tab and type instructions in the editor.
 A bare `/plan` activates planning without submitting a prompt. Shift+Tab toggles plan mode while the session is idle.
-The editor border changes to `#6FB01C` while plan mode is active.
+The editor border and prompt pointer change to the theme's plan-mode green while plan mode is active.
 
 Plan mode exposes `submit_plan` and canonical `read`, `grep`, `find`, and `ls` repository inspection tools when caller restrictions permit them.
 Extension tools, SDK custom tools, shell execution, and file mutation tools are unavailable until the plan is accepted or discarded.

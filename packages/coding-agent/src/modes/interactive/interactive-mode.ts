@@ -610,8 +610,7 @@ export class InteractiveMode {
 			paddingX: editorPaddingX,
 			autocompleteMaxVisible,
 			prompt: SELECTED_LIST_PREFIX,
-			promptStyle: (text) =>
-				this.isBashMode ? theme.fg("bashMode", text.replace(/^>/, "!")) : theme.fg("selectionAccent", text),
+			promptStyle: (text) => this.styleEditorPrompt(text),
 			concealedInputPrefix: "!",
 			placeholder: "Ask Diffex to do something for you.",
 			placeholderStyle: (text) => theme.fg("muted", text),
@@ -2970,8 +2969,8 @@ export class InteractiveMode {
 		if (!preserveExclusiveOwner) {
 			this.editorContainer.addChild(this.editor as Component);
 			this.ui.setFocus(this.editor as Component);
-			this.ui.requestRender();
 		}
+		this.updateEditorBorderColor();
 	}
 
 	/**
@@ -4379,6 +4378,12 @@ export class InteractiveMode {
 		} else {
 			this.showStatus(`Restored ${restored} queued message${restored > 1 ? "s" : ""} to editor`);
 		}
+	}
+
+	private styleEditorPrompt(text: string): string {
+		if (this.isBashMode) return theme.fg("bashMode", text.replace(/^>/, "!"));
+		if (this.session.collaborationMode === "plan") return theme.fg("planMode", text);
+		return theme.fg("selectionAccent", text);
 	}
 
 	private updateEditorBorderColor(): void {
