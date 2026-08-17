@@ -4382,13 +4382,13 @@ export class InteractiveMode {
 	}
 
 	private updateEditorBorderColor(): void {
-		if (this.isBashMode) {
-			this.editor.borderColor = theme.getBashModeBorderColor();
-		} else if (this.session.collaborationMode === "plan") {
-			this.editor.borderColor = theme.getPlanModeBorderColor();
-		} else {
-			this.editor.borderColor = getEditorTheme().borderColor;
-		}
+		const borderColor = this.isBashMode
+			? theme.getBashModeBorderColor()
+			: this.session.collaborationMode === "plan"
+				? theme.getPlanModeBorderColor()
+				: getEditorTheme().borderColor;
+		this.defaultEditor.borderColor = borderColor;
+		this.editor.borderColor = borderColor;
 		this.ui.requestRender();
 	}
 
