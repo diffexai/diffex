@@ -15,6 +15,7 @@ import type {
 	Model,
 } from "@earendil-works/diffex-ai/compat";
 import { registerFauxProvider, streamSimple } from "@earendil-works/diffex-ai/compat";
+import type { HarnessStateStore, HarnessVersionBundle } from "@earendil-works/diffex-harness-state";
 import { AgentSession, type AgentSessionEvent } from "../../src/core/agent-session.ts";
 import { AuthStorage } from "../../src/core/auth-storage.ts";
 import type { ExtensionRunner, SessionStartEvent } from "../../src/core/extensions/index.ts";
@@ -74,6 +75,8 @@ export interface HarnessOptions {
 	withConfiguredAuth?: boolean;
 	modelsJson?: Record<string, unknown>;
 	sessionStartEvent?: SessionStartEvent;
+	harnessStateStore?: HarnessStateStore;
+	harnessVersionBundle?: HarnessVersionBundle;
 }
 
 export interface Harness {
@@ -194,6 +197,8 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 		excludedToolNames: options.excludedToolNames,
 		extensionRunnerRef,
 		sessionStartEvent: options.sessionStartEvent,
+		harnessStateStore: options.harnessStateStore,
+		harnessVersionBundle: options.harnessVersionBundle,
 	});
 
 	const events: AgentSessionEvent[] = [];

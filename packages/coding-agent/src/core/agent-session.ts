@@ -46,6 +46,12 @@ import {
 	resetApiProviders,
 	streamSimple,
 } from "@earendil-works/diffex-ai/compat";
+import type {
+	HarnessStateStore,
+	HarnessVersion,
+	HarnessVersionBundle,
+	HarnessVersionList,
+} from "@earendil-works/diffex-harness-state";
 import { getThemeByName, theme } from "../modes/interactive/theme/theme.ts";
 import { stripFrontmatter } from "../utils/frontmatter.ts";
 import { resolvePath } from "../utils/paths.ts";
@@ -240,6 +246,10 @@ export interface AgentSessionConfig {
 	sessionStartEvent?: SessionStartEvent;
 	/** Lifecycle-owned child-agent controller. */
 	subagentController?: SubagentController;
+	/** Global immutable harness revision store. */
+	harnessStateStore?: HarnessStateStore;
+	/** Harness revision activated for this session. */
+	harnessVersionBundle?: HarnessVersionBundle;
 }
 
 export interface ExtensionBindings {
@@ -393,6 +403,9 @@ export class AgentSession {
 	private _baseSystemPromptOptions!: BuildSystemPromptOptions;
 	private _systemPromptOverride?: string;
 	private readonly _subagentController: SubagentController | undefined;
+	private readonly _harnessStateStore: HarnessStateStore | undefined;
+	private _harnessVersionBundle: HarnessVersionBundle | undefined;
+	private _harnessSwitchInProgress = false;
 	private _subagentWaitAbortController: AbortController | undefined;
 	private _agentRunAborted = false;
 	private _disposePromise: Promise<void> | undefined;
@@ -413,6 +426,8 @@ export class AgentSession {
 		this._baseToolsOverride = config.baseToolsOverride;
 		this._sessionStartEvent = config.sessionStartEvent ?? { type: "session_start", reason: "startup" };
 		this._subagentController = config.subagentController;
+		this._harnessStateStore = config.harnessStateStore;
+		this._harnessVersionBundle = config.harnessVersionBundle;
 
 		this._armInitialCurrentPlanRestoration();
 
@@ -1071,6 +1086,11 @@ export class AgentSession {
 		return this.agent.state.systemPrompt;
 	}
 
+	/** Globally selected harness revision activated for this session. */
+	get activeHarnessVersion(): HarnessVersion | undefined {
+		return this._harnessVersionBundle?.manifest.version;
+	}
+
 	/** Current retry attempt (0 if not retrying) */
 	get retryAttempt(): number {
 		return this._retryAttempt;
@@ -1104,6 +1124,62 @@ export class AgentSession {
 	/** Current in-memory child-agent roster, sorted by name. */
 	getSubagents(): readonly SubagentSummary[] {
 		return this._subagentController?.getSummaries() ?? Object.freeze([]);
+	}
+
+	/** List valid harness revisions and diagnostics for unavailable revision paths. */
+	async listHarnessVersions(): Promise<HarnessVersionList> {
+		if (!this._harnessStateStore) {
+			return { versions: Object.freeze([]), diagnostics: Object.freeze([]), currentVersion: null };
+		}
+		return this._harnessStateStore.listVersions();
+	}
+
+	/**
+	 * Atomically select and activate a complete harness revision for future requests.
+	 * Conversation history and unrelated resources remain unchanged.
+	 */
+	async switchHarnessVersion(version: HarnessVersion): Promise<void> {
+		if (version === this.activeHarnessVersion) {
+			return;
+		}
+		if (!this._harnessStateStore) {
+			throw new Error("Harness version switching is unavailable for this session.");
+		}
+		if (this._harnessSwitchInProgress) {
+			throw new Error("Cannot switch harness versions while another switch is in progress.");
+		}
+		if (this.isStreaming) {
+			throw new Error("Cannot switch harness versions while a response is streaming.");
+		}
+		if (this.isCompacting) {
+			throw new Error("Cannot switch harness versions while compaction is in progress.");
+		}
+		if (this.isBashRunning) {
+			throw new Error("Cannot switch harness versions while a bash command is running.");
+		}
+
+		this._harnessSwitchInProgress = true;
+		try {
+			const listing = await this._harnessStateStore.listVersions();
+			const target = listing.versions.find((bundle) => bundle.manifest.version === version);
+			if (!target) {
+				const diagnostic = listing.diagnostics.find((entry) => entry.version === version);
+				throw new Error(
+					diagnostic
+						? `Harness version ${version} is unavailable: ${diagnostic.message}`
+						: `Harness version ${version} was not found.`,
+				);
+			}
+
+			await this._subagentController?.reset();
+			const selected = await this._harnessStateStore.selectVersion(version);
+			this._harnessVersionBundle = selected;
+			this._baseSystemPrompt = this._rebuildSystemPrompt(this.getActiveToolNames());
+			this._systemPromptOverride = undefined;
+			this.agent.state.systemPrompt = this._baseSystemPrompt;
+		} finally {
+			this._harnessSwitchInProgress = false;
+		}
 	}
 
 	/**
@@ -1239,6 +1315,12 @@ export class AgentSession {
 			selectedTools: validToolNames,
 			toolSnippets,
 			promptGuidelines,
+			evolutionMemory: this._harnessVersionBundle
+				? {
+						version: this._harnessVersionBundle.manifest.version,
+						memory: this._harnessVersionBundle.state.memory,
+					}
+				: undefined,
 		};
 		return buildSystemPrompt(this._baseSystemPromptOptions);
 	}
@@ -1406,6 +1488,9 @@ export class AgentSession {
 	 * @throws Error if no model selected or no API key available (when not streaming)
 	 */
 	async prompt(text: string, options?: PromptOptions): Promise<void> {
+		if (this._harnessSwitchInProgress) {
+			throw new Error("Cannot submit a prompt while a harness version switch is in progress.");
+		}
 		const expandPromptTemplates = options?.expandPromptTemplates ?? true;
 		const preflightResult = options?.preflightResult;
 		let messages: AgentMessage[] | undefined;

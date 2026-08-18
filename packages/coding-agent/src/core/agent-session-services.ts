@@ -1,9 +1,11 @@
 import { join } from "node:path";
 import type { ThinkingLevel } from "@earendil-works/diffex-agent-core";
 import type { Model } from "@earendil-works/diffex-ai";
+import type { HarnessStateStore, HarnessVersionBundle } from "@earendil-works/diffex-harness-state";
 import { getAgentDir } from "../config.ts";
 import { resolvePath } from "../utils/paths.ts";
 import type { SessionStartEvent, ToolDefinition } from "./extensions/index.ts";
+import { loadGlobalHarnessState } from "./harness-state-runtime.ts";
 import { ModelRuntime } from "./model-runtime.ts";
 import {
 	DefaultResourceLoader,
@@ -77,6 +79,8 @@ export interface AgentSessionServices {
 	modelRuntime: ModelRuntime;
 	settingsManager: SettingsManager;
 	resourceLoader: ResourceLoader;
+	harnessStateStore: HarnessStateStore;
+	harnessVersionBundle: HarnessVersionBundle | undefined;
 	diagnostics: AgentSessionRuntimeDiagnostic[];
 }
 
@@ -146,6 +150,7 @@ export async function createAgentSessionServices(
 			signal: options.modelRuntimeSignal,
 		}));
 	const settingsManager = options.settingsManager ?? SettingsManager.create(cwd, agentDir);
+	const harnessState = await loadGlobalHarnessState(agentDir);
 	const resourceLoader = new DefaultResourceLoader({
 		...(options.resourceLoaderOptions ?? {}),
 		cwd,
@@ -155,6 +160,9 @@ export async function createAgentSessionServices(
 	await resourceLoader.reload(options.resourceLoaderReloadOptions);
 
 	const diagnostics: AgentSessionRuntimeDiagnostic[] = [];
+	if (harnessState.warning) {
+		diagnostics.push({ type: "warning", message: harnessState.warning });
+	}
 	const extensionsResult = resourceLoader.getExtensions();
 	let registeredProvider = false;
 	for (const { name, config, extensionPath } of extensionsResult.runtime.pendingProviderRegistrations) {
@@ -194,6 +202,8 @@ export async function createAgentSessionServices(
 		modelRuntime,
 		settingsManager,
 		resourceLoader,
+		harnessStateStore: harnessState.store,
+		harnessVersionBundle: harnessState.bundle,
 		diagnostics,
 	};
 }
@@ -214,6 +224,8 @@ export async function createAgentSessionFromServices(
 		modelRuntime: options.services.modelRuntime,
 		settingsManager: options.services.settingsManager,
 		resourceLoader: options.services.resourceLoader,
+		harnessStateStore: options.services.harnessStateStore,
+		harnessVersionBundle: options.services.harnessVersionBundle,
 		sessionManager: options.sessionManager,
 		model: options.model,
 		thinkingLevel: options.thinkingLevel,

@@ -1,12 +1,14 @@
 import { join } from "node:path";
 import { Agent, type AgentMessage, setDefaultStreamFn, type ThinkingLevel } from "@earendil-works/diffex-agent-core";
 import { clampThinkingLevel, type Message, type Model, streamSimple } from "@earendil-works/diffex-ai/compat";
+import type { HarnessStateStore, HarnessVersionBundle } from "@earendil-works/diffex-harness-state";
 import { getAgentDir } from "../config.ts";
 import { resolvePath } from "../utils/paths.ts";
 import { AgentSession } from "./agent-session.ts";
 import { formatNoModelsAvailableMessage } from "./auth-guidance.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
 import type { ExtensionRunner, LoadExtensionsResult, SessionStartEvent, ToolDefinition } from "./extensions/index.ts";
+import { loadGlobalHarnessState } from "./harness-state-runtime.ts";
 import { convertToLlm } from "./messages.ts";
 import { findInitialModel } from "./model-resolver.ts";
 import { ModelRuntime } from "./model-runtime.ts";
@@ -96,6 +98,10 @@ export interface CreateAgentSessionOptions {
 	settingsManager?: SettingsManager;
 	/** Session start event metadata for extension runtime startup. */
 	sessionStartEvent?: SessionStartEvent;
+	/** Preloaded global harness store. Primarily used by runtime service composition. */
+	harnessStateStore?: HarnessStateStore;
+	/** Activated harness revision from the preloaded store. */
+	harnessVersionBundle?: HarnessVersionBundle;
 }
 
 /** Result from createAgentSession */
@@ -106,6 +112,8 @@ export interface CreateAgentSessionResult {
 	extensionsResult: LoadExtensionsResult;
 	/** Warning if session was restored with a different model than saved */
 	modelFallbackMessage?: string;
+	/** Non-fatal warning when optional harness state could not be activated. */
+	harnessStateWarning?: string;
 }
 
 // Re-exports
@@ -229,6 +237,9 @@ function createRootSubagentController(maxConcurrent: number, agentDir: string): 
 export async function createAgentSession(options: CreateAgentSessionOptions = {}): Promise<CreateAgentSessionResult> {
 	const cwd = resolvePath(options.cwd ?? options.sessionManager?.getCwd() ?? process.cwd());
 	const agentDir = options.agentDir ? resolvePath(options.agentDir) : getDefaultAgentDir();
+	const loadedHarnessState = options.harnessStateStore
+		? { store: options.harnessStateStore, bundle: options.harnessVersionBundle, warning: undefined }
+		: await loadGlobalHarnessState(agentDir);
 	const subagentOptions = normalizeSubagentOptions(options.subagents);
 	assertNoReservedSubagentTools(options.customTools);
 	const subagentController =
@@ -453,6 +464,8 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		extensionRunnerRef,
 		sessionStartEvent: options.sessionStartEvent,
 		subagentController,
+		harnessStateStore: loadedHarnessState.store,
+		harnessVersionBundle: loadedHarnessState.bundle,
 	});
 	subagentController?.bindParent(session);
 	const extensionsResult = resourceLoader.getExtensions();
@@ -461,5 +474,6 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		session,
 		extensionsResult,
 		modelFallbackMessage,
+		harnessStateWarning: loadedHarnessState.warning,
 	};
 }

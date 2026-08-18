@@ -16,6 +16,8 @@ export interface BuildSystemPromptOptions {
 	promptGuidelines?: string[];
 	/** Text to append to system prompt. */
 	appendSystemPrompt?: string;
+	/** Activated harness evolution memory. Empty memory is omitted from the prompt. */
+	evolutionMemory?: { version: string; memory: string };
 	/** Working directory. */
 	cwd: string;
 	/** Pre-loaded context files. */
@@ -32,6 +34,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 		toolSnippets,
 		promptGuidelines,
 		appendSystemPrompt,
+		evolutionMemory,
 		cwd,
 		contextFiles: providedContextFiles,
 		skills: providedSkills,
@@ -39,6 +42,9 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 	const promptCwd = cwd.replace(/\\/g, "/");
 
 	const appendSection = appendSystemPrompt ? `\n\n${appendSystemPrompt}` : "";
+	const evolutionSection = evolutionMemory?.memory
+		? `\n\n<evolution_memory version="${evolutionMemory.version}">\n${evolutionMemory.memory}\n</evolution_memory>`
+		: "";
 
 	const contextFiles = providedContextFiles ?? [];
 	const skills = providedSkills ?? [];
@@ -49,6 +55,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 		if (appendSection) {
 			prompt += appendSection;
 		}
+		prompt += evolutionSection;
 
 		// Append project context files
 		if (contextFiles.length > 0) {
@@ -140,6 +147,7 @@ Diffex documentation (read only when the user asks about Diffex itself, its SDK,
 	if (appendSection) {
 		prompt += appendSection;
 	}
+	prompt += evolutionSection;
 
 	// Append project context files
 	if (contextFiles.length > 0) {

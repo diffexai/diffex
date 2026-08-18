@@ -114,4 +114,40 @@ describe("buildSystemPrompt", () => {
 			expect(prompt.match(/- Use dynamic_tool for summaries\./g)).toHaveLength(1);
 		});
 	});
+
+	describe("evolution memory", () => {
+		test.each([
+			{ label: "default", customPrompt: undefined },
+			{ label: "custom", customPrompt: "Custom base prompt." },
+		])("places non-empty memory before project context for the $label prompt", ({ customPrompt }) => {
+			const prompt = buildSystemPrompt({
+				customPrompt,
+				appendSystemPrompt: "Appended instructions.",
+				evolutionMemory: {
+					version: "sha256:1234",
+					memory: "Prefer focused changes.",
+				},
+				contextFiles: [{ path: "AGENTS.md", content: "Project instructions." }],
+				skills: [],
+				cwd: process.cwd(),
+			});
+
+			const evolutionBlock =
+				'<evolution_memory version="sha256:1234">\nPrefer focused changes.\n</evolution_memory>';
+			expect(prompt).toContain(evolutionBlock);
+			expect(prompt.indexOf("Appended instructions.")).toBeLessThan(prompt.indexOf(evolutionBlock));
+			expect(prompt.indexOf(evolutionBlock)).toBeLessThan(prompt.indexOf("<project_context>"));
+		});
+
+		test("omits the evolution block for empty root memory", () => {
+			const prompt = buildSystemPrompt({
+				evolutionMemory: { version: "sha256:root", memory: "" },
+				contextFiles: [],
+				skills: [],
+				cwd: process.cwd(),
+			});
+
+			expect(prompt).not.toContain("<evolution_memory");
+		});
+	});
 });
