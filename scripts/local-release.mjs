@@ -6,6 +6,7 @@ import { isAbsolute, join, relative, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 
 const packages = [
+	{ directory: "packages/harness-state", name: "@earendil-works/diffex-harness-state" },
 	{ directory: "packages/telemetry", name: "@earendil-works/diffex-telemetry" },
 	{ directory: "packages/ai", name: "@earendil-works/diffex-ai" },
 	{ directory: "packages/tui", name: "@earendil-works/diffex-tui" },

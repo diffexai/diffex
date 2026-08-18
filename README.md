@@ -37,6 +37,7 @@ Use `./diffex-test.sh` to run the Diffex-branded coding agent directly from this
 | [`packages/telemetry`](packages/telemetry) | Vendor-neutral telemetry contracts and typed schemas. |
 | [`packages/ai`](packages/ai) | Unified LLM API with provider and model discovery. |
 | [`packages/agent`](packages/agent) | Agent runtime, tool calling, state management, and attachments. |
+| [`packages/harness-state`](packages/harness-state) | Immutable, content-addressed harness revisions and global selection. |
 | [`packages/protocol`](packages/protocol) | Transport-neutral CBOR protocol for remote sessions. |
 | [`packages/client`](packages/client) | Transport-neutral client for remote sessions. |
 | [`packages/server`](packages/server) | Experimental remote session server. |

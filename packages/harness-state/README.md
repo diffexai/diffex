@@ -1,37 +1,60 @@
-# `@diffexai/diffex-harness-state`
+# `@earendil-works/diffex-harness-state`
 
-Private workspace package for the Diffex harness-state schema and directory-bundle persistence.
+Persistent, content-addressed harness revisions for Diffex.
 
-## State and bundle format
+## Storage
 
-A logical state contains only Diffex's evolving memory:
-
-```ts
-{
-	memory: string;
-}
-```
-
-The memory consists of notes collected throughout the evolution process to improve Diffex's behavior. It must not start with U+FEFF and must contain a non-whitespace character. A portable bundle root is a direct directory, not a symbolic link, with exactly these direct regular files and exact casing:
+`HarnessStateStore` stores global revisions beneath an agent directory:
 
 ```text
-state-directory/
-|-- manifest.json  # SHA-256 identity and base-version metadata
-`-- EVOLVE.md      # memory notes as UTF-8 bytes, preserved verbatim
+<agentDir>/harness-state/
+|-- current.json
+`-- versions/
+    `-- sha256-<revision-digest>/
+        |-- manifest.json
+        `-- EVOLVE.md
 ```
 
-Both files must be fatal, BOM-free UTF-8. The manifest must contain only `contentHash` and `base`, each formatted as `sha256:` followed by 64 lowercase hexadecimal characters. Loading verifies that `contentHash` matches the exact `EVOLVE.md` bytes, including line endings and trailing whitespace. `base` identifies the predecessor's `contentHash`; a root harness conventionally uses its own `contentHash` as `base`.
+Revision identifiers use canonical `sha256:<digest>` strings in APIs and data.
+Directory names replace the colon with a dash for Windows portability.
+
+Each manifest contains `schemaVersion`, `version`, `base`, and a deterministic artifact inventory.
+The revision hash covers the schema version, parent revision, and sorted artifact descriptors, but not the `version` field itself.
+Each artifact retains its own content hash over its exact bytes.
+Including the parent revision makes repeated evolution with identical artifact content produce a distinct successor.
+
+Only one `evolution-memory` artifact at `EVOLVE.md` is supported for activation today.
+The manifest schema can represent future artifact kinds so incompatible revisions can be inspected and reported, but activation rejects every kind the runtime cannot fully understand.
+
+## Validation
+
+Activation validates the complete bundle before returning any state.
+It rejects malformed or noncanonical manifests, revision and content hash mismatches, undeclared or missing files, duplicate and nonportable paths, incorrect casing, symbolic links, non-regular files, malformed UTF-8, leading BOMs, and unsupported artifact kinds.
+`EVOLVE.md` may be exactly empty for the root revision.
+Non-empty whitespace-only memory remains invalid.
 
 ## API
 
-- `HarnessStateSchema`, `HarnessStateManifestSchema`, and `HarnessStateBundleSchema` are strict TypeBox schemas. Their inferred types expose readonly fields.
-- `loadHarnessState(bundlePath)` validates a bundle, verifies its content hash, and returns `{ state, manifest }` without normalizing the memory.
-- `saveHarnessState(state, destinationPath, options?)` derives the content hash, stages a canonical two-file bundle beside the destination, and returns `{ state, manifest }`. Passing `options.base` identifies the predecessor; omitting it creates a self-based root. The parent must already be a directory, any existing destination entry is rejected, and a failed save attempts to remove its owned staging directory.
+- `computeHarnessVersion(input)` computes a canonical revision identifier.
+- `serializeHarnessVersion(input)` exposes the canonical serialization used by the hash.
+- `harnessVersionDirectoryName(version)` creates the portable directory name.
+- `saveHarnessState(state, destinationPath, base)` writes an immutable, idempotent revision bundle.
+- `loadHarnessState(bundlePath)` validates and loads one complete revision bundle.
+- `new HarnessStateStore(agentDir)` manages the global store beneath an effective agent directory.
 
-The package does not include or select a default harness. Callers must provide an explicit bundle path or state.
+The store provides these operations:
 
-Invalid state, layout, encoding, manifest, or memory data rejects with an ordinary descriptive `Error`. JSON syntax failures retain the original syntax error as their cause. Other filesystem errors propagate unchanged.
+- `initialize()` creates and selects the empty root if no pointer exists.
+- `loadCurrent()` strictly validates and loads the selected revision.
+- `listVersions()` returns compatible bundles and per-path diagnostics for corrupt or incompatible entries.
+  Diagnostics retain validated manifest and EVOLVE state when an incompatible future artifact is the only activation blocker.
+- `saveVersion(state, base)` creates an immutable revision without selecting it.
+- `selectVersion(version)` validates the complete target and atomically replaces the pointer.
+- `advance(state, expectedBase)` commits and selects a successor only when the selected revision still matches `expectedBase`.
 
-## Limitations
+Initialization, selection, and advancement share a cross-process store lock.
+Version writes stage beside their destination and are idempotent only when an existing revision validates to the same canonical content.
+Pointer replacement uses a staged file and atomic rename.
+An expected-base race returns a discriminated `conflict` result and does not create or select a silent branch.
 
-The state stores only the evolving memory notes. The manifest records one base hash but does not resolve predecessors, verify their existence, detect cycles, or otherwise manage lineage. The package has no migration or compatibility behavior and does not represent tools, models, context, sessions, or provenance. Persistence does not provide cross-process coordination, retries, or durability guarantees.
+The package does not implement skill generation, source mutation, orchestration loading, build execution, restart handling, rollback, garbage collection, aliases, project-local stores, or session-level revision pinning.
