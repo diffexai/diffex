@@ -650,7 +650,6 @@ describe("automatic subagent coordination", () => {
 
 	it("preserves cancellation before the subagent wait is installed", async () => {
 		const { root, harness } = await createRoot();
-		const childStarted = deferred<void>();
 		const abortStarted = deferred<void>();
 		const lifecycle: Array<{ type: "start" } | { type: "end"; cancelled: boolean }> = [];
 		let abortPromise: Promise<void> | undefined;
@@ -666,7 +665,6 @@ describe("automatic subagent coordination", () => {
 		harness.setResponses(
 			Array.from({ length: 6 }, () => async (context: Context, options?: SimpleStreamOptions) => {
 				if (!hasTool(context, "spawn_agent")) {
-					childStarted.resolve();
 					return await new Promise<ReturnType<typeof fauxAssistantMessage>>((resolve) => {
 						options?.signal?.addEventListener(
 							"abort",
@@ -686,7 +684,7 @@ describe("automatic subagent coordination", () => {
 		);
 
 		const prompt = root.prompt("cancel before post-run coordination");
-		await Promise.all([childStarted.promise, abortStarted.promise]);
+		await abortStarted.promise;
 		await prompt;
 		await abortPromise;
 
