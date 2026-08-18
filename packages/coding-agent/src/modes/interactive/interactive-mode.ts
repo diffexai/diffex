@@ -138,6 +138,10 @@ import { ExtensionEditorComponent } from "./components/extension-editor.ts";
 import { ExtensionInputComponent } from "./components/extension-input.ts";
 import { ExtensionSelectorComponent } from "./components/extension-selector.ts";
 import { FooterComponent, formatCwdForFooter, formatTokens } from "./components/footer.ts";
+import {
+	createHarnessVersionSelectorItems,
+	HarnessVersionSelectorComponent,
+} from "./components/harness-version-selector.ts";
 import { formatKeyText, keyDisplayText } from "./components/keybinding-hints.ts";
 import { LoginDialogComponent } from "./components/login-dialog.ts";
 import { createMermaidMarkdownTransformer } from "./components/mermaid.ts";
@@ -2944,6 +2948,11 @@ export class InteractiveMode {
 				this.editor.setText("");
 				return;
 			}
+			if (text === "/version") {
+				this.editor.setText("");
+				await this.showHarnessVersionSelector();
+				return;
+			}
 			if (text === "/subagents") {
 				this.handleSubagentsCommand();
 				this.editor.setText("");
@@ -4622,6 +4631,51 @@ export class InteractiveMode {
 			);
 			return { component: selector, focus: selector.getSettingsList() };
 		});
+	}
+
+	private async showHarnessVersionSelector(): Promise<void> {
+		try {
+			const { versions, diagnostics, currentVersion } = await this.session.listHarnessVersions();
+			const items = createHarnessVersionSelectorItems(versions, diagnostics);
+			if (items.length === 0) {
+				this.showStatus("No harness versions available");
+				return;
+			}
+
+			this.showSelector((done) => {
+				let switching = false;
+				const selector = new HarnessVersionSelectorComponent(
+					items,
+					currentVersion ?? this.session.activeHarnessVersion,
+					(version) => {
+						if (switching) return;
+						if (version === this.session.activeHarnessVersion) {
+							done();
+							this.showStatus(`Harness version already active: ${version}`);
+							return;
+						}
+						switching = true;
+						void this.session
+							.switchHarnessVersion(version)
+							.then(() => {
+								done();
+								this.showStatus(`Harness version: ${version}`);
+							})
+							.catch((error: unknown) => {
+								done();
+								this.showError(error instanceof Error ? error.message : String(error));
+							});
+					},
+					() => {
+						done();
+						this.ui.requestRender();
+					},
+				);
+				return { component: selector, focus: selector };
+			});
+		} catch (error: unknown) {
+			this.showError(`Could not list harness versions: ${error instanceof Error ? error.message : String(error)}`);
+		}
 	}
 
 	private async handleModelCommand(searchTerm?: string): Promise<void> {

@@ -17,4 +17,11 @@ describe("BUILTIN_SLASH_COMMANDS", () => {
 			description: "Show sub-agents in the current session",
 		});
 	});
+
+	it("includes the harness version selector command", () => {
+		expect(BUILTIN_SLASH_COMMANDS).toContainEqual({
+			name: "version",
+			description: "Select harness version",
+		});
+	});
 });
