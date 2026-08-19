@@ -72,6 +72,31 @@ describe("AgentSession harness revisions", () => {
 		);
 	});
 
+	it("reports a live activation to the process lifecycle observer", async () => {
+		const activatedVersions: HarnessVersion[] = [];
+		const agentDir = join(tmpdir(), `diffex-harness-observer-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+		mkdirSync(agentDir, { recursive: true });
+		agentDirs.push(agentDir);
+		const store = new HarnessStateStore(agentDir);
+		const root = await store.initialize();
+		const successor = await store.saveVersion({ memory: "Observed memory." }, root.manifest.version);
+		const harness = await createHarness({
+			harnessStateStore: store,
+			harnessVersionBundle: root,
+			lifecycleObserver: {
+				operationSettled: () => {},
+				harnessActivated: (version) => {
+					activatedVersions.push(version);
+				},
+			},
+		});
+		harnesses.push(harness);
+
+		await harness.session.switchHarnessVersion(successor.manifest.version);
+
+		expect(activatedVersions).toEqual([successor.manifest.version]);
+	});
+
 	it.each([
 		{ property: "isStreaming", message: "while a response is streaming" },
 		{ property: "isCompacting", message: "while compaction is in progress" },
