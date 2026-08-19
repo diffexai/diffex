@@ -6,6 +6,7 @@
 		"moduleResolution": "NodeNext",
 		"paths": {
 			"*": ["./*"],
+			"#harness-trace": ["./packages/harness-trace/src/index.ts"],
 			"@earendil-works/diffex-harness-state": ["./packages/harness-state/src/index.ts"],
 			"@earendil-works/diffex-harness-trace": ["./packages/harness-trace/src/index.ts"],
 			"@earendil-works/diffex-telemetry": ["./packages/telemetry/src/index.ts"],

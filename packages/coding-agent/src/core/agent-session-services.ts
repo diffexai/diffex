@@ -4,6 +4,7 @@ import type { Model } from "@earendil-works/diffex-ai";
 import type { HarnessStateStore, HarnessVersionBundle } from "@earendil-works/diffex-harness-state";
 import { getAgentDir } from "../config.ts";
 import { resolvePath } from "../utils/paths.ts";
+import type { AgentSessionLifecycleObserver } from "./agent-session-lifecycle.ts";
 import type { SessionStartEvent, ToolDefinition } from "./extensions/index.ts";
 import { loadGlobalHarnessState } from "./harness-state-runtime.ts";
 import { ModelRuntime } from "./model-runtime.ts";
@@ -68,6 +69,7 @@ export interface CreateAgentSessionFromServicesOptions {
 	noTools?: CreateAgentSessionOptions["noTools"];
 	customTools?: ToolDefinition[];
 	subagents?: CreateAgentSessionOptions["subagents"];
+	lifecycleObserver?: AgentSessionLifecycleObserver;
 }
 
 /**
@@ -243,6 +245,7 @@ export async function createAgentSessionFromServices(
 		noTools: options.noTools,
 		customTools: options.customTools,
 		subagents: options.subagents,
+		lifecycleObserver: options.lifecycleObserver,
 		sessionStartEvent: options.sessionStartEvent,
 	});
 }

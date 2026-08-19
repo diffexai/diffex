@@ -18,6 +18,8 @@ const packages = [
 	{ directory: "packages/coding-agent", name: "@earendil-works/diffex-coding-agent" },
 ];
 
+const privateBuildPackages = [{ directory: "packages/harness-trace" }];
+
 function printUsage() {
 	console.log(`Usage: node scripts/local-release.mjs [options]
 
@@ -223,7 +225,7 @@ if (!options.skipCheck) {
 	run("npm", ["run", "check"], { cwd: repoRoot });
 }
 
-for (const pkg of packages) {
+for (const pkg of [...privateBuildPackages, ...packages]) {
 	run("npm", ["run", "clean"], { cwd: pkg.directory });
 	run("npm", ["run", pkg.directory === "packages/ai" ? "build:offline" : "build"], { cwd: pkg.directory });
 }

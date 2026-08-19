@@ -12,6 +12,7 @@ import type { HarnessStateStore, HarnessVersionBundle } from "@earendil-works/di
 import { getAgentDir } from "../config.ts";
 import { resolvePath } from "../utils/paths.ts";
 import { AgentSession } from "./agent-session.ts";
+import type { AgentSessionLifecycleObserver } from "./agent-session-lifecycle.ts";
 import { formatNoModelsAvailableMessage } from "./auth-guidance.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
 import type { ExtensionRunner, LoadExtensionsResult, SessionStartEvent, ToolDefinition } from "./extensions/index.ts";
@@ -111,6 +112,8 @@ export interface CreateAgentSessionOptions {
 	harnessVersionBundle?: HarnessVersionBundle;
 	/** Optional parent for passive runtime telemetry. */
 	telemetryContext?: TelemetryContext;
+	/** Optional process-owned observer for durable lifecycle boundaries. */
+	lifecycleObserver?: AgentSessionLifecycleObserver;
 }
 
 /** Result from createAgentSession */
@@ -485,7 +488,15 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		harnessStateStore: loadedHarnessState.store,
 		harnessVersionBundle: loadedHarnessState.bundle,
 		telemetryContext,
+		lifecycleObserver: options.lifecycleObserver,
 	});
+	if (session.activeHarnessVersion) {
+		try {
+			await options.lifecycleObserver?.harnessActivated(session.activeHarnessVersion);
+		} catch {
+			// Lifecycle observers are passive and never change session creation.
+		}
+	}
 	subagentController?.bindParent(session);
 	const extensionsResult = resourceLoader.getExtensions();
 

@@ -23,8 +23,29 @@ export function isInstallTelemetryEnabled(
 }
 
 export const CODING_AGENT_TELEMETRY_SCHEMA = {
-	version: 1,
+	version: 2,
 	spans: {
+		"diffex.coding_agent.diagnostic": {
+			description: "One runtime diagnostic surfaced to the process user",
+			parents: { kind: "any" },
+			startAttributes: {
+				"diffex.diagnostic.severity": {
+					type: "string",
+					required: true,
+					values: ["info", "warning", "error"],
+					description: "Diagnostic severity",
+				},
+				"diffex.diagnostic.message": {
+					type: "string",
+					required: true,
+					cardinality: "high",
+					sensitive: true,
+					description: "Exact surfaced diagnostic message",
+				},
+			},
+			endAttributes: {},
+			status: { default: "ok", errorWhen: "The diagnostic has error severity" },
+		},
 		"diffex.coding_agent.operation": {
 			description: "One user-visible coding-agent session operation",
 			parents: { kind: "any" },

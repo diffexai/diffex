@@ -3,6 +3,7 @@ import { basename, join, resolve } from "node:path";
 import type { TelemetryContext } from "@earendil-works/diffex-agent-core";
 import { resolvePath } from "../utils/paths.ts";
 import type { AgentSession } from "./agent-session.ts";
+import type { InvocationSessionAttachmentReason } from "./agent-session-lifecycle.ts";
 import type { AgentSessionRuntimeDiagnostic, AgentSessionServices } from "./agent-session-services.ts";
 import type {
 	ProjectTrustContext,
@@ -40,7 +41,10 @@ export type CreateAgentSessionRuntimeFactory = (options: {
 	sessionStartEvent?: SessionStartEvent;
 	projectTrustContext?: ProjectTrustContext;
 	telemetryContext?: TelemetryContext;
+	invocationSessionReason?: InvocationSessionAttachmentReason;
 }) => Promise<CreateAgentSessionRuntimeResult>;
+
+export type InvocationTerminationStatus = "completed" | "failed" | "aborted";
 
 /**
  * Thrown when /import references a JSONL file path that does not exist.
@@ -82,6 +86,7 @@ export class AgentSessionRuntime {
 	private _diagnostics: AgentSessionRuntimeDiagnostic[];
 	private _modelFallbackMessage?: string;
 	private disposePromise: Promise<void> | undefined;
+	private readonly onDispose: ((status: InvocationTerminationStatus) => Promise<void>) | undefined;
 
 	constructor(
 		_session: AgentSession,
@@ -89,6 +94,7 @@ export class AgentSessionRuntime {
 		createRuntime: CreateAgentSessionRuntimeFactory,
 		_diagnostics: AgentSessionRuntimeDiagnostic[] = [],
 		_modelFallbackMessage?: string,
+		onDispose?: (status: InvocationTerminationStatus) => Promise<void>,
 	) {
 		this._session = _session;
 		this._services = _services;
@@ -99,6 +105,7 @@ export class AgentSessionRuntime {
 			});
 		this._diagnostics = _diagnostics;
 		this._modelFallbackMessage = _modelFallbackMessage;
+		this.onDispose = onDispose;
 	}
 
 	get services(): AgentSessionServices {
@@ -249,6 +256,7 @@ export class AgentSessionRuntime {
 				sessionManager,
 				sessionStartEvent: { type: "session_start", reason: "resume", previousSessionFile },
 				projectTrustContext: options?.projectTrustContextFactory?.(sessionManager.getCwd()),
+				invocationSessionReason: "switch",
 			}),
 		);
 		await this.finishSessionReplacement(options?.withSession);
@@ -281,6 +289,7 @@ export class AgentSessionRuntime {
 				agentDir: this.services.agentDir,
 				sessionManager,
 				sessionStartEvent: { type: "session_start", reason: "new", previousSessionFile },
+				invocationSessionReason: "new",
 			}),
 		);
 		if (options?.setup) {
@@ -335,6 +344,7 @@ export class AgentSessionRuntime {
 						agentDir: this.services.agentDir,
 						sessionManager,
 						sessionStartEvent: { type: "session_start", reason: "fork", previousSessionFile },
+						invocationSessionReason: "fork",
 					}),
 				);
 				await this.finishSessionReplacement(options?.withSession);
@@ -358,6 +368,7 @@ export class AgentSessionRuntime {
 					agentDir: this.services.agentDir,
 					sessionManager,
 					sessionStartEvent: { type: "session_start", reason: "fork", previousSessionFile },
+					invocationSessionReason: "fork",
 				}),
 			);
 			await this.finishSessionReplacement(options?.withSession);
@@ -377,6 +388,7 @@ export class AgentSessionRuntime {
 				agentDir: this.services.agentDir,
 				sessionManager,
 				sessionStartEvent: { type: "session_start", reason: "fork", previousSessionFile },
+				invocationSessionReason: "fork",
 			}),
 		);
 		await this.finishSessionReplacement(options?.withSession);
@@ -421,13 +433,14 @@ export class AgentSessionRuntime {
 				agentDir: this.services.agentDir,
 				sessionManager,
 				sessionStartEvent: { type: "session_start", reason: "resume", previousSessionFile },
+				invocationSessionReason: "import",
 			}),
 		);
 		await this.finishSessionReplacement();
 		return { cancelled: false };
 	}
 
-	dispose(): Promise<void> {
+	dispose(terminationStatus: InvocationTerminationStatus = "completed"): Promise<void> {
 		if (this.disposePromise) return this.disposePromise;
 
 		let resolveDispose!: () => void;
@@ -437,8 +450,19 @@ export class AgentSessionRuntime {
 			rejectDispose = reject;
 		});
 		this.disposePromise = disposePromise;
-		void this.teardownCurrent("quit").then(resolveDispose, rejectDispose);
+		void this.finishDispose(terminationStatus).then(resolveDispose, rejectDispose);
 		return disposePromise;
+	}
+
+	private async finishDispose(terminationStatus: InvocationTerminationStatus): Promise<void> {
+		let teardownFailure: unknown;
+		try {
+			await this.teardownCurrent("quit");
+		} catch (error) {
+			teardownFailure = error;
+		}
+		await this.onDispose?.(teardownFailure === undefined ? terminationStatus : "failed");
+		if (teardownFailure !== undefined) throw teardownFailure;
 	}
 }
 
@@ -456,6 +480,8 @@ export async function createAgentSessionRuntime(
 		sessionManager: SessionManager;
 		sessionStartEvent?: SessionStartEvent;
 		telemetryContext?: TelemetryContext;
+		invocationSessionReason?: InvocationSessionAttachmentReason;
+		onDispose?: (status: InvocationTerminationStatus) => Promise<void>;
 	},
 ): Promise<AgentSessionRuntime> {
 	assertSessionCwdExists(options.sessionManager, options.cwd);
@@ -466,6 +492,7 @@ export async function createAgentSessionRuntime(
 		createRuntime,
 		result.diagnostics,
 		result.modelFallbackMessage,
+		options.onDispose,
 	);
 }
 

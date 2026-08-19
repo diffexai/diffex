@@ -33,7 +33,12 @@ import { createProjectTrustContext } from "./cli/project-trust.ts";
 import { selectSession } from "./cli/session-picker.ts";
 import { shouldRunFirstTimeSetup, showFirstTimeSetup, showStartupSelector } from "./cli/startup-ui.ts";
 import { APP_NAME, ENV_SESSION_DIR, expandTildePath, getAgentDir, getPackageDir, VERSION } from "./config.ts";
-import { type CreateAgentSessionRuntimeFactory, createAgentSessionRuntime } from "./core/agent-session-runtime.ts";
+import type { InvocationSessionAttachmentReason } from "./core/agent-session-lifecycle.ts";
+import {
+	type AgentSessionRuntime,
+	type CreateAgentSessionRuntimeFactory,
+	createAgentSessionRuntime,
+} from "./core/agent-session-runtime.ts";
 import {
 	type AgentSessionRuntimeDiagnostic,
 	createAgentSessionFromServices,
@@ -44,6 +49,7 @@ import { AuthStorage, ReadOnlyAuthStorage } from "./core/auth-storage.ts";
 import { exportFromFile } from "./core/export-html/index.ts";
 import type { InlineExtension } from "./core/extensions/types.ts";
 import { applyHttpProxySettings, configureHttpDispatcher } from "./core/http-dispatcher.ts";
+import { createInvocationTrace } from "./core/invocation-trace.ts";
 import { resolveCliModel, resolveModelScope, type ScopedModel } from "./core/model-resolver.ts";
 import { ModelRuntime } from "./core/model-runtime.ts";
 import { restoreStdout, takeOverStdout } from "./core/output-guard.ts";
@@ -134,6 +140,15 @@ function toPrintOutputMode(appMode: AppMode): Exclude<Mode, "rpc"> {
 
 function isPlainRuntimeMetadataCommand(parsed: Args): boolean {
 	return !parsed.print && parsed.mode === undefined && (parsed.help === true || parsed.listModels !== undefined);
+}
+
+function initialSessionAttachmentReason(
+	parsed: Args,
+	sessionManager: SessionManager,
+): InvocationSessionAttachmentReason {
+	if (parsed.fork) return "fork";
+	if (parsed.resume || parsed.continue || parsed.session || sessionManager.getEntryCount() > 0) return "resume";
+	return "startup";
 }
 
 async function runAuthCommand(args: string[]): Promise<boolean> {
@@ -656,7 +671,8 @@ export async function main(args: string[], options?: MainOptions) {
 	time("runMigrations");
 
 	const startupSettingsManager = SettingsManager.create(cwd, agentDir);
-	reportDiagnostics(collectSettingsDiagnostics(startupSettingsManager, "startup session lookup"));
+	const startupSettingsDiagnostics = collectSettingsDiagnostics(startupSettingsManager, "startup session lookup");
+	reportDiagnostics(startupSettingsDiagnostics);
 
 	// Experimental first-time setup: theme choice and analytics opt-in.
 	// Runs before any runtime services are created so the chosen settings apply everywhere.
@@ -697,6 +713,12 @@ export async function main(args: string[], options?: MainOptions) {
 		}
 		sessionManager.appendSessionInfo(name);
 	}
+	const invocationTraceResult = await createInvocationTrace({ agentDir, sessionManager });
+	const invocationTrace = invocationTraceResult.trace;
+	if (invocationTraceResult.diagnostic) {
+		reportDiagnostics([invocationTraceResult.diagnostic]);
+	}
+	await invocationTrace.recordDiagnostics(startupSettingsDiagnostics);
 	time("createSessionManager");
 
 	const trustStore = new ProjectTrustStore(agentDir);
@@ -719,7 +741,9 @@ export async function main(args: string[], options?: MainOptions) {
 		sessionStartEvent,
 		projectTrustContext,
 		telemetryContext,
+		invocationSessionReason = "startup",
 	}) => {
+		await invocationTrace.attachSession(sessionManager, invocationSessionReason);
 		const isInitialRuntime = sessionStartEvent === undefined;
 		const projectTrustDiagnostics: AgentSessionRuntimeDiagnostic[] = [];
 		const cachedProjectTrust = projectTrustByCwd.get(cwd);
@@ -830,24 +854,39 @@ export async function main(args: string[], options?: MainOptions) {
 			excludeTools: sessionOptions.excludeTools,
 			noTools: sessionOptions.noTools,
 			customTools: sessionOptions.customTools,
+			lifecycleObserver: invocationTrace,
 		});
 		const cliThinkingOverride = parsed.thinking !== undefined || cliThinkingFromModel;
 		if (created.session.model && cliThinkingOverride) {
 			created.session.setThinkingLevel(created.session.thinkingLevel);
 		}
 
-		return {
+		const result = {
 			...created,
 			services,
 			diagnostics,
 		};
+		await invocationTrace.recordDiagnostics(diagnostics);
+		return result;
 	};
 	time("createRuntime");
-	const runtime = await createAgentSessionRuntime(createRuntime, {
-		cwd: sessionManager.getCwd(),
-		agentDir,
-		sessionManager,
-	});
+	let runtime: AgentSessionRuntime;
+	try {
+		runtime = await createAgentSessionRuntime(createRuntime, {
+			cwd: sessionManager.getCwd(),
+			agentDir,
+			sessionManager,
+			invocationSessionReason: initialSessionAttachmentReason(parsed, sessionManager),
+			telemetryContext: invocationTrace.telemetryContext,
+			onDispose: (status) => invocationTrace.close(status),
+		});
+	} catch (error) {
+		await invocationTrace.recordDiagnostics([
+			{ type: "error", message: error instanceof Error ? error.message : String(error) },
+		]);
+		await invocationTrace.close("failed");
+		throw error;
+	}
 	time("createAgentSessionRuntime");
 	const { services, session, modelFallbackMessage } = runtime;
 	const { settingsManager, modelRuntime, resourceLoader } = services;
@@ -898,18 +937,21 @@ export async function main(args: string[], options?: MainOptions) {
 		if (runtime.diagnostics.some((diagnostic) => diagnostic.message.includes("Failed to load extension"))) {
 			console.error(chalk.yellow(EXTENSION_LOAD_FAILURE_HINT));
 		}
+		await runtime.dispose("failed");
 		process.exit(1);
 	}
 	time("createAgentSession");
 
 	if (appMode !== "interactive" && !session.model) {
 		console.error(chalk.red(formatNoModelsAvailableMessage()));
+		await runtime.dispose("failed");
 		process.exit(1);
 	}
 
 	const startupBenchmark = isTruthyEnvFlag(process.env.DIFFEX_STARTUP_BENCHMARK);
 	if (startupBenchmark && appMode !== "interactive") {
 		console.error(chalk.red("Error: DIFFEX_STARTUP_BENCHMARK only supports interactive mode"));
+		await runtime.dispose("failed");
 		process.exit(1);
 	}
 
@@ -952,6 +994,7 @@ export async function main(args: string[], options?: MainOptions) {
 			if (process.stderr.writableLength > 0) {
 				await new Promise<void>((resolve) => process.stderr.once("drain", resolve));
 			}
+			await runtime.dispose();
 			return;
 		}
 

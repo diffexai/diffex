@@ -60,6 +60,7 @@ import { stripFrontmatter } from "../utils/frontmatter.ts";
 import { resolvePath } from "../utils/paths.ts";
 import { sleep } from "../utils/sleep.ts";
 import { normalizeToolResultImages } from "../utils/tool-result-images.ts";
+import type { AgentSessionLifecycleObserver } from "./agent-session-lifecycle.ts";
 import { formatNoApiKeyFoundMessage, formatNoModelSelectedMessage } from "./auth-guidance.ts";
 import { type BashResult, executeBashWithOperations } from "./bash-executor.ts";
 import {
@@ -256,6 +257,8 @@ export interface AgentSessionConfig {
 	harnessVersionBundle?: HarnessVersionBundle;
 	/** Parent context for passive runtime telemetry. */
 	telemetryContext?: TelemetryContext;
+	/** Process-owned observer for durable lifecycle boundaries. */
+	lifecycleObserver?: AgentSessionLifecycleObserver;
 }
 
 export interface ExtensionBindings {
@@ -412,6 +415,7 @@ export class AgentSession {
 	private readonly _harnessStateStore: HarnessStateStore | undefined;
 	private _harnessVersionBundle: HarnessVersionBundle | undefined;
 	private readonly _telemetryContext: TelemetryContext;
+	private readonly _lifecycleObserver: AgentSessionLifecycleObserver | undefined;
 	private _harnessSwitchInProgress = false;
 	private _subagentWaitAbortController: AbortController | undefined;
 	private _agentRunAborted = false;
@@ -436,6 +440,7 @@ export class AgentSession {
 		this._harnessStateStore = config.harnessStateStore;
 		this._harnessVersionBundle = config.harnessVersionBundle;
 		this._telemetryContext = config.telemetryContext ?? NOOP_TELEMETRY_CONTEXT;
+		this._lifecycleObserver = config.lifecycleObserver;
 
 		this._armInitialCurrentPlanRestoration();
 
@@ -1197,6 +1202,7 @@ export class AgentSession {
 			this._baseSystemPrompt = this._rebuildSystemPrompt(this.getActiveToolNames());
 			this._systemPromptOverride = undefined;
 			this.agent.state.systemPrompt = this._baseSystemPrompt;
+			await this._notifyHarnessActivated(version);
 		} finally {
 			this._harnessSwitchInProgress = false;
 		}
@@ -1353,11 +1359,13 @@ export class AgentSession {
 		kind: "prompt" | "compaction" | "navigation" | "abort" | "queue" | "bash" | "export",
 		callback: (telemetryContext: TelemetryContext) => Result | Promise<Result>,
 	): Promise<Result> {
-		return startCodingAgentSpan(
+		const operationId = uuidv7();
+		const firstEntryOrdinal = this.sessionManager.getEntryCount();
+		const operation = startCodingAgentSpan(
 			this.agent.telemetryContext,
 			"diffex.coding_agent.operation",
 			{
-				"diffex.operation.id": uuidv7(),
+				"diffex.operation.id": operationId,
 				"diffex.session.id": this.sessionId,
 				"diffex.operation.kind": kind,
 			},
@@ -1385,6 +1393,26 @@ export class AgentSession {
 				}
 			},
 		);
+		return operation.finally(() => this._notifyOperationSettled({ operationId, firstEntryOrdinal }));
+	}
+
+	private async _notifyOperationSettled(options: { operationId: string; firstEntryOrdinal: number }): Promise<void> {
+		try {
+			await this._lifecycleObserver?.operationSettled({
+				...options,
+				sessionManager: this.sessionManager,
+			});
+		} catch {
+			// Lifecycle observers are passive and never change operation behavior.
+		}
+	}
+
+	private async _notifyHarnessActivated(version: HarnessVersion): Promise<void> {
+		try {
+			await this._lifecycleObserver?.harnessActivated(version);
+		} catch {
+			// Lifecycle observers are passive and never change activation behavior.
+		}
 	}
 
 	private async _runAgentPrompt(messages: AgentMessage | AgentMessage[]): Promise<void> {

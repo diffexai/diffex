@@ -1,4 +1,4 @@
-import { type FileHandle, mkdir, open } from "node:fs/promises";
+import { chmod, type FileHandle, mkdir, open } from "node:fs/promises";
 import { dirname } from "node:path";
 import {
 	type AttributeValue,
@@ -396,7 +396,9 @@ export async function createJsonlTraceContext(options: CreateJsonlTraceContextOp
 		},
 	};
 	const encodedHeader = encodeTraceRecord(header);
-	await mkdir(dirname(options.destinationPath), { recursive: true, mode: 0o700 });
+	const destinationDirectory = dirname(options.destinationPath);
+	await mkdir(destinationDirectory, { recursive: true, mode: 0o700 });
+	await chmod(destinationDirectory, 0o700);
 	const file = await open(options.destinationPath, "wx", 0o600);
 	try {
 		await file.writeFile(encodedHeader, { encoding: "utf8" });
