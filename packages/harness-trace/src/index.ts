@@ -10,6 +10,7 @@ export {
 	type MaterializedInvocation,
 	type MaterializedInvocationOrdering,
 	type MaterializedSessionEvidence,
+	type MaterializedSessionPathResolver,
 	type MaterializedSessionSource,
 	type MaterializedSpan,
 	type MaterializedSpanEvent,
@@ -17,6 +18,7 @@ export {
 	type MaterializedTerminationStatus,
 	type MaterializedTraceEvidence,
 	type MaterializedTraceRecordSource,
+	type MaterializeJsonlInvocationOptions,
 } from "./materialized-types.ts";
 export { materializeJsonlInvocation, serializeMaterializedInvocation } from "./materializer.ts";
 export { readJsonlTraceFile } from "./reader.ts";

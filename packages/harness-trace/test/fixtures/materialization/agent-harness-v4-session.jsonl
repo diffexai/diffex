@@ -1,0 +1,6 @@
+{"kind":"header","version":4,"id":"harness-session","createdAt":1787066340000,"cwd":"/workspace"}
+{"kind":"entry","lane":"main","id":"entry-40","type":"message","parentId":null,"seq":40,"timestamp":1787066400000,"message":{"role":"user","content":"Continue the task","timestamp":1787066400000}}
+{"kind":"record","id":"record-41","lane":"main","type":"step_attempt","runId":"run-1","step":"assistant","attempt":2,"resultEntryId":"entry-42","seq":41,"timestamp":1787066401000}
+{"kind":"record","id":"record-42","lane":"main","type":"usage","cause":"assistant","runId":"run-1","entryId":"entry-42","attempt":2,"stopReason":"stop","usage":{"input":20,"output":10,"cacheRead":0,"cacheWrite":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"seq":42,"timestamp":1787066402000}
+{"kind":"entry","lane":"main","id":"entry-43","type":"compaction","parentId":"entry-40","summary":"Retained task state","retainedTail":[],"tokensBefore":2200,"seq":43,"timestamp":1787066403000}
+{"kind":"record","id":"record-44","lane":"main","type":"operation_finished","runId":"run-1","outcome":"aborted","seq":44,"timestamp":1787066404000}

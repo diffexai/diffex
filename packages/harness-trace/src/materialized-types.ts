@@ -1,5 +1,11 @@
 import type { SpanAttributes, SpanStatus } from "@earendil-works/diffex-telemetry";
-import type { TraceHealth, TraceProducer, TraceRecord, TraceTerminationStatus } from "./types.ts";
+import type {
+	TraceHealth,
+	TraceProducer,
+	TraceRecord,
+	TraceSessionAttachRecord,
+	TraceTerminationStatus,
+} from "./types.ts";
 
 export const MATERIALIZED_INVOCATION_VERSION = 1 as const;
 
@@ -49,12 +55,21 @@ export interface MaterializedSessionSource {
 	readonly bindingId: string;
 	readonly sessionId: string;
 	readonly path: string;
+	readonly resolvedPath?: string;
 	readonly sessionFormat: string;
 	readonly formatVersion: number;
 	readonly segmentTraceSequences: readonly number[];
 	readonly entryId?: string;
 	readonly entryOrdinal?: number;
 	readonly sessionSequence?: number;
+}
+
+export type MaterializedSessionPathResolver = (
+	attachment: TraceSessionAttachRecord,
+) => string | undefined | Promise<string | undefined>;
+
+export interface MaterializeJsonlInvocationOptions {
+	readonly resolveSessionPath?: MaterializedSessionPathResolver;
 }
 
 export interface MaterializedSpanEvent {

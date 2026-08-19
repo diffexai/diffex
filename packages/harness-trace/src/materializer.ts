@@ -1,20 +1,24 @@
+import { causalIdentifiers } from "./evidence-utils.ts";
 import {
 	MATERIALIZED_INVOCATION_VERSION,
 	type MaterializationDiagnostic,
 	type MaterializationIntegrity,
-	type MaterializedCausalIdentifier,
 	type MaterializedEvidence,
 	type MaterializedEvidenceOrder,
 	type MaterializedInvocation,
 	type MaterializedSpan,
 	type MaterializedSpanEvent,
 	type MaterializedTraceRecordSource,
+	type MaterializeJsonlInvocationOptions,
 } from "./materialized-types.ts";
 import { readJsonlTraceFile } from "./reader.ts";
+import { materializeSessionEvidence } from "./session-materializer.ts";
 import type {
 	TraceFooterRecord,
 	TraceHeaderRecord,
 	TraceRecord,
+	TraceSessionAttachRecord,
+	TraceSessionSegmentRecord,
 	TraceSpanEndRecord,
 	TraceSpanEventRecord,
 	TraceSpanStartRecord,
@@ -42,31 +46,6 @@ function indexedTraceRecords(records: readonly TraceRecord[], traceId: string | 
 			type: record.type,
 		},
 	}));
-}
-
-function isIdentifierName(name: string): boolean {
-	return name === "id" || name.endsWith("Id") || name.endsWith(".id") || name.endsWith("_id");
-}
-
-function collectCausalIdentifiers(value: unknown, prefix = "", result = new Map<string, string>()): void {
-	if (Array.isArray(value)) {
-		for (const item of value) collectCausalIdentifiers(item, prefix, result);
-		return;
-	}
-	if (typeof value !== "object" || value === null) return;
-	for (const [name, item] of Object.entries(value)) {
-		const qualifiedName = prefix ? `${prefix}.${name}` : name;
-		if (typeof item === "string" && isIdentifierName(name)) result.set(`${qualifiedName}\0${item}`, item);
-		else collectCausalIdentifiers(item, qualifiedName, result);
-	}
-}
-
-function causalIdentifiers(...values: readonly unknown[]): readonly MaterializedCausalIdentifier[] {
-	const identifiers = new Map<string, string>();
-	for (const value of values) collectCausalIdentifiers(value, "", identifiers);
-	return [...identifiers.entries()]
-		.map(([key, value]) => ({ name: key.slice(0, key.indexOf("\0")), value }))
-		.sort((left, right) => left.name.localeCompare(right.name) || left.value.localeCompare(right.value));
 }
 
 function traceOrder(
@@ -198,15 +177,77 @@ function materializationIntegrity(diagnostics: readonly MaterializationDiagnosti
 	return diagnostics.length === 0 ? "complete" : "partial";
 }
 
+async function materializeSessions(
+	traceId: string | null,
+	indexed: readonly IndexedTraceRecord[],
+	options: MaterializeJsonlInvocationOptions,
+): Promise<{ evidence: MaterializedEvidence[]; diagnostics: MaterializationDiagnostic[] }> {
+	const attachments = indexed.filter(
+		(item): item is IndexedTraceRecord & { readonly record: TraceSessionAttachRecord } =>
+			item.record.type === "session_attach",
+	);
+	const segmentSources = new Map(
+		indexed
+			.filter((item) => item.record.type === "session_segment")
+			.map((item) => [item.record.sequence, item.source] as const),
+	);
+	const results = await Promise.all(
+		attachments.map(async ({ record: attachment }) => {
+			const segments = indexed
+				.map((item) => item.record)
+				.filter(
+					(record): record is TraceSessionSegmentRecord =>
+						record.type === "session_segment" && record.bindingId === attachment.bindingId,
+				);
+			if (segments.length === 0) return { evidence: [], diagnostics: [] };
+			let resolvedPath: string | undefined;
+			try {
+				resolvedPath = options.resolveSessionPath ? await options.resolveSessionPath(attachment) : attachment.path;
+			} catch (error) {
+				return {
+					evidence: [],
+					diagnostics: [
+						{
+							code: "session_missing" as const,
+							message: error instanceof Error ? error.message : String(error),
+							recoverable: true,
+							bindingId: attachment.bindingId,
+						},
+					],
+				};
+			}
+			return materializeSessionEvidence({ traceId, attachment, segments, segmentSources, resolvedPath });
+		}),
+	);
+	return {
+		evidence: results.flatMap((result) => result.evidence),
+		diagnostics: results.flatMap((result) => result.diagnostics),
+	};
+}
+
+function sortEvidence(evidence: MaterializedEvidence[]): void {
+	evidence.sort((left, right) => {
+		const sequenceOrder = left.order.traceSequence - right.order.traceSequence;
+		if (sequenceOrder !== 0) return sequenceOrder;
+		const leftPosition = left.order.sessionPosition ?? Number.MAX_SAFE_INTEGER;
+		const rightPosition = right.order.sessionPosition ?? Number.MAX_SAFE_INTEGER;
+		return leftPosition - rightPosition || left.evidenceId.localeCompare(right.evidenceId);
+	});
+}
+
 /** Builds a deterministic evidence document from a validated invocation trace. */
-export async function materializeJsonlInvocation(tracePath: string): Promise<MaterializedInvocation> {
+export async function materializeJsonlInvocation(
+	tracePath: string,
+	options: MaterializeJsonlInvocationOptions = {},
+): Promise<MaterializedInvocation> {
 	const result = await readJsonlTraceFile(tracePath);
 	const header = result.records.find((record): record is TraceHeaderRecord => record.type === "trace_header");
 	const footer = result.records.find((record): record is TraceFooterRecord => record.type === "trace_footer");
 	const traceId = header?.traceId ?? null;
 	const indexed = indexedTraceRecords(result.records, traceId);
 	const materialized = materializeTraceEvidence(traceId, indexed);
-	const diagnostics = [...traceIntegrityDiagnostics(result), ...materialized.diagnostics];
+	const sessions = await materializeSessions(traceId, indexed, options);
+	const diagnostics = [...traceIntegrityDiagnostics(result), ...materialized.diagnostics, ...sessions.diagnostics];
 	if (footer && (footer.health.droppedRecords > 0 || footer.health.writerErrors > 0 || footer.health.writerDisabled)) {
 		diagnostics.push({
 			code: "trace_writer_degraded",
@@ -216,6 +257,13 @@ export async function materializeJsonlInvocation(tracePath: string): Promise<Mat
 		});
 	}
 
+	const evidence = [...materialized.evidence, ...sessions.evidence];
+	sortEvidence(evidence);
+	const orderingAmbiguity = sessions.evidence.length
+		? [
+				"Session cursor order is durable within each segment, but clocks and segment boundaries may not define a total order with trace records",
+			]
+		: [];
 	return {
 		version: MATERIALIZED_INVOCATION_VERSION,
 		tracePath,
@@ -224,8 +272,8 @@ export async function materializeJsonlInvocation(tracePath: string): Promise<Mat
 		integrity: materializationIntegrity(diagnostics),
 		terminationStatus: footer?.terminationStatus ?? (header ? "crashed" : "unknown"),
 		health: footer?.health ?? null,
-		ordering: { criteria: ORDERING_CRITERIA, ambiguity: [] },
-		evidence: materialized.evidence,
+		ordering: { criteria: ORDERING_CRITERIA, ambiguity: orderingAmbiguity },
+		evidence,
 		diagnostics,
 	};
 }
