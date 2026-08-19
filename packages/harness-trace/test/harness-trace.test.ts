@@ -1,6 +1,7 @@
-import { type FileHandle, mkdir, mkdtemp, open, readFile, rm } from "node:fs/promises";
+import { type FileHandle, mkdir, mkdtemp, open, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { RecordedTelemetrySpan, SpanAttributes } from "@earendil-works/diffex-telemetry";
 import {
 	createTelemetryAdapterConformance,
@@ -12,6 +13,9 @@ import {
 	encodeTraceRecord,
 	type JsonlTraceContext,
 	parseTraceRecord,
+	readJsonlTraceFile,
+	type TraceFooterRecord,
+	type TraceHeaderRecord,
 	type TraceRecord,
 	type TraceSpanEndRecord,
 	type TraceSpanEventRecord,
@@ -30,11 +34,11 @@ async function createTrace(path: string): Promise<JsonlTraceContext> {
 	return createJsonlTraceContext({
 		destinationPath: path,
 		traceId: "trace-1",
-		sessionId: "session-1",
-		sessionPath: "/sessions/session-1.jsonl",
-		producerVersion: "0.2.0",
-		codeRevision: "abcdef",
-		harnessVersion: "sha256:1234",
+		diffexVersion: "0.2.0",
+		sourceRevision: "abcdef",
+		runtimeKind: "node",
+		runtimeVersion: "22.19.0",
+		telemetrySchemaVersions: { ai: 1, harness: 1 },
 		metadata: { invocation: "test", attempt: 2, enabled: true, empty: null },
 	});
 }
@@ -46,6 +50,42 @@ async function readRecords(context: JsonlTraceContext, path: string): Promise<Tr
 		.split("\n")
 		.filter((line) => line.length > 0)
 		.map(parseTraceRecord);
+}
+
+function fixturePath(name: string): string {
+	return fileURLToPath(new URL(`./fixtures/${name}`, import.meta.url));
+}
+
+function traceHeader(): TraceHeaderRecord {
+	return {
+		type: "trace_header",
+		sequence: 1,
+		timestamp: "2026-08-18T10:00:00.000Z",
+		schemaVersion: 1,
+		traceId: "trace-reader",
+		producer: {
+			diffexVersion: "0.2.0",
+			sourceRevision: "abcdef",
+			runtime: { kind: "node", version: "22.19.0" },
+			telemetrySchemaVersions: { ai: 1 },
+			metadata: {},
+		},
+	};
+}
+
+function traceFooter(sequence: number): TraceFooterRecord {
+	return {
+		type: "trace_footer",
+		sequence,
+		timestamp: "2026-08-18T10:00:01.000Z",
+		terminationStatus: "completed",
+		health: { droppedRecords: 0, writerErrors: 0, writerDisabled: false, closed: true },
+	};
+}
+
+async function writeTraceLines(path: string, lines: readonly string[]): Promise<void> {
+	await mkdir(dirname(path), { recursive: true });
+	await writeFile(path, lines.join(""), "utf8");
 }
 
 function normalizedSpans(records: readonly TraceRecord[]): readonly RecordedTelemetrySpan[] {
@@ -99,12 +139,21 @@ describe("JSONL telemetry adapter conformance", () => {
 });
 
 describe("JSONL trace records", () => {
-	it("records ordered timestamps, nesting, events, merged attributes, statuses, and session ranges", async () => {
+	it("records ordered telemetry across session and harness transitions", async () => {
 		vi.useFakeTimers({ toFake: ["Date"] });
 		vi.setSystemTime(new Date("2026-08-18T10:00:00.000Z"));
 		const path = await temporaryTracePath();
 		const context = await createTrace(path);
 		const automaticFailure = new Error("automatic failure");
+		context.attachSession({
+			bindingId: "binding-1",
+			sessionId: "session-1",
+			path: "/sessions/session-1.jsonl",
+			sessionFormat: "coding-agent",
+			formatVersion: 3,
+			reason: "startup",
+		});
+		context.activateHarness({ harnessVersion: "sha256:1234", reason: "initial" });
 
 		const parentResult = context.startSpan(
 			{ name: "parent", attributes: { retained: "start", overwritten: "start", omitted: undefined } },
@@ -127,13 +176,47 @@ describe("JSONL trace records", () => {
 		);
 		expect(await parentResult).toBe("parent-result");
 		vi.setSystemTime(new Date("2026-08-18T10:00:02.000Z"));
-		context.recordSessionRange({ lane: "main", operationId: "operation-1", startSequence: 12, endSequence: 19 });
+		context.recordSessionSegment({
+			bindingId: "binding-1",
+			lane: "main",
+			operationId: "operation-1",
+			cursor: {
+				kind: "coding-agent-v3",
+				start: {
+					entryOrdinal: 12,
+					entryId: "entry-12",
+					digest: { kind: "prefix", algorithm: "sha256", value: "1".repeat(64) },
+				},
+				end: {
+					entryOrdinal: 19,
+					entryId: "entry-19",
+					digest: { kind: "content", algorithm: "sha256", value: "2".repeat(64) },
+				},
+			},
+		});
+		context.attachSession({
+			bindingId: "binding-2",
+			sessionId: "session-2",
+			path: "/sessions/session-2.db",
+			sessionFormat: "agent-harness",
+			formatVersion: 1,
+			reason: "switch",
+		});
+		context.activateHarness({ harnessVersion: "sha256:5678", reason: "switch" });
+		context.recordSessionSegment({
+			bindingId: "binding-2",
+			lane: "main",
+			operationId: "operation-2",
+			cursor: { kind: "agent-harness", startSequence: 20, endSequence: 27 },
+		});
 		await context.close("completed");
 
 		const records = await readRecords(context, path);
 		expect(records.map((record) => record.sequence)).toEqual(records.map((_, index) => index + 1));
 		expect(records.map((record) => record.type)).toEqual([
 			"trace_header",
+			"session_attach",
+			"harness_activate",
 			"span_start",
 			"span_event",
 			"span_start",
@@ -141,7 +224,10 @@ describe("JSONL trace records", () => {
 			"span_end",
 			"span_end",
 			"span_end",
-			"session_range",
+			"session_segment",
+			"session_attach",
+			"harness_activate",
+			"session_segment",
 			"trace_footer",
 		]);
 		const header = records[0];
@@ -149,9 +235,22 @@ describe("JSONL trace records", () => {
 			type: "trace_header",
 			timestamp: "2026-08-18T10:00:00.000Z",
 			traceId: "trace-1",
-			session: { id: "session-1", path: "/sessions/session-1.jsonl" },
-			producer: { metadata: { invocation: "test", attempt: 2, enabled: true, empty: null } },
+			producer: {
+				diffexVersion: "0.2.0",
+				sourceRevision: "abcdef",
+				runtime: { kind: "node", version: "22.19.0" },
+				telemetrySchemaVersions: { ai: 1, harness: 1 },
+				metadata: { invocation: "test", attempt: 2, enabled: true, empty: null },
+			},
 		});
+		expect(records.filter((record) => record.type === "session_attach")).toEqual([
+			expect.objectContaining({ bindingId: "binding-1", sessionId: "session-1", reason: "startup" }),
+			expect.objectContaining({ bindingId: "binding-2", sessionId: "session-2", reason: "switch" }),
+		]);
+		expect(records.filter((record) => record.type === "harness_activate")).toEqual([
+			expect.objectContaining({ harnessVersion: "sha256:1234", reason: "initial" }),
+			expect.objectContaining({ harnessVersion: "sha256:5678", reason: "switch" }),
+		]);
 		const [parentStart, firstStart, secondStart] = records.filter(
 			(record): record is TraceSpanStartRecord => record.type === "span_start",
 		);
@@ -179,12 +278,12 @@ describe("JSONL trace records", () => {
 			error: { name: "Expected", message: "declined" },
 		});
 		expect(records.at(-2)).toMatchObject({
-			type: "session_range",
+			type: "session_segment",
 			timestamp: "2026-08-18T10:00:02.000Z",
+			bindingId: "binding-2",
 			lane: "main",
-			operationId: "operation-1",
-			startSequence: 12,
-			endSequence: 19,
+			operationId: "operation-2",
+			cursor: { kind: "agent-harness", startSequence: 20, endSequence: 27 },
 		});
 		expect(records.at(-1)).toMatchObject({
 			type: "trace_footer",
@@ -199,10 +298,11 @@ describe("JSONL trace records", () => {
 		const context = await createJsonlTraceContext({
 			destinationPath: path,
 			traceId: "trace-copy",
-			sessionId: "session-copy",
-			producerVersion: "0.2.0",
-			codeRevision: "revision",
-			harnessVersion: "harness",
+			diffexVersion: "0.2.0",
+			sourceRevision: "revision",
+			runtimeKind: "node",
+			runtimeVersion: "22.19.0",
+			telemetrySchemaVersions: { ai: 1 },
 			metadata,
 		});
 		metadata.source = "mutated";
@@ -302,6 +402,9 @@ describe("JSONL trace records", () => {
 
 		const records = await readRecords(context, path);
 		expect(records.map((record) => record.type)).toEqual(["trace_header"]);
+		const readResult = await readJsonlTraceFile(path);
+		expect(readResult.records).toEqual(records);
+		expect(readResult.diagnostics.map((diagnostic) => diagnostic.code)).toContain("missing_footer");
 	});
 });
 
@@ -332,20 +435,25 @@ describe("single-record codec", () => {
 				timestamp: "2026-08-18T10:00:00.000Z",
 				schemaVersion: 2,
 				traceId: "trace",
-				session: { id: "session" },
-				producer: { version: "1", codeRevision: "r", harnessVersion: "h", metadata: {} },
+				producer: {
+					diffexVersion: "1",
+					sourceRevision: "r",
+					runtime: { kind: "node", version: "22" },
+					telemetrySchemaVersions: {},
+					metadata: {},
+				},
 			}),
 		],
 		[
-			"invalid range",
+			"invalid segment",
 			JSON.stringify({
-				type: "session_range",
+				type: "session_segment",
 				sequence: 2,
 				timestamp: "2026-08-18T10:00:00.000Z",
+				bindingId: "binding",
 				lane: "main",
 				operationId: "operation",
-				startSequence: 3,
-				endSequence: 2,
+				cursor: { kind: "agent-harness", startSequence: 3, endSequence: 2 },
 			}),
 		],
 		[
@@ -362,5 +470,152 @@ describe("single-record codec", () => {
 		],
 	])("rejects %s", (_name, line) => {
 		expect(() => parseTraceRecord(line)).toThrow(/invalid trace record/i);
+	});
+});
+
+describe("whole-file reader", () => {
+	it.each([
+		["coding-agent-v3.jsonl", "coding-agent-v3"],
+		["agent-harness.jsonl", "agent-harness"],
+	])("validates the %s cursor fixture", async (name, cursorKind) => {
+		const result = await readJsonlTraceFile(fixturePath(name));
+		expect(result.diagnostics).toEqual([]);
+		expect(result.closed).toBe(true);
+		expect(result.records.find((record) => record.type === "session_segment")).toMatchObject({
+			cursor: { kind: cursorKind },
+		});
+	});
+
+	it("detects sequence gaps while preserving parsed records", async () => {
+		const path = await temporaryTracePath();
+		await writeTraceLines(path, [
+			encodeTraceRecord(traceHeader()),
+			encodeTraceRecord({
+				type: "harness_activate",
+				sequence: 3,
+				timestamp: "2026-08-18T10:00:00.500Z",
+				harnessVersion: "sha256:1234",
+				reason: "initial",
+			}),
+			encodeTraceRecord(traceFooter(4)),
+		]);
+
+		const result = await readJsonlTraceFile(path);
+		expect(result.records).toHaveLength(3);
+		expect(result.diagnostics).toEqual([expect.objectContaining({ code: "sequence_gap", sequence: 3 })]);
+	});
+
+	it.each([
+		[
+			"duplicate_header",
+			[encodeTraceRecord(traceHeader()), encodeTraceRecord(traceHeader()), encodeTraceRecord(traceFooter(3))],
+		],
+		[
+			"misplaced_header",
+			[
+				encodeTraceRecord({
+					type: "harness_activate",
+					sequence: 1,
+					timestamp: "2026-08-18T10:00:00.000Z",
+					harnessVersion: "sha256:1234",
+					reason: "initial",
+				}),
+				encodeTraceRecord(traceHeader()),
+				encodeTraceRecord(traceFooter(3)),
+			],
+		],
+		[
+			"duplicate_footer",
+			[encodeTraceRecord(traceHeader()), encodeTraceRecord(traceFooter(2)), encodeTraceRecord(traceFooter(3))],
+		],
+		["misplaced_footer", [encodeTraceRecord(traceFooter(1)), encodeTraceRecord(traceHeader())]],
+	] as const)("detects %s", async (diagnosticCode, lines) => {
+		const path = await temporaryTracePath();
+		await writeTraceLines(path, lines);
+		const result = await readJsonlTraceFile(path);
+		expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toContain(diagnosticCode);
+	});
+
+	it("detects invalid parentage and duplicate span settlement", async () => {
+		const path = await temporaryTracePath();
+		await writeTraceLines(path, [
+			encodeTraceRecord(traceHeader()),
+			encodeTraceRecord({
+				type: "span_start",
+				sequence: 2,
+				timestamp: "2026-08-18T10:00:00.100Z",
+				spanId: 1,
+				parentSpanId: 99,
+				name: "orphan",
+				attributes: {},
+			}),
+			encodeTraceRecord({
+				type: "span_end",
+				sequence: 3,
+				timestamp: "2026-08-18T10:00:00.200Z",
+				spanId: 1,
+				attributes: {},
+				status: { status: "ok" },
+			}),
+			encodeTraceRecord({
+				type: "span_end",
+				sequence: 4,
+				timestamp: "2026-08-18T10:00:00.300Z",
+				spanId: 1,
+				attributes: {},
+				status: { status: "ok" },
+			}),
+			encodeTraceRecord(traceFooter(5)),
+		]);
+
+		const result = await readJsonlTraceFile(path);
+		expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toEqual([
+			"invalid_span_parentage",
+			"duplicate_span_settlement",
+		]);
+	});
+
+	it("detects records after closure", async () => {
+		const path = await temporaryTracePath();
+		await writeTraceLines(path, [
+			encodeTraceRecord(traceHeader()),
+			encodeTraceRecord(traceFooter(2)),
+			encodeTraceRecord({
+				type: "harness_activate",
+				sequence: 3,
+				timestamp: "2026-08-18T10:00:02.000Z",
+				harnessVersion: "sha256:late",
+				reason: "switch",
+			}),
+		]);
+
+		const result = await readJsonlTraceFile(path);
+		expect(result.records).toHaveLength(3);
+		expect(result.diagnostics).toEqual([expect.objectContaining({ code: "record_after_footer", sequence: 3 })]);
+	});
+
+	it("detects a partial final line and missing footer", async () => {
+		const path = await temporaryTracePath();
+		await writeTraceLines(path, [encodeTraceRecord(traceHeader()), '{"type":"trace_footer"']);
+
+		const result = await readJsonlTraceFile(path);
+		expect(result.records).toEqual([traceHeader()]);
+		expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toEqual(["partial_final_line", "missing_footer"]);
+		expect(result.closed).toBe(false);
+	});
+
+	it("rejects a forward schema without interpreting later records", async () => {
+		const path = await temporaryTracePath();
+		await writeTraceLines(path, [
+			`${JSON.stringify({ ...traceHeader(), schemaVersion: 2 })}\n`,
+			encodeTraceRecord(traceFooter(2)),
+		]);
+
+		const result = await readJsonlTraceFile(path);
+		expect(result.records).toEqual([]);
+		expect(result.diagnostics).toEqual([
+			expect.objectContaining({ code: "incompatible_schema_version", lineNumber: 1 }),
+		]);
+		expect(result.closed).toBe(false);
 	});
 });

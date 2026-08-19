@@ -1,0 +1,5 @@
+{"type":"trace_header","sequence":1,"timestamp":"2026-08-18T11:00:00.000Z","schemaVersion":1,"traceId":"agent-harness-trace","producer":{"diffexVersion":"0.2.0","sourceRevision":"abcdef","runtime":{"kind":"bun","version":"1.3.0"},"telemetrySchemaVersions":{"ai":1,"harness":1},"metadata":{}}}
+{"type":"session_attach","sequence":2,"timestamp":"2026-08-18T11:00:00.001Z","bindingId":"harness-binding","sessionId":"harness-session","path":"/sessions/harness-session.db","sessionFormat":"agent-harness","formatVersion":1,"reason":"startup"}
+{"type":"harness_activate","sequence":3,"timestamp":"2026-08-18T11:00:00.002Z","harnessVersion":"sha256:5678","reason":"initial"}
+{"type":"session_segment","sequence":4,"timestamp":"2026-08-18T11:00:00.003Z","bindingId":"harness-binding","lane":"main","operationId":"operation-1","cursor":{"kind":"agent-harness","startSequence":40,"endSequence":49}}
+{"type":"trace_footer","sequence":5,"timestamp":"2026-08-18T11:00:00.004Z","terminationStatus":"completed","health":{"droppedRecords":0,"writerErrors":0,"writerDisabled":false,"closed":true}}
