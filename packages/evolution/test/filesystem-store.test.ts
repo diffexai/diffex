@@ -1,0 +1,199 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import {
+	computeEvolutionContentDigest,
+	createEvolutionArtifactMetadata,
+	type EvolutionArtifactProducer,
+	type EvolutionJob,
+	type EvolutionLeaseToken,
+	type EvolutionScope,
+	EvolutionStorageCorruptionError,
+	FileEvolutionPersistence,
+	type InstructionSnapshot,
+	planEvolutionRetention,
+} from "../src/index.ts";
+
+const scope: EvolutionScope = { repositoryId: "diffex", scopeId: "repository" };
+const producer: EvolutionArtifactProducer = {
+	name: "fixture",
+	version: "1.0.0",
+	promptVersion: null,
+	model: null,
+};
+const temporaryDirectories: string[] = [];
+
+afterEach(async () => {
+	await Promise.all(temporaryDirectories.splice(0).map((path) => rm(path, { recursive: true, force: true })));
+});
+
+async function storeFixture(): Promise<{ readonly root: string; readonly store: FileEvolutionPersistence }> {
+	const root = await mkdtemp(join(tmpdir(), "diffex-evolution-store-"));
+	temporaryDirectories.push(root);
+	return { root, store: new FileEvolutionPersistence(root) };
+}
+
+function instructionSnapshot(): InstructionSnapshot {
+	const documents = [
+		{
+			path: "/repo/AGENTS.md",
+			precedence: 1,
+			content: "Keep durable state fenced.\n",
+			contentDigest: computeEvolutionContentDigest("Keep durable state fenced.\n"),
+		},
+	];
+	return {
+		metadata: createEvolutionArtifactMetadata({
+			artifactId: "instructions-1",
+			producer,
+			sourceIds: [],
+			scope,
+			createdAt: "2026-08-19T12:00:00.000Z",
+			content: documents,
+		}),
+		documents,
+	};
+}
+
+function job(reference: EvolutionJob["inputSnapshot"]): EvolutionJob {
+	const createdAt = new Date().toISOString();
+	const content: Omit<EvolutionJob, "metadata"> = {
+		jobId: "job-1",
+		inputSnapshot: reference,
+		trigger: "manual",
+		evidenceRange: { afterCursor: 0, throughCursor: 3 },
+		stage: "queued",
+		outcome: "active",
+		reasonCode: null,
+		failureMessage: null,
+		completion: null,
+		resolution: null,
+		checkpoints: [],
+		attempt: 0,
+		revision: 0,
+		createdAt,
+		updatedAt: createdAt,
+		terminalAt: null,
+		retryNotBefore: null,
+	};
+	return {
+		...content,
+		metadata: createEvolutionArtifactMetadata({
+			artifactId: content.jobId,
+			producer,
+			sourceIds: [reference.artifactId],
+			scope,
+			createdAt,
+			content,
+		}),
+	};
+}
+
+async function scopeLease(store: FileEvolutionPersistence, ownerId: string): Promise<EvolutionLeaseToken> {
+	const lease = await store.acquire(
+		"scope",
+		computeEvolutionContentDigest(scope),
+		ownerId,
+		new Date().toISOString(),
+		5_000,
+	);
+	if (lease === null) throw new Error("Expected fixture scope lease");
+	return lease;
+}
+
+describe("filesystem evolution persistence", () => {
+	it("stores immutable artifacts by content digest and detects corruption", async () => {
+		const { root, store } = await storeFixture();
+		const artifact = instructionSnapshot();
+
+		const first = await store.put(artifact);
+		const second = await store.put(artifact);
+		expect(second).toEqual(first);
+		expect(await store.get(first)).toEqual(artifact);
+
+		const artifactPath = join(root, "artifacts", first.contentDigest.replace("sha256:", "sha256-"), "artifact.json");
+		await writeFile(artifactPath, "{}\n", "utf8");
+		await expect(store.get(first)).rejects.toBeInstanceOf(EvolutionStorageCorruptionError);
+	});
+
+	it("fences stale scope owners from job and cursor mutations", async () => {
+		const { store } = await storeFixture();
+		const artifactReference = await store.put(instructionSnapshot());
+		const firstLease = await scopeLease(store, "owner-1");
+		await store.create(job(artifactReference), firstLease);
+
+		const takeoverTime = new Date(Date.parse(firstLease.expiresAt) + 1).toISOString();
+		const secondLease = await store.acquire(
+			"scope",
+			computeEvolutionContentDigest(scope),
+			"owner-2",
+			takeoverTime,
+			5_000,
+		);
+		if (secondLease === null) throw new Error("Expected stale lease takeover");
+		expect(secondLease.fence).toBe(firstLease.fence + 1);
+		await expect(store.commit(scope, 0, 3, "job-1", new Date().toISOString(), firstLease)).rejects.toThrow(
+			"lease was lost",
+		);
+		expect(await store.commit(scope, 0, 3, "job-1", new Date().toISOString(), secondLease)).toBe("committed");
+		expect(await store.commit(scope, 0, 3, "job-1", new Date().toISOString(), secondLease)).toBe("already-committed");
+	});
+
+	it("uses compare-and-swap revisions for durable job manifests", async () => {
+		const { store } = await storeFixture();
+		const reference = await store.put(instructionSnapshot());
+		const lease = await scopeLease(store, "owner-1");
+		const initial = job(reference);
+		await store.create(initial, lease);
+		const { metadata: _metadata, ...initialContent } = initial;
+		const advancedContent: Omit<EvolutionJob, "metadata"> = {
+			...initialContent,
+			stage: "snapshotting",
+			revision: 1,
+			updatedAt: new Date().toISOString(),
+		};
+		const advanced: EvolutionJob = {
+			...advancedContent,
+			metadata: createEvolutionArtifactMetadata({
+				artifactId: advancedContent.jobId,
+				producer,
+				sourceIds: [reference.artifactId],
+				scope,
+				createdAt: advancedContent.createdAt,
+				content: advancedContent,
+			}),
+		};
+
+		await store.save(advanced, 0, lease);
+		await expect(store.save(advanced, 0, lease)).rejects.toThrow("revision conflict");
+		expect(await store.load(initial.jobId)).toMatchObject({ stage: "snapshotting", revision: 1 });
+	});
+
+	it("retains unresolved failures while expiring completed audit state", () => {
+		const reference = { artifactId: "input-1", contentDigest: `sha256:${"a".repeat(64)}` };
+		const initial = job(reference);
+		const terminalAt = "2026-01-01T00:00:00.000Z";
+		const completed: EvolutionJob = {
+			...initial,
+			jobId: "job-completed",
+			stage: "completed",
+			outcome: "completed",
+			terminalAt,
+			completion: { kind: "no-op", resultingHarnessVersion: null, processedEvidenceCursor: 3 },
+		};
+		const failed: EvolutionJob = {
+			...initial,
+			jobId: "job-failed",
+			outcome: "terminal-failed",
+			reasonCode: "artifact-corrupt",
+			failureMessage: "corrupt artifact",
+			terminalAt,
+		};
+
+		expect(planEvolutionRetention([completed, failed], "2026-03-01T00:00:00.000Z")).toEqual({
+			removableJobIds: ["job-completed"],
+			retainedBlockingJobIds: ["job-failed"],
+		});
+	});
+});
