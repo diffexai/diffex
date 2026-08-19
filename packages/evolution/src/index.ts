@@ -1,6 +1,17 @@
 export {
 	type ActiveEvolutionStage,
 	type CheckpointSavedLedgerEvent,
+	COUNTER_OBSERVATION_SCHEMA_VERSION,
+	COUNTER_REPORT_SCHEMA_VERSION,
+	type CounterAttributionMethod,
+	type CounterObservation,
+	type CounterObservationStatus,
+	type CounterReport,
+	type CounterReportEvidence,
+	type CounterReportTrend,
+	type CounterSignal,
+	type CounterSignalSource,
+	EVOLUTION_MEMORY_ITEM_SCHEMA_VERSION,
 	EVOLUTION_SCHEMA_VERSION,
 	type EvidenceCorpusDocument,
 	type EvidenceCorpusManifest,
@@ -19,6 +30,8 @@ export {
 	type EvolutionJobStage,
 	type EvolutionLeaseToken,
 	type EvolutionLedgerEvent,
+	type EvolutionMemoryItem,
+	type EvolutionMemoryItemLedgerMetadata,
 	type EvolutionMemoryProposal,
 	type EvolutionMemoryTarget,
 	type EvolutionModelIdentity,
@@ -71,6 +84,7 @@ export {
 	type EvolutionJobCreationBlockReason,
 	type EvolutionJobCreationResult,
 } from "./control-plane.ts";
+export { DisabledPreReflectionStage } from "./counter.ts";
 export { EvolutionExecutionError } from "./errors.ts";
 export {
 	EvolutionStorageCorruptionError,
@@ -106,6 +120,8 @@ export type {
 	EvolutionStageExecutor,
 	EvolutionWorkSource,
 	InteractivePriorityGate,
+	PreReflectionStage,
+	PreReflectionStageInput,
 	ProposalScorer,
 	ProposalScoringInput,
 	ProposalValidationInput,

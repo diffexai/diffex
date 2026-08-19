@@ -105,6 +105,7 @@ function snapshotContext(): EvolutionSnapshotContext {
 			baseVersion: null,
 			memory,
 			memoryContentDigest: computeEvolutionContentDigest(memory),
+			activeMemoryItems: [],
 		},
 		instructions: [
 			{

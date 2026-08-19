@@ -6,6 +6,9 @@ import type {
 } from "@earendil-works/diffex-harness-trace";
 
 export const EVOLUTION_SCHEMA_VERSION = 1 as const;
+export const EVOLUTION_MEMORY_ITEM_SCHEMA_VERSION = 1 as const;
+export const COUNTER_OBSERVATION_SCHEMA_VERSION = 1 as const;
+export const COUNTER_REPORT_SCHEMA_VERSION = 1 as const;
 
 export type JsonPrimitive = boolean | number | string | null;
 export type JsonValue = JsonPrimitive | JsonObject | readonly JsonValue[];
@@ -39,11 +42,77 @@ export interface EvolutionArtifactMetadata {
 	readonly createdAt: string;
 }
 
+export interface EvolutionMemoryItemLedgerMetadata {
+	readonly origin: "evolution" | "manual";
+	readonly creationEventId: string | null;
+	readonly supersessionEventId: string | null;
+}
+
+export interface EvolutionMemoryItem {
+	readonly schemaVersion: typeof EVOLUTION_MEMORY_ITEM_SCHEMA_VERSION;
+	readonly memoryItemId: string;
+	readonly contentDigest: string;
+	readonly creationRevision: HarnessVersion;
+	readonly supersessionRevision: HarnessVersion | null;
+	readonly ledger: EvolutionMemoryItemLedgerMetadata;
+}
+
+export type CounterSignal = "helpful" | "harmful" | "neutral" | "unknown";
+
+export type CounterSignalSource = "direct-user" | "environment" | "model-self-assessment" | "replay" | "test" | "tool";
+
+export type CounterAttributionMethod = "co-occurrence" | "deterministic" | "direct" | "inferred" | "self-assessed";
+
+export type CounterObservationStatus = "candidate" | "final";
+
+export interface CounterObservation {
+	readonly schemaVersion: typeof COUNTER_OBSERVATION_SCHEMA_VERSION;
+	readonly observationId: string;
+	readonly memoryItemId: string;
+	readonly harnessRevision: HarnessVersion;
+	readonly topLevelTaskLineageId: string;
+	readonly traceIds: readonly string[];
+	readonly evidenceIds: readonly string[];
+	readonly signal: CounterSignal;
+	readonly signalSource: CounterSignalSource;
+	readonly attributionMethod: CounterAttributionMethod;
+	readonly status: CounterObservationStatus;
+	readonly policyVersion: string;
+	readonly timestamp: string;
+	readonly idempotencyKey: string;
+}
+
+export interface CounterReportEvidence {
+	readonly memoryItemId: string;
+	readonly signal: CounterSignal;
+	readonly observationIds: readonly string[];
+	readonly topLevelTaskLineageIds: readonly string[];
+	readonly traceIds: readonly string[];
+	readonly evidenceIds: readonly string[];
+}
+
+export interface CounterReportTrend {
+	readonly memoryItemId: string;
+	readonly signal: CounterSignal;
+	readonly observationIds: readonly string[];
+	readonly topLevelTaskLineageIds: readonly string[];
+}
+
+export interface CounterReport {
+	readonly artifactKind: "counter-report";
+	readonly schemaVersion: typeof COUNTER_REPORT_SCHEMA_VERSION;
+	readonly metadata: EvolutionArtifactMetadata;
+	readonly policyVersion: string;
+	readonly evidence: readonly CounterReportEvidence[];
+	readonly trends: readonly CounterReportTrend[];
+}
+
 export interface ImmutableHarnessSnapshot {
 	readonly harnessVersion: HarnessVersion;
 	readonly baseVersion: HarnessVersion | null;
 	readonly memory: string;
 	readonly memoryContentDigest: string;
+	readonly activeMemoryItems: readonly EvolutionMemoryItem[];
 }
 
 export type EvolutionEvidenceOrigin = "product-runtime" | "evolution-pipeline";

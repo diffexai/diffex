@@ -1,5 +1,6 @@
 import type { MaterializedInvocation } from "@earendil-works/diffex-harness-trace";
 import type {
+	CounterReport,
 	EvidenceCorpusManifest,
 	EvolutionArtifactReference,
 	EvolutionInputSnapshot,
@@ -7,6 +8,7 @@ import type {
 	EvolutionJobStage,
 	EvolutionLeaseToken,
 	EvolutionLedgerEvent,
+	EvolutionMemoryItem,
 	EvolutionModelIdentity,
 	EvolutionProcessedEvidenceCursor,
 	EvolutionPromptVersions,
@@ -29,6 +31,7 @@ import type {
 } from "./contracts.ts";
 
 export type EvolutionArtifact =
+	| CounterReport
 	| EvidenceCorpusManifest
 	| EvolutionInputSnapshot
 	| EvolutionProposal
@@ -69,9 +72,22 @@ export interface EvolutionModelExecutor {
 	execute(request: EvolutionModelRequest): Promise<EvolutionModelResponse>;
 }
 
+export interface PreReflectionStageInput {
+	readonly input: EvolutionInputSnapshot;
+	readonly corpus: EvidenceCorpusManifest;
+	readonly activeMemoryItems: readonly EvolutionMemoryItem[];
+	readonly idempotencyKey: string;
+	readonly signal?: AbortSignal;
+}
+
+export interface PreReflectionStage {
+	run(input: PreReflectionStageInput): Promise<CounterReport | null>;
+}
+
 export interface ReflectorInput {
 	readonly input: EvolutionInputSnapshot;
 	readonly corpus: EvidenceCorpusManifest;
+	readonly counterReport?: CounterReport | null;
 	readonly instructions: InstructionSnapshot;
 	readonly model: EvolutionModelExecutor;
 	readonly idempotencyKey: string;
