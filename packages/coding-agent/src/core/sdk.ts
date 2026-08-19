@@ -1,5 +1,12 @@
 import { join } from "node:path";
-import { Agent, type AgentMessage, setDefaultStreamFn, type ThinkingLevel } from "@earendil-works/diffex-agent-core";
+import {
+	Agent,
+	type AgentMessage,
+	NOOP_TELEMETRY_CONTEXT,
+	setDefaultStreamFn,
+	type TelemetryContext,
+	type ThinkingLevel,
+} from "@earendil-works/diffex-agent-core";
 import { clampThinkingLevel, type Message, type Model, streamSimple } from "@earendil-works/diffex-ai/compat";
 import type { HarnessStateStore, HarnessVersionBundle } from "@earendil-works/diffex-harness-state";
 import { getAgentDir } from "../config.ts";
@@ -102,6 +109,8 @@ export interface CreateAgentSessionOptions {
 	harnessStateStore?: HarnessStateStore;
 	/** Activated harness revision from the preloaded store. */
 	harnessVersionBundle?: HarnessVersionBundle;
+	/** Optional parent for passive runtime telemetry. */
+	telemetryContext?: TelemetryContext;
 }
 
 /** Result from createAgentSession */
@@ -182,10 +191,15 @@ function assertNoReservedSubagentTools(customTools: readonly ToolDefinition[] | 
 	}
 }
 
-function createRootSubagentController(maxConcurrent: number, agentDir: string): SubagentController {
+function createRootSubagentController(
+	maxConcurrent: number,
+	agentDir: string,
+	telemetryContext: TelemetryContext,
+): SubagentController {
 	const sessionManagerFactory = new RootLocalEphemeralSubagentSessionManagerFactory();
 	return new SubagentController({
 		maxConcurrent,
+		telemetryContext,
 		captureSession: (parent, childName, origin) => {
 			const config = captureSubagentSessionConfig(parent, agentDir);
 			return (signal) =>
@@ -241,9 +255,12 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		? { store: options.harnessStateStore, bundle: options.harnessVersionBundle, warning: undefined }
 		: await loadGlobalHarnessState(agentDir);
 	const subagentOptions = normalizeSubagentOptions(options.subagents);
+	const telemetryContext = options.telemetryContext ?? NOOP_TELEMETRY_CONTEXT;
 	assertNoReservedSubagentTools(options.customTools);
 	const subagentController =
-		subagentOptions === false ? undefined : createRootSubagentController(subagentOptions.maxConcurrent, agentDir);
+		subagentOptions === false
+			? undefined
+			: createRootSubagentController(subagentOptions.maxConcurrent, agentDir, telemetryContext);
 	const customTools = [...(options.customTools ?? []), ...(subagentController?.createToolDefinitions() ?? [])];
 	let resourceLoader = options.resourceLoader;
 
@@ -368,6 +385,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	const extensionRunnerRef: { current?: ExtensionRunner } = {};
 
 	agent = new Agent({
+		telemetryContext,
 		initialState: {
 			systemPrompt: "",
 			model,
@@ -466,6 +484,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		subagentController,
 		harnessStateStore: loadedHarnessState.store,
 		harnessVersionBundle: loadedHarnessState.bundle,
+		telemetryContext,
 	});
 	subagentController?.bindParent(session);
 	const extensionsResult = resourceLoader.getExtensions();

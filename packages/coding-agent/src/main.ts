@@ -718,6 +718,7 @@ export async function main(args: string[], options?: MainOptions) {
 		sessionManager,
 		sessionStartEvent,
 		projectTrustContext,
+		telemetryContext,
 	}) => {
 		const isInitialRuntime = sessionStartEvent === undefined;
 		const projectTrustDiagnostics: AgentSessionRuntimeDiagnostic[] = [];
@@ -736,6 +737,7 @@ export async function main(args: string[], options?: MainOptions) {
 			agentDir,
 			settingsManager: runtimeSettingsManager,
 			modelRuntimeSignal: AbortSignal.timeout(15_000),
+			telemetryContext,
 			extensionFlagValues: parsed.unknownFlags,
 			resourceLoaderReloadOptions: shouldResolveProjectTrust
 				? {
@@ -755,6 +757,7 @@ export async function main(args: string[], options?: MainOptions) {
 										hasUI: isInitialRuntime && trustPromptMode === "interactive",
 									}),
 								onExtensionError: (message) => projectTrustDiagnostics.push({ type: "warning", message }),
+								telemetryContext,
 							});
 							projectTrustByCwd.set(cwd, trusted);
 							return trusted;

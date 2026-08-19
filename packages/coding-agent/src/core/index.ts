@@ -78,3 +78,12 @@ export {
 	type WorkingIndicatorOptions,
 } from "./extensions/index.ts";
 export { createSyntheticSourceInfo } from "./source-info.ts";
+export {
+	CODING_AGENT_TELEMETRY_SCHEMA,
+	type CodingAgentSpan,
+	type CodingAgentSpanEndAttributes,
+	type CodingAgentSpanName,
+	type CodingAgentSpanStartAttributes,
+	type CodingAgentTelemetrySpan,
+	startCodingAgentSpan,
+} from "./telemetry.ts";

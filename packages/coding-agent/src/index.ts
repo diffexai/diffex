@@ -276,6 +276,15 @@ export {
 } from "./core/skills.ts";
 export { createSyntheticSourceInfo } from "./core/source-info.ts";
 export type { SubagentStatus, SubagentSummary } from "./core/subagents/types.ts";
+export {
+	CODING_AGENT_TELEMETRY_SCHEMA,
+	type CodingAgentSpan,
+	type CodingAgentSpanEndAttributes,
+	type CodingAgentSpanName,
+	type CodingAgentSpanStartAttributes,
+	type CodingAgentTelemetrySpan,
+	startCodingAgentSpan,
+} from "./core/telemetry.ts";
 export { type EditDiffResult, generateDiffString, generateUnifiedPatch } from "./core/tools/edit-diff.ts";
 // Tools
 export {

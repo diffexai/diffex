@@ -1,5 +1,6 @@
 import { copyFileSync, existsSync, mkdirSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
+import type { TelemetryContext } from "@earendil-works/diffex-agent-core";
 import { resolvePath } from "../utils/paths.ts";
 import type { AgentSession } from "./agent-session.ts";
 import type { AgentSessionRuntimeDiagnostic, AgentSessionServices } from "./agent-session-services.ts";
@@ -38,6 +39,7 @@ export type CreateAgentSessionRuntimeFactory = (options: {
 	sessionManager: SessionManager;
 	sessionStartEvent?: SessionStartEvent;
 	projectTrustContext?: ProjectTrustContext;
+	telemetryContext?: TelemetryContext;
 }) => Promise<CreateAgentSessionRuntimeResult>;
 
 /**
@@ -90,7 +92,11 @@ export class AgentSessionRuntime {
 	) {
 		this._session = _session;
 		this._services = _services;
-		this.createRuntime = createRuntime;
+		this.createRuntime = (options) =>
+			createRuntime({
+				...options,
+				telemetryContext: options.telemetryContext ?? _services.telemetryContext,
+			});
 		this._diagnostics = _diagnostics;
 		this._modelFallbackMessage = _modelFallbackMessage;
 	}
@@ -449,6 +455,7 @@ export async function createAgentSessionRuntime(
 		agentDir: string;
 		sessionManager: SessionManager;
 		sessionStartEvent?: SessionStartEvent;
+		telemetryContext?: TelemetryContext;
 	},
 ): Promise<AgentSessionRuntime> {
 	assertSessionCwdExists(options.sessionManager, options.cwd);

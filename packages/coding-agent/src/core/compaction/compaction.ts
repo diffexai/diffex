@@ -5,7 +5,15 @@
  * and after compaction the session is reloaded.
  */
 
-import type { AgentMessage, StreamFn, ThinkingLevel } from "@earendil-works/diffex-agent-core";
+import {
+	type AgentMessage,
+	type AiTelemetrySpan,
+	NOOP_TELEMETRY_CONTEXT,
+	type StreamFn,
+	startAiSpan,
+	type TelemetryContext,
+	type ThinkingLevel,
+} from "@earendil-works/diffex-agent-core";
 import {
 	contentText,
 	type RetryCallbacks,
@@ -550,8 +558,9 @@ function createSummarizationOptions(
 	env: Record<string, string> | undefined,
 	signal: AbortSignal | undefined,
 	thinkingLevel: ThinkingLevel | undefined,
+	telemetryContext: TelemetryContext | undefined,
 ): SimpleStreamOptions {
-	const options: SimpleStreamOptions = { maxTokens, signal, apiKey, headers, env };
+	const options: SimpleStreamOptions = { maxTokens, signal, apiKey, headers, env, telemetryContext };
 	if (model.reasoning && thinkingLevel && thinkingLevel !== "off") {
 		options.reasoning = thinkingLevel;
 	}
@@ -580,10 +589,48 @@ export async function completeSummarization(
 		sessionId: uuidv7(),
 	};
 	const produce = async (): Promise<AssistantMessage> =>
-		streamFn
-			? (await streamFn(model, context, requestOptions)).result()
-			: completeSimple(model, context, requestOptions);
+		startAiSpan(
+			requestOptions.telemetryContext ?? NOOP_TELEMETRY_CONTEXT,
+			"diffex.ai.request",
+			{
+				"diffex.request.id": uuidv7(),
+				"diffex.ai.operation": "stream",
+				"diffex.ai.provider": model.provider,
+				"diffex.ai.model": model.id,
+				"diffex.ai.api": model.api,
+				"diffex.ai.streaming": true,
+			},
+			async (span) => {
+				const telemetryOptions = { ...requestOptions, telemetryContext: span };
+				const response = streamFn
+					? await (await streamFn(model, context, telemetryOptions)).result()
+					: await completeSimple(model, context, telemetryOptions);
+				settleSummarizationRequestSpan(span, response);
+				return response;
+			},
+		);
 	return retryAssistantCall(produce, retry, requestOptions.signal, callbacks);
+}
+
+function settleSummarizationRequestSpan(span: AiTelemetrySpan<"diffex.ai.request">, message: AssistantMessage): void {
+	const stopReason =
+		message.stopReason === "pending" ? undefined : message.stopReason === "toolUse" ? "tool_use" : message.stopReason;
+	span.setAttributes({
+		...(message.responseModel === undefined ? {} : { "diffex.ai.response.model": message.responseModel }),
+		...(message.responseId === undefined ? {} : { "diffex.ai.response.id": message.responseId }),
+		...(stopReason === undefined ? {} : { "diffex.ai.response.stop_reason": stopReason }),
+		"diffex.ai.usage.input_tokens": message.usage.input,
+		"diffex.ai.usage.output_tokens": message.usage.output,
+		"diffex.ai.usage.cache_read_tokens": message.usage.cacheRead,
+		"diffex.ai.usage.cache_write_tokens": message.usage.cacheWrite,
+		...(message.usage.reasoning === undefined ? {} : { "diffex.ai.usage.reasoning_tokens": message.usage.reasoning }),
+		"diffex.ai.usage.total_tokens": message.usage.totalTokens,
+		"diffex.ai.usage.cost": message.usage.cost.total,
+		...(message.stopReason === "error" ? { "diffex.ai.error.type": "AssistantMessageError" } : {}),
+	});
+	if (message.stopReason === "error" || message.stopReason === "aborted") {
+		span.setStatus({ status: "error" });
+	}
 }
 
 /**
@@ -604,6 +651,7 @@ export async function generateSummary(
 	env?: Record<string, string>,
 	retry?: RetryPolicy,
 	callbacks?: RetryCallbacks,
+	telemetryContext?: TelemetryContext,
 ): Promise<string> {
 	return (
 		await generateSummaryWithUsage(
@@ -620,6 +668,7 @@ export async function generateSummary(
 			env,
 			retry,
 			callbacks,
+			telemetryContext,
 		)
 	).text;
 }
@@ -639,6 +688,7 @@ export async function generateSummaryWithUsage(
 	env?: Record<string, string>,
 	retry?: RetryPolicy,
 	callbacks?: RetryCallbacks,
+	telemetryContext?: TelemetryContext,
 ): Promise<{ text: string; usage: Usage }> {
 	const maxTokens = Math.min(
 		Math.floor(0.8 * reserveTokens),
@@ -671,7 +721,16 @@ export async function generateSummaryWithUsage(
 		},
 	];
 
-	const completionOptions = createSummarizationOptions(model, maxTokens, apiKey, headers, env, signal, thinkingLevel);
+	const completionOptions = createSummarizationOptions(
+		model,
+		maxTokens,
+		apiKey,
+		headers,
+		env,
+		signal,
+		thinkingLevel,
+		telemetryContext,
+	);
 
 	const response = await completeSummarization(
 		model,
@@ -832,6 +891,7 @@ export async function compact(
 	env?: Record<string, string>,
 	retry?: RetryPolicy,
 	callbacks?: RetryCallbacks,
+	telemetryContext?: TelemetryContext,
 ): Promise<CompactionResult> {
 	const {
 		firstKeptEntryId,
@@ -866,6 +926,7 @@ export async function compact(
 				env,
 				retry,
 				callbacks,
+				telemetryContext,
 			);
 			historyText = historyResult.text;
 			historyUsage = historyResult.usage;
@@ -882,6 +943,7 @@ export async function compact(
 			streamFn,
 			retry,
 			callbacks,
+			telemetryContext,
 		);
 		// Merge into single summary
 		summary = `${historyText}\n\n---\n\n**Turn Context (split turn):**\n\n${turnPrefixResult.text}`;
@@ -902,6 +964,7 @@ export async function compact(
 			env,
 			retry,
 			callbacks,
+			telemetryContext,
 		);
 		summary = result.text;
 		summaryUsage = result.usage;
@@ -939,6 +1002,7 @@ async function generateTurnPrefixSummary(
 	streamFn?: StreamFn,
 	retry?: RetryPolicy,
 	callbacks?: RetryCallbacks,
+	telemetryContext?: TelemetryContext,
 ): Promise<{ text: string; usage: Usage }> {
 	const maxTokens = Math.min(
 		Math.floor(0.5 * reserveTokens),
@@ -958,7 +1022,7 @@ async function generateTurnPrefixSummary(
 	const response = await completeSummarization(
 		model,
 		{ systemPrompt: SUMMARIZATION_SYSTEM_PROMPT, messages: summarizationMessages },
-		createSummarizationOptions(model, maxTokens, apiKey, headers, env, signal, thinkingLevel),
+		createSummarizationOptions(model, maxTokens, apiKey, headers, env, signal, thinkingLevel, telemetryContext),
 		streamFn,
 		retry,
 		callbacks,

@@ -1,6 +1,8 @@
+import { NOOP_TELEMETRY_CONTEXT, type TelemetryContext, uuidv7 } from "@earendil-works/diffex-agent-core";
 import type { AssistantMessage } from "@earendil-works/diffex-ai";
 import type { AgentSession } from "../agent-session.ts";
 import type { ToolDefinition } from "../extensions/types.ts";
+import { startCodingAgentSpan } from "../telemetry.ts";
 import { createAgentActionTool, createAgentsTool, createSpawnAgentTool } from "../tools/subagents.ts";
 import type {
 	CaptureSubagentSession,
@@ -80,6 +82,7 @@ function getAssistantText(message: AssistantMessage | undefined): string | undef
 }
 
 interface SubagentRecord {
+	id: string;
 	name: string;
 	task: string;
 	status: SubagentStatus;
@@ -98,6 +101,7 @@ interface SubagentRecord {
 	cleanupFailures?: unknown[];
 	coordinatedRun?: CoordinatedRun;
 	lastRetryCycleId?: number;
+	telemetryContext?: TelemetryContext;
 }
 
 function isTerminalStatus(status: SubagentStatus): status is SubagentTerminalStatus {
@@ -143,6 +147,7 @@ const MAX_TIMER_MS = 2_147_483_647;
 export class SubagentController {
 	readonly #maxConcurrent: number;
 	readonly #captureSession: CaptureSubagentSession | undefined;
+	readonly #telemetryContext: TelemetryContext;
 	readonly #records = new Map<string, SubagentRecord>();
 	readonly #listeners = new Set<SubagentLifecycleListener>();
 	readonly #waiters = new Set<RevisionWaiter>();
@@ -159,12 +164,17 @@ export class SubagentController {
 	#resetCleanupPromise: Promise<unknown[]> | undefined;
 	#shutdownPromise: Promise<void> | undefined;
 
-	constructor(options: { maxConcurrent: number; captureSession?: CaptureSubagentSession }) {
+	constructor(options: {
+		maxConcurrent: number;
+		captureSession?: CaptureSubagentSession;
+		telemetryContext?: TelemetryContext;
+	}) {
 		if (!Number.isInteger(options.maxConcurrent) || options.maxConcurrent <= 0) {
 			throw new RangeError("maxConcurrent must be a positive integer");
 		}
 		this.#maxConcurrent = options.maxConcurrent;
 		this.#captureSession = options.captureSession;
+		this.#telemetryContext = options.telemetryContext ?? NOOP_TELEMETRY_CONTEXT;
 	}
 
 	createToolDefinitions(): ToolDefinition[] {
@@ -176,7 +186,7 @@ export class SubagentController {
 				if (!createSession) {
 					throw new Error("Subagent session capture is unavailable");
 				}
-				this.spawn(name, task, createSession, origin);
+				this.spawn(name, task, createSession, origin, parent.agent.telemetryContext);
 			}),
 			createAgentActionTool((request) => {
 				const parent = this.#getBoundParent();
@@ -217,6 +227,7 @@ export class SubagentController {
 
 		const timestamp = Date.now();
 		const record: SubagentRecord = {
+			id: uuidv7(),
 			name,
 			task,
 			status: "queued",
@@ -233,13 +244,32 @@ export class SubagentController {
 		}));
 	}
 
-	spawn(name: string, task: string, createSession: CreateSubagentSession, origin?: SubagentSpawnOrigin): void {
+	spawn(
+		name: string,
+		task: string,
+		createSession: CreateSubagentSession,
+		origin?: SubagentSpawnOrigin,
+		telemetryContext: TelemetryContext = this.#telemetryContext,
+	): void {
 		this.reserve(name, task);
 		const record = this.#records.get(name)!;
 		record.createSession = createSession;
+		record.telemetryContext = telemetryContext;
 		if (origin?.type === "agent_tool_call") {
 			record.coordinatedRun = this.#createCoordinatedRun("initial");
 		}
+		void startCodingAgentSpan(
+			telemetryContext,
+			"diffex.coding_agent.subagent",
+			{
+				"diffex.subagent.id": record.id,
+				"diffex.subagent.name": record.name,
+				"diffex.subagent.action": "spawn",
+			},
+			(span) => {
+				span.setAttributes({ "diffex.subagent.outcome": "queued" });
+			},
+		);
 		this.#scheduleRun(record, task);
 	}
 
@@ -247,11 +277,13 @@ export class SubagentController {
 		if (message.trim().length === 0) {
 			return Promise.reject(new Error("Subagent message must be non-empty"));
 		}
-		return this.#serializeAction(name, () => this.#message(name, message, wake, coordinated));
+		return this.#serializeAction(name, () =>
+			this.#traceAction(name, "message", () => this.#message(name, message, wake, coordinated)),
+		);
 	}
 
 	interrupt(name: string): Promise<SubagentActionResult> {
-		return this.#serializeAction(name, () => this.#interrupt(name));
+		return this.#serializeAction(name, () => this.#traceAction(name, "interrupt", () => this.#interrupt(name)));
 	}
 
 	attachSession(name: string, session: AgentSession): void {
@@ -321,6 +353,32 @@ export class SubagentController {
 	}
 
 	async waitForBatch(batch: SubagentDeliveryBatch, options: SubagentBatchWaitOptions = {}): Promise<void> {
+		const batchTelemetryContext = batch.attempts
+			.map((attempt) => this.#records.get(attempt.name)?.telemetryContext)
+			.find((context) => context !== undefined);
+		return startCodingAgentSpan(
+			batchTelemetryContext ?? this.#telemetryContext,
+			"diffex.coding_agent.subagent",
+			{
+				"diffex.subagent.id": `batch:${batch.id}`,
+				"diffex.subagent.name": "batch",
+				"diffex.subagent.action": "wait",
+			},
+			async (span) => {
+				try {
+					await this.#waitForBatch(batch, options);
+					span.setAttributes({ "diffex.subagent.outcome": "completed" });
+				} catch (error) {
+					const interrupted = options.signal?.aborted === true;
+					span.setAttributes({ "diffex.subagent.outcome": interrupted ? "interrupted" : "failed" });
+					span.setStatus({ status: "error" });
+					throw error;
+				}
+			},
+		);
+	}
+
+	async #waitForBatch(batch: SubagentDeliveryBatch, options: SubagentBatchWaitOptions): Promise<void> {
 		const notified = new Set<string>();
 		let snapshot = this.snapshot();
 		while (true) {
@@ -867,6 +925,43 @@ export class SubagentController {
 		return result;
 	}
 
+	#traceAction(
+		name: string,
+		action: "message" | "interrupt",
+		callback: () => Promise<SubagentActionResult>,
+	): Promise<SubagentActionResult> {
+		const record = this.#getRecordForAction(name);
+		return startCodingAgentSpan(
+			record.telemetryContext ?? this.#telemetryContext,
+			"diffex.coding_agent.subagent",
+			{
+				"diffex.subagent.id": record.id,
+				"diffex.subagent.name": record.name,
+				"diffex.subagent.action": action,
+			},
+			async (span) => {
+				try {
+					const result = await callback();
+					span.setAttributes({
+						"diffex.subagent.outcome":
+							result.status === "failed"
+								? "failed"
+								: result.status === "interrupted"
+									? "interrupted"
+									: result.status === "queued"
+										? "queued"
+										: "completed",
+					});
+					return result;
+				} catch (error) {
+					span.setAttributes({ "diffex.subagent.outcome": "failed" });
+					span.setStatus({ status: "error" });
+					throw error;
+				}
+			},
+		);
+	}
+
 	async #message(name: string, message: string, wake: boolean, coordinated: boolean): Promise<SubagentActionResult> {
 		const record = this.#getRecordForAction(name);
 		while (record.status === "running" && record.session?.isIdle) {
@@ -960,6 +1055,34 @@ export class SubagentController {
 	}
 
 	async #runPrompt(record: SubagentRecord, prompt: string, runController: AbortController): Promise<void> {
+		const action = record.coordinatedRun?.attempt === "retry" ? "retry" : "run";
+		await startCodingAgentSpan(
+			record.telemetryContext ?? this.#telemetryContext,
+			"diffex.coding_agent.subagent",
+			{
+				"diffex.subagent.id": record.id,
+				"diffex.subagent.name": record.name,
+				"diffex.subagent.action": action,
+			},
+			async (span) => {
+				await this.#runPromptInner(record, prompt, runController);
+				const outcome =
+					record.status === "failed"
+						? "failed"
+						: record.status === "interrupted"
+							? "interrupted"
+							: record.status === "queued"
+								? "queued"
+								: "completed";
+				span.setAttributes({ "diffex.subagent.outcome": outcome });
+				if (outcome === "failed" || outcome === "interrupted") {
+					span.setStatus({ status: "error" });
+				}
+			},
+		);
+	}
+
+	async #runPromptInner(record: SubagentRecord, prompt: string, runController: AbortController): Promise<void> {
 		let permit: SubagentPermit | undefined;
 		let session = record.session;
 		const assistantMessages: AssistantMessage[] = [];

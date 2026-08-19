@@ -6,7 +6,7 @@ import { createInMemoryModelRegistry, createModelRegistry, getModelRuntime } fro
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AgentMessage, AgentTool } from "@earendil-works/diffex-agent-core";
+import type { AgentMessage, AgentTool, TelemetryContext } from "@earendil-works/diffex-agent-core";
 import { Agent } from "@earendil-works/diffex-agent-core";
 import type {
 	FauxModelDefinition,
@@ -77,6 +77,7 @@ export interface HarnessOptions {
 	sessionStartEvent?: SessionStartEvent;
 	harnessStateStore?: HarnessStateStore;
 	harnessVersionBundle?: HarnessVersionBundle;
+	telemetryContext?: TelemetryContext;
 }
 
 export interface Harness {
@@ -146,6 +147,7 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 	}
 
 	const agent = new Agent({
+		telemetryContext: options.telemetryContext,
 		getApiKey: () => (withConfiguredAuth ? "faux-key" : undefined),
 		streamFn: streamSimple,
 		initialState: {
@@ -199,6 +201,7 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 		sessionStartEvent: options.sessionStartEvent,
 		harnessStateStore: options.harnessStateStore,
 		harnessVersionBundle: options.harnessVersionBundle,
+		telemetryContext: options.telemetryContext,
 	});
 
 	const events: AgentSessionEvent[] = [];

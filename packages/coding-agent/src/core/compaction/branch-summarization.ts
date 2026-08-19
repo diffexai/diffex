@@ -5,7 +5,7 @@
  * a summary of the branch being left so context isn't lost.
  */
 
-import type { AgentMessage, StreamFn } from "@earendil-works/diffex-agent-core";
+import type { AgentMessage, StreamFn, TelemetryContext } from "@earendil-works/diffex-agent-core";
 import type { RetryCallbacks, RetryPolicy } from "@earendil-works/diffex-ai";
 import { contentText } from "@earendil-works/diffex-ai";
 import type { Model, SimpleStreamOptions, Usage } from "@earendil-works/diffex-ai/compat";
@@ -87,6 +87,8 @@ export interface GenerateBranchSummaryOptions {
 	retry?: RetryPolicy;
 	/** Optional callbacks for retry reporting (e.g. TUI retry indicators). */
 	callbacks?: RetryCallbacks;
+	/** Explicit parent for provider-request telemetry. */
+	telemetryContext?: TelemetryContext;
 }
 
 // ============================================================================
@@ -306,6 +308,7 @@ export async function generateBranchSummary(
 		streamFn,
 		retry,
 		callbacks,
+		telemetryContext,
 	} = options;
 
 	// Token budget = context window minus reserved space for prompt + response
@@ -347,7 +350,7 @@ export async function generateBranchSummary(
 	// without running through agent state/events. Retried via completeSummarization
 	// so transient stream drops reuse the configured retry policy.
 	const context = { systemPrompt: SUMMARIZATION_SYSTEM_PROMPT, messages: summarizationMessages };
-	const requestOptions: SimpleStreamOptions = { apiKey, headers, env, signal, maxTokens: 2048 };
+	const requestOptions: SimpleStreamOptions = { apiKey, headers, env, signal, maxTokens: 2048, telemetryContext };
 	const response = await completeSummarization(model, context, requestOptions, streamFn, retry, callbacks);
 
 	// Check if aborted or errored

@@ -1,5 +1,6 @@
-import type { ThinkingLevel } from "@earendil-works/diffex-agent-core";
+import type { TelemetryContext, ThinkingLevel } from "@earendil-works/diffex-agent-core";
 import type { Model } from "@earendil-works/diffex-ai";
+import type { HarnessStateStore, HarnessVersionBundle } from "@earendil-works/diffex-harness-state";
 import type { AgentSession } from "../agent-session.ts";
 import {
 	type AgentSessionServices,
@@ -21,6 +22,9 @@ export interface CreateSubagentServicesOptions {
 	agentDir: string;
 	modelRuntime: ModelRuntime;
 	settingsManager: SettingsManager;
+	harnessStateStore?: HarnessStateStore;
+	harnessVersionBundle?: HarnessVersionBundle;
+	telemetryContext?: TelemetryContext;
 }
 
 export interface SubagentSessionConfig {
@@ -33,6 +37,9 @@ export interface SubagentSessionConfig {
 	readonly tools: readonly ToolName[];
 	readonly parentSession: string;
 	readonly sourceSessionManager: SessionManager;
+	readonly harnessStateStore?: HarnessStateStore;
+	readonly harnessVersionBundle?: HarnessVersionBundle;
+	readonly telemetryContext?: TelemetryContext;
 }
 
 export interface CreateSubagentSessionOptions {
@@ -56,6 +63,9 @@ export function createSubagentServices(options: CreateSubagentServicesOptions): 
 		agentDir: options.agentDir,
 		modelRuntime: options.modelRuntime,
 		settingsManager: options.settingsManager,
+		harnessStateStore: options.harnessStateStore,
+		harnessVersionBundle: options.harnessVersionBundle,
+		telemetryContext: options.telemetryContext,
 		resourceLoaderOptions: {
 			noExtensions: true,
 			noPromptTemplates: true,
@@ -92,6 +102,9 @@ export function captureSubagentSessionConfig(parent: AgentSession, agentDir: str
 		tools,
 		parentSession: parent.sessionId,
 		sourceSessionManager: parent.sessionManager,
+		harnessStateStore: parent.harnessStateStore,
+		harnessVersionBundle: parent.harnessVersionBundle,
+		telemetryContext: parent.agent.telemetryContext,
 	});
 }
 
@@ -105,6 +118,9 @@ export async function createSubagentSession(
 		agentDir: config.agentDir,
 		modelRuntime: config.modelRuntime,
 		settingsManager: config.settingsManager,
+		harnessStateStore: config.harnessStateStore,
+		harnessVersionBundle: config.harnessVersionBundle,
+		telemetryContext: config.telemetryContext,
 	});
 	options.signal?.throwIfAborted();
 

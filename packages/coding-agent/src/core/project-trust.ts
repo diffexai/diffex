@@ -1,3 +1,4 @@
+import type { TelemetryContext } from "@earendil-works/diffex-agent-core";
 import { CONFIG_DIR_NAME } from "../config.ts";
 import { emitProjectTrustEvent } from "./extensions/runner.ts";
 import type { LoadExtensionsResult, ProjectTrustContext } from "./extensions/types.ts";
@@ -19,6 +20,7 @@ export interface ResolveProjectTrustedOptions {
 	extensionsResult?: LoadExtensionsResult;
 	projectTrustContext: ProjectTrustContext;
 	onExtensionError?: (message: string) => void;
+	telemetryContext?: TelemetryContext;
 }
 
 function formatProjectTrustPrompt(cwd: string): string {
@@ -56,6 +58,7 @@ export async function resolveProjectTrusted(options: ResolveProjectTrustedOption
 			options.extensionsResult,
 			{ type: "project_trust", cwd: options.cwd },
 			options.projectTrustContext,
+			options.telemetryContext,
 		);
 		for (const error of errors) {
 			options.onExtensionError?.(`Extension "${error.extensionPath}" project_trust error: ${error.error}`);

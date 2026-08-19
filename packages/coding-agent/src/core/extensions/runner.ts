@@ -2,7 +2,7 @@
  * Extension runner - executes extensions and manages their lifecycle.
  */
 
-import type { AgentMessage } from "@earendil-works/diffex-agent-core";
+import { type AgentMessage, NOOP_TELEMETRY_CONTEXT, type TelemetryContext } from "@earendil-works/diffex-agent-core";
 import type { ImageContent, Model, Provider, ProviderHeaders } from "@earendil-works/diffex-ai";
 import type { KeyId } from "@earendil-works/diffex-tui";
 import { type Theme, theme } from "../../modes/interactive/theme/theme.ts";
@@ -12,6 +12,7 @@ import type { ModelRegistry } from "../model-registry.ts";
 import type { ScopedModel } from "../model-resolver.ts";
 import type { SessionManager } from "../session-manager.ts";
 import type { BuildSystemPromptOptions } from "../system-prompt.ts";
+import { startCodingAgentSpan } from "../telemetry.ts";
 import type {
 	BeforeAgentStartEvent,
 	BeforeAgentStartEventResult,
@@ -204,6 +205,7 @@ export async function emitProjectTrustEvent(
 	extensionsResult: LoadExtensionsResult,
 	event: ProjectTrustEvent,
 	ctx: ProjectTrustContext,
+	telemetryContext: TelemetryContext = NOOP_TELEMETRY_CONTEXT,
 ): Promise<{ result?: ProjectTrustEventResult; errors: ExtensionError[] }> {
 	const errors: ExtensionError[] = [];
 	for (const ext of extensionsResult.extensions) {
@@ -214,7 +216,25 @@ export async function emitProjectTrustEvent(
 
 		for (const handler of handlers) {
 			try {
-				const handlerResult = (await handler(event, ctx)) as ProjectTrustEventResult;
+				const handlerResult = (await startCodingAgentSpan(
+					telemetryContext,
+					"diffex.coding_agent.extension_hook",
+					{
+						"diffex.extension.hook": event.type,
+						"diffex.extension.path": ext.path,
+					},
+					async (span) => {
+						try {
+							const result = await handler(event, ctx);
+							span.setAttributes({ "diffex.extension.outcome": "completed" });
+							return result;
+						} catch (error) {
+							span.setAttributes({ "diffex.extension.outcome": "failed" });
+							span.setStatus({ status: "error" });
+							throw error;
+						}
+					},
+				)) as ProjectTrustEventResult;
 				if (handlerResult.trusted === "undecided") {
 					continue;
 				}
@@ -295,6 +315,7 @@ export class ExtensionRunner {
 	private shortcutDiagnostics: ResourceDiagnostic[] = [];
 	private commandDiagnostics: ResourceDiagnostic[] = [];
 	private staleMessage: string | undefined;
+	private readonly telemetryContext: TelemetryContext;
 
 	constructor(
 		extensions: Extension[],
@@ -302,6 +323,7 @@ export class ExtensionRunner {
 		cwd: string,
 		sessionManager: SessionManager,
 		modelRegistry: ModelRegistry,
+		telemetryContext: TelemetryContext = NOOP_TELEMETRY_CONTEXT,
 	) {
 		this.extensions = extensions;
 		this.runtime = runtime;
@@ -309,6 +331,7 @@ export class ExtensionRunner {
 		this.cwd = cwd;
 		this.sessionManager = sessionManager;
 		this.modelRegistry = modelRegistry;
+		this.telemetryContext = telemetryContext;
 	}
 
 	bindCore(
@@ -798,6 +821,33 @@ export class ExtensionRunner {
 		);
 	}
 
+	private invokeExtensionHook<Result>(
+		extensionPath: string,
+		hook: string,
+		callback: () => Result | Promise<Result>,
+		resolveOutcome?: (result: Result) => "completed" | "blocked",
+	): Promise<Result> {
+		return startCodingAgentSpan(
+			this.telemetryContext,
+			"diffex.coding_agent.extension_hook",
+			{
+				"diffex.extension.hook": hook,
+				"diffex.extension.path": extensionPath,
+			},
+			async (span) => {
+				try {
+					const result = await callback();
+					span.setAttributes({ "diffex.extension.outcome": resolveOutcome?.(result) ?? "completed" });
+					return result;
+				} catch (error) {
+					span.setAttributes({ "diffex.extension.outcome": "failed" });
+					span.setStatus({ status: "error" });
+					throw error;
+				}
+			},
+		);
+	}
+
 	async emit<TEvent extends RunnerEmitEvent>(event: TEvent): Promise<RunnerEmitResult<TEvent>> {
 		const ctx = this.createContext();
 		let result: SessionBeforeEventResult | undefined;
@@ -808,7 +858,15 @@ export class ExtensionRunner {
 
 			for (const handler of handlers) {
 				try {
-					const handlerResult = await handler(event, ctx);
+					const handlerResult = await this.invokeExtensionHook(
+						ext.path,
+						event.type,
+						() => handler(event, ctx),
+						(value) =>
+							this.isSessionBeforeEvent(event) && (value as SessionBeforeEventResult | undefined)?.cancel
+								? "blocked"
+								: "completed",
+					);
 
 					if (this.isSessionBeforeEvent(event) && handlerResult) {
 						result = handlerResult as SessionBeforeEventResult;
@@ -844,7 +902,9 @@ export class ExtensionRunner {
 			for (const handler of handlers) {
 				try {
 					const currentEvent: MessageEndEvent = { ...event, message: currentMessage };
-					const handlerResult = (await handler(currentEvent, ctx)) as MessageEndEventResult | undefined;
+					const handlerResult = (await this.invokeExtensionHook(ext.path, "message_end", () =>
+						handler(currentEvent, ctx),
+					)) as MessageEndEventResult | undefined;
 					if (!handlerResult?.message) continue;
 
 					if (handlerResult.message.role !== currentMessage.role) {
@@ -885,7 +945,9 @@ export class ExtensionRunner {
 
 			for (const handler of handlers) {
 				try {
-					const handlerResult = (await handler(currentEvent, ctx)) as ToolResultEventResult | undefined;
+					const handlerResult = (await this.invokeExtensionHook(ext.path, "tool_result", () =>
+						handler(currentEvent, ctx),
+					)) as ToolResultEventResult | undefined;
 					if (!handlerResult) continue;
 
 					if (handlerResult.content !== undefined) {
@@ -938,7 +1000,12 @@ export class ExtensionRunner {
 			if (!handlers || handlers.length === 0) continue;
 
 			for (const handler of handlers) {
-				const handlerResult = await handler(event, ctx);
+				const handlerResult = await this.invokeExtensionHook(
+					ext.path,
+					"tool_call",
+					() => handler(event, ctx),
+					(value) => ((value as ToolCallEventResult | undefined)?.block ? "blocked" : "completed"),
+				);
 
 				if (handlerResult) {
 					result = handlerResult as ToolCallEventResult;
@@ -961,7 +1028,7 @@ export class ExtensionRunner {
 
 			for (const handler of handlers) {
 				try {
-					const handlerResult = await handler(event, ctx);
+					const handlerResult = await this.invokeExtensionHook(ext.path, "user_bash", () => handler(event, ctx));
 					if (handlerResult) {
 						return handlerResult as UserBashEventResult;
 					}
@@ -992,7 +1059,7 @@ export class ExtensionRunner {
 			for (const handler of handlers) {
 				try {
 					const event: ContextEvent = { type: "context", messages: currentMessages };
-					const handlerResult = await handler(event, ctx);
+					const handlerResult = await this.invokeExtensionHook(ext.path, "context", () => handler(event, ctx));
 
 					if (handlerResult && (handlerResult as ContextEventResult).messages) {
 						currentMessages = (handlerResult as ContextEventResult).messages!;
@@ -1027,7 +1094,9 @@ export class ExtensionRunner {
 						type: "before_provider_request",
 						payload: currentPayload,
 					};
-					const handlerResult = await handler(event, ctx);
+					const handlerResult = await this.invokeExtensionHook(ext.path, "before_provider_request", () =>
+						handler(event, ctx),
+					);
 					if (handlerResult !== undefined) {
 						currentPayload = handlerResult;
 					}
@@ -1061,7 +1130,7 @@ export class ExtensionRunner {
 						type: "before_provider_headers",
 						headers,
 					};
-					await handler(event, ctx);
+					await this.invokeExtensionHook(ext.path, "before_provider_headers", () => handler(event, ctx));
 				} catch (err) {
 					const message = err instanceof Error ? err.message : String(err);
 					const stack = err instanceof Error ? err.stack : undefined;
@@ -1109,7 +1178,9 @@ export class ExtensionRunner {
 						systemPrompt: currentSystemPrompt,
 						systemPromptOptions,
 					};
-					const handlerResult = await handler(event, ctx);
+					const handlerResult = await this.invokeExtensionHook(ext.path, "before_agent_start", () =>
+						handler(event, ctx),
+					);
 
 					if (handlerResult) {
 						const result = handlerResult as BeforeAgentStartEventResult;
@@ -1164,7 +1235,9 @@ export class ExtensionRunner {
 			for (const handler of handlers) {
 				try {
 					const event: ResourcesDiscoverEvent = { type: "resources_discover", cwd, reason };
-					const handlerResult = await handler(event, ctx);
+					const handlerResult = await this.invokeExtensionHook(ext.path, "resources_discover", () =>
+						handler(event, ctx),
+					);
 					const result = handlerResult as ResourcesDiscoverResult | undefined;
 
 					if (result?.skillPaths?.length) {
@@ -1213,7 +1286,9 @@ export class ExtensionRunner {
 						source,
 						streamingBehavior,
 					};
-					const result = (await handler(event, ctx)) as InputEventResult | undefined;
+					const result = (await this.invokeExtensionHook(ext.path, "input", () => handler(event, ctx))) as
+						| InputEventResult
+						| undefined;
 					if (result?.action === "handled") return result;
 					if (result?.action === "transform") {
 						currentText = result.text;

@@ -15,14 +15,17 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname } from "node:path";
-import type {
-	Agent,
-	AgentEvent,
-	AgentMessage,
-	AgentState,
-	AgentTool,
-	PrepareNextTurnContext,
-	ThinkingLevel,
+import {
+	type Agent,
+	type AgentEvent,
+	type AgentMessage,
+	type AgentState,
+	type AgentTool,
+	NOOP_TELEMETRY_CONTEXT,
+	type PrepareNextTurnContext,
+	type TelemetryContext,
+	type ThinkingLevel,
+	uuidv7,
 } from "@earendil-works/diffex-agent-core";
 import { contentText } from "@earendil-works/diffex-ai";
 import type {
@@ -114,6 +117,7 @@ import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.ts";
 import type { SubagentController } from "./subagents/controller.ts";
 import type { SubagentBatchResult, SubagentDeliveryBatch, SubagentSummary } from "./subagents/types.ts";
 import { type BuildSystemPromptOptions, buildSystemPrompt } from "./system-prompt.ts";
+import { startCodingAgentSpan } from "./telemetry.ts";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts";
 import { createAllToolDefinitions } from "./tools/index.ts";
 import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapper.ts";
@@ -250,6 +254,8 @@ export interface AgentSessionConfig {
 	harnessStateStore?: HarnessStateStore;
 	/** Harness revision activated for this session. */
 	harnessVersionBundle?: HarnessVersionBundle;
+	/** Parent context for passive runtime telemetry. */
+	telemetryContext?: TelemetryContext;
 }
 
 export interface ExtensionBindings {
@@ -405,6 +411,7 @@ export class AgentSession {
 	private readonly _subagentController: SubagentController | undefined;
 	private readonly _harnessStateStore: HarnessStateStore | undefined;
 	private _harnessVersionBundle: HarnessVersionBundle | undefined;
+	private readonly _telemetryContext: TelemetryContext;
 	private _harnessSwitchInProgress = false;
 	private _subagentWaitAbortController: AbortController | undefined;
 	private _agentRunAborted = false;
@@ -428,6 +435,7 @@ export class AgentSession {
 		this._subagentController = config.subagentController;
 		this._harnessStateStore = config.harnessStateStore;
 		this._harnessVersionBundle = config.harnessVersionBundle;
+		this._telemetryContext = config.telemetryContext ?? NOOP_TELEMETRY_CONTEXT;
 
 		this._armInitialCurrentPlanRestoration();
 
@@ -446,6 +454,18 @@ export class AgentSession {
 
 	get modelRuntime(): ModelRuntime {
 		return this._modelRuntime;
+	}
+
+	get telemetryContext(): TelemetryContext {
+		return this._telemetryContext;
+	}
+
+	get harnessStateStore(): HarnessStateStore | undefined {
+		return this._harnessStateStore;
+	}
+
+	get harnessVersionBundle(): HarnessVersionBundle | undefined {
+		return this._harnessVersionBundle;
 	}
 
 	private async _getRequiredRequestAuth(model: Model<any>): Promise<{
@@ -1329,6 +1349,44 @@ export class AgentSession {
 	// Prompting
 	// =========================================================================
 
+	private _traceOperation<Result>(
+		kind: "prompt" | "compaction" | "navigation" | "abort" | "queue" | "bash" | "export",
+		callback: (telemetryContext: TelemetryContext) => Result | Promise<Result>,
+	): Promise<Result> {
+		return startCodingAgentSpan(
+			this.agent.telemetryContext,
+			"diffex.coding_agent.operation",
+			{
+				"diffex.operation.id": uuidv7(),
+				"diffex.session.id": this.sessionId,
+				"diffex.operation.kind": kind,
+			},
+			async (span) => {
+				const previousAgentContext = this.agent.telemetryContext;
+				const bindsAgentContext = kind === "prompt" && !this.isStreaming;
+				if (bindsAgentContext) this.agent.telemetryContext = span;
+				try {
+					const result = await callback(span);
+					const aborted = bindsAgentContext && this._agentRunAborted;
+					span.setAttributes({ "diffex.operation.outcome": aborted ? "aborted" : "completed" });
+					if (aborted) span.setStatus({ status: "error" });
+					return result;
+				} catch (error) {
+					const aborted =
+						error instanceof Error &&
+						(error.name === "AbortError" || error.message.toLowerCase().includes("cancelled"));
+					span.setAttributes({ "diffex.operation.outcome": aborted ? "aborted" : "failed" });
+					span.setStatus({ status: "error" });
+					throw error;
+				} finally {
+					if (bindsAgentContext && this.agent.telemetryContext === span) {
+						this.agent.telemetryContext = previousAgentContext;
+					}
+				}
+			},
+		);
+	}
+
 	private async _runAgentPrompt(messages: AgentMessage | AgentMessage[]): Promise<void> {
 		this._agentRunAborted = false;
 		this._isAgentRunActive = true;
@@ -1488,6 +1546,10 @@ export class AgentSession {
 	 * @throws Error if no model selected or no API key available (when not streaming)
 	 */
 	async prompt(text: string, options?: PromptOptions): Promise<void> {
+		return this._traceOperation("prompt", () => this._prompt(text, options));
+	}
+
+	private async _prompt(text: string, options?: PromptOptions): Promise<void> {
 		if (this._harnessSwitchInProgress) {
 			throw new Error("Cannot submit a prompt while a harness version switch is in progress.");
 		}
@@ -1754,6 +1816,10 @@ export class AgentSession {
 	 * Internal: Queue a steering message (already expanded, no extension command check).
 	 */
 	private async _queueSteer(text: string, images?: ImageContent[]): Promise<void> {
+		await this._traceOperation("queue", () => this._enqueueSteer(text, images));
+	}
+
+	private async _enqueueSteer(text: string, images?: ImageContent[]): Promise<void> {
 		this._steeringMessages.push(text);
 		this._emitQueueUpdate();
 		const content: (TextContent | ImageContent)[] = [{ type: "text", text }];
@@ -1771,6 +1837,10 @@ export class AgentSession {
 	 * Internal: Queue a follow-up message (already expanded, no extension command check).
 	 */
 	private async _queueFollowUp(text: string, images?: ImageContent[]): Promise<void> {
+		await this._traceOperation("queue", () => this._enqueueFollowUp(text, images));
+	}
+
+	private async _enqueueFollowUp(text: string, images?: ImageContent[]): Promise<void> {
 		this._followUpMessages.push(text);
 		this._emitQueueUpdate();
 		const content: (TextContent | ImageContent)[] = [{ type: "text", text }];
@@ -1925,6 +1995,10 @@ export class AgentSession {
 	 * Abort current operation and wait for agent to become idle.
 	 */
 	async abort(): Promise<void> {
+		return this._traceOperation("abort", () => this._abort());
+	}
+
+	private async _abort(): Promise<void> {
 		this.abortRetry();
 		if (this._isAgentRunActive) this._agentRunAborted = true;
 		this._subagentWaitAbortController?.abort(new Error("Subagent coordination cancelled"));
@@ -2167,10 +2241,12 @@ export class AgentSession {
 	 * @param customInstructions Optional instructions for the compaction summary
 	 */
 	compact(customInstructions?: string): Promise<CompactionResult> {
-		return this._runOwnedOperation(() => this._compact(customInstructions));
+		return this._runOwnedOperation(() =>
+			this._traceOperation("compaction", (telemetryContext) => this._compact(customInstructions, telemetryContext)),
+		);
 	}
 
-	private async _compact(customInstructions?: string): Promise<CompactionResult> {
+	private async _compact(customInstructions?: string, telemetryContext?: TelemetryContext): Promise<CompactionResult> {
 		await this.abort();
 		if (this._disposePromise) {
 			throw new Error("Compaction cancelled");
@@ -2248,7 +2324,8 @@ export class AgentSession {
 					this.agent.streamFunction,
 					env,
 					this.settingsManager.getRetrySettings(),
-					this._summarizationRetryCallbacks({ source: "compaction", reason: "manual" }),
+					this._summarizationRetryCallbacks({ source: "compaction", reason: "manual" }, telemetryContext),
+					telemetryContext,
 				);
 				summary = result.summary;
 				firstKeptEntryId = result.firstKeptEntryId;
@@ -2474,10 +2551,18 @@ export class AgentSession {
 	 */
 	private _runAutoCompaction(reason: "overflow" | "threshold", willRetry: boolean): Promise<boolean> {
 		if (this._disposePromise) return Promise.resolve(false);
-		return this._runOwnedOperation(() => this._runAutoCompactionOperation(reason, willRetry));
+		return this._runOwnedOperation(() =>
+			this._traceOperation("compaction", (telemetryContext) =>
+				this._runAutoCompactionOperation(reason, willRetry, telemetryContext),
+			),
+		);
 	}
 
-	private async _runAutoCompactionOperation(reason: "overflow" | "threshold", willRetry: boolean): Promise<boolean> {
+	private async _runAutoCompactionOperation(
+		reason: "overflow" | "threshold",
+		willRetry: boolean,
+		telemetryContext: TelemetryContext = this._telemetryContext,
+	): Promise<boolean> {
 		const settings = this.settingsManager.getCompactionSettings();
 		let started = false;
 
@@ -2557,7 +2642,8 @@ export class AgentSession {
 					this.agent.streamFunction,
 					env,
 					this.settingsManager.getRetrySettings(),
-					this._summarizationRetryCallbacks({ source: "compaction", reason }),
+					this._summarizationRetryCallbacks({ source: "compaction", reason }, telemetryContext),
+					telemetryContext,
 				);
 				summary = compactResult.summary;
 				firstKeptEntryId = compactResult.firstKeptEntryId;
@@ -2997,6 +3083,7 @@ export class AgentSession {
 			this._cwd,
 			this.sessionManager,
 			new ModelRegistry(this._modelRuntime),
+			this._telemetryContext,
 		);
 		if (this._extensionRunnerRef) {
 			this._extensionRunnerRef.current = this._extensionRunner;
@@ -3064,9 +3151,24 @@ export class AgentSession {
 	 */
 	private _summarizationRetryCallbacks(
 		source: { source: "branchSummary" } | { source: "compaction"; reason: "manual" | "threshold" | "overflow" },
+		telemetryContext: TelemetryContext = this.agent.telemetryContext,
 	): RetryCallbacks {
 		return {
 			onRetryScheduled: (attempt, maxAttempts, delayMs, errorMessage) => {
+				void startCodingAgentSpan(
+					telemetryContext,
+					"diffex.coding_agent.retry",
+					{
+						"diffex.session.id": this.sessionId,
+						"diffex.retry.kind": source.source === "branchSummary" ? "branch_summary" : "compaction",
+						"diffex.retry.attempt": attempt,
+						"diffex.retry.max_attempts": maxAttempts,
+						"diffex.retry.delay_ms": delayMs,
+					},
+					(span) => {
+						span.setAttributes({ "diffex.retry.outcome": "scheduled" });
+					},
+				);
 				this._emit({
 					type: "summarization_retry_scheduled",
 					attempt,
@@ -3124,18 +3226,40 @@ export class AgentSession {
 		// Wait with exponential backoff (abortable)
 		this._retryAbortController = new AbortController();
 		try {
-			await sleep(delayMs, this._retryAbortController.signal);
-		} catch {
-			// Aborted during sleep - emit end event so UI can clean up
-			const attempt = this._retryAttempt;
-			this._retryAttempt = 0;
-			this._emit({
-				type: "auto_retry_end",
-				success: false,
-				attempt,
-				finalError: "Retry cancelled",
-			});
-			return false;
+			const resumed = await startCodingAgentSpan(
+				this.agent.telemetryContext,
+				"diffex.coding_agent.retry",
+				{
+					"diffex.session.id": this.sessionId,
+					"diffex.retry.kind": "provider",
+					"diffex.retry.attempt": this._retryAttempt,
+					"diffex.retry.max_attempts": settings.maxRetries,
+					"diffex.retry.delay_ms": delayMs,
+				},
+				async (span) => {
+					try {
+						await sleep(delayMs, this._retryAbortController?.signal);
+						span.setAttributes({ "diffex.retry.outcome": "resumed" });
+						return true;
+					} catch {
+						span.setAttributes({ "diffex.retry.outcome": "cancelled" });
+						span.setStatus({ status: "error" });
+						return false;
+					}
+				},
+			);
+			if (!resumed) {
+				// Aborted during sleep - emit end event so UI can clean up
+				const attempt = this._retryAttempt;
+				this._retryAttempt = 0;
+				this._emit({
+					type: "auto_retry_end",
+					success: false,
+					attempt,
+					finalError: "Retry cancelled",
+				});
+				return false;
+			}
 		} finally {
 			this._retryAbortController = undefined;
 		}
@@ -3185,7 +3309,25 @@ export class AgentSession {
 		onChunk?: (chunk: string) => void,
 		options?: { excludeFromContext?: boolean; id?: string; operations?: BashOperations },
 	): Promise<BashResult> {
-		return this._runOwnedOperation(() => this._executeBash(command, onChunk, options));
+		return this._runOwnedOperation(() =>
+			this._traceOperation("bash", () =>
+				startCodingAgentSpan(
+					this.agent.telemetryContext,
+					"diffex.coding_agent.terminal",
+					{ "diffex.session.id": this.sessionId },
+					async (span) => {
+						const result = await this._executeBash(command, onChunk, options);
+						const outcome = result.cancelled ? "cancelled" : result.exitCode === 0 ? "completed" : "failed";
+						span.setAttributes({
+							"diffex.terminal.exit_code": result.exitCode,
+							"diffex.terminal.outcome": outcome,
+						});
+						if (outcome !== "completed") span.setStatus({ status: "error" });
+						return result;
+					},
+				),
+			),
+		);
 	}
 
 	private async _executeBash(
@@ -3322,12 +3464,17 @@ export class AgentSession {
 		targetId: string,
 		options: { summarize?: boolean; customInstructions?: string; replaceInstructions?: boolean; label?: string } = {},
 	): Promise<{ editorText?: string; cancelled: boolean; aborted?: boolean; summaryEntry?: BranchSummaryEntry }> {
-		return this._runOwnedOperation(() => this._navigateTree(targetId, options));
+		return this._runOwnedOperation(() =>
+			this._traceOperation("navigation", (telemetryContext) =>
+				this._navigateTree(targetId, options, telemetryContext),
+			),
+		);
 	}
 
 	private async _navigateTree(
 		targetId: string,
 		options: { summarize?: boolean; customInstructions?: string; replaceInstructions?: boolean; label?: string },
+		telemetryContext: TelemetryContext,
 	): Promise<{ editorText?: string; cancelled: boolean; aborted?: boolean; summaryEntry?: BranchSummaryEntry }> {
 		if (this.isStreaming) {
 			throw new Error("Wait for the current response to finish before navigating the session tree.");
@@ -3428,7 +3575,8 @@ export class AgentSession {
 					reserveTokens: branchSummarySettings.reserveTokens,
 					streamFn: this.agent.streamFunction,
 					retry: this.settingsManager.getRetrySettings(),
-					callbacks: this._summarizationRetryCallbacks({ source: "branchSummary" }),
+					callbacks: this._summarizationRetryCallbacks({ source: "branchSummary" }, telemetryContext),
+					telemetryContext,
 				});
 				if (result.aborted) {
 					return { cancelled: true, aborted: true };
@@ -3646,6 +3794,10 @@ export class AgentSession {
 	 * @returns Path to exported file
 	 */
 	async exportToHtml(outputPath?: string): Promise<string> {
+		return this._traceOperation("export", () => this._exportToHtml(outputPath));
+	}
+
+	private async _exportToHtml(outputPath?: string): Promise<string> {
 		const configuredThemeName = this.settingsManager.getTheme();
 		const themeName = configuredThemeName && getThemeByName(configuredThemeName) ? configuredThemeName : undefined;
 
@@ -3656,11 +3808,30 @@ export class AgentSession {
 			cwd: this.sessionManager.getCwd(),
 		});
 
-		return await exportSessionToHtml(this.sessionManager, this.state, {
+		const filePath = await exportSessionToHtml(this.sessionManager, this.state, {
 			outputPath,
 			themeName,
 			toolRenderer,
 		});
+		this._recordArtifact("html", filePath);
+		return filePath;
+	}
+
+	private _recordArtifact(kind: "html" | "jsonl", filePath: string): void {
+		void startCodingAgentSpan(
+			this.agent.telemetryContext,
+			"diffex.coding_agent.artifact",
+			{
+				"diffex.session.id": this.sessionId,
+				"diffex.artifact.kind": kind,
+			},
+			(span) => {
+				span.setAttributes({
+					"diffex.artifact.path": filePath,
+					"diffex.artifact.outcome": "written",
+				});
+			},
+		);
 	}
 
 	/**
@@ -3699,6 +3870,7 @@ export class AgentSession {
 		}
 
 		writeFileSync(filePath, `${lines.join("\n")}\n`);
+		this._recordArtifact("jsonl", filePath);
 		return filePath;
 	}
 

@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import type { ThinkingLevel } from "@earendil-works/diffex-agent-core";
+import { NOOP_TELEMETRY_CONTEXT, type TelemetryContext, type ThinkingLevel } from "@earendil-works/diffex-agent-core";
 import type { Model } from "@earendil-works/diffex-ai";
 import type { HarnessStateStore, HarnessVersionBundle } from "@earendil-works/diffex-harness-state";
 import { getAgentDir } from "../config.ts";
@@ -45,6 +45,9 @@ export interface CreateAgentSessionServicesOptions {
 	extensionFlagValues?: Map<string, boolean | string>;
 	resourceLoaderOptions?: Omit<DefaultResourceLoaderOptions, "cwd" | "agentDir" | "settingsManager">;
 	resourceLoaderReloadOptions?: ResourceLoaderReloadOptions;
+	harnessStateStore?: HarnessStateStore;
+	harnessVersionBundle?: HarnessVersionBundle;
+	telemetryContext?: TelemetryContext;
 }
 
 /**
@@ -81,6 +84,7 @@ export interface AgentSessionServices {
 	resourceLoader: ResourceLoader;
 	harnessStateStore: HarnessStateStore;
 	harnessVersionBundle: HarnessVersionBundle | undefined;
+	telemetryContext: TelemetryContext;
 	diagnostics: AgentSessionRuntimeDiagnostic[];
 }
 
@@ -150,7 +154,9 @@ export async function createAgentSessionServices(
 			signal: options.modelRuntimeSignal,
 		}));
 	const settingsManager = options.settingsManager ?? SettingsManager.create(cwd, agentDir);
-	const harnessState = await loadGlobalHarnessState(agentDir);
+	const harnessState = options.harnessStateStore
+		? { store: options.harnessStateStore, bundle: options.harnessVersionBundle, warning: undefined }
+		: await loadGlobalHarnessState(agentDir);
 	const resourceLoader = new DefaultResourceLoader({
 		...(options.resourceLoaderOptions ?? {}),
 		cwd,
@@ -204,6 +210,7 @@ export async function createAgentSessionServices(
 		resourceLoader,
 		harnessStateStore: harnessState.store,
 		harnessVersionBundle: harnessState.bundle,
+		telemetryContext: options.telemetryContext ?? NOOP_TELEMETRY_CONTEXT,
 		diagnostics,
 	};
 }
@@ -226,6 +233,7 @@ export async function createAgentSessionFromServices(
 		resourceLoader: options.services.resourceLoader,
 		harnessStateStore: options.services.harnessStateStore,
 		harnessVersionBundle: options.services.harnessVersionBundle,
+		telemetryContext: options.services.telemetryContext,
 		sessionManager: options.sessionManager,
 		model: options.model,
 		thinkingLevel: options.thinkingLevel,
