@@ -87,26 +87,45 @@ function sessionTrace(options: SessionTraceOptions): TraceRecord[] {
 	];
 }
 
-async function codingAgentCursor(path: string, start: number, end: number): Promise<SessionSegmentCursor> {
+async function codingAgentCursor(
+	path: string,
+	start: number,
+	end: number,
+	digestKinds: { start: "content" | "prefix"; end: "content" | "prefix" } = {
+		start: "content",
+		end: "content",
+	},
+): Promise<SessionSegmentCursor> {
 	const lines = (await readFile(path, "utf8"))
 		.trimEnd()
 		.split("\n")
 		.slice(1)
 		.map((line) => JSON.parse(line) as Readonly<Record<string, unknown>>);
-	const entryCursor = (entryOrdinal: number) => {
+	const entryCursor = (entryOrdinal: number, kind: "content" | "prefix") => {
 		const entry = lines[entryOrdinal];
 		if (!entry || typeof entry.id !== "string") throw new Error(`Missing fixture entry ${entryOrdinal}`);
+		const digestInput =
+			kind === "content"
+				? JSON.stringify(entry)
+				: lines
+						.slice(0, entryOrdinal + 1)
+						.map((item) => `${JSON.stringify(item)}\n`)
+						.join("");
 		return {
 			entryOrdinal,
 			entryId: entry.id,
 			digest: {
-				kind: "content" as const,
+				kind,
 				algorithm: "sha256" as const,
-				value: createHash("sha256").update(JSON.stringify(entry)).digest("hex"),
+				value: createHash("sha256").update(digestInput).digest("hex"),
 			},
 		};
 	};
-	return { kind: "coding-agent-v3", start: entryCursor(start), end: entryCursor(end) };
+	return {
+		kind: "coding-agent-v3",
+		start: entryCursor(start, digestKinds.start),
+		end: entryCursor(end, digestKinds.end),
+	};
 }
 
 function traceRecords(options: { footer?: boolean; degraded?: boolean } = {}): TraceRecord[] {
@@ -252,7 +271,7 @@ describe("invocation materializer", () => {
 				sessionFormat: "coding-agent",
 				formatVersion: 3,
 				reason: "resume",
-				cursor: await codingAgentCursor(sessionPath, 0, 3),
+				cursor: await codingAgentCursor(sessionPath, 0, 3, { start: "prefix", end: "content" }),
 			}),
 		);
 
