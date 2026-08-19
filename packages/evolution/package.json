@@ -1,0 +1,43 @@
+{
+	"name": "@earendil-works/diffex-evolution",
+	"version": "0.2.0",
+	"description": "Private evolution pipeline contracts and orchestration for Diffex",
+	"private": true,
+	"type": "module",
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		}
+	},
+	"files": [
+		"dist"
+	],
+	"scripts": {
+		"clean": "shx rm -rf dist",
+		"build": "tsgo -p tsconfig.build.json",
+		"test": "vitest --run",
+		"prepublishOnly": "npm run clean && npm run build"
+	},
+	"author": "Earendil Works",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/diffexai/diffex.git",
+		"directory": "packages/evolution"
+	},
+	"engines": {
+		"node": ">=22.19.0"
+	},
+	"dependencies": {
+		"@earendil-works/diffex-harness-state": "0.2.0",
+		"@earendil-works/diffex-harness-trace": "0.2.0"
+	},
+	"devDependencies": {
+		"@types/node": "24.12.4",
+		"shx": "0.4.0",
+		"vitest": "4.1.9"
+	}
+}
