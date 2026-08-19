@@ -1,6 +1,6 @@
 import type { AgentMessage } from "@earendil-works/diffex-agent-core";
 import { type ImageContent, type Message, type TextContent, type Usage, uuidv7 } from "@earendil-works/diffex-ai";
-import { randomUUID } from "crypto";
+import { createHash, randomUUID } from "crypto";
 import {
 	appendFileSync,
 	closeSync,
@@ -169,6 +169,22 @@ export interface SessionContext {
 	messages: AgentMessage[];
 	thinkingLevel: string;
 	model: { provider: string; modelId: string } | null;
+}
+
+export interface SessionEntryCursor {
+	/** Zero-based ordinal among non-header session entries. */
+	entryOrdinal: number;
+	entryId: string;
+	digest: {
+		kind: "content";
+		algorithm: "sha256";
+		value: string;
+	};
+}
+
+export interface SessionEntryCursorRange {
+	start: SessionEntryCursor;
+	end: SessionEntryCursor;
 }
 
 export interface SessionInfo {
@@ -1300,6 +1316,49 @@ export class SessionManager {
 	 */
 	getEntries(): SessionEntry[] {
 		return this.fileEntries.filter((e): e is SessionEntry => e.type !== "session");
+	}
+
+	/** Return the number of non-header entries admitted to this session. */
+	getEntryCount(): number {
+		return this.fileEntries.length > 0 && this.fileEntries[0].type === "session"
+			? this.fileEntries.length - 1
+			: this.fileEntries.length;
+	}
+
+	/**
+	 * Describe entries appended from the supplied zero-based ordinal through the
+	 * current end of the session.
+	 *
+	 * Digests cover the exact JSON representation produced by SessionManager for
+	 * each entry, giving trace consumers an immutable content reference without
+	 * exposing persistence internals.
+	 */
+	getEntryCursorRange(firstEntryOrdinal: number): SessionEntryCursorRange | undefined {
+		if (!Number.isInteger(firstEntryOrdinal) || firstEntryOrdinal < 0) {
+			throw new RangeError("Session entry ordinal must be a non-negative integer");
+		}
+
+		const entries = this.getEntries();
+		if (firstEntryOrdinal >= entries.length) return undefined;
+
+		const cursor = (entryOrdinal: number): SessionEntryCursor => {
+			const entry = entries[entryOrdinal];
+			if (!entry) throw new Error(`Session entry ${entryOrdinal} is unavailable`);
+			return {
+				entryOrdinal,
+				entryId: entry.id,
+				digest: {
+					kind: "content",
+					algorithm: "sha256",
+					value: createHash("sha256").update(JSON.stringify(entry)).digest("hex"),
+				},
+			};
+		};
+
+		return {
+			start: cursor(firstEntryOrdinal),
+			end: cursor(entries.length - 1),
+		};
 	}
 
 	/**
