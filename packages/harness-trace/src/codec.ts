@@ -1,17 +1,26 @@
 import type { AttributeValue, SpanAttributes, SpanStatus } from "@earendil-works/diffex-telemetry";
 import {
+	type AgentHarnessSessionSegmentCursor,
+	type CodingAgentV3EntryCursor,
+	type HarnessActivationReason,
+	type SessionAttachmentReason,
+	type SessionEntryDigest,
+	type SessionSegmentCursor,
 	TRACE_SCHEMA_VERSION,
 	type TraceFooterRecord,
+	type TraceHarnessActivateRecord,
 	type TraceHeaderRecord,
 	type TraceHealth,
 	type TraceMetadata,
 	type TraceProducer,
 	type TraceRecord,
-	type TraceSessionRangeRecord,
-	type TraceSessionReference,
+	type TraceRuntimeIdentity,
+	type TraceSessionAttachRecord,
+	type TraceSessionSegmentRecord,
 	type TraceSpanEndRecord,
 	type TraceSpanEventRecord,
 	type TraceSpanStartRecord,
+	type TraceTelemetrySchemaVersions,
 } from "./types.ts";
 
 function invalidRecord(message: string): never {
@@ -59,14 +68,14 @@ function nonEmptyStringValue(value: unknown, name: string): string {
 	return text;
 }
 
-function sequenceValue(value: unknown, name: string): number {
+function positiveIntegerValue(value: unknown, name: string): number {
 	if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) {
 		invalidRecord(`${name} must be a positive safe integer`);
 	}
 	return value;
 }
 
-function countValue(value: unknown, name: string): number {
+function nonNegativeIntegerValue(value: unknown, name: string): number {
 	if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
 		invalidRecord(`${name} must be a non-negative safe integer`);
 	}
@@ -126,8 +135,8 @@ function healthValue(value: unknown): TraceHealth {
 		invalidRecord("health flags must be boolean");
 	}
 	return {
-		droppedRecords: countValue(health.droppedRecords, "health.droppedRecords"),
-		writerErrors: countValue(health.writerErrors, "health.writerErrors"),
+		droppedRecords: nonNegativeIntegerValue(health.droppedRecords, "health.droppedRecords"),
+		writerErrors: nonNegativeIntegerValue(health.writerErrors, "health.writerErrors"),
 		writerDisabled: health.writerDisabled,
 		closed: health.closed,
 	};
@@ -144,34 +153,49 @@ function metadataValue(value: unknown): TraceMetadata {
 	return parsed;
 }
 
-function sessionValue(value: unknown): TraceSessionReference {
-	const session = recordValue(value, "session");
-	optionalKeys(session, ["id"], ["path"], "session");
+function telemetrySchemaVersionsValue(value: unknown): TraceTelemetrySchemaVersions {
+	const versions = recordValue(value, "producer.telemetrySchemaVersions");
+	const parsed: Record<string, number> = {};
+	for (const [name, version] of Object.entries(versions)) {
+		if (name.length === 0) invalidRecord("telemetry schema names must be non-empty");
+		parsed[name] = positiveIntegerValue(version, `producer.telemetrySchemaVersions.${name}`);
+	}
+	return parsed;
+}
+
+function runtimeValue(value: unknown): TraceRuntimeIdentity {
+	const runtime = recordValue(value, "producer.runtime");
+	exactKeys(runtime, ["kind", "version"], "producer.runtime");
 	return {
-		id: nonEmptyStringValue(session.id, "session.id"),
-		...(session.path === undefined ? {} : { path: nonEmptyStringValue(session.path, "session.path") }),
+		kind: nonEmptyStringValue(runtime.kind, "producer.runtime.kind"),
+		version: nonEmptyStringValue(runtime.version, "producer.runtime.version"),
 	};
 }
 
 function producerValue(value: unknown): TraceProducer {
 	const producer = recordValue(value, "producer");
-	exactKeys(producer, ["version", "codeRevision", "harnessVersion", "metadata"], "producer");
+	exactKeys(
+		producer,
+		["diffexVersion", "sourceRevision", "runtime", "telemetrySchemaVersions", "metadata"],
+		"producer",
+	);
 	return {
-		version: nonEmptyStringValue(producer.version, "producer.version"),
-		codeRevision: nonEmptyStringValue(producer.codeRevision, "producer.codeRevision"),
-		harnessVersion: nonEmptyStringValue(producer.harnessVersion, "producer.harnessVersion"),
+		diffexVersion: nonEmptyStringValue(producer.diffexVersion, "producer.diffexVersion"),
+		sourceRevision: nonEmptyStringValue(producer.sourceRevision, "producer.sourceRevision"),
+		runtime: runtimeValue(producer.runtime),
+		telemetrySchemaVersions: telemetrySchemaVersionsValue(producer.telemetrySchemaVersions),
 		metadata: metadataValue(producer.metadata),
 	};
 }
 
 function commonRecord(value: Record<string, unknown>, keys: readonly string[], name: string): void {
 	exactKeys(value, ["type", "sequence", "timestamp", ...keys], name);
-	sequenceValue(value.sequence, "sequence");
+	positiveIntegerValue(value.sequence, "sequence");
 	timestampValue(value.timestamp);
 }
 
 function parseHeader(value: Record<string, unknown>): TraceHeaderRecord {
-	commonRecord(value, ["schemaVersion", "traceId", "session", "producer"], "trace_header");
+	commonRecord(value, ["schemaVersion", "traceId", "producer"], "trace_header");
 	if (value.sequence !== 1) invalidRecord("trace_header sequence must be 1");
 	if (value.schemaVersion !== TRACE_SCHEMA_VERSION) invalidRecord("unsupported schema version");
 	return {
@@ -180,19 +204,71 @@ function parseHeader(value: Record<string, unknown>): TraceHeaderRecord {
 		timestamp: timestampValue(value.timestamp),
 		schemaVersion: TRACE_SCHEMA_VERSION,
 		traceId: nonEmptyStringValue(value.traceId, "traceId"),
-		session: sessionValue(value.session),
 		producer: producerValue(value.producer),
+	};
+}
+
+const sessionAttachmentReasons = new Set<SessionAttachmentReason>([
+	"startup",
+	"resume",
+	"new",
+	"import",
+	"fork",
+	"switch",
+]);
+
+function sessionAttachmentReasonValue(value: unknown): SessionAttachmentReason {
+	const reason = nonEmptyStringValue(value, "reason") as SessionAttachmentReason;
+	if (!sessionAttachmentReasons.has(reason)) invalidRecord("session attachment reason is invalid");
+	return reason;
+}
+
+function parseSessionAttach(value: Record<string, unknown>): TraceSessionAttachRecord {
+	commonRecord(
+		value,
+		["bindingId", "sessionId", "path", "sessionFormat", "formatVersion", "reason"],
+		"session_attach",
+	);
+	return {
+		type: "session_attach",
+		sequence: positiveIntegerValue(value.sequence, "sequence"),
+		timestamp: timestampValue(value.timestamp),
+		bindingId: nonEmptyStringValue(value.bindingId, "bindingId"),
+		sessionId: nonEmptyStringValue(value.sessionId, "sessionId"),
+		path: nonEmptyStringValue(value.path, "path"),
+		sessionFormat: nonEmptyStringValue(value.sessionFormat, "sessionFormat"),
+		formatVersion: positiveIntegerValue(value.formatVersion, "formatVersion"),
+		reason: sessionAttachmentReasonValue(value.reason),
+	};
+}
+
+const harnessActivationReasons = new Set<HarnessActivationReason>(["initial", "switch"]);
+
+function harnessActivationReasonValue(value: unknown): HarnessActivationReason {
+	const reason = nonEmptyStringValue(value, "reason") as HarnessActivationReason;
+	if (!harnessActivationReasons.has(reason)) invalidRecord("harness activation reason is invalid");
+	return reason;
+}
+
+function parseHarnessActivate(value: Record<string, unknown>): TraceHarnessActivateRecord {
+	commonRecord(value, ["harnessVersion", "reason"], "harness_activate");
+	return {
+		type: "harness_activate",
+		sequence: positiveIntegerValue(value.sequence, "sequence"),
+		timestamp: timestampValue(value.timestamp),
+		harnessVersion: nonEmptyStringValue(value.harnessVersion, "harnessVersion"),
+		reason: harnessActivationReasonValue(value.reason),
 	};
 }
 
 function parseSpanStart(value: Record<string, unknown>): TraceSpanStartRecord {
 	commonRecord(value, ["spanId", "parentSpanId", "name", "attributes"], "span_start");
-	const parentSpanId = value.parentSpanId === null ? null : sequenceValue(value.parentSpanId, "parentSpanId");
+	const parentSpanId = value.parentSpanId === null ? null : positiveIntegerValue(value.parentSpanId, "parentSpanId");
 	return {
 		type: "span_start",
-		sequence: sequenceValue(value.sequence, "sequence"),
+		sequence: positiveIntegerValue(value.sequence, "sequence"),
 		timestamp: timestampValue(value.timestamp),
-		spanId: sequenceValue(value.spanId, "spanId"),
+		spanId: positiveIntegerValue(value.spanId, "spanId"),
 		parentSpanId,
 		name: stringValue(value.name, "name"),
 		attributes: attributesValue(value.attributes, "attributes"),
@@ -203,9 +279,9 @@ function parseSpanEvent(value: Record<string, unknown>): TraceSpanEventRecord {
 	commonRecord(value, ["spanId", "name", "attributes"], "span_event");
 	return {
 		type: "span_event",
-		sequence: sequenceValue(value.sequence, "sequence"),
+		sequence: positiveIntegerValue(value.sequence, "sequence"),
 		timestamp: timestampValue(value.timestamp),
-		spanId: sequenceValue(value.spanId, "spanId"),
+		spanId: positiveIntegerValue(value.spanId, "spanId"),
 		name: stringValue(value.name, "name"),
 		attributes: attributesValue(value.attributes, "attributes"),
 	};
@@ -215,27 +291,63 @@ function parseSpanEnd(value: Record<string, unknown>): TraceSpanEndRecord {
 	commonRecord(value, ["spanId", "attributes", "status"], "span_end");
 	return {
 		type: "span_end",
-		sequence: sequenceValue(value.sequence, "sequence"),
+		sequence: positiveIntegerValue(value.sequence, "sequence"),
 		timestamp: timestampValue(value.timestamp),
-		spanId: sequenceValue(value.spanId, "spanId"),
+		spanId: positiveIntegerValue(value.spanId, "spanId"),
 		attributes: attributesValue(value.attributes, "attributes"),
 		status: statusValue(value.status),
 	};
 }
 
-function parseSessionRange(value: Record<string, unknown>): TraceSessionRangeRecord {
-	commonRecord(value, ["lane", "operationId", "startSequence", "endSequence"], "session_range");
-	const startSequence = sequenceValue(value.startSequence, "startSequence");
-	const endSequence = sequenceValue(value.endSequence, "endSequence");
-	if (endSequence < startSequence) invalidRecord("session range ends before it starts");
+function sessionEntryDigestValue(value: unknown, name: string): SessionEntryDigest {
+	const digest = recordValue(value, name);
+	exactKeys(digest, ["kind", "algorithm", "value"], name);
+	if (digest.kind !== "prefix" && digest.kind !== "content") invalidRecord(`${name}.kind is invalid`);
+	if (digest.algorithm !== "sha256") invalidRecord(`${name}.algorithm is invalid`);
+	const digestValue = nonEmptyStringValue(digest.value, `${name}.value`);
+	if (!/^[a-f0-9]{64}$/.test(digestValue)) invalidRecord(`${name}.value must be a lowercase SHA-256 digest`);
+	return { kind: digest.kind, algorithm: "sha256", value: digestValue };
+}
+
+function codingAgentEntryCursorValue(value: unknown, name: string): CodingAgentV3EntryCursor {
+	const cursor = recordValue(value, name);
+	exactKeys(cursor, ["entryOrdinal", "entryId", "digest"], name);
 	return {
-		type: "session_range",
-		sequence: sequenceValue(value.sequence, "sequence"),
+		entryOrdinal: nonNegativeIntegerValue(cursor.entryOrdinal, `${name}.entryOrdinal`),
+		entryId: nonEmptyStringValue(cursor.entryId, `${name}.entryId`),
+		digest: sessionEntryDigestValue(cursor.digest, `${name}.digest`),
+	};
+}
+
+function agentHarnessCursorValue(value: Record<string, unknown>): AgentHarnessSessionSegmentCursor {
+	exactKeys(value, ["kind", "startSequence", "endSequence"], "cursor");
+	const startSequence = positiveIntegerValue(value.startSequence, "cursor.startSequence");
+	const endSequence = positiveIntegerValue(value.endSequence, "cursor.endSequence");
+	if (endSequence < startSequence) invalidRecord("session segment ends before it starts");
+	return { kind: "agent-harness", startSequence, endSequence };
+}
+
+function sessionSegmentCursorValue(value: unknown): SessionSegmentCursor {
+	const cursor = recordValue(value, "cursor");
+	if (cursor.kind === "agent-harness") return agentHarnessCursorValue(cursor);
+	if (cursor.kind !== "coding-agent-v3") invalidRecord("cursor.kind is invalid");
+	exactKeys(cursor, ["kind", "start", "end"], "cursor");
+	const start = codingAgentEntryCursorValue(cursor.start, "cursor.start");
+	const end = codingAgentEntryCursorValue(cursor.end, "cursor.end");
+	if (end.entryOrdinal < start.entryOrdinal) invalidRecord("session segment ends before it starts");
+	return { kind: "coding-agent-v3", start, end };
+}
+
+function parseSessionSegment(value: Record<string, unknown>): TraceSessionSegmentRecord {
+	commonRecord(value, ["bindingId", "lane", "operationId", "cursor"], "session_segment");
+	return {
+		type: "session_segment",
+		sequence: positiveIntegerValue(value.sequence, "sequence"),
 		timestamp: timestampValue(value.timestamp),
+		bindingId: nonEmptyStringValue(value.bindingId, "bindingId"),
 		lane: nonEmptyStringValue(value.lane, "lane"),
 		operationId: nonEmptyStringValue(value.operationId, "operationId"),
-		startSequence,
-		endSequence,
+		cursor: sessionSegmentCursorValue(value.cursor),
 	};
 }
 
@@ -250,7 +362,7 @@ function parseFooter(value: Record<string, unknown>): TraceFooterRecord {
 	}
 	return {
 		type: "trace_footer",
-		sequence: sequenceValue(value.sequence, "sequence"),
+		sequence: positiveIntegerValue(value.sequence, "sequence"),
 		timestamp: timestampValue(value.timestamp),
 		terminationStatus: value.terminationStatus,
 		health: healthValue(value.health),
@@ -267,8 +379,9 @@ export function encodeTraceRecord(record: TraceRecord): string {
 /** Parses and validates exactly one trace record, with or without one trailing LF. */
 export function parseTraceRecord(line: string): TraceRecord {
 	const text = line.endsWith("\n") ? line.slice(0, -1) : line;
-	if (text.length === 0 || text.includes("\n") || text.includes("\r"))
+	if (text.length === 0 || text.includes("\n") || text.includes("\r")) {
 		invalidRecord("expected one LF-framed JSON value");
+	}
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(text);
@@ -279,14 +392,18 @@ export function parseTraceRecord(line: string): TraceRecord {
 	switch (value.type) {
 		case "trace_header":
 			return parseHeader(value);
+		case "session_attach":
+			return parseSessionAttach(value);
+		case "harness_activate":
+			return parseHarnessActivate(value);
 		case "span_start":
 			return parseSpanStart(value);
 		case "span_event":
 			return parseSpanEvent(value);
 		case "span_end":
 			return parseSpanEnd(value);
-		case "session_range":
-			return parseSessionRange(value);
+		case "session_segment":
+			return parseSessionSegment(value);
 		case "trace_footer":
 			return parseFooter(value);
 		default:

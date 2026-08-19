@@ -10,13 +10,19 @@ import {
 } from "@earendil-works/diffex-telemetry";
 import { encodeTraceRecord } from "./codec.ts";
 import {
+	type AgentHarnessSessionSegmentCursor,
+	type CodingAgentV3SessionSegmentCursor,
 	type CreateJsonlTraceContextOptions,
+	type HarnessActivation,
 	type JsonlTraceContext,
-	type SessionSequenceRange,
+	type SessionAttachment,
+	type SessionSegment,
+	type SessionSegmentCursor,
 	TRACE_SCHEMA_VERSION,
 	type TraceHealth,
 	type TraceMetadata,
 	type TraceRecord,
+	type TraceTelemetrySchemaVersions,
 	type TraceTerminationStatus,
 } from "./types.ts";
 
@@ -86,6 +92,33 @@ function copyMetadata(
 		copy[name] = value;
 	}
 	return copy;
+}
+
+function copyTelemetrySchemaVersions(versions: Readonly<Record<string, number>>): TraceTelemetrySchemaVersions {
+	return { ...versions };
+}
+
+function copySessionSegmentCursor(cursor: SessionSegmentCursor): SessionSegmentCursor {
+	if (cursor.kind === "agent-harness") {
+		return {
+			kind: "agent-harness",
+			startSequence: cursor.startSequence,
+			endSequence: cursor.endSequence,
+		} satisfies AgentHarnessSessionSegmentCursor;
+	}
+	return {
+		kind: "coding-agent-v3",
+		start: {
+			entryOrdinal: cursor.start.entryOrdinal,
+			entryId: cursor.start.entryId,
+			digest: { ...cursor.start.digest },
+		},
+		end: {
+			entryOrdinal: cursor.end.entryOrdinal,
+			entryId: cursor.end.entryId,
+			digest: { ...cursor.end.digest },
+		},
+	} satisfies CodingAgentV3SessionSegmentCursor;
 }
 
 class JsonlTraceRecorder implements JsonlTraceContext {
@@ -253,20 +286,54 @@ class JsonlTraceRecorder implements JsonlTraceContext {
 		return this.#startSpan(undefined, options, callback);
 	}
 
-	recordSessionRange(range: SessionSequenceRange): void {
+	attachSession(attachment: SessionAttachment): void {
 		if (this.#closed) return;
 		try {
 			this.#enqueue({
-				type: "session_range",
+				type: "session_attach",
 				sequence: this.#sequence(),
 				timestamp: this.#timestamp(),
-				lane: range.lane,
-				operationId: range.operationId,
-				startSequence: range.startSequence,
-				endSequence: range.endSequence,
+				bindingId: attachment.bindingId,
+				sessionId: attachment.sessionId,
+				path: attachment.path,
+				sessionFormat: attachment.sessionFormat,
+				formatVersion: attachment.formatVersion,
+				reason: attachment.reason,
 			});
 		} catch {
-			// Session reference recording is passive.
+			// Session attachment recording is passive.
+		}
+	}
+
+	activateHarness(activation: HarnessActivation): void {
+		if (this.#closed) return;
+		try {
+			this.#enqueue({
+				type: "harness_activate",
+				sequence: this.#sequence(),
+				timestamp: this.#timestamp(),
+				harnessVersion: activation.harnessVersion,
+				reason: activation.reason,
+			});
+		} catch {
+			// Harness activation recording is passive.
+		}
+	}
+
+	recordSessionSegment(segment: SessionSegment): void {
+		if (this.#closed) return;
+		try {
+			this.#enqueue({
+				type: "session_segment",
+				sequence: this.#sequence(),
+				timestamp: this.#timestamp(),
+				bindingId: segment.bindingId,
+				lane: segment.lane,
+				operationId: segment.operationId,
+				cursor: copySessionSegmentCursor(segment.cursor),
+			});
+		} catch {
+			// Session segment recording is passive.
 		}
 	}
 
@@ -320,14 +387,11 @@ export async function createJsonlTraceContext(options: CreateJsonlTraceContextOp
 		timestamp: new Date().toISOString(),
 		schemaVersion: TRACE_SCHEMA_VERSION,
 		traceId: options.traceId,
-		session: {
-			id: options.sessionId,
-			...(options.sessionPath === undefined ? {} : { path: options.sessionPath }),
-		},
 		producer: {
-			version: options.producerVersion,
-			codeRevision: options.codeRevision,
-			harnessVersion: options.harnessVersion,
+			diffexVersion: options.diffexVersion,
+			sourceRevision: options.sourceRevision,
+			runtime: { kind: options.runtimeKind, version: options.runtimeVersion },
+			telemetrySchemaVersions: copyTelemetrySchemaVersions(options.telemetrySchemaVersions),
 			metadata: copyMetadata(options.metadata),
 		},
 	};
