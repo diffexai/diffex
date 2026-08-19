@@ -1,10 +1,24 @@
-import type { EvolutionTarget, MutationBatch, MutationWriteResult } from "./contracts.ts";
+import type {
+	EvolutionLeaseToken,
+	EvolutionTarget,
+	HarnessActivationResult,
+	MutationBatch,
+	MutationWriteResult,
+} from "./contracts.ts";
 
 export type EvolutionTargetKind = EvolutionTarget["kind"];
 
 export interface EvolutionTargetWriter {
 	readonly kind: EvolutionTargetKind;
-	write(batch: MutationBatch): Promise<MutationWriteResult>;
+	write(
+		batch: MutationBatch,
+		context: { readonly idempotencyKey: string; readonly lease: EvolutionLeaseToken; readonly signal?: AbortSignal },
+	): Promise<MutationWriteResult>;
+	activate(
+		batch: MutationBatch,
+		writeResult: MutationWriteResult,
+		context: { readonly idempotencyKey: string; readonly lease: EvolutionLeaseToken; readonly signal?: AbortSignal },
+	): Promise<HarnessActivationResult>;
 }
 
 export interface EvolutionTargetAdapterRegistryOptions {

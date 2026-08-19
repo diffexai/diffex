@@ -25,8 +25,12 @@ function canonicalize(value: unknown, path: string): JsonValue {
 }
 
 export function computeEvolutionContentDigest(value: unknown): string {
-	const canonical = JSON.stringify(canonicalize(value, "$"));
+	const canonical = serializeEvolutionValue(value);
 	return `${CONTENT_DIGEST_PREFIX}${createHash("sha256").update(canonical).digest("hex")}`;
+}
+
+export function serializeEvolutionValue(value: unknown): string {
+	return JSON.stringify(canonicalize(value, "$"));
 }
 
 export interface CreateEvolutionArtifactMetadataOptions {

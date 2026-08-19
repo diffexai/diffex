@@ -50,14 +50,45 @@ export type EvolutionEvidenceOrigin = "product-runtime" | "evolution-pipeline";
 
 export interface EvolutionEvidenceSource {
 	readonly sourceId: string;
+	readonly materializationId: string;
+	readonly ingestionCursor: number;
 	readonly origin: EvolutionEvidenceOrigin;
 	readonly contentDigest: string;
 	readonly invocation: MaterializedInvocation;
 }
 
+export type EvolutionTriggerKind = "automatic" | "manual";
+
+export interface EvolutionRepositorySnapshot {
+	readonly repositoryId: string;
+	readonly rootPath: string;
+	readonly revision: string;
+}
+
+export interface EvolutionTokenMeasurement {
+	readonly estimatorVersion: string;
+	readonly estimatedTokens: number;
+}
+
+export interface EvolutionPromptVersions {
+	readonly reflector: string;
+	readonly curator: string;
+	readonly validator: string;
+	readonly writer: string;
+}
+
 export interface EvolutionInputSnapshot {
 	readonly metadata: EvolutionArtifactMetadata;
+	readonly trigger: EvolutionTriggerKind;
+	readonly repository: EvolutionRepositorySnapshot;
 	readonly harness: ImmutableHarnessSnapshot;
+	readonly expectedHarnessBaseVersion: HarnessVersion;
+	readonly ingestionHighWaterCursor: number;
+	readonly instructions: readonly InstructionDocumentSnapshot[];
+	readonly modelConfiguration: EvolutionModelIdentity;
+	readonly pipelineVersion: string;
+	readonly promptVersions: EvolutionPromptVersions;
+	readonly tokenMeasurement: EvolutionTokenMeasurement;
 	readonly evidenceSources: readonly EvolutionEvidenceSource[];
 }
 
@@ -205,95 +236,132 @@ export interface MutationBatch {
 
 export interface MutationWriteResult {
 	readonly batchId: string;
-	readonly status: "applied" | "failed";
+	readonly status: "failed" | "written";
+	readonly output: JsonObject | null;
+	readonly message: string | null;
+}
+
+export interface MutationWriteReceipt {
+	readonly metadata: EvolutionArtifactMetadata;
+	readonly batchId: string;
+	readonly idempotencyKey: string;
+	readonly result: MutationWriteResult;
+}
+
+export interface HarnessActivationResult {
+	readonly batchId: string;
+	readonly status: "activated" | "failed";
 	readonly resultingHarnessVersion: HarnessVersion | null;
 	readonly message: string | null;
 }
 
-export interface CreatedCheckpoint {
-	readonly schemaVersion: typeof EVOLUTION_SCHEMA_VERSION;
-	readonly stage: "created";
+export interface HarnessActivationReceipt {
+	readonly metadata: EvolutionArtifactMetadata;
+	readonly batchId: string;
+	readonly idempotencyKey: string;
+	readonly result: HarnessActivationResult;
 }
 
-export interface CorpusCheckpoint {
-	readonly schemaVersion: typeof EVOLUTION_SCHEMA_VERSION;
-	readonly stage: "corpus-prepared";
-	readonly corpusManifestId: string;
-	readonly instructionSnapshotId: string;
+export type EvolutionJobStage =
+	| "queued"
+	| "snapshotting"
+	| "counter-slot"
+	| "reflecting"
+	| "curating"
+	| "validating"
+	| "writing"
+	| "activating"
+	| "completed";
+
+export type ActiveEvolutionStage = Exclude<EvolutionJobStage, "completed">;
+
+export type EvolutionJobOutcome =
+	| "active"
+	| "completed"
+	| "interrupted"
+	| "retryable-failed"
+	| "terminal-failed"
+	| "superseded";
+
+export type EvolutionFailureReasonCode =
+	| "artifact-corrupt"
+	| "harness-base-conflict"
+	| "lease-lost"
+	| "model-call-failed"
+	| "pipeline-invariant"
+	| "shutdown"
+	| "snapshot-invalid"
+	| "stage-failed"
+	| "superseded-by-operator"
+	| "validation-rejected"
+	| "writer-failed";
+
+export interface EvolutionArtifactReference {
+	readonly artifactId: string;
+	readonly contentDigest: string;
 }
 
-export interface ReflectedCheckpoint {
+export interface EvolutionStageCheckpoint {
 	readonly schemaVersion: typeof EVOLUTION_SCHEMA_VERSION;
-	readonly stage: "reflected";
-	readonly reflectionNodeIds: readonly string[];
-	readonly lessonIds: readonly string[];
+	readonly stage: ActiveEvolutionStage;
+	readonly idempotencyKey: string;
+	readonly outputArtifacts: readonly EvolutionArtifactReference[];
+	readonly state: JsonObject;
+	readonly completedAt: string;
 }
 
-export interface CuratedCheckpoint {
-	readonly schemaVersion: typeof EVOLUTION_SCHEMA_VERSION;
-	readonly stage: "curated";
-	readonly proposalIds: readonly string[];
-}
+export type EvolutionCompletionKind = "activated" | "no-op";
 
-export interface ValidatedCheckpoint {
-	readonly schemaVersion: typeof EVOLUTION_SCHEMA_VERSION;
-	readonly stage: "validated";
-	readonly validationReportId: string;
-}
-
-export interface ScoredCheckpoint {
-	readonly schemaVersion: typeof EVOLUTION_SCHEMA_VERSION;
-	readonly stage: "scored";
-	readonly scoredProposalIds: readonly string[];
-}
-
-export interface WrittenCheckpoint {
-	readonly schemaVersion: typeof EVOLUTION_SCHEMA_VERSION;
-	readonly stage: "written";
-	readonly mutationBatchId: string | null;
-	readonly writeResult: MutationWriteResult | null;
-}
-
-export interface CompletedCheckpoint {
-	readonly schemaVersion: typeof EVOLUTION_SCHEMA_VERSION;
-	readonly stage: "completed";
+export interface EvolutionJobCompletion {
+	readonly kind: EvolutionCompletionKind;
 	readonly resultingHarnessVersion: HarnessVersion | null;
+	readonly processedEvidenceCursor: number;
 }
 
-export type ActiveEvolutionStage =
-	| "created"
-	| "corpus-prepared"
-	| "reflected"
-	| "curated"
-	| "validated"
-	| "scored"
-	| "written";
-
-export interface FailedCheckpoint {
-	readonly schemaVersion: typeof EVOLUTION_SCHEMA_VERSION;
-	readonly stage: "failed";
-	readonly failedStage: ActiveEvolutionStage;
-	readonly message: string;
+export interface EvolutionJobResolution {
+	readonly kind: "administratively-resolved" | "superseded";
+	readonly reasonCode: EvolutionFailureReasonCode;
+	readonly resolvedAt: string;
 }
-
-export type EvolutionCheckpoint =
-	| CreatedCheckpoint
-	| CorpusCheckpoint
-	| ReflectedCheckpoint
-	| CuratedCheckpoint
-	| ValidatedCheckpoint
-	| ScoredCheckpoint
-	| WrittenCheckpoint
-	| CompletedCheckpoint
-	| FailedCheckpoint;
 
 export interface EvolutionJob {
 	readonly metadata: EvolutionArtifactMetadata;
 	readonly jobId: string;
-	readonly inputSnapshotId: string;
-	readonly status: "completed" | "failed" | "running";
-	readonly checkpoint: EvolutionCheckpoint;
+	readonly inputSnapshot: EvolutionArtifactReference;
+	readonly trigger: EvolutionTriggerKind;
+	readonly evidenceRange: {
+		readonly afterCursor: number;
+		readonly throughCursor: number;
+	};
+	readonly stage: EvolutionJobStage;
+	readonly outcome: EvolutionJobOutcome;
+	readonly reasonCode: EvolutionFailureReasonCode | null;
+	readonly failureMessage: string | null;
+	readonly completion: EvolutionJobCompletion | null;
+	readonly resolution: EvolutionJobResolution | null;
+	readonly checkpoints: readonly EvolutionStageCheckpoint[];
+	readonly attempt: number;
+	readonly revision: number;
+	readonly createdAt: string;
 	readonly updatedAt: string;
+	readonly terminalAt: string | null;
+	readonly retryNotBefore: string | null;
+}
+
+export interface EvolutionProcessedEvidenceCursor {
+	readonly schemaVersion: typeof EVOLUTION_SCHEMA_VERSION;
+	readonly scope: EvolutionScope;
+	readonly sequence: number;
+	readonly committedByJobId: string | null;
+	readonly updatedAt: string;
+}
+
+export interface EvolutionLeaseToken {
+	readonly kind: "scope" | "writer";
+	readonly key: string;
+	readonly ownerId: string;
+	readonly fence: number;
+	readonly expiresAt: string;
 }
 
 export type EvolutionProposalLedgerDisposition =
@@ -317,7 +385,7 @@ export interface JobCreatedLedgerEvent extends EvolutionLedgerEventBase {
 
 export interface CheckpointSavedLedgerEvent extends EvolutionLedgerEventBase {
 	readonly type: "checkpoint-saved";
-	readonly checkpoint: EvolutionCheckpoint;
+	readonly checkpoint: EvolutionStageCheckpoint;
 }
 
 export interface ProposalDispositionLedgerEvent extends EvolutionLedgerEventBase {
@@ -335,12 +403,16 @@ export interface MutationWrittenLedgerEvent extends EvolutionLedgerEventBase {
 
 export interface JobCompletedLedgerEvent extends EvolutionLedgerEventBase {
 	readonly type: "job-completed";
+	readonly completionKind: EvolutionCompletionKind;
 	readonly resultingHarnessVersion: HarnessVersion | null;
+	readonly processedEvidenceCursor: number;
 }
 
 export interface JobFailedLedgerEvent extends EvolutionLedgerEventBase {
 	readonly type: "job-failed";
-	readonly failedStage: FailedCheckpoint["failedStage"];
+	readonly failedStage: ActiveEvolutionStage;
+	readonly outcome: Extract<EvolutionJobOutcome, "interrupted" | "retryable-failed" | "terminal-failed">;
+	readonly reasonCode: EvolutionFailureReasonCode;
 	readonly message: string;
 }
 

@@ -1,14 +1,28 @@
+import type { MaterializedInvocation } from "@earendil-works/diffex-harness-trace";
 import type {
 	EvidenceCorpusManifest,
-	EvolutionCheckpoint,
+	EvolutionArtifactReference,
 	EvolutionInputSnapshot,
 	EvolutionJob,
+	EvolutionJobStage,
+	EvolutionLeaseToken,
 	EvolutionLedgerEvent,
+	EvolutionModelIdentity,
+	EvolutionProcessedEvidenceCursor,
+	EvolutionPromptVersions,
 	EvolutionProposal,
+	EvolutionRepositorySnapshot,
+	EvolutionScope,
+	EvolutionStageCheckpoint,
+	EvolutionTriggerKind,
+	HarnessActivationReceipt,
+	ImmutableHarnessSnapshot,
+	InstructionDocumentSnapshot,
 	InstructionSnapshot,
 	JsonObject,
 	Lesson,
 	MutationBatch,
+	MutationWriteReceipt,
 	ReflectionNode,
 	ScoredProposal,
 	ValidationReport,
@@ -18,9 +32,11 @@ export type EvolutionArtifact =
 	| EvidenceCorpusManifest
 	| EvolutionInputSnapshot
 	| EvolutionProposal
+	| HarnessActivationReceipt
 	| InstructionSnapshot
 	| Lesson
 	| MutationBatch
+	| MutationWriteReceipt
 	| ReflectionNode
 	| ScoredProposal
 	| ValidationReport;
@@ -36,7 +52,9 @@ export interface EvolutionIdGenerator {
 export interface EvolutionModelRequest {
 	readonly stage: "curator" | "reflector";
 	readonly promptVersion: string;
+	readonly idempotencyKey: string;
 	readonly input: JsonObject;
+	readonly signal?: AbortSignal;
 }
 
 export interface EvolutionModelResponse {
@@ -51,15 +69,13 @@ export interface EvolutionModelExecutor {
 	execute(request: EvolutionModelRequest): Promise<EvolutionModelResponse>;
 }
 
-export interface InstructionLoader {
-	load(input: EvolutionInputSnapshot): Promise<InstructionSnapshot>;
-}
-
 export interface ReflectorInput {
 	readonly input: EvolutionInputSnapshot;
 	readonly corpus: EvidenceCorpusManifest;
 	readonly instructions: InstructionSnapshot;
 	readonly model: EvolutionModelExecutor;
+	readonly idempotencyKey: string;
+	readonly signal?: AbortSignal;
 }
 
 export interface ReflectionResult {
@@ -77,6 +93,8 @@ export interface CuratorInput {
 	readonly instructions: InstructionSnapshot;
 	readonly reflection: ReflectionResult;
 	readonly model: EvolutionModelExecutor;
+	readonly idempotencyKey: string;
+	readonly signal?: AbortSignal;
 }
 
 export interface Curator {
@@ -89,6 +107,7 @@ export interface ProposalValidationInput {
 	readonly instructions: InstructionSnapshot;
 	readonly reflection: ReflectionResult;
 	readonly proposals: readonly EvolutionProposal[];
+	readonly signal?: AbortSignal;
 }
 
 export interface ProposalValidator {
@@ -104,13 +123,41 @@ export interface ProposalScorer {
 }
 
 export interface EvolutionArtifactStore {
-	put(artifact: EvolutionArtifact): Promise<void>;
+	put(artifact: EvolutionArtifact): Promise<EvolutionArtifactReference>;
+	get(reference: EvolutionArtifactReference): Promise<EvolutionArtifact>;
 }
 
 export interface EvolutionJobStore {
-	create(job: EvolutionJob): Promise<void>;
-	save(job: EvolutionJob): Promise<void>;
+	create(job: EvolutionJob, lease: EvolutionLeaseToken): Promise<void>;
+	save(job: EvolutionJob, expectedRevision: number, lease: EvolutionLeaseToken): Promise<void>;
 	load(jobId: string): Promise<EvolutionJob | null>;
+	list(scope?: EvolutionScope): Promise<readonly EvolutionJob[]>;
+}
+
+export type EvolutionCursorCommitResult = "already-committed" | "committed" | "conflict";
+
+export interface EvolutionCursorStore {
+	load(scope: EvolutionScope): Promise<EvolutionProcessedEvidenceCursor>;
+	commit(
+		scope: EvolutionScope,
+		expectedSequence: number,
+		nextSequence: number,
+		jobId: string,
+		updatedAt: string,
+		lease: EvolutionLeaseToken,
+	): Promise<EvolutionCursorCommitResult>;
+}
+
+export interface EvolutionLeaseStore {
+	acquire(
+		kind: EvolutionLeaseToken["kind"],
+		key: string,
+		ownerId: string,
+		now: string,
+		ttlMs: number,
+	): Promise<EvolutionLeaseToken | null>;
+	renew(lease: EvolutionLeaseToken, now: string, ttlMs: number): Promise<EvolutionLeaseToken | null>;
+	release(lease: EvolutionLeaseToken): Promise<void>;
 }
 
 export interface EvolutionLedger {
@@ -121,10 +168,84 @@ export interface EvolutionLedger {
 export interface EvolutionProgressEvent {
 	readonly jobId: string;
 	readonly emittedAt: string;
-	readonly type: "checkpoint" | "failed" | "started";
-	readonly checkpoint: EvolutionCheckpoint;
+	readonly type: "checkpoint" | "completed" | "failed" | "started";
+	readonly stage: EvolutionJobStage;
+	readonly checkpoint?: EvolutionStageCheckpoint;
 }
 
 export interface EvolutionEventSink {
 	emit(event: EvolutionProgressEvent): void | Promise<void>;
+}
+
+export interface SuccessfulMaterialization {
+	readonly materializationId: string;
+	readonly ingestionCursor: number;
+	readonly origin: "product-runtime";
+	readonly contentDigest: string;
+	readonly invocation: MaterializedInvocation;
+}
+
+export interface EvolutionEvidenceCatalog {
+	highWaterCursor(scope: EvolutionScope): Promise<number>;
+	listSuccessful(
+		scope: EvolutionScope,
+		afterCursor: number,
+		throughCursor: number,
+	): Promise<readonly SuccessfulMaterialization[]>;
+}
+
+export interface EvolutionSnapshotContext {
+	readonly repository: EvolutionRepositorySnapshot;
+	readonly harness: ImmutableHarnessSnapshot;
+	readonly instructions: readonly InstructionDocumentSnapshot[];
+	readonly modelConfiguration: EvolutionModelIdentity;
+	readonly pipelineVersion: string;
+	readonly promptVersions: EvolutionPromptVersions;
+}
+
+export interface EvolutionSnapshotSource {
+	capture(scope: EvolutionScope, signal?: AbortSignal): Promise<EvolutionSnapshotContext>;
+}
+
+export interface EvolutionStageExecutionContext {
+	readonly job: EvolutionJob;
+	readonly input: EvolutionInputSnapshot;
+	readonly priorArtifacts: readonly EvolutionArtifact[];
+	readonly idempotencyKey: string;
+	readonly scopeLease: EvolutionLeaseToken;
+	readonly writerLease: EvolutionLeaseToken | null;
+	readonly signal?: AbortSignal;
+}
+
+export type EvolutionStageDirective = "complete-activated" | "complete-no-op" | "continue";
+
+export interface EvolutionStageExecutionResult {
+	readonly artifacts: readonly EvolutionArtifact[];
+	readonly ledgerEvents?: readonly EvolutionLedgerEvent[];
+	readonly state: JsonObject;
+	readonly directive: EvolutionStageDirective;
+	readonly resultingHarnessVersion?: string;
+}
+
+export interface EvolutionStageExecutor {
+	execute(context: EvolutionStageExecutionContext): Promise<EvolutionStageExecutionResult>;
+}
+
+export interface EvolutionJobCreationRequest {
+	readonly scope: EvolutionScope;
+	readonly trigger: EvolutionTriggerKind;
+	readonly signal?: AbortSignal;
+}
+
+export interface EvolutionJobRunner {
+	runJob(jobId: string, signal?: AbortSignal): Promise<EvolutionJob>;
+}
+
+export interface EvolutionWorkSource {
+	nextRunnableJob(now: string, signal?: AbortSignal): Promise<string | null>;
+	waitForWork(signal: AbortSignal): Promise<void>;
+}
+
+export interface InteractivePriorityGate {
+	waitUntilBackgroundAllowed(signal: AbortSignal): Promise<void>;
 }
