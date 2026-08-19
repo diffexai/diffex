@@ -18,6 +18,9 @@ One logical request to an AI provider
 
 | Name | Type | Required | Values | Notes | Description |
 |---|---|---:|---|---|---|
+| `diffex.invocation.id` | `string` | no |  | high cardinality | Owning in-process agent invocation id |
+| `diffex.turn.id` | `string` | no |  | high cardinality | Owning in-process turn id |
+| `diffex.request.id` | `string` | no |  | high cardinality | Logical provider request id |
 | `diffex.ai.operation` | `string` | yes | stream, fetch_deferred, cancel_deferred, generate_images |  | Logical provider operation |
 | `diffex.ai.provider` | `string` | yes |  |  | Selected provider id |
 | `diffex.ai.model` | `string` | yes |  |  | Requested model id |
@@ -45,6 +48,97 @@ All end attributes are optional completion enrichment.
 | `diffex.ai.stream.chunk_count` | `number` |  |  | Streamed update chunk count |
 | `diffex.ai.stream.time_to_first_chunk_ms` | `number` |  |  | Elapsed milliseconds to first update chunk |
 | `diffex.ai.error.type` | `string` |  | low cardinality | Provider or transport error class |
+
+#### Events
+
+No declared span events.
+
+## Active agent runtime schema
+
+Schema version: 1
+
+### `diffex.agent.run`
+
+One in-process agent prompt or continuation
+
+- Parents: root or caller-owned external span
+- Default status: `ok`
+- Error when: The invocation fails or is aborted
+
+#### Start attributes
+
+| Name | Type | Required | Values | Notes | Description |
+|---|---|---:|---|---|---|
+| `diffex.invocation.id` | `string` | yes |  | high cardinality | Invocation-local run id |
+| `diffex.session.id` | `string` | no |  | high cardinality | Caller-provided session id |
+| `diffex.agent.run_kind` | `string` | yes | prompt, continue |  | Agent admission path |
+
+#### End attributes
+
+All end attributes are optional completion enrichment.
+
+| Name | Type | Values | Notes | Description |
+|---|---|---|---|---|
+| `diffex.agent.outcome` | `string` | completed, failed, aborted |  | Terminal invocation outcome |
+| `diffex.agent.turn_count` | `number` |  |  | Number of admitted turns |
+
+#### Events
+
+No declared span events.
+
+### `diffex.agent.turn`
+
+One assistant response and its tool batch in the active agent runtime
+
+- Parents: `diffex.agent.run`
+- Default status: `ok`
+- Error when: The turn fails or is aborted
+
+#### Start attributes
+
+| Name | Type | Required | Values | Notes | Description |
+|---|---|---:|---|---|---|
+| `diffex.invocation.id` | `string` | yes |  | high cardinality | Owning agent invocation id |
+| `diffex.turn.id` | `string` | yes |  | high cardinality | Invocation-local turn id |
+| `diffex.turn.index` | `number` | yes |  |  | Zero-based turn index |
+
+#### End attributes
+
+All end attributes are optional completion enrichment.
+
+| Name | Type | Values | Notes | Description |
+|---|---|---|---|---|
+| `diffex.agent.outcome` | `string` | completed, failed, aborted |  | Terminal turn outcome |
+
+#### Events
+
+No declared span events.
+
+### `diffex.agent.tool`
+
+One tool call admitted by the active agent runtime
+
+- Parents: `diffex.agent.turn`
+- Default status: `ok`
+- Error when: The finalized tool result is an error
+
+#### Start attributes
+
+| Name | Type | Required | Values | Notes | Description |
+|---|---|---:|---|---|---|
+| `diffex.invocation.id` | `string` | yes |  | high cardinality | Owning agent invocation id |
+| `diffex.turn.id` | `string` | yes |  | high cardinality | Owning turn id |
+| `diffex.tool.call_id` | `string` | yes |  | high cardinality | Provider-assigned tool call id |
+| `diffex.tool.name` | `string` | yes |  |  | Requested tool name |
+
+#### End attributes
+
+All end attributes are optional completion enrichment.
+
+| Name | Type | Values | Notes | Description |
+|---|---|---|---|---|
+| `diffex.tool.is_error` | `boolean` |  |  | Whether the finalized tool result is an error |
+| `diffex.tool.outcome` | `string` | completed, failed, aborted |  | Terminal tool-call outcome |
 
 #### Events
 

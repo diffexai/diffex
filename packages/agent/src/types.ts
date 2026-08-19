@@ -13,6 +13,7 @@ import type {
 	ToolResultMessage,
 	Usage,
 } from "@earendil-works/diffex-ai";
+import type { TelemetryContext } from "@earendil-works/diffex-telemetry";
 import type { Static, TSchema } from "typebox";
 
 /**
@@ -148,6 +149,12 @@ export interface PrepareNextTurnContext extends ShouldStopAfterTurnContext {}
 
 export interface AgentLoopConfig extends SimpleStreamOptions {
 	model: Model<any>;
+	/** Explicit parent context for this in-process agent invocation. */
+	telemetryContext?: TelemetryContext;
+	/** Stable invocation id supplied by a higher-level admission boundary. */
+	invocationId?: string;
+	/** Stable turn id supplied by the active loop turn. */
+	turnId?: string;
 
 	/**
 	 * Converts AgentMessage[] to LLM-compatible Message[] before each LLM call.

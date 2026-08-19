@@ -82,6 +82,11 @@ export * from "./harness/session/search.ts";
 export * from "./harness/skills.ts";
 export * from "./harness/system-prompt.ts";
 export type {
+	AgentRuntimeSpan,
+	AgentRuntimeSpanEndAttributes,
+	AgentRuntimeSpanName,
+	AgentRuntimeSpanStartAttributes,
+	AgentRuntimeTelemetrySpan,
 	AiSpan,
 	AiSpanAttributes,
 	AiSpanEndAttributes,
@@ -100,9 +105,11 @@ export type {
 	HarnessTelemetrySpan,
 } from "./harness/telemetry.ts";
 export {
+	AGENT_RUNTIME_TELEMETRY_SCHEMA,
 	AGENT_TELEMETRY_SCHEMAS,
 	AI_TELEMETRY_SCHEMA,
 	HARNESS_TELEMETRY_SCHEMA,
+	startAgentRuntimeSpan,
 	startAiSpan,
 	startHarnessSpan,
 } from "./harness/telemetry.ts";

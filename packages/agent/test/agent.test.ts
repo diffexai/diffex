@@ -11,6 +11,7 @@ import {
 	type AgentEvent,
 	type AgentTool,
 	type AgentToolUpdateCallback,
+	InMemoryTelemetryContext,
 	type StreamFn,
 	setDefaultStreamFn,
 } from "../src/index.ts";
@@ -811,5 +812,104 @@ describe("Agent", () => {
 
 		await agent.prompt("hello again");
 		expect(receivedSessionId).toBe("session-def");
+	});
+
+	it("records nested runtime telemetry without changing tool execution", async () => {
+		const telemetryContext = new InMemoryTelemetryContext();
+		const schema = Type.Object({});
+		const tool: AgentTool<typeof schema> = {
+			name: "finish",
+			label: "Finish",
+			description: "Completes the run",
+			parameters: schema,
+			execute: async () => ({
+				content: [{ type: "text", text: "done" }],
+				details: {},
+				terminate: true,
+			}),
+		};
+		const agent = new Agent({
+			initialState: { tools: [tool] },
+			telemetryContext,
+			sessionId: "session-telemetry",
+			streamFn: (_model, _context, options) => {
+				expect(options?.telemetryContext).toBeDefined();
+				const stream = new MockAssistantStream();
+				queueMicrotask(() => {
+					stream.push({
+						type: "done",
+						reason: "toolUse",
+						message: createAssistantToolUseMessage([
+							{ type: "toolCall", id: "call-telemetry", name: "finish", arguments: {} },
+						]),
+					});
+				});
+				return stream;
+			},
+		});
+
+		await agent.prompt("run the tool");
+
+		const spans = telemetryContext.getSpans();
+		expect(spans.map((span) => span.name)).toEqual([
+			"diffex.agent.run",
+			"diffex.agent.turn",
+			"diffex.ai.request",
+			"diffex.agent.tool",
+		]);
+		const [runSpan, turnSpan, requestSpan, toolSpan] = spans;
+		expect(runSpan.parentId).toBeNull();
+		expect(turnSpan.parentId).toBe(runSpan.id);
+		expect(requestSpan.parentId).toBe(turnSpan.id);
+		expect(toolSpan.parentId).toBe(turnSpan.id);
+		expect(runSpan.attributes).toMatchObject({
+			"diffex.session.id": "session-telemetry",
+			"diffex.agent.outcome": "completed",
+			"diffex.agent.turn_count": 1,
+		});
+		expect(requestSpan.attributes["diffex.request.id"]).toEqual(expect.any(String));
+		expect(toolSpan.attributes).toMatchObject({
+			"diffex.tool.call_id": "call-telemetry",
+			"diffex.tool.outcome": "completed",
+			"diffex.tool.is_error": false,
+		});
+		expect(spans.every((span) => span.settled)).toBe(true);
+	});
+
+	it("marks returned provider failures without changing prompt settlement", async () => {
+		const telemetryContext = new InMemoryTelemetryContext();
+		const agent = new Agent({
+			telemetryContext,
+			streamFn: () => {
+				const stream = new MockAssistantStream();
+				queueMicrotask(() => {
+					stream.push({
+						type: "error",
+						reason: "error",
+						error: {
+							...createAssistantMessage(""),
+							stopReason: "error",
+							errorMessage: "provider failed",
+						},
+					});
+				});
+				return stream;
+			},
+		});
+
+		await expect(agent.prompt("hello")).resolves.toBeUndefined();
+
+		const spans = telemetryContext.getSpans();
+		expect(spans.find((span) => span.name === "diffex.agent.run")).toMatchObject({
+			attributes: { "diffex.agent.outcome": "failed", "diffex.agent.turn_count": 1 },
+			status: { status: "error" },
+		});
+		expect(spans.find((span) => span.name === "diffex.ai.request")).toMatchObject({
+			attributes: {
+				"diffex.ai.response.stop_reason": "error",
+				"diffex.ai.error.type": "AssistantMessageError",
+			},
+			status: { status: "error" },
+		});
 	});
 });

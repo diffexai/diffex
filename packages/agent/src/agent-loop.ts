@@ -8,8 +8,16 @@ import {
 	type Context,
 	EventStream,
 	type ToolResultMessage,
+	uuidv7,
 	validateToolArguments,
 } from "@earendil-works/diffex-ai";
+import { NOOP_TELEMETRY_CONTEXT } from "@earendil-works/diffex-telemetry";
+import {
+	type AgentRuntimeTelemetrySpan,
+	type AiTelemetrySpan,
+	startAgentRuntimeSpan,
+	startAiSpan,
+} from "./harness/telemetry.ts";
 import { getDefaultStreamFn } from "./stream-fn.ts";
 import type {
 	AgentContext,
@@ -100,21 +108,48 @@ export async function runAgentLoop(
 	signal: AbortSignal | undefined,
 	streamFn: StreamFn,
 ): Promise<AgentMessage[]> {
-	const newMessages: AgentMessage[] = [...prompts];
-	const currentContext: AgentContext = {
-		...context,
-		messages: [...context.messages, ...prompts],
-	};
+	const invocationId = config.invocationId ?? uuidv7();
+	return startAgentRuntimeSpan(
+		config.telemetryContext ?? NOOP_TELEMETRY_CONTEXT,
+		"diffex.agent.run",
+		{
+			"diffex.invocation.id": invocationId,
+			...(config.sessionId === undefined ? {} : { "diffex.session.id": config.sessionId }),
+			"diffex.agent.run_kind": "prompt",
+		},
+		async (span) => {
+			const newMessages: AgentMessage[] = [...prompts];
+			const currentContext: AgentContext = {
+				...context,
+				messages: [...context.messages, ...prompts],
+			};
+			const instrumentedConfig = { ...config, telemetryContext: span, invocationId };
 
-	await emit({ type: "agent_start" });
-	await emit({ type: "turn_start" });
-	for (const prompt of prompts) {
-		await emit({ type: "message_start", message: prompt });
-		await emit({ type: "message_end", message: prompt });
-	}
+			try {
+				await emit({ type: "agent_start" });
+				await emit({ type: "turn_start" });
+				for (const prompt of prompts) {
+					await emit({ type: "message_start", message: prompt });
+					await emit({ type: "message_end", message: prompt });
+				}
 
-	await runLoop(currentContext, newMessages, config, signal, emit, streamFn ?? getDefaultStreamFn());
-	return newMessages;
+				const turnCount = await runLoop(
+					currentContext,
+					newMessages,
+					instrumentedConfig,
+					signal,
+					emit,
+					streamFn ?? getDefaultStreamFn(),
+				);
+				settleAgentRunSpan(span, newMessages, turnCount);
+				return newMessages;
+			} catch (error) {
+				span.setAttributes({ "diffex.agent.outcome": signal?.aborted ? "aborted" : "failed" });
+				span.setStatus({ status: "error" });
+				throw error;
+			}
+		},
+	);
 }
 
 export async function runAgentLoopContinue(
@@ -132,14 +167,66 @@ export async function runAgentLoopContinue(
 		throw new Error("Cannot continue from message role: assistant");
 	}
 
-	const newMessages: AgentMessage[] = [];
-	const currentContext: AgentContext = { ...context };
+	const invocationId = config.invocationId ?? uuidv7();
+	return startAgentRuntimeSpan(
+		config.telemetryContext ?? NOOP_TELEMETRY_CONTEXT,
+		"diffex.agent.run",
+		{
+			"diffex.invocation.id": invocationId,
+			...(config.sessionId === undefined ? {} : { "diffex.session.id": config.sessionId }),
+			"diffex.agent.run_kind": "continue",
+		},
+		async (span) => {
+			const newMessages: AgentMessage[] = [];
+			const currentContext: AgentContext = { ...context };
+			const instrumentedConfig = { ...config, telemetryContext: span, invocationId };
 
-	await emit({ type: "agent_start" });
-	await emit({ type: "turn_start" });
+			try {
+				await emit({ type: "agent_start" });
+				await emit({ type: "turn_start" });
+				const turnCount = await runLoop(
+					currentContext,
+					newMessages,
+					instrumentedConfig,
+					signal,
+					emit,
+					streamFn ?? getDefaultStreamFn(),
+				);
+				settleAgentRunSpan(span, newMessages, turnCount);
+				return newMessages;
+			} catch (error) {
+				span.setAttributes({ "diffex.agent.outcome": signal?.aborted ? "aborted" : "failed" });
+				span.setStatus({ status: "error" });
+				throw error;
+			}
+		},
+	);
+}
 
-	await runLoop(currentContext, newMessages, config, signal, emit, streamFn ?? getDefaultStreamFn());
-	return newMessages;
+function getAgentOutcome(messages: AgentMessage[]): "completed" | "failed" | "aborted" {
+	for (let index = messages.length - 1; index >= 0; index--) {
+		const message = messages[index];
+		if (message.role !== "assistant") continue;
+		if (message.stopReason === "aborted") return "aborted";
+		if (message.stopReason === "error") return "failed";
+		return "completed";
+	}
+	return "completed";
+}
+
+function settleAgentRunSpan(
+	span: AgentRuntimeTelemetrySpan<"diffex.agent.run">,
+	messages: AgentMessage[],
+	turnCount: number,
+): void {
+	const outcome = getAgentOutcome(messages);
+	span.setAttributes({
+		"diffex.agent.outcome": outcome,
+		"diffex.agent.turn_count": turnCount,
+	});
+	if (outcome !== "completed") {
+		span.setStatus({ status: "error" });
+	}
 }
 
 function createAgentStream(): EventStream<AgentEvent, AgentMessage[]> {
@@ -159,10 +246,11 @@ async function runLoop(
 	signal: AbortSignal | undefined,
 	emit: AgentEventSink,
 	streamFunction: StreamFn,
-): Promise<void> {
+): Promise<number> {
 	let currentContext = initialContext;
 	let config = initialConfig;
 	let firstTurn = true;
+	let turnIndex = 0;
 	// Check for steering messages at start (user may have typed while waiting)
 	let pendingMessages: AgentMessage[] = (await config.getSteeringMessages?.()) || [];
 
@@ -172,91 +260,36 @@ async function runLoop(
 
 		// Inner loop: process tool calls and steering messages
 		while (hasMoreToolCalls || pendingMessages.length > 0) {
-			if (!firstTurn) {
-				await emit({ type: "turn_start" });
-			} else {
-				firstTurn = false;
-			}
-
-			// Process pending messages (inject before next assistant response)
-			if (pendingMessages.length > 0) {
-				for (const message of pendingMessages) {
-					await emit({ type: "message_start", message });
-					await emit({ type: "message_end", message });
-					currentContext.messages.push(message);
-					newMessages.push(message);
-				}
-				pendingMessages = [];
-			}
-
-			// Stream assistant response
-			const message = await streamAssistantResponse(currentContext, config, signal, emit, streamFunction);
-			newMessages.push(message);
-
-			if (message.stopReason === "error" || message.stopReason === "aborted") {
-				await emit({ type: "turn_end", message, toolResults: [] });
-				await emit({ type: "agent_end", messages: newMessages });
-				return;
-			}
-
-			// Check for tool calls
-			const toolCalls = message.content.filter((c) => c.type === "toolCall");
-
-			const toolResults: ToolResultMessage[] = [];
-			hasMoreToolCalls = false;
-			if (toolCalls.length > 0) {
-				// A "length" stop means the output was cut off by the token limit, so
-				// every tool call in the message may carry truncated arguments. Fail
-				// them all instead of executing potentially borked calls.
-				const executedToolBatch =
-					message.stopReason === "length"
-						? await failToolCallsFromTruncatedMessage(toolCalls, emit)
-						: await executeToolCalls(currentContext, message, config, signal, emit);
-				toolResults.push(...executedToolBatch.messages);
-				hasMoreToolCalls = !executedToolBatch.terminate;
-
-				for (const result of toolResults) {
-					currentContext.messages.push(result);
-					newMessages.push(result);
-				}
-			}
-
-			await emit({ type: "turn_end", message, toolResults });
-
-			const nextTurnContext = {
-				message,
-				toolResults,
-				context: currentContext,
-				newMessages,
-			};
-			const nextTurnSnapshot = await config.prepareNextTurn?.(nextTurnContext);
-			if (nextTurnSnapshot) {
-				currentContext = nextTurnSnapshot.context ?? currentContext;
-				config = {
-					...config,
-					model: nextTurnSnapshot.model ?? config.model,
-					reasoning:
-						nextTurnSnapshot.thinkingLevel === undefined
-							? config.reasoning
-							: nextTurnSnapshot.thinkingLevel === "off"
-								? undefined
-								: nextTurnSnapshot.thinkingLevel,
-				};
-			}
-
-			if (
-				await config.shouldStopAfterTurn?.({
-					message,
-					toolResults,
-					context: currentContext,
-					newMessages,
-				})
-			) {
-				await emit({ type: "agent_end", messages: newMessages });
-				return;
-			}
-
-			pendingMessages = (await config.getSteeringMessages?.()) || [];
+			const turnId = uuidv7();
+			const runTelemetryContext = config.telemetryContext ?? NOOP_TELEMETRY_CONTEXT;
+			const result = await startAgentRuntimeSpan(
+				runTelemetryContext,
+				"diffex.agent.turn",
+				{
+					"diffex.invocation.id": config.invocationId ?? uuidv7(),
+					"diffex.turn.id": turnId,
+					"diffex.turn.index": turnIndex,
+				},
+				(span) =>
+					runTurn({
+						currentContext,
+						newMessages,
+						config: { ...config, telemetryContext: span, turnId },
+						signal,
+						emit,
+						streamFunction,
+						pendingMessages,
+						firstTurn,
+						span,
+					}),
+			);
+			turnIndex++;
+			firstTurn = false;
+			currentContext = result.currentContext;
+			config = { ...result.config, telemetryContext: runTelemetryContext, turnId: undefined };
+			pendingMessages = result.pendingMessages;
+			hasMoreToolCalls = result.hasMoreToolCalls;
+			if (result.ended) return turnIndex;
 		}
 
 		// Agent would stop here. Check for follow-up messages.
@@ -272,6 +305,115 @@ async function runLoop(
 	}
 
 	await emit({ type: "agent_end", messages: newMessages });
+	return turnIndex;
+}
+
+interface RunTurnOptions {
+	currentContext: AgentContext;
+	newMessages: AgentMessage[];
+	config: AgentLoopConfig;
+	signal: AbortSignal | undefined;
+	emit: AgentEventSink;
+	streamFunction: StreamFn;
+	pendingMessages: AgentMessage[];
+	firstTurn: boolean;
+	span: AgentRuntimeTelemetrySpan<"diffex.agent.turn">;
+}
+
+interface RunTurnResult {
+	currentContext: AgentContext;
+	config: AgentLoopConfig;
+	pendingMessages: AgentMessage[];
+	hasMoreToolCalls: boolean;
+	ended: boolean;
+}
+
+async function runTurn(options: RunTurnOptions): Promise<RunTurnResult> {
+	let { currentContext, config, pendingMessages } = options;
+	if (!options.firstTurn) {
+		await options.emit({ type: "turn_start" });
+	}
+
+	if (pendingMessages.length > 0) {
+		for (const message of pendingMessages) {
+			await options.emit({ type: "message_start", message });
+			await options.emit({ type: "message_end", message });
+			currentContext.messages.push(message);
+			options.newMessages.push(message);
+		}
+		pendingMessages = [];
+	}
+
+	const message = await streamAssistantResponse(
+		currentContext,
+		config,
+		options.signal,
+		options.emit,
+		options.streamFunction,
+	);
+	options.newMessages.push(message);
+	const outcome =
+		message.stopReason === "aborted" ? "aborted" : message.stopReason === "error" ? "failed" : "completed";
+	options.span.setAttributes({ "diffex.agent.outcome": outcome });
+	if (outcome !== "completed") {
+		options.span.setStatus({ status: "error" });
+		await options.emit({ type: "turn_end", message, toolResults: [] });
+		await options.emit({ type: "agent_end", messages: options.newMessages });
+		return { currentContext, config, pendingMessages, hasMoreToolCalls: false, ended: true };
+	}
+
+	const toolCalls = message.content.filter((content) => content.type === "toolCall");
+	const toolResults: ToolResultMessage[] = [];
+	let hasMoreToolCalls = false;
+	if (toolCalls.length > 0) {
+		const executedToolBatch =
+			message.stopReason === "length"
+				? await failToolCallsFromTruncatedMessage(toolCalls, config, options.signal, options.emit)
+				: await executeToolCalls(currentContext, message, config, options.signal, options.emit);
+		toolResults.push(...executedToolBatch.messages);
+		hasMoreToolCalls = !executedToolBatch.terminate;
+		for (const result of toolResults) {
+			currentContext.messages.push(result);
+			options.newMessages.push(result);
+		}
+	}
+
+	await options.emit({ type: "turn_end", message, toolResults });
+	const nextTurnContext = {
+		message,
+		toolResults,
+		context: currentContext,
+		newMessages: options.newMessages,
+	};
+	const nextTurnSnapshot = await config.prepareNextTurn?.(nextTurnContext);
+	if (nextTurnSnapshot) {
+		currentContext = nextTurnSnapshot.context ?? currentContext;
+		config = {
+			...config,
+			model: nextTurnSnapshot.model ?? config.model,
+			reasoning:
+				nextTurnSnapshot.thinkingLevel === undefined
+					? config.reasoning
+					: nextTurnSnapshot.thinkingLevel === "off"
+						? undefined
+						: nextTurnSnapshot.thinkingLevel,
+		};
+	}
+
+	if (
+		await config.shouldStopAfterTurn?.({
+			message,
+			toolResults,
+			context: currentContext,
+			newMessages: options.newMessages,
+		})
+	) {
+		await options.emit({ type: "agent_end", messages: options.newMessages });
+		return { currentContext, config, pendingMessages, hasMoreToolCalls, ended: true };
+	}
+
+	pendingMessages = (await config.getSteeringMessages?.()) || [];
+	return { currentContext, config, pendingMessages, hasMoreToolCalls, ended: false };
 }
 
 /**
@@ -304,71 +446,124 @@ async function streamAssistantResponse(
 	// Resolve API key (important for expiring tokens)
 	const resolvedApiKey =
 		(config.getApiKey ? await config.getApiKey(config.model.provider) : undefined) || config.apiKey;
+	const requestId = uuidv7();
+	return startAiSpan(
+		config.telemetryContext ?? NOOP_TELEMETRY_CONTEXT,
+		"diffex.ai.request",
+		{
+			...(config.invocationId === undefined ? {} : { "diffex.invocation.id": config.invocationId }),
+			...(config.turnId === undefined ? {} : { "diffex.turn.id": config.turnId }),
+			"diffex.request.id": requestId,
+			"diffex.ai.operation": "stream",
+			"diffex.ai.provider": config.model.provider,
+			"diffex.ai.model": config.model.id,
+			"diffex.ai.api": config.model.api,
+			"diffex.ai.streaming": true,
+		},
+		async (span) => {
+			const startedAt = performance.now();
+			let firstChunkAt: number | undefined;
+			let chunkCount = 0;
+			const response = await streamFunction(config.model, llmContext, {
+				...config,
+				apiKey: resolvedApiKey,
+				signal,
+				telemetryContext: span,
+			});
 
-	const response = await streamFunction(config.model, llmContext, {
-		...config,
-		apiKey: resolvedApiKey,
-		signal,
-	});
+			let partialMessage: AssistantMessage | null = null;
+			let addedPartial = false;
 
-	let partialMessage: AssistantMessage | null = null;
-	let addedPartial = false;
+			for await (const event of response) {
+				chunkCount++;
+				firstChunkAt ??= performance.now();
+				switch (event.type) {
+					case "start":
+						partialMessage = event.partial;
+						context.messages.push(partialMessage);
+						addedPartial = true;
+						await emit({ type: "message_start", message: { ...partialMessage } });
+						break;
 
-	for await (const event of response) {
-		switch (event.type) {
-			case "start":
-				partialMessage = event.partial;
-				context.messages.push(partialMessage);
-				addedPartial = true;
-				await emit({ type: "message_start", message: { ...partialMessage } });
-				break;
+					case "text_start":
+					case "text_delta":
+					case "text_end":
+					case "thinking_start":
+					case "thinking_delta":
+					case "thinking_end":
+					case "toolcall_start":
+					case "toolcall_delta":
+					case "toolcall_end":
+						if (partialMessage) {
+							partialMessage = event.partial;
+							context.messages[context.messages.length - 1] = partialMessage;
+							await emit({
+								type: "message_update",
+								assistantMessageEvent: event,
+								message: { ...partialMessage },
+							});
+						}
+						break;
 
-			case "text_start":
-			case "text_delta":
-			case "text_end":
-			case "thinking_start":
-			case "thinking_delta":
-			case "thinking_end":
-			case "toolcall_start":
-			case "toolcall_delta":
-			case "toolcall_end":
-				if (partialMessage) {
-					partialMessage = event.partial;
-					context.messages[context.messages.length - 1] = partialMessage;
-					await emit({
-						type: "message_update",
-						assistantMessageEvent: event,
-						message: { ...partialMessage },
-					});
+					case "done":
+					case "error": {
+						const finalMessage = await response.result();
+						if (addedPartial) {
+							context.messages[context.messages.length - 1] = finalMessage;
+						} else {
+							context.messages.push(finalMessage);
+						}
+						if (!addedPartial) {
+							await emit({ type: "message_start", message: { ...finalMessage } });
+						}
+						await emit({ type: "message_end", message: finalMessage });
+						settleAiRequestSpan(span, finalMessage, chunkCount, startedAt, firstChunkAt);
+						return finalMessage;
+					}
 				}
-				break;
-
-			case "done":
-			case "error": {
-				const finalMessage = await response.result();
-				if (addedPartial) {
-					context.messages[context.messages.length - 1] = finalMessage;
-				} else {
-					context.messages.push(finalMessage);
-				}
-				if (!addedPartial) {
-					await emit({ type: "message_start", message: { ...finalMessage } });
-				}
-				await emit({ type: "message_end", message: finalMessage });
-				return finalMessage;
 			}
-		}
-	}
 
-	const finalMessage = await response.result();
-	if (addedPartial) {
-		context.messages[context.messages.length - 1] = finalMessage;
-	} else {
-		context.messages.push(finalMessage);
-		await emit({ type: "message_start", message: { ...finalMessage } });
+			const finalMessage = await response.result();
+			if (addedPartial) {
+				context.messages[context.messages.length - 1] = finalMessage;
+			} else {
+				context.messages.push(finalMessage);
+				await emit({ type: "message_start", message: { ...finalMessage } });
+			}
+			await emit({ type: "message_end", message: finalMessage });
+			settleAiRequestSpan(span, finalMessage, chunkCount, startedAt, firstChunkAt);
+			return finalMessage;
+		},
+	);
+}
+
+function settleAiRequestSpan(
+	span: AiTelemetrySpan<"diffex.ai.request">,
+	message: AssistantMessage,
+	chunkCount: number,
+	startedAt: number,
+	firstChunkAt: number | undefined,
+): void {
+	const stopReason =
+		message.stopReason === "pending" ? undefined : message.stopReason === "toolUse" ? "tool_use" : message.stopReason;
+	span.setAttributes({
+		...(message.responseModel === undefined ? {} : { "diffex.ai.response.model": message.responseModel }),
+		...(message.responseId === undefined ? {} : { "diffex.ai.response.id": message.responseId }),
+		...(stopReason === undefined ? {} : { "diffex.ai.response.stop_reason": stopReason }),
+		"diffex.ai.usage.input_tokens": message.usage.input,
+		"diffex.ai.usage.output_tokens": message.usage.output,
+		"diffex.ai.usage.cache_read_tokens": message.usage.cacheRead,
+		"diffex.ai.usage.cache_write_tokens": message.usage.cacheWrite,
+		...(message.usage.reasoning === undefined ? {} : { "diffex.ai.usage.reasoning_tokens": message.usage.reasoning }),
+		"diffex.ai.usage.total_tokens": message.usage.totalTokens,
+		"diffex.ai.usage.cost": message.usage.cost.total,
+		"diffex.ai.stream.chunk_count": chunkCount,
+		...(firstChunkAt === undefined ? {} : { "diffex.ai.stream.time_to_first_chunk_ms": firstChunkAt - startedAt }),
+		...(message.stopReason === "error" ? { "diffex.ai.error.type": "AssistantMessageError" } : {}),
+	});
+	if (message.stopReason === "error" || message.stopReason === "aborted") {
+		span.setStatus({ status: "error" });
 	}
-	await emit({ type: "message_end", message: finalMessage });
-	return finalMessage;
 }
 
 /**
@@ -380,6 +575,8 @@ async function streamAssistantResponse(
  */
 async function failToolCallsFromTruncatedMessage(
 	toolCalls: AgentToolCall[],
+	config: AgentLoopConfig,
+	signal: AbortSignal | undefined,
 	emit: AgentEventSink,
 ): Promise<ExecutedToolCallBatch> {
 	const messages: ToolResultMessage[] = [];
@@ -390,13 +587,13 @@ async function failToolCallsFromTruncatedMessage(
 			toolName: toolCall.name,
 			args: toolCall.arguments,
 		});
-		const finalized: FinalizedToolCallOutcome = {
+		const finalized = await withToolSpan(config, signal, toolCall, async () => ({
 			toolCall,
 			result: createErrorToolResult(
 				`Tool call "${toolCall.name}" was not executed: the response hit the output token limit, so its arguments may be truncated. Re-issue the tool call with complete arguments.`,
 			),
 			isError: true,
-		};
+		}));
 		await emitToolExecutionEnd(finalized, emit);
 		const toolResultMessage = createToolResultMessage(finalized);
 		await emitToolResultMessage(toolResultMessage, emit);
@@ -449,25 +646,18 @@ async function executeToolCallsSequential(
 			args: toolCall.arguments,
 		});
 
-		const preparation = await prepareToolCall(currentContext, assistantMessage, toolCall, config, signal);
-		let finalized: FinalizedToolCallOutcome;
-		if (preparation.kind === "immediate") {
-			finalized = {
-				toolCall,
-				result: preparation.result,
-				isError: preparation.isError,
-			};
-		} else {
+		const finalized = await withToolSpan(config, signal, toolCall, async () => {
+			const preparation = await prepareToolCall(currentContext, assistantMessage, toolCall, config, signal);
+			if (preparation.kind === "immediate") {
+				return {
+					toolCall,
+					result: preparation.result,
+					isError: preparation.isError,
+				};
+			}
 			const executed = await executePreparedToolCall(preparation, signal, emit);
-			finalized = await finalizeExecutedToolCall(
-				currentContext,
-				assistantMessage,
-				preparation,
-				executed,
-				config,
-				signal,
-			);
-		}
+			return finalizeExecutedToolCall(currentContext, assistantMessage, preparation, executed, config, signal);
+		});
 
 		await emitToolExecutionEnd(finalized, emit);
 		const toolResultMessage = createToolResultMessage(finalized);
@@ -506,11 +696,11 @@ async function executeToolCallsParallel(
 
 		const preparation = await prepareToolCall(currentContext, assistantMessage, toolCall, config, signal);
 		if (preparation.kind === "immediate") {
-			const finalized = {
+			const finalized = await withToolSpan(config, signal, toolCall, async () => ({
 				toolCall,
 				result: preparation.result,
 				isError: preparation.isError,
-			} satisfies FinalizedToolCallOutcome;
+			}));
 			await emitToolExecutionEnd(finalized, emit);
 			finalizedCalls.push(finalized);
 			if (signal?.aborted) {
@@ -520,15 +710,10 @@ async function executeToolCallsParallel(
 		}
 
 		finalizedCalls.push(async () => {
-			const executed = await executePreparedToolCall(preparation, signal, emit);
-			const finalized = await finalizeExecutedToolCall(
-				currentContext,
-				assistantMessage,
-				preparation,
-				executed,
-				config,
-				signal,
-			);
+			const finalized = await withToolSpan(config, signal, toolCall, async () => {
+				const executed = await executePreparedToolCall(preparation, signal, emit);
+				return finalizeExecutedToolCall(currentContext, assistantMessage, preparation, executed, config, signal);
+			});
 			await emitToolExecutionEnd(finalized, emit);
 			return finalized;
 		});
@@ -578,6 +763,34 @@ type FinalizedToolCallOutcome = {
 };
 
 type FinalizedToolCallEntry = FinalizedToolCallOutcome | (() => Promise<FinalizedToolCallOutcome>);
+
+async function withToolSpan(
+	config: AgentLoopConfig,
+	signal: AbortSignal | undefined,
+	toolCall: AgentToolCall,
+	run: () => Promise<FinalizedToolCallOutcome>,
+): Promise<FinalizedToolCallOutcome> {
+	return startAgentRuntimeSpan(
+		config.telemetryContext ?? NOOP_TELEMETRY_CONTEXT,
+		"diffex.agent.tool",
+		{
+			"diffex.invocation.id": config.invocationId ?? uuidv7(),
+			"diffex.turn.id": config.turnId ?? uuidv7(),
+			"diffex.tool.call_id": toolCall.id,
+			"diffex.tool.name": toolCall.name,
+		},
+		async (span) => {
+			const finalized = await run();
+			const outcome = finalized.isError ? (signal?.aborted ? "aborted" : "failed") : "completed";
+			span.setAttributes({
+				"diffex.tool.is_error": finalized.isError,
+				"diffex.tool.outcome": outcome,
+			});
+			if (finalized.isError) span.setStatus({ status: "error" });
+			return finalized;
+		},
+	);
+}
 
 function shouldTerminateToolBatch(finalizedCalls: FinalizedToolCallOutcome[]): boolean {
 	return finalizedCalls.length > 0 && finalizedCalls.every((finalized) => finalized.result.terminate === true);

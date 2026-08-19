@@ -8,6 +8,7 @@ import {
 import { describe, expect, expectTypeOf, it } from "vitest";
 import { renderAgentTelemetrySchemaMarkdown } from "../../scripts/generate-telemetry-docs.ts";
 import {
+	AGENT_RUNTIME_TELEMETRY_SCHEMA,
 	AGENT_TELEMETRY_SCHEMAS,
 	AI_TELEMETRY_SCHEMA,
 	type AiSpanEndAttributes,
@@ -20,10 +21,20 @@ import {
 } from "../../src/harness/telemetry.ts";
 
 describe("agent telemetry schemas", () => {
-	it("serializes both schemas and generates the checked-in reference", () => {
+	it("serializes the schemas and generates the checked-in reference", () => {
 		expect(() => JSON.stringify(AI_TELEMETRY_SCHEMA)).not.toThrow();
+		expect(() => JSON.stringify(AGENT_RUNTIME_TELEMETRY_SCHEMA)).not.toThrow();
 		expect(() => JSON.stringify(HARNESS_TELEMETRY_SCHEMA)).not.toThrow();
-		expect(AGENT_TELEMETRY_SCHEMAS).toEqual([AI_TELEMETRY_SCHEMA, HARNESS_TELEMETRY_SCHEMA]);
+		expect(AGENT_TELEMETRY_SCHEMAS).toEqual([
+			AI_TELEMETRY_SCHEMA,
+			AGENT_RUNTIME_TELEMETRY_SCHEMA,
+			HARNESS_TELEMETRY_SCHEMA,
+		]);
+		expect(Object.keys(AGENT_RUNTIME_TELEMETRY_SCHEMA.spans)).toEqual([
+			"diffex.agent.run",
+			"diffex.agent.turn",
+			"diffex.agent.tool",
+		]);
 		expect(Object.keys(HARNESS_TELEMETRY_SCHEMA.spans)).toEqual([
 			"diffex.harness.run",
 			"diffex.harness.compaction",

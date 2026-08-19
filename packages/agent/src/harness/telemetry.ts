@@ -46,6 +46,24 @@ export const AI_TELEMETRY_SCHEMA = {
 			description: "One logical request to an AI provider",
 			parents: { kind: "any" },
 			startAttributes: {
+				"diffex.invocation.id": {
+					type: "string",
+					required: false,
+					cardinality: "high",
+					description: "Owning in-process agent invocation id",
+				},
+				"diffex.turn.id": {
+					type: "string",
+					required: false,
+					cardinality: "high",
+					description: "Owning in-process turn id",
+				},
+				"diffex.request.id": {
+					type: "string",
+					required: false,
+					cardinality: "high",
+					description: "Logical provider request id",
+				},
 				"diffex.ai.operation": {
 					type: "string",
 					required: true,
@@ -142,6 +160,148 @@ export function startAiSpan<Name extends AiSpanName, const Attributes extends Ai
 	callback: (span: AiTelemetrySpan<Name>) => Result | Promise<Result>,
 ): Promise<Result> {
 	return telemetryContext.startSpan({ name, attributes }, (span) => callback(span as AiTelemetrySpan<Name>));
+}
+
+export const AGENT_RUNTIME_TELEMETRY_SCHEMA = {
+	version: 1,
+	spans: {
+		"diffex.agent.run": {
+			description: "One in-process agent prompt or continuation",
+			parents: { kind: "root_or_external" },
+			startAttributes: {
+				"diffex.invocation.id": {
+					type: "string",
+					required: true,
+					cardinality: "high",
+					description: "Invocation-local run id",
+				},
+				"diffex.session.id": {
+					type: "string",
+					required: false,
+					cardinality: "high",
+					description: "Caller-provided session id",
+				},
+				"diffex.agent.run_kind": {
+					type: "string",
+					required: true,
+					values: ["prompt", "continue"],
+					description: "Agent admission path",
+				},
+			},
+			endAttributes: {
+				"diffex.agent.outcome": {
+					type: "string",
+					values: ["completed", "failed", "aborted"],
+					description: "Terminal invocation outcome",
+				},
+				"diffex.agent.turn_count": {
+					type: "number",
+					description: "Number of admitted turns",
+				},
+			},
+			status: { default: "ok", errorWhen: "The invocation fails or is aborted" },
+		},
+		"diffex.agent.turn": {
+			description: "One assistant response and its tool batch in the active agent runtime",
+			parents: { kind: "spans", spans: ["diffex.agent.run"] },
+			startAttributes: {
+				"diffex.invocation.id": {
+					type: "string",
+					required: true,
+					cardinality: "high",
+					description: "Owning agent invocation id",
+				},
+				"diffex.turn.id": {
+					type: "string",
+					required: true,
+					cardinality: "high",
+					description: "Invocation-local turn id",
+				},
+				"diffex.turn.index": {
+					type: "number",
+					required: true,
+					description: "Zero-based turn index",
+				},
+			},
+			endAttributes: {
+				"diffex.agent.outcome": {
+					type: "string",
+					values: ["completed", "failed", "aborted"],
+					description: "Terminal turn outcome",
+				},
+			},
+			status: { default: "ok", errorWhen: "The turn fails or is aborted" },
+		},
+		"diffex.agent.tool": {
+			description: "One tool call admitted by the active agent runtime",
+			parents: { kind: "spans", spans: ["diffex.agent.turn"] },
+			startAttributes: {
+				"diffex.invocation.id": {
+					type: "string",
+					required: true,
+					cardinality: "high",
+					description: "Owning agent invocation id",
+				},
+				"diffex.turn.id": {
+					type: "string",
+					required: true,
+					cardinality: "high",
+					description: "Owning turn id",
+				},
+				"diffex.tool.call_id": {
+					type: "string",
+					required: true,
+					cardinality: "high",
+					description: "Provider-assigned tool call id",
+				},
+				"diffex.tool.name": {
+					type: "string",
+					required: true,
+					description: "Requested tool name",
+				},
+			},
+			endAttributes: {
+				"diffex.tool.is_error": {
+					type: "boolean",
+					description: "Whether the finalized tool result is an error",
+				},
+				"diffex.tool.outcome": {
+					type: "string",
+					values: ["completed", "failed", "aborted"],
+					description: "Terminal tool-call outcome",
+				},
+			},
+			status: { default: "ok", errorWhen: "The finalized tool result is an error" },
+		},
+	},
+} as const satisfies TelemetrySchemaDefinition;
+
+export type AgentRuntimeSpanName = TelemetrySchemaSpanName<typeof AGENT_RUNTIME_TELEMETRY_SCHEMA>;
+export type AgentRuntimeSpanStartAttributes<Name extends AgentRuntimeSpanName> = TelemetrySchemaSpanStartAttributes<
+	typeof AGENT_RUNTIME_TELEMETRY_SCHEMA,
+	Name
+>;
+export type AgentRuntimeSpanEndAttributes<Name extends AgentRuntimeSpanName> = TelemetrySchemaSpanEndAttributes<
+	typeof AGENT_RUNTIME_TELEMETRY_SCHEMA,
+	Name
+>;
+export type AgentRuntimeTelemetrySpan<Name extends AgentRuntimeSpanName> = SchemaTelemetrySpan<
+	typeof AGENT_RUNTIME_TELEMETRY_SCHEMA,
+	Name
+>;
+export type AgentRuntimeSpan = TelemetrySchemaSpanUnion<typeof AGENT_RUNTIME_TELEMETRY_SCHEMA>;
+
+export function startAgentRuntimeSpan<
+	Name extends AgentRuntimeSpanName,
+	const Attributes extends AgentRuntimeSpanStartAttributes<Name>,
+	Result,
+>(
+	telemetryContext: TelemetryContext,
+	name: Name,
+	attributes: ExactTelemetryAttributes<AgentRuntimeSpanStartAttributes<Name>, Attributes>,
+	callback: (span: AgentRuntimeTelemetrySpan<Name>) => Result | Promise<Result>,
+): Promise<Result> {
+	return telemetryContext.startSpan({ name, attributes }, (span) => callback(span as AgentRuntimeTelemetrySpan<Name>));
 }
 
 const HOOK_NAMES = [
@@ -576,8 +736,12 @@ export const HARNESS_TELEMETRY_SCHEMA = {
 	},
 } as const satisfies TelemetrySchemaDefinition;
 
-/** Combined typed span vocabulary for agent-owned AI-request and harness telemetry. */
-export const AGENT_TELEMETRY_SCHEMAS = [AI_TELEMETRY_SCHEMA, HARNESS_TELEMETRY_SCHEMA] as const;
+/** Combined typed span vocabulary for agent-owned AI-request, runtime, and harness telemetry. */
+export const AGENT_TELEMETRY_SCHEMAS = [
+	AI_TELEMETRY_SCHEMA,
+	AGENT_RUNTIME_TELEMETRY_SCHEMA,
+	HARNESS_TELEMETRY_SCHEMA,
+] as const;
 
 export type HarnessSpanName = TelemetrySchemaSpanName<typeof HARNESS_TELEMETRY_SCHEMA>;
 export type HarnessSpanStartAttributes<Name extends HarnessSpanName> = TelemetrySchemaSpanStartAttributes<
