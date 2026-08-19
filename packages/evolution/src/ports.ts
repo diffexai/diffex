@@ -87,7 +87,7 @@ export interface PreReflectionStage {
 export interface ReflectorInput {
 	readonly input: EvolutionInputSnapshot;
 	readonly corpus: EvidenceCorpusManifest;
-	readonly counterReport?: CounterReport | null;
+	readonly counterReport: CounterReport | null;
 	readonly instructions: InstructionSnapshot;
 	readonly model: EvolutionModelExecutor;
 	readonly idempotencyKey: string;

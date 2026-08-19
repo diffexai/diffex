@@ -352,6 +352,7 @@ describe("checkpointed evolution pipeline", () => {
 				content,
 			});
 		const modelKeys: string[] = [];
+		const reflectorCounterReports: unknown[] = [];
 		const writeKeys = new Set<string>();
 		const activationKeys = new Set<string>();
 		const target: EvolutionTargetWriter = {
@@ -385,6 +386,7 @@ describe("checkpointed evolution pipeline", () => {
 			},
 			reflector: {
 				async reflect(input) {
+					reflectorCounterReports.push(input.counterReport);
 					await input.model.execute({
 						stage: "reflector",
 						promptVersion: "reflector-v1",
@@ -479,6 +481,9 @@ describe("checkpointed evolution pipeline", () => {
 		const completed = await fixture.controlPlane.runJob(created.jobId);
 
 		expect(completed.outcome).toBe("completed");
+		const counterCheckpoint = completed.checkpoints.find((checkpoint) => checkpoint.stage === "counter-slot");
+		expect(counterCheckpoint).toMatchObject({ outputArtifacts: [], state: {} });
+		expect(reflectorCounterReports).toEqual([null]);
 		expect(modelKeys).toHaveLength(2);
 		expect(new Set(modelKeys).size).toBe(2);
 		expect(writeKeys.size).toBe(1);

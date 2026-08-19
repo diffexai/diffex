@@ -1,4 +1,5 @@
 import type {
+	CounterReport,
 	EvidenceCorpusManifest,
 	EvolutionArtifactMetadata,
 	EvolutionArtifactProducer,
@@ -18,6 +19,7 @@ import type {
 	ScoredProposal,
 	ValidationReport,
 } from "./contracts.ts";
+import { DisabledPreReflectionStage } from "./counter.ts";
 import { EvolutionExecutionError } from "./errors.ts";
 import type {
 	Curator,
@@ -26,6 +28,7 @@ import type {
 	EvolutionStageExecutionContext,
 	EvolutionStageExecutionResult,
 	EvolutionStageExecutor,
+	PreReflectionStage,
 	ProposalScorer,
 	ProposalValidator,
 	ReflectionResult,
@@ -44,6 +47,7 @@ export interface EvolutionPipelineDependencies {
 	readonly validator: ProposalValidator;
 	readonly scorer: ProposalScorer;
 	readonly targets: EvolutionTargetAdapterRegistry;
+	readonly preReflectionStage?: PreReflectionStage;
 }
 
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
@@ -52,6 +56,10 @@ function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
 
 function isCorpus(artifact: EvolutionArtifact): artifact is EvidenceCorpusManifest {
 	return "excludedSources" in artifact;
+}
+
+function isCounterReport(artifact: EvolutionArtifact): artifact is CounterReport {
+	return "artifactKind" in artifact && artifact.artifactKind === "counter-report";
 }
 
 function isInstructionSnapshot(artifact: EvolutionArtifact): artifact is InstructionSnapshot {
@@ -106,6 +114,16 @@ function requireOne<T>(values: readonly T[], description: string): T {
 		});
 	}
 	return values[0] as T;
+}
+
+function optionalOne<T>(values: readonly T[], description: string): T | null {
+	if (values.length > 1) {
+		throw new EvolutionExecutionError(`Expected at most one ${description}, found ${values.length}`, {
+			reasonCode: "artifact-corrupt",
+			retryable: false,
+		});
+	}
+	return values[0] ?? null;
 }
 
 function assertScoredProposals(
@@ -194,10 +212,12 @@ function stageFailure(
 
 export class EvolutionPipeline implements EvolutionStageExecutor {
 	readonly #dependencies: EvolutionPipelineDependencies;
+	readonly #preReflectionStage: PreReflectionStage;
 	readonly #producer: EvolutionArtifactProducer;
 
 	constructor(dependencies: EvolutionPipelineDependencies) {
 		this.#dependencies = dependencies;
+		this.#preReflectionStage = dependencies.preReflectionStage ?? new DisabledPreReflectionStage();
 		this.#producer = {
 			name: PIPELINE_PRODUCER_NAME,
 			version: dependencies.version,
@@ -337,12 +357,14 @@ export class EvolutionPipeline implements EvolutionStageExecutor {
 
 	#pipelineInputs(context: EvolutionStageExecutionContext): {
 		readonly corpus: EvidenceCorpusManifest;
+		readonly counterReport: CounterReport | null;
 		readonly instructions: InstructionSnapshot;
 		readonly reflection: ReflectionResult;
 		readonly proposals: readonly EvolutionProposal[];
 	} {
 		return {
 			corpus: requireOne(context.priorArtifacts.filter(isCorpus), "corpus manifest"),
+			counterReport: optionalOne(context.priorArtifacts.filter(isCounterReport), "Counter report"),
 			instructions: requireOne(context.priorArtifacts.filter(isInstructionSnapshot), "instruction snapshot"),
 			reflection: {
 				nodes: context.priorArtifacts.filter(isReflectionNode),
@@ -401,15 +423,30 @@ export class EvolutionPipeline implements EvolutionStageExecutor {
 					directive: "continue",
 				};
 			}
-			case "counter-slot":
-				return { artifacts: [], state: { enabled: false }, directive: "continue" };
+			case "counter-slot": {
+				const corpus = requireOne(context.priorArtifacts.filter(isCorpus), "corpus manifest");
+				const counterReport = await this.#preReflectionStage.run({
+					input: context.input,
+					corpus,
+					activeMemoryItems: context.input.harness.activeMemoryItems,
+					idempotencyKey: context.idempotencyKey,
+					signal: context.signal,
+				});
+				if (counterReport === null) return { artifacts: [], state: {}, directive: "continue" };
+				return {
+					artifacts: [counterReport],
+					state: { counterReportId: counterReport.metadata.artifactId },
+					directive: "continue",
+				};
+			}
 			case "reflecting": {
-				const { corpus, instructions } = this.#pipelineInputs(context);
+				const { corpus, counterReport, instructions } = this.#pipelineInputs(context);
 				let reflection: ReflectionResult;
 				try {
 					reflection = await this.#dependencies.reflector.reflect({
 						input: context.input,
 						corpus,
+						counterReport,
 						instructions,
 						model: this.#dependencies.model,
 						idempotencyKey: context.idempotencyKey,
