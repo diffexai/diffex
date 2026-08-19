@@ -1,4 +1,24 @@
 export { encodeTraceRecord, parseTraceRecord } from "./codec.ts";
+export {
+	MATERIALIZED_INVOCATION_VERSION,
+	type MaterializationDiagnostic,
+	type MaterializationDiagnosticCode,
+	type MaterializationIntegrity,
+	type MaterializedCausalIdentifier,
+	type MaterializedEvidence,
+	type MaterializedEvidenceOrder,
+	type MaterializedInvocation,
+	type MaterializedInvocationOrdering,
+	type MaterializedSessionEvidence,
+	type MaterializedSessionSource,
+	type MaterializedSpan,
+	type MaterializedSpanEvent,
+	type MaterializedSpanEvidence,
+	type MaterializedTerminationStatus,
+	type MaterializedTraceEvidence,
+	type MaterializedTraceRecordSource,
+} from "./materialized-types.ts";
+export { materializeJsonlInvocation, serializeMaterializedInvocation } from "./materializer.ts";
 export { readJsonlTraceFile } from "./reader.ts";
 export { createJsonlTraceContext } from "./recorder.ts";
 export {
