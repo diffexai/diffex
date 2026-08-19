@@ -260,10 +260,19 @@ export interface CompletedCheckpoint {
 	readonly resultingHarnessVersion: HarnessVersion | null;
 }
 
+export type ActiveEvolutionStage =
+	| "created"
+	| "corpus-prepared"
+	| "reflected"
+	| "curated"
+	| "validated"
+	| "scored"
+	| "written";
+
 export interface FailedCheckpoint {
 	readonly schemaVersion: typeof EVOLUTION_SCHEMA_VERSION;
 	readonly stage: "failed";
-	readonly failedStage: Exclude<EvolutionCheckpoint["stage"], "completed" | "failed">;
+	readonly failedStage: ActiveEvolutionStage;
 	readonly message: string;
 }
 

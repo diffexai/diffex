@@ -1,4 +1,5 @@
 export {
+	type ActiveEvolutionStage,
 	type CheckpointSavedLedgerEvent,
 	type CompletedCheckpoint,
 	type CorpusCheckpoint,
@@ -57,8 +58,38 @@ export {
 	type ValidationSeverity,
 	type WrittenCheckpoint,
 } from "./contracts.ts";
+export { EvolutionPipeline, type EvolutionPipelineDependencies, type EvolutionRunResult } from "./pipeline.ts";
+export type {
+	Curator,
+	CuratorInput,
+	EvolutionArtifact,
+	EvolutionArtifactStore,
+	EvolutionClock,
+	EvolutionEventSink,
+	EvolutionIdGenerator,
+	EvolutionJobStore,
+	EvolutionLedger,
+	EvolutionModelExecutor,
+	EvolutionModelRequest,
+	EvolutionModelResponse,
+	EvolutionProgressEvent,
+	InstructionLoader,
+	ProposalScorer,
+	ProposalScoringInput,
+	ProposalValidationInput,
+	ProposalValidator,
+	ReflectionResult,
+	Reflector,
+	ReflectorInput,
+} from "./ports.ts";
 export {
 	type CreateEvolutionArtifactMetadataOptions,
 	computeEvolutionContentDigest,
 	createEvolutionArtifactMetadata,
 } from "./provenance.ts";
+export {
+	EvolutionTargetAdapterRegistry,
+	type EvolutionTargetAdapterRegistryOptions,
+	type EvolutionTargetKind,
+	type EvolutionTargetWriter,
+} from "./targets.ts";
