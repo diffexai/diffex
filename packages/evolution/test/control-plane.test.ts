@@ -362,7 +362,17 @@ describe("checkpointed evolution pipeline", () => {
 				return {
 					batchId: batch.batchId,
 					status: "written",
-					output: { candidateDigest: computeEvolutionContentDigest(batch) },
+					output: {
+						candidateId: `candidate-${batch.batchId}`,
+						candidateDigest: computeEvolutionContentDigest(batch),
+						batchHash: computeEvolutionContentDigest(batch),
+						expectedBaseVersion: batch.expectedBaseVersion,
+						expectedBaseDigest: batch.expectedBaseDigest,
+						resultingHarnessVersion: SECOND_HARNESS_VERSION,
+						resultingMemoryDigest: computeEvolutionContentDigest("candidate"),
+						operationIds: batch.mutations.map((mutation) => mutation.mutationId),
+						diff: { start: 0, removed: "", added: "candidate" },
+					},
 					message: null,
 				};
 			},
@@ -562,11 +572,23 @@ describe("checkpointed evolution pipeline", () => {
 		expect(new Set(modelKeys).size).toBe(2);
 		expect(writeKeys.size).toBe(1);
 		expect(activationKeys.size).toBe(1);
+		const ledger = await fixture.persistence.read(created.jobId);
 		expect(
-			(await fixture.persistence.read(created.jobId))
+			ledger
 				.filter((event) => event.type === "proposal-disposition")
 				.map((event) => [event.proposalId, event.disposition]),
 		).toEqual([["proposal-1", "applied"]]);
+		expect(ledger.filter((event) => event.type === "mutation-written")).toHaveLength(1);
+		expect(ledger.find((event) => event.type === "harness-activated")).toMatchObject({
+			batchId: expect.stringMatching(/^mutation-batch-/),
+			proposalIds: ["proposal-1"],
+			evidenceIds: [],
+			operationIds: [expect.stringMatching(/^mutation-/)],
+			exactDiff: { start: 0, removed: "", added: "candidate" },
+			parentHarnessVersion: FIRST_HARNESS_VERSION,
+			resultingHarnessVersion: SECOND_HARNESS_VERSION,
+			rollbackParentHarnessVersion: FIRST_HARNESS_VERSION,
+		});
 	});
 });
 

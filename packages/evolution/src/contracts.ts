@@ -539,8 +539,30 @@ export interface MutationBatch {
 	readonly metadata: EvolutionArtifactMetadata;
 	readonly batchId: string;
 	readonly targetKind: "evolution-memory";
+	readonly expectedBaseVersion: HarnessVersion;
+	readonly expectedBaseDigest: string;
+	readonly baseMemoryItems: readonly EvolutionMemoryItem[];
+	readonly activationEventId: string;
 	readonly mutations: readonly EvolutionMutation[];
 }
+
+export type EvolutionMemoryExactDiff = JsonObject & {
+	readonly start: number;
+	readonly removed: string;
+	readonly added: string;
+};
+
+export type EvolutionMemoryWriteOutput = JsonObject & {
+	readonly candidateId: string;
+	readonly candidateDigest: string;
+	readonly batchHash: string;
+	readonly expectedBaseVersion: HarnessVersion;
+	readonly expectedBaseDigest: string;
+	readonly resultingHarnessVersion: HarnessVersion;
+	readonly resultingMemoryDigest: string;
+	readonly operationIds: readonly string[];
+	readonly diff: EvolutionMemoryExactDiff;
+};
 
 export interface MutationWriteResult {
 	readonly batchId: string;
@@ -714,6 +736,19 @@ export interface MutationWrittenLedgerEvent extends EvolutionLedgerEventBase {
 	readonly writeResult: MutationWriteResult;
 }
 
+export interface HarnessActivatedLedgerEvent extends EvolutionLedgerEventBase {
+	readonly type: "harness-activated";
+	readonly batchId: string;
+	readonly proposalIds: readonly string[];
+	readonly evidenceIds: readonly string[];
+	readonly operationIds: readonly string[];
+	readonly exactDiff: EvolutionMemoryExactDiff;
+	readonly parentHarnessVersion: HarnessVersion;
+	readonly resultingHarnessVersion: HarnessVersion;
+	readonly activationResult: HarnessActivationResult;
+	readonly rollbackParentHarnessVersion: HarnessVersion;
+}
+
 export interface JobCompletedLedgerEvent extends EvolutionLedgerEventBase {
 	readonly type: "job-completed";
 	readonly completionKind: EvolutionCompletionKind;
@@ -779,6 +814,7 @@ export type EvolutionLedgerEvent =
 	| CheckpointSavedLedgerEvent
 	| ProposalDispositionLedgerEvent
 	| MutationWrittenLedgerEvent
+	| HarnessActivatedLedgerEvent
 	| JobCompletedLedgerEvent
 	| JobFailedLedgerEvent
 	| ProposalRolledBackLedgerEvent

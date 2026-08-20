@@ -46,6 +46,7 @@ export {
 	type EvolutionLedgerEvent,
 	type EvolutionMemoryAddDelta,
 	type EvolutionMemoryDelta,
+	type EvolutionMemoryExactDiff,
 	type EvolutionMemoryItem,
 	type EvolutionMemoryItemLedgerMetadata,
 	type EvolutionMemoryProposal,
@@ -53,6 +54,7 @@ export {
 	type EvolutionMemoryRemoveDelta,
 	type EvolutionMemoryReplaceDelta,
 	type EvolutionMemoryTarget,
+	type EvolutionMemoryWriteOutput,
 	type EvolutionModelIdentity,
 	type EvolutionMutation,
 	type EvolutionProcessedEvidenceCursor,
@@ -70,6 +72,7 @@ export {
 	type EvolutionTriggerKind,
 	type ExcludedEvidenceSource,
 	type ExistingInstructionReference,
+	type HarnessActivatedLedgerEvent,
 	type HarnessActivationReceipt,
 	type HarnessActivationResult,
 	type ImmutableHarnessSnapshot,
@@ -123,6 +126,7 @@ export {
 	type StructuredDeltaCuratorOptions,
 } from "./curator.ts";
 export { EvolutionExecutionError } from "./errors.ts";
+export { EvolutionMemoryWriter, type EvolutionMemoryWriterOptions } from "./evolution-memory-writer.ts";
 export {
 	EvolutionStorageCorruptionError,
 	FileEvolutionPersistence,
