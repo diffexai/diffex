@@ -177,40 +177,36 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 
 	#overviewEntries(overview: EvolutionOverview): readonly MenuEntry[] {
 		return [
-			{ label: "Refresh overview", enabled: true, select: () => void this.refresh() },
+			{ label: "Refresh", enabled: true, select: () => void this.refresh() },
 			{
-				label: "Start a new evolution job",
+				label: "Evolve",
 				enabled: overview.activeJob === null,
 				select: () => this.#confirm("start"),
 			},
 			{
-				label: overview.activeJob ? `View active job ${overview.activeJob.jobId}` : "View active job",
+				label: "View",
 				enabled: overview.activeJob !== null,
 				select: () => {
 					if (overview.activeJob) this.#push({ kind: "job", jobId: overview.activeJob.jobId });
 				},
 			},
 			{
-				label: overview.newestResumableJob
-					? `Resume ${overview.newestResumableJob.jobId}`
-					: "Resume newest interrupted job",
+				label: "Resume",
 				enabled: overview.newestResumableJob !== null && overview.activeJob === null,
 				select: () => this.#confirm("resume"),
 			},
 			{
-				label: "Browse job history, proposals, and applied diffs",
+				label: "Browse",
 				enabled: true,
 				select: () => this.#push({ kind: "jobs" }),
 			},
 			{
-				label: overview.rollbackAction
-					? `Roll back ${abbreviate(overview.rollbackAction.fromHarnessVersion)} to ${abbreviate(overview.rollbackAction.toHarnessVersion)}`
-					: "Roll back the active evolution revision",
+				label: "Rollback",
 				enabled: overview.rollbackAction !== null,
 				select: () => this.#confirm("rollback"),
 			},
 			{
-				label: overview.activeJob ? `Cancel ${overview.activeJob.jobId}` : "Cancel active job",
+				label: "Cancel",
 				enabled: overview.activeJob?.cancellable === true,
 				select: () => this.#confirm("cancel"),
 			},
@@ -221,8 +217,8 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 		const overview = this.#overview;
 		if (action === "start") {
 			return [
-				"Start a manual evolution job?",
-				"The job will snapshot globally unprocessed evidence and run in the background.",
+				"Would you like Diffex to evolve based on the information it has collected?",
+				"This process will run in the background.",
 			];
 		}
 		if (action === "resume") {
@@ -271,18 +267,19 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 	}
 
 	#renderOverview(overview: EvolutionOverview): void {
-		this.#addLine("Evidence scope: global");
-		this.#addLine(`Unprocessed materialized tokens: ${overview.unprocessedEstimatedTokens.toLocaleString()}`);
-		this.#addLine(`Automatic threshold: > ${overview.automaticTokenThreshold.toLocaleString()} tokens`);
-		this.#addLine(`Settled invocations: ${overview.settledInvocationCount}`);
-		this.#addLine(`Last automatic run: ${timestamp(overview.lastAutomaticRunAt)}`);
-		this.#addLine(`Cooldown: ${duration(overview.cooldownRemainingMs)}`);
+		this.#addLine(`Evolution tokens: ${overview.unprocessedEstimatedTokens.toLocaleString()}`);
+		this.#addLine(`Evolution invocations: ${overview.settledInvocationCount}`);
+		this.#addLine(`Last automatic evolution: ${timestamp(overview.lastAutomaticRunAt)}`);
 		this.#addLine(
 			overview.automaticEligibility.eligible
-				? "Next automatic run: eligible"
-				: `Next automatic run: ${overview.automaticEligibility.reason}`,
+				? "Next automatic evolution: Eligible"
+				: `Next automatic evolution: ${
+						overview.automaticEligibility.reason === "insufficient-tokens"
+							? "Insufficient information"
+							: overview.automaticEligibility.reason
+					}`,
 		);
-		this.#addLine(`Selected harness (global): ${abbreviate(overview.currentHarnessVersion)}`);
+		this.#addLine(`Cooldown: ${duration(overview.cooldownRemainingMs)}`);
 		this.#addLine(`Session harness: ${abbreviate(overview.observedHarnessVersion)}`);
 		if (overview.nextPromptWillRefresh) this.#addLine("Next prompt will refresh the selected harness", "accent");
 	}

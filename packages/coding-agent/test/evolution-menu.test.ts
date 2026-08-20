@@ -105,13 +105,41 @@ describe("EvolutionMenuComponent", () => {
 		await vi.waitFor(() => expect(fixture.overviewCall).toHaveBeenCalled());
 
 		const output = stripAnsi(component.render(180).join("\n"));
-		expect(output).toContain("Evidence scope: global");
-		expect(output).toContain("Unprocessed materialized tokens: 1,100,001");
-		expect(output).toContain("Automatic threshold: > 1,000,000 tokens");
-		expect(output).toContain("Next automatic run: blocking-job");
-		expect(output).toContain("Selected harness (global): sha256:aaaaaaaaaaaa");
-		expect(output).toContain("Start a new evolution job [unavailable]");
-		expect(output).toContain("Resume newest interrupted job [unavailable]");
+		expect(output).toContain("Evolution tokens: 1,100,001");
+		expect(output).toContain("Evolution invocations: 6");
+		expect(output).toContain("Last automatic evolution: never");
+		expect(output).toContain("Next automatic evolution: blocking-job");
+		expect(output.indexOf("Next automatic evolution")).toBeLessThan(output.indexOf("Cooldown"));
+		expect(output).not.toContain("Evidence scope");
+		expect(output).not.toContain("Automatic threshold");
+		expect(output).not.toContain("Selected harness");
+		expect(output).toContain("Refresh");
+		expect(output).toContain("Evolve [unavailable]");
+		expect(output).toContain("View");
+		expect(output).toContain("Resume [unavailable]");
+		expect(output).toContain("Browse");
+		expect(output).toContain("Rollback [unavailable]");
+		expect(output).toContain("Cancel");
+	});
+
+	it("describes insufficient automatic evidence in user-facing language", async () => {
+		const fixture = client(overview({ automaticEligibility: { eligible: false, reason: "insufficient-tokens" } }));
+		const component = new EvolutionMenuComponent(
+			fixture.client,
+			() => {},
+			() => {},
+			() => {},
+		);
+		await vi.waitFor(() => expect(fixture.overviewCall).toHaveBeenCalled());
+
+		const output = stripAnsi(component.render(180).join("\n"));
+		expect(output).toContain("Next automatic evolution: Insufficient information");
+		expect(output).toContain("Evolve");
+		expect(output).toContain("View [unavailable]");
+		expect(output).toContain("Resume [unavailable]");
+		expect(output).toContain("Browse");
+		expect(output).toContain("Rollback [unavailable]");
+		expect(output).toContain("Cancel [unavailable]");
 	});
 
 	it("confirms a manual start before invoking the control service", async () => {
@@ -122,18 +150,16 @@ describe("EvolutionMenuComponent", () => {
 			() => {},
 			() => {},
 		);
-		await vi.waitFor(() =>
-			expect(stripAnsi(component.render(160).join("\n"))).toContain("Start a new evolution job"),
-		);
+		await vi.waitFor(() => expect(stripAnsi(component.render(160).join("\n"))).toContain("Evolve"));
 
 		component.handleInput("\u001b[B");
 		component.handleInput("\n");
 		await vi.waitFor(() =>
-			expect(stripAnsi(component.render(160).join("\n"))).toContain("Start a manual evolution job?"),
+			expect(stripAnsi(component.render(160).join("\n"))).toContain(
+				"Would you like Diffex to evolve based on the information it has collected?",
+			),
 		);
-		expect(stripAnsi(component.render(160).join("\n"))).toContain(
-			"The job will snapshot globally unprocessed evidence",
-		);
+		expect(stripAnsi(component.render(160).join("\n"))).toContain("This process will run in the background.");
 		expect(fixture.startManual).not.toHaveBeenCalled();
 
 		component.handleInput("\n");
@@ -150,14 +176,14 @@ describe("EvolutionMenuComponent", () => {
 			status,
 			() => {},
 		);
-		await vi.waitFor(() =>
-			expect(stripAnsi(component.render(160).join("\n"))).toContain("Start a new evolution job"),
-		);
+		await vi.waitFor(() => expect(stripAnsi(component.render(160).join("\n"))).toContain("Evolve"));
 
 		component.handleInput("\u001b[B");
 		component.handleInput("\n");
 		await vi.waitFor(() =>
-			expect(stripAnsi(component.render(160).join("\n"))).toContain("Start a manual evolution job?"),
+			expect(stripAnsi(component.render(160).join("\n"))).toContain(
+				"Would you like Diffex to evolve based on the information it has collected?",
+			),
 		);
 		component.handleInput("\n");
 
@@ -177,12 +203,14 @@ describe("EvolutionMenuComponent", () => {
 		component.handleInput("\u001b[B");
 		component.handleInput("\n");
 		await vi.waitFor(() =>
-			expect(stripAnsi(component.render(160).join("\n"))).toContain("Start a manual evolution job?"),
+			expect(stripAnsi(component.render(160).join("\n"))).toContain(
+				"Would you like Diffex to evolve based on the information it has collected?",
+			),
 		);
 
 		component.handleInput("\u001b");
 		expect(close).not.toHaveBeenCalled();
-		await vi.waitFor(() => expect(stripAnsi(component.render(160).join("\n"))).toContain("Refresh overview"));
+		await vi.waitFor(() => expect(stripAnsi(component.render(160).join("\n"))).toContain("Refresh"));
 		component.handleInput("\u001b");
 
 		expect(close).toHaveBeenCalledOnce();
