@@ -327,4 +327,38 @@ describe("evolution memory writer", () => {
 		expect(await harnessState.loadCurrent()).toEqual(competing.bundle);
 		expect((await harnessState.listVersions()).versions).toHaveLength(3);
 	});
+
+	it("rejects a tampered write receipt before activation", async () => {
+		const { harnessState, initialMemory, snapshot, writer } = await fixture();
+		const selectedBatch = batch(snapshot, [
+			{
+				mutationId: "mutation-receipt",
+				proposalId: "proposal-receipt",
+				target: { kind: "evolution-memory", expectedHarnessVersion: snapshot.harnessVersion },
+				payload: {
+					operation: "ADD",
+					destination: { section: null, anchor: null },
+					content: "- Activate only the exact staged receipt.",
+					intendedScope: ["repository"],
+				},
+			},
+		]);
+		const writeResult = await writer.write(selectedBatch, {
+			idempotencyKey: "write-receipt",
+			lease: writerLease,
+		});
+		if (writeResult.output === null) throw new Error("Expected a candidate output");
+		const tampered = {
+			...writeResult,
+			output: { ...writeResult.output, diff: { start: 0, removed: "", added: "false audit data" } },
+		};
+
+		await expect(
+			writer.activate(selectedBatch, tampered, {
+				idempotencyKey: "activate-receipt",
+				lease: writerLease,
+			}),
+		).rejects.toThrow("write receipt does not match its durable candidate");
+		expect((await harnessState.loadCurrent()).state.memory).toBe(initialMemory);
+	});
 });

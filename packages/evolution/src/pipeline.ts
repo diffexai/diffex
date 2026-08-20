@@ -110,10 +110,14 @@ function isEvolutionMemoryWriteOutput(value: unknown): value is EvolutionMemoryW
 		typeof value.candidateDigest === "string" &&
 		typeof value.batchHash === "string" &&
 		typeof value.expectedBaseVersion === "string" &&
+		typeof value.expectedBaseDigest === "string" &&
 		typeof value.resultingHarnessVersion === "string" &&
+		typeof value.resultingMemoryDigest === "string" &&
 		Array.isArray(value.operationIds) &&
+		value.operationIds.every((operationId) => typeof operationId === "string") &&
 		isRecord(value.diff) &&
-		typeof value.diff.start === "number" &&
+		Number.isSafeInteger(value.diff.start) &&
+		(value.diff.start as number) >= 0 &&
 		typeof value.diff.removed === "string" &&
 		typeof value.diff.added === "string"
 	);
@@ -686,6 +690,12 @@ export class EvolutionPipeline implements EvolutionStageExecutor {
 						retryable: true,
 					});
 				}
+				if (result.batchId !== batch.batchId || !isEvolutionMemoryWriteOutput(result.output)) {
+					throw new EvolutionExecutionError(`Mutation batch "${batch.batchId}" returned an invalid write result`, {
+						reasonCode: "writer-failed",
+						retryable: false,
+					});
+				}
 				const receiptId = stableId("write-receipt", { idempotencyKey: context.idempotencyKey, result });
 				const receipt: MutationWriteReceipt = {
 					metadata: this.#metadata(
@@ -716,6 +726,22 @@ export class EvolutionPipeline implements EvolutionStageExecutor {
 						retryable: true,
 					});
 				}
+				if (
+					receipt.batchId !== batch.batchId ||
+					receipt.result.batchId !== batch.batchId ||
+					!isEvolutionMemoryWriteOutput(receipt.result.output) ||
+					receipt.result.output.expectedBaseVersion !== batch.expectedBaseVersion ||
+					receipt.result.output.expectedBaseDigest !== batch.expectedBaseDigest ||
+					receipt.result.output.operationIds.length !== batch.mutations.length ||
+					receipt.result.output.operationIds.some(
+						(operationId, index) => operationId !== batch.mutations[index]?.mutationId,
+					)
+				) {
+					throw new EvolutionExecutionError("Evolution memory write receipt does not match its mutation batch", {
+						reasonCode: "artifact-corrupt",
+						retryable: false,
+					});
+				}
 				let result: Awaited<ReturnType<typeof writer.activate>>;
 				try {
 					result = await writer.activate(batch, receipt.result, {
@@ -734,6 +760,15 @@ export class EvolutionPipeline implements EvolutionStageExecutor {
 							retryable: true,
 						},
 					);
+				}
+				if (
+					result.batchId !== batch.batchId ||
+					result.resultingHarnessVersion !== receipt.result.output.resultingHarnessVersion
+				) {
+					throw new EvolutionExecutionError("Harness activation result does not match its staged candidate", {
+						reasonCode: "writer-failed",
+						retryable: false,
+					});
 				}
 				const receiptId = stableId("activation-receipt", { idempotencyKey: context.idempotencyKey, result });
 				const activationReceipt: HarnessActivationReceipt = {
@@ -755,12 +790,6 @@ export class EvolutionPipeline implements EvolutionStageExecutor {
 				const selected = context.priorArtifacts
 					.filter(isScoredProposal)
 					.filter((scored) => scored.disposition === "selected");
-				if (!isEvolutionMemoryWriteOutput(receipt.result.output)) {
-					throw new EvolutionExecutionError("Evolution memory write receipt output is invalid", {
-						reasonCode: "artifact-corrupt",
-						retryable: false,
-					});
-				}
 				const activationEvent = this.#harnessActivatedEvent(
 					context,
 					batch,

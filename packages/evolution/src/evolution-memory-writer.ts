@@ -782,11 +782,13 @@ export class EvolutionMemoryWriter implements EvolutionTargetWriter {
 		const output = parseWriteOutput(writeResult);
 		const candidate = await this.#loadCandidate(batch.batchId);
 		if (
+			writeResult.batchId !== batch.batchId ||
 			candidate === null ||
 			candidate.candidateId !== output.candidateId ||
 			candidate.candidateDigest !== output.candidateDigest ||
 			candidate.batchHash !== computeEvolutionContentDigest(batch) ||
-			candidate.batchHash !== output.batchHash
+			candidate.batchHash !== output.batchHash ||
+			serializeEvolutionValue(output) !== serializeEvolutionValue(outputForCandidate(candidate))
 		) {
 			throw new Error(`Mutation batch "${batch.batchId}" write receipt does not match its durable candidate`);
 		}
