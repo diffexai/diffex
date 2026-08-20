@@ -1,4 +1,5 @@
 import {
+	copyFileSync,
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
@@ -12,10 +13,16 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import type { AgentTool } from "@earendil-works/diffex-agent-core";
 import { fauxAssistantMessage } from "@earendil-works/diffex-ai";
+import type { FauxModelDefinition } from "@earendil-works/diffex-ai/compat";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgentSession } from "../../src/core/agent-session.ts";
 import { createAgentSessionFromServices, createAgentSessionServices } from "../../src/core/agent-session-services.ts";
-import { loadEntriesFromFile, persistSessionHeader, SessionManager } from "../../src/core/session-manager.ts";
+import {
+	loadEntriesFromFile,
+	persistSessionHeader,
+	persistSessionState,
+	SessionManager,
+} from "../../src/core/session-manager.ts";
 import {
 	type ChildSnapshotV1,
 	decodeSubagentRosterSnapshot,
@@ -25,10 +32,12 @@ import {
 	SUBAGENT_ROSTER_CUSTOM_TYPE,
 } from "../../src/core/subagents/persistence.ts";
 import { createHarness, type Harness } from "./harness.ts";
-import { deferred } from "./subagent-harness.ts";
+import { deferred, getLastUserText } from "./subagent-harness.ts";
 
 const CHILD_ID_A = "018f4f7c-43b7-7abc-8def-0123456789ab";
 const CHILD_ID_B = "018f4f7c-43b7-7abc-8def-0123456789ac";
+const CHILD_ID_C = "018f4f7c-43b7-7abc-8def-0123456789ad";
+const CHILD_ID_D = "018f4f7c-43b7-7abc-8def-0123456789ae";
 
 function childSnapshot(overrides: Partial<ChildSnapshotV1> = {}): ChildSnapshotV1 {
 	return {
@@ -232,9 +241,18 @@ describe("durable subagent lifecycle", () => {
 		while (harnesses.length > 0) await harnesses.pop()?.cleanup();
 	});
 
-	async function createRoot(options: { persist?: boolean; subagents?: false } = {}) {
+	async function createRoot(
+		options: {
+			persist?: boolean;
+			subagents?: false;
+			models?: FauxModelDefinition[];
+			modelId?: string;
+			thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+			tools?: string[];
+		} = {},
+	) {
 		const harness = await createHarness({
-			models: [{ id: "faux-lifecycle", name: "Lifecycle", reasoning: true }],
+			models: options.models ?? [{ id: "faux-lifecycle", name: "Lifecycle", reasoning: true }],
 			settings: { retry: { enabled: false } },
 		});
 		harnesses.push(harness);
@@ -261,12 +279,44 @@ describe("durable subagent lifecycle", () => {
 		const { session } = await createAgentSessionFromServices({
 			services,
 			sessionManager,
-			model: harness.getModel("faux-lifecycle"),
-			thinkingLevel: "high",
+			model: harness.getModel(options.modelId ?? "faux-lifecycle"),
+			thinkingLevel: options.thinkingLevel ?? "high",
+			tools: options.tools,
 			subagents: options.subagents,
 		});
 		sessions.push(session);
-		return { harness, session, sessionManager, cwd, sessionDir };
+		return { harness, services, session, sessionManager, cwd, agentDir, sessionDir };
+	}
+
+	async function reopenRoot(
+		root: Awaited<ReturnType<typeof createRoot>>,
+		options: { modelId?: string; thinkingLevel?: "low" | "high"; tools?: string[] } = {},
+	) {
+		const sessionFile = root.sessionManager.getSessionFile();
+		if (!sessionFile) throw new Error("Missing parent session file");
+		const services = await createAgentSessionServices({
+			cwd: root.cwd,
+			agentDir: root.agentDir,
+			modelRuntime: root.harness.session.modelRuntime,
+			settingsManager: root.harness.settingsManager,
+			resourceLoaderOptions: {
+				noExtensions: true,
+				noSkills: true,
+				noPromptTemplates: true,
+				noThemes: true,
+				reloadSettings: false,
+			},
+		});
+		const sessionManager = SessionManager.open(sessionFile, root.sessionDir, root.cwd);
+		const { session } = await createAgentSessionFromServices({
+			services,
+			sessionManager,
+			model: root.harness.getModel(options.modelId ?? "faux-lifecycle"),
+			thinkingLevel: options.thinkingLevel ?? "high",
+			tools: options.tools,
+		});
+		sessions.push(session);
+		return { ...root, services, session, sessionManager };
 	}
 
 	function getTool(session: AgentSession, name: string): AgentTool {
@@ -281,6 +331,20 @@ describe("durable subagent lifecycle", () => {
 			const decoded = decodeSubagentRosterSnapshot(entry.data);
 			return [decoded.children.flatMap((child) => (child.kind === "restorable" ? [child.snapshot] : []))];
 		});
+	}
+
+	function persistRoster(sessionManager: SessionManager, agents: unknown[]): void {
+		sessionManager.appendCustomEntry(SUBAGENT_ROSTER_CUSTOM_TYPE, { schemaVersion: 1, agents });
+		persistSessionState(sessionManager);
+	}
+
+	function persistChild(
+		root: Awaited<ReturnType<typeof createRoot>>,
+		config: ChildSnapshotV1["config"],
+		name = "worker",
+	): void {
+		new ParentOwnedSubagentSessionStore(root.sessionManager).createChild(name, CHILD_ID_A);
+		persistRoster(root.sessionManager, [childSnapshot({ name, childSessionId: CHILD_ID_A, config })]);
 	}
 
 	it("persists the child header and queued roster before direct spawn starts provider work", async () => {
@@ -462,6 +526,329 @@ describe("durable subagent lifecycle", () => {
 
 		await expect(session.dispose()).resolves.toBeUndefined();
 		expect(sessionManager.getLeafId()).toBe(previousLeafId);
+	});
+
+	it("restores terminal and interrupted records without calls, isolates bad histories, and opens lazily on wake", async () => {
+		const root = await createRoot();
+		const sessionFile = root.sessionManager.getSessionFile();
+		if (!sessionFile) throw new Error("Missing parent session file");
+		const store = new ParentOwnedSubagentSessionStore(root.sessionManager);
+		store.createChild("alpha", CHILD_ID_A);
+		store.createChild("beta", CHILD_ID_B);
+		const corrupt = store.createChild("corrupt", CHILD_ID_C);
+		const corruptFile = corrupt.getSessionFile();
+		if (!corruptFile) throw new Error("Missing corrupt child file");
+		const corruptHeader = JSON.parse(readFileSync(corruptFile, "utf8")) as Record<string, unknown>;
+		corruptHeader.parentSession = "another-parent";
+		writeFileSync(corruptFile, `${JSON.stringify(corruptHeader)}\n`);
+		const config = {
+			model: { provider: "faux", id: "faux-lifecycle" },
+			thinkingLevel: "high" as const,
+			tools: ["read"] as const,
+			harnessRevision: root.session.activeHarnessVersion ?? null,
+		};
+		persistRoster(root.sessionManager, [
+			childSnapshot({ name: "alpha", childSessionId: CHILD_ID_A, config }),
+			childSnapshot({
+				name: "beta",
+				childSessionId: CHILD_ID_B,
+				status: "running",
+				result: undefined,
+				completedAt: undefined,
+				config,
+			}),
+			childSnapshot({ name: "corrupt", childSessionId: CHILD_ID_C, config }),
+			childSnapshot({ name: "missing", childSessionId: CHILD_ID_D, config }),
+		]);
+		await root.session.dispose();
+
+		let providerCalls = 0;
+		const seenPrompts: string[] = [];
+		root.harness.setResponses([
+			(context) => {
+				providerCalls += 1;
+				seenPrompts.push(getLastUserText(context));
+				return fauxAssistantMessage("continued");
+			},
+			(context) => {
+				providerCalls += 1;
+				seenPrompts.push(getLastUserText(context));
+				return fauxAssistantMessage("recovered");
+			},
+		]);
+		const openChild = vi.spyOn(ParentOwnedSubagentSessionStore.prototype, "openChild");
+		const reopened = await reopenRoot(root);
+		expect(providerCalls).toBe(0);
+		expect(openChild).not.toHaveBeenCalled();
+		expect(reopened.session.messages).toEqual([]);
+		expect(
+			reopened.sessionManager
+				.getEntries()
+				.filter((entry) => entry.type === "message" || entry.type === "custom_message"),
+		).toEqual([]);
+		await expect(getTool(reopened.session, "agents").execute("restored", { timeout_ms: 0 })).resolves.toMatchObject({
+			details: {
+				agents: [
+					{ name: "alpha", status: "idle", result: "done" },
+					{ name: "beta", status: "interrupted" },
+					{ name: "corrupt", status: "failed", error: expect.stringContaining("identity mismatch") },
+					{ name: "missing", status: "failed", error: expect.stringContaining("found 0") },
+				],
+			},
+		});
+		expect(reopened.services.diagnostics).toEqual(
+			expect.arrayContaining([
+				{ type: "warning", message: expect.stringContaining("corrupt history is unavailable") },
+				{ type: "warning", message: expect.stringContaining("missing history is unavailable") },
+			]),
+		);
+
+		await getTool(reopened.session, "agent_action").execute("wake-valid", {
+			target: "alpha",
+			action: "message",
+			message: "continue valid",
+			wake: true,
+		});
+		await getTool(reopened.session, "agents").execute("wait-valid", {
+			timeout_ms: 1_000,
+			targets: ["alpha"],
+			until: "all",
+		});
+		expect(openChild).toHaveBeenCalledTimes(1);
+
+		await getTool(reopened.session, "agent_action").execute("wake-isolated", {
+			target: "corrupt",
+			action: "message",
+			message: "recovery only",
+			wake: true,
+		});
+		await getTool(reopened.session, "agents").execute("wait-isolated", {
+			timeout_ms: 1_000,
+			targets: ["corrupt"],
+			until: "all",
+		});
+		expect(providerCalls).toBe(2);
+		expect(seenPrompts).toEqual(["continue valid", "recovery only"]);
+		const latest = readSnapshots(sessionFile).at(-1) ?? [];
+		expect(latest.find((entry) => entry.name === "corrupt")?.childSessionId).not.toBe(CHILD_ID_C);
+		expect(existsSync(corruptFile)).toBe(true);
+	});
+
+	it("isolates duplicate persisted names without blocking a valid sibling", async () => {
+		const root = await createRoot();
+		new ParentOwnedSubagentSessionStore(root.sessionManager).createChild("alpha", CHILD_ID_A);
+		persistRoster(root.sessionManager, [
+			childSnapshot({ config: { ...childSnapshot().config, model: { provider: "faux", id: "faux-lifecycle" } } }),
+			childSnapshot({ name: "duplicate", childSessionId: CHILD_ID_B }),
+			childSnapshot({ name: "duplicate", childSessionId: CHILD_ID_C }),
+		]);
+		await root.session.dispose();
+		const reopened = await reopenRoot(root);
+		await expect(getTool(reopened.session, "agents").execute("duplicates", { timeout_ms: 0 })).resolves.toMatchObject(
+			{
+				details: {
+					agents: [
+						{ name: "alpha", status: "idle" },
+						{ name: "duplicate", status: "failed", error: "Duplicate persisted subagent name: duplicate" },
+					],
+				},
+			},
+		);
+		expect(reopened.services.diagnostics).toContainEqual({
+			type: "warning",
+			message: "Duplicate persisted subagent name: duplicate",
+		});
+	});
+
+	it("uses the complete captured configuration on wake without treating authentication as fallback", async () => {
+		const root = await createRoot({
+			models: [
+				{ id: "captured-model", name: "Captured", reasoning: true },
+				{ id: "current-model", name: "Current", reasoning: true },
+			],
+			modelId: "captured-model",
+		});
+		const captured = {
+			model: { provider: "faux", id: "captured-model" },
+			thinkingLevel: "high" as const,
+			tools: ["grep"] as const,
+			harnessRevision: null,
+		};
+		persistChild(root, captured);
+		await root.session.dispose();
+		const reopened = await reopenRoot(root, { modelId: "current-model", thinkingLevel: "low" });
+		reopened.session.setActiveToolsByName(["read", "agent_action", "agents"]);
+		vi.spyOn(reopened.session.modelRuntime, "hasConfiguredAuth").mockImplementation(() => {
+			throw new Error("authentication must not participate in restoration fallback");
+		});
+		root.harness.setResponses([fauxAssistantMessage("captured configuration used")]);
+
+		await getTool(reopened.session, "agent_action").execute("captured", {
+			target: "worker",
+			action: "message",
+			message: "wake captured",
+			wake: true,
+		});
+		await getTool(reopened.session, "agents").execute("captured-wait", {
+			timeout_ms: 1_000,
+			targets: ["worker"],
+			until: "all",
+		});
+		const sessionFile = reopened.sessionManager.getSessionFile();
+		if (!sessionFile) throw new Error("Missing parent session file");
+		expect(readSnapshots(sessionFile).at(-1)?.[0]?.config).toEqual(captured);
+		expect(
+			reopened.services.diagnostics.filter((entry) => entry.message.includes("configuration is unusable")),
+		).toEqual([]);
+	});
+
+	it("falls back to the complete wake-time parent configuration with one diagnostic", async () => {
+		const cases: Array<{
+			name: string;
+			config: ChildSnapshotV1["config"];
+			removeTool?: string;
+		}> = [
+			{
+				name: "model",
+				config: {
+					model: { provider: "faux", id: "missing-model" },
+					thinkingLevel: "high",
+					tools: ["read"],
+					harnessRevision: null,
+				},
+			},
+			{
+				name: "thinking",
+				config: {
+					model: { provider: "faux", id: "faux-lifecycle" },
+					thinkingLevel: "max",
+					tools: ["read"],
+					harnessRevision: null,
+				},
+			},
+			{
+				name: "tool",
+				config: {
+					model: { provider: "faux", id: "faux-lifecycle" },
+					thinkingLevel: "high",
+					tools: ["grep"],
+					harnessRevision: null,
+				},
+				removeTool: "grep",
+			},
+			{
+				name: "harness",
+				config: {
+					model: { provider: "faux", id: "faux-lifecycle" },
+					thinkingLevel: "high",
+					tools: ["read"],
+					harnessRevision: `sha256:${"f".repeat(64)}`,
+				},
+			},
+		];
+
+		for (const testCase of cases) {
+			const root = await createRoot();
+			persistChild(root, testCase.config);
+			await root.session.dispose();
+			const reopened = await reopenRoot(root);
+			reopened.session.setThinkingLevel("low");
+			reopened.session.setActiveToolsByName(["read", "agent_action", "agents"]);
+			const availableTools = reopened.session.getAllTools();
+			const toolSpy = testCase.removeTool
+				? vi
+						.spyOn(reopened.session, "getAllTools")
+						.mockReturnValue(availableTools.filter((tool) => tool.name !== testCase.removeTool))
+				: undefined;
+			root.harness.setResponses([fauxAssistantMessage(`fallback ${testCase.name}`)]);
+			const diagnosticCount = reopened.services.diagnostics.length;
+
+			await getTool(reopened.session, "agent_action").execute(`fallback-${testCase.name}`, {
+				target: "worker",
+				action: "message",
+				message: `wake ${testCase.name}`,
+				wake: true,
+			});
+			await getTool(reopened.session, "agents").execute(`fallback-wait-${testCase.name}`, {
+				timeout_ms: 1_000,
+				targets: ["worker"],
+				until: "all",
+			});
+			toolSpy?.mockRestore();
+
+			const addedDiagnostics = reopened.services.diagnostics.slice(diagnosticCount);
+			expect(addedDiagnostics, testCase.name).toHaveLength(1);
+			expect(addedDiagnostics[0]?.message).toContain("configuration is unusable");
+			const sessionFile = reopened.sessionManager.getSessionFile();
+			if (!sessionFile) throw new Error("Missing parent session file");
+			expect(readSnapshots(sessionFile).at(-1)?.[0]?.config, testCase.name).toEqual({
+				model: { provider: "faux", id: "faux-lifecycle" },
+				thinkingLevel: "low",
+				tools: ["read"],
+				harnessRevision: reopened.session.activeHarnessVersion ?? null,
+			});
+			await expect(
+				getTool(reopened.session, "agents").execute(`fallback-result-${testCase.name}`, {
+					timeout_ms: 0,
+					targets: ["worker"],
+				}),
+			).resolves.toMatchObject({
+				details: { agents: [{ status: "idle", error: expect.stringContaining("configuration is unusable") }] },
+			});
+		}
+	});
+
+	it("isolates unavailable child histories in forked and imported parent files", async () => {
+		const root = await createRoot();
+		persistChild(root, {
+			model: { provider: "faux", id: "faux-lifecycle" },
+			thinkingLevel: "high",
+			tools: ["read"],
+			harnessRevision: null,
+		});
+		await root.session.dispose();
+		const sourceFile = root.sessionManager.getSessionFile();
+		if (!sourceFile) throw new Error("Missing source parent session file");
+		const forkDirectory = join(root.harness.tempDir, "fork-sessions");
+		const importDirectory = join(root.harness.tempDir, "import-sessions");
+		mkdirSync(forkDirectory, { recursive: true });
+		mkdirSync(importDirectory, { recursive: true });
+		const fork = SessionManager.forkFrom(sourceFile, root.cwd, forkDirectory);
+		const importedFile = join(importDirectory, "imported.jsonl");
+		copyFileSync(sourceFile, importedFile);
+		const imported = SessionManager.open(importedFile, importDirectory, root.cwd);
+
+		for (const sessionManager of [fork, imported]) {
+			const services = await createAgentSessionServices({
+				cwd: root.cwd,
+				agentDir: root.agentDir,
+				modelRuntime: root.harness.session.modelRuntime,
+				settingsManager: root.harness.settingsManager,
+				resourceLoaderOptions: {
+					noExtensions: true,
+					noSkills: true,
+					noPromptTemplates: true,
+					noThemes: true,
+					reloadSettings: false,
+				},
+			});
+			const { session } = await createAgentSessionFromServices({
+				services,
+				sessionManager,
+				model: root.harness.getModel("faux-lifecycle"),
+				thinkingLevel: "high",
+			});
+			sessions.push(session);
+			await expect(getTool(session, "agents").execute("unavailable", { timeout_ms: 0 })).resolves.toMatchObject({
+				details: {
+					agents: [{ name: "worker", status: "failed", error: expect.stringContaining("history is unavailable") }],
+				},
+			});
+			expect(services.diagnostics).toContainEqual({
+				type: "warning",
+				message: expect.stringContaining("worker history is unavailable"),
+			});
+		}
 	});
 
 	it("keeps in-memory, disabled, and unsaved modes ephemeral", async () => {

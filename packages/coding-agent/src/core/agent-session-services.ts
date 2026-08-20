@@ -17,6 +17,7 @@ import {
 import { type CreateAgentSessionOptions, type CreateAgentSessionResult, createAgentSession } from "./sdk.ts";
 import type { SessionManager } from "./session-manager.ts";
 import { SettingsManager } from "./settings-manager.ts";
+import { registerSubagentRuntimeDiagnosticSink } from "./subagents/runtime-diagnostics.ts";
 
 /**
  * Non-fatal issues collected while creating services or sessions.
@@ -227,6 +228,7 @@ export async function createAgentSessionServices(
 export async function createAgentSessionFromServices(
 	options: CreateAgentSessionFromServicesOptions,
 ): Promise<CreateAgentSessionResult> {
+	registerSubagentRuntimeDiagnosticSink(options.sessionManager, options.services.diagnostics);
 	return createAgentSession({
 		cwd: options.services.cwd,
 		agentDir: options.services.agentDir,

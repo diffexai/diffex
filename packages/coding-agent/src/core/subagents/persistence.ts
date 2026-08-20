@@ -346,7 +346,7 @@ export class ParentOwnedSubagentSessionStore {
 		return child;
 	}
 
-	openChild(childName: string, childSessionId: string, childLeafId: string | null): SessionManager {
+	#validateChildFile(childName: string, childSessionId: string, childLeafId: string | null): string {
 		if (!SUBAGENT_NAME_PATTERN.test(childName)) throw new Error(`Invalid subagent name: ${childName}`);
 		assertValidChildSessionId(childSessionId);
 		if (childLeafId !== null && !isNonEmptyString(childLeafId)) {
@@ -380,7 +380,15 @@ export class ParentOwnedSubagentSessionStore {
 		if (childLeafId !== null && !entries.some((entry) => entry.type !== "session" && entry.id === childLeafId)) {
 			throw new Error(`Persisted child leaf ${childLeafId} is unavailable for ${childName}`);
 		}
+		return childFile;
+	}
 
+	validateChild(childName: string, childSessionId: string, childLeafId: string | null): void {
+		this.#validateChildFile(childName, childSessionId, childLeafId);
+	}
+
+	openChild(childName: string, childSessionId: string, childLeafId: string | null): SessionManager {
+		const childFile = this.#validateChildFile(childName, childSessionId, childLeafId);
 		const child = SessionManager.open(childFile, this.#ownedDirectory, this.#parent.getCwd());
 		if (childLeafId === null) child.resetLeaf();
 		else child.branch(childLeafId);

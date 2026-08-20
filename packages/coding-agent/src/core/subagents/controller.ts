@@ -107,8 +107,19 @@ interface SubagentRecord {
 	sessionManager?: CapturedSubagentSession["sessionManager"];
 	persistenceConfig?: CapturedSubagentSession["config"];
 	persistenceError?: string;
+	runtimeWarning?: string;
+	persistedChildSessionId?: string;
+	persistedChildLeafId?: string | null;
+	persistable?: boolean;
+	prepareWake?: PrepareSubagentWake;
 	leafUnsubscribe?: () => void;
 }
+
+export interface PreparedSubagentWake extends CapturedSubagentSession {
+	readonly warning?: string;
+}
+
+export type PrepareSubagentWake = () => Promise<PreparedSubagentWake>;
 
 function isTerminalStatus(status: SubagentStatus): status is SubagentTerminalStatus {
 	return status === "idle" || status === "failed" || status === "interrupted";
@@ -246,6 +257,51 @@ export class SubagentController {
 			status: "queued",
 			timestamp,
 		}));
+	}
+
+	restore(snapshot: ChildSnapshotV1, prepareWake: PrepareSubagentWake, isolationError?: string): void {
+		this.#assertReservable(snapshot.name);
+		const interrupted = snapshot.status === "queued" || snapshot.status === "running";
+		const isolated = isolationError !== undefined;
+		const timestamp = interrupted || isolated ? Date.now() : snapshot.updatedAt;
+		this.#records.set(snapshot.name, {
+			id: uuidv7(),
+			name: snapshot.name,
+			task: snapshot.task,
+			status: isolated ? "failed" : interrupted ? "interrupted" : snapshot.status,
+			createdAt: snapshot.createdAt,
+			updatedAt: timestamp,
+			...(snapshot.startedAt === undefined ? {} : { startedAt: snapshot.startedAt }),
+			...(interrupted || isolated
+				? { completedAt: timestamp }
+				: snapshot.completedAt === undefined
+					? {}
+					: { completedAt: snapshot.completedAt }),
+			...(snapshot.result === undefined ? {} : { finalText: snapshot.result }),
+			...((isolationError ?? snapshot.error) === undefined ? {} : { error: isolationError ?? snapshot.error }),
+			persistenceConfig: snapshot.config,
+			persistedChildSessionId: snapshot.childSessionId,
+			persistedChildLeafId: snapshot.childLeafId,
+			persistable: true,
+			prepareWake,
+		});
+	}
+
+	restoreIsolated(name: string, error: string, prepareWake: PrepareSubagentWake): void {
+		this.#assertReservable(name);
+		const timestamp = Date.now();
+		this.#records.set(name, {
+			id: uuidv7(),
+			name,
+			task: "Persisted subagent restoration failed",
+			status: "failed",
+			createdAt: timestamp,
+			updatedAt: timestamp,
+			completedAt: timestamp,
+			error,
+			persistable: false,
+			prepareWake,
+		});
 	}
 
 	spawn(
@@ -832,9 +888,9 @@ export class SubagentController {
 					status: agent.status,
 					...(record.coordinatedRun === undefined ? {} : { runId: record.coordinatedRun.id }),
 					...(record.finalText === undefined ? {} : { result: record.finalText }),
-					...((record.error ?? record.persistenceError) === undefined
+					...((record.error ?? record.persistenceError ?? record.runtimeWarning) === undefined
 						? {}
-						: { error: record.error ?? record.persistenceError }),
+						: { error: record.error ?? record.persistenceError ?? record.runtimeWarning }),
 				}),
 			];
 		});
@@ -869,9 +925,9 @@ export class SubagentController {
 			attempt: run.attempt,
 			retryAvailable,
 			...(record.finalText === undefined ? {} : { result: record.finalText }),
-			...((record.error ?? record.persistenceError) === undefined
+			...((record.error ?? record.persistenceError ?? record.runtimeWarning) === undefined
 				? {}
-				: { error: record.error ?? record.persistenceError }),
+				: { error: record.error ?? record.persistenceError ?? record.runtimeWarning }),
 		});
 	}
 
@@ -879,40 +935,47 @@ export class SubagentController {
 		const interruptionTimestamp = interruptActive ? Date.now() : undefined;
 		return [...this.#records.values()]
 			.sort((left, right) => left.name.localeCompare(right.name))
-			.map((record) => {
+			.flatMap((record) => {
+				if (record.persistable === false) return [];
 				const config = record.persistenceConfig;
 				const sessionManager = record.sessionManager;
-				if (!config || !sessionManager) {
+				const childSessionId = sessionManager ? sessionManager.getSessionId() : record.persistedChildSessionId;
+				const childLeafId = sessionManager ? sessionManager.getLeafId() : record.persistedChildLeafId;
+				if (!config || !childSessionId || childLeafId === undefined) {
 					throw new Error(`Persistent subagent state is unavailable: ${record.name}`);
 				}
 				const interrupted = interruptActive && (record.status === "queued" || record.status === "running");
 				const snapshotTimestamp = interruptionTimestamp ?? record.updatedAt;
 				const error = record.error ?? record.persistenceError;
-				return {
-					name: record.name,
-					task: record.task,
-					status: interrupted ? "interrupted" : record.status,
-					createdAt: record.createdAt,
-					updatedAt: interrupted ? snapshotTimestamp : record.updatedAt,
-					...(record.startedAt === undefined ? {} : { startedAt: record.startedAt }),
-					...(interrupted
-						? { completedAt: snapshotTimestamp }
-						: record.completedAt === undefined
-							? {}
-							: { completedAt: record.completedAt }),
-					...(record.finalText === undefined ? {} : { result: record.finalText }),
-					...(error === undefined ? {} : { error }),
-					childSessionId: sessionManager.getSessionId(),
-					childLeafId: sessionManager.getLeafId(),
-					config,
-				};
+				return [
+					{
+						name: record.name,
+						task: record.task,
+						status: interrupted ? "interrupted" : record.status,
+						createdAt: record.createdAt,
+						updatedAt: interrupted ? snapshotTimestamp : record.updatedAt,
+						...(record.startedAt === undefined ? {} : { startedAt: record.startedAt }),
+						...(interrupted
+							? { completedAt: snapshotTimestamp }
+							: record.completedAt === undefined
+								? {}
+								: { completedAt: record.completedAt }),
+						...(record.finalText === undefined ? {} : { result: record.finalText }),
+						...(error === undefined ? {} : { error }),
+						childSessionId,
+						childLeafId,
+						config,
+					},
+				];
 			});
 	}
 
 	#persistRosterBestEffort(changedName?: string, interruptActive = false): void {
 		if (!this.#persistRoster || this.#records.size === 0) return;
 		try {
-			this.#persistRoster(this.#createPersistenceSnapshot(interruptActive), false);
+			const snapshot = this.#createPersistenceSnapshot(interruptActive);
+			if (snapshot.length === 0) return;
+			this.#persistRoster(snapshot, false);
 		} catch (error) {
 			const message = `Subagent roster persistence failed: ${normalizeError(error)}`;
 			if (changedName) {
@@ -1082,6 +1145,18 @@ export class SubagentController {
 		if (record.status === "queued") {
 			throw new Error(`Cannot message queued subagent: ${name}`);
 		}
+		if (!record.session && record.prepareWake) {
+			if (!wake) throw new Error(`Cannot message restored subagent without wake: ${name}`);
+			const prepared = await record.prepareWake();
+			record.createSession = prepared.createSession;
+			record.sessionManager = prepared.sessionManager;
+			record.persistenceConfig = prepared.config;
+			record.persistedChildSessionId = prepared.sessionManager.getSessionId();
+			record.persistedChildLeafId = prepared.sessionManager.getLeafId();
+			record.persistable = true;
+			record.runtimeWarning = prepared.warning;
+			record.prepareWake = undefined;
+		}
 		if (record.status === "failed" || record.status === "interrupted") {
 			if (!wake) {
 				throw new Error(`Cannot message ${record.status} subagent without wake: ${name}`);
@@ -1098,17 +1173,17 @@ export class SubagentController {
 			this.#scheduleRun(record, message);
 			return { target: name, action: "message", status: "queued", delivery: "prompt" };
 		}
+		if (record.status === "idle" && wake) {
+			record.coordinatedRun = undefined;
+			this.#scheduleRun(record, message);
+			return { target: name, action: "message", status: "queued", delivery: "prompt" };
+		}
 
 		const session = record.session;
 		if (!session) {
 			throw new Error(`Subagent session is unavailable: ${name}`);
 		}
 		if (record.status === "idle") {
-			if (wake) {
-				record.coordinatedRun = undefined;
-				this.#scheduleRun(record, message);
-				return { target: name, action: "message", status: "queued", delivery: "prompt" };
-			}
 			await session.followUp(message);
 			return { target: name, action: "message", status: "idle", delivery: "follow_up" };
 		}

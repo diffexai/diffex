@@ -25,9 +25,22 @@ import type { ResourceLoader } from "./resource-loader.ts";
 import { DefaultResourceLoader } from "./resource-loader.ts";
 import { getDefaultSessionDir, persistSessionState, SessionManager } from "./session-manager.ts";
 import { SettingsManager } from "./settings-manager.ts";
-import { SubagentController } from "./subagents/controller.ts";
-import { encodeSubagentRosterSnapshot, SUBAGENT_ROSTER_CUSTOM_TYPE } from "./subagents/persistence.ts";
-import { captureSubagentSessionConfig, createSubagentSession } from "./subagents/services.ts";
+import { type PreparedSubagentWake, SubagentController } from "./subagents/controller.ts";
+import {
+	type ChildSnapshotV1,
+	encodeSubagentRosterSnapshot,
+	ParentOwnedSubagentSessionStore,
+	readSelectedBranchSubagentRoster,
+	SUBAGENT_ROSTER_CUSTOM_TYPE,
+} from "./subagents/persistence.ts";
+import { reportSubagentRuntimeWarning } from "./subagents/runtime-diagnostics.ts";
+import {
+	capturePersistedSubagentConfig,
+	captureSubagentSessionConfig,
+	createSubagentSession,
+	type ResolvedRestoredSubagentConfig,
+	resolveRestoredSubagentConfig,
+} from "./subagents/services.ts";
 import { RootLocalEphemeralSubagentSessionManagerFactory } from "./subagents/session-manager-factory.ts";
 import { time } from "./timings.ts";
 import {
@@ -218,12 +231,7 @@ function createRootSubagentController(
 			);
 			return Object.freeze({
 				sessionManager,
-				config: Object.freeze({
-					model: Object.freeze({ provider: config.model.provider, id: config.model.id }),
-					thinkingLevel: config.thinkingLevel,
-					tools: config.tools,
-					harnessRevision: config.harnessVersionBundle?.manifest.version ?? null,
-				}),
+				config: capturePersistedSubagentConfig(config),
 				createSession: (signal: AbortSignal) =>
 					createSubagentSession(config, {
 						signal,
@@ -250,6 +258,108 @@ function createRootSubagentController(
 				}
 			: undefined,
 	});
+}
+
+function createPreparedSubagentWake(
+	childName: string,
+	sessionManager: SessionManager,
+	resolved: ResolvedRestoredSubagentConfig,
+): PreparedSubagentWake {
+	return Object.freeze({
+		sessionManager,
+		config: resolved.persistedConfig,
+		...(resolved.warning === undefined ? {} : { warning: resolved.warning }),
+		createSession: (signal: AbortSignal) =>
+			createSubagentSession(resolved.sessionConfig, { signal, childName, sessionManager }),
+	});
+}
+
+async function createReplacementSubagentWake(
+	parent: AgentSession,
+	agentDir: string,
+	store: ParentOwnedSubagentSessionStore,
+	childName: string,
+): Promise<PreparedSubagentWake> {
+	const sessionConfig = captureSubagentSessionConfig(parent, agentDir);
+	const sessionManager = store.createChild(childName);
+	return createPreparedSubagentWake(childName, sessionManager, {
+		sessionConfig,
+		persistedConfig: capturePersistedSubagentConfig(sessionConfig),
+	});
+}
+
+async function prepareRestoredSubagentWake(
+	parent: AgentSession,
+	agentDir: string,
+	store: ParentOwnedSubagentSessionStore,
+	snapshot: ChildSnapshotV1,
+): Promise<PreparedSubagentWake> {
+	const resolved = await resolveRestoredSubagentConfig(parent, agentDir, snapshot.config, snapshot.name);
+	if (resolved.warning) reportSubagentRuntimeWarning(parent.sessionManager, resolved.warning);
+	try {
+		return createPreparedSubagentWake(
+			snapshot.name,
+			store.openChild(snapshot.name, snapshot.childSessionId, snapshot.childLeafId),
+			resolved,
+		);
+	} catch (error) {
+		const message = `Persisted subagent ${snapshot.name} history became unavailable: ${error instanceof Error ? error.message : String(error)}; creating a replacement child session`;
+		reportSubagentRuntimeWarning(parent.sessionManager, message);
+		const replacement = await createReplacementSubagentWake(parent, agentDir, store, snapshot.name);
+		return Object.freeze({ ...replacement, warning: message });
+	}
+}
+
+function restoreRootSubagents(
+	controller: SubagentController,
+	parent: AgentSession,
+	agentDir: string,
+	parentSessionManager: SessionManager,
+): void {
+	if (!parentSessionManager.isPersisted()) return;
+	const roster = readSelectedBranchSubagentRoster(parentSessionManager);
+	for (const warning of roster.warnings) reportSubagentRuntimeWarning(parentSessionManager, warning);
+	if (!roster.found || roster.children.length === 0) return;
+
+	let store: ParentOwnedSubagentSessionStore;
+	try {
+		store = new ParentOwnedSubagentSessionStore(parentSessionManager);
+	} catch (error) {
+		const message = `Persisted subagent storage is unavailable: ${error instanceof Error ? error.message : String(error)}`;
+		reportSubagentRuntimeWarning(parentSessionManager, message);
+		for (const child of roster.children) {
+			const name = child.kind === "restorable" ? child.snapshot.name : child.name;
+			controller.restoreIsolated(name, child.kind === "isolated" ? child.error : message, () =>
+				Promise.reject(new Error(message)),
+			);
+		}
+		return;
+	}
+
+	for (const child of roster.children) {
+		if (child.kind === "isolated") {
+			controller.restoreIsolated(child.name, child.error, () =>
+				createReplacementSubagentWake(parent, agentDir, store, child.name),
+			);
+			continue;
+		}
+
+		const snapshot = child.snapshot;
+		let historyError: string | undefined;
+		try {
+			store.validateChild(snapshot.name, snapshot.childSessionId, snapshot.childLeafId);
+		} catch (error) {
+			historyError = `Persisted subagent ${snapshot.name} history is unavailable: ${error instanceof Error ? error.message : String(error)}`;
+			reportSubagentRuntimeWarning(parentSessionManager, historyError);
+		}
+		controller.restore(
+			snapshot,
+			historyError
+				? () => createReplacementSubagentWake(parent, agentDir, store, snapshot.name)
+				: () => prepareRestoredSubagentWake(parent, agentDir, store, snapshot),
+			historyError,
+		);
+	}
 }
 
 /**
@@ -534,6 +644,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		}
 	}
 	subagentController?.bindParent(session);
+	if (subagentController) restoreRootSubagents(subagentController, session, agentDir, sessionManager);
 	const extensionsResult = resourceLoader.getExtensions();
 
 	return {

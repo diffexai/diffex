@@ -1,5 +1,6 @@
 import type { TelemetryContext, ThinkingLevel } from "@earendil-works/diffex-agent-core";
 import type { Model } from "@earendil-works/diffex-ai";
+import { clampThinkingLevel } from "@earendil-works/diffex-ai/compat";
 import type { HarnessStateStore, HarnessVersionBundle } from "@earendil-works/diffex-harness-state";
 import type { AgentSession } from "../agent-session.ts";
 import {
@@ -15,7 +16,7 @@ import {
 	RootLocalEphemeralSubagentSessionManagerFactory,
 	type SubagentSessionManagerFactory,
 } from "./session-manager-factory.ts";
-import type { SubagentSpawnOrigin } from "./types.ts";
+import type { CapturedSubagentConfig, SubagentSpawnOrigin } from "./types.ts";
 
 export interface CreateSubagentServicesOptions {
 	cwd: string;
@@ -48,6 +49,12 @@ export interface CreateSubagentSessionOptions {
 	readonly origin?: SubagentSpawnOrigin;
 	readonly sessionManagerFactory?: SubagentSessionManagerFactory;
 	readonly sessionManager?: SessionManager;
+}
+
+export interface ResolvedRestoredSubagentConfig {
+	readonly sessionConfig: SubagentSessionConfig;
+	readonly persistedConfig: CapturedSubagentConfig;
+	readonly warning?: string;
 }
 
 const SUBAGENT_SYSTEM_PROMPT = [
@@ -107,6 +114,73 @@ export function captureSubagentSessionConfig(parent: AgentSession, agentDir: str
 		harnessVersionBundle: parent.harnessVersionBundle,
 		telemetryContext: parent.agent.telemetryContext,
 	});
+}
+
+export function capturePersistedSubagentConfig(config: SubagentSessionConfig): CapturedSubagentConfig {
+	return Object.freeze({
+		model: Object.freeze({ provider: config.model.provider, id: config.model.id }),
+		thinkingLevel: config.thinkingLevel,
+		tools: config.tools,
+		harnessRevision: config.harnessVersionBundle?.manifest.version ?? null,
+	});
+}
+
+export async function resolveRestoredSubagentConfig(
+	parent: AgentSession,
+	agentDir: string,
+	captured: CapturedSubagentConfig,
+	childName: string,
+): Promise<ResolvedRestoredSubagentConfig> {
+	const current = captureSubagentSessionConfig(parent, agentDir);
+	const unavailable: string[] = [];
+	const model = current.modelRuntime.getModel(captured.model.provider, captured.model.id);
+	if (!model) unavailable.push(`model ${captured.model.provider}/${captured.model.id} is unavailable`);
+	else if (clampThinkingLevel(model, captured.thinkingLevel) !== captured.thinkingLevel) {
+		unavailable.push(`thinking level ${captured.thinkingLevel} is unavailable`);
+	}
+
+	const availableTools = new Set(
+		parent
+			.getAllTools()
+			.filter((tool) => tool.sourceInfo.source === "builtin")
+			.map((tool) => tool.name),
+	);
+	const missingTools = captured.tools.filter((tool) => !availableTools.has(tool));
+	if (missingTools.length > 0) unavailable.push(`tools ${missingTools.join(", ")} are unavailable`);
+
+	let harnessVersionBundle: HarnessVersionBundle | undefined;
+	if (captured.harnessRevision !== null) {
+		if (current.harnessVersionBundle?.manifest.version === captured.harnessRevision) {
+			harnessVersionBundle = current.harnessVersionBundle;
+		} else {
+			try {
+				const listing = await current.harnessStateStore?.listVersions();
+				harnessVersionBundle = listing?.versions.find(
+					(bundle) => bundle.manifest.version === captured.harnessRevision,
+				);
+			} catch {
+				// The complete current parent configuration is selected below.
+			}
+			if (!harnessVersionBundle) unavailable.push(`harness revision ${captured.harnessRevision} is unavailable`);
+		}
+	}
+
+	if (!model || unavailable.length > 0) {
+		return {
+			sessionConfig: current,
+			persistedConfig: capturePersistedSubagentConfig(current),
+			warning: `Persisted subagent ${childName} configuration is unusable (${unavailable.join("; ")}); using the complete current parent configuration`,
+		};
+	}
+
+	const sessionConfig = Object.freeze({
+		...current,
+		model,
+		thinkingLevel: captured.thinkingLevel,
+		tools: captured.tools,
+		harnessVersionBundle,
+	});
+	return { sessionConfig, persistedConfig: captured };
 }
 
 export async function createSubagentSession(
