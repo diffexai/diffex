@@ -514,6 +514,30 @@ describe("session selector path/delete interactions", () => {
 		expect(existsSync(fixture.parentFile)).toBe(true);
 	});
 
+	it("reports partial deletion when parent deletion throws after owned cleanup", async () => {
+		const fixture = createPersistedParentFixture();
+		tempDirs.push(fixture.baseDir);
+		mkdirSync(fixture.ownedDirectory, { recursive: true });
+
+		const result = await deleteSessionWithOwnedSubagents(
+			fixture.parentFile,
+			async (ownedDirectory) => {
+				renameSync(ownedDirectory, join(fixture.baseDir, "trashed-owned"));
+			},
+			async () => {
+				throw new Error("parent callback failed");
+			},
+		);
+
+		expect(result).toEqual({
+			ok: false,
+			method: "trash",
+			error: "Parent-owned subagent sessions were moved to trash, but parent deletion failed: parent callback failed",
+		});
+		expect(existsSync(fixture.ownedDirectory)).toBe(false);
+		expect(existsSync(fixture.parentFile)).toBe(true);
+	});
+
 	it.each(["namespace-file", "namespace-link", "owned-file", "owned-link"] as const)(
 		"rejects an unsafe %s without deleting the parent",
 		async (unsafeComponent) => {

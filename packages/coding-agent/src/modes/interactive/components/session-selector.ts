@@ -692,7 +692,17 @@ export async function deleteSessionWithOwnedSubagents(
 		const deletion = await deleteParentSessionWithOwnedSubagents(
 			sessionPath,
 			moveOwnedDirectoryToTrash,
-			deleteParentSessionFile,
+			async (parentSessionFile): Promise<SessionFileDeletionResult> => {
+				try {
+					return await deleteParentSessionFile(parentSessionFile);
+				} catch (error) {
+					return {
+						ok: false,
+						method: "trash",
+						error: error instanceof Error ? error.message : String(error),
+					};
+				}
+			},
 		);
 		if (!deletion.parentResult.ok && deletion.ownedDirectoryMovedToTrash) {
 			return {
