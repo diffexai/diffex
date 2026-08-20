@@ -6,6 +6,7 @@ import {
 	closeSync,
 	createReadStream,
 	existsSync,
+	fsyncSync,
 	mkdirSync,
 	openSync,
 	readdirSync,
@@ -1032,6 +1033,25 @@ export class SessionManager {
 
 	getSessionFile(): string | undefined {
 		return this.sessionFile;
+	}
+
+	/** Persist a newly created session header before admitting dependent work. */
+	_persistHeader(): void {
+		if (!this.persist || !this.sessionFile) {
+			throw new Error("Cannot persist an in-memory session header");
+		}
+		if (this.fileEntries.length !== 1 || this.fileEntries[0]?.type !== "session") {
+			throw new Error("Session header must be persisted before appending entries");
+		}
+
+		const fd = openSync(this.sessionFile, "wx");
+		try {
+			writeFileSync(fd, `${JSON.stringify(this.fileEntries[0])}\n`);
+			fsyncSync(fd);
+		} finally {
+			closeSync(fd);
+		}
+		this.flushed = true;
 	}
 
 	_persist(entry: SessionEntry): void {
