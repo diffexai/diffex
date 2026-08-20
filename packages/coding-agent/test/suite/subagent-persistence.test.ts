@@ -702,6 +702,51 @@ describe("durable subagent lifecycle", () => {
 		).toEqual([]);
 	});
 
+	it("keeps a loadable captured harness revision active for the provider request", async () => {
+		const root = await createRoot();
+		const store = root.session.harnessStateStore;
+		const capturedRevision = root.session.activeHarnessVersion;
+		if (!store || !capturedRevision) throw new Error("Missing initialized harness state");
+		persistChild(root, {
+			model: { provider: "faux", id: "faux-lifecycle" },
+			thinkingLevel: "high",
+			tools: ["read"],
+			harnessRevision: capturedRevision,
+		});
+		await root.session.dispose();
+		const advanced = await store.advance({ memory: "Use only the newer parent memory." }, capturedRevision);
+		expect(advanced.status).toBe("advanced");
+		if (advanced.status !== "advanced") throw new Error("Expected harness advance to succeed");
+
+		const providerPrompts: string[] = [];
+		root.harness.setResponses([
+			(context) => {
+				providerPrompts.push(context.systemPrompt ?? "");
+				return fauxAssistantMessage("captured harness used");
+			},
+		]);
+		const reopened = await reopenRoot(root);
+		expect(reopened.session.activeHarnessVersion).toBe(advanced.bundle.manifest.version);
+
+		await getTool(reopened.session, "agent_action").execute("captured-harness", {
+			target: "worker",
+			action: "message",
+			message: "wake captured harness",
+			wake: true,
+		});
+		await getTool(reopened.session, "agents").execute("captured-harness-wait", {
+			timeout_ms: 1_000,
+			targets: ["worker"],
+			until: "all",
+		});
+
+		expect(providerPrompts).toHaveLength(1);
+		expect(providerPrompts[0]).not.toContain("Use only the newer parent memory.");
+		const sessionFile = reopened.sessionManager.getSessionFile();
+		if (!sessionFile) throw new Error("Missing parent session file");
+		expect(readSnapshots(sessionFile).at(-1)?.[0]?.config.harnessRevision).toBe(capturedRevision);
+	});
+
 	it("falls back to the complete wake-time parent configuration with one diagnostic", async () => {
 		const cases: Array<{
 			name: string;

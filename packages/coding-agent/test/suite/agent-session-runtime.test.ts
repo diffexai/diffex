@@ -297,13 +297,25 @@ describe("AgentSessionRuntime characterization", () => {
 
 			const nextAgents = runtime.session.getToolDefinition("agents")!;
 			await expect(
-				nextAgents.execute("list-empty", { timeout_ms: 0 }, undefined, undefined, extensionContext),
-			).resolves.toMatchObject({ details: { timed_out: false, agents: [] } });
+				nextAgents.execute("list-replacement", { timeout_ms: 0 }, undefined, undefined, extensionContext),
+			).resolves.toMatchObject({
+				details: {
+					timed_out: false,
+					agents:
+						flow === "import"
+							? [
+									{ name: "queued", status: "interrupted" },
+									{ name: "worker", status: "interrupted" },
+								]
+							: [],
+				},
+			});
 			faux.setResponses([fauxAssistantMessage("replacement child done")]);
 			const nextSpawn = runtime.session.getToolDefinition("spawn_agent")!;
+			const replacementName = flow === "import" ? "replacement" : "worker";
 			await nextSpawn.execute(
 				"reuse-worker",
-				{ name: "worker", task: "again" },
+				{ name: replacementName, task: "again" },
 				undefined,
 				undefined,
 				extensionContext,
@@ -311,13 +323,13 @@ describe("AgentSessionRuntime characterization", () => {
 			await expect(
 				nextAgents.execute(
 					"wait-worker",
-					{ timeout_ms: 1_000, targets: ["worker"], until: "all" },
+					{ timeout_ms: 1_000, targets: [replacementName], until: "all" },
 					undefined,
 					undefined,
 					extensionContext,
 				),
 			).resolves.toMatchObject({
-				details: { timed_out: false, agents: [{ name: "worker", status: "idle" }] },
+				details: { timed_out: false, agents: [{ name: replacementName, status: "idle" }] },
 			});
 		},
 	);

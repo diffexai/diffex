@@ -122,6 +122,7 @@ import {
 import type { SlashCommandInfo } from "./slash-commands.ts";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.ts";
 import type { SubagentController } from "./subagents/controller.ts";
+import { hasFixedHarnessSubagentSession } from "./subagents/session-runtime.ts";
 import type { SubagentBatchResult, SubagentDeliveryBatch, SubagentSummary } from "./subagents/types.ts";
 import { type BuildSystemPromptOptions, buildSystemPrompt } from "./system-prompt.ts";
 import { type CodingAgentTelemetrySpan, startCodingAgentSpan } from "./telemetry.ts";
@@ -1260,7 +1261,7 @@ export class AgentSession {
 	}
 
 	private async _refreshSelectedHarnessAtPromptBoundary(): Promise<void> {
-		if (!this._harnessStateStore) return;
+		if (!this._harnessStateStore || hasFixedHarnessSubagentSession(this.sessionManager)) return;
 
 		const selected = await this._harnessStateStore.loadCurrent();
 		if (selected.manifest.version === this.activeHarnessVersion) return;

@@ -16,6 +16,7 @@ import {
 	RootLocalEphemeralSubagentSessionManagerFactory,
 	type SubagentSessionManagerFactory,
 } from "./session-manager-factory.ts";
+import { markFixedHarnessSubagentSession } from "./session-runtime.ts";
 import type { CapturedSubagentConfig, SubagentSpawnOrigin } from "./types.ts";
 
 export interface CreateSubagentServicesOptions {
@@ -210,6 +211,7 @@ export async function createSubagentSession(
 				origin: options.origin ?? Object.freeze({ type: "programmatic", contextEntryId: null }),
 			}),
 		);
+	markFixedHarnessSubagentSession(sessionManager);
 	const { session } = await createAgentSessionFromServices({
 		services,
 		sessionManager,
