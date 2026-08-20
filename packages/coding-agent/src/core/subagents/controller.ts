@@ -5,6 +5,7 @@ import type { ToolDefinition } from "../extensions/types.ts";
 import { startCodingAgentSpan } from "../telemetry.ts";
 import { createAgentActionTool, createAgentsTool, createSpawnAgentTool } from "../tools/subagents.ts";
 import type { ChildSnapshotV1 } from "./persistence.ts";
+import { reportSubagentRuntimeWarning } from "./runtime-diagnostics.ts";
 import type {
 	CapturedSubagentSession,
 	CaptureSubagentSession,
@@ -165,6 +166,7 @@ export class SubagentController {
 	readonly #maxConcurrent: number;
 	readonly #captureSession: CaptureSubagentSession | undefined;
 	readonly #persistRoster: ((agents: readonly ChildSnapshotV1[], admission: boolean) => void) | undefined;
+	readonly #restoreRoster: ((controller: SubagentController, parent: AgentSession) => void) | undefined;
 	readonly #telemetryContext: TelemetryContext;
 	readonly #records = new Map<string, SubagentRecord>();
 	readonly #listeners = new Set<SubagentLifecycleListener>();
@@ -187,6 +189,7 @@ export class SubagentController {
 		captureSession?: CaptureSubagentSession;
 		telemetryContext?: TelemetryContext;
 		persistRoster?: (agents: readonly ChildSnapshotV1[], admission: boolean) => void;
+		restoreRoster?: (controller: SubagentController, parent: AgentSession) => void;
 	}) {
 		if (!Number.isInteger(options.maxConcurrent) || options.maxConcurrent <= 0) {
 			throw new RangeError("maxConcurrent must be a positive integer");
@@ -195,6 +198,7 @@ export class SubagentController {
 		this.#captureSession = options.captureSession;
 		this.#telemetryContext = options.telemetryContext ?? NOOP_TELEMETRY_CONTEXT;
 		this.#persistRoster = options.persistRoster;
+		this.#restoreRoster = options.restoreRoster;
 	}
 
 	createToolDefinitions(): ToolDefinition[] {
@@ -730,29 +734,108 @@ export class SubagentController {
 		});
 		this.#resetPromise = resetPromise;
 
-		try {
-			this.#resetting = true;
-			const resetError = this.#resetError();
-			this.#rejectPermitQueue(resetError);
-			const records = this.#detachRecords(resetError);
-			const cleanup = this.#cleanupRecords(records);
-			this.#resetCleanupPromise = cleanup;
-			this.#publish(
-				(revision) => ({
-					type: "subagent_controller_reset",
-					revision,
-					timestamp: Date.now(),
-				}),
-				"reset",
-			);
-			void this.#finishReset(cleanup).then(resolveReset, rejectReset);
-		} catch (error) {
-			if (!this.#closed) this.#resetting = false;
-			this.#resetCleanupPromise = undefined;
-			this.#resetPromise = undefined;
-			rejectReset(error);
-		}
+		void this.#resetContext().then(resolveReset, rejectReset);
 		return resetPromise;
+	}
+
+	reconcileBranch(mutateLeaf: () => void): Promise<void> {
+		if (this.#closed) return Promise.reject(this.#closedError());
+		if (this.#resetting) return Promise.reject(this.#resetError());
+		return this.#runContextBoundary(async () => {
+			await this.#quiesceActiveRecords();
+			if (this.#closed) throw this.#closedError();
+			mutateLeaf();
+			await this.#replaceRecordsFromSelectedBranch();
+		});
+	}
+
+	async #resetContext(): Promise<void> {
+		try {
+			await this.#runContextBoundary(async () => {
+				await this.#quiesceActiveRecords();
+				if (this.#closed) throw this.#closedError();
+				this.#persistRoster?.([], true);
+				await this.#clearRecords();
+				if (this.#closed) throw this.#closedError();
+			});
+		} finally {
+			this.#resetPromise = undefined;
+		}
+	}
+
+	async #runContextBoundary(operation: () => Promise<void>): Promise<void> {
+		this.#resetting = true;
+		this.#rejectPermitQueue(this.#resetError());
+		try {
+			await operation();
+		} finally {
+			if (!this.#closed) {
+				this.#resetting = false;
+				this.#drainPermitQueue();
+			}
+		}
+	}
+
+	async #quiesceActiveRecords(): Promise<void> {
+		const activeRecords = [...this.#records.values()].filter(
+			(record) => record.status === "queued" || record.status === "running",
+		);
+		const results = await Promise.allSettled(activeRecords.map((record) => this.#quiesceRecord(record)));
+		const failures = results.flatMap((result) => (result.status === "rejected" ? [result.reason] : []));
+		if (failures.length > 0) throw new AggregateError(failures, "Failed to quiesce subagent controller");
+	}
+
+	async #quiesceRecord(record: SubagentRecord): Promise<void> {
+		record.session?.clearQueue();
+		record.interruptionRequested = true;
+		if (record.status === "queued") {
+			record.runController?.abort(new Error(`Subagent interrupted: ${record.name}`));
+		} else if (record.session) {
+			await record.session.abort();
+		}
+		await record.run;
+		if (record.status === "queued" || record.status === "running") this.markInterrupted(record.name);
+	}
+
+	async #clearRecords(): Promise<void> {
+		const records = this.#detachRecords(this.#resetError());
+		const cleanup = this.#cleanupRecords(records);
+		this.#resetCleanupPromise = cleanup;
+		this.#publish(
+			(revision) => ({
+				type: "subagent_controller_reset",
+				revision,
+				timestamp: Date.now(),
+			}),
+			"reset",
+		);
+		const failures = await cleanup;
+		if (this.#resetCleanupPromise === cleanup) this.#resetCleanupPromise = undefined;
+		this.#reportCleanupFailures(failures);
+	}
+
+	async #replaceRecordsFromSelectedBranch(): Promise<void> {
+		await this.#clearRecords();
+		if (this.#closed) return;
+		this.#resetting = false;
+		try {
+			this.#restoreRoster?.(this, this.#getBoundParent());
+		} catch (error) {
+			reportSubagentRuntimeWarning(
+				this.#getBoundParent().sessionManager,
+				`Subagent roster reconciliation failed: ${normalizeError(error)}`,
+			);
+		} finally {
+			if (!this.#closed) this.#resetting = true;
+		}
+	}
+
+	#reportCleanupFailures(failures: readonly unknown[]): void {
+		if (failures.length === 0 || !this.#parent) return;
+		reportSubagentRuntimeWarning(
+			this.#parent.sessionManager,
+			`Subagent context cleanup failed after reset: ${failures.map(normalizeError).join("; ")}`,
+		);
 	}
 
 	#transition(name: string, status: SubagentStatus, fields: TransitionFields = {}): void {
@@ -824,7 +907,7 @@ export class SubagentController {
 	}
 
 	#getRecordForUpdate(name: string): SubagentRecord | undefined {
-		if (this.#closed || this.#resetting) return undefined;
+		if (this.#closed) return undefined;
 		const record = this.#records.get(name);
 		if (!record) {
 			throw new Error(`Unknown subagent: ${name}`);
@@ -1409,25 +1492,6 @@ export class SubagentController {
 			if (result.status === "rejected") failures.push(result.reason);
 		}
 		return failures;
-	}
-
-	async #finishReset(cleanup: Promise<unknown[]>): Promise<void> {
-		const failures = await cleanup;
-		if (!this.#closed) {
-			this.#resetting = false;
-			this.#drainPermitQueue();
-		}
-		if (this.#resetCleanupPromise === cleanup) {
-			this.#resetCleanupPromise = undefined;
-		}
-		this.#resetPromise = undefined;
-
-		if (this.#closed) {
-			throw this.#closedError();
-		}
-		if (failures.length > 0) {
-			throw new AggregateError(failures, "Failed to reset subagent controller");
-		}
 	}
 
 	async #finishShutdown(shutdownCleanup: Promise<unknown[]>, resetCleanup?: Promise<unknown[]>): Promise<void> {

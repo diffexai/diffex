@@ -15,8 +15,9 @@ import type { AgentTool } from "@earendil-works/diffex-agent-core";
 import { fauxAssistantMessage } from "@earendil-works/diffex-ai";
 import type { FauxModelDefinition } from "@earendil-works/diffex-ai/compat";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { AgentSession } from "../../src/core/agent-session.ts";
+import { AgentSession } from "../../src/core/agent-session.ts";
 import { createAgentSessionFromServices, createAgentSessionServices } from "../../src/core/agent-session-services.ts";
+import type { InlineExtension } from "../../src/core/extensions/types.ts";
 import {
 	loadEntriesFromFile,
 	persistSessionHeader,
@@ -249,6 +250,7 @@ describe("durable subagent lifecycle", () => {
 			modelId?: string;
 			thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 			tools?: string[];
+			extensionFactories?: InlineExtension[];
 		} = {},
 	) {
 		const harness = await createHarness({
@@ -267,7 +269,8 @@ describe("durable subagent lifecycle", () => {
 			modelRuntime: harness.session.modelRuntime,
 			settingsManager: harness.settingsManager,
 			resourceLoaderOptions: {
-				noExtensions: true,
+				noExtensions: options.extensionFactories === undefined,
+				extensionFactories: options.extensionFactories,
 				noSkills: true,
 				noPromptTemplates: true,
 				noThemes: true,
@@ -345,6 +348,20 @@ describe("durable subagent lifecycle", () => {
 	): void {
 		new ParentOwnedSubagentSessionStore(root.sessionManager).createChild(name, CHILD_ID_A);
 		persistRoster(root.sessionManager, [childSnapshot({ name, childSessionId: CHILD_ID_A, config })]);
+	}
+
+	function createRosterBranch(root: Awaited<ReturnType<typeof createRoot>>, agents: unknown[]): string {
+		const branchPoint = root.sessionManager.getLeafId();
+		if (!branchPoint) throw new Error("Missing branch point");
+		persistRoster(root.sessionManager, agents);
+		const targetId = root.sessionManager.appendMessage({ role: "user", content: "target branch", timestamp: 1 });
+		root.sessionManager.branch(branchPoint);
+		root.sessionManager.appendMessage({
+			role: "user",
+			content: "current branch",
+			timestamp: 2,
+		});
+		return targetId;
 	}
 
 	it("persists the child header and queued roster before direct spawn starts provider work", async () => {
@@ -526,6 +543,236 @@ describe("durable subagent lifecycle", () => {
 
 		await expect(session.dispose()).resolves.toBeUndefined();
 		expect(sessionManager.getLeafId()).toBe(previousLeafId);
+	});
+
+	it("completes extension cancellation before touching active children", async () => {
+		const release = deferred<void>();
+		const started = deferred<void>();
+		const root = await createRoot({
+			extensionFactories: [
+				(api) => {
+					api.on("session_before_tree", () => ({ cancel: true }));
+				},
+			],
+		});
+		const targetId = createRosterBranch(root, []);
+		root.harness.setResponses([
+			async () => {
+				started.resolve();
+				await release.promise;
+				return fauxAssistantMessage("finished later");
+			},
+		]);
+		await getTool(root.session, "spawn_agent").execute("spawn", { name: "worker", task: "keep running" });
+		await started.promise;
+		const currentLeafId = root.sessionManager.getLeafId();
+		if (!currentLeafId) throw new Error("Missing current leaf");
+
+		await expect(root.session.navigateTree(targetId)).resolves.toEqual({ cancelled: true });
+		expect(root.sessionManager.getLeafId()).toBe(currentLeafId);
+		expect(root.session.getSubagents()).toEqual([{ name: "worker", status: "running", task: "keep running" }]);
+		release.resolve();
+	});
+
+	it("finishes optional summarization before quiescing and replacing the target roster", async () => {
+		const childStarted = deferred<void>();
+		const summaryStarted = deferred<void>();
+		const releaseSummary = deferred<void>();
+		const root = await createRoot();
+		const store = new ParentOwnedSubagentSessionStore(root.sessionManager);
+		store.createChild("target", CHILD_ID_B);
+		const config = {
+			model: { provider: "faux", id: "faux-lifecycle" },
+			thinkingLevel: "high" as const,
+			tools: ["read"] as const,
+			harnessRevision: root.session.activeHarnessVersion ?? null,
+		};
+		const targetId = createRosterBranch(root, [
+			childSnapshot({ name: "target", childSessionId: CHILD_ID_B, config }),
+		]);
+		root.harness.setResponses([
+			async (_context, request) => {
+				childStarted.resolve();
+				await new Promise<void>((resolvePromise) => {
+					request?.signal?.addEventListener("abort", () => resolvePromise(), { once: true });
+				});
+				return fauxAssistantMessage("interrupted child");
+			},
+			async () => {
+				summaryStarted.resolve();
+				await releaseSummary.promise;
+				return fauxAssistantMessage("branch summary");
+			},
+		]);
+		await getTool(root.session, "spawn_agent").execute("spawn", { name: "worker", task: "keep running" });
+		await childStarted.promise;
+		const currentLeafId = root.sessionManager.getLeafId();
+		if (!currentLeafId) throw new Error("Missing current leaf");
+
+		const navigation = root.session.navigateTree(targetId, { summarize: true });
+		await summaryStarted.promise;
+		expect(root.sessionManager.getLeafId()).toBe(currentLeafId);
+		expect(root.session.getSubagents()[0]).toMatchObject({ name: "worker", status: "running" });
+		releaseSummary.resolve();
+		await expect(navigation).resolves.toMatchObject({ cancelled: false });
+		expect(root.session.getSubagents()).toEqual([{ name: "target", status: "idle", task: "Inspect the change" }]);
+	});
+
+	it("retains the old leaf and roster when child quiescing fails", async () => {
+		const childStarted = deferred<void>();
+		const releaseChild = deferred<void>();
+		const root = await createRoot();
+		const targetId = createRosterBranch(root, []);
+		root.harness.setResponses([
+			async () => {
+				childStarted.resolve();
+				await releaseChild.promise;
+				return fauxAssistantMessage("finished later");
+			},
+		]);
+		await getTool(root.session, "spawn_agent").execute("spawn", { name: "worker", task: "keep running" });
+		await childStarted.promise;
+		const currentLeafId = root.sessionManager.getLeafId();
+		if (!currentLeafId) throw new Error("Missing current leaf");
+		const abort = vi.spyOn(AgentSession.prototype, "abort").mockRejectedValueOnce(new Error("quiesce unavailable"));
+
+		await expect(root.session.navigateTree(targetId)).rejects.toThrow("Failed to quiesce subagent controller");
+		expect(root.sessionManager.getLeafId()).toBe(currentLeafId);
+		expect(root.session.getSubagents()[0]).toMatchObject({ name: "worker", status: "running" });
+		abort.mockRestore();
+		releaseChild.resolve();
+	});
+
+	it("does not block a successful leaf change when a quiesce status snapshot fails", async () => {
+		const childStarted = deferred<void>();
+		const root = await createRoot();
+		const targetId = createRosterBranch(root, []);
+		root.harness.setResponses([
+			async (_context, request) => {
+				childStarted.resolve();
+				await new Promise<void>((resolvePromise) => {
+					request?.signal?.addEventListener("abort", () => resolvePromise(), { once: true });
+				});
+				return fauxAssistantMessage("interrupted child");
+			},
+		]);
+		await getTool(root.session, "spawn_agent").execute("spawn", { name: "worker", task: "keep running" });
+		await childStarted.promise;
+		const currentLeafId = root.sessionManager.getLeafId();
+		if (!currentLeafId) throw new Error("Missing current leaf");
+		vi.spyOn(root.sessionManager, "appendCustomEntry").mockImplementationOnce(() => {
+			throw new Error("status snapshot unavailable");
+		});
+
+		await expect(root.session.navigateTree(targetId)).resolves.toMatchObject({ cancelled: false });
+		expect(root.sessionManager.getLeafId()).not.toBe(currentLeafId);
+		expect(root.session.getSubagents()).toEqual([]);
+	});
+
+	it("uses the corrupt newest target snapshot to mask older target children", async () => {
+		const root = await createRoot();
+		const branchPoint = root.sessionManager.getLeafId();
+		if (!branchPoint) throw new Error("Missing branch point");
+		persistRoster(root.sessionManager, [childSnapshot()]);
+		root.sessionManager.appendCustomEntry(SUBAGENT_ROSTER_CUSTOM_TYPE, { schemaVersion: 2, agents: [] });
+		const targetId = root.sessionManager.appendMessage({ role: "user", content: "corrupt target", timestamp: 1 });
+		root.sessionManager.branch(branchPoint);
+		root.sessionManager.appendMessage({ role: "user", content: "current branch", timestamp: 2 });
+
+		await root.session.navigateTree(targetId);
+		expect(root.session.getSubagents()).toEqual([]);
+		expect(root.services.diagnostics).toContainEqual({
+			type: "warning",
+			message: "Latest subagent roster snapshot is malformed or uses an unsupported schema version",
+		});
+	});
+
+	it.each(["reload", "manual harness switch", "prompt-boundary harness refresh"] as const)(
+		"writes an empty reset barrier through %s",
+		async (boundary) => {
+			const root = await createRoot();
+			root.harness.setResponses([fauxAssistantMessage("child complete")]);
+			await getTool(root.session, "spawn_agent").execute("spawn", { name: "worker", task: "finish" });
+			await getTool(root.session, "agents").execute("wait", { timeout_ms: 1_000, until: "all" });
+			const store = root.session.harnessStateStore;
+			const currentVersion = root.session.activeHarnessVersion;
+
+			if (boundary === "reload") {
+				await root.session.reload();
+			} else {
+				if (!store || !currentVersion) throw new Error("Missing initialized harness state");
+				if (boundary === "manual harness switch") {
+					const successor = await store.saveVersion({ memory: "manual successor" }, currentVersion);
+					await root.session.switchHarnessVersion(successor.manifest.version);
+				} else {
+					const successor = await store.advance({ memory: "prompt successor" }, currentVersion);
+					expect(successor.status).toBe("advanced");
+					root.harness.setResponses([fauxAssistantMessage("parent response")]);
+					await root.session.prompt("activate selected harness");
+				}
+			}
+
+			expect(root.session.getSubagents()).toEqual([]);
+			const selected = readSelectedBranchSubagentRoster(root.sessionManager);
+			expect(selected).toMatchObject({ found: true, children: [], warnings: [] });
+		},
+	);
+
+	it("aborts a shared harness reset before context mutation when the empty barrier fails", async () => {
+		const root = await createRoot();
+		root.harness.setResponses([fauxAssistantMessage("child complete")]);
+		await getTool(root.session, "spawn_agent").execute("spawn", { name: "worker", task: "finish" });
+		await getTool(root.session, "agents").execute("wait", { timeout_ms: 1_000, until: "all" });
+		const store = root.session.harnessStateStore;
+		const currentVersion = root.session.activeHarnessVersion;
+		if (!store || !currentVersion) throw new Error("Missing initialized harness state");
+		const successor = await store.saveVersion({ memory: "must not activate" }, currentVersion);
+		const originalAppend = root.sessionManager.appendCustomEntry.bind(root.sessionManager);
+		vi.spyOn(root.sessionManager, "appendCustomEntry").mockImplementation((customType, data) => {
+			if (
+				customType === SUBAGENT_ROSTER_CUSTOM_TYPE &&
+				typeof data === "object" &&
+				data !== null &&
+				"agents" in data &&
+				Array.isArray(data.agents) &&
+				data.agents.length === 0
+			) {
+				throw new Error("reset barrier unavailable");
+			}
+			return originalAppend(customType, data);
+		});
+
+		await expect(root.session.switchHarnessVersion(successor.manifest.version)).rejects.toThrow(
+			"reset barrier unavailable",
+		);
+		expect(root.session.activeHarnessVersion).toBe(currentVersion);
+		expect(root.session.getSubagents()).toEqual([{ name: "worker", status: "idle", task: "finish" }]);
+		expect(readSelectedBranchSubagentRoster(root.sessionManager).children).toHaveLength(1);
+	});
+
+	it("keeps a reset committed and reports cleanup failure after the durable barrier", async () => {
+		const root = await createRoot();
+		root.harness.setResponses([fauxAssistantMessage("child complete")]);
+		await getTool(root.session, "spawn_agent").execute("spawn", { name: "worker", task: "finish" });
+		await getTool(root.session, "agents").execute("wait", { timeout_ms: 1_000, until: "all" });
+		const store = root.session.harnessStateStore;
+		const currentVersion = root.session.activeHarnessVersion;
+		if (!store || !currentVersion) throw new Error("Missing initialized harness state");
+		const successor = await store.saveVersion({ memory: "activate despite cleanup failure" }, currentVersion);
+		vi.spyOn(AgentSession.prototype, "dispose").mockRejectedValueOnce(new Error("cleanup unavailable"));
+
+		await expect(root.session.switchHarnessVersion(successor.manifest.version)).resolves.toBeUndefined();
+		expect(root.session.activeHarnessVersion).toBe(successor.manifest.version);
+		expect(root.session.getSubagents()).toEqual([]);
+		expect(readSelectedBranchSubagentRoster(root.sessionManager)).toMatchObject({
+			found: true,
+			children: [],
+			warnings: [],
+		});
+		expect(root.services.diagnostics).toContainEqual({
+			type: "warning",
+			message: "Subagent context cleanup failed after reset: cleanup unavailable",
+		});
 	});
 
 	it("restores terminal and interrupted records without calls, isolates bad histories, and opens lazily on wake", async () => {

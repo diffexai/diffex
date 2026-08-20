@@ -218,6 +218,7 @@ function createRootSubagentController(
 	return new SubagentController({
 		maxConcurrent,
 		telemetryContext,
+		restoreRoster: (controller, parent) => restoreRootSubagents(controller, parent, agentDir, parentSessionManager),
 		captureSession: (parent, childName, origin) => {
 			const config = captureSubagentSessionConfig(parent, agentDir);
 			const sessionManager = sessionManagerFactory.create(

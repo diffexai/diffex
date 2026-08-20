@@ -3768,32 +3768,33 @@ export class AgentSession {
 			// Switch leaf (with or without summary)
 			// Summary is attached at the navigation target position (newLeafId), not the old branch
 			let summaryEntry: BranchSummaryEntry | undefined;
-			if (summaryText) {
-				// Create summary at target position (can be null for root)
-				const summaryId = this.sessionManager.branchWithSummary(
-					newLeafId,
-					summaryText,
-					summaryDetails,
-					fromExtension,
-					summaryUsage,
-				);
-				summaryEntry = this.sessionManager.getEntry(summaryId) as BranchSummaryEntry;
-
-				// Attach label to the summary entry
-				if (label) {
-					this.sessionManager.appendLabelChange(summaryId, label);
+			const mutateLeaf = (): void => {
+				if (summaryText) {
+					const summaryId = this.sessionManager.branchWithSummary(
+						newLeafId,
+						summaryText,
+						summaryDetails,
+						fromExtension,
+						summaryUsage,
+					);
+					summaryEntry = this.sessionManager.getEntry(summaryId) as BranchSummaryEntry;
+					if (label) this.sessionManager.appendLabelChange(summaryId, label);
+				} else if (newLeafId === null) {
+					this.sessionManager.resetLeaf();
+				} else {
+					this.sessionManager.branch(newLeafId);
 				}
-			} else if (newLeafId === null) {
-				// No summary, navigating to root - reset leaf
-				this.sessionManager.resetLeaf();
-			} else {
-				// No summary, navigating to non-root
-				this.sessionManager.branch(newLeafId);
-			}
 
-			// Attach label to target entry when not summarizing (no summary entry to label)
-			if (label && !summaryText) {
-				this.sessionManager.appendLabelChange(targetId, label);
+				if (label && !summaryText) this.sessionManager.appendLabelChange(targetId, label);
+			};
+
+			try {
+				if (this._subagentController) await this._subagentController.reconcileBranch(mutateLeaf);
+				else mutateLeaf();
+			} catch (error) {
+				if (oldLeafId === null) this.sessionManager.resetLeaf();
+				else this.sessionManager.branch(oldLeafId);
+				throw error;
 			}
 
 			// Update agent state
