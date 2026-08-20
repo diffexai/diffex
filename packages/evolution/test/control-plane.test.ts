@@ -23,6 +23,7 @@ import {
 	type EvolutionStageExecutor,
 	EvolutionTargetAdapterRegistry,
 	type EvolutionTargetWriter,
+	estimateEvolutionTokens,
 	evaluateAutomaticEvolutionEligibility,
 	FileEvolutionPersistence,
 	type Lesson,
@@ -609,6 +610,10 @@ describe("checkpointed evolution pipeline", () => {
 });
 
 describe("automatic evolution policy", () => {
+	it("reports zero tokens for an empty evidence corpus", () => {
+		expect(estimateEvolutionTokens([])).toBe(0);
+	});
+
 	it("requires a strict token threshold and at least three invocations", () => {
 		expect(
 			evaluateAutomaticEvolutionEligibility({

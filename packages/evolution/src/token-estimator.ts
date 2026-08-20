@@ -9,6 +9,7 @@ export const AUTOMATIC_EVOLUTION_COOLDOWN_MS = 20 * 60 * 1_000;
 const CHARACTERS_PER_ESTIMATED_TOKEN = 4;
 
 export function estimateEvolutionTokens(invocations: readonly MaterializedInvocation[]): number {
+	if (invocations.length === 0) return 0;
 	const canonicalCorpus = serializeEvolutionValue(invocations);
 	return Math.ceil(new TextEncoder().encode(canonicalCorpus).byteLength / CHARACTERS_PER_ESTIMATED_TOKEN);
 }
