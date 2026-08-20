@@ -504,6 +504,7 @@ describe("checkpointed evolution pipeline", () => {
 					const proposalResults = input.proposals.map((proposal) => ({
 						proposalId: proposal.proposalId,
 						disposition: "accepted" as const,
+						reasonCodes: [],
 						issues: [],
 					}));
 					const report: ValidationReport = {
@@ -514,6 +515,8 @@ describe("checkpointed evolution pipeline", () => {
 								proposalResults,
 							},
 						),
+						validatorVersion: "fixture-validator-v1",
+						assurance: "provenance-recurrence-and-structure-only",
 						proposalResults,
 					};
 					return report;
@@ -527,7 +530,17 @@ describe("checkpointed evolution pipeline", () => {
 								disposition: "selected",
 							}),
 							proposal,
-							score: 100,
+							scorerVersion: "fixture-scorer-v1",
+							evidenceRankingScore: 100,
+							scoreComponents: {
+								recurrence: 30,
+								provenanceIntegrity: 20,
+								sourceSignalStrength: 15,
+								scopeCoverage: 15,
+								curatorConfidence: 10,
+								proposalCompleteness: 10,
+								contradictionPenalty: 0,
+							},
 							disposition: "selected",
 							reasonCodes: ["selected"],
 						}),

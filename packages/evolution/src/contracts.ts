@@ -488,21 +488,42 @@ export interface ValidationIssue {
 
 export interface ProposalValidationResult {
 	readonly proposalId: string;
-	readonly disposition: "accepted" | "deferred" | "rejected";
+	readonly disposition: "accepted" | "deferred" | "quarantined" | "rejected";
+	readonly reasonCodes: readonly string[];
 	readonly issues: readonly ValidationIssue[];
 }
 
 export interface ValidationReport {
 	readonly metadata: EvolutionArtifactMetadata;
+	readonly validatorVersion: string;
+	readonly assurance: "provenance-recurrence-and-structure-only";
 	readonly proposalResults: readonly ProposalValidationResult[];
 }
 
-export type ScoredProposalDisposition = "deferred" | "rejected" | "selected" | "superseded";
+export interface EvidenceRankingScoreComponents {
+	readonly recurrence: number;
+	readonly provenanceIntegrity: number;
+	readonly sourceSignalStrength: number;
+	readonly scopeCoverage: number;
+	readonly curatorConfidence: number;
+	readonly proposalCompleteness: number;
+	readonly contradictionPenalty: number;
+}
+
+export type ScoredProposalDisposition =
+	| "deferred"
+	| "quarantined"
+	| "rejected"
+	| "selected"
+	| "superseded"
+	| "unselected";
 
 export interface ScoredProposal {
 	readonly metadata: EvolutionArtifactMetadata;
 	readonly proposal: EvolutionProposal;
-	readonly score: number | null;
+	readonly scorerVersion: string;
+	readonly evidenceRankingScore: number | null;
+	readonly scoreComponents: EvidenceRankingScoreComponents | null;
 	readonly disposition: ScoredProposalDisposition;
 	readonly reasonCodes: readonly string[];
 }
@@ -658,9 +679,11 @@ export type EvolutionProposalLedgerDisposition =
 	| "applied"
 	| "deferred"
 	| "failed"
+	| "quarantined"
 	| "rejected"
 	| "rolled-back"
-	| "superseded";
+	| "superseded"
+	| "unselected";
 
 interface EvolutionLedgerEventBase {
 	readonly metadata: EvolutionArtifactMetadata;

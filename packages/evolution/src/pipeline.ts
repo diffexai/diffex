@@ -85,7 +85,7 @@ function isProposal(artifact: EvolutionArtifact): artifact is EvolutionProposal 
 }
 
 function isScoredProposal(artifact: EvolutionArtifact): artifact is ScoredProposal {
-	return "proposal" in artifact && "score" in artifact;
+	return "proposal" in artifact && "evidenceRankingScore" in artifact;
 }
 
 function isMutationBatch(artifact: EvolutionArtifact): artifact is MutationBatch {

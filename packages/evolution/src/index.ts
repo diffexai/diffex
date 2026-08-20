@@ -20,6 +20,7 @@ export {
 	type EvidenceCoverageDisposition,
 	type EvidenceCoverageEntry,
 	type EvidenceCoverageMap,
+	type EvidenceRankingScoreComponents,
 	type EvidenceSemanticUnit,
 	type EvidenceSemanticUnitKind,
 	type EvidenceSlice,
@@ -168,6 +169,13 @@ export type {
 	ReflectorInput,
 	SuccessfulMaterialization,
 } from "./ports.ts";
+export {
+	DeterministicProposalRanker,
+	type DeterministicProposalRankerDependencies,
+	type DeterministicProposalRankerOptions,
+	EVIDENCE_RANKING_ASSURANCE,
+	EVIDENCE_RANKING_SCORER_VERSION,
+} from "./proposal-ranking.ts";
 export {
 	type CreateEvolutionArtifactMetadataOptions,
 	computeEvolutionContentDigest,
