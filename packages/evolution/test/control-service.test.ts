@@ -9,9 +9,11 @@ import {
 	EvolutionBackgroundWorker,
 	EvolutionControlPlane,
 	EvolutionControlService,
+	EvolutionExecutionError,
 	EvolutionProgressBus,
 	type EvolutionScope,
 	type EvolutionSnapshotContext,
+	type EvolutionStageExecutor,
 	FileEvolutionPersistence,
 	PollingEvolutionWorkSource,
 	type SuccessfulMaterialization,
@@ -35,7 +37,7 @@ class SequenceIds {
 }
 
 class FixedClock {
-	#timestamp = Date.parse("2026-08-20T12:00:00.000Z");
+	#timestamp = Date.now();
 
 	now(): string {
 		const value = new Date(this.#timestamp).toISOString();
@@ -80,7 +82,16 @@ interface ServiceFixture {
 	readonly controlPlane: EvolutionControlPlane;
 }
 
-async function serviceFixture(): Promise<ServiceFixture> {
+async function serviceFixture(
+	executor: EvolutionStageExecutor = {
+		async execute(context) {
+			if (context.job.stage === "validating") {
+				return { artifacts: [], state: {}, directive: "complete-no-op" as const };
+			}
+			return { artifacts: [], state: {}, directive: "continue" as const };
+		},
+	},
+): Promise<ServiceFixture> {
 	const root = await mkdtemp(join(tmpdir(), "diffex-evolution-service-"));
 	temporaryDirectories.push(root);
 	const store = new FileEvolutionPersistence(join(root, "evolution"));
@@ -140,14 +151,7 @@ async function serviceFixture(): Promise<ServiceFixture> {
 			events: progress,
 			evidence,
 			snapshots,
-			executor: {
-				async execute(context) {
-					if (context.job.stage === "validating") {
-						return { artifacts: [], state: {}, directive: "complete-no-op" as const };
-					}
-					return { artifacts: [], state: {}, directive: "continue" as const };
-				},
-			},
+			executor,
 		},
 		{ leaseTtlMs: 5_000, heartbeatIntervalMs: 1_000 },
 	);
@@ -219,6 +223,38 @@ describe("evolution control service", () => {
 		expect(await fixture.store.load(started.job.jobId)).toMatchObject({ attempt: 1, retryNotBefore: null });
 	});
 
+	it("starts fresh work after a terminal failure and reports incomplete reflection coverage", async () => {
+		const fixture = await serviceFixture({
+			async execute(context) {
+				if (context.job.stage === "reflecting") {
+					throw new EvolutionExecutionError("Reflector returned an invalid response", {
+						reasonCode: "reflection-invalid-response",
+						retryable: false,
+					});
+				}
+				return { artifacts: [], state: {}, directive: "continue" };
+			},
+		});
+		const first = await fixture.service.startManual();
+		if (first.status !== "created") throw new Error("Expected a created job");
+
+		await expect(fixture.controlPlane.runJob(first.job.jobId)).rejects.toThrow(
+			"Reflector returned an invalid response",
+		);
+		expect(await fixture.service.getJob(first.job.jobId)).toMatchObject({
+			outcome: "terminal-failed",
+			observability: { sliceCoverage: null },
+		});
+		const failedOverview = await fixture.service.overview();
+		expect(failedOverview).toMatchObject({ activeJob: null, lastEvolutionAt: expect.any(String) });
+		expect(failedOverview.cooldownRemainingMs).toBe(0);
+
+		const second = await fixture.service.startManual();
+		expect(second).toMatchObject({ status: "created" });
+		if (second.status === "created") expect(second.job.jobId).not.toBe(first.job.jobId);
+		await fixture.service.cancelActive();
+	});
+
 	it("reports durable latency, budget, coverage, conflict, and recovery observability", async () => {
 		const fixture = await serviceFixture();
 		const started = await fixture.service.startManual();
@@ -239,7 +275,7 @@ describe("evolution control service", () => {
 			estimatedEvidenceTokens: expect.any(Number),
 			providerCostUsd: null,
 			reflectorBudget: { modelCalls: 0, reflectionRounds: 0, toolCalls: 0 },
-			sliceCoverage: { analyzed: 0, corrupt: 0, skipped: 0, unreadable: 0 },
+			sliceCoverage: null,
 			proposalDispositions: {
 				applied: 0,
 				deferred: 0,

@@ -68,7 +68,7 @@ export interface EvolutionOverview {
 	readonly settledInvocationCount: number;
 	readonly automaticTokenThreshold: number;
 	readonly automaticMinimumInvocations: number;
-	readonly lastAutomaticRunAt: string | null;
+	readonly lastEvolutionAt: string | null;
 	readonly cooldownRemainingMs: number;
 	readonly automaticEligibility:
 		| { readonly eligible: true }
@@ -119,7 +119,7 @@ export interface EvolutionJobObservability {
 		readonly corrupt: number;
 		readonly skipped: number;
 		readonly unreadable: number;
-	};
+	} | null;
 	readonly proposalDispositions: Readonly<Record<EvolutionProposalLedgerDisposition, number>>;
 	readonly activationConflicts: number;
 	readonly rollbackAvailable: boolean;
@@ -304,6 +304,12 @@ export class EvolutionControlService {
 				.map((job) => job.terminalAt as string)
 				.sort()
 				.at(-1) ?? null;
+		const lastEvolutionAt =
+			jobs
+				.filter((job) => job.terminalAt !== null)
+				.map((job) => job.terminalAt as string)
+				.sort()
+				.at(-1) ?? null;
 		const currentTime = Date.parse(this.#dependencies.clock.now());
 		const cooldownRemainingMs =
 			lastAutomaticRunAt === null
@@ -329,7 +335,7 @@ export class EvolutionControlService {
 			settledInvocationCount: materializations.length,
 			automaticTokenThreshold: AUTOMATIC_EVOLUTION_TOKEN_THRESHOLD,
 			automaticMinimumInvocations: AUTOMATIC_EVOLUTION_MINIMUM_INVOCATIONS,
-			lastAutomaticRunAt,
+			lastEvolutionAt,
 			cooldownRemainingMs,
 			automaticEligibility: eligibility,
 			activeJob: active === null ? null : summary(active),
@@ -357,7 +363,13 @@ export class EvolutionControlService {
 			if (result.status === "created") return { status: "created", job: summary(result.job) };
 			if (result.reason === "blocking-job" && result.blockingJobId !== undefined) {
 				const blocking = await this.#dependencies.jobs.load(result.blockingJobId);
-				if (blocking !== null) return { status: "attached", job: summary(blocking) };
+				if (blocking !== null) {
+					const blockingSummary = summary(blocking);
+					if (blockingSummary.cancellable || blockingSummary.resumable) {
+						return { status: "attached", job: blockingSummary };
+					}
+					continue;
+				}
 			}
 			if (result.reason !== "scope-busy") return { status: "not-created", reason: result.reason };
 			const active = activeJob(await this.#dependencies.jobs.list(this.#dependencies.scope));
@@ -466,13 +478,17 @@ export class EvolutionControlService {
 			},
 			{ modelCalls: 0, reflectionRounds: 0, toolCalls: 0 },
 		);
-		const coverageEntries = artifacts.filter(isCoverageMap).flatMap((artifact) => artifact.entries);
-		const sliceCoverage = {
-			analyzed: coverageEntries.filter((entry) => entry.disposition === "analyzed").length,
-			corrupt: coverageEntries.filter((entry) => entry.disposition === "corrupt").length,
-			skipped: coverageEntries.filter((entry) => entry.disposition === "skipped").length,
-			unreadable: coverageEntries.filter((entry) => entry.disposition === "unreadable").length,
-		};
+		const coverageMaps = artifacts.filter(isCoverageMap);
+		const coverageEntries = coverageMaps.flatMap((artifact) => artifact.entries);
+		const sliceCoverage =
+			coverageMaps.length === 0
+				? null
+				: {
+						analyzed: coverageEntries.filter((entry) => entry.disposition === "analyzed").length,
+						corrupt: coverageEntries.filter((entry) => entry.disposition === "corrupt").length,
+						skipped: coverageEntries.filter((entry) => entry.disposition === "skipped").length,
+						unreadable: coverageEntries.filter((entry) => entry.disposition === "unreadable").length,
+					};
 		const proposalDispositions: Record<EvolutionProposalLedgerDisposition, number> = {
 			applied: 0,
 			deferred: 0,

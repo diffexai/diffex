@@ -117,7 +117,10 @@ function isInputSnapshot(artifact: EvolutionArtifact): artifact is EvolutionInpu
 }
 
 function isOpenBlockingJob(job: EvolutionJob): boolean {
-	return job.resolution === null && job.outcome !== "completed" && job.outcome !== "superseded";
+	return (
+		job.resolution === null &&
+		(job.outcome === "active" || job.outcome === "interrupted" || job.outcome === "retryable-failed")
+	);
 }
 
 function rangesOverlap(left: EvolutionJob["evidenceRange"], right: EvolutionJob["evidenceRange"]): boolean {
