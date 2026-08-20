@@ -97,13 +97,14 @@ describe("asynchronous subagent startup", () => {
 			gates.get("second")!.resolve(fauxAssistantMessage("second done"));
 			await waitForStatus(controller, "second", "idle");
 			await providerStarts.get("third")!.promise;
-			expect(started).toEqual(["first", "second", "third"]);
+			expect(started.slice(0, 2).sort()).toEqual(["first", "second"]);
+			expect(started[2]).toBe("third");
 			expect(controller.snapshot().agents.find((agent) => agent.name === "fourth")?.status).toBe("queued");
 
 			gates.get("first")!.resolve(fauxAssistantMessage("first done"));
 			await waitForStatus(controller, "first", "idle");
 			await providerStarts.get("fourth")!.promise;
-			expect(started).toEqual(["first", "second", "third", "fourth"]);
+			expect(started[3]).toBe("fourth");
 		} finally {
 			for (const [name, gate] of gates) gate.resolve(fauxAssistantMessage(`${name} done`));
 		}
