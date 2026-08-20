@@ -3,6 +3,7 @@
 	"compilerOptions": {
 		"outDir": "./dist",
 		"paths": {
+			"#evolution": ["../evolution/dist/index.d.ts"],
 			"#harness-trace": ["../harness-trace/dist/index.d.ts"],
 			"@earendil-works/diffex-agent-core": ["../agent/dist/index.d.ts"],
 			"@earendil-works/diffex-agent-core/*": ["../agent/dist/*.d.ts"],

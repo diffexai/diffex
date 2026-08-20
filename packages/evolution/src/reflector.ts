@@ -428,6 +428,7 @@ export class RecursiveReflector implements Reflector {
 					response = await abortable(
 						input.model.execute({
 							stage: "reflector",
+							model: input.input.modelConfiguration,
 							promptVersion: input.input.promptVersions.reflector,
 							idempotencyKey: `${input.idempotencyKey}:${plan.nodeId}:${round}`,
 							input: this.#modelInput(input, plan, completed, round),

@@ -26,6 +26,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{ name: "copy", description: "Copy last agent message to clipboard" },
 	{ name: "name", description: "Set session display name" },
 	{ name: "session", description: "Show session info and stats" },
+	{ name: "evolve", description: "Inspect and control harness evolution" },
 	{ name: "version", description: "Select harness version" },
 	{ name: "subagents", description: "Show sub-agents in the current session" },
 	{ name: "changelog", description: "Show changelog entries" },

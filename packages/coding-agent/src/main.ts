@@ -46,6 +46,7 @@ import {
 } from "./core/agent-session-services.ts";
 import { formatNoModelsAvailableMessage } from "./core/auth-guidance.ts";
 import { AuthStorage, ReadOnlyAuthStorage } from "./core/auth-storage.ts";
+import { createCodingAgentEvolutionRuntime, EvolutionRuntimeCoordinator } from "./core/evolution-runtime.ts";
 import { exportFromFile } from "./core/export-html/index.ts";
 import type { InlineExtension } from "./core/extensions/types.ts";
 import { applyHttpProxySettings, configureHttpDispatcher } from "./core/http-dispatcher.ts";
@@ -715,6 +716,7 @@ export async function main(args: string[], options?: MainOptions) {
 	}
 	const invocationTraceResult = await createInvocationTrace({ agentDir, sessionManager });
 	const invocationTrace = invocationTraceResult.trace;
+	const evolutionCoordinator = new EvolutionRuntimeCoordinator(invocationTrace);
 	if (invocationTraceResult.diagnostic) {
 		reportDiagnostics([invocationTraceResult.diagnostic]);
 	}
@@ -854,7 +856,7 @@ export async function main(args: string[], options?: MainOptions) {
 			excludeTools: sessionOptions.excludeTools,
 			noTools: sessionOptions.noTools,
 			customTools: sessionOptions.customTools,
-			lifecycleObserver: invocationTrace,
+			lifecycleObserver: evolutionCoordinator,
 		});
 		const cliThinkingOverride = parsed.thinking !== undefined || cliThinkingFromModel;
 		if (created.session.model && cliThinkingOverride) {
@@ -866,6 +868,17 @@ export async function main(args: string[], options?: MainOptions) {
 			services,
 			diagnostics,
 		};
+		await evolutionCoordinator.replace(
+			await createCodingAgentEvolutionRuntime({
+				agentDir,
+				cwd,
+				session: created.session,
+				harnessState: services.harnessStateStore,
+				modelRuntime,
+				resourceLoader,
+				currentTracePath: invocationTrace.destinationPath,
+			}),
+		);
 		await invocationTrace.recordDiagnostics(diagnostics);
 		return result;
 	};
@@ -878,7 +891,13 @@ export async function main(args: string[], options?: MainOptions) {
 			sessionManager,
 			invocationSessionReason: initialSessionAttachmentReason(parsed, sessionManager),
 			telemetryContext: invocationTrace.telemetryContext,
-			onDispose: (status) => invocationTrace.close(status),
+			onDispose: async (status) => {
+				try {
+					await evolutionCoordinator.stop();
+				} finally {
+					await invocationTrace.close(status);
+				}
+			},
 		});
 	} catch (error) {
 		await invocationTrace.recordDiagnostics([
@@ -970,6 +989,7 @@ export async function main(args: string[], options?: MainOptions) {
 		await runRpcMode(runtime);
 	} else if (appMode === "interactive") {
 		const interactiveMode = new InteractiveMode(runtime, {
+			evolution: evolutionCoordinator,
 			migratedProviders,
 			modelFallbackMessage,
 			autoTrustOnReloadCwd,

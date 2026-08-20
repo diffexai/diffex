@@ -134,6 +134,7 @@ import {
 } from "./components/diffex-welcome.ts";
 import { DynamicBorder } from "./components/dynamic-border.ts";
 import { EarendilAnnouncementComponent } from "./components/earendil-announcement.ts";
+import { type EvolutionMenuClient, EvolutionMenuComponent } from "./components/evolution-menu.ts";
 import { ExtensionEditorComponent } from "./components/extension-editor.ts";
 import { ExtensionInputComponent } from "./components/extension-input.ts";
 import { ExtensionSelectorComponent } from "./components/extension-selector.ts";
@@ -333,6 +334,8 @@ function formatLoginProviderCompletionDescription(provider: LoginProviderComplet
  * Options for InteractiveMode initialization.
  */
 export interface InteractiveModeOptions {
+	/** Process-owned evolution controls for the current repository runtime. */
+	evolution?: EvolutionMenuClient;
 	/** Providers that were migrated to auth.json (shows warning) */
 	migratedProviders?: string[];
 	/** Warning message if session model couldn't be restored */
@@ -2948,6 +2951,11 @@ export class InteractiveMode {
 				this.editor.setText("");
 				return;
 			}
+			if (text === "/evolve") {
+				this.editor.setText("");
+				this.showEvolutionMenu("");
+				return;
+			}
 			if (text === "/version") {
 				this.editor.setText("");
 				await this.showHarnessVersionSelector();
@@ -4676,6 +4684,32 @@ export class InteractiveMode {
 		} catch (error: unknown) {
 			this.showError(`Could not list harness versions: ${error instanceof Error ? error.message : String(error)}`);
 		}
+	}
+
+	private showEvolutionMenu(editorText: string): void {
+		const evolution = this.options.evolution;
+		if (!evolution) {
+			this.showError("Evolution runtime is unavailable");
+			this.editor.setText(editorText);
+			return;
+		}
+		this.showSelector((done) => {
+			const close = () => {
+				done();
+				this.editor.setText(editorText);
+				this.ui.requestRender();
+			};
+			const menu = new EvolutionMenuComponent(
+				evolution,
+				close,
+				(message, error) => {
+					if (error) this.showError(message);
+					else this.showStatus(message);
+				},
+				() => this.ui.requestRender(),
+			);
+			return { component: menu, focus: menu, dispose: () => menu.dispose() };
+		});
 	}
 
 	private async handleModelCommand(searchTerm?: string): Promise<void> {

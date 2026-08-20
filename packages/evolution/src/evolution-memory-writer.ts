@@ -551,6 +551,10 @@ export class EvolutionMemoryWriter implements EvolutionTargetWriter {
 		}
 	}
 
+	async loadActiveMemoryItems(bundle: HarnessVersionBundle): Promise<readonly EvolutionMemoryItem[]> {
+		return activeItems(await this.#loadCatalog(bundle));
+	}
+
 	async #loadCandidate(batchId: string): Promise<StoredEvolutionMemoryCandidate | null> {
 		const contents = await this.#readOptional(this.#candidateFile(batchId));
 		if (contents === null) return null;

@@ -11,6 +11,7 @@ export const workspaceSourcePaths = {
 	agentIndex: fileURLToPath(new URL("./packages/agent/src/index.ts", import.meta.url)),
 	harnessStateIndex: fileURLToPath(new URL("./packages/harness-state/src/index.ts", import.meta.url)),
 	harnessTraceIndex: fileURLToPath(new URL("./packages/harness-trace/src/index.ts", import.meta.url)),
+	evolutionIndex: fileURLToPath(new URL("./packages/evolution/src/index.ts", import.meta.url)),
 	codingAgentIndex: fileURLToPath(new URL("./packages/coding-agent/src/index.ts", import.meta.url)),
 	tuiIndex: fileURLToPath(new URL("./packages/tui/src/index.ts", import.meta.url)),
 } as const;
@@ -18,6 +19,7 @@ export const workspaceSourcePaths = {
 export default defineConfig({
 	resolve: {
 		alias: [
+			{ find: /^#evolution$/, replacement: workspaceSourcePaths.evolutionIndex },
 			{ find: /^#harness-trace$/, replacement: workspaceSourcePaths.harnessTraceIndex },
 			{ find: /^@earendil-works\/diffex-telemetry$/, replacement: workspaceSourcePaths.telemetryIndex },
 			{ find: /^@earendil-works\/diffex-telemetry\/testing$/, replacement: workspaceSourcePaths.telemetryTesting },

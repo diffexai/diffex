@@ -63,6 +63,7 @@ export interface EvolutionModelTool {
 
 export interface ReflectorModelRequest {
 	readonly stage: "reflector";
+	readonly model: EvolutionModelIdentity;
 	readonly promptVersion: string;
 	readonly idempotencyKey: string;
 	readonly input: JsonObject;
@@ -72,6 +73,7 @@ export interface ReflectorModelRequest {
 
 export interface CuratorModelRequest {
 	readonly stage: "curator";
+	readonly model: EvolutionModelIdentity;
 	readonly promptVersion: string;
 	readonly idempotencyKey: string;
 	readonly input: JsonObject;

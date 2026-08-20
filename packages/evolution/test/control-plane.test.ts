@@ -302,6 +302,20 @@ describe("durable evolution control plane", () => {
 		expect(replacement.status).toBe("created");
 	});
 
+	it("marks an abandoned active job as explicitly resumable", async () => {
+		const fixture = await controlPlaneFixture(new RecordingExecutor());
+		const created = await createManualJob(fixture);
+
+		const recovered = await fixture.controlPlane.recoverAbandonedJob(created.jobId);
+
+		expect(recovered).toMatchObject({
+			outcome: "interrupted",
+			reasonCode: "lease-lost",
+			failureMessage: "Evolution job was interrupted after its lease expired",
+		});
+		expect((await fixture.persistence.load(created.jobId))?.outcome).toBe("interrupted");
+	});
+
 	it("reports no evidence instead of creating an empty manual job", async () => {
 		const fixture = await controlPlaneFixture(new RecordingExecutor(), []);
 
@@ -399,6 +413,7 @@ describe("checkpointed evolution pipeline", () => {
 					reflectorCounterReports.push(input.counterReport);
 					await input.model.execute({
 						stage: "reflector",
+						model: input.input.modelConfiguration,
 						promptVersion: "reflector-v1",
 						idempotencyKey: input.idempotencyKey,
 						input: {},
@@ -453,6 +468,7 @@ describe("checkpointed evolution pipeline", () => {
 				async curate(input) {
 					await input.model.execute({
 						stage: "curator",
+						model: input.input.modelConfiguration,
 						promptVersion: "curator-v1",
 						idempotencyKey: input.idempotencyKey,
 						input: {},

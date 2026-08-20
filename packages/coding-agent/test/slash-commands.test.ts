@@ -24,4 +24,11 @@ describe("BUILTIN_SLASH_COMMANDS", () => {
 			description: "Select harness version",
 		});
 	});
+
+	it("includes the evolution menu command", () => {
+		expect(BUILTIN_SLASH_COMMANDS).toContainEqual({
+			name: "evolve",
+			description: "Inspect and control harness evolution",
+		});
+	});
 });

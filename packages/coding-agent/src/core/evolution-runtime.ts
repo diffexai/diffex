@@ -1,0 +1,627 @@
+import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { readdir, readFile, realpath } from "node:fs/promises";
+import { join, resolve } from "node:path";
+import { promisify } from "node:util";
+import { contentText, type Message, type Model, type Tool } from "@earendil-works/diffex-ai";
+import type { HarnessStateStore, HarnessVersion } from "@earendil-works/diffex-harness-state";
+import type { TSchema } from "typebox";
+import {
+	computeEvolutionContentDigest,
+	DeterministicProposalRanker,
+	EvolutionBackgroundWorker,
+	EvolutionControlPlane,
+	EvolutionControlService,
+	type EvolutionEvidenceCatalog,
+	type EvolutionJobDetail,
+	type EvolutionJobSummary,
+	EvolutionMemoryWriter,
+	type EvolutionModelExecutor,
+	type EvolutionModelRequest,
+	type EvolutionModelResponse,
+	type EvolutionOverview,
+	EvolutionPipeline,
+	EvolutionProgressBus,
+	type EvolutionProgressEvent,
+	type EvolutionProposalDetail,
+	type EvolutionRollbackAction,
+	type EvolutionScope,
+	type EvolutionSnapshotSource,
+	type EvolutionStartResult,
+	EvolutionTargetAdapterRegistry,
+	FileEvolutionPersistence,
+	type InteractivePriorityGate,
+	type JsonObject,
+	PollingEvolutionWorkSource,
+	RecursiveReflector,
+	StructuredDeltaCurator,
+	type SuccessfulMaterialization,
+} from "#evolution";
+import { materializeJsonlInvocation } from "#harness-trace";
+import { VERSION } from "../config.ts";
+import type { AgentSession } from "./agent-session.ts";
+import type { AgentSessionLifecycleObserver, AgentSessionOperationSettlement } from "./agent-session-lifecycle.ts";
+import type { InvocationTrace } from "./invocation-trace.ts";
+import type { ModelRuntime } from "./model-runtime.ts";
+import type { ResourceLoader } from "./resource-loader.ts";
+
+const execFileAsync = promisify(execFile);
+const EVOLUTION_DIRECTORY_NAME = "evolution";
+const TRACE_DIRECTORY_NAME = "traces";
+const RESPONSE_TOOL_NAME = "submit_evolution_response";
+const MAX_MODEL_ROUNDS = 24;
+
+const REFLECTOR_RESPONSE_SCHEMA = {
+	type: "object",
+	additionalProperties: false,
+	required: ["complete", "lessons"],
+	properties: {
+		complete: { type: "boolean" },
+		lessons: {
+			type: "array",
+			items: {
+				type: "object",
+				additionalProperties: false,
+				required: [
+					"kind",
+					"summary",
+					"preconditions",
+					"observedOutcome",
+					"supportingEvidenceIds",
+					"counterevidenceIds",
+					"applicabilityBoundaries",
+					"uncertainty",
+					"actionableTakeaway",
+				],
+				properties: {
+					kind: {
+						enum: [
+							"counterexample",
+							"direct-instruction",
+							"failure-workaround",
+							"harmful-memory",
+							"incorrect-source-of-truth",
+							"missing-capability",
+							"missing-verification",
+							"orchestration-inefficiency",
+							"repository-constraint",
+							"successful-strategy",
+							"tool-behavior",
+							"unresolved-work",
+						],
+					},
+					summary: { type: "string", minLength: 1 },
+					preconditions: { type: "array", items: { type: "string", minLength: 1 } },
+					observedOutcome: { type: "string", minLength: 1 },
+					supportingEvidenceIds: { type: "array", minItems: 1, items: { type: "string", minLength: 1 } },
+					counterevidenceIds: { type: "array", items: { type: "string", minLength: 1 } },
+					applicabilityBoundaries: { type: "array", items: { type: "string", minLength: 1 } },
+					uncertainty: { type: ["string", "null"] },
+					actionableTakeaway: { type: "string", minLength: 1 },
+				},
+			},
+		},
+	},
+} as const satisfies JsonObject;
+
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function parseJsonObject(text: string): JsonObject | null {
+	const candidate = text
+		.trim()
+		.replace(/^```(?:json)?\s*/u, "")
+		.replace(/\s*```$/u, "");
+	try {
+		const parsed: unknown = JSON.parse(candidate);
+		return isRecord(parsed) ? (parsed as JsonObject) : null;
+	} catch {
+		return null;
+	}
+}
+
+function abortableDelay(delayMs: number, signal: AbortSignal): Promise<void> {
+	if (signal.aborted) return Promise.reject(signal.reason);
+	return new Promise((resolveDelay, reject) => {
+		const timer = setTimeout(() => {
+			signal.removeEventListener("abort", onAbort);
+			resolveDelay();
+		}, delayMs);
+		const onAbort = () => {
+			clearTimeout(timer);
+			reject(signal.reason);
+		};
+		signal.addEventListener("abort", onAbort, { once: true });
+	});
+}
+
+class SessionPriorityGate implements InteractivePriorityGate {
+	readonly #session: AgentSession;
+
+	constructor(session: AgentSession) {
+		this.#session = session;
+	}
+
+	async waitUntilBackgroundAllowed(signal: AbortSignal): Promise<void> {
+		while (this.#session.isStreaming) await abortableDelay(50, signal);
+	}
+}
+
+class CodingAgentEvolutionModelExecutor implements EvolutionModelExecutor {
+	readonly #session: AgentSession;
+	readonly #modelRuntime: ModelRuntime;
+	readonly #priority: InteractivePriorityGate;
+
+	constructor(session: AgentSession, modelRuntime: ModelRuntime, priority: InteractivePriorityGate) {
+		this.#session = session;
+		this.#modelRuntime = modelRuntime;
+		this.#priority = priority;
+	}
+
+	#model(request: EvolutionModelRequest): Model<string> {
+		const configured = this.#modelRuntime.getModel(request.model.provider, request.model.model);
+		if (configured) return configured as Model<string>;
+		const current = this.#session.model;
+		if (current?.provider === request.model.provider && current.id === request.model.model) {
+			return current as Model<string>;
+		}
+		throw new Error(`Evolution model ${request.model.provider}/${request.model.model} is unavailable`);
+	}
+
+	async execute(request: EvolutionModelRequest): Promise<EvolutionModelResponse> {
+		const model = this.#model(request);
+		const evolutionTools = request.stage === "reflector" ? request.tools : [];
+		const responseSchema = request.stage === "curator" ? request.outputSchema : REFLECTOR_RESPONSE_SCHEMA;
+		const responseTool: Tool = {
+			name: RESPONSE_TOOL_NAME,
+			description: "Submit the complete structured response after inspecting all required evidence.",
+			parameters: responseSchema as TSchema,
+			constrainedSampling: { type: "json_schema", strict: "prefer" },
+		};
+		const tools: Tool[] = [
+			...evolutionTools.map((tool) => ({
+				name: tool.name,
+				description: tool.description,
+				parameters: tool.inputSchema as TSchema,
+			})),
+			responseTool,
+		];
+		const messages: Message[] = [
+			{
+				role: "user",
+				content: JSON.stringify(request.input),
+				timestamp: Date.now(),
+			},
+		];
+		for (let round = 0; round < MAX_MODEL_ROUNDS; round += 1) {
+			request.signal?.throwIfAborted();
+			await this.#priority.waitUntilBackgroundAllowed(request.signal ?? new AbortController().signal);
+			const assistant = await this.#modelRuntime.completeSimple(
+				model,
+				{
+					systemPrompt:
+						"You are Diffex's evidence evolution engine. Inspect cited evidence, follow the supplied schema exactly, and use submit_evolution_response only when the result is complete.",
+					messages,
+					tools,
+				},
+				{
+					signal: request.signal,
+					cacheRetention: "none",
+					sessionId: request.idempotencyKey,
+				},
+			);
+			if (assistant.stopReason === "error" || assistant.stopReason === "aborted") {
+				throw new Error(assistant.errorMessage ?? `Evolution model stopped with ${assistant.stopReason}`);
+			}
+			messages.push(assistant);
+			const calls = assistant.content.filter((part) => part.type === "toolCall");
+			for (const call of calls) {
+				if (call.name === RESPONSE_TOOL_NAME) {
+					return { output: call.arguments as JsonObject, model: { provider: model.provider, model: model.id } };
+				}
+				const tool = evolutionTools.find((candidate) => candidate.name === call.name);
+				const output = tool
+					? await tool.execute(call.arguments as JsonObject)
+					: { error: `Unknown evolution tool ${call.name}` };
+				messages.push({
+					role: "toolResult",
+					toolCallId: call.id,
+					toolName: call.name,
+					content: [{ type: "text", text: JSON.stringify(output) }],
+					isError: tool === undefined,
+					timestamp: Date.now(),
+				});
+			}
+			if (calls.length === 0) {
+				const parsed = parseJsonObject(contentText(assistant.content));
+				if (parsed) return { output: parsed, model: { provider: model.provider, model: model.id } };
+				messages.push({
+					role: "user",
+					content: `Return the result through ${RESPONSE_TOOL_NAME}.`,
+					timestamp: Date.now(),
+				});
+			}
+		}
+		throw new Error(`Evolution model exceeded ${MAX_MODEL_ROUNDS} tool rounds`);
+	}
+}
+
+class TraceEvidenceCatalog implements EvolutionEvidenceCatalog {
+	readonly #traceDirectory: string;
+	readonly #repositoryRoot: string;
+	readonly #scope: EvolutionScope;
+	readonly #excludedTracePath: string | undefined;
+	readonly #cache = new Map<string, Promise<SuccessfulMaterialization | null>>();
+
+	constructor(options: {
+		agentDir: string;
+		repositoryRoot: string;
+		scope: EvolutionScope;
+		excludedTracePath?: string;
+	}) {
+		this.#traceDirectory = join(options.agentDir, TRACE_DIRECTORY_NAME);
+		this.#repositoryRoot = resolve(options.repositoryRoot);
+		this.#scope = options.scope;
+		this.#excludedTracePath = options.excludedTracePath;
+	}
+
+	#assertScope(scope: EvolutionScope): void {
+		if (scope.repositoryId !== this.#scope.repositoryId || scope.scopeId !== this.#scope.scopeId) {
+			throw new Error("Evolution evidence catalog scope does not match the repository runtime");
+		}
+	}
+
+	async #paths(): Promise<readonly string[]> {
+		try {
+			return (await readdir(this.#traceDirectory, { withFileTypes: true }))
+				.filter((entry) => entry.isFile() && entry.name.endsWith(".jsonl"))
+				.map((entry) => join(this.#traceDirectory, entry.name))
+				.filter((path) => path !== this.#excludedTracePath)
+				.sort();
+		} catch (error) {
+			if (error instanceof Error && "code" in error && error.code === "ENOENT") return [];
+			throw error;
+		}
+	}
+
+	async #sessionBelongsToRepository(path: string): Promise<boolean> {
+		try {
+			const firstLine = (await readFile(path, "utf8")).split("\n", 1)[0];
+			const header: unknown = JSON.parse(firstLine ?? "");
+			if (!isRecord(header) || typeof header.cwd !== "string") return false;
+			const sessionRoot = await realpath(header.cwd).catch(() => resolve(header.cwd as string));
+			return sessionRoot === this.#repositoryRoot;
+		} catch {
+			return false;
+		}
+	}
+
+	async #materialize(path: string, ingestionCursor: number): Promise<SuccessfulMaterialization | null> {
+		const invocation = await materializeJsonlInvocation(path);
+		const sessionPaths = new Set(
+			invocation.evidence.flatMap((evidence) =>
+				evidence.sessionSource === undefined
+					? []
+					: [evidence.sessionSource.resolvedPath ?? evidence.sessionSource.path],
+			),
+		);
+		let belongs = false;
+		for (const sessionPath of sessionPaths) {
+			if (await this.#sessionBelongsToRepository(sessionPath)) {
+				belongs = true;
+				break;
+			}
+		}
+		if (!belongs) return null;
+		const contentDigest = computeEvolutionContentDigest(invocation);
+		return {
+			materializationId: invocation.traceId ?? `materialization-${contentDigest.slice("sha256:".length)}`,
+			ingestionCursor,
+			origin: "product-runtime",
+			contentDigest,
+			invocation,
+		};
+	}
+
+	async highWaterCursor(scope: EvolutionScope): Promise<number> {
+		this.#assertScope(scope);
+		return (await this.#paths()).length;
+	}
+
+	async listSuccessful(
+		scope: EvolutionScope,
+		afterCursor: number,
+		throughCursor: number,
+	): Promise<readonly SuccessfulMaterialization[]> {
+		this.#assertScope(scope);
+		const paths = await this.#paths();
+		const selected = paths.slice(afterCursor, Math.min(throughCursor, paths.length));
+		const materializations = await Promise.all(
+			selected.map((path, index) => {
+				const ingestionCursor = afterCursor + index + 1;
+				const key = `${ingestionCursor}:${path}`;
+				const cached = this.#cache.get(key);
+				if (cached) return cached;
+				const created = this.#materialize(path, ingestionCursor);
+				this.#cache.set(key, created);
+				return created;
+			}),
+		);
+		return materializations.filter((entry): entry is SuccessfulMaterialization => entry !== null);
+	}
+}
+
+class CodingAgentSnapshotSource implements EvolutionSnapshotSource {
+	readonly #cwd: string;
+	readonly #scope: EvolutionScope;
+	readonly #harnessState: HarnessStateStore;
+	readonly #resourceLoader: ResourceLoader;
+	readonly #session: AgentSession;
+	readonly #writer: EvolutionMemoryWriter;
+
+	constructor(options: {
+		cwd: string;
+		scope: EvolutionScope;
+		harnessState: HarnessStateStore;
+		resourceLoader: ResourceLoader;
+		session: AgentSession;
+		writer: EvolutionMemoryWriter;
+	}) {
+		this.#cwd = options.cwd;
+		this.#scope = options.scope;
+		this.#harnessState = options.harnessState;
+		this.#resourceLoader = options.resourceLoader;
+		this.#session = options.session;
+		this.#writer = options.writer;
+	}
+
+	async #revision(): Promise<string> {
+		try {
+			const result = await execFileAsync("git", ["-C", this.#cwd, "rev-parse", "HEAD"]);
+			return result.stdout.trim();
+		} catch {
+			return `unversioned:${computeEvolutionContentDigest(this.#cwd).slice("sha256:".length)}`;
+		}
+	}
+
+	async capture(scope: EvolutionScope, signal?: AbortSignal) {
+		if (scope.repositoryId !== this.#scope.repositoryId || scope.scopeId !== this.#scope.scopeId) {
+			throw new Error("Evolution snapshot scope does not match the repository runtime");
+		}
+		signal?.throwIfAborted();
+		const bundle = await this.#harnessState.loadCurrent();
+		const model = this.#session.model;
+		if (!model) throw new Error("Evolution requires an active model");
+		const instructions = this.#resourceLoader.getAgentsFiles().agentsFiles.map((file, precedence) => ({
+			path: file.path,
+			precedence,
+			content: file.content,
+			contentDigest: computeEvolutionContentDigest(file.content),
+		}));
+		return {
+			repository: {
+				repositoryId: scope.repositoryId,
+				rootPath: this.#cwd,
+				revision: await this.#revision(),
+			},
+			harness: {
+				harnessVersion: bundle.manifest.version,
+				baseVersion: bundle.manifest.base,
+				memory: bundle.state.memory,
+				memoryContentDigest: computeEvolutionContentDigest(bundle.state.memory),
+				activeMemoryItems: await this.#writer.loadActiveMemoryItems(bundle),
+			},
+			instructions,
+			modelConfiguration: {
+				provider: model.provider,
+				model: model.id,
+				configurationDigest: computeEvolutionContentDigest({
+					provider: model.provider,
+					model: model.id,
+					api: model.api,
+					baseUrl: model.baseUrl,
+				}),
+			},
+			pipelineVersion: VERSION,
+			promptVersions: {
+				reflector: "reflector-v1",
+				curator: "curator-v1",
+				validator: "validator-v1",
+				writer: "writer-v1",
+			},
+		};
+	}
+}
+
+export interface CodingAgentEvolutionRuntime {
+	readonly control: EvolutionControlService;
+	start(): Promise<void>;
+	evaluateAutomatic(): void;
+	stop(): Promise<void>;
+}
+
+export interface CreateCodingAgentEvolutionRuntimeOptions {
+	readonly agentDir: string;
+	readonly cwd: string;
+	readonly session: AgentSession;
+	readonly harnessState: HarnessStateStore;
+	readonly modelRuntime: ModelRuntime;
+	readonly resourceLoader: ResourceLoader;
+	readonly currentTracePath?: string;
+}
+
+export async function createCodingAgentEvolutionRuntime(
+	options: CreateCodingAgentEvolutionRuntimeOptions,
+): Promise<CodingAgentEvolutionRuntime> {
+	const repositoryRoot = await realpath(options.cwd).catch(() => resolve(options.cwd));
+	const repositoryId = computeEvolutionContentDigest(repositoryRoot);
+	const scope: EvolutionScope = { repositoryId, scopeId: repositoryId };
+	const storageRoot = join(options.agentDir, EVOLUTION_DIRECTORY_NAME, repositoryId.replace("sha256:", "sha256-"));
+	const persistence = new FileEvolutionPersistence(storageRoot);
+	const progress = new EvolutionProgressBus();
+	const clock = { now: () => new Date().toISOString() };
+	const priority = new SessionPriorityGate(options.session);
+	const evidence = new TraceEvidenceCatalog({
+		agentDir: options.agentDir,
+		repositoryRoot,
+		scope,
+		excludedTracePath: options.currentTracePath,
+	});
+	const writer = new EvolutionMemoryWriter({
+		version: VERSION,
+		harnessState: options.harnessState,
+		statePath: join(storageRoot, "writer"),
+	});
+	const targets = new EvolutionTargetAdapterRegistry({ writers: [writer] });
+	const model = new CodingAgentEvolutionModelExecutor(options.session, options.modelRuntime, priority);
+	const reflector = new RecursiveReflector({ version: VERSION, artifacts: persistence, ledger: persistence });
+	const curator = new StructuredDeltaCurator({ version: VERSION });
+	const ranker = new DeterministicProposalRanker({ version: VERSION });
+	const pipeline = new EvolutionPipeline({
+		version: VERSION,
+		model,
+		reflector,
+		curator,
+		validator: ranker,
+		scorer: ranker,
+		targets,
+	});
+	const controlPlane = new EvolutionControlPlane({
+		version: VERSION,
+		clock,
+		ids: { nextId: (kind) => `${kind}-${randomUUID()}` },
+		artifacts: persistence,
+		jobs: persistence,
+		cursors: persistence,
+		leases: persistence,
+		ledger: persistence,
+		events: progress,
+		evidence,
+		snapshots: new CodingAgentSnapshotSource({
+			cwd: repositoryRoot,
+			scope,
+			harnessState: options.harnessState,
+			resourceLoader: options.resourceLoader,
+			session: options.session,
+			writer,
+		}),
+		executor: pipeline,
+	});
+	const worker = new EvolutionBackgroundWorker({
+		clock,
+		source: new PollingEvolutionWorkSource(persistence, clock),
+		runner: controlPlane,
+		priority,
+	});
+	const control = new EvolutionControlService({
+		scope,
+		clock,
+		controlPlane,
+		worker,
+		jobs: persistence,
+		cursors: persistence,
+		evidence,
+		artifacts: persistence,
+		ledger: persistence,
+		harnesses: options.harnessState,
+		progress,
+		observedHarnessVersion: () => options.session.activeHarnessVersion,
+	});
+	return {
+		control,
+		async start() {
+			const abandoned = (await persistence.list(scope)).filter((job) => job.outcome === "active");
+			for (const job of abandoned) await controlPlane.recoverAbandonedJob(job.jobId);
+			control.start();
+		},
+		evaluateAutomatic() {
+			void control.triggerAutomatic().catch(() => {});
+		},
+		stop: () => control.stop(),
+	};
+}
+
+/** Process-owned bridge that keeps trace flushing ordered before automatic evolution checks. */
+export class EvolutionRuntimeCoordinator implements AgentSessionLifecycleObserver {
+	readonly #trace: InvocationTrace;
+	readonly #listeners = new Set<(event: EvolutionProgressEvent) => void>();
+	#runtime: CodingAgentEvolutionRuntime | null = null;
+	#unsubscribe: (() => void) | null = null;
+
+	constructor(trace: InvocationTrace) {
+		this.#trace = trace;
+	}
+
+	async replace(runtime: CodingAgentEvolutionRuntime): Promise<void> {
+		const previous = this.#runtime;
+		this.#unsubscribe?.();
+		this.#unsubscribe = null;
+		this.#runtime = null;
+		await previous?.stop();
+		await runtime.start();
+		this.#runtime = runtime;
+		this.#unsubscribe = runtime.control.subscribe((event) => {
+			for (const listener of this.#listeners) listener(event);
+		});
+	}
+
+	async operationSettled(settlement: AgentSessionOperationSettlement): Promise<void> {
+		await this.#trace.operationSettled(settlement);
+		this.#runtime?.evaluateAutomatic();
+	}
+
+	harnessActivated(version: HarnessVersion): Promise<void> {
+		return this.#trace.harnessActivated(version);
+	}
+
+	subscribe(listener: (event: EvolutionProgressEvent) => void): () => void {
+		this.#listeners.add(listener);
+		return () => this.#listeners.delete(listener);
+	}
+
+	#control(): EvolutionControlService {
+		if (!this.#runtime) throw new Error("Evolution runtime is unavailable");
+		return this.#runtime.control;
+	}
+
+	overview(): Promise<EvolutionOverview> {
+		return this.#control().overview();
+	}
+
+	listJobs(): Promise<readonly EvolutionJobSummary[]> {
+		return this.#control().listJobs();
+	}
+
+	jobDetail(jobId: string): Promise<EvolutionJobDetail> {
+		return this.#control().getJob(jobId);
+	}
+
+	proposalDetail(jobId: string, proposalId: string): Promise<EvolutionProposalDetail> {
+		return this.#control().getProposal(jobId, proposalId);
+	}
+
+	startManual(): Promise<EvolutionStartResult> {
+		return this.#control().startManual();
+	}
+
+	resumeNewest(): Promise<EvolutionJobSummary> {
+		return this.#control().resumeNewest();
+	}
+
+	cancelActive(): Promise<EvolutionJobSummary> {
+		return this.#control().cancelActive();
+	}
+
+	rollback(): Promise<EvolutionRollbackAction> {
+		return this.#control().rollback();
+	}
+
+	async stop(): Promise<void> {
+		this.#unsubscribe?.();
+		this.#unsubscribe = null;
+		const runtime = this.#runtime;
+		this.#runtime = null;
+		await runtime?.stop();
+	}
+}

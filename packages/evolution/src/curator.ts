@@ -935,6 +935,7 @@ export class StructuredDeltaCurator implements Curator {
 			const response = await abortable(
 				input.model.execute({
 					stage: "curator",
+					model: input.input.modelConfiguration,
 					promptVersion: input.input.promptVersions.curator,
 					idempotencyKey: input.idempotencyKey,
 					input: modelInput(input, lessons),

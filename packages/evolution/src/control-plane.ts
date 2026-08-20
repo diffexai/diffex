@@ -865,23 +865,32 @@ export class EvolutionControlPlane implements EvolutionJobRunner {
 		});
 	}
 
-	async interruptJob(jobId: string): Promise<EvolutionJob> {
+	async #markInterrupted(
+		jobId: string,
+		reasonCode: "cancelled-by-operator" | "lease-lost",
+		failureMessage: string,
+		allowBusy: boolean,
+	): Promise<EvolutionJob | null> {
 		const initial = await this.#dependencies.jobs.load(jobId);
 		if (initial === null) throw new Error(`Unknown evolution job "${jobId}"`);
 		if (initial.outcome !== "active") {
+			if (allowBusy) return initial;
 			throw new Error(`Evolution job "${jobId}" cannot be interrupted from outcome "${initial.outcome}"`);
 		}
 		const ownerId = this.#dependencies.ids.nextId("lease-owner");
 		const initialLease = await this.#acquireScopeLease(initial.metadata.scope, ownerId);
-		if (initialLease === null) throw new Error(`Evolution scope for job "${jobId}" is already leased`);
+		if (initialLease === null) {
+			if (allowBusy) return null;
+			throw new Error(`Evolution scope for job "${jobId}" is already leased`);
+		}
 		return this.#withHeartbeat(initialLease, undefined, async (lease) => {
 			const current = await this.#dependencies.jobs.load(jobId);
 			if (current === null) throw new Error(`Unknown evolution job "${jobId}"`);
 			if (current.outcome !== "active") return current;
 			const interrupted = this.#withJobRevision(current, {
 				outcome: "interrupted",
-				reasonCode: "cancelled-by-operator",
-				failureMessage: "Evolution job was cancelled by the operator",
+				reasonCode,
+				failureMessage,
 				terminalAt: this.#dependencies.clock.now(),
 				retryNotBefore: null,
 			});
@@ -895,6 +904,21 @@ export class EvolutionControlPlane implements EvolutionJobRunner {
 			});
 			return interrupted;
 		});
+	}
+
+	async interruptJob(jobId: string): Promise<EvolutionJob> {
+		const interrupted = await this.#markInterrupted(
+			jobId,
+			"cancelled-by-operator",
+			"Evolution job was cancelled by the operator",
+			false,
+		);
+		if (interrupted === null) throw new Error(`Evolution scope for job "${jobId}" is already leased`);
+		return interrupted;
+	}
+
+	async recoverAbandonedJob(jobId: string): Promise<EvolutionJob | null> {
+		return this.#markInterrupted(jobId, "lease-lost", "Evolution job was interrupted after its lease expired", true);
 	}
 
 	async #resolveJob(
