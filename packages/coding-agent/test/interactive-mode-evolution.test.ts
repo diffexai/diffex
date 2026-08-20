@@ -48,7 +48,7 @@ function overview(): EvolutionOverview {
 		settledInvocationCount: 0,
 		automaticTokenThreshold: 1_000_000,
 		automaticMinimumInvocations: 5,
-		lastAutomaticRunAt: null,
+		lastEvolutionAt: null,
 		cooldownRemainingMs: 0,
 		automaticEligibility: { eligible: false, reason: "insufficient-tokens" },
 		activeJob: null,

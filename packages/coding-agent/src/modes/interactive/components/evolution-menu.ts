@@ -43,6 +43,7 @@ type MenuView =
 interface MenuEntry {
 	readonly label: string;
 	readonly enabled: boolean;
+	readonly disabledStatus?: string;
 	readonly select: () => void;
 }
 
@@ -62,8 +63,17 @@ function duration(milliseconds: number): string {
 	return `${minutes} minute${minutes === 1 ? "" : "s"}`;
 }
 
-function timestamp(value: string | null): string {
-	return value === null ? "never" : sanitizeEvolutionText(value);
+export function formatEvolutionTimestamp(value: string | null, now = new Date()): string {
+	if (value === null) return "never";
+	const checkpoint = new Date(value);
+	if (!Number.isFinite(checkpoint.getTime())) return sanitizeEvolutionText(value);
+	const hours = checkpoint.getHours();
+	const time = `${hours % 12 || 12}:${checkpoint.getMinutes().toString().padStart(2, "0")} ${hours < 12 ? "am" : "pm"}`;
+	const isToday =
+		checkpoint.getFullYear() === now.getFullYear() &&
+		checkpoint.getMonth() === now.getMonth() &&
+		checkpoint.getDate() === now.getDate();
+	return isToday ? `Today at ${time}` : `${checkpoint.getMonth() + 1}/${checkpoint.getDate()} at ${time}`;
 }
 
 export class EvolutionMenuComponent extends Container implements Focusable {
@@ -72,6 +82,7 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 	readonly #onStatus: (message: string, error: boolean) => void;
 	readonly #requestRender: () => void;
 	readonly #unsubscribe: () => void;
+	readonly #pollIntervalMs: number;
 	readonly #viewStack: MenuView[] = [{ kind: "overview" }];
 	#overview: EvolutionOverview | null = null;
 	#jobs: readonly EvolutionJobSummary[] = [];
@@ -82,6 +93,8 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 	#loading = true;
 	#disposed = false;
 	#focused = false;
+	#pollTimeout: ReturnType<typeof setTimeout> | null = null;
+	#refreshPromise: Promise<void> | null = null;
 
 	get focused(): boolean {
 		return this.#focused;
@@ -96,12 +109,14 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 		onClose: () => void,
 		onStatus: (message: string, error: boolean) => void,
 		requestRender: () => void,
+		pollIntervalMs = 1_000,
 	) {
 		super();
 		this.#client = client;
 		this.#onClose = onClose;
 		this.#onStatus = onStatus;
 		this.#requestRender = requestRender;
+		this.#pollIntervalMs = pollIntervalMs;
 		this.#unsubscribe = client.subscribe(() => {
 			void this.refresh();
 		});
@@ -113,6 +128,7 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 		if (this.#disposed) return;
 		this.#disposed = true;
 		this.#unsubscribe();
+		if (this.#pollTimeout !== null) clearTimeout(this.#pollTimeout);
 	}
 
 	#view(): MenuView {
@@ -136,8 +152,14 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 		this.#onClose();
 	}
 
-	async refresh(): Promise<void> {
-		if (this.#disposed) return;
+	refresh(): Promise<void> {
+		if (this.#disposed) return Promise.resolve();
+		if (this.#refreshPromise !== null) return this.#refreshPromise;
+		this.#refreshPromise = this.#refresh();
+		return this.#refreshPromise;
+	}
+
+	async #refresh(): Promise<void> {
 		this.#loading = true;
 		this.rebuild();
 		try {
@@ -151,10 +173,24 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 		} catch (error) {
 			this.#onStatus(error instanceof Error ? error.message : String(error), true);
 		} finally {
+			this.#refreshPromise = null;
 			this.#loading = false;
 			this.rebuild();
 			this.#requestRender();
+			this.#schedulePoll();
 		}
+	}
+
+	#schedulePoll(): void {
+		if (this.#pollTimeout !== null) clearTimeout(this.#pollTimeout);
+		this.#pollTimeout = null;
+		if (this.#disposed || this.#overview === null || this.#overview.activeJob === null) return;
+		this.#pollTimeout = setTimeout(() => {
+			this.#pollTimeout = null;
+			void this.refresh();
+		}, this.#pollIntervalMs);
+		const timeout = this.#pollTimeout as ReturnType<typeof setTimeout> & { unref?: () => void };
+		timeout.unref?.();
 	}
 
 	#run<T>(action: () => Promise<T>, success: string | ((result: T) => string)): void {
@@ -181,6 +217,7 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 			{
 				label: "Evolve",
 				enabled: overview.activeJob === null,
+				disabledStatus: overview.activeJob === null ? undefined : "Started",
 				select: () => this.#confirm("start"),
 			},
 			{
@@ -269,7 +306,7 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 	#renderOverview(overview: EvolutionOverview): void {
 		this.#addLine(`Evolution tokens: ${overview.unprocessedEstimatedTokens.toLocaleString()}`);
 		this.#addLine(`Evolution invocations: ${overview.settledInvocationCount}`);
-		this.#addLine(`Last automatic evolution: ${timestamp(overview.lastAutomaticRunAt)}`);
+		this.#addLine(`Last evolution: ${formatEvolutionTimestamp(overview.lastEvolutionAt)}`);
 		this.#addLine(
 			overview.automaticEligibility.eligible
 				? "Next automatic evolution: Eligible"
@@ -285,34 +322,34 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 	}
 
 	#renderJob(job: EvolutionJobDetail): void {
-		const stageLatencies = job.observability.stageLatencies
-			.map((entry) => `${entry.stage}=${entry.durationMs}ms`)
-			.join(", ");
 		const coverage = job.observability.sliceCoverage;
+		let result: string;
+		if (job.outcome === "active") result = "In progress";
+		else if (job.outcome === "completed") {
+			result = job.emittedProposals === 0 ? "Completed with no proposals" : "Completed with proposals";
+		} else if (job.outcome === "terminal-failed" && job.stage === "reflecting" && job.emittedProposals === 0) {
+			result = "Failed during reflection before proposals could be generated";
+		} else if (job.outcome === "terminal-failed") result = `Failed during ${job.stage}`;
+		else if (job.outcome === "retryable-failed") result = "Paused after a recoverable failure";
+		else if (job.outcome === "interrupted") result = "Interrupted";
+		else result = "Superseded";
 		for (const line of [
-			`Job: ${job.jobId}`,
 			`Trigger: ${job.trigger}`,
-			`Evidence high-water cursor: ${job.evidenceHighWaterCursor}`,
 			`Stage: ${job.stage} (${job.outcome})`,
-			`Slices: ${job.completedSlices} completed / ${job.discoveredSlices} discovered`,
-			`Model calls: ${job.modelCalls}; retries: ${job.modelRetries}`,
+			`Result: ${result}`,
+			`Finished: ${formatEvolutionTimestamp(job.terminalAt)}`,
 			`Proposals: ${job.emittedProposals} emitted / ${job.eligibleProposals} eligible`,
-			`Selected operations: ${job.selectedOperations}`,
-			`Queue age: ${job.observability.queueAgeMs === null ? "pending" : `${job.observability.queueAgeMs}ms`}`,
-			`Stage latency: ${stageLatencies || "pending"}`,
-			`Evidence tokens: ${job.observability.estimatedEvidenceTokens.toLocaleString()}`,
-			"Provider cost: unavailable",
+			`Evolution token: ${job.observability.estimatedEvidenceTokens.toLocaleString()}`,
 			`Reflector budget: ${job.observability.reflectorBudget.modelCalls} model / ${job.observability.reflectorBudget.reflectionRounds} rounds / ${job.observability.reflectorBudget.toolCalls} tools`,
-			`Coverage: ${coverage.analyzed} analyzed / ${coverage.corrupt} corrupt / ${coverage.skipped} skipped / ${coverage.unreadable} unreadable`,
-			`Proposal dispositions: ${JSON.stringify(job.observability.proposalDispositions)}`,
-			`Activation conflicts: ${job.observability.activationConflicts}`,
+			coverage === null
+				? job.outcome === "active"
+					? "Coverage: pending"
+					: "Coverage: unavailable - reflection did not complete"
+				: `Coverage: ${coverage.analyzed} analyzed / ${coverage.corrupt} corrupt / ${coverage.skipped} skipped / ${coverage.unreadable} unreadable`,
 			`Recovery attempts: ${job.observability.recoveryAttempts}`,
-			`Rollback available: ${job.observability.rollbackAvailable ? "yes" : "no"}`,
-			`Last checkpoint: ${timestamp(job.lastCheckpointAt)}`,
+			`Last checkpoint: ${formatEvolutionTimestamp(job.lastCheckpointAt)}`,
 			`Last error: ${job.errorMessage ?? "none"}`,
 			`Base harness: ${abbreviate(job.baseHarnessVersion)}`,
-			`Activated harness: ${abbreviate(job.activatedHarnessVersion)}`,
-			`Next prompt will refresh: ${job.nextPromptWillRefresh ? "yes" : "no"}`,
 		]) {
 			this.#addLine(line);
 		}
@@ -339,7 +376,7 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 		entries.forEach((entry, index) => {
 			const selected = index === this.#selectedIndex;
 			const prefix = selected ? SELECTED_LIST_PREFIX : UNSELECTED_LIST_PREFIX;
-			const disabled = entry.enabled ? "" : " [unavailable]";
+			const disabled = entry.enabled ? "" : ` [${entry.disabledStatus ?? "unavailable"}]`;
 			const line = `${prefix}${entry.label}${disabled}`;
 			this.addChild(
 				new TruncatedText(theme.fg(entry.enabled ? (selected ? "selectionAccent" : "text") : "muted", line), 1, 0),
