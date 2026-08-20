@@ -101,11 +101,41 @@ function assertDirectFile(path: string, stats: Awaited<ReturnType<typeof lstat>>
 	}
 }
 
+function assertMetadata(value: unknown, path: string, expectedArtifactId?: string): void {
+	if (
+		!isRecord(value) ||
+		value.schemaVersion !== EVOLUTION_SCHEMA_VERSION ||
+		typeof value.artifactId !== "string" ||
+		!SAFE_ID_PATTERN.test(value.artifactId) ||
+		(expectedArtifactId !== undefined && value.artifactId !== expectedArtifactId) ||
+		!isRecord(value.producer) ||
+		typeof value.producer.name !== "string" ||
+		typeof value.producer.version !== "string" ||
+		(typeof value.producer.promptVersion !== "string" && value.producer.promptVersion !== null) ||
+		(value.producer.model !== null &&
+			(!isRecord(value.producer.model) ||
+				typeof value.producer.model.provider !== "string" ||
+				typeof value.producer.model.model !== "string" ||
+				typeof value.producer.model.configurationDigest !== "string" ||
+				!DIGEST_PATTERN.test(value.producer.model.configurationDigest))) ||
+		!Array.isArray(value.sourceIds) ||
+		value.sourceIds.some((sourceId) => typeof sourceId !== "string" || sourceId.length === 0) ||
+		typeof value.contentDigest !== "string" ||
+		!DIGEST_PATTERN.test(value.contentDigest) ||
+		!isRecord(value.scope) ||
+		typeof value.scope.repositoryId !== "string" ||
+		typeof value.scope.scopeId !== "string" ||
+		typeof value.createdAt !== "string" ||
+		!Number.isFinite(Date.parse(value.createdAt))
+	) {
+		throw new EvolutionStorageCorruptionError(path, "artifact metadata is invalid or incompatible");
+	}
+}
+
 function parseArtifact(contents: string, path: string): EvolutionArtifact {
 	const parsed = parseJson(contents, path);
-	if (!isRecord(parsed) || !isRecord(parsed.metadata) || typeof parsed.metadata.artifactId !== "string") {
-		throw new EvolutionStorageCorruptionError(path, "artifact metadata is invalid");
-	}
+	if (!isRecord(parsed)) throw new EvolutionStorageCorruptionError(path, "artifact is invalid");
+	assertMetadata(parsed.metadata, path);
 	return parsed as unknown as EvolutionArtifact;
 }
 
@@ -124,10 +154,6 @@ function parseJob(contents: string, path: string): EvolutionJob {
 		(parsed.trigger !== "automatic" && parsed.trigger !== "manual") ||
 		!Array.isArray(parsed.checkpoints) ||
 		!isRecord(parsed.metadata) ||
-		typeof parsed.metadata.artifactId !== "string" ||
-		parsed.metadata.artifactId !== parsed.jobId ||
-		typeof parsed.metadata.contentDigest !== "string" ||
-		!DIGEST_PATTERN.test(parsed.metadata.contentDigest) ||
 		!isRecord(parsed.metadata.scope) ||
 		typeof parsed.metadata.scope.repositoryId !== "string" ||
 		typeof parsed.metadata.scope.scopeId !== "string" ||
@@ -170,6 +196,7 @@ function parseJob(contents: string, path: string): EvolutionJob {
 	) {
 		throw new EvolutionStorageCorruptionError(path, "job manifest is invalid");
 	}
+	assertMetadata(parsed.metadata, path, parsed.jobId);
 	const { metadata, ...jobContent } = parsed;
 	if (metadata.contentDigest !== computeEvolutionContentDigest(jobContent)) {
 		throw new EvolutionStorageCorruptionError(path, "job manifest content digest is invalid");
@@ -179,9 +206,17 @@ function parseJob(contents: string, path: string): EvolutionJob {
 
 function parseLedgerEvent(contents: string, path: string): EvolutionLedgerEvent {
 	const parsed = parseJson(contents, path);
-	if (!isRecord(parsed) || typeof parsed.eventId !== "string" || typeof parsed.jobId !== "string") {
+	if (
+		!isRecord(parsed) ||
+		typeof parsed.eventId !== "string" ||
+		!SAFE_ID_PATTERN.test(parsed.eventId) ||
+		typeof parsed.jobId !== "string" ||
+		!SAFE_ID_PATTERN.test(parsed.jobId) ||
+		typeof parsed.type !== "string"
+	) {
 		throw new EvolutionStorageCorruptionError(path, "ledger event is invalid");
 	}
+	assertMetadata(parsed.metadata, path, parsed.eventId);
 	return parsed as unknown as EvolutionLedgerEvent;
 }
 
@@ -374,6 +409,7 @@ export class FileEvolutionPersistence
 	async put(artifact: EvolutionArtifact): Promise<EvolutionArtifactReference> {
 		await this.#ensureDirectories();
 		const content = serializeEvolutionValue(artifact);
+		parseArtifact(content, join(this.#artifactPath, artifact.metadata.artifactId));
 		const contentDigest = computeEvolutionContentDigest(artifact);
 		const destination = join(this.#artifactPath, artifactDirectoryName(contentDigest));
 		const artifactPath = join(destination, ARTIFACT_FILE_NAME);
@@ -614,6 +650,7 @@ export class FileEvolutionPersistence
 		const destination = join(jobLedgerPath, event.eventId);
 		const eventPath = join(destination, "event.json");
 		const content = serializeEvolutionValue(event);
+		parseLedgerEvent(content, eventPath);
 		const existing = await this.#readOptional(eventPath);
 		if (existing !== null) {
 			if (existing.trimEnd() !== content) {
