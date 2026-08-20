@@ -1,11 +1,14 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { setKeybindings } from "@earendil-works/diffex-tui";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { KeybindingsManager } from "../src/core/keybindings.ts";
-import type { SessionInfo } from "../src/core/session-manager.ts";
-import { SessionSelectorComponent } from "../src/modes/interactive/components/session-selector.ts";
+import { type SessionInfo, SessionManager } from "../src/core/session-manager.ts";
+import {
+	deleteSessionWithOwnedSubagents,
+	SessionSelectorComponent,
+} from "../src/modes/interactive/components/session-selector.ts";
 import { initTheme } from "../src/modes/interactive/theme/theme.ts";
 
 type Deferred<T> = {
@@ -80,6 +83,33 @@ function createSymlinkedSessionPaths(): {
 		parentAliasA: join(aliasASessions, "parent.jsonl"),
 		parentAliasB: join(aliasBSessions, "parent.jsonl"),
 		childAliasB: join(aliasBSessions, "child.jsonl"),
+	};
+}
+
+function createPersistedParentFixture(parentId = "parent-id"): {
+	baseDir: string;
+	parentFile: string;
+	namespaceDirectory: string;
+	ownedDirectory: string;
+} {
+	const baseDir = mkdtempSync(join(tmpdir(), "diffex-parent-delete-"));
+	const parentFile = join(baseDir, "parent.jsonl");
+	writeFileSync(
+		parentFile,
+		`${JSON.stringify({
+			type: "session",
+			version: 3,
+			id: parentId,
+			timestamp: "2026-08-20T00:00:00.000Z",
+			cwd: baseDir,
+		})}\n`,
+	);
+	const namespaceDirectory = join(baseDir, ".subagents");
+	return {
+		baseDir,
+		parentFile,
+		namespaceDirectory,
+		ownedDirectory: join(namespaceDirectory, parentId),
 	};
 }
 
@@ -350,5 +380,198 @@ describe("session selector path/delete interactions", () => {
 
 		expect(confirmationChanges).toEqual([]);
 		expect(errorMessage).toBe("Cannot delete the currently active session");
+	});
+
+	it("trashes only the selected parent's owned directory before deleting the parent", async () => {
+		const fixture = createPersistedParentFixture();
+		tempDirs.push(fixture.baseDir);
+		mkdirSync(fixture.ownedDirectory, { recursive: true });
+		writeFileSync(
+			join(fixture.ownedDirectory, "child.jsonl"),
+			`${JSON.stringify({
+				type: "session",
+				version: 3,
+				id: "child-id",
+				timestamp: "2026-08-20T00:00:00.000Z",
+				cwd: fixture.baseDir,
+				parentSession: fixture.parentFile,
+			})}\n`,
+		);
+		const siblingDirectory = join(fixture.namespaceDirectory, "other-parent");
+		mkdirSync(siblingDirectory);
+		writeFileSync(join(siblingDirectory, "sibling.jsonl"), "sibling\n");
+
+		const listed = await SessionManager.list(fixture.baseDir, fixture.baseDir);
+		expect(listed.map((session) => session.path)).toEqual([fixture.parentFile]);
+
+		const calls: string[] = [];
+		const result = await deleteSessionWithOwnedSubagents(
+			fixture.parentFile,
+			async (ownedDirectory) => {
+				calls.push(`owned:${ownedDirectory}`);
+				renameSync(ownedDirectory, join(fixture.baseDir, `trashed-${basename(ownedDirectory)}`));
+			},
+			async (parentFile) => {
+				calls.push(`parent:${parentFile}`);
+				renameSync(parentFile, join(fixture.baseDir, "trashed-parent.jsonl"));
+				return { ok: true, method: "trash" };
+			},
+		);
+
+		expect(result).toEqual({ ok: true, method: "trash" });
+		expect(calls).toEqual([`owned:${fixture.ownedDirectory}`, `parent:${fixture.parentFile}`]);
+		expect(existsSync(fixture.ownedDirectory)).toBe(false);
+		expect(existsSync(siblingDirectory)).toBe(true);
+		expect(existsSync(fixture.parentFile)).toBe(false);
+	});
+
+	it.each(["namespace", "owned"] as const)("deletes the parent when the %s directory is absent", async (missing) => {
+		const fixture = createPersistedParentFixture();
+		tempDirs.push(fixture.baseDir);
+		if (missing === "owned") mkdirSync(fixture.namespaceDirectory);
+		let cleanupCalled = false;
+
+		const result = await deleteSessionWithOwnedSubagents(
+			fixture.parentFile,
+			async () => {
+				cleanupCalled = true;
+			},
+			async (parentFile) => {
+				renameSync(parentFile, join(fixture.baseDir, "trashed-parent.jsonl"));
+				return { ok: true, method: "trash" };
+			},
+		);
+
+		expect(result.ok).toBe(true);
+		expect(cleanupCalled).toBe(false);
+		expect(existsSync(fixture.parentFile)).toBe(false);
+	});
+
+	it("retains the parent when owned-directory cleanup fails", async () => {
+		const fixture = createPersistedParentFixture();
+		tempDirs.push(fixture.baseDir);
+		mkdirSync(fixture.ownedDirectory, { recursive: true });
+		let parentDeletionCalled = false;
+
+		const result = await deleteSessionWithOwnedSubagents(
+			fixture.parentFile,
+			async () => {
+				throw new Error("trash unavailable");
+			},
+			async () => {
+				parentDeletionCalled = true;
+				return { ok: true, method: "trash" };
+			},
+		);
+
+		expect(result.ok).toBe(false);
+		expect(result.error).toContain("cleanup failed; parent session was retained");
+		expect(result.error).toContain("trash unavailable");
+		expect(parentDeletionCalled).toBe(false);
+		expect(existsSync(fixture.parentFile)).toBe(true);
+		expect(existsSync(fixture.ownedDirectory)).toBe(true);
+	});
+
+	it("retains the parent when cleanup reports success without moving the owned directory", async () => {
+		const fixture = createPersistedParentFixture();
+		tempDirs.push(fixture.baseDir);
+		mkdirSync(fixture.ownedDirectory, { recursive: true });
+		let parentDeletionCalled = false;
+
+		const result = await deleteSessionWithOwnedSubagents(
+			fixture.parentFile,
+			async () => {},
+			async () => {
+				parentDeletionCalled = true;
+				return { ok: true, method: "trash" };
+			},
+		);
+
+		expect(result.ok).toBe(false);
+		expect(result.error).toContain("remains after trash operation");
+		expect(parentDeletionCalled).toBe(false);
+		expect(existsSync(fixture.parentFile)).toBe(true);
+	});
+
+	it("reports partial deletion when parent deletion fails after owned cleanup", async () => {
+		const fixture = createPersistedParentFixture();
+		tempDirs.push(fixture.baseDir);
+		mkdirSync(fixture.ownedDirectory, { recursive: true });
+
+		const result = await deleteSessionWithOwnedSubagents(
+			fixture.parentFile,
+			async (ownedDirectory) => {
+				renameSync(ownedDirectory, join(fixture.baseDir, "trashed-owned"));
+			},
+			async () => ({ ok: false, method: "unlink", error: "parent locked" }),
+		);
+
+		expect(result.ok).toBe(false);
+		expect(result.error).toBe(
+			"Parent-owned subagent sessions were moved to trash, but parent deletion failed: parent locked",
+		);
+		expect(existsSync(fixture.ownedDirectory)).toBe(false);
+		expect(existsSync(fixture.parentFile)).toBe(true);
+	});
+
+	it.each(["namespace-file", "namespace-link", "owned-file", "owned-link"] as const)(
+		"rejects an unsafe %s without deleting the parent",
+		async (unsafeComponent) => {
+			const fixture = createPersistedParentFixture();
+			tempDirs.push(fixture.baseDir);
+			const linkTarget = join(fixture.baseDir, "link-target");
+			mkdirSync(linkTarget);
+			if (unsafeComponent === "namespace-file") {
+				writeFileSync(fixture.namespaceDirectory, "not a directory\n");
+			} else if (unsafeComponent === "namespace-link") {
+				symlinkSync(linkTarget, fixture.namespaceDirectory, process.platform === "win32" ? "junction" : "dir");
+			} else {
+				mkdirSync(fixture.namespaceDirectory);
+				if (unsafeComponent === "owned-file") writeFileSync(fixture.ownedDirectory, "not a directory\n");
+				else symlinkSync(linkTarget, fixture.ownedDirectory, process.platform === "win32" ? "junction" : "dir");
+			}
+			let parentDeletionCalled = false;
+
+			const result = await deleteSessionWithOwnedSubagents(
+				fixture.parentFile,
+				async () => {},
+				async () => {
+					parentDeletionCalled = true;
+					return { ok: true, method: "trash" };
+				},
+			);
+
+			expect(result.ok).toBe(false);
+			expect(result.error).toContain("is not a safe directory");
+			expect(parentDeletionCalled).toBe(false);
+			expect(existsSync(fixture.parentFile)).toBe(true);
+		},
+	);
+
+	it("rejects an invalid parent header id without touching another path", async () => {
+		const fixture = createPersistedParentFixture("../outside");
+		tempDirs.push(fixture.baseDir);
+		const outsidePath = join(fixture.baseDir, "outside");
+		mkdirSync(outsidePath);
+		let cleanupCalled = false;
+		let parentDeletionCalled = false;
+
+		const result = await deleteSessionWithOwnedSubagents(
+			fixture.parentFile,
+			async () => {
+				cleanupCalled = true;
+			},
+			async () => {
+				parentDeletionCalled = true;
+				return { ok: true, method: "trash" };
+			},
+		);
+
+		expect(result.ok).toBe(false);
+		expect(result.error).toContain("Session id must be non-empty");
+		expect(cleanupCalled).toBe(false);
+		expect(parentDeletionCalled).toBe(false);
+		expect(existsSync(outsidePath)).toBe(true);
+		expect(existsSync(fixture.parentFile)).toBe(true);
 	});
 });

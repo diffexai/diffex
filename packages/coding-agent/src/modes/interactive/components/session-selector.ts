@@ -17,6 +17,7 @@ import {
 } from "@earendil-works/diffex-tui";
 import { KeybindingsManager } from "../../../core/keybindings.ts";
 import type { SessionInfo, SessionListProgress } from "../../../core/session-manager.ts";
+import { deleteParentSessionWithOwnedSubagents } from "../../../core/subagents/persistence.ts";
 import { canonicalizePath as _canonicalizePath } from "../../../utils/paths.ts";
 import { theme } from "../theme/theme.ts";
 import { DynamicBorder } from "./dynamic-border.ts";
@@ -641,31 +642,29 @@ class SessionList implements Component, Focusable {
 
 type SessionsLoader = (onProgress?: SessionListProgress) => Promise<SessionInfo[]>;
 
+type SessionFileDeletionResult = { ok: boolean; method: "trash" | "unlink"; error?: string };
+
+function movePathToTrash(path: string): { ok: boolean; error?: string } {
+	const trashArgs = path.startsWith("-") ? ["--", path] : [path];
+	const trashResult = spawnSync("trash", trashArgs, { encoding: "utf-8" });
+	const parts: string[] = [];
+	if (trashResult.error) parts.push(trashResult.error.message);
+	const stderr = trashResult.stderr?.trim();
+	if (stderr) parts.push(stderr.split("\n")[0] ?? stderr);
+
+	if (trashResult.status === 0 || !existsSync(path)) return { ok: true };
+	return {
+		ok: false,
+		...(parts.length === 0 ? {} : { error: `trash: ${parts.join(" · ").slice(0, 200)}` }),
+	};
+}
+
 /**
  * Delete a session file, trying the `trash` CLI first, then falling back to unlink
  */
-async function deleteSessionFile(
-	sessionPath: string,
-): Promise<{ ok: boolean; method: "trash" | "unlink"; error?: string }> {
-	// Try `trash` first (if installed)
-	const trashArgs = sessionPath.startsWith("-") ? ["--", sessionPath] : [sessionPath];
-	const trashResult = spawnSync("trash", trashArgs, { encoding: "utf-8" });
-
-	const getTrashErrorHint = (): string | null => {
-		const parts: string[] = [];
-		if (trashResult.error) {
-			parts.push(trashResult.error.message);
-		}
-		const stderr = trashResult.stderr?.trim();
-		if (stderr) {
-			parts.push(stderr.split("\n")[0] ?? stderr);
-		}
-		if (parts.length === 0) return null;
-		return `trash: ${parts.join(" · ").slice(0, 200)}`;
-	};
-
-	// If trash reports success, or the file is gone afterwards, treat it as successful
-	if (trashResult.status === 0 || !existsSync(sessionPath)) {
+async function deleteSessionFile(sessionPath: string): Promise<SessionFileDeletionResult> {
+	const trashResult = movePathToTrash(sessionPath);
+	if (trashResult.ok) {
 		return { ok: true, method: "trash" };
 	}
 
@@ -675,10 +674,46 @@ async function deleteSessionFile(
 		return { ok: true, method: "unlink" };
 	} catch (err) {
 		const unlinkError = err instanceof Error ? err.message : String(err);
-		const trashErrorHint = getTrashErrorHint();
-		const error = trashErrorHint ? `${unlinkError} (${trashErrorHint})` : unlinkError;
+		const error = trashResult.error ? `${unlinkError} (${trashResult.error})` : unlinkError;
 		return { ok: false, method: "unlink", error };
 	}
+}
+
+type MoveOwnedDirectoryToTrash = (ownedDirectory: string) => Promise<void>;
+type DeleteParentSessionFile = (parentSessionFile: string) => Promise<SessionFileDeletionResult>;
+
+/** Internal selector deletion seam used by focused tests. */
+export async function deleteSessionWithOwnedSubagents(
+	sessionPath: string,
+	moveOwnedDirectoryToTrash: MoveOwnedDirectoryToTrash,
+	deleteParentSessionFile: DeleteParentSessionFile,
+): Promise<SessionFileDeletionResult> {
+	try {
+		const deletion = await deleteParentSessionWithOwnedSubagents(
+			sessionPath,
+			moveOwnedDirectoryToTrash,
+			deleteParentSessionFile,
+		);
+		if (!deletion.parentResult.ok && deletion.ownedDirectoryMovedToTrash) {
+			return {
+				...deletion.parentResult,
+				error: `Parent-owned subagent sessions were moved to trash, but parent deletion failed: ${deletion.parentResult.error ?? "unknown error"}`,
+			};
+		}
+		return deletion.parentResult;
+	} catch (error) {
+		return {
+			ok: false,
+			method: "trash",
+			error: `Parent-owned subagent cleanup failed; parent session was retained: ${error instanceof Error ? error.message : String(error)}`,
+		};
+	}
+}
+
+async function moveOwnedSubagentDirectoryToTrash(ownedDirectory: string): Promise<void> {
+	const result = movePathToTrash(ownedDirectory);
+	if (!result.ok) throw new Error(result.error ?? "trash operation failed");
+	if (existsSync(ownedDirectory)) throw new Error("trash reported success but the directory remains");
 }
 
 /**
@@ -832,7 +867,11 @@ export class SessionSelectorComponent extends Container implements Focusable {
 
 		// Handle session deletion
 		this.sessionList.onDeleteSession = async (sessionPath: string) => {
-			const result = await deleteSessionFile(sessionPath);
+			const result = await deleteSessionWithOwnedSubagents(
+				sessionPath,
+				moveOwnedSubagentDirectoryToTrash,
+				deleteSessionFile,
+			);
 
 			if (result.ok) {
 				if (this.currentSessions) {

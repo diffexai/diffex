@@ -62,6 +62,16 @@ export interface SelectedBranchRosterSnapshot {
 	readonly warnings: readonly string[];
 }
 
+interface PathDeletionResult {
+	readonly ok: boolean;
+	readonly error?: string;
+}
+
+interface ParentSessionDeletion<T extends PathDeletionResult> {
+	readonly parentResult: T;
+	readonly ownedDirectoryMovedToTrash: boolean;
+}
+
 interface ChildCandidate {
 	readonly name: string;
 	readonly childSessionId?: string;
@@ -299,10 +309,62 @@ function assertSafeDirectory(path: string, description: string): void {
 		throw new Error(`${description} is not a safe directory: ${path}`);
 }
 
+function lstatIfPresent(path: string): ReturnType<typeof lstatSync> | undefined {
+	try {
+		return lstatSync(path);
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+		throw error;
+	}
+}
+
 function ensureSafeDirectory(path: string, parentDirectory: string, description: string): void {
 	assertContainedPath(parentDirectory, path);
 	if (!existsSync(path)) mkdirSync(path);
 	assertSafeDirectory(path, description);
+}
+
+/** Internal helper for deleting a parent and only its validated, recoverably trashed child namespace. */
+export async function deleteParentSessionWithOwnedSubagents<T extends PathDeletionResult>(
+	parentSessionFile: string,
+	moveOwnedDirectoryToTrash: (ownedDirectory: string) => Promise<void>,
+	deleteParentSessionFile: (parentSessionFile: string) => Promise<T>,
+): Promise<ParentSessionDeletion<T>> {
+	const resolvedParentFile = resolve(parentSessionFile);
+	const header = loadEntriesFromFile(resolvedParentFile)[0];
+	if (header?.type !== "session") throw new Error(`Session header is unavailable: ${resolvedParentFile}`);
+	assertValidSessionId(header.id);
+
+	const parentDirectory = dirname(resolvedParentFile);
+	const namespaceDirectory = resolve(parentDirectory, ".subagents");
+	const ownedDirectory = resolve(namespaceDirectory, header.id);
+	assertContainedPath(parentDirectory, namespaceDirectory);
+	assertContainedPath(parentDirectory, ownedDirectory);
+
+	let ownedDirectoryMovedToTrash = false;
+	const namespaceStats = lstatIfPresent(namespaceDirectory);
+	if (namespaceStats) {
+		if (namespaceStats.isSymbolicLink() || !namespaceStats.isDirectory()) {
+			throw new Error(`Subagent namespace is not a safe directory: ${namespaceDirectory}`);
+		}
+
+		const ownedStats = lstatIfPresent(ownedDirectory);
+		if (ownedStats) {
+			if (ownedStats.isSymbolicLink() || !ownedStats.isDirectory()) {
+				throw new Error(`Parent-owned subagent directory is not a safe directory: ${ownedDirectory}`);
+			}
+			await moveOwnedDirectoryToTrash(ownedDirectory);
+			if (lstatIfPresent(ownedDirectory)) {
+				throw new Error(`Parent-owned subagent directory remains after trash operation: ${ownedDirectory}`);
+			}
+			ownedDirectoryMovedToTrash = true;
+		}
+	}
+
+	return {
+		parentResult: await deleteParentSessionFile(resolvedParentFile),
+		ownedDirectoryMovedToTrash,
+	};
 }
 
 export class ParentOwnedSubagentSessionStore {
