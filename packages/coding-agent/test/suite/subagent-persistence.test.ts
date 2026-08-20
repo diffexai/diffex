@@ -338,7 +338,9 @@ describe("durable subagent lifecycle", () => {
 				return fauxAssistantMessage("unexpected");
 			},
 		]);
-		vi.spyOn(sessionManager, "appendCustomEntry").mockImplementationOnce(() => {
+		const append = vi.spyOn(sessionManager, "appendCustomEntry");
+		append.mockImplementationOnce((customType, data) => {
+			SessionManager.prototype.appendCustomEntry.call(sessionManager, customType, data);
 			throw new Error("parent roster unavailable");
 		});
 
@@ -350,6 +352,7 @@ describe("durable subagent lifecycle", () => {
 		await expect(getTool(session, "agents").execute("list", { timeout_ms: 0 })).resolves.toMatchObject({
 			details: { agents: [] },
 		});
+		expect(readSelectedBranchSubagentRoster(sessionManager)).toMatchObject({ found: false, children: [] });
 	});
 
 	it("rejects spawn without provider work when the child header cannot persist", async () => {
@@ -435,6 +438,30 @@ describe("durable subagent lifecycle", () => {
 		const latest = readSnapshots(sessionFile).at(-1)?.[0];
 		expect(latest).toMatchObject({ name: "worker", status: "interrupted" });
 		expect(latest?.completedAt).toBeTypeOf("number");
+	});
+
+	it("still disposes gracefully when the interrupted roster cannot persist", async () => {
+		const started = deferred<void>();
+		const { harness, session, sessionManager } = await createRoot();
+		harness.setResponses([
+			async (_context, request) => {
+				started.resolve();
+				await new Promise<void>((resolvePromise) => {
+					request?.signal?.addEventListener("abort", () => resolvePromise(), { once: true });
+				});
+				return fauxAssistantMessage("stopped");
+			},
+		]);
+
+		await getTool(session, "spawn_agent").execute("spawn", { name: "worker", task: "keep running" });
+		await started.promise;
+		const previousLeafId = sessionManager.getLeafId();
+		vi.spyOn(sessionManager, "appendCustomEntry").mockImplementationOnce(() => {
+			throw new Error("graceful snapshot unavailable");
+		});
+
+		await expect(session.dispose()).resolves.toBeUndefined();
+		expect(sessionManager.getLeafId()).toBe(previousLeafId);
 	});
 
 	it("keeps in-memory, disabled, and unsaved modes ephemeral", async () => {

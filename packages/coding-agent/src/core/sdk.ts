@@ -235,11 +235,18 @@ function createRootSubagentController(
 		},
 		persistRoster: parentSessionManager.isPersisted()
 			? (agents, admission) => {
-					parentSessionManager.appendCustomEntry(
-						SUBAGENT_ROSTER_CUSTOM_TYPE,
-						encodeSubagentRosterSnapshot(agents),
-					);
-					if (admission) persistSessionState(parentSessionManager);
+					const previousLeafId = parentSessionManager.getLeafId();
+					try {
+						parentSessionManager.appendCustomEntry(
+							SUBAGENT_ROSTER_CUSTOM_TYPE,
+							encodeSubagentRosterSnapshot(agents),
+						);
+						if (admission) persistSessionState(parentSessionManager);
+					} catch (error) {
+						if (previousLeafId === null) parentSessionManager.resetLeaf();
+						else parentSessionManager.branch(previousLeafId);
+						throw error;
+					}
 				}
 			: undefined,
 	});
