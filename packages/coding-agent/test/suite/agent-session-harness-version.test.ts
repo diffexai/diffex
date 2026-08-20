@@ -72,6 +72,32 @@ describe("AgentSession harness revisions", () => {
 		);
 	});
 
+	it("refreshes the selected harness before the next admitted request", async () => {
+		const { harness, store, rootVersion } = await createVersionedHarness();
+		const providerPrompts: string[] = [];
+		harness.setResponses([
+			(context) => {
+				providerPrompts.push(context.systemPrompt ?? "");
+				return fauxAssistantMessage("before activation");
+			},
+			(context) => {
+				providerPrompts.push(context.systemPrompt ?? "");
+				return fauxAssistantMessage("after activation");
+			},
+		]);
+
+		await harness.session.prompt("first request");
+		const advance = await store.advance({ memory: "Use the newly selected memory." }, rootVersion);
+		expect(advance.status).toBe("advanced");
+		if (advance.status !== "advanced") throw new Error("Expected harness advance to succeed");
+
+		await harness.session.prompt("second request");
+
+		expect(harness.session.activeHarnessVersion).toBe(advance.bundle.manifest.version);
+		expect(providerPrompts[0]).not.toContain("<evolution_memory");
+		expect(providerPrompts[1]).toContain("Use the newly selected memory.");
+	});
+
 	it("reports a live activation to the process lifecycle observer", async () => {
 		const activatedVersions: HarnessVersion[] = [];
 		const agentDir = join(tmpdir(), `diffex-harness-observer-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -79,7 +105,6 @@ describe("AgentSession harness revisions", () => {
 		agentDirs.push(agentDir);
 		const store = new HarnessStateStore(agentDir);
 		const root = await store.initialize();
-		const successor = await store.saveVersion({ memory: "Observed memory." }, root.manifest.version);
 		const harness = await createHarness({
 			harnessStateStore: store,
 			harnessVersionBundle: root,
@@ -91,10 +116,14 @@ describe("AgentSession harness revisions", () => {
 			},
 		});
 		harnesses.push(harness);
+		harness.setResponses([fauxAssistantMessage("observed")]);
+		const successor = await store.advance({ memory: "Observed memory." }, root.manifest.version);
+		expect(successor.status).toBe("advanced");
+		if (successor.status !== "advanced") throw new Error("Expected harness advance to succeed");
 
-		await harness.session.switchHarnessVersion(successor.manifest.version);
+		await harness.session.prompt("observe the selected harness");
 
-		expect(activatedVersions).toEqual([successor.manifest.version]);
+		expect(activatedVersions).toEqual([successor.bundle.manifest.version]);
 	});
 
 	it.each([

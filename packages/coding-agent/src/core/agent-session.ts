@@ -1196,16 +1196,29 @@ export class AgentSession {
 				);
 			}
 
-			await this._subagentController?.reset();
 			const selected = await this._harnessStateStore.selectVersion(version);
-			this._harnessVersionBundle = selected;
-			this._baseSystemPrompt = this._rebuildSystemPrompt(this.getActiveToolNames());
-			this._systemPromptOverride = undefined;
-			this.agent.state.systemPrompt = this._baseSystemPrompt;
-			await this._notifyHarnessActivated(version);
+			await this._activateHarnessBundle(selected);
 		} finally {
 			this._harnessSwitchInProgress = false;
 		}
+	}
+
+	private async _activateHarnessBundle(bundle: HarnessVersionBundle): Promise<void> {
+		await this._subagentController?.reset();
+		this._harnessVersionBundle = bundle;
+		this._baseSystemPrompt = this._rebuildSystemPrompt(this.getActiveToolNames());
+		this._systemPromptOverride = undefined;
+		this.agent.state.systemPrompt = this._baseSystemPrompt;
+		await this._notifyHarnessActivated(bundle.manifest.version);
+	}
+
+	private async _refreshSelectedHarnessAtPromptBoundary(): Promise<void> {
+		if (!this._harnessStateStore) return;
+
+		const selected = await this._harnessStateStore.loadCurrent();
+		if (selected.manifest.version === this.activeHarnessVersion) return;
+
+		await this._activateHarnessBundle(selected);
 	}
 
 	/**
@@ -1645,6 +1658,8 @@ export class AgentSession {
 				preflightResult?.(true);
 				return;
 			}
+
+			await this._refreshSelectedHarnessAtPromptBoundary();
 
 			// Flush any pending bash messages before the new prompt
 			this._flushPendingBashMessages();
