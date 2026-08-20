@@ -9,7 +9,10 @@ import {
 	type EvidenceCorpusManifest,
 	type EvolutionArtifactProducer,
 	type EvolutionInputSnapshot,
+	type EvolutionJob,
 	type EvolutionMemoryProposal,
+	EvolutionPipeline,
+	EvolutionTargetAdapterRegistry,
 	type InstructionSnapshot,
 	type Lesson,
 	type ProposalScoringInput,
@@ -477,6 +480,128 @@ describe("deterministic proposal evidence ranking", () => {
 		expect(belowThreshold.scored[0]).toMatchObject({
 			disposition: "unselected",
 			reasonCodes: ["below-eligibility-threshold"],
+		});
+	});
+
+	it("rejects stale trace closure and duplicates against applicable instructions", async () => {
+		const data = fixture([
+			{ evidenceId: "support-a", lineageId: "task-a" },
+			{ evidenceId: "support-b", lineageId: "task-b" },
+		]);
+		const lessons = [lesson("lesson-1", ["support-a", "support-b"])];
+		const staleTrace = proposal("proposal-trace", data.input, lessons, "Distinct guidance", {
+			supportingTraceIds: ["invented-trace"],
+		});
+		const instructionDuplicate = proposal("proposal-instruction", data.input, lessons, "repository   GUIDANCE.");
+		const report = await new DeterministicProposalRanker({ version: "1" }).validate(
+			validationInput(data, lessons, [staleTrace, instructionDuplicate]),
+		);
+
+		expect(report.proposalResults).toEqual([
+			expect.objectContaining({
+				proposalId: "proposal-trace",
+				disposition: "rejected",
+				reasonCodes: expect.arrayContaining(["trace-closure-invalid"]),
+			}),
+			expect.objectContaining({
+				proposalId: "proposal-instruction",
+				disposition: "rejected",
+				reasonCodes: expect.arrayContaining(["duplicate-instruction-normalized"]),
+			}),
+		]);
+	});
+
+	it("rejects altered validation reports and selection limits above five", async () => {
+		const data = fixture([
+			{ evidenceId: "support-a", lineageId: "task-a" },
+			{ evidenceId: "support-b", lineageId: "task-b" },
+		]);
+		const lessons = [lesson("lesson-1", ["support-a", "support-b"])];
+		const proposals = [proposal("proposal-a", data.input, lessons)];
+		const input = validationInput(data, lessons, proposals);
+		const ranker = new DeterministicProposalRanker({ version: "1" });
+		const validation = await ranker.validate(input);
+
+		await expect(
+			ranker.score({
+				...input,
+				validation: {
+					...validation,
+					proposalResults: validation.proposalResults.map((result) => ({ ...result, disposition: "rejected" })),
+				},
+			}),
+		).rejects.toThrow("does not match deterministic validation");
+		expect(() => new DeterministicProposalRanker({ version: "1" }, { maxSelectedProposals: 6 })).toThrow(
+			"cannot exceed 5",
+		);
+	});
+
+	it("completes validation as a no-op when accepted proposals are below threshold", async () => {
+		const data = fixture([
+			{ evidenceId: "support-a", lineageId: "task-a" },
+			{ evidenceId: "support-b", lineageId: "task-b" },
+		]);
+		const lessons = [lesson("lesson-1", ["support-a", "support-b"])];
+		const proposals = [proposal("proposal-a", data.input, lessons)];
+		const validationInputValue = validationInput(data, lessons, proposals);
+		const ranker = new DeterministicProposalRanker({ version: "1" }, { eligibilityThreshold: 100 });
+		const pipeline = new EvolutionPipeline({
+			version: "1",
+			model: { execute: () => Promise.reject(new Error("Model execution is not expected")) },
+			reflector: { reflect: () => Promise.reject(new Error("Reflection is not expected")) },
+			curator: { curate: () => Promise.reject(new Error("Curation is not expected")) },
+			validator: ranker,
+			scorer: ranker,
+			targets: new EvolutionTargetAdapterRegistry({ writers: [] }),
+		});
+		const job: EvolutionJob = {
+			metadata: metadata("job-1", [data.input.metadata.artifactId], { stage: "validating" }),
+			jobId: "job-1",
+			inputSnapshot: {
+				artifactId: data.input.metadata.artifactId,
+				contentDigest: data.input.metadata.contentDigest,
+			},
+			trigger: "manual",
+			evidenceRange: { afterCursor: 0, throughCursor: data.input.ingestionHighWaterCursor },
+			stage: "validating",
+			outcome: "active",
+			reasonCode: null,
+			failureMessage: null,
+			completion: null,
+			resolution: null,
+			checkpoints: [],
+			attempt: 1,
+			revision: 1,
+			createdAt,
+			updatedAt: createdAt,
+			terminalAt: null,
+			retryNotBefore: null,
+		};
+
+		const result = await pipeline.execute({
+			job,
+			input: data.input,
+			priorArtifacts: [
+				data.corpus,
+				data.instructions,
+				...lessons,
+				validationInputValue.reflection.coverage,
+				...proposals,
+			],
+			idempotencyKey: "job-1:validating",
+			scopeLease: {
+				kind: "scope",
+				key: "diffex:repository",
+				ownerId: "worker-1",
+				fence: 1,
+				expiresAt: "2026-08-19T12:20:00.000Z",
+			},
+			writerLease: null,
+		});
+
+		expect(result).toMatchObject({
+			directive: "complete-no-op",
+			state: { acceptedProposalIds: ["proposal-a"], selectedProposalIds: [] },
 		});
 	});
 });

@@ -1,6 +1,5 @@
 import type { MaterializedEvidence, MaterializedInvocation } from "@earendil-works/diffex-harness-trace";
 import type {
-	EvidenceCorpusDocument,
 	EvidenceRankingScoreComponents,
 	EvolutionArtifactProducer,
 	EvolutionMemoryDelta,
@@ -31,11 +30,9 @@ type EvidenceSignal = "deterministic-outcome" | "direct-user" | "model-self-asse
 interface EvidenceContext {
 	readonly evidence: MaterializedEvidence;
 	readonly invocation: MaterializedInvocation;
-	readonly sourceId: string;
 	readonly materializationId: string;
 	readonly ingestionCursor: number;
 	readonly traceId: string | null;
-	readonly document: EvidenceCorpusDocument;
 	readonly taskLineageId: string | null;
 	readonly signal: EvidenceSignal;
 	readonly signalPoints: number;
@@ -85,6 +82,10 @@ function sameSet(left: readonly string[], right: readonly string[]): boolean {
 	return sortedLeft.length === sortedRight.length && sortedLeft.every((value, index) => value === sortedRight[index]);
 }
 
+function hasDuplicates(values: readonly string[]): boolean {
+	return new Set(values).size !== values.length;
+}
+
 function clamp(value: number, minimum: number, maximum: number): number {
 	return Math.min(maximum, Math.max(minimum, value));
 }
@@ -92,6 +93,14 @@ function clamp(value: number, minimum: number, maximum: number): number {
 function positiveInteger(value: number | undefined, fallback: number, name: string): number {
 	const resolved = value ?? fallback;
 	if (!Number.isSafeInteger(resolved) || resolved < 1) throw new Error(`${name} must be a positive integer`);
+	return resolved;
+}
+
+function selectionLimit(value: number | undefined): number {
+	const resolved = positiveInteger(value, DEFAULT_MAX_SELECTED_PROPOSALS, "maxSelectedProposals");
+	if (resolved > DEFAULT_MAX_SELECTED_PROPOSALS) {
+		throw new Error(`maxSelectedProposals cannot exceed ${DEFAULT_MAX_SELECTED_PROPOSALS}`);
+	}
 	return resolved;
 }
 
@@ -189,6 +198,21 @@ function evidenceIndex(input: ProposalValidationInput): {
 	const index = new Map<string, EvidenceContext>();
 	const globalIssues: ValidationIssue[] = [];
 	const documents = new Map(input.corpus.documents.map((document) => [document.sourceId, document]));
+	if (documents.size !== input.corpus.documents.length) {
+		globalIssues.push({
+			code: "materialization-registry-mismatch",
+			message: "Corpus contains duplicate evidence source registrations",
+			severity: "error",
+		});
+	}
+	const sourceIds = new Set(input.input.evidenceSources.map((source) => source.sourceId));
+	if (input.corpus.documents.some((document) => !sourceIds.has(document.sourceId))) {
+		globalIssues.push({
+			code: "materialization-registry-mismatch",
+			message: "Corpus contains evidence outside the frozen input snapshot",
+			severity: "error",
+		});
+	}
 	for (const source of input.input.evidenceSources) {
 		const document = documents.get(source.sourceId);
 		if (document === undefined || document.materializationId !== source.materializationId) {
@@ -228,11 +252,9 @@ function evidenceIndex(input: ProposalValidationInput): {
 			index.set(evidence.evidenceId, {
 				evidence,
 				invocation: source.invocation,
-				sourceId: source.sourceId,
 				materializationId: source.materializationId,
 				ingestionCursor: source.ingestionCursor,
 				traceId: source.invocation.traceId,
-				document,
 				taskLineageId: taskLineageId(evidence),
 				signal: signal.signal,
 				signalPoints: signal.points,
@@ -329,6 +351,34 @@ function validatesInstructionReference(
 	return issues;
 }
 
+function instructionDuplicateIssues(
+	documents: readonly InstructionDocumentSnapshot[],
+	proposal: EvolutionProposal,
+): ValidationIssue[] {
+	if (proposal.disposition === "deferred") return [];
+	return addContents(proposal.exactDelta).flatMap((content) => {
+		if (documents.some((document) => document.content.includes(content))) {
+			return [
+				issue(
+					proposal.proposalId,
+					"duplicate-instruction-exact",
+					"Proposed content already exists in an applicable instruction",
+				),
+			];
+		}
+		const normalized = normalizedText(content);
+		return documents.some((document) => normalizedText(document.content).includes(normalized))
+			? [
+					issue(
+						proposal.proposalId,
+						"duplicate-instruction-normalized",
+						"Proposed content duplicates an applicable instruction after normalization",
+					),
+				]
+			: [];
+	});
+}
+
 function validateMemoryReference(input: ProposalValidationInput, proposal: EvolutionProposal): ValidationIssue[] {
 	const issues: ValidationIssue[] = [];
 	for (const reference of proposal.instructionRelationship.relevantEntries) {
@@ -362,6 +412,16 @@ function proposalShapeIssues(
 	) {
 		issues.push(
 			issue(proposal.proposalId, "proposal-schema-invalid", "Proposal metadata or content digest is invalid"),
+		);
+	}
+	if (
+		hasDuplicates(proposal.lessonIds) ||
+		hasDuplicates(proposal.supportingEvidenceIds) ||
+		hasDuplicates(proposal.contradictingEvidenceIds) ||
+		hasDuplicates(proposal.conflictingProposalIds)
+	) {
+		issues.push(
+			issue(proposal.proposalId, "duplicate-proposal-reference", "Proposal contains duplicate identifiers"),
 		);
 	}
 	if (
@@ -486,6 +546,18 @@ function lessonClosure(
 				issue(proposal.proposalId, "lesson-scope-invalid", `Lesson "${lessonId}" is outside the frozen scope`),
 			);
 		}
+		if (
+			lesson.metadata.artifactId !== lesson.lessonId ||
+			lesson.metadata.contentDigest !== computeEvolutionContentDigest(contentWithoutMetadata(lesson))
+		) {
+			issues.push(
+				issue(
+					proposal.proposalId,
+					"lesson-digest-invalid",
+					`Lesson "${lessonId}" failed immutable artifact validation`,
+				),
+			);
+		}
 		lessons.push(lesson);
 	}
 	const expectedSupporting = unique(lessons.flatMap((lesson) => lesson.evidenceIds));
@@ -547,10 +619,22 @@ function lessonClosure(
 			}
 			return [context];
 		});
+	const supporting = resolve(proposal.supportingEvidenceIds, "supporting");
+	const contradicting = resolve(proposal.contradictingEvidenceIds, "contradicting");
+	const supportingTraceIds = unique(supporting.flatMap((context) => context.traceId ?? []));
+	const contradictingTraceIds = unique(contradicting.flatMap((context) => context.traceId ?? []));
+	if (
+		!sameSet(proposal.supportingTraceIds, supportingTraceIds) ||
+		!sameSet(proposal.contradictingTraceIds, contradictingTraceIds)
+	) {
+		issues.push(
+			issue(proposal.proposalId, "trace-closure-invalid", "Proposal trace references do not match cited evidence"),
+		);
+	}
 	return {
 		issues,
-		supporting: resolve(proposal.supportingEvidenceIds, "supporting"),
-		contradicting: resolve(proposal.contradictingEvidenceIds, "contradicting"),
+		supporting,
+		contradicting,
 	};
 }
 
@@ -703,6 +787,7 @@ function validationContext(
 		...globalIssues.map((candidate) => ({ ...candidate, proposalId: proposal.proposalId })),
 		...proposalShapeIssues(input, proposal, options),
 		...validatesInstructionReference(input.instructions.documents, proposal),
+		...instructionDuplicateIssues(input.instructions.documents, proposal),
 		...validateMemoryReference(input, proposal),
 		...closure.issues,
 		...scopeIssues(proposal, contexts),
@@ -802,11 +887,7 @@ export class DeterministicProposalRanker implements ProposalValidator, ProposalS
 				DEFAULT_ELIGIBILITY_THRESHOLD,
 				"eligibilityThreshold",
 			),
-			maxSelectedProposals: positiveInteger(
-				options.maxSelectedProposals,
-				DEFAULT_MAX_SELECTED_PROPOSALS,
-				"maxSelectedProposals",
-			),
+			maxSelectedProposals: selectionLimit(options.maxSelectedProposals),
 			minimumIndependentTasks: positiveInteger(
 				options.minimumIndependentTasks,
 				DEFAULT_MINIMUM_INDEPENDENT_TASKS,
@@ -865,7 +946,17 @@ export class DeterministicProposalRanker implements ProposalValidator, ProposalS
 	async score(input: ProposalScoringInput): Promise<readonly ScoredProposal[]> {
 		input.signal?.throwIfAborted();
 		const evidence = evidenceIndex(input);
-		const validationById = new Map(input.validation.proposalResults.map((result) => [result.proposalId, result]));
+		const expectedValidation = await this.validate(input);
+		if (
+			input.validation.validatorVersion !== expectedValidation.validatorVersion ||
+			input.validation.assurance !== expectedValidation.assurance ||
+			computeEvolutionContentDigest(input.validation.proposalResults) !==
+				computeEvolutionContentDigest(expectedValidation.proposalResults) ||
+			input.validation.metadata.contentDigest !== expectedValidation.metadata.contentDigest
+		) {
+			throw new Error("Scorer received a validation report that does not match deterministic validation");
+		}
+		const validationById = new Map(expectedValidation.proposalResults.map((result) => [result.proposalId, result]));
 		const contexts = new Map(
 			input.proposals.map((proposal) => [
 				proposal.proposalId,
@@ -923,12 +1014,13 @@ export class DeterministicProposalRanker implements ProposalValidator, ProposalS
 				reasonCodes = ["selected-by-evidence-ranking"];
 			} else {
 				disposition = "unselected";
+				const conflicts = selected.some((item) => operationConflicts(proposal, item.context.proposal));
 				reasonCodes =
 					rankedItem.score < this.#options.eligibilityThreshold
 						? ["below-eligibility-threshold"]
-						: selected.length >= this.#options.maxSelectedProposals
-							? ["selection-limit-reached"]
-							: ["conflicts-with-higher-ranked-proposal"];
+						: conflicts
+							? ["conflicts-with-higher-ranked-proposal"]
+							: ["selection-limit-reached"];
 			}
 			const content = {
 				proposalId: proposal.proposalId,

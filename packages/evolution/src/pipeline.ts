@@ -165,6 +165,12 @@ function assertScoredProposals(
 			retryable: false,
 		});
 	}
+	if (scoredProposals.filter((scored) => scored.disposition === "selected").length > 5) {
+		throw new EvolutionExecutionError("Scorer selected more than five proposal groups", {
+			reasonCode: "pipeline-invariant",
+			retryable: false,
+		});
+	}
 }
 
 function assertValidationReport(
@@ -186,15 +192,18 @@ function assertValidationReport(
 			retryable: false,
 		});
 	}
-	const accepted = new Set(
-		validation.proposalResults
-			.filter((result) => result.disposition === "accepted")
-			.map((result) => result.proposalId),
-	);
+	const validationById = new Map(validation.proposalResults.map((result) => [result.proposalId, result]));
 	if (
-		scoredProposals.some((scored) => scored.disposition === "selected" && !accepted.has(scored.proposal.proposalId))
+		scoredProposals.some((scored) => {
+			const validationResult = validationById.get(scored.proposal.proposalId);
+			if (validationResult === undefined) return true;
+			if (validationResult.disposition === "accepted") {
+				return !["selected", "superseded", "unselected"].includes(scored.disposition);
+			}
+			return scored.disposition !== validationResult.disposition;
+		})
 	) {
-		throw new EvolutionExecutionError("Scorer selected a proposal that deterministic validation did not accept", {
+		throw new EvolutionExecutionError("Scorer disposition does not match deterministic validation", {
 			reasonCode: "pipeline-invariant",
 			retryable: false,
 		});
@@ -543,12 +552,6 @@ export class EvolutionPipeline implements EvolutionStageExecutor {
 				const selectedProposalIds = scoredProposals
 					.filter((scored) => scored.disposition === "selected")
 					.map((scored) => scored.proposal.proposalId);
-				if (acceptedProposalIds.length > 0 && selectedProposalIds.length === 0) {
-					throw new EvolutionExecutionError("Accepted proposals produced no writable selection", {
-						reasonCode: "validation-rejected",
-						retryable: false,
-					});
-				}
 				const ledgerEvents = scoredProposals.flatMap((scored): EvolutionLedgerEvent[] => {
 					const disposition: EvolutionProposalLedgerDisposition | null =
 						scored.disposition === "selected" ? null : scored.disposition;
@@ -563,7 +566,7 @@ export class EvolutionPipeline implements EvolutionStageExecutor {
 						acceptedProposalIds,
 						selectedProposalIds,
 					},
-					directive: acceptedProposalIds.length === 0 ? "complete-no-op" : "continue",
+					directive: selectedProposalIds.length === 0 ? "complete-no-op" : "continue",
 				};
 			}
 			case "writing": {
