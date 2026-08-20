@@ -1,6 +1,8 @@
 # Invocation Traces
 
-Diffex creates one invocation trace for each CLI process whose initial session is persisted.
+Diffex creates immutable invocation trace intervals for each CLI process whose initial session is persisted.
+An interval closes as soon as its operations settle, so a running peer can discover completed evidence without reading a trace that is still changing.
+Concurrent operations in one process share an interval until every operation in that interval settles.
 Ephemeral commands such as `--no-session`, `--help`, and `--list-models` do not create traces.
 
 Trace creation is passive.
@@ -10,6 +12,7 @@ If the trace file cannot be created, Diffex prints one warning and continues wit
 
 Trace files are stored in `~/.diffex/agent/traces/` by default, or beneath the directory selected by `DIFFEX_CODING_AGENT_DIR`.
 Each file is named `<UTC timestamp>_<trace ID>.jsonl`.
+A long-running process can create multiple files as successive operations settle.
 The trace directory is restricted to the current user with mode `0700`, and each trace file uses mode `0600` on POSIX systems.
 
 Tools can discover traces by scanning this directory for `.jsonl` files and validating them with the harness trace reader.
@@ -37,8 +40,8 @@ Each fact has one authoritative source so a trace remains compact and materializ
 | AgentHarness session JSONL | Durable entries, operation admission and settlement, abort requests, retry attempts, tool admission, queue changes, deferred writes, usage, lane pointers, and session facts | `session_item` evidence selected by durable session sequence |
 | Agent and AI telemetry spans | Agent runs, turns, logical provider requests, provider outcomes, tool execution outcomes, usage, and causal invocation, turn, request, and tool-call identifiers | Consolidated `span` evidence |
 | Coding-agent and extension telemetry spans | User-visible operations, retries and sleeps, extension hook outcomes, subagent coordination, terminal commands, external artifact references, and runtime diagnostics | Consolidated `span` evidence |
-| Trace lifecycle records | Producer identity, session bindings, harness activation, session segments, trace writer degradation, and completed, failed, or aborted process termination | `trace_record` evidence and document diagnostics |
-| Missing trace footer | A process that did not close its trace orderly | A `crashed` materialized termination status with a missing-footer diagnostic |
+| Trace lifecycle records | Producer identity, session bindings, harness activation, session segments, trace writer degradation, and completed, failed, or aborted interval termination | `trace_record` evidence and document diagnostics |
+| Missing trace footer | A process that did not close its active interval orderly | A `crashed` materialized termination status with a missing-footer diagnostic |
 
 Agent and extension events remain live notification APIs.
 Their durable facts are represented by the owning session entry, session record, or telemetry span listed above rather than by copying event payloads into the trace.
