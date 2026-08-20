@@ -73,7 +73,7 @@ describe("coding-agent evolution runtime", () => {
 		}
 	});
 
-	it("composes a repository-scoped control service without evidence", async () => {
+	it("shares one global control scope across working directories", async () => {
 		const agentDir = join(tmpdir(), `diffex-evolution-runtime-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 		mkdirSync(agentDir, { recursive: true });
 		temporaryDirectories.push(agentDir);
@@ -81,6 +81,8 @@ describe("coding-agent evolution runtime", () => {
 		const bundle = await store.initialize();
 		const harness = await createHarness({ harnessStateStore: store, harnessVersionBundle: bundle });
 		harnesses.push(harness);
+		const peerDirectory = join(harness.tempDir, "peer");
+		mkdirSync(peerDirectory);
 		const runtime = await createCodingAgentEvolutionRuntime({
 			agentDir,
 			cwd: harness.tempDir,
@@ -89,14 +91,28 @@ describe("coding-agent evolution runtime", () => {
 			modelRuntime: harness.session.modelRuntime,
 			resourceLoader: harness.session.resourceLoader,
 		});
+		const peerRuntime = await createCodingAgentEvolutionRuntime({
+			agentDir,
+			cwd: peerDirectory,
+			session: harness.session,
+			harnessState: store,
+			modelRuntime: harness.session.modelRuntime,
+			resourceLoader: harness.session.resourceLoader,
+		});
 		await runtime.start();
+		await peerRuntime.start();
 
 		try {
 			const state = await runtime.control.overview();
+			const peerState = await peerRuntime.control.overview();
 			expect(state.currentHarnessVersion).toBe(bundle.manifest.version);
+			expect(state.scope).toEqual({ repositoryId: "global", scopeId: "global" });
+			expect(peerState.scope).toEqual(state.scope);
 			expect(state.settledInvocationCount).toBe(0);
+			expect(peerState.settledInvocationCount).toBe(0);
 			expect(await runtime.control.startManual()).toEqual({ status: "not-created", reason: "no-new-evidence" });
 		} finally {
+			await peerRuntime.stop();
 			await runtime.stop();
 		}
 	});
@@ -157,7 +173,6 @@ describe("coding-agent evolution runtime", () => {
 		const scope: EvolutionScope = { repositoryId: "repository", scopeId: "repository" };
 		const catalog = new TraceEvidenceCatalog({
 			agentDir: root,
-			repositoryRoot,
 			scope,
 			async materializeInvocation(path) {
 				if (path === unreadablePath) throw new Error("simulated incompatible trace");
@@ -177,6 +192,41 @@ describe("coding-agent evolution runtime", () => {
 		expect(await catalog.highWaterCursor(scope)).toBe(4);
 		expect(await catalog.listSuccessful(scope, 3, 4)).toMatchObject([
 			{ materializationId: "00-late", ingestionCursor: 4 },
+		]);
+	});
+
+	it("exposes the same immutable trace prefix while an invocation is active", async () => {
+		const root = join(tmpdir(), `diffex-global-evidence-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+		const traceDirectory = join(root, "traces");
+		mkdirSync(traceDirectory, { recursive: true });
+		temporaryDirectories.push(root);
+		const firstPath = join(traceDirectory, "first.jsonl");
+		writeFileSync(firstPath, "first\n");
+		await new Promise((resolveDelay) => setTimeout(resolveDelay, 5));
+		const activePath = join(traceDirectory, "active.jsonl");
+		writeFileSync(activePath, "active\n");
+		await new Promise((resolveDelay) => setTimeout(resolveDelay, 5));
+		const laterPath = join(traceDirectory, "later.jsonl");
+		writeFileSync(laterPath, "later\n");
+		const active = new Set([activePath]);
+		const scope: EvolutionScope = { repositoryId: "global", scopeId: "global" };
+		const catalog = new TraceEvidenceCatalog({
+			agentDir: root,
+			scope,
+			isTraceActive: async (path) => active.has(path),
+			materializeInvocation: async (path) => materializedInvocation(basename(path, ".jsonl"), "/session.jsonl"),
+		});
+
+		expect(await catalog.highWaterCursor(scope)).toBe(1);
+		expect(await catalog.listSuccessful(scope, 0, 3)).toMatchObject([
+			{ materializationId: "first", ingestionCursor: 1 },
+		]);
+
+		active.delete(activePath);
+		expect(await catalog.highWaterCursor(scope)).toBe(3);
+		expect(await catalog.listSuccessful(scope, 1, 3)).toMatchObject([
+			{ materializationId: "active", ingestionCursor: 2 },
+			{ materializationId: "later", ingestionCursor: 3 },
 		]);
 	});
 

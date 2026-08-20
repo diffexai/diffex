@@ -1,4 +1,5 @@
-import { join } from "node:path";
+import { mkdir } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import {
 	AGENT_RUNTIME_TELEMETRY_SCHEMA,
 	AI_TELEMETRY_SCHEMA,
@@ -6,6 +7,7 @@ import {
 	type TelemetryContext,
 } from "@earendil-works/diffex-agent-core";
 import { uuidv7 } from "@earendil-works/diffex-ai";
+import lockfile from "proper-lockfile";
 import {
 	createJsonlTraceContext,
 	type JsonlTraceContext,
@@ -20,6 +22,8 @@ import { CURRENT_SESSION_VERSION } from "./session-manager.ts";
 import { CODING_AGENT_TELEMETRY_SCHEMA } from "./telemetry.ts";
 
 const TRACE_DIRECTORY_NAME = "traces";
+export const INVOCATION_TRACE_LOCK_STALE_MS = 30_000;
+const INVOCATION_TRACE_LOCK_UPDATE_MS = 10_000;
 
 export interface InvocationTraceCreationResult {
 	trace: InvocationTrace;
@@ -64,13 +68,15 @@ export class InvocationTrace implements AgentSessionLifecycleObserver {
 	readonly destinationPath: string | undefined;
 	readonly telemetryContext: TelemetryContext;
 	private readonly recorder: JsonlTraceContext | undefined;
+	private readonly releaseTraceLock: (() => Promise<void>) | undefined;
 	private readonly sessionBindings = new WeakMap<SessionManager, string>();
 	private activeHarnessVersion: string | undefined;
 	private signalTermination: TraceTerminationStatus | undefined;
 	private readonly signalCleanupHandlers: Array<() => void> = [];
 
-	constructor(recorder?: JsonlTraceContext) {
+	constructor(recorder?: JsonlTraceContext, releaseTraceLock?: () => Promise<void>) {
 		this.recorder = recorder;
+		this.releaseTraceLock = releaseTraceLock;
 		this.destinationPath = recorder?.destinationPath;
 		this.telemetryContext = recorder ?? NOOP_TELEMETRY_CONTEXT;
 		if (recorder) this.registerSignalObservers();
@@ -157,7 +163,11 @@ export class InvocationTrace implements AgentSessionLifecycleObserver {
 
 	async close(terminationStatus: TraceTerminationStatus = "completed"): Promise<void> {
 		for (const cleanup of this.signalCleanupHandlers.splice(0)) cleanup();
-		await this.recorder?.close(finalTerminationStatus(terminationStatus, this.signalTermination));
+		try {
+			await this.recorder?.close(finalTerminationStatus(terminationStatus, this.signalTermination));
+		} finally {
+			await this.releaseTraceLock?.();
+		}
 	}
 }
 
@@ -169,9 +179,17 @@ export async function createInvocationTrace(
 	const traceId = uuidv7();
 	const version = options.diffexVersion ?? VERSION;
 	const runtime = runtimeIdentity();
+	const destinationPath = invocationTracePath(options.agentDir, traceId);
+	let releaseTraceLock: (() => Promise<void>) | undefined;
 	try {
+		await mkdir(dirname(destinationPath), { recursive: true, mode: 0o700 });
+		releaseTraceLock = await lockfile.lock(destinationPath, {
+			realpath: false,
+			stale: INVOCATION_TRACE_LOCK_STALE_MS,
+			update: INVOCATION_TRACE_LOCK_UPDATE_MS,
+		});
 		const recorder = await createJsonlTraceContext({
-			destinationPath: invocationTracePath(options.agentDir, traceId),
+			destinationPath,
 			traceId,
 			diffexVersion: version,
 			sourceRevision: sourceRevision(version, options.sourceRevision),
@@ -183,8 +201,9 @@ export async function createInvocationTrace(
 				"coding-agent": CODING_AGENT_TELEMETRY_SCHEMA.version,
 			},
 		});
-		return { trace: new InvocationTrace(recorder) };
+		return { trace: new InvocationTrace(recorder, releaseTraceLock) };
 	} catch (error) {
+		await releaseTraceLock?.().catch(() => {});
 		return {
 			trace: new InvocationTrace(),
 			diagnostic: {

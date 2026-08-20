@@ -9,6 +9,7 @@ import {
 	type TraceRecord,
 	type TraceSessionAttachRecord,
 } from "@earendil-works/diffex-harness-trace";
+import lockfile from "proper-lockfile";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ENV_AGENT_DIR } from "../src/config.ts";
 import { createInvocationTrace } from "../src/core/invocation-trace.ts";
@@ -201,6 +202,18 @@ function footer(records: readonly TraceRecord[]): TraceFooterRecord | undefined 
 }
 
 describe("CLI invocation tracing", () => {
+	it("locks an active trace until the invocation closes", async () => {
+		const directories = setup();
+		const manager = SessionManager.create(directories.projectDir, join(directories.agentDir, "sessions"));
+		const { trace } = await createInvocationTrace({ agentDir: directories.agentDir, sessionManager: manager });
+		const path = trace.destinationPath;
+		if (!path) throw new Error("Invocation trace path was not created");
+
+		await expect(lockfile.check(path, { realpath: false })).resolves.toBe(true);
+		await trace.close();
+		await expect(lockfile.check(path, { realpath: false })).resolves.toBe(false);
+	});
+
 	it("records completed and resumed persisted invocations", async () => {
 		const directories = setup();
 		const first = await runCli(directories, [...commonArgs(directories), "-p", "hello"]);

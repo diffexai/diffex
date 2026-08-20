@@ -1,10 +1,11 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { readdir, readFile, realpath, stat } from "node:fs/promises";
+import { readdir, realpath, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { contentText, type Message, type Model, type Tool } from "@earendil-works/diffex-ai";
 import type { HarnessStateStore, HarnessVersion } from "@earendil-works/diffex-harness-state";
+import lockfile from "proper-lockfile";
 import type { TSchema } from "typebox";
 import {
 	computeEvolutionContentDigest,
@@ -42,13 +43,14 @@ import { materializeJsonlInvocation } from "#harness-trace";
 import { VERSION } from "../config.ts";
 import type { AgentSession } from "./agent-session.ts";
 import type { AgentSessionLifecycleObserver, AgentSessionOperationSettlement } from "./agent-session-lifecycle.ts";
-import type { InvocationTrace } from "./invocation-trace.ts";
+import { INVOCATION_TRACE_LOCK_STALE_MS, type InvocationTrace } from "./invocation-trace.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
 import type { ResourceLoader } from "./resource-loader.ts";
 
 const execFileAsync = promisify(execFile);
 const EVOLUTION_DIRECTORY_NAME = "evolution";
 const TRACE_DIRECTORY_NAME = "traces";
+const GLOBAL_EVOLUTION_SCOPE: EvolutionScope = { repositoryId: "global", scopeId: "global" };
 const RESPONSE_TOOL_NAME = "submit_evolution_response";
 const MAX_MODEL_ROUNDS = 24;
 
@@ -250,24 +252,26 @@ export class CodingAgentEvolutionModelExecutor implements EvolutionModelExecutor
 
 export class TraceEvidenceCatalog implements EvolutionEvidenceCatalog {
 	readonly #traceDirectory: string;
-	readonly #repositoryRoot: string;
 	readonly #scope: EvolutionScope;
 	readonly #excludedTracePath: string | undefined;
 	readonly #materializeInvocation: typeof materializeJsonlInvocation;
+	readonly #isTraceActive: (path: string) => Promise<boolean>;
 	readonly #cache = new Map<string, Promise<SuccessfulMaterialization | null>>();
 
 	constructor(options: {
 		agentDir: string;
-		repositoryRoot: string;
 		scope: EvolutionScope;
 		excludedTracePath?: string;
 		materializeInvocation?: typeof materializeJsonlInvocation;
+		isTraceActive?: (path: string) => Promise<boolean>;
 	}) {
 		this.#traceDirectory = join(options.agentDir, TRACE_DIRECTORY_NAME);
-		this.#repositoryRoot = resolve(options.repositoryRoot);
 		this.#scope = options.scope;
 		this.#excludedTracePath = options.excludedTracePath;
 		this.#materializeInvocation = options.materializeInvocation ?? materializeJsonlInvocation;
+		this.#isTraceActive =
+			options.isTraceActive ??
+			((path) => lockfile.check(path, { realpath: false, stale: INVOCATION_TRACE_LOCK_STALE_MS }));
 	}
 
 	#assertScope(scope: EvolutionScope): void {
@@ -280,8 +284,7 @@ export class TraceEvidenceCatalog implements EvolutionEvidenceCatalog {
 		try {
 			const paths = (await readdir(this.#traceDirectory, { withFileTypes: true }))
 				.filter((entry) => entry.isFile() && entry.name.endsWith(".jsonl"))
-				.map((entry) => join(this.#traceDirectory, entry.name))
-				.filter((path) => path !== this.#excludedTracePath);
+				.map((entry) => join(this.#traceDirectory, entry.name));
 			const discovered = await Promise.all(
 				paths.map(async (path) => {
 					try {
@@ -292,49 +295,29 @@ export class TraceEvidenceCatalog implements EvolutionEvidenceCatalog {
 					}
 				}),
 			);
-			return discovered
+			const ordered = discovered
 				.filter((entry): entry is { path: string; createdAt: bigint } => entry !== null)
 				.sort((left, right) => {
 					if (left.createdAt < right.createdAt) return -1;
 					if (left.createdAt > right.createdAt) return 1;
 					return left.path.localeCompare(right.path);
-				})
-				.map((entry) => entry.path);
+				});
+			const settled: string[] = [];
+			for (const entry of ordered) {
+				if (entry.path === this.#excludedTracePath || (await this.#isTraceActive(entry.path).catch(() => true))) {
+					break;
+				}
+				settled.push(entry.path);
+			}
+			return settled;
 		} catch (error) {
 			if (error instanceof Error && "code" in error && error.code === "ENOENT") return [];
 			throw error;
 		}
 	}
 
-	async #sessionBelongsToRepository(path: string): Promise<boolean> {
-		try {
-			const firstLine = (await readFile(path, "utf8")).split("\n", 1)[0];
-			const header: unknown = JSON.parse(firstLine ?? "");
-			if (!isRecord(header) || typeof header.cwd !== "string") return false;
-			const sessionRoot = await realpath(header.cwd).catch(() => resolve(header.cwd as string));
-			return sessionRoot === this.#repositoryRoot;
-		} catch {
-			return false;
-		}
-	}
-
 	async #materialize(path: string, ingestionCursor: number): Promise<SuccessfulMaterialization | null> {
 		const invocation = await this.#materializeInvocation(path);
-		const sessionPaths = new Set(
-			invocation.evidence.flatMap((evidence) =>
-				evidence.sessionSource === undefined
-					? []
-					: [evidence.sessionSource.resolvedPath ?? evidence.sessionSource.path],
-			),
-		);
-		let belongs = false;
-		for (const sessionPath of sessionPaths) {
-			if (await this.#sessionBelongsToRepository(sessionPath)) {
-				belongs = true;
-				break;
-			}
-		}
-		if (!belongs) return null;
 		const contentDigest = computeEvolutionContentDigest(invocation);
 		return {
 			materializationId: invocation.traceId ?? `materialization-${contentDigest.slice("sha256:".length)}`,
@@ -476,16 +459,14 @@ export async function createCodingAgentEvolutionRuntime(
 	options: CreateCodingAgentEvolutionRuntimeOptions,
 ): Promise<CodingAgentEvolutionRuntime> {
 	const repositoryRoot = await realpath(options.cwd).catch(() => resolve(options.cwd));
-	const repositoryId = computeEvolutionContentDigest(repositoryRoot);
-	const scope: EvolutionScope = { repositoryId, scopeId: repositoryId };
-	const storageRoot = join(options.agentDir, EVOLUTION_DIRECTORY_NAME, repositoryId.replace("sha256:", "sha256-"));
+	const scope = GLOBAL_EVOLUTION_SCOPE;
+	const storageRoot = join(options.agentDir, EVOLUTION_DIRECTORY_NAME);
 	const persistence = new FileEvolutionPersistence(storageRoot);
 	const progress = new EvolutionProgressBus();
 	const clock = { now: () => new Date().toISOString() };
 	const priority = new SessionPriorityGate(options.session);
 	const evidence = new TraceEvidenceCatalog({
 		agentDir: options.agentDir,
-		repositoryRoot,
 		scope,
 		excludedTracePath: options.currentTracePath,
 	});
