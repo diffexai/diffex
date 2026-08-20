@@ -228,6 +228,8 @@ function createSessionId(): string {
 	return uuidv7();
 }
 
+const PERSIST_SESSION_HEADER = Symbol("persistSessionHeader");
+
 export function assertValidSessionId(id: string): void {
 	if (!/^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/.test(id)) {
 		throw new Error(
@@ -1036,7 +1038,7 @@ export class SessionManager {
 	}
 
 	/** Persist a newly created session header before admitting dependent work. */
-	_persistHeader(): void {
+	[PERSIST_SESSION_HEADER](): void {
 		if (!this.persist || !this.sessionFile) {
 			throw new Error("Cannot persist an in-memory session header");
 		}
@@ -1806,4 +1808,9 @@ export class SessionManager {
 			return [];
 		}
 	}
+}
+
+/** Internal seam for durably admitting a newly created dependent session. */
+export function persistSessionHeader(sessionManager: SessionManager): void {
+	sessionManager[PERSIST_SESSION_HEADER]();
 }

@@ -6,6 +6,7 @@ import {
 	assertValidSessionId,
 	type CustomEntry,
 	loadEntriesFromFile,
+	persistSessionHeader,
 	type SessionEntry,
 	SessionManager,
 } from "../session-manager.ts";
@@ -341,7 +342,7 @@ export class ParentOwnedSubagentSessionStore {
 		const childFile = child.getSessionFile();
 		if (!childFile) throw new Error("Child session file is unavailable");
 		assertContainedPath(this.#ownedDirectory, resolve(childFile));
-		child._persistHeader();
+		persistSessionHeader(child);
 		return child;
 	}
 

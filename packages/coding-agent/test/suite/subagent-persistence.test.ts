@@ -11,7 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { SessionManager } from "../../src/core/session-manager.ts";
+import { persistSessionHeader, SessionManager } from "../../src/core/session-manager.ts";
 import {
 	type ChildSnapshotV1,
 	decodeSubagentRosterSnapshot,
@@ -131,7 +131,7 @@ describe("parent-owned subagent session storage", () => {
 		const root = mkdtempSync(join(tmpdir(), "diffex-subagent-persistence-"));
 		tempDirectories.push(root);
 		const parent = SessionManager.create(root, root, { id: "parent-session" });
-		parent._persistHeader();
+		persistSessionHeader(parent);
 		return { parent, root };
 	}
 
