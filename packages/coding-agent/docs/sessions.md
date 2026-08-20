@@ -27,12 +27,21 @@ For the JSONL file format and SessionManager API, see [Session Format](session-f
 | `/new` | Start a new session |
 | `/name <name>` | Set the current session display name |
 | `/session` | Show session info |
+| `/subagents` | Show sub-agents in the current session |
 | `/tree` | Navigate the current session tree |
 | `/fork` | Create a new session from a previous user message |
 | `/clone` | Duplicate the current active branch into a new session |
 | `/compact [prompt]` | Summarize older context; see [Compaction](compaction.md) |
 | `/export [file]` | Export session to HTML |
 | `/share` | Upload as a secret GitHub Gist and return its direct URL |
+
+## Sub-agents in Saved Sessions
+
+Saved parent sessions automatically preserve their branch-scoped sub-agent roster and usable child histories. Reopening a parent restores terminal records as recorded and changes children that were queued or running to interrupted. Reopening does not resume provider work, replay the original task, or redeliver a completed result.
+
+An explicit wake resumes a child from its saved history when that history is usable. If the history is missing, unsafe, or invalid, Diffex creates an isolated replacement and runs only the wake message. A wake uses the child's complete captured model, thinking level, tools, and harness when all remain usable; otherwise it uses the complete current parent configuration and reports a warning rather than mixing configurations.
+
+Branch navigation and session-context resets reconcile the roster only after the transition is safe. In-memory parents and `--no-session` sessions keep sub-agents ephemeral. Setting `subagents: false` disables the sub-agent tools without erasing a saved roster.
 
 ## Resuming and Deleting Sessions
 
