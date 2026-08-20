@@ -164,12 +164,61 @@ export interface EvolutionInputSnapshot {
 export interface EvidenceCorpusDocument {
 	readonly documentId: string;
 	readonly sourceId: string;
+	readonly materializationId: string;
 	readonly contentDigest: string;
 	readonly materializedInvocationVersion: number;
 	readonly traceId: string | null;
 	readonly integrity: MaterializationIntegrity;
 	readonly terminationStatus: MaterializedTerminationStatus;
 	readonly evidenceIds: readonly string[];
+	readonly semanticUnits: readonly EvidenceSemanticUnit[];
+	readonly diagnostics: readonly EvidenceCorpusDiagnostic[];
+	readonly orderingAmbiguity: readonly string[];
+}
+
+export type EvidenceSemanticUnitKind =
+	| "message"
+	| "span"
+	| "terminal-outcome"
+	| "tool-exchange"
+	| "trace-record"
+	| "turn";
+
+export interface EvidenceSourceCursor {
+	readonly traceSequence: number;
+	readonly timestamp: string | null;
+	readonly sessionPosition: number | null;
+	readonly parentSpanId: number | null;
+	readonly causalIdentifiers: readonly MaterializedCausalLink[];
+	readonly session: {
+		readonly bindingId: string;
+		readonly entryId: string | null;
+		readonly entryOrdinal: number | null;
+		readonly sessionSequence: number | null;
+	} | null;
+}
+
+export interface MaterializedCausalLink {
+	readonly name: string;
+	readonly value: string;
+}
+
+export interface EvidenceSemanticUnit {
+	readonly unitId: string;
+	readonly ordinal: number;
+	readonly kind: EvidenceSemanticUnitKind;
+	readonly evidenceIds: readonly string[];
+	readonly contentDigest: string;
+	readonly sourceCursor: EvidenceSourceCursor;
+}
+
+export interface EvidenceCorpusDiagnostic {
+	readonly code: string;
+	readonly message: string;
+	readonly recoverable: boolean;
+	readonly traceSequence: number | null;
+	readonly bindingId: string | null;
+	readonly sourceCode: string | null;
 }
 
 export interface ExcludedEvidenceSource {
@@ -195,29 +244,107 @@ export interface InstructionSnapshot {
 	readonly documents: readonly InstructionDocumentSnapshot[];
 }
 
+export interface EvidenceSliceCursor {
+	readonly documentId: string;
+	readonly startUnitId: string;
+	readonly endUnitId: string;
+	readonly startOrdinal: number;
+	readonly endOrdinal: number;
+	readonly digest: string;
+}
+
+export type EvidenceSliceOpenReason =
+	| "error-without-workaround"
+	| "new-turn-near-end"
+	| "tool-call-without-result"
+	| "tool-result-without-call";
+
+export interface EvidenceSliceEdge {
+	readonly status: "closed" | "open";
+	readonly reasons: readonly EvidenceSliceOpenReason[];
+	readonly evidenceIds: readonly string[];
+}
+
+export interface EvidenceSliceContinuation {
+	readonly previousSliceId: string | null;
+	readonly nextSliceId: string | null;
+}
+
+export interface EvidenceSlice {
+	readonly sliceId: string;
+	readonly manifestDigest: string;
+	readonly cursor: EvidenceSliceCursor;
+	readonly unitIds: readonly string[];
+	readonly evidenceIds: readonly string[];
+	readonly contentDigest: string;
+	readonly leftEdge: EvidenceSliceEdge;
+	readonly rightEdge: EvidenceSliceEdge;
+	readonly continuation: EvidenceSliceContinuation;
+}
+
+export type EvidenceCoverageDisposition = "analyzed" | "corrupt" | "skipped" | "unreadable";
+
+export interface EvidenceCoverageEntry {
+	readonly documentId: string;
+	readonly evidenceId: string;
+	readonly disposition: EvidenceCoverageDisposition;
+	readonly sliceIds: readonly string[];
+	readonly overlaps: readonly string[];
+	readonly continuationSliceIds: readonly string[];
+	readonly diagnosticCodes: readonly string[];
+}
+
+export interface EvidenceCoverageMap {
+	readonly metadata: EvolutionArtifactMetadata;
+	readonly manifestDigest: string;
+	readonly entries: readonly EvidenceCoverageEntry[];
+	readonly rootNodeIds: readonly string[];
+	readonly finalLessonIds: readonly string[];
+}
+
 export type ReflectionNodeStatus = "pending" | "complete" | "failed";
 
 export interface ReflectionNode {
 	readonly metadata: EvolutionArtifactMetadata;
 	readonly nodeId: string;
+	readonly kind: "leaf" | "synthesis";
+	readonly depth: number;
 	readonly parentNodeId: string | null;
 	readonly childNodeIds: readonly string[];
+	readonly sliceIds: readonly string[];
 	readonly evidenceIds: readonly string[];
 	readonly lessonIds: readonly string[];
+	readonly resultDigest: string;
 	readonly status: ReflectionNodeStatus;
 }
 
-export type LessonKind = "constraint" | "failure" | "instruction" | "strategy" | "unresolved";
+export type LessonKind =
+	| "counterexample"
+	| "direct-instruction"
+	| "failure-workaround"
+	| "harmful-memory"
+	| "incorrect-source-of-truth"
+	| "missing-capability"
+	| "missing-verification"
+	| "orchestration-inefficiency"
+	| "repository-constraint"
+	| "successful-strategy"
+	| "tool-behavior"
+	| "unresolved-work";
 
 export interface Lesson {
 	readonly metadata: EvolutionArtifactMetadata;
 	readonly lessonId: string;
 	readonly kind: LessonKind;
 	readonly summary: string;
+	readonly preconditions: readonly string[];
+	readonly observedOutcome: string;
 	readonly evidenceIds: readonly string[];
 	readonly counterevidenceIds: readonly string[];
 	readonly scope: EvolutionScope;
+	readonly applicabilityBoundaries: readonly string[];
 	readonly uncertainty: string | null;
+	readonly actionableTakeaway: string;
 }
 
 export interface EvolutionMemoryTarget {
@@ -358,6 +485,8 @@ export type EvolutionFailureReasonCode =
 	| "lease-lost"
 	| "model-call-failed"
 	| "pipeline-invariant"
+	| "reflection-budget-exhausted"
+	| "reflection-invalid-response"
 	| "shutdown"
 	| "snapshot-invalid"
 	| "stage-failed"
@@ -492,6 +621,44 @@ export interface ProposalRolledBackLedgerEvent extends EvolutionLedgerEventBase 
 	readonly toHarnessVersion: HarnessVersion;
 }
 
+export interface ReflectorBudgetCharge {
+	readonly modelCalls: number;
+	readonly reflectionRounds: number;
+	readonly toolCalls: number;
+}
+
+export interface ReflectorToolCallLedgerEvent extends EvolutionLedgerEventBase {
+	readonly type: "reflector-tool-call";
+	readonly toolCallId: string;
+	readonly toolName: string;
+	readonly manifestDigest: string;
+	readonly requestDigest: string;
+	readonly requestedSliceId: string | null;
+	readonly resolvedEvidenceIds: readonly string[];
+	readonly resultDigest: string | null;
+	readonly denialCode: string | null;
+	readonly budgetCharge: ReflectorBudgetCharge;
+}
+
+export interface ReflectorModelCallLedgerEvent extends EvolutionLedgerEventBase {
+	readonly type: "reflector-model-call";
+	readonly modelCallId: string;
+	readonly nodeId: string;
+	readonly attempt: number;
+	readonly reflectionRound: number;
+	readonly manifestDigest: string;
+	readonly idempotencyKey: string;
+	readonly budgetCharge: ReflectorBudgetCharge;
+}
+
+export interface ReflectionNodeCheckpointedLedgerEvent extends EvolutionLedgerEventBase {
+	readonly type: "reflection-node-checkpointed";
+	readonly nodeId: string;
+	readonly manifestDigest: string;
+	readonly node: EvolutionArtifactReference;
+	readonly lessons: readonly EvolutionArtifactReference[];
+}
+
 export type EvolutionLedgerEvent =
 	| JobCreatedLedgerEvent
 	| CheckpointSavedLedgerEvent
@@ -499,4 +666,7 @@ export type EvolutionLedgerEvent =
 	| MutationWrittenLedgerEvent
 	| JobCompletedLedgerEvent
 	| JobFailedLedgerEvent
-	| ProposalRolledBackLedgerEvent;
+	| ProposalRolledBackLedgerEvent
+	| ReflectionNodeCheckpointedLedgerEvent
+	| ReflectorModelCallLedgerEvent
+	| ReflectorToolCallLedgerEvent;

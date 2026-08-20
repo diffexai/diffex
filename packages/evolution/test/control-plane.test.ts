@@ -392,28 +392,51 @@ describe("checkpointed evolution pipeline", () => {
 						promptVersion: "reflector-v1",
 						idempotencyKey: input.idempotencyKey,
 						input: {},
+						tools: [],
 						signal: input.signal,
 					});
 					const lesson: Lesson = {
 						metadata: metadata("lesson-1", ["materialization-1"], { summary: "Keep narrow changes" }),
 						lessonId: "lesson-1",
-						kind: "strategy",
+						kind: "successful-strategy",
 						summary: "Keep narrow changes",
+						preconditions: [],
+						observedOutcome: "The change remains focused",
 						evidenceIds: [],
 						counterevidenceIds: [],
 						scope,
+						applicabilityBoundaries: [],
 						uncertainty: null,
+						actionableTakeaway: "Keep changes narrow",
 					};
 					const node: ReflectionNode = {
 						metadata: metadata("reflection-1", [lesson.lessonId], { lessonIds: [lesson.lessonId] }),
 						nodeId: "reflection-1",
+						kind: "leaf",
+						depth: 0,
 						parentNodeId: null,
 						childNodeIds: [],
+						sliceIds: [],
 						evidenceIds: [],
 						lessonIds: [lesson.lessonId],
+						resultDigest: computeEvolutionContentDigest({ lessonIds: [lesson.lessonId] }),
 						status: "complete",
 					};
-					return { nodes: [node], lessons: [lesson] };
+					const coverageContent = {
+						manifestDigest: input.corpus.metadata.contentDigest,
+						entries: [],
+						rootNodeIds: [node.nodeId],
+						finalLessonIds: [lesson.lessonId],
+					};
+					return {
+						nodes: [node],
+						lessons: [lesson],
+						coverage: {
+							metadata: metadata("coverage-1", [node.nodeId], coverageContent),
+							...coverageContent,
+						},
+						finalLessonIds: [lesson.lessonId],
+					};
 				},
 			},
 			curator: {

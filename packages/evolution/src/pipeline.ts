@@ -1,6 +1,7 @@
 import type {
 	CounterReport,
 	EvidenceCorpusManifest,
+	EvidenceCoverageMap,
 	EvolutionArtifactMetadata,
 	EvolutionArtifactProducer,
 	EvolutionInputSnapshot,
@@ -21,6 +22,7 @@ import type {
 } from "./contracts.ts";
 import { DisabledPreReflectionStage } from "./counter.ts";
 import { EvolutionExecutionError } from "./errors.ts";
+import { buildEvidenceCorpusDocument } from "./evidence-corpus.ts";
 import type {
 	Curator,
 	EvolutionArtifact,
@@ -60,6 +62,10 @@ function isCorpus(artifact: EvolutionArtifact): artifact is EvidenceCorpusManife
 
 function isCounterReport(artifact: EvolutionArtifact): artifact is CounterReport {
 	return "artifactKind" in artifact && artifact.artifactKind === "counter-report";
+}
+
+function isCoverageMap(artifact: EvolutionArtifact): artifact is EvidenceCoverageMap {
+	return "manifestDigest" in artifact && "entries" in artifact && "finalLessonIds" in artifact;
 }
 
 function isInstructionSnapshot(artifact: EvolutionArtifact): artifact is InstructionSnapshot {
@@ -304,20 +310,12 @@ export class EvolutionPipeline implements EvolutionStageExecutor {
 					},
 				);
 			}
-			return {
-				documentId: stableId("corpus-document", {
-					idempotencyKey,
-					materializationId: source.materializationId,
-					contentDigest: source.contentDigest,
-				}),
-				sourceId: source.sourceId,
+			const documentId = stableId("corpus-document", {
+				idempotencyKey,
+				materializationId: source.materializationId,
 				contentDigest: source.contentDigest,
-				materializedInvocationVersion: source.invocation.version,
-				traceId: source.invocation.traceId,
-				integrity: source.invocation.integrity,
-				terminationStatus: source.invocation.terminationStatus,
-				evidenceIds: source.invocation.evidence.map((evidence) => evidence.evidenceId),
-			};
+			});
+			return buildEvidenceCorpusDocument(documentId, source);
 		});
 		const artifactId = stableId("corpus-manifest", { idempotencyKey, documents });
 		return {
@@ -359,17 +357,23 @@ export class EvolutionPipeline implements EvolutionStageExecutor {
 		readonly corpus: EvidenceCorpusManifest;
 		readonly counterReport: CounterReport | null;
 		readonly instructions: InstructionSnapshot;
-		readonly reflection: ReflectionResult;
+		readonly reflection: ReflectionResult | null;
 		readonly proposals: readonly EvolutionProposal[];
 	} {
+		const coverage = optionalOne(context.priorArtifacts.filter(isCoverageMap), "evidence coverage map");
 		return {
 			corpus: requireOne(context.priorArtifacts.filter(isCorpus), "corpus manifest"),
 			counterReport: optionalOne(context.priorArtifacts.filter(isCounterReport), "Counter report"),
 			instructions: requireOne(context.priorArtifacts.filter(isInstructionSnapshot), "instruction snapshot"),
-			reflection: {
-				nodes: context.priorArtifacts.filter(isReflectionNode),
-				lessons: context.priorArtifacts.filter(isLesson),
-			},
+			reflection:
+				coverage === null
+					? null
+					: {
+							nodes: context.priorArtifacts.filter(isReflectionNode),
+							lessons: context.priorArtifacts.filter(isLesson),
+							coverage,
+							finalLessonIds: coverage.finalLessonIds,
+						},
 			proposals: context.priorArtifacts.filter(isProposal),
 		};
 	}
@@ -444,6 +448,7 @@ export class EvolutionPipeline implements EvolutionStageExecutor {
 				let reflection: ReflectionResult;
 				try {
 					reflection = await this.#dependencies.reflector.reflect({
+						jobId: context.job.jobId,
 						input: context.input,
 						corpus,
 						counterReport,
@@ -464,16 +469,24 @@ export class EvolutionPipeline implements EvolutionStageExecutor {
 					"lesson ID",
 				);
 				return {
-					artifacts: [...reflection.nodes, ...reflection.lessons],
+					artifacts: [...reflection.nodes, ...reflection.lessons, reflection.coverage],
 					state: {
 						reflectionNodeIds: reflection.nodes.map((node) => node.nodeId),
 						lessonIds: reflection.lessons.map((lesson) => lesson.lessonId),
+						coverageMapId: reflection.coverage.metadata.artifactId,
+						finalLessonIds: reflection.finalLessonIds,
 					},
 					directive: "continue",
 				};
 			}
 			case "curating": {
 				const { corpus, instructions, reflection } = this.#pipelineInputs(context);
+				if (reflection === null) {
+					throw new EvolutionExecutionError("Evidence coverage is missing from reflection output", {
+						reasonCode: "artifact-corrupt",
+						retryable: false,
+					});
+				}
 				let proposals: readonly EvolutionProposal[];
 				try {
 					proposals = await this.#dependencies.curator.curate({
@@ -500,6 +513,12 @@ export class EvolutionPipeline implements EvolutionStageExecutor {
 			}
 			case "validating": {
 				const { corpus, instructions, reflection, proposals } = this.#pipelineInputs(context);
+				if (reflection === null) {
+					throw new EvolutionExecutionError("Evidence coverage is missing from reflection output", {
+						reasonCode: "artifact-corrupt",
+						retryable: false,
+					});
+				}
 				const validationInput = {
 					input: context.input,
 					corpus,

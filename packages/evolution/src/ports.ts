@@ -2,6 +2,7 @@ import type { MaterializedInvocation } from "@earendil-works/diffex-harness-trac
 import type {
 	CounterReport,
 	EvidenceCorpusManifest,
+	EvidenceCoverageMap,
 	EvolutionArtifactReference,
 	EvolutionInputSnapshot,
 	EvolutionJob,
@@ -32,6 +33,7 @@ import type {
 
 export type EvolutionArtifact =
 	| CounterReport
+	| EvidenceCoverageMap
 	| EvidenceCorpusManifest
 	| EvolutionInputSnapshot
 	| EvolutionProposal
@@ -52,13 +54,32 @@ export interface EvolutionIdGenerator {
 	nextId(kind: string): string;
 }
 
-export interface EvolutionModelRequest {
-	readonly stage: "curator" | "reflector";
+export interface EvolutionModelTool {
+	readonly name: string;
+	readonly description: string;
+	readonly inputSchema: JsonObject;
+	execute(input: JsonObject): Promise<JsonObject>;
+}
+
+export interface ReflectorModelRequest {
+	readonly stage: "reflector";
 	readonly promptVersion: string;
 	readonly idempotencyKey: string;
 	readonly input: JsonObject;
+	readonly tools: readonly EvolutionModelTool[];
 	readonly signal?: AbortSignal;
 }
+
+export interface CuratorModelRequest {
+	readonly stage: "curator";
+	readonly promptVersion: string;
+	readonly idempotencyKey: string;
+	readonly input: JsonObject;
+	readonly tools?: never;
+	readonly signal?: AbortSignal;
+}
+
+export type EvolutionModelRequest = CuratorModelRequest | ReflectorModelRequest;
 
 export interface EvolutionModelResponse {
 	readonly output: JsonObject;
@@ -85,6 +106,7 @@ export interface PreReflectionStage {
 }
 
 export interface ReflectorInput {
+	readonly jobId: string;
 	readonly input: EvolutionInputSnapshot;
 	readonly corpus: EvidenceCorpusManifest;
 	readonly counterReport: CounterReport | null;
@@ -97,6 +119,8 @@ export interface ReflectorInput {
 export interface ReflectionResult {
 	readonly nodes: readonly ReflectionNode[];
 	readonly lessons: readonly Lesson[];
+	readonly coverage: EvidenceCoverageMap;
+	readonly finalLessonIds: readonly string[];
 }
 
 export interface Reflector {
