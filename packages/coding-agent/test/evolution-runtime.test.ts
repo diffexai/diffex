@@ -195,7 +195,7 @@ describe("coding-agent evolution runtime", () => {
 		]);
 	});
 
-	it("exposes the same immutable trace prefix while an invocation is active", async () => {
+	it("indexes settled traces without letting an older active invocation block them", async () => {
 		const root = join(tmpdir(), `diffex-global-evidence-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 		const traceDirectory = join(root, "traces");
 		mkdirSync(traceDirectory, { recursive: true });
@@ -216,17 +216,23 @@ describe("coding-agent evolution runtime", () => {
 			isTraceActive: async (path) => active.has(path),
 			materializeInvocation: async (path) => materializedInvocation(basename(path, ".jsonl"), "/session.jsonl"),
 		});
+		const peerCatalog = new TraceEvidenceCatalog({
+			agentDir: root,
+			scope,
+			isTraceActive: async (path) => active.has(path),
+			materializeInvocation: async (path) => materializedInvocation(basename(path, ".jsonl"), "/session.jsonl"),
+		});
 
-		expect(await catalog.highWaterCursor(scope)).toBe(1);
+		expect(await Promise.all([catalog.highWaterCursor(scope), peerCatalog.highWaterCursor(scope)])).toEqual([2, 2]);
 		expect(await catalog.listSuccessful(scope, 0, 3)).toMatchObject([
 			{ materializationId: "first", ingestionCursor: 1 },
+			{ materializationId: "later", ingestionCursor: 2 },
 		]);
 
 		active.delete(activePath);
-		expect(await catalog.highWaterCursor(scope)).toBe(3);
-		expect(await catalog.listSuccessful(scope, 1, 3)).toMatchObject([
-			{ materializationId: "active", ingestionCursor: 2 },
-			{ materializationId: "later", ingestionCursor: 3 },
+		expect(await Promise.all([catalog.highWaterCursor(scope), peerCatalog.highWaterCursor(scope)])).toEqual([3, 3]);
+		expect(await peerCatalog.listSuccessful(scope, 2, 3)).toMatchObject([
+			{ materializationId: "active", ingestionCursor: 3 },
 		]);
 	});
 

@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { readdir, realpath, stat } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { mkdir, readdir, readFile, realpath, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { basename, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { contentText, type Message, type Model, type Tool } from "@earendil-works/diffex-ai";
 import type { HarnessStateStore, HarnessVersion } from "@earendil-works/diffex-harness-state";
@@ -50,6 +50,8 @@ import type { ResourceLoader } from "./resource-loader.ts";
 const execFileAsync = promisify(execFile);
 const EVOLUTION_DIRECTORY_NAME = "evolution";
 const TRACE_DIRECTORY_NAME = "traces";
+const TRACE_EVIDENCE_INDEX_NAME = ".evolution-index.json";
+const TRACE_EVIDENCE_INDEX_VERSION = 1;
 const GLOBAL_EVOLUTION_SCOPE: EvolutionScope = { repositoryId: "global", scopeId: "global" };
 const RESPONSE_TOOL_NAME = "submit_evolution_response";
 const MAX_MODEL_ROUNDS = 24;
@@ -252,6 +254,8 @@ export class CodingAgentEvolutionModelExecutor implements EvolutionModelExecutor
 
 export class TraceEvidenceCatalog implements EvolutionEvidenceCatalog {
 	readonly #traceDirectory: string;
+	readonly #indexPath: string;
+	readonly #indexLockPath: string;
 	readonly #scope: EvolutionScope;
 	readonly #excludedTracePath: string | undefined;
 	readonly #materializeInvocation: typeof materializeJsonlInvocation;
@@ -266,6 +270,8 @@ export class TraceEvidenceCatalog implements EvolutionEvidenceCatalog {
 		isTraceActive?: (path: string) => Promise<boolean>;
 	}) {
 		this.#traceDirectory = join(options.agentDir, TRACE_DIRECTORY_NAME);
+		this.#indexPath = join(this.#traceDirectory, TRACE_EVIDENCE_INDEX_NAME);
+		this.#indexLockPath = join(this.#traceDirectory, ".evolution-index");
 		this.#scope = options.scope;
 		this.#excludedTracePath = options.excludedTracePath;
 		this.#materializeInvocation = options.materializeInvocation ?? materializeJsonlInvocation;
@@ -280,39 +286,93 @@ export class TraceEvidenceCatalog implements EvolutionEvidenceCatalog {
 		}
 	}
 
-	async #paths(): Promise<readonly string[]> {
+	async #readIndex(): Promise<string[]> {
 		try {
-			const paths = (await readdir(this.#traceDirectory, { withFileTypes: true }))
-				.filter((entry) => entry.isFile() && entry.name.endsWith(".jsonl"))
-				.map((entry) => join(this.#traceDirectory, entry.name));
-			const discovered = await Promise.all(
-				paths.map(async (path) => {
-					try {
-						const file = await stat(path, { bigint: true });
-						return { path, createdAt: file.birthtimeNs === 0n ? file.ctimeNs : file.birthtimeNs };
-					} catch {
-						return null;
-					}
-				}),
-			);
-			const ordered = discovered
-				.filter((entry): entry is { path: string; createdAt: bigint } => entry !== null)
-				.sort((left, right) => {
-					if (left.createdAt < right.createdAt) return -1;
-					if (left.createdAt > right.createdAt) return 1;
-					return left.path.localeCompare(right.path);
-				});
-			const settled: string[] = [];
-			for (const entry of ordered) {
-				if (entry.path === this.#excludedTracePath || (await this.#isTraceActive(entry.path).catch(() => true))) {
-					break;
-				}
-				settled.push(entry.path);
+			const parsed: unknown = JSON.parse(await readFile(this.#indexPath, "utf8"));
+			if (
+				!isRecord(parsed) ||
+				parsed.version !== TRACE_EVIDENCE_INDEX_VERSION ||
+				!Array.isArray(parsed.entries) ||
+				!parsed.entries.every(
+					(entry): entry is string =>
+						typeof entry === "string" && basename(entry) === entry && entry.endsWith(".jsonl"),
+				) ||
+				new Set(parsed.entries).size !== parsed.entries.length
+			) {
+				throw new Error("Evolution trace evidence index is invalid");
 			}
-			return settled;
+			return parsed.entries;
 		} catch (error) {
 			if (error instanceof Error && "code" in error && error.code === "ENOENT") return [];
 			throw error;
+		}
+	}
+
+	async #writeIndex(entries: readonly string[]): Promise<void> {
+		const temporaryPath = join(this.#traceDirectory, `.${TRACE_EVIDENCE_INDEX_NAME}.${randomUUID()}.tmp`);
+		try {
+			await writeFile(
+				temporaryPath,
+				`${JSON.stringify({ version: TRACE_EVIDENCE_INDEX_VERSION, entries }, null, 2)}\n`,
+				{ encoding: "utf8", flag: "wx", mode: 0o600 },
+			);
+			await rename(temporaryPath, this.#indexPath);
+		} catch (error) {
+			await unlink(temporaryPath).catch((cleanupError: unknown) => {
+				if (!(cleanupError instanceof Error && "code" in cleanupError && cleanupError.code === "ENOENT")) {
+					throw cleanupError;
+				}
+			});
+			throw error;
+		}
+	}
+
+	async #paths(): Promise<readonly string[]> {
+		await mkdir(this.#traceDirectory, { recursive: true, mode: 0o700 });
+		const release = await lockfile.lock(this.#indexLockPath, {
+			lockfilePath: `${this.#indexLockPath}.lock`,
+			realpath: false,
+			retries: { retries: 200, factor: 1, minTimeout: 5, maxTimeout: 25, randomize: true },
+			stale: INVOCATION_TRACE_LOCK_STALE_MS,
+			update: 10_000,
+		});
+		try {
+			const indexed = await this.#readIndex();
+			const indexedNames = new Set(indexed);
+			const candidates = await Promise.all(
+				(await readdir(this.#traceDirectory, { withFileTypes: true }))
+					.filter((entry) => entry.isFile() && entry.name.endsWith(".jsonl") && !indexedNames.has(entry.name))
+					.map(async (entry) => {
+						const path = join(this.#traceDirectory, entry.name);
+						if (path === this.#excludedTracePath || (await this.#isTraceActive(path).catch(() => true))) {
+							return null;
+						}
+						try {
+							const file = await stat(path, { bigint: true });
+							return {
+								name: entry.name,
+								createdAt: file.birthtimeNs === 0n ? file.ctimeNs : file.birthtimeNs,
+							};
+						} catch {
+							return null;
+						}
+					}),
+			);
+			const additions = candidates
+				.filter((entry): entry is { name: string; createdAt: bigint } => entry !== null)
+				.sort((left, right) => {
+					if (left.createdAt < right.createdAt) return -1;
+					if (left.createdAt > right.createdAt) return 1;
+					return left.name.localeCompare(right.name);
+				})
+				.map((entry) => entry.name);
+			if (additions.length > 0) {
+				indexed.push(...additions);
+				await this.#writeIndex(indexed);
+			}
+			return indexed.map((name) => join(this.#traceDirectory, name));
+		} finally {
+			await release();
 		}
 	}
 
