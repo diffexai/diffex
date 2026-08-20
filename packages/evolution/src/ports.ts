@@ -75,6 +75,7 @@ export interface CuratorModelRequest {
 	readonly promptVersion: string;
 	readonly idempotencyKey: string;
 	readonly input: JsonObject;
+	readonly outputSchema: JsonObject;
 	readonly tools?: never;
 	readonly signal?: AbortSignal;
 }

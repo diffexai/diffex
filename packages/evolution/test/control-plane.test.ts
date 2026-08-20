@@ -446,6 +446,7 @@ describe("checkpointed evolution pipeline", () => {
 						promptVersion: "curator-v1",
 						idempotencyKey: input.idempotencyKey,
 						input: {},
+						outputSchema: {},
 						signal: input.signal,
 					});
 					const exactDelta = {
@@ -460,11 +461,13 @@ describe("checkpointed evolution pipeline", () => {
 						summary: "Append one focused rule",
 						scope: {
 							repository: scope,
+							repositoryRevision: "abc123",
 							materializationIds: [],
 							traceIds: [],
 							sessionIds: [],
 							taskLineageIds: [],
 							runtimeKinds: [],
+							runtimeVersions: [],
 							sourceRevisions: [],
 							harnessVersions: [FIRST_HARNESS_VERSION],
 							applicabilityBoundaries: [],

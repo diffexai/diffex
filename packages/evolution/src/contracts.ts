@@ -368,11 +368,13 @@ export type EvolutionProposalAction = "ADD" | "DEFER" | "REMOVE" | "REPLACE";
 
 export interface EvolutionProposalScope {
 	readonly repository: EvolutionScope;
+	readonly repositoryRevision: string;
 	readonly materializationIds: readonly string[];
 	readonly traceIds: readonly string[];
 	readonly sessionIds: readonly string[];
 	readonly taskLineageIds: readonly string[];
 	readonly runtimeKinds: readonly string[];
+	readonly runtimeVersions: readonly string[];
 	readonly sourceRevisions: readonly string[];
 	readonly harnessVersions: readonly HarnessVersion[];
 	readonly applicabilityBoundaries: readonly string[];
@@ -433,10 +435,7 @@ export interface EvolutionMemoryReplaceDelta {
 	readonly addition: Omit<EvolutionMemoryAddDelta, "operation">;
 }
 
-export type EvolutionMemoryDelta =
-	| EvolutionMemoryAddDelta
-	| EvolutionMemoryRemoveDelta
-	| EvolutionMemoryReplaceDelta;
+export type EvolutionMemoryDelta = EvolutionMemoryAddDelta | EvolutionMemoryRemoveDelta | EvolutionMemoryReplaceDelta;
 
 interface EvolutionProposalBase {
 	readonly metadata: EvolutionArtifactMetadata;

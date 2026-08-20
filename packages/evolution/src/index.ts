@@ -1,5 +1,6 @@
 export {
 	type ActiveEvolutionStage,
+	type ApplicableInstructionReference,
 	type CheckpointSavedLedgerEvent,
 	COUNTER_OBSERVATION_SCHEMA_VERSION,
 	COUNTER_REPORT_SCHEMA_VERSION,
@@ -27,8 +28,6 @@ export {
 	type EvidenceSliceEdge,
 	type EvidenceSliceOpenReason,
 	type EvidenceSourceCursor,
-	type EvolutionMemoryAddDelta,
-	type EvolutionMemoryDelta,
 	type EvolutionArtifactMetadata,
 	type EvolutionArtifactProducer,
 	type EvolutionArtifactReference,
@@ -44,12 +43,14 @@ export {
 	type EvolutionJobStage,
 	type EvolutionLeaseToken,
 	type EvolutionLedgerEvent,
+	type EvolutionMemoryAddDelta,
+	type EvolutionMemoryDelta,
 	type EvolutionMemoryItem,
 	type EvolutionMemoryItemLedgerMetadata,
 	type EvolutionMemoryProposal,
+	type EvolutionMemoryReference,
 	type EvolutionMemoryRemoveDelta,
 	type EvolutionMemoryReplaceDelta,
-	type EvolutionMemoryReference,
 	type EvolutionMemoryTarget,
 	type EvolutionModelIdentity,
 	type EvolutionMutation,
@@ -105,7 +106,6 @@ export {
 	type ValidationIssue,
 	type ValidationReport,
 	type ValidationSeverity,
-	type ApplicableInstructionReference,
 } from "./contracts.ts";
 export {
 	EvolutionControlPlane,
@@ -115,6 +115,12 @@ export {
 	type EvolutionJobCreationResult,
 } from "./control-plane.ts";
 export { DisabledPreReflectionStage } from "./counter.ts";
+export {
+	CURATOR_OUTPUT_SCHEMA,
+	StructuredDeltaCurator,
+	type StructuredDeltaCuratorDependencies,
+	type StructuredDeltaCuratorOptions,
+} from "./curator.ts";
 export { EvolutionExecutionError } from "./errors.ts";
 export {
 	EvolutionStorageCorruptionError,

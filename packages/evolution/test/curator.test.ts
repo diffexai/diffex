@@ -1,0 +1,693 @@
+import type { MaterializedEvidence, MaterializedInvocation } from "@earendil-works/diffex-harness-trace";
+import { describe, expect, it } from "vitest";
+import {
+	CURATOR_OUTPUT_SCHEMA,
+	type CuratorInput,
+	computeEvolutionContentDigest,
+	createEvolutionArtifactMetadata,
+	type EvidenceCorpusManifest,
+	type EvolutionArtifactProducer,
+	type EvolutionInputSnapshot,
+	type EvolutionMemoryItem,
+	type EvolutionModelResponse,
+	type InstructionSnapshot,
+	type JsonObject,
+	type Lesson,
+	type ReflectionResult,
+	StructuredDeltaCurator,
+} from "../src/index.ts";
+
+const FIRST_HARNESS_VERSION = `sha256:${"1".repeat(64)}`;
+const SECOND_HARNESS_VERSION = `sha256:${"2".repeat(64)}`;
+const MEMORY_ITEM_DIGEST = `sha256:${"3".repeat(64)}`;
+const MODEL_CONFIGURATION_DIGEST = `sha256:${"4".repeat(64)}`;
+const createdAt = "2026-08-19T12:00:00.000Z";
+const scope = { repositoryId: "diffex", scopeId: "repository" } as const;
+const producer: EvolutionArtifactProducer = {
+	name: "fixture",
+	version: "1",
+	promptVersion: null,
+	model: null,
+};
+
+function metadata(artifactId: string, sourceIds: readonly string[], content: unknown) {
+	return createEvolutionArtifactMetadata({ artifactId, producer, sourceIds, scope, createdAt, content });
+}
+
+function sessionEvidence(evidenceId: string, position: number, sessionId: string): MaterializedEvidence {
+	return {
+		kind: "session_item",
+		evidenceId,
+		itemType: "message",
+		payload: { type: "message", id: `entry-${position}`, message: { role: "assistant", content: evidenceId } },
+		order: {
+			traceSequence: position + 2,
+			timestamp: new Date(Date.parse(createdAt) + position).toISOString(),
+			sessionPosition: position,
+			parentSpanId: null,
+			causalIdentifiers: [{ name: "diffex.task.lineage", value: "task-lineage-1" }],
+			ambiguity: [],
+		},
+		traceSources: [],
+		sessionSource: {
+			bindingId: "binding-1",
+			sessionId,
+			path: "/private/session.jsonl",
+			sessionFormat: "coding-agent-v3",
+			formatVersion: 3,
+			segmentTraceSequences: [position + 2],
+			entryId: `entry-${position}`,
+			entryOrdinal: position,
+		},
+	};
+}
+
+function invocation(): MaterializedInvocation {
+	return {
+		version: 1,
+		tracePath: "/private/trace.jsonl",
+		traceId: "trace-1",
+		producer: {
+			diffexVersion: "0.2.0",
+			sourceRevision: "revision-1",
+			runtime: { kind: "node", version: "24.0.0" },
+			telemetrySchemaVersions: {},
+			metadata: {},
+		},
+		integrity: "complete",
+		terminationStatus: "completed",
+		health: null,
+		ordering: {
+			criteria: ["trace_sequence", "session_cursor", "timestamp", "span_parentage", "causal_id"],
+			ambiguity: [],
+		},
+		evidence: [
+			{
+				kind: "trace_record",
+				evidenceId: "activation-1",
+				payload: {
+					type: "harness_activate",
+					sequence: 1,
+					timestamp: createdAt,
+					harnessVersion: FIRST_HARNESS_VERSION,
+					reason: "initial",
+				},
+				order: {
+					traceSequence: 1,
+					timestamp: createdAt,
+					causalIdentifiers: [],
+					ambiguity: [],
+				},
+				traceSources: [],
+			},
+			sessionEvidence("support-1", 0, "session-1"),
+			sessionEvidence("counter-1", 1, "session-1"),
+		],
+		diagnostics: [],
+	};
+}
+
+function memoryItem(memoryItemId = "memory-1"): EvolutionMemoryItem {
+	return {
+		schemaVersion: 1,
+		memoryItemId,
+		contentDigest: MEMORY_ITEM_DIGEST,
+		creationRevision: FIRST_HARNESS_VERSION,
+		supersessionRevision: null,
+		ledger: { origin: "evolution", creationEventId: "event-1", supersessionEventId: null },
+	};
+}
+
+function fixtureInput(): EvolutionInputSnapshot {
+	const materialized = invocation();
+	const source = {
+		sourceId: "source-1",
+		materializationId: "materialization-1",
+		ingestionCursor: 1,
+		origin: "product-runtime" as const,
+		contentDigest: computeEvolutionContentDigest(materialized),
+		invocation: materialized,
+	};
+	const memory = "# Evolution memory\n\n- Keep focused changes.\n";
+	const firstInstruction = "Repository guidance.\n";
+	const secondInstruction = "Nested guidance.\n";
+	return {
+		metadata: metadata("input-1", [source.sourceId], { sourceId: source.sourceId }),
+		trigger: "manual",
+		repository: { repositoryId: "diffex", rootPath: "/repo", revision: "current-revision" },
+		harness: {
+			harnessVersion: SECOND_HARNESS_VERSION,
+			baseVersion: FIRST_HARNESS_VERSION,
+			memory,
+			memoryContentDigest: computeEvolutionContentDigest(memory),
+			activeMemoryItems: [memoryItem()],
+		},
+		expectedHarnessBaseVersion: SECOND_HARNESS_VERSION,
+		ingestionHighWaterCursor: 1,
+		instructions: [
+			{
+				path: "/repo/AGENTS.md",
+				precedence: 10,
+				content: firstInstruction,
+				contentDigest: computeEvolutionContentDigest(firstInstruction),
+			},
+			{
+				path: "/repo/packages/evolution/AGENTS.md",
+				precedence: 20,
+				content: secondInstruction,
+				contentDigest: computeEvolutionContentDigest(secondInstruction),
+			},
+		],
+		modelConfiguration: {
+			provider: "faux",
+			model: "fixture",
+			configurationDigest: MODEL_CONFIGURATION_DIGEST,
+		},
+		pipelineVersion: "pipeline-v1",
+		promptVersions: {
+			reflector: "reflector-v1",
+			curator: "curator-v1",
+			validator: "validator-v1",
+			writer: "writer-v1",
+		},
+		tokenMeasurement: { estimatorVersion: "fixture", estimatedTokens: 100 },
+		evidenceSources: [source],
+	};
+}
+
+function lesson(lessonId: string, summary: string): Lesson {
+	const content = { lessonId, summary };
+	return {
+		metadata: metadata(lessonId, ["support-1", "counter-1"], content),
+		lessonId,
+		kind: "successful-strategy",
+		summary,
+		preconditions: ["The task changes repository code"],
+		observedOutcome: "The result remained focused",
+		evidenceIds: ["support-1"],
+		counterevidenceIds: ["counter-1"],
+		scope,
+		applicabilityBoundaries: ["Repository code changes"],
+		uncertainty: null,
+		actionableTakeaway: "Keep changes focused",
+	};
+}
+
+function reflection(): ReflectionResult {
+	const finalLesson = lesson("lesson-final", "Keep changes focused");
+	const intermediateLesson = lesson("lesson-intermediate", "Intermediate observation");
+	return {
+		nodes: [],
+		lessons: [intermediateLesson, finalLesson],
+		coverage: {
+			metadata: metadata("coverage-1", ["source-1"], { finalLessonIds: [finalLesson.lessonId] }),
+			manifestDigest: "corpus-digest",
+			entries: [],
+			rootNodeIds: [],
+			finalLessonIds: [finalLesson.lessonId],
+		},
+		finalLessonIds: [finalLesson.lessonId],
+	};
+}
+
+function corpus(): EvidenceCorpusManifest {
+	return {
+		metadata: metadata("corpus-1", ["source-1"], { documents: ["document-1"] }),
+		documents: [
+			{
+				documentId: "document-1",
+				sourceId: "source-1",
+				materializationId: "materialization-1",
+				contentDigest: "source-digest",
+				materializedInvocationVersion: 1,
+				traceId: "trace-1",
+				integrity: "complete",
+				terminationStatus: "completed",
+				evidenceIds: ["activation-1", "support-1", "counter-1"],
+				semanticUnits: [],
+				diagnostics: [],
+				orderingAmbiguity: [],
+			},
+		],
+		excludedSources: [],
+	};
+}
+
+function instructions(input: EvolutionInputSnapshot): InstructionSnapshot {
+	return {
+		metadata: metadata("instructions-1", [input.metadata.artifactId], input.instructions),
+		documents: input.instructions,
+	};
+}
+
+function curatorInput(execute: CuratorInput["model"]["execute"]): CuratorInput {
+	const input = fixtureInput();
+	return {
+		input,
+		corpus: corpus(),
+		instructions: instructions(input),
+		reflection: reflection(),
+		model: { execute },
+		idempotencyKey: "job-1:curating",
+	};
+}
+
+function novelRelationship(): JsonObject {
+	return { classification: "novel", relevantEntries: [], strengthening: null };
+}
+
+function proposal(
+	action: "ADD" | "DEFER" | "REMOVE" | "REPLACE",
+	target: JsonObject,
+	exactDelta: JsonObject | null,
+	overrides: Readonly<Record<string, unknown>> = {},
+) {
+	return {
+		target,
+		action,
+		summary: `${action} focused guidance`,
+		exactDelta,
+		expectedBenefit: "Future changes remain focused",
+		acceptanceCriterion: "The guidance is independently addressable",
+		risk: "The guidance could be applied too broadly",
+		rollbackDescription: "Reverse this exact delta",
+		curatorConfidence: 0.85,
+		uncertainty: null,
+		counterexamples: ["Generated files require broad mechanical updates"],
+		conflictingDecisionKeys: [],
+		finding: null,
+		...overrides,
+	};
+}
+
+function response(decisions: readonly JsonObject[]): EvolutionModelResponse {
+	return { output: { decisions }, model: { provider: "faux", model: "curator-fixture" } };
+}
+
+function decision(
+	decisionKey: string,
+	proposalValue: JsonObject | null,
+	relationship: JsonObject = novelRelationship(),
+) {
+	return { decisionKey, lessonIds: ["lesson-final"], relationship, proposal: proposalValue };
+}
+
+describe("structured delta curator", () => {
+	it("emits a provenance-rich ADD from final lessons and ordered snapshots", async () => {
+		const capturedInputs: JsonObject[] = [];
+		const curator = new StructuredDeltaCurator({ version: "1.2.3" });
+		const input = curatorInput(async (request) => {
+			if (request.stage !== "curator") throw new Error("Unexpected Reflector request");
+			capturedInputs.push(request.input);
+			expect(request.outputSchema).toBe(CURATOR_OUTPUT_SCHEMA);
+			expect("tools" in request).toBe(false);
+			return response([
+				decision(
+					"focused-add",
+					proposal(
+						"ADD",
+						{ kind: "evolution-memory" },
+						{
+							operation: "ADD",
+							destination: { section: "Engineering", anchor: null },
+							content: "Keep repository changes focused.",
+							intendedScope: ["Repository code changes"],
+						},
+					),
+				),
+			]);
+		});
+
+		const first = await curator.curate(input);
+		const second = await curator.curate(input);
+
+		expect(capturedInputs[0]?.lessons).toEqual([expect.objectContaining({ lessonId: "lesson-final" })]);
+		expect(capturedInputs[0]?.instructions).toEqual(input.instructions.documents);
+		expect(capturedInputs[0]?.memoryCatalog).toMatchObject({
+			renderedMemory: input.input.harness.memory,
+			baseDigest: input.input.harness.memoryContentDigest,
+			activeItems: [expect.objectContaining({ memoryItemId: "memory-1" })],
+		});
+		expect(first).toHaveLength(1);
+		expect(first[0]).toMatchObject({
+			disposition: "actionable",
+			target: { kind: "evolution-memory", expectedHarnessVersion: SECOND_HARNESS_VERSION },
+			action: "ADD",
+			expectedBaseDigest: input.input.harness.memoryContentDigest,
+			lessonIds: ["lesson-final"],
+			supportingEvidenceIds: ["support-1"],
+			contradictingEvidenceIds: ["counter-1"],
+			supportingTraceIds: ["trace-1"],
+			contradictingTraceIds: ["trace-1"],
+			scope: {
+				repository: scope,
+				repositoryRevision: "current-revision",
+				materializationIds: ["materialization-1"],
+				traceIds: ["trace-1"],
+				sessionIds: ["session-1"],
+				taskLineageIds: ["task-lineage-1"],
+				runtimeKinds: ["node"],
+				runtimeVersions: ["24.0.0"],
+				sourceRevisions: ["revision-1"],
+				harnessVersions: [FIRST_HARNESS_VERSION],
+				applicabilityBoundaries: ["Repository code changes"],
+			},
+			metadata: {
+				producer: {
+					name: "diffex-evolution-curator",
+					version: "1.2.3",
+					promptVersion: "curator-v1",
+					model: {
+						provider: "faux",
+						model: "curator-fixture",
+						configurationDigest: MODEL_CONFIGURATION_DIGEST,
+					},
+				},
+			},
+		});
+		expect(second[0]?.proposalId).toBe(first[0]?.proposalId);
+		expect(second[0]?.metadata.contentDigest).toBe(first[0]?.metadata.contentDigest);
+	});
+
+	it("emits exact removal and atomic replacement deltas", async () => {
+		const curator = new StructuredDeltaCurator({ version: "1.2.3" });
+		const proposals = await curator.curate(
+			curatorInput(() =>
+				Promise.resolve(
+					response([
+						decision(
+							"remove-rule",
+							proposal(
+								"REMOVE",
+								{ kind: "evolution-memory" },
+								{
+									operation: "REMOVE",
+									memoryItemId: "memory-1",
+									reason: "Counterevidence shows the rule is harmful",
+								},
+							),
+						),
+						decision(
+							"replace-rule",
+							proposal(
+								"REPLACE",
+								{ kind: "evolution-memory" },
+								{
+									operation: "REPLACE",
+									removal: {
+										memoryItemId: "memory-1",
+										reason: "Narrow the existing rule",
+									},
+									addition: {
+										destination: { section: null, anchor: "memory-1" },
+										content: "Keep repository code changes focused.",
+										intendedScope: ["Repository code changes"],
+									},
+								},
+							),
+						),
+					]),
+				),
+			),
+		);
+
+		expect(proposals[0]).toMatchObject({
+			action: "REMOVE",
+			exactDelta: { memoryItemId: "memory-1", expectedContentDigest: MEMORY_ITEM_DIGEST },
+		});
+		expect(proposals[1]).toMatchObject({
+			action: "REPLACE",
+			exactDelta: {
+				operation: "REPLACE",
+				removal: { memoryItemId: "memory-1", expectedContentDigest: MEMORY_ITEM_DIGEST },
+				addition: { content: "Keep repository code changes focused." },
+			},
+		});
+	});
+
+	it("preserves skill and source findings as non-executable deferred proposals", async () => {
+		const curator = new StructuredDeltaCurator({ version: "1.2.3" });
+		const proposals = await curator.curate(
+			curatorInput(() =>
+				Promise.resolve(
+					response([
+						decision(
+							"defer-skill",
+							proposal("DEFER", { kind: "skill", skillName: "review" }, null, {
+								finding: "The review skill needs a narrower verification contract",
+							}),
+						),
+						decision(
+							"defer-source",
+							proposal("DEFER", { kind: "orchestration-source", sourcePath: "src/runner.ts" }, null, {
+								finding: "The runner should isolate retries",
+							}),
+						),
+					]),
+				),
+			),
+		);
+
+		expect(proposals).toEqual([
+			expect.objectContaining({
+				disposition: "deferred",
+				target: { kind: "skill", skillName: "review" },
+				action: "DEFER",
+				exactDelta: null,
+				expectedBaseDigest: null,
+			}),
+			expect.objectContaining({
+				disposition: "deferred",
+				target: { kind: "orchestration-source", sourcePath: "src/runner.ts" },
+				action: "DEFER",
+				exactDelta: null,
+			}),
+		]);
+	});
+
+	it("resolves model decision conflicts to stable proposal IDs", async () => {
+		const addDelta = {
+			operation: "ADD",
+			destination: { section: "Engineering", anchor: null },
+			content: "Keep changes focused.",
+			intendedScope: ["Repository code changes"],
+		};
+		const curator = new StructuredDeltaCurator({ version: "1.2.3" });
+		const proposals = await curator.curate(
+			curatorInput(() =>
+				Promise.resolve(
+					response([
+						decision(
+							"broad-rule",
+							proposal("ADD", { kind: "evolution-memory" }, addDelta, {
+								conflictingDecisionKeys: ["narrow-rule"],
+							}),
+						),
+						decision("narrow-rule", proposal("ADD", { kind: "evolution-memory" }, addDelta)),
+					]),
+				),
+			),
+		);
+
+		expect(proposals[0]?.conflictingProposalIds).toEqual([proposals[1]?.proposalId]);
+	});
+
+	it("suppresses duplicate and conflicting decisions and retains strengthening references", async () => {
+		const input = curatorInput(() =>
+			Promise.resolve(
+				response([
+					decision("duplicate-rule", null, {
+						classification: "duplicate",
+						relevantEntries: [
+							{ kind: "applicable-instruction", path: "/repo/AGENTS.md", locator: "Repository guidance" },
+						],
+						strengthening: null,
+					}),
+					decision("conflicting-rule", null, {
+						classification: "conflicts",
+						relevantEntries: [
+							{ kind: "evolution-memory", memoryItemId: "memory-1", locator: "Keep focused changes" },
+						],
+						strengthening: null,
+					}),
+					decision(
+						"strengthen-rule",
+						proposal(
+							"ADD",
+							{ kind: "evolution-memory" },
+							{
+								operation: "ADD",
+								destination: { section: "Engineering", anchor: null },
+								content: "Run focused verification after repository changes.",
+								intendedScope: ["Repository code changes"],
+							},
+						),
+						{
+							classification: "strengthens",
+							relevantEntries: [
+								{
+									kind: "applicable-instruction",
+									path: "/repo/packages/evolution/AGENTS.md",
+									locator: "Nested guidance",
+								},
+							],
+							strengthening: { kind: "enforcement", description: "Adds a verification requirement" },
+						},
+					),
+				]),
+			),
+		);
+		const curator = new StructuredDeltaCurator({ version: "1.2.3" });
+
+		const proposals = await curator.curate(input);
+
+		expect(proposals).toHaveLength(1);
+		expect(proposals[0]).toMatchObject({
+			instructionRelationship: {
+				classification: "strengthens",
+				relevantEntries: [
+					{
+						kind: "applicable-instruction",
+						path: "/repo/packages/evolution/AGENTS.md",
+						precedence: 20,
+						contentDigest: input.instructions.documents[1]?.contentDigest,
+					},
+				],
+				strengthening: { kind: "enforcement" },
+			},
+		});
+	});
+
+	it("retries invalid structured output without changing the idempotency key", async () => {
+		const keys: string[] = [];
+		let calls = 0;
+		const curator = new StructuredDeltaCurator({ version: "1.2.3" });
+		const proposals = await curator.curate(
+			curatorInput((request) => {
+				keys.push(request.idempotencyKey);
+				calls += 1;
+				if (calls === 1) {
+					return Promise.resolve(
+						response([{ ...decision("invalid", null), lessonIds: ["lesson-intermediate"], proposal: null }]),
+					);
+				}
+				return Promise.resolve(
+					response([
+						decision(
+							"valid",
+							proposal(
+								"ADD",
+								{ kind: "evolution-memory" },
+								{
+									operation: "ADD",
+									destination: { section: "Engineering", anchor: null },
+									content: "Keep changes focused.",
+									intendedScope: ["Repository code changes"],
+								},
+							),
+						),
+					]),
+				);
+			}),
+		);
+
+		expect(proposals).toHaveLength(1);
+		expect(keys).toEqual(["job-1:curating", "job-1:curating"]);
+	});
+
+	it("rejects unsupported writer routes after bounded attempts", async () => {
+		let calls = 0;
+		const curator = new StructuredDeltaCurator({ version: "1.2.3" });
+		const input = curatorInput(() => {
+			calls += 1;
+			return Promise.resolve(
+				response([
+					decision(
+						"invalid-skill-write",
+						proposal(
+							"ADD",
+							{ kind: "skill", skillName: "review" },
+							{
+								operation: "ADD",
+								destination: { section: "Review", anchor: null },
+								content: "Write directly to the skill.",
+								intendedScope: ["review"],
+							},
+						),
+					),
+				]),
+			);
+		});
+
+		await expect(curator.curate(input)).rejects.toMatchObject({
+			reasonCode: "curation-invalid-response",
+			retryable: false,
+		});
+		expect(calls).toBe(2);
+	});
+
+	it("rejects unknown instruction, memory-item, and evidence references", async () => {
+		const curator = new StructuredDeltaCurator({ version: "1.2.3" }, { maxResponseAttempts: 1 });
+		const addProposal = proposal(
+			"ADD",
+			{ kind: "evolution-memory" },
+			{
+				operation: "ADD",
+				destination: { section: "Engineering", anchor: null },
+				content: "Keep changes focused.",
+				intendedScope: ["Repository code changes"],
+			},
+		);
+		const unknownInstruction = curatorInput(() =>
+			Promise.resolve(
+				response([
+					decision("unknown-instruction", addProposal, {
+						classification: "strengthens",
+						relevantEntries: [{ kind: "applicable-instruction", path: "/repo/missing.md", locator: "Missing" }],
+						strengthening: { kind: "precision", description: "Adds exact guidance" },
+					}),
+				]),
+			),
+		);
+		const unknownMemoryItem = curatorInput(() =>
+			Promise.resolve(
+				response([
+					decision(
+						"unknown-memory",
+						proposal(
+							"REMOVE",
+							{ kind: "evolution-memory" },
+							{
+								operation: "REMOVE",
+								memoryItemId: "missing-memory",
+								reason: "Remove stale guidance",
+							},
+						),
+					),
+				]),
+			),
+		);
+		const unknownEvidenceBase = curatorInput(() =>
+			Promise.resolve(response([decision("unknown-evidence", addProposal)])),
+		);
+		const unknownEvidence: CuratorInput = {
+			...unknownEvidenceBase,
+			reflection: {
+				...unknownEvidenceBase.reflection,
+				lessons: unknownEvidenceBase.reflection.lessons.map((item) =>
+					item.lessonId === "lesson-final" ? { ...item, evidenceIds: ["missing-evidence"] } : item,
+				),
+			},
+		};
+
+		await expect(curator.curate(unknownInstruction)).rejects.toMatchObject({
+			reasonCode: "curation-invalid-response",
+		});
+		await expect(curator.curate(unknownMemoryItem)).rejects.toMatchObject({
+			reasonCode: "curation-invalid-response",
+		});
+		await expect(curator.curate(unknownEvidence)).rejects.toMatchObject({
+			reasonCode: "curation-invalid-response",
+		});
+	});
+});
