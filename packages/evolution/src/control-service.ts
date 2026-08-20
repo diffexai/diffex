@@ -352,13 +352,19 @@ export class EvolutionControlService {
 	}
 
 	async #start(trigger: "automatic" | "manual"): Promise<EvolutionStartResult> {
-		const result = await this.#dependencies.controlPlane.createJob({ scope: this.#dependencies.scope, trigger });
-		if (result.status === "created") return { status: "created", job: summary(result.job) };
-		if (result.reason === "blocking-job" && result.blockingJobId !== undefined) {
-			const blocking = await this.#dependencies.jobs.load(result.blockingJobId);
-			if (blocking !== null) return { status: "attached", job: summary(blocking) };
+		for (let contentionAttempt = 0; contentionAttempt < 20; contentionAttempt += 1) {
+			const result = await this.#dependencies.controlPlane.createJob({ scope: this.#dependencies.scope, trigger });
+			if (result.status === "created") return { status: "created", job: summary(result.job) };
+			if (result.reason === "blocking-job" && result.blockingJobId !== undefined) {
+				const blocking = await this.#dependencies.jobs.load(result.blockingJobId);
+				if (blocking !== null) return { status: "attached", job: summary(blocking) };
+			}
+			if (result.reason !== "scope-busy") return { status: "not-created", reason: result.reason };
+			const active = activeJob(await this.#dependencies.jobs.list(this.#dependencies.scope));
+			if (active !== null) return { status: "attached", job: summary(active) };
+			await new Promise((resolveDelay) => setTimeout(resolveDelay, 10));
 		}
-		return { status: "not-created", reason: result.reason };
+		return { status: "not-created", reason: "scope-busy" };
 	}
 
 	startManual(): Promise<EvolutionStartResult> {

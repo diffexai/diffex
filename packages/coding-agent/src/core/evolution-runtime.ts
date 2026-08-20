@@ -14,6 +14,7 @@ import {
 	EvolutionControlService,
 	type EvolutionEvidenceCatalog,
 	type EvolutionJobDetail,
+	type EvolutionJobRunner,
 	type EvolutionJobSummary,
 	EvolutionMemoryWriter,
 	type EvolutionModelExecutor,
@@ -528,10 +529,20 @@ export async function createCodingAgentEvolutionRuntime(
 		}),
 		executor: pipeline,
 	});
+	const abandonedJobIds = new Set<string>();
+	const runner: EvolutionJobRunner = {
+		async runJob(jobId, signal) {
+			if (!abandonedJobIds.has(jobId)) return controlPlane.runJob(jobId, signal);
+			const recovered = await controlPlane.recoverAbandonedJob(jobId);
+			if (recovered === null) throw new Error(`Evolution job "${jobId}" is waiting for stale-lease recovery`);
+			abandonedJobIds.delete(jobId);
+			return recovered;
+		},
+	};
 	const worker = new EvolutionBackgroundWorker({
 		clock,
 		source: new PollingEvolutionWorkSource(persistence, clock),
-		runner: controlPlane,
+		runner,
 		priority,
 	});
 	const control = new EvolutionControlService({
@@ -552,7 +563,11 @@ export async function createCodingAgentEvolutionRuntime(
 		control,
 		async start() {
 			const abandoned = (await persistence.list(scope)).filter((job) => job.outcome === "active");
-			for (const job of abandoned) await controlPlane.recoverAbandonedJob(job.jobId);
+			for (const job of abandoned) {
+				abandonedJobIds.add(job.jobId);
+				const recovered = await controlPlane.recoverAbandonedJob(job.jobId);
+				if (recovered !== null) abandonedJobIds.delete(job.jobId);
+			}
 			control.start();
 		},
 		evaluateAutomatic() {

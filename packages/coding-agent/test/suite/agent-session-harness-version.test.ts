@@ -98,6 +98,45 @@ describe("AgentSession harness revisions", () => {
 		expect(providerPrompts[1]).toContain("Use the newly selected memory.");
 	});
 
+	it("keeps an in-flight request pinned while the next request refreshes", async () => {
+		const { harness, store, rootVersion } = await createVersionedHarness();
+		const providerPrompts: string[] = [];
+		let signalFirstStarted: (() => void) | undefined;
+		let resolveFirst: ((message: ReturnType<typeof fauxAssistantMessage>) => void) | undefined;
+		const firstStarted = new Promise<void>((resolveStarted) => {
+			signalFirstStarted = resolveStarted;
+		});
+		const firstResponse = new Promise<ReturnType<typeof fauxAssistantMessage>>((resolveResponse) => {
+			resolveFirst = resolveResponse;
+		});
+		harness.setResponses([
+			(context) => {
+				providerPrompts.push(context.systemPrompt ?? "");
+				signalFirstStarted?.();
+				return firstResponse;
+			},
+			(context) => {
+				providerPrompts.push(context.systemPrompt ?? "");
+				return fauxAssistantMessage("after activation");
+			},
+		]);
+
+		const inFlight = harness.session.prompt("request admitted before activation");
+		await firstStarted;
+		const advance = await store.advance({ memory: "Use memory selected during the request." }, rootVersion);
+		expect(advance.status).toBe("advanced");
+		if (advance.status !== "advanced") throw new Error("Expected harness advance to succeed");
+		expect(harness.session.activeHarnessVersion).toBe(rootVersion);
+		resolveFirst?.(fauxAssistantMessage("before activation"));
+		await inFlight;
+
+		await harness.session.prompt("request admitted after activation");
+
+		expect(providerPrompts[0]).not.toContain("Use memory selected during the request.");
+		expect(providerPrompts[1]).toContain("Use memory selected during the request.");
+		expect(harness.session.activeHarnessVersion).toBe(advance.bundle.manifest.version);
+	});
+
 	it("reports a live activation to the process lifecycle observer", async () => {
 		const activatedVersions: HarnessVersion[] = [];
 		const agentDir = join(tmpdir(), `diffex-harness-observer-${Date.now()}-${Math.random().toString(36).slice(2)}`);

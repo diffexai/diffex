@@ -189,13 +189,11 @@ describe("evolution control service", () => {
 			activeJob: null,
 		});
 
-		const started = await fixture.service.startManual();
-		expect(started.status).toBe("created");
-		const attached = await fixture.service.startManual();
-		expect(attached).toMatchObject({
-			status: "attached",
-			job: { jobId: started.status === "created" ? started.job.jobId : "" },
-		});
+		const results = await Promise.all([fixture.service.startManual(), fixture.service.startManual()]);
+		const started = results.find((result) => result.status === "created");
+		const attached = results.find((result) => result.status === "attached");
+		if (started?.status !== "created") throw new Error("Expected one created job");
+		expect(attached).toMatchObject({ status: "attached", job: { jobId: started.job.jobId } });
 		expect(events).toHaveLength(1);
 		unsubscribe();
 		await fixture.service.cancelActive();

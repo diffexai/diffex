@@ -384,6 +384,62 @@ describe("recursive reflector", () => {
 		expect(resumedKeys).toContain(interruptedKey);
 	});
 
+	it.each(["model", "slice-tool"] as const)(
+		"resumes with the same logical call after a %s interruption",
+		async (interruptionPoint) => {
+			const { reflector } = await reflectorFixture();
+			const controller = new AbortController();
+			let signalStarted: (() => void) | undefined;
+			let signalToolInterrupted: (() => void) | undefined;
+			const started = new Promise<void>((resolveStarted) => {
+				signalStarted = resolveStarted;
+			});
+			const toolInterrupted = new Promise<void>((resolveInterrupted) => {
+				signalToolInterrupted = resolveInterrupted;
+			});
+			let interruptedKey = "";
+			const first = reflectInput({
+				async execute(request) {
+					if (request.stage !== "reflector") throw new Error("Unexpected Curator request");
+					interruptedKey = request.idempotencyKey;
+					signalStarted?.();
+					if (interruptionPoint === "slice-tool") {
+						controller.abort(new Error("simulated slice-tool interruption"));
+						const readSlice = request.tools.find((tool) => tool.name === "read_slice");
+						try {
+							await readSlice?.execute({ documentId: "document-1", startOrdinal: 0, endOrdinal: 1 });
+						} catch {
+							signalToolInterrupted?.();
+						}
+					}
+					return new Promise<never>(() => {});
+				},
+			});
+			const interrupted = reflector.reflect({ ...first, signal: controller.signal });
+			await started;
+			if (interruptionPoint === "model") controller.abort(new Error("simulated model interruption"));
+
+			await expect(interrupted).rejects.toThrow(`simulated ${interruptionPoint} interruption`);
+			if (interruptionPoint === "slice-tool") await toolInterrupted;
+			const resumedKeys: string[] = [];
+			const resumed = reflectInput({
+				async execute(request) {
+					if (request.stage !== "reflector") throw new Error("Unexpected Curator request");
+					resumedKeys.push(request.idempotencyKey);
+					const node = jsonObject(request.input.node, "node");
+					const evidenceIds = Array.isArray(node.evidenceIds) ? node.evidenceIds.map(String) : [];
+					return {
+						output: { complete: true, lessons: [lesson(evidenceIds)] },
+						model: { provider: "faux", model: "fixture" },
+					};
+				},
+			});
+
+			expect((await reflector.reflect(resumed)).nodes).toHaveLength(4);
+			expect(resumedKeys).toContain(interruptedKey);
+		},
+	);
+
 	it("retries invalid structured output within the model-call budget", async () => {
 		const { persistence, reflector } = await reflectorFixture();
 		const input = reflectInput({

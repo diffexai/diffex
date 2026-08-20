@@ -289,6 +289,23 @@ describe("durable evolution control plane", () => {
 		expect(fixture.executor.calls.has("activating")).toBe(false);
 	});
 
+	it("leaves evidence arriving after the frozen cursor for the next job", async () => {
+		const materializations = [materialization(1), materialization(2), materialization(3)];
+		const fixture = await controlPlaneFixture(new RecordingExecutor({ noOp: true }), materializations);
+		const created = await createManualJob(fixture);
+
+		materializations.push(materialization(4));
+		const completed = await fixture.controlPlane.runJob(created.jobId);
+
+		expect(completed.evidenceRange).toEqual({ afterCursor: 0, throughCursor: 3 });
+		expect(completed.completion?.processedEvidenceCursor).toBe(3);
+		const next = await fixture.controlPlane.createJob({ scope, trigger: "manual" });
+		expect(next).toMatchObject({
+			status: "created",
+			job: { evidenceRange: { afterCursor: 3, throughCursor: 4 } },
+		});
+	});
+
 	it("blocks overlapping jobs until the frozen range is explicitly superseded", async () => {
 		const fixture = await controlPlaneFixture(new RecordingExecutor());
 		const first = await createManualJob(fixture);

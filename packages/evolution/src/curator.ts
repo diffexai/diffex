@@ -910,7 +910,16 @@ function abortable<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
 	return new Promise((resolve, reject) => {
 		const onAbort = () => reject(signal.reason);
 		signal.addEventListener("abort", onAbort, { once: true });
-		void promise.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
+		void promise.then(
+			(value) => {
+				signal.removeEventListener("abort", onAbort);
+				resolve(value);
+			},
+			(error: unknown) => {
+				signal.removeEventListener("abort", onAbort);
+				reject(error);
+			},
+		);
 	});
 }
 

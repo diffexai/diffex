@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const childProcessMocks = vi.hoisted(() => ({
+	execFile: vi.fn(),
 	spawn: vi.fn(),
 	spawnSync: vi.fn(),
 }));
@@ -74,6 +75,7 @@ function createContext(): {
 describe("InteractiveMode /share", () => {
 	beforeEach(() => {
 		delete process.env.DIFFEX_SHARE_VIEWER_URL;
+		childProcessMocks.execFile.mockReset();
 		childProcessMocks.spawn.mockReset();
 		childProcessMocks.spawnSync.mockReset();
 	});

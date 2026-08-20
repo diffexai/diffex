@@ -458,9 +458,12 @@ describe("deterministic proposal evidence ranking", () => {
 			{ evidenceId: "support-b", lineageId: "task-b" },
 		]);
 		const lessons = [lesson("lesson-1", ["support-a", "support-b"])];
-		const proposals = Array.from({ length: 7 }, (_, index) =>
-			proposal(`proposal-${String(index).padStart(2, "0")}`, data.input, lessons, `Distinct rule ${index}`),
-		);
+		const proposals = Array.from({ length: 7 }, (_, index) => {
+			const proposalId = `proposal-${String(index).padStart(2, "0")}`;
+			return proposal(proposalId, data.input, lessons, `Distinct rule ${index}`, {
+				conflictingProposalIds: proposalId === "proposal-01" ? ["proposal-00"] : [],
+			});
+		});
 		const duplicate = proposal("proposal-duplicate", data.input, lessons, "Distinct rule 0");
 		const ranker = new DeterministicProposalRanker({ version: "1" });
 		const result = await validateAndScore(ranker, validationInput(data, lessons, [...proposals, duplicate]));
@@ -469,6 +472,10 @@ describe("deterministic proposal evidence ranking", () => {
 		expect(result.scored.find((item) => item.proposal.proposalId === "proposal-duplicate")).toMatchObject({
 			disposition: "superseded",
 			reasonCodes: ["exact-proposal-fingerprint-collapsed"],
+		});
+		expect(result.scored.find((item) => item.proposal.proposalId === "proposal-01")).toMatchObject({
+			disposition: "unselected",
+			reasonCodes: ["conflicts-with-higher-ranked-proposal"],
 		});
 		expect(result.scored.filter((item) => item.disposition === "unselected")).toHaveLength(2);
 
@@ -481,6 +488,38 @@ describe("deterministic proposal evidence ranking", () => {
 			disposition: "unselected",
 			reasonCodes: ["below-eligibility-threshold"],
 		});
+	});
+
+	it("keeps score bounds and lexical tie-breaking stable across input order", async () => {
+		const data = fixture([
+			{ evidenceId: "support-a", lineageId: "task-a" },
+			{ evidenceId: "support-b", lineageId: "task-b" },
+		]);
+		const lessons = [lesson("lesson-1", ["support-a", "support-b"])];
+		const proposals = Array.from({ length: 8 }, (_, index) =>
+			proposal(`proposal-${String(index).padStart(2, "0")}`, data.input, lessons, `Tied rule ${index}`),
+		);
+		const ranker = new DeterministicProposalRanker({ version: "1" });
+		const selectedSets: string[][] = [];
+		for (const ordered of [proposals, [...proposals].reverse()]) {
+			const result = await validateAndScore(ranker, validationInput(data, lessons, ordered));
+			for (const scored of result.scored) {
+				if (scored.evidenceRankingScore !== null) {
+					expect(scored.evidenceRankingScore).toBeGreaterThanOrEqual(0);
+					expect(scored.evidenceRankingScore).toBeLessThanOrEqual(100);
+				}
+			}
+			selectedSets.push(
+				result.scored
+					.filter((scored) => scored.disposition === "selected")
+					.map((scored) => scored.proposal.proposalId)
+					.sort(),
+			);
+		}
+		expect(selectedSets).toEqual([
+			["proposal-00", "proposal-01", "proposal-02", "proposal-03", "proposal-04"],
+			["proposal-00", "proposal-01", "proposal-02", "proposal-03", "proposal-04"],
+		]);
 	});
 
 	it("rejects stale trace closure and duplicates against applicable instructions", async () => {

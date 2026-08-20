@@ -152,7 +152,7 @@ function fixtureInput(): EvolutionInputSnapshot {
 				contentDigest: computeEvolutionContentDigest(firstInstruction),
 			},
 			{
-				path: "/repo/packages/evolution/AGENTS.md",
+				path: "/repo/CLAUDE.md",
 				precedence: 20,
 				content: secondInstruction,
 				contentDigest: computeEvolutionContentDigest(secondInstruction),
@@ -506,7 +506,8 @@ describe("structured delta curator", () => {
 					decision("conflicting-rule", null, {
 						classification: "conflicts",
 						relevantEntries: [
-							{ kind: "evolution-memory", memoryItemId: "memory-1", locator: "Keep focused changes" },
+							{ kind: "applicable-instruction", path: "/repo/AGENTS.md", locator: "Repository guidance" },
+							{ kind: "applicable-instruction", path: "/repo/CLAUDE.md", locator: "Nested guidance" },
 						],
 						strengthening: null,
 					}),
@@ -527,7 +528,7 @@ describe("structured delta curator", () => {
 							relevantEntries: [
 								{
 									kind: "applicable-instruction",
-									path: "/repo/packages/evolution/AGENTS.md",
+									path: "/repo/CLAUDE.md",
 									locator: "Nested guidance",
 								},
 							],
@@ -548,7 +549,7 @@ describe("structured delta curator", () => {
 				relevantEntries: [
 					{
 						kind: "applicable-instruction",
-						path: "/repo/packages/evolution/AGENTS.md",
+						path: "/repo/CLAUDE.md",
 						precedence: 20,
 						contentDigest: input.instructions.documents[1]?.contentDigest,
 					},

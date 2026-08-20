@@ -197,6 +197,21 @@ describe("filesystem evolution persistence", () => {
 		expect(await store.commit(scope, 0, 3, "job-1", new Date().toISOString(), secondLease)).toBe("already-committed");
 	});
 
+	it("admits only one owner across concurrent persistence instances", async () => {
+		const { root, store } = await storeFixture();
+		const peer = new FileEvolutionPersistence(root);
+		const now = new Date().toISOString();
+		const key = computeEvolutionContentDigest(scope);
+
+		const leases = await Promise.all([
+			store.acquire("scope", key, "owner-1", now, 5_000),
+			peer.acquire("scope", key, "owner-2", now, 5_000),
+		]);
+
+		expect(leases.filter((lease) => lease !== null)).toHaveLength(1);
+		expect(leases.filter((lease) => lease === null)).toHaveLength(1);
+	});
+
 	it("uses compare-and-swap revisions for durable job manifests", async () => {
 		const { store } = await storeFixture();
 		const reference = await store.put(instructionSnapshot());
