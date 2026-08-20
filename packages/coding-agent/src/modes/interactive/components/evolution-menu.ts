@@ -222,7 +222,7 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 		if (action === "start") {
 			return [
 				"Start a manual evolution job?",
-				"The job will snapshot unprocessed evidence from the current working directory and run in the background.",
+				"The job will snapshot globally unprocessed evidence and run in the background.",
 			];
 		}
 		if (action === "resume") {
@@ -271,7 +271,7 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 	}
 
 	#renderOverview(overview: EvolutionOverview): void {
-		this.#addLine("Evidence scope: current working directory");
+		this.#addLine("Evidence scope: global");
 		this.#addLine(`Unprocessed materialized tokens: ${overview.unprocessedEstimatedTokens.toLocaleString()}`);
 		this.#addLine(`Automatic threshold: > ${overview.automaticTokenThreshold.toLocaleString()} tokens`);
 		this.#addLine(`Settled invocations: ${overview.settledInvocationCount}`);
