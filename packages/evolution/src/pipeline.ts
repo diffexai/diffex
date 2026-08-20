@@ -395,7 +395,7 @@ export class EvolutionPipeline implements EvolutionStageExecutor {
 			mutationId: stableId("mutation", { idempotencyKey: context.idempotencyKey, proposalId: proposal.proposalId }),
 			proposalId: proposal.proposalId,
 			target: proposal.target,
-			payload: proposal.executablePayload,
+			payload: proposal.exactDelta,
 		}));
 		const batchId = stableId("mutation-batch", { idempotencyKey: context.idempotencyKey, mutations });
 		return {

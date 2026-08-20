@@ -364,23 +364,115 @@ export interface OrchestrationSourceTarget {
 
 export type EvolutionTarget = EvolutionMemoryTarget | SkillTarget | OrchestrationSourceTarget;
 
+export type EvolutionProposalAction = "ADD" | "DEFER" | "REMOVE" | "REPLACE";
+
+export interface EvolutionProposalScope {
+	readonly repository: EvolutionScope;
+	readonly materializationIds: readonly string[];
+	readonly traceIds: readonly string[];
+	readonly sessionIds: readonly string[];
+	readonly taskLineageIds: readonly string[];
+	readonly runtimeKinds: readonly string[];
+	readonly sourceRevisions: readonly string[];
+	readonly harnessVersions: readonly HarnessVersion[];
+	readonly applicabilityBoundaries: readonly string[];
+}
+
+export interface ApplicableInstructionReference {
+	readonly kind: "applicable-instruction";
+	readonly path: string;
+	readonly precedence: number;
+	readonly contentDigest: string;
+	readonly locator: string;
+}
+
+export interface EvolutionMemoryReference {
+	readonly kind: "evolution-memory";
+	readonly memoryItemId: string | null;
+	readonly contentDigest: string;
+	readonly locator: string;
+}
+
+export type ExistingInstructionReference = ApplicableInstructionReference | EvolutionMemoryReference;
+
+export type InstructionRelationshipClassification = "conflicts" | "duplicate" | "novel" | "strengthens";
+
+export type InstructionStrengtheningKind = "applicability-boundary" | "condition" | "enforcement" | "precision";
+
+export interface InstructionStrengthening {
+	readonly kind: InstructionStrengtheningKind;
+	readonly description: string;
+}
+
+export interface EvolutionProposalInstructionRelationship {
+	readonly classification: Extract<InstructionRelationshipClassification, "novel" | "strengthens">;
+	readonly relevantEntries: readonly ExistingInstructionReference[];
+	readonly strengthening: InstructionStrengthening | null;
+}
+
+export interface EvolutionMemoryAddDelta {
+	readonly operation: "ADD";
+	readonly destination: {
+		readonly section: string | null;
+		readonly anchor: string | null;
+	};
+	readonly content: string;
+	readonly intendedScope: readonly string[];
+}
+
+export interface EvolutionMemoryRemoveDelta {
+	readonly operation: "REMOVE";
+	readonly memoryItemId: string;
+	readonly expectedContentDigest: string;
+	readonly reason: string;
+}
+
+export interface EvolutionMemoryReplaceDelta {
+	readonly operation: "REPLACE";
+	readonly removal: Omit<EvolutionMemoryRemoveDelta, "operation">;
+	readonly addition: Omit<EvolutionMemoryAddDelta, "operation">;
+}
+
+export type EvolutionMemoryDelta =
+	| EvolutionMemoryAddDelta
+	| EvolutionMemoryRemoveDelta
+	| EvolutionMemoryReplaceDelta;
+
 interface EvolutionProposalBase {
 	readonly metadata: EvolutionArtifactMetadata;
 	readonly proposalId: string;
 	readonly summary: string;
+	readonly scope: EvolutionProposalScope;
 	readonly lessonIds: readonly string[];
-	readonly evidenceIds: readonly string[];
+	readonly supportingEvidenceIds: readonly string[];
+	readonly contradictingEvidenceIds: readonly string[];
+	readonly supportingTraceIds: readonly string[];
+	readonly contradictingTraceIds: readonly string[];
+	readonly expectedBenefit: string;
+	readonly acceptanceCriterion: string;
+	readonly risk: string;
+	readonly rollbackDescription: string;
+	readonly curatorConfidence: number;
+	readonly uncertainty: string | null;
+	readonly counterexamples: readonly string[];
+	readonly conflictingProposalIds: readonly string[];
+	readonly instructionRelationship: EvolutionProposalInstructionRelationship;
 }
 
 export interface EvolutionMemoryProposal extends EvolutionProposalBase {
 	readonly disposition: "actionable";
 	readonly target: EvolutionMemoryTarget;
-	readonly executablePayload: JsonObject;
+	readonly action: Exclude<EvolutionProposalAction, "DEFER">;
+	readonly exactDelta: EvolutionMemoryDelta;
+	readonly expectedBaseDigest: string;
 }
 
 export interface DeferredEvolutionProposal extends EvolutionProposalBase {
 	readonly disposition: "deferred";
 	readonly target: SkillTarget | OrchestrationSourceTarget;
+	readonly action: "DEFER";
+	readonly exactDelta: null;
+	readonly expectedBaseDigest: null;
 	readonly finding: string;
 }
 
@@ -420,7 +512,7 @@ export interface EvolutionMutation {
 	readonly mutationId: string;
 	readonly proposalId: string;
 	readonly target: EvolutionMemoryTarget;
-	readonly payload: JsonObject;
+	readonly payload: EvolutionMemoryDelta;
 }
 
 export interface MutationBatch {
@@ -485,6 +577,7 @@ export type EvolutionFailureReasonCode =
 	| "lease-lost"
 	| "model-call-failed"
 	| "pipeline-invariant"
+	| "curation-invalid-response"
 	| "reflection-budget-exhausted"
 	| "reflection-invalid-response"
 	| "shutdown"
