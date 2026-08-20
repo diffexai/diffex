@@ -229,6 +229,7 @@ function createSessionId(): string {
 }
 
 const PERSIST_SESSION_HEADER = Symbol("persistSessionHeader");
+const PERSIST_SESSION_STATE = Symbol("persistSessionState");
 
 export function assertValidSessionId(id: string): void {
 	if (!/^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/.test(id)) {
@@ -1056,6 +1057,34 @@ export class SessionManager {
 		this.flushed = true;
 	}
 
+	/** Flush the complete admitted session state before accepting dependent work. */
+	[PERSIST_SESSION_STATE](): void {
+		if (!this.persist || !this.sessionFile) {
+			throw new Error("Cannot persist an in-memory session");
+		}
+
+		if (!this.flushed) {
+			const fd = openSync(this.sessionFile, "wx");
+			try {
+				for (const entry of this.fileEntries) {
+					writeFileSync(fd, `${JSON.stringify(entry)}\n`);
+				}
+				fsyncSync(fd);
+			} finally {
+				closeSync(fd);
+			}
+			this.flushed = true;
+			return;
+		}
+
+		const fd = openSync(this.sessionFile, "r+");
+		try {
+			fsyncSync(fd);
+		} finally {
+			closeSync(fd);
+		}
+	}
+
 	_persist(entry: SessionEntry): void {
 		if (!this.persist || !this.sessionFile) return;
 
@@ -1813,4 +1842,9 @@ export class SessionManager {
 /** Internal seam for durably admitting a newly created dependent session. */
 export function persistSessionHeader(sessionManager: SessionManager): void {
 	sessionManager[PERSIST_SESSION_HEADER]();
+}
+
+/** Internal seam for durably admitting state that normal creation may still buffer. */
+export function persistSessionState(sessionManager: SessionManager): void {
+	sessionManager[PERSIST_SESSION_STATE]();
 }

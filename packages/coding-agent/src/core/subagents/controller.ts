@@ -4,7 +4,9 @@ import type { AgentSession } from "../agent-session.ts";
 import type { ToolDefinition } from "../extensions/types.ts";
 import { startCodingAgentSpan } from "../telemetry.ts";
 import { createAgentActionTool, createAgentsTool, createSpawnAgentTool } from "../tools/subagents.ts";
+import type { ChildSnapshotV1 } from "./persistence.ts";
 import type {
+	CapturedSubagentSession,
 	CaptureSubagentSession,
 	CreateSubagentSession,
 	SubagentActionResult,
@@ -102,6 +104,10 @@ interface SubagentRecord {
 	coordinatedRun?: CoordinatedRun;
 	lastRetryCycleId?: number;
 	telemetryContext?: TelemetryContext;
+	sessionManager?: CapturedSubagentSession["sessionManager"];
+	persistenceConfig?: CapturedSubagentSession["config"];
+	persistenceError?: string;
+	leafUnsubscribe?: () => void;
 }
 
 function isTerminalStatus(status: SubagentStatus): status is SubagentTerminalStatus {
@@ -147,6 +153,7 @@ const MAX_TIMER_MS = 2_147_483_647;
 export class SubagentController {
 	readonly #maxConcurrent: number;
 	readonly #captureSession: CaptureSubagentSession | undefined;
+	readonly #persistRoster: ((agents: readonly ChildSnapshotV1[], admission: boolean) => void) | undefined;
 	readonly #telemetryContext: TelemetryContext;
 	readonly #records = new Map<string, SubagentRecord>();
 	readonly #listeners = new Set<SubagentLifecycleListener>();
@@ -168,6 +175,7 @@ export class SubagentController {
 		maxConcurrent: number;
 		captureSession?: CaptureSubagentSession;
 		telemetryContext?: TelemetryContext;
+		persistRoster?: (agents: readonly ChildSnapshotV1[], admission: boolean) => void;
 	}) {
 		if (!Number.isInteger(options.maxConcurrent) || options.maxConcurrent <= 0) {
 			throw new RangeError("maxConcurrent must be a positive integer");
@@ -175,18 +183,20 @@ export class SubagentController {
 		this.#maxConcurrent = options.maxConcurrent;
 		this.#captureSession = options.captureSession;
 		this.#telemetryContext = options.telemetryContext ?? NOOP_TELEMETRY_CONTEXT;
+		this.#persistRoster = options.persistRoster;
 	}
 
 	createToolDefinitions(): ToolDefinition[] {
 		const definitions = [
 			createSpawnAgentTool((name, task, toolCallId) => {
 				const parent = this.#getBoundParent();
+				this.#assertReservable(name);
 				const origin = captureSpawnOrigin(parent, toolCallId);
-				const createSession = this.#captureSession?.(parent, name, origin);
-				if (!createSession) {
+				const captured = this.#captureSession?.(parent, name, origin);
+				if (!captured) {
 					throw new Error("Subagent session capture is unavailable");
 				}
-				this.spawn(name, task, createSession, origin, parent.agent.telemetryContext);
+				this.spawn(name, task, captured.createSession, origin, parent.agent.telemetryContext, captured);
 			}),
 			createAgentActionTool((request) => {
 				const parent = this.#getBoundParent();
@@ -217,13 +227,7 @@ export class SubagentController {
 	}
 
 	reserve(name: string, task: string): void {
-		this.#assertOpen();
-		if (!SUBAGENT_NAME_PATTERN.test(name)) {
-			throw new Error(`Invalid subagent name: ${name}`);
-		}
-		if (this.#records.has(name)) {
-			throw new Error(`Subagent already reserved: ${name}`);
-		}
+		this.#assertReservable(name);
 
 		const timestamp = Date.now();
 		const record: SubagentRecord = {
@@ -250,14 +254,43 @@ export class SubagentController {
 		createSession: CreateSubagentSession,
 		origin?: SubagentSpawnOrigin,
 		telemetryContext: TelemetryContext = this.#telemetryContext,
+		captured?: CapturedSubagentSession,
 	): void {
-		this.reserve(name, task);
-		const record = this.#records.get(name)!;
+		this.#assertReservable(name);
+		if (this.#persistRoster && !captured) {
+			throw new Error("Persistent subagent admission requires captured session state");
+		}
+
+		const timestamp = Date.now();
+		const record: SubagentRecord = {
+			id: uuidv7(),
+			name,
+			task,
+			status: "queued",
+			createdAt: timestamp,
+			updatedAt: timestamp,
+		};
 		record.createSession = createSession;
 		record.telemetryContext = telemetryContext;
+		record.sessionManager = captured?.sessionManager;
+		record.persistenceConfig = captured?.config;
 		if (origin?.type === "agent_tool_call") {
 			record.coordinatedRun = this.#createCoordinatedRun("initial");
 		}
+		this.#records.set(name, record);
+		try {
+			this.#persistRoster?.(this.#createPersistenceSnapshot(), true);
+		} catch (error) {
+			this.#records.delete(name);
+			throw error;
+		}
+		this.#publish((revision) => ({
+			type: "subagent_reserved",
+			revision,
+			name,
+			status: "queued",
+			timestamp,
+		}));
 		void startCodingAgentSpan(
 			telemetryContext,
 			"diffex.coding_agent.subagent",
@@ -293,6 +326,11 @@ export class SubagentController {
 			throw new Error(`Subagent session already attached: ${name}`);
 		}
 		record.session = session;
+		record.sessionManager = session.sessionManager;
+		record.leafUnsubscribe = session.subscribe((event) => {
+			if (event.type !== "message_end" && event.type !== "entry_appended") return;
+			queueMicrotask(() => this.#persistLeafChange(name));
+		});
 	}
 
 	trackRun(name: string, run: Promise<void>): void {
@@ -600,6 +638,7 @@ export class SubagentController {
 		this.#shutdownPromise = shutdownPromise;
 
 		try {
+			this.#persistRosterBestEffort(undefined, true);
 			this.#closed = true;
 			const closedError = this.#closedError();
 			this.#rejectPermitQueue(closedError);
@@ -695,6 +734,7 @@ export class SubagentController {
 			status,
 			timestamp,
 		}));
+		this.#persistRosterBestEffort(name);
 	}
 
 	#isValidTransition(previousStatus: SubagentStatus, status: SubagentStatus): boolean {
@@ -792,7 +832,9 @@ export class SubagentController {
 					status: agent.status,
 					...(record.coordinatedRun === undefined ? {} : { runId: record.coordinatedRun.id }),
 					...(record.finalText === undefined ? {} : { result: record.finalText }),
-					...(record.error === undefined ? {} : { error: record.error }),
+					...((record.error ?? record.persistenceError) === undefined
+						? {}
+						: { error: record.error ?? record.persistenceError }),
 				}),
 			];
 		});
@@ -827,8 +869,68 @@ export class SubagentController {
 			attempt: run.attempt,
 			retryAvailable,
 			...(record.finalText === undefined ? {} : { result: record.finalText }),
-			...(record.error === undefined ? {} : { error: record.error }),
+			...((record.error ?? record.persistenceError) === undefined
+				? {}
+				: { error: record.error ?? record.persistenceError }),
 		});
+	}
+
+	#createPersistenceSnapshot(interruptActive = false): ChildSnapshotV1[] {
+		const interruptionTimestamp = interruptActive ? Date.now() : undefined;
+		return [...this.#records.values()]
+			.sort((left, right) => left.name.localeCompare(right.name))
+			.map((record) => {
+				const config = record.persistenceConfig;
+				const sessionManager = record.sessionManager;
+				if (!config || !sessionManager) {
+					throw new Error(`Persistent subagent state is unavailable: ${record.name}`);
+				}
+				const interrupted = interruptActive && (record.status === "queued" || record.status === "running");
+				const snapshotTimestamp = interruptionTimestamp ?? record.updatedAt;
+				const error = record.error ?? record.persistenceError;
+				return {
+					name: record.name,
+					task: record.task,
+					status: interrupted ? "interrupted" : record.status,
+					createdAt: record.createdAt,
+					updatedAt: interrupted ? snapshotTimestamp : record.updatedAt,
+					...(record.startedAt === undefined ? {} : { startedAt: record.startedAt }),
+					...(interrupted
+						? { completedAt: snapshotTimestamp }
+						: record.completedAt === undefined
+							? {}
+							: { completedAt: record.completedAt }),
+					...(record.finalText === undefined ? {} : { result: record.finalText }),
+					...(error === undefined ? {} : { error }),
+					childSessionId: sessionManager.getSessionId(),
+					childLeafId: sessionManager.getLeafId(),
+					config,
+				};
+			});
+	}
+
+	#persistRosterBestEffort(changedName?: string, interruptActive = false): void {
+		if (!this.#persistRoster || this.#records.size === 0) return;
+		try {
+			this.#persistRoster(this.#createPersistenceSnapshot(interruptActive), false);
+		} catch (error) {
+			const message = `Subagent roster persistence failed: ${normalizeError(error)}`;
+			if (changedName) {
+				const record = this.#records.get(changedName);
+				if (record) record.persistenceError = message;
+				return;
+			}
+			for (const record of this.#records.values()) {
+				if (record.status === "queued" || record.status === "running") {
+					record.persistenceError = message;
+				}
+			}
+		}
+	}
+
+	#persistLeafChange(name: string): void {
+		if (this.#closed || this.#resetting || !this.#records.has(name)) return;
+		this.#persistRosterBestEffort(name);
 	}
 
 	#queryConditionMet(agents: readonly SubagentResultView[], until: "any" | "all"): boolean {
@@ -1188,6 +1290,7 @@ export class SubagentController {
 
 	async #cleanupRecords(records: SubagentRecord[]): Promise<unknown[]> {
 		const failures: unknown[] = [];
+		for (const record of records) record.leafUnsubscribe?.();
 		const abortResults = await Promise.allSettled(
 			records.flatMap((record) => {
 				const session = record.session;
@@ -1266,6 +1369,16 @@ export class SubagentController {
 	#assertOpen(): void {
 		if (this.#closed) throw this.#closedError();
 		if (this.#resetting) throw this.#resetError();
+	}
+
+	#assertReservable(name: string): void {
+		this.#assertOpen();
+		if (!SUBAGENT_NAME_PATTERN.test(name)) {
+			throw new Error(`Invalid subagent name: ${name}`);
+		}
+		if (this.#records.has(name)) {
+			throw new Error(`Subagent already reserved: ${name}`);
+		}
 	}
 
 	#resetError(): Error {

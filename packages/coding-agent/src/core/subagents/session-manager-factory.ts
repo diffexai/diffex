@@ -1,4 +1,5 @@
 import { SessionManager } from "../session-manager.ts";
+import { ParentOwnedSubagentSessionStore } from "./persistence.ts";
 import type { SubagentSpawnOrigin } from "./types.ts";
 
 export interface SubagentSessionManagerRequest {
@@ -16,7 +17,9 @@ export interface SubagentSessionManagerFactory {
 export class RootLocalEphemeralSubagentSessionManagerFactory implements SubagentSessionManagerFactory {
 	create(request: SubagentSessionManagerRequest): SessionManager {
 		// Future context inheritance will be opt-in and use request.origin.contextEntryId with request.sourceSessionManager.forkBranch().
-		// Future persistence will replace or extend this internal manager factory, add root metadata, and implement restoration without changing controller scheduling.
+		if (request.sourceSessionManager.isPersisted()) {
+			return new ParentOwnedSubagentSessionStore(request.sourceSessionManager).createChild(request.childName);
+		}
 		return SessionManager.inMemory(request.cwd, { parentSession: request.parentSessionId });
 	}
 }

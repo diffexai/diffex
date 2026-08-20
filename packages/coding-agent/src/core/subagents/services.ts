@@ -47,6 +47,7 @@ export interface CreateSubagentSessionOptions {
 	readonly childName?: string;
 	readonly origin?: SubagentSpawnOrigin;
 	readonly sessionManagerFactory?: SubagentSessionManagerFactory;
+	readonly sessionManager?: SessionManager;
 }
 
 const SUBAGENT_SYSTEM_PROMPT = [
@@ -124,16 +125,17 @@ export async function createSubagentSession(
 	});
 	options.signal?.throwIfAborted();
 
-	const sessionManagerFactory = options.sessionManagerFactory ?? new RootLocalEphemeralSubagentSessionManagerFactory();
-	const sessionManager = sessionManagerFactory.create(
-		Object.freeze({
-			childName: options.childName ?? "subagent",
-			sourceSessionManager: config.sourceSessionManager,
-			cwd: config.cwd,
-			parentSessionId: config.parentSession,
-			origin: options.origin ?? Object.freeze({ type: "programmatic", contextEntryId: null }),
-		}),
-	);
+	const sessionManager =
+		options.sessionManager ??
+		(options.sessionManagerFactory ?? new RootLocalEphemeralSubagentSessionManagerFactory()).create(
+			Object.freeze({
+				childName: options.childName ?? "subagent",
+				sourceSessionManager: config.sourceSessionManager,
+				cwd: config.cwd,
+				parentSessionId: config.parentSession,
+				origin: options.origin ?? Object.freeze({ type: "programmatic", contextEntryId: null }),
+			}),
+		);
 	const { session } = await createAgentSessionFromServices({
 		services,
 		sessionManager,

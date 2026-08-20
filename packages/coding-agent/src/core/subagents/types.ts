@@ -1,4 +1,7 @@
+import type { ThinkingLevel } from "@earendil-works/diffex-agent-core";
 import type { AgentSession } from "../agent-session.ts";
+import type { SessionManager } from "../session-manager.ts";
+import type { ToolName } from "../tools/index.ts";
 
 export const SUBAGENT_NAME_PATTERN = /^[a-z][a-z0-9_-]{0,63}$/;
 
@@ -11,6 +14,19 @@ export interface SubagentSummary {
 }
 
 export type CreateSubagentSession = (signal: AbortSignal) => Promise<AgentSession>;
+
+export interface CapturedSubagentConfig {
+	readonly model: { readonly provider: string; readonly id: string };
+	readonly thinkingLevel: ThinkingLevel;
+	readonly tools: readonly ToolName[];
+	readonly harnessRevision: string | null;
+}
+
+export interface CapturedSubagentSession {
+	readonly createSession: CreateSubagentSession;
+	readonly sessionManager: SessionManager;
+	readonly config: CapturedSubagentConfig;
+}
 
 export type SubagentSpawnOrigin =
 	| {
@@ -33,7 +49,7 @@ export type CaptureSubagentSession = (
 	parent: AgentSession,
 	childName: string,
 	origin: SubagentSpawnOrigin,
-) => CreateSubagentSession;
+) => CapturedSubagentSession;
 
 export type SubagentMessageDelivery = "steer" | "follow_up" | "prompt";
 

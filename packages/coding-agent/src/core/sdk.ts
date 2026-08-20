@@ -23,9 +23,10 @@ import { ModelRuntime } from "./model-runtime.ts";
 import { mergeProviderAttributionHeaders } from "./provider-attribution.ts";
 import type { ResourceLoader } from "./resource-loader.ts";
 import { DefaultResourceLoader } from "./resource-loader.ts";
-import { getDefaultSessionDir, SessionManager } from "./session-manager.ts";
+import { getDefaultSessionDir, persistSessionState, SessionManager } from "./session-manager.ts";
 import { SettingsManager } from "./settings-manager.ts";
 import { SubagentController } from "./subagents/controller.ts";
+import { encodeSubagentRosterSnapshot, SUBAGENT_ROSTER_CUSTOM_TYPE } from "./subagents/persistence.ts";
 import { captureSubagentSessionConfig, createSubagentSession } from "./subagents/services.ts";
 import { RootLocalEphemeralSubagentSessionManagerFactory } from "./subagents/session-manager-factory.ts";
 import { time } from "./timings.ts";
@@ -198,6 +199,7 @@ function createRootSubagentController(
 	maxConcurrent: number,
 	agentDir: string,
 	telemetryContext: TelemetryContext,
+	parentSessionManager: SessionManager,
 ): SubagentController {
 	const sessionManagerFactory = new RootLocalEphemeralSubagentSessionManagerFactory();
 	return new SubagentController({
@@ -205,14 +207,41 @@ function createRootSubagentController(
 		telemetryContext,
 		captureSession: (parent, childName, origin) => {
 			const config = captureSubagentSessionConfig(parent, agentDir);
-			return (signal) =>
-				createSubagentSession(config, {
-					signal,
+			const sessionManager = sessionManagerFactory.create(
+				Object.freeze({
 					childName,
+					sourceSessionManager: config.sourceSessionManager,
+					cwd: config.cwd,
+					parentSessionId: config.parentSession,
 					origin,
-					sessionManagerFactory,
-				});
+				}),
+			);
+			return Object.freeze({
+				sessionManager,
+				config: Object.freeze({
+					model: Object.freeze({ provider: config.model.provider, id: config.model.id }),
+					thinkingLevel: config.thinkingLevel,
+					tools: config.tools,
+					harnessRevision: config.harnessVersionBundle?.manifest.version ?? null,
+				}),
+				createSession: (signal: AbortSignal) =>
+					createSubagentSession(config, {
+						signal,
+						childName,
+						origin,
+						sessionManager,
+					}),
+			});
 		},
+		persistRoster: parentSessionManager.isPersisted()
+			? (agents, admission) => {
+					parentSessionManager.appendCustomEntry(
+						SUBAGENT_ROSTER_CUSTOM_TYPE,
+						encodeSubagentRosterSnapshot(agents),
+					);
+					if (admission) persistSessionState(parentSessionManager);
+				}
+			: undefined,
 	});
 }
 
@@ -260,11 +289,6 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	const subagentOptions = normalizeSubagentOptions(options.subagents);
 	const telemetryContext = options.telemetryContext ?? NOOP_TELEMETRY_CONTEXT;
 	assertNoReservedSubagentTools(options.customTools);
-	const subagentController =
-		subagentOptions === false
-			? undefined
-			: createRootSubagentController(subagentOptions.maxConcurrent, agentDir, telemetryContext);
-	const customTools = [...(options.customTools ?? []), ...(subagentController?.createToolDefinitions() ?? [])];
 	let resourceLoader = options.resourceLoader;
 
 	const authPath = options.agentDir ? join(agentDir, "auth.json") : undefined;
@@ -273,6 +297,11 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 
 	const settingsManager = options.settingsManager ?? SettingsManager.create(cwd, agentDir);
 	const sessionManager = options.sessionManager ?? SessionManager.create(cwd, getDefaultSessionDir(cwd, agentDir));
+	const subagentController =
+		subagentOptions === false
+			? undefined
+			: createRootSubagentController(subagentOptions.maxConcurrent, agentDir, telemetryContext, sessionManager);
+	const customTools = [...(options.customTools ?? []), ...(subagentController?.createToolDefinitions() ?? [])];
 
 	if (!resourceLoader) {
 		resourceLoader = new DefaultResourceLoader({ cwd, agentDir, settingsManager });
