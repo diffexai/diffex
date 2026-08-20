@@ -105,9 +105,11 @@ describe("EvolutionMenuComponent", () => {
 		await vi.waitFor(() => expect(fixture.overviewCall).toHaveBeenCalled());
 
 		const output = stripAnsi(component.render(180).join("\n"));
+		expect(output).toContain("Evidence scope: current working directory");
 		expect(output).toContain("Unprocessed materialized tokens: 1,100,001");
 		expect(output).toContain("Automatic threshold: > 1,000,000 tokens");
 		expect(output).toContain("Next automatic run: blocking-job");
+		expect(output).toContain("Selected harness (global): sha256:aaaaaaaaaaaa");
 		expect(output).toContain("Start a new evolution job [unavailable]");
 		expect(output).toContain("Resume newest interrupted job [unavailable]");
 	});
@@ -128,6 +130,9 @@ describe("EvolutionMenuComponent", () => {
 		component.handleInput("\n");
 		await vi.waitFor(() =>
 			expect(stripAnsi(component.render(160).join("\n"))).toContain("Start a manual evolution job?"),
+		);
+		expect(stripAnsi(component.render(160).join("\n"))).toContain(
+			"The job will snapshot unprocessed evidence from the current working directory",
 		);
 		expect(fixture.startManual).not.toHaveBeenCalled();
 
