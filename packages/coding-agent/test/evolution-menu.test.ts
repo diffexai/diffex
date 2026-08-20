@@ -135,6 +135,30 @@ describe("EvolutionMenuComponent", () => {
 		await vi.waitFor(() => expect(fixture.startManual).toHaveBeenCalledOnce());
 	});
 
+	it("reports when a manual start has no settled evidence", async () => {
+		const fixture = client(overview());
+		fixture.startManual.mockResolvedValue({ status: "not-created", reason: "no-new-evidence" });
+		const status = vi.fn();
+		const component = new EvolutionMenuComponent(
+			fixture.client,
+			() => {},
+			status,
+			() => {},
+		);
+		await vi.waitFor(() =>
+			expect(stripAnsi(component.render(160).join("\n"))).toContain("Start a new evolution job"),
+		);
+
+		component.handleInput("\u001b[B");
+		component.handleInput("\n");
+		await vi.waitFor(() =>
+			expect(stripAnsi(component.render(160).join("\n"))).toContain("Start a manual evolution job?"),
+		);
+		component.handleInput("\n");
+
+		await vi.waitFor(() => expect(status).toHaveBeenCalledWith("No new settled evidence is available", false));
+	});
+
 	it("pops a nested view before closing and disposes its progress subscription", async () => {
 		const fixture = client(overview());
 		const close = vi.fn();

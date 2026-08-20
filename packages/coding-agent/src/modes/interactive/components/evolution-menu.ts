@@ -157,10 +157,10 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 		}
 	}
 
-	#run(action: () => Promise<unknown>, success: string): void {
+	#run<T>(action: () => Promise<T>, success: string | ((result: T) => string)): void {
 		void action()
-			.then(() => {
-				this.#onStatus(success, false);
+			.then((result) => {
+				this.#onStatus(typeof success === "string" ? success : success(result), false);
 				this.#viewStack.splice(1);
 				return this.refresh();
 			})
@@ -245,7 +245,17 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 
 	#confirmEntries(action: "cancel" | "resume" | "rollback" | "start"): readonly MenuEntry[] {
 		const run = () => {
-			if (action === "start") this.#run(() => this.#client.startManual(), "Evolution job started");
+			if (action === "start") {
+				this.#run(
+					() => this.#client.startManual(),
+					(result) => {
+						if (result.status === "created") return "Evolution job started";
+						if (result.status === "attached") return `Attached to evolution job ${result.job.jobId}`;
+						if (result.reason === "no-new-evidence") return "No new settled evidence is available";
+						return `Evolution job was not started: ${result.reason}`;
+					},
+				);
+			}
 			if (action === "resume") this.#run(() => this.#client.resumeNewest(), "Evolution job resumed");
 			if (action === "cancel") this.#run(() => this.#client.cancelActive(), "Evolution job interrupted");
 			if (action === "rollback") this.#run(() => this.#client.rollback(), "Harness revision rolled back");
