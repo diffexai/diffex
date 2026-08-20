@@ -1244,20 +1244,23 @@ export class AgentSession {
 				);
 			}
 
-			const selected = await this._harnessStateStore.selectVersion(version);
-			await this._activateHarnessBundle(selected);
+			await this._activateHarnessBundle(target, () => this._harnessStateStore!.selectVersion(version));
 		} finally {
 			this._harnessSwitchInProgress = false;
 		}
 	}
 
-	private async _activateHarnessBundle(bundle: HarnessVersionBundle): Promise<void> {
+	private async _activateHarnessBundle(
+		bundle: HarnessVersionBundle,
+		selectBundle?: () => Promise<HarnessVersionBundle>,
+	): Promise<void> {
 		await this._subagentController?.reset();
-		this._harnessVersionBundle = bundle;
+		const activatedBundle = selectBundle ? await selectBundle() : bundle;
+		this._harnessVersionBundle = activatedBundle;
 		this._baseSystemPrompt = this._rebuildSystemPrompt(this.getActiveToolNames());
 		this._systemPromptOverride = undefined;
 		this.agent.state.systemPrompt = this._baseSystemPrompt;
-		await this._notifyHarnessActivated(bundle.manifest.version);
+		await this._notifyHarnessActivated(activatedBundle.manifest.version);
 	}
 
 	private async _refreshSelectedHarnessAtPromptBoundary(): Promise<void> {

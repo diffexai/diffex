@@ -428,29 +428,37 @@ describe("SubagentController", () => {
 		const firstReset = controller.reset();
 		const secondReset = controller.reset();
 		expect(firstReset).toBe(secondReset);
-		expect(controller.snapshot().agents).toEqual([]);
+		expect(controller.snapshot().agents).toMatchObject([{ name: "worker", status: "running" }]);
 		expect(() => controller.reserve("later", "task")).toThrow("Subagent controller is resetting");
 		expect(() => controller.message("worker", "message")).toThrow("Subagent controller is resetting");
 		await expect(controller.queryAgents({ timeoutMs: 0 })).rejects.toThrow("Subagent controller is resetting");
 		await expect(controller.acquirePermit()).rejects.toThrow("Subagent controller is resetting");
 		await expect(queuedPermit).rejects.toThrow("Subagent controller is resetting");
-		await expect(waiter).resolves.toEqual({ reason: "reset" });
+		await expect(waiter).resolves.toMatchObject({
+			reason: "changed",
+			snapshot: { agents: [{ name: "worker", status: "interrupted" }] },
+		});
 		await expect(controller.waitForChange(0, { timeoutMs: 100 })).resolves.toEqual({ reason: "reset" });
 		activePermit.release();
 		await disposeStarted.promise;
+		expect(controller.snapshot().agents).toEqual([]);
 		expect(await isPending(firstReset)).toBe(true);
 		disposeGate.resolve();
 		await firstReset;
 
 		expect(dispose).toHaveBeenCalledOnce();
-		expect(events).toHaveLength(1);
-		expect(events[0]).toMatchObject({ type: "subagent_controller_reset" });
-		expect(JSON.stringify(events[0])).not.toContain("private task");
+		expect(events).toHaveLength(2);
+		expect(events.map((event) => event.type)).toEqual(["subagent_status_changed", "subagent_controller_reset"]);
+		expect(JSON.stringify(events)).not.toContain("private task");
 		expect(() => controller.reserve("worker", "reused task")).not.toThrow();
-		expect(events.map((event) => event.type)).toEqual(["subagent_controller_reset", "subagent_reserved"]);
+		expect(events.map((event) => event.type)).toEqual([
+			"subagent_status_changed",
+			"subagent_controller_reset",
+			"subagent_reserved",
+		]);
 	});
 
-	it("reopens after aggregating reset cleanup failures", async () => {
+	it("reopens after treating reset cleanup failures as best effort", async () => {
 		const controller = new SubagentController({ maxConcurrent: 2 });
 		const first = await harness();
 		const second = await harness();
@@ -462,17 +470,32 @@ describe("SubagentController", () => {
 		controller.reserve("first", "task");
 		controller.attachSession("first", first.session);
 		controller.markRunning("first");
+		controller.markIdle("first");
 		controller.reserve("second", "task");
 		controller.attachSession("second", second.session);
 		controller.markRunning("second");
 		controller.markIdle("second");
 
-		const error = await controller.reset().catch((reason: unknown) => reason);
-		expect(error).toBeInstanceOf(AggregateError);
-		expect((error as AggregateError).errors).toEqual([abortFailure, disposeFailure]);
+		await expect(controller.reset()).resolves.toBeUndefined();
+		expect(first.session.dispose).toHaveBeenCalledOnce();
 		expect(secondDispose).toHaveBeenCalledOnce();
 		expect(controller.snapshot().agents).toEqual([]);
 		expect(() => controller.reserve("first", "reused")).not.toThrow();
+	});
+
+	it("reopens admission without clearing the roster when quiescing fails", async () => {
+		const controller = new SubagentController({ maxConcurrent: 1 });
+		const child = await harness();
+		vi.spyOn(child.session, "abort").mockRejectedValue(new Error("quiesce failed"));
+		const dispose = vi.spyOn(child.session, "dispose").mockResolvedValue();
+		controller.reserve("worker", "task");
+		controller.attachSession("worker", child.session);
+		controller.markRunning("worker");
+
+		await expect(controller.reset()).rejects.toThrow("Failed to quiesce subagent controller");
+		expect(controller.snapshot().agents).toMatchObject([{ name: "worker", status: "running" }]);
+		expect(dispose).not.toHaveBeenCalled();
+		expect(() => controller.reserve("later", "task")).not.toThrow();
 	});
 
 	it("keeps shutdown permanent when it races reset", async () => {
@@ -510,8 +533,8 @@ describe("SubagentController", () => {
 		});
 
 		const reset = controller.reset();
-		expect(nestedReset).toBe(reset);
 		await reset;
+		expect(nestedReset).toBe(reset);
 		const shutdown = controller.shutdown();
 		expect(nestedShutdown).toBe(shutdown);
 		await shutdown;

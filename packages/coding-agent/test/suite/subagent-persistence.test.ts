@@ -746,8 +746,14 @@ describe("durable subagent lifecycle", () => {
 			"reset barrier unavailable",
 		);
 		expect(root.session.activeHarnessVersion).toBe(currentVersion);
+		expect((await store.loadCurrent()).manifest.version).toBe(currentVersion);
 		expect(root.session.getSubagents()).toEqual([{ name: "worker", status: "idle", task: "finish" }]);
 		expect(readSelectedBranchSubagentRoster(root.sessionManager).children).toHaveLength(1);
+		await expect(
+			getTool(root.session, "agents").execute("after-failed-reset", { timeout_ms: 0 }),
+		).resolves.toMatchObject({
+			details: { agents: [{ name: "worker", status: "idle" }] },
+		});
 	});
 
 	it("keeps a reset committed and reports cleanup failure after the durable barrier", async () => {
