@@ -77,6 +77,7 @@ interface ServiceFixture {
 	readonly service: EvolutionControlService;
 	readonly store: FileEvolutionPersistence;
 	readonly progress: EvolutionProgressBus;
+	readonly controlPlane: EvolutionControlPlane;
 }
 
 async function serviceFixture(): Promise<ServiceFixture> {
@@ -140,8 +141,11 @@ async function serviceFixture(): Promise<ServiceFixture> {
 			evidence,
 			snapshots,
 			executor: {
-				async execute() {
-					throw new Error("The service fixture does not execute pipeline stages");
+				async execute(context) {
+					if (context.job.stage === "validating") {
+						return { artifacts: [], state: {}, directive: "complete-no-op" as const };
+					}
+					return { artifacts: [], state: {}, directive: "continue" as const };
 				},
 			},
 		},
@@ -167,7 +171,7 @@ async function serviceFixture(): Promise<ServiceFixture> {
 		progress,
 		observedHarnessVersion: () => harness.manifest.version,
 	});
-	return { service, store, progress };
+	return { service, store, progress, controlPlane };
 }
 
 describe("evolution control service", () => {
@@ -215,5 +219,44 @@ describe("evolution control service", () => {
 		const resumed = await fixture.service.resumeNewest();
 		expect(resumed).toMatchObject({ jobId: started.job.jobId, outcome: "active", resumable: false });
 		expect(await fixture.store.load(started.job.jobId)).toMatchObject({ attempt: 1, retryNotBefore: null });
+	});
+
+	it("reports durable latency, budget, coverage, conflict, and recovery observability", async () => {
+		const fixture = await serviceFixture();
+		const started = await fixture.service.startManual();
+		if (started.status !== "created") throw new Error("Expected a created job");
+
+		await fixture.controlPlane.runJob(started.job.jobId);
+		const detail = await fixture.service.getJob(started.job.jobId);
+
+		expect(detail.observability).toEqual({
+			queueAgeMs: expect.any(Number),
+			stageLatencies: [
+				{ stage: "snapshotting", durationMs: expect.any(Number) },
+				{ stage: "counter-slot", durationMs: expect.any(Number) },
+				{ stage: "reflecting", durationMs: expect.any(Number) },
+				{ stage: "curating", durationMs: expect.any(Number) },
+				{ stage: "validating", durationMs: expect.any(Number) },
+			],
+			estimatedEvidenceTokens: expect.any(Number),
+			providerCostUsd: null,
+			reflectorBudget: { modelCalls: 0, reflectionRounds: 0, toolCalls: 0 },
+			sliceCoverage: { analyzed: 0, corrupt: 0, skipped: 0, unreadable: 0 },
+			proposalDispositions: {
+				applied: 0,
+				deferred: 0,
+				failed: 0,
+				quarantined: 0,
+				rejected: 0,
+				"rolled-back": 0,
+				superseded: 0,
+				unselected: 0,
+			},
+			activationConflicts: 0,
+			rollbackAvailable: false,
+			recoveryAttempts: 0,
+		});
+		expect(detail.observability.queueAgeMs).toBeGreaterThanOrEqual(0);
+		expect(detail.observability.stageLatencies.every((entry) => entry.durationMs >= 0)).toBe(true);
 	});
 });

@@ -277,6 +277,10 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 	}
 
 	#renderJob(job: EvolutionJobDetail): void {
+		const stageLatencies = job.observability.stageLatencies
+			.map((entry) => `${entry.stage}=${entry.durationMs}ms`)
+			.join(", ");
+		const coverage = job.observability.sliceCoverage;
 		for (const line of [
 			`Job: ${job.jobId}`,
 			`Trigger: ${job.trigger}`,
@@ -286,6 +290,16 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 			`Model calls: ${job.modelCalls}; retries: ${job.modelRetries}`,
 			`Proposals: ${job.emittedProposals} emitted / ${job.eligibleProposals} eligible`,
 			`Selected operations: ${job.selectedOperations}`,
+			`Queue age: ${job.observability.queueAgeMs === null ? "pending" : `${job.observability.queueAgeMs}ms`}`,
+			`Stage latency: ${stageLatencies || "pending"}`,
+			`Evidence tokens: ${job.observability.estimatedEvidenceTokens.toLocaleString()}`,
+			"Provider cost: unavailable",
+			`Reflector budget: ${job.observability.reflectorBudget.modelCalls} model / ${job.observability.reflectorBudget.reflectionRounds} rounds / ${job.observability.reflectorBudget.toolCalls} tools`,
+			`Coverage: ${coverage.analyzed} analyzed / ${coverage.corrupt} corrupt / ${coverage.skipped} skipped / ${coverage.unreadable} unreadable`,
+			`Proposal dispositions: ${JSON.stringify(job.observability.proposalDispositions)}`,
+			`Activation conflicts: ${job.observability.activationConflicts}`,
+			`Recovery attempts: ${job.observability.recoveryAttempts}`,
+			`Rollback available: ${job.observability.rollbackAvailable ? "yes" : "no"}`,
 			`Last checkpoint: ${timestamp(job.lastCheckpointAt)}`,
 			`Last error: ${job.errorMessage ?? "none"}`,
 			`Base harness: ${abbreviate(job.baseHarnessVersion)}`,

@@ -123,11 +123,13 @@ export {
 	type EvolutionControlServiceDependencies,
 	type EvolutionHarnessControl,
 	type EvolutionJobDetail,
+	type EvolutionJobObservability,
 	type EvolutionJobSummary,
 	type EvolutionOverview,
 	EvolutionProgressBus,
 	type EvolutionProposalDetail,
 	type EvolutionRollbackAction,
+	type EvolutionStageLatency,
 	type EvolutionStartResult,
 } from "./control-service.ts";
 export { DisabledPreReflectionStage } from "./counter.ts";

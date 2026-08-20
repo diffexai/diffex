@@ -638,6 +638,7 @@ export class EvolutionControlPlane implements EvolutionJobRunner {
 	): Promise<EvolutionJob> {
 		if (job.stage === "completed") return job;
 		const idempotencyKey = stableId("stage", { jobId: job.jobId, stage: job.stage });
+		const startedAt = this.#dependencies.clock.now();
 		const result = await this.#dependencies.executor.execute({
 			job,
 			input,
@@ -661,6 +662,7 @@ export class EvolutionControlPlane implements EvolutionJobRunner {
 				controlDirective: result.directive,
 				resultingHarnessVersion: result.resultingHarnessVersion ?? null,
 			} satisfies StageCompletionState,
+			startedAt,
 			completedAt: this.#dependencies.clock.now(),
 		};
 		const checkpointed = this.#withJobRevision(job, {

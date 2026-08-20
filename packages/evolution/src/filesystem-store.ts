@@ -191,6 +191,7 @@ function parseJob(contents: string, path: string): EvolutionJob {
 						!DIGEST_PATTERN.test(reference.contentDigest),
 				) ||
 				!isRecord(checkpoint.state) ||
+				(typeof checkpoint.startedAt !== "string" && checkpoint.startedAt !== undefined) ||
 				typeof checkpoint.completedAt !== "string",
 		)
 	) {

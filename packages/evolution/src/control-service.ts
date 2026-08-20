@@ -8,6 +8,7 @@ import type {
 	EvolutionLedgerEvent,
 	EvolutionMemoryExactDiff,
 	EvolutionProposal,
+	EvolutionProposalLedgerDisposition,
 	EvolutionScope,
 	HarnessActivatedLedgerEvent,
 	ScoredProposal,
@@ -95,6 +96,34 @@ export interface EvolutionJobDetail extends EvolutionJobSummary {
 	readonly activatedHarnessVersion: HarnessVersion | null;
 	readonly nextPromptWillRefresh: boolean;
 	readonly proposalIds: readonly string[];
+	readonly observability: EvolutionJobObservability;
+}
+
+export interface EvolutionStageLatency {
+	readonly stage: EvolutionJobStage;
+	readonly durationMs: number;
+}
+
+export interface EvolutionJobObservability {
+	readonly queueAgeMs: number | null;
+	readonly stageLatencies: readonly EvolutionStageLatency[];
+	readonly estimatedEvidenceTokens: number;
+	readonly providerCostUsd: null;
+	readonly reflectorBudget: {
+		readonly modelCalls: number;
+		readonly reflectionRounds: number;
+		readonly toolCalls: number;
+	};
+	readonly sliceCoverage: {
+		readonly analyzed: number;
+		readonly corrupt: number;
+		readonly skipped: number;
+		readonly unreadable: number;
+	};
+	readonly proposalDispositions: Readonly<Record<EvolutionProposalLedgerDisposition, number>>;
+	readonly activationConflicts: number;
+	readonly rollbackAvailable: boolean;
+	readonly recoveryAttempts: number;
 }
 
 export interface EvolutionProposalDetail {
@@ -135,6 +164,10 @@ function isScoredProposal(artifact: EvolutionArtifact): artifact is ScoredPropos
 
 function isValidationReport(artifact: EvolutionArtifact): artifact is ValidationReport {
 	return "proposalResults" in artifact && "validatorVersion" in artifact;
+}
+
+function isCoverageMap(artifact: EvolutionArtifact): artifact is Extract<EvolutionArtifact, { entries: unknown }> {
+	return "manifestDigest" in artifact && "entries" in artifact && "finalLessonIds" in artifact;
 }
 
 function stringArray(value: unknown): readonly string[] {
@@ -405,6 +438,54 @@ export class EvolutionControlService {
 		const modelRetries = events.filter((event) => event.type === "reflector-model-call" && event.attempt > 1).length;
 		const selectedOperations = activation?.operationIds.length ?? 0;
 		const observed = this.#dependencies.observedHarnessVersion() ?? null;
+		const firstCheckpoint = job.checkpoints[0];
+		const queueStart = firstCheckpoint?.startedAt;
+		const queueAgeMs =
+			queueStart === undefined ? null : Math.max(0, Date.parse(queueStart) - Date.parse(job.createdAt));
+		const stageLatencies = job.checkpoints.map((checkpoint, index) => {
+			const startedAt = checkpoint.startedAt ?? job.checkpoints[index - 1]?.completedAt ?? job.createdAt;
+			return {
+				stage: checkpoint.stage,
+				durationMs: Math.max(0, Date.parse(checkpoint.completedAt) - Date.parse(startedAt)),
+			};
+		});
+		const reflectorBudget = events.reduce(
+			(total, event) => {
+				if (event.type !== "reflector-model-call" && event.type !== "reflector-tool-call") return total;
+				return {
+					modelCalls: total.modelCalls + event.budgetCharge.modelCalls,
+					reflectionRounds: total.reflectionRounds + event.budgetCharge.reflectionRounds,
+					toolCalls: total.toolCalls + event.budgetCharge.toolCalls,
+				};
+			},
+			{ modelCalls: 0, reflectionRounds: 0, toolCalls: 0 },
+		);
+		const coverageEntries = artifacts.filter(isCoverageMap).flatMap((artifact) => artifact.entries);
+		const sliceCoverage = {
+			analyzed: coverageEntries.filter((entry) => entry.disposition === "analyzed").length,
+			corrupt: coverageEntries.filter((entry) => entry.disposition === "corrupt").length,
+			skipped: coverageEntries.filter((entry) => entry.disposition === "skipped").length,
+			unreadable: coverageEntries.filter((entry) => entry.disposition === "unreadable").length,
+		};
+		const proposalDispositions: Record<EvolutionProposalLedgerDisposition, number> = {
+			applied: 0,
+			deferred: 0,
+			failed: 0,
+			quarantined: 0,
+			rejected: 0,
+			"rolled-back": 0,
+			superseded: 0,
+			unselected: 0,
+		};
+		for (const event of events) {
+			if (event.type === "proposal-disposition") proposalDispositions[event.disposition] += 1;
+			if (event.type === "proposal-rolled-back") proposalDispositions["rolled-back"] += 1;
+		}
+		const validVersions = new Set(versions.versions.map((bundle) => bundle.manifest.version));
+		const rollbackAvailable =
+			activation !== null &&
+			versions.currentVersion === activation.resultingHarnessVersion &&
+			validVersions.has(activation.rollbackParentHarnessVersion);
 		return {
 			...summary(job),
 			evidenceHighWaterCursor: input.ingestionHighWaterCursor,
@@ -424,6 +505,20 @@ export class EvolutionControlService {
 			nextPromptWillRefresh:
 				versions.currentVersion !== null && observed !== null && versions.currentVersion !== observed,
 			proposalIds,
+			observability: {
+				queueAgeMs,
+				stageLatencies,
+				estimatedEvidenceTokens: input.tokenMeasurement.estimatedTokens,
+				providerCostUsd: null,
+				reflectorBudget,
+				sliceCoverage,
+				proposalDispositions,
+				activationConflicts: events.filter(
+					(event) => event.type === "job-failed" && event.reasonCode === "harness-base-conflict",
+				).length,
+				rollbackAvailable,
+				recoveryAttempts: job.attempt,
+			},
 		};
 	}
 

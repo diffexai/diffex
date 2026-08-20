@@ -641,6 +641,7 @@ export interface EvolutionStageCheckpoint {
 	readonly idempotencyKey: string;
 	readonly outputArtifacts: readonly EvolutionArtifactReference[];
 	readonly state: JsonObject;
+	readonly startedAt?: string;
 	readonly completedAt: string;
 }
 
