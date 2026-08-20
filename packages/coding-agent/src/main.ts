@@ -876,7 +876,6 @@ export async function main(args: string[], options?: MainOptions) {
 				harnessState: services.harnessStateStore,
 				modelRuntime,
 				resourceLoader,
-				currentTracePath: invocationTrace.destinationPath,
 			}),
 		);
 		await invocationTrace.recordDiagnostics(diagnostics);

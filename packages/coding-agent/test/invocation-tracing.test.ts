@@ -1,8 +1,9 @@
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { mkdir, open } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { fauxAssistantMessage } from "@earendil-works/diffex-ai";
 import {
 	readJsonlTraceFile,
 	type TraceFooterRecord,
@@ -11,7 +12,9 @@ import {
 } from "@earendil-works/diffex-harness-trace";
 import lockfile from "proper-lockfile";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { EvolutionScope } from "#evolution";
 import { ENV_AGENT_DIR } from "../src/config.ts";
+import { TraceEvidenceCatalog } from "../src/core/evolution-runtime.ts";
 import { createInvocationTrace } from "../src/core/invocation-trace.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
 
@@ -149,6 +152,24 @@ async function collectCli(child: ChildProcessWithoutNullStreams): Promise<CliRes
 	});
 }
 
+async function waitForStdout(child: ChildProcessWithoutNullStreams, expected: string): Promise<void> {
+	await new Promise<void>((resolvePromise, reject) => {
+		let stdout = "";
+		const timeout = setTimeout(() => {
+			child.stdout.off("data", onData);
+			reject(new Error(`Timed out waiting for RPC output containing ${expected}`));
+		}, 10_000);
+		const onData = (chunk: Buffer) => {
+			stdout += chunk.toString();
+			if (!stdout.includes(expected)) return;
+			clearTimeout(timeout);
+			child.stdout.off("data", onData);
+			resolvePromise();
+		};
+		child.stdout.on("data", onData);
+	});
+}
+
 async function runCli(directories: TestDirectories, args: string[], extraEnv?: NodeJS.ProcessEnv): Promise<CliResult> {
 	const child = startCli(directories, args, extraEnv);
 	const resultPromise = collectCli(child);
@@ -212,6 +233,178 @@ describe("CLI invocation tracing", () => {
 		await expect(lockfile.check(path, { realpath: false })).resolves.toBe(true);
 		await trace.close();
 		await expect(lockfile.check(path, { realpath: false })).resolves.toBe(false);
+	});
+
+	it("publishes settled operations while the invocation remains running", async () => {
+		const directories = setup();
+		const manager = SessionManager.create(directories.projectDir, join(directories.agentDir, "sessions"));
+		const { trace } = await createInvocationTrace({ agentDir: directories.agentDir, sessionManager: manager });
+		await trace.attachSession(manager, "startup");
+		const scope: EvolutionScope = { repositoryId: "global", scopeId: "global" };
+		const catalog = new TraceEvidenceCatalog({ agentDir: directories.agentDir, scope });
+		const firstPath = trace.destinationPath;
+		if (!firstPath) throw new Error("Invocation trace path was not created");
+
+		expect(await catalog.highWaterCursor(scope)).toBe(0);
+		const firstEntryOrdinal = manager.getEntryCount();
+		manager.appendSessionInfo("first operation");
+		await trace.startSpan(
+			{
+				name: "diffex.coding_agent.operation",
+				attributes: { "diffex.operation.id": "operation-1" },
+			},
+			() => {},
+		);
+		await trace.operationSettled({ operationId: "operation-1", sessionManager: manager, firstEntryOrdinal });
+
+		await expect(lockfile.check(firstPath, { realpath: false })).resolves.toBe(false);
+		expect(await catalog.highWaterCursor(scope)).toBe(1);
+		expect(await catalog.listSuccessful(scope, 0, 1)).toHaveLength(1);
+		expect(footer(await readTrace(firstPath))?.terminationStatus).toBe("completed");
+
+		const secondEntryOrdinal = manager.getEntryCount();
+		manager.appendSessionInfo("second operation");
+		await trace.startSpan(
+			{
+				name: "diffex.coding_agent.operation",
+				attributes: { "diffex.operation.id": "operation-2" },
+			},
+			() => {},
+		);
+		const secondPath = trace.destinationPath;
+		if (!secondPath) throw new Error("Second invocation trace path was not created");
+		expect(secondPath).not.toBe(firstPath);
+		await expect(lockfile.check(secondPath, { realpath: false })).resolves.toBe(true);
+		await trace.operationSettled({
+			operationId: "operation-2",
+			sessionManager: manager,
+			firstEntryOrdinal: secondEntryOrdinal,
+		});
+
+		expect(await catalog.highWaterCursor(scope)).toBe(2);
+		expect(await catalog.listSuccessful(scope, 1, 2)).toHaveLength(1);
+		expect(tracePaths(directories.agentDir)).toHaveLength(2);
+		await trace.close();
+		expect(tracePaths(directories.agentDir)).toHaveLength(2);
+	});
+
+	it("settles concurrent process traces without overwriting either file", async () => {
+		const directories = setup();
+		const peerProjectDir = join(directories.root, "peer-project");
+		mkdirSync(peerProjectDir);
+		const firstManager = SessionManager.create(directories.projectDir, join(directories.agentDir, "sessions"));
+		const secondManager = SessionManager.create(peerProjectDir, join(directories.agentDir, "sessions"));
+		const [{ trace: firstTrace }, { trace: secondTrace }] = await Promise.all([
+			createInvocationTrace({ agentDir: directories.agentDir, sessionManager: firstManager }),
+			createInvocationTrace({ agentDir: directories.agentDir, sessionManager: secondManager }),
+		]);
+		await Promise.all([
+			firstTrace.attachSession(firstManager, "startup"),
+			secondTrace.attachSession(secondManager, "startup"),
+		]);
+		firstManager.appendSessionInfo("first process");
+		secondManager.appendSessionInfo("second process");
+		await Promise.all([
+			firstTrace.startSpan(
+				{
+					name: "diffex.coding_agent.operation",
+					attributes: { "diffex.operation.id": "first-operation" },
+				},
+				() => {},
+			),
+			secondTrace.startSpan(
+				{
+					name: "diffex.coding_agent.operation",
+					attributes: { "diffex.operation.id": "second-operation" },
+				},
+				() => {},
+			),
+		]);
+		const firstPath = firstTrace.destinationPath;
+		const secondPath = secondTrace.destinationPath;
+		if (!firstPath || !secondPath) throw new Error("Concurrent invocation trace paths were not created");
+		expect(firstPath).not.toBe(secondPath);
+
+		await Promise.all([
+			firstTrace.operationSettled({
+				operationId: "first-operation",
+				sessionManager: firstManager,
+				firstEntryOrdinal: 0,
+			}),
+			secondTrace.operationSettled({
+				operationId: "second-operation",
+				sessionManager: secondManager,
+				firstEntryOrdinal: 0,
+			}),
+		]);
+
+		expect(tracePaths(directories.agentDir)).toHaveLength(2);
+		await expect(Promise.all([lockfile.check(firstPath), lockfile.check(secondPath)])).resolves.toEqual([
+			false,
+			false,
+		]);
+		const scope: EvolutionScope = { repositoryId: "global", scopeId: "global" };
+		const firstCatalog = new TraceEvidenceCatalog({ agentDir: directories.agentDir, scope });
+		const secondCatalog = new TraceEvidenceCatalog({ agentDir: directories.agentDir, scope });
+		expect(await Promise.all([firstCatalog.highWaterCursor(scope), secondCatalog.highWaterCursor(scope)])).toEqual([
+			2, 2,
+		]);
+		const materializations = await firstCatalog.listSuccessful(scope, 0, 2);
+		expect(materializations).toHaveLength(2);
+		expect(new Set(materializations.map((entry) => entry.materializationId)).size).toBe(2);
+		await Promise.all([firstTrace.close(), secondTrace.close()]);
+	});
+
+	it("keeps overlapping operations in one immutable trace interval", async () => {
+		const directories = setup();
+		const manager = SessionManager.create(directories.projectDir, join(directories.agentDir, "sessions"));
+		const { trace } = await createInvocationTrace({ agentDir: directories.agentDir, sessionManager: manager });
+		await trace.attachSession(manager, "startup");
+		const firstEntryOrdinal = manager.getEntryCount();
+		manager.appendMessage({
+			role: "user",
+			content: [{ type: "text", text: "overlapping operations" }],
+			timestamp: Date.now(),
+		});
+		manager.appendMessage(fauxAssistantMessage("response"));
+		let releaseFirst: (() => void) | undefined;
+		const firstOperation = trace.startSpan(
+			{
+				name: "diffex.coding_agent.operation",
+				attributes: { "diffex.operation.id": "first-operation" },
+			},
+			() =>
+				new Promise<void>((resolveOperation) => {
+					releaseFirst = resolveOperation;
+				}),
+		);
+		await vi.waitFor(() => expect(releaseFirst).toBeDefined());
+		await trace.startSpan(
+			{
+				name: "diffex.coding_agent.operation",
+				attributes: { "diffex.operation.id": "second-operation" },
+			},
+			() => {},
+		);
+		await trace.operationSettled({ operationId: "second-operation", sessionManager: manager, firstEntryOrdinal });
+		const path = trace.destinationPath;
+		if (!path) throw new Error("Overlapping invocation trace path was not created");
+		await expect(lockfile.check(path, { realpath: false })).resolves.toBe(true);
+
+		releaseFirst?.();
+		await firstOperation;
+		await trace.operationSettled({ operationId: "first-operation", sessionManager: manager, firstEntryOrdinal });
+
+		await expect(lockfile.check(path, { realpath: false })).resolves.toBe(false);
+		expect(tracePaths(directories.agentDir)).toEqual([path]);
+		const scope: EvolutionScope = { repositoryId: "global", scopeId: "global" };
+		const catalog = new TraceEvidenceCatalog({ agentDir: directories.agentDir, scope });
+		const [materialization] = await catalog.listSuccessful(scope, 0, await catalog.highWaterCursor(scope));
+		const sessionEvidence =
+			materialization?.invocation.evidence.filter((entry) => entry.kind === "session_item") ?? [];
+		expect(sessionEvidence).toHaveLength(2);
+		expect(new Set(sessionEvidence.map((entry) => entry.evidenceId)).size).toBe(2);
+		await trace.close();
 	});
 
 	it("records completed and resumed persisted invocations", async () => {
@@ -299,14 +492,9 @@ describe("CLI invocation tracing", () => {
 		const directories = setup();
 		const child = startCli(directories, [...commonArgs(directories), "--mode", "rpc"]);
 		const resultPromise = collectCli(child);
-		await vi.waitFor(
-			() => {
-				const path = tracePaths(directories.agentDir)[0];
-				expect(path).toBeDefined();
-				expect(readFileSync(path, "utf8")).toContain('"harness_activate"');
-			},
-			{ timeout: 10_000, interval: 20 },
-		);
+		const ready = waitForStdout(child, '"id":"trace-ready"');
+		child.stdin.write(`${JSON.stringify({ id: "trace-ready", type: "get_state" })}\n`);
+		await ready;
 
 		child.kill(signal);
 		const result = await resultPromise;

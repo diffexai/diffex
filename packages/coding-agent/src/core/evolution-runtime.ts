@@ -257,7 +257,6 @@ export class TraceEvidenceCatalog implements EvolutionEvidenceCatalog {
 	readonly #indexPath: string;
 	readonly #indexLockPath: string;
 	readonly #scope: EvolutionScope;
-	readonly #excludedTracePath: string | undefined;
 	readonly #materializeInvocation: typeof materializeJsonlInvocation;
 	readonly #isTraceActive: (path: string) => Promise<boolean>;
 	readonly #cache = new Map<string, Promise<SuccessfulMaterialization | null>>();
@@ -265,7 +264,6 @@ export class TraceEvidenceCatalog implements EvolutionEvidenceCatalog {
 	constructor(options: {
 		agentDir: string;
 		scope: EvolutionScope;
-		excludedTracePath?: string;
 		materializeInvocation?: typeof materializeJsonlInvocation;
 		isTraceActive?: (path: string) => Promise<boolean>;
 	}) {
@@ -273,7 +271,6 @@ export class TraceEvidenceCatalog implements EvolutionEvidenceCatalog {
 		this.#indexPath = join(this.#traceDirectory, TRACE_EVIDENCE_INDEX_NAME);
 		this.#indexLockPath = join(this.#traceDirectory, ".evolution-index");
 		this.#scope = options.scope;
-		this.#excludedTracePath = options.excludedTracePath;
 		this.#materializeInvocation = options.materializeInvocation ?? materializeJsonlInvocation;
 		this.#isTraceActive =
 			options.isTraceActive ??
@@ -344,7 +341,7 @@ export class TraceEvidenceCatalog implements EvolutionEvidenceCatalog {
 					.filter((entry) => entry.isFile() && entry.name.endsWith(".jsonl") && !indexedNames.has(entry.name))
 					.map(async (entry) => {
 						const path = join(this.#traceDirectory, entry.name);
-						if (path === this.#excludedTracePath || (await this.#isTraceActive(path).catch(() => true))) {
+						if (await this.#isTraceActive(path).catch(() => true)) {
 							return null;
 						}
 						try {
@@ -512,7 +509,6 @@ export interface CreateCodingAgentEvolutionRuntimeOptions {
 	readonly harnessState: HarnessStateStore;
 	readonly modelRuntime: ModelRuntime;
 	readonly resourceLoader: ResourceLoader;
-	readonly currentTracePath?: string;
 }
 
 export async function createCodingAgentEvolutionRuntime(
@@ -528,7 +524,6 @@ export async function createCodingAgentEvolutionRuntime(
 	const evidence = new TraceEvidenceCatalog({
 		agentDir: options.agentDir,
 		scope,
-		excludedTracePath: options.currentTracePath,
 	});
 	const writer = new EvolutionMemoryWriter({
 		version: VERSION,
