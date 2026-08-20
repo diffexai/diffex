@@ -291,11 +291,24 @@ describe("recursive reflector", () => {
 
 	it("denies evidence outside the frozen manifest and audits the denial", async () => {
 		const { persistence, reflector } = await reflectorFixture();
+		let checkedDenials = false;
 		const input = reflectInput({
 			async execute(request) {
 				if (request.stage !== "reflector") throw new Error("Unexpected Curator request");
-				const outline = request.tools.find((tool) => tool.name === "inspect_outline");
-				await expect(outline?.execute({ documentId: "outside-document" })).rejects.toThrow("not permitted");
+				if (!checkedDenials) {
+					checkedDenials = true;
+					const outline = request.tools.find((tool) => tool.name === "inspect_outline");
+					await expect(outline?.execute({ documentId: "outside-document" })).rejects.toThrow("not permitted");
+					const read = request.tools.find((tool) => tool.name === "read_slice");
+					await expect(
+						read?.execute({
+							documentId: "document-1",
+							startOrdinal: 0,
+							endOrdinal: 1,
+							path: "/etc/passwd",
+						}),
+					).rejects.toThrow("does not permit field");
+				}
 				const node = jsonObject(request.input.node, "node");
 				const evidenceIds = Array.isArray(node.evidenceIds) ? node.evidenceIds.map(String) : [];
 				return {
@@ -314,16 +327,27 @@ describe("recursive reflector", () => {
 				denialCode: "document-not-permitted",
 			}),
 		);
+		expect(await persistence.read("job-1")).toContainEqual(
+			expect.objectContaining({
+				type: "reflector-tool-call",
+				toolName: "read_slice",
+				denialCode: "invalid-request",
+			}),
+		);
 	});
 
 	it("resumes from durable completed nodes without repeating their model calls", async () => {
 		const { persistence, reflector } = await reflectorFixture();
 		let calls = 0;
+		let interruptedKey: string | null = null;
 		const firstRun = reflectInput({
 			async execute(request) {
 				if (request.stage !== "reflector") throw new Error("Unexpected Curator request");
 				calls += 1;
-				if (calls >= 2) throw new Error("simulated provider interruption");
+				if (calls >= 2) {
+					interruptedKey = request.idempotencyKey;
+					throw new Error("simulated provider interruption");
+				}
 				const node = jsonObject(request.input.node, "node");
 				const evidenceIds = Array.isArray(node.evidenceIds) ? node.evidenceIds.map(String) : [];
 				return {
@@ -332,17 +356,19 @@ describe("recursive reflector", () => {
 				};
 			},
 		});
-		await expect(reflector.reflect(firstRun)).rejects.toThrow("invalid response");
+		await expect(reflector.reflect(firstRun)).rejects.toThrow("model call failed");
 		const checkpoint = (await persistence.read("job-1")).find(
 			(event) => event.type === "reflection-node-checkpointed",
 		);
 		expect(checkpoint).toBeDefined();
 		const resumedNodes: string[] = [];
+		const resumedKeys: string[] = [];
 		const resumed = reflectInput({
 			async execute(request) {
 				if (request.stage !== "reflector") throw new Error("Unexpected Curator request");
 				const node = jsonObject(request.input.node, "node");
 				resumedNodes.push(String(node.nodeId));
+				resumedKeys.push(request.idempotencyKey);
 				const evidenceIds = Array.isArray(node.evidenceIds) ? node.evidenceIds.map(String) : [];
 				return {
 					output: { complete: true, lessons: [lesson(evidenceIds)] },
@@ -355,5 +381,103 @@ describe("recursive reflector", () => {
 
 		expect(result.nodes).toHaveLength(4);
 		expect(resumedNodes).not.toContain(checkpoint?.nodeId);
+		expect(resumedKeys).toContain(interruptedKey);
+	});
+
+	it("retries invalid structured output within the model-call budget", async () => {
+		const { persistence, reflector } = await reflectorFixture();
+		const input = reflectInput({
+			execute() {
+				return Promise.resolve({
+					output: { complete: true, lessons: [lesson(["invented-evidence"])] },
+					model: { provider: "faux", model: "fixture" },
+				});
+			},
+		});
+
+		await expect(reflector.reflect(input)).rejects.toMatchObject({
+			reasonCode: "reflection-invalid-response",
+			retryable: false,
+		});
+		const events = await persistence.read("job-1");
+		expect(events.filter((event) => event.type === "reflector-model-call")).toHaveLength(2);
+		expect(events.filter((event) => event.type === "reflection-node-checkpointed")).toHaveLength(0);
+	});
+
+	it("stops after five incomplete refinement rounds by default", async () => {
+		const { persistence } = await reflectorFixture();
+		const reflector = new RecursiveReflector(
+			{ version: "1.0.0", artifacts: persistence, ledger: persistence },
+			{ maxUnitsPerSlice: 2, maxResponseRetries: 1 },
+		);
+		const input = reflectInput({
+			async execute(request) {
+				if (request.stage !== "reflector") throw new Error("Unexpected Curator request");
+				const node = jsonObject(request.input.node, "node");
+				const evidenceIds = Array.isArray(node.evidenceIds) ? node.evidenceIds.map(String) : [];
+				return {
+					output: { complete: false, lessons: [lesson(evidenceIds)] },
+					model: { provider: "faux", model: "fixture" },
+				};
+			},
+		});
+
+		await expect(reflector.reflect(input)).rejects.toMatchObject({
+			reasonCode: "reflection-budget-exhausted",
+		});
+		expect((await persistence.read("job-1")).filter((event) => event.type === "reflector-model-call")).toHaveLength(
+			5,
+		);
+	});
+
+	it("fails when a model catches a hard tool-budget denial", async () => {
+		const { persistence } = await reflectorFixture();
+		const reflector = new RecursiveReflector(
+			{ version: "1.0.0", artifacts: persistence, ledger: persistence },
+			{ maxToolCalls: 1, maxUnitsPerSlice: 2 },
+		);
+		const input = reflectInput({
+			async execute(request) {
+				if (request.stage !== "reflector") throw new Error("Unexpected Curator request");
+				const list = request.tools.find((tool) => tool.name === "list_documents");
+				await list?.execute({});
+				await expect(list?.execute({})).rejects.toThrow("budget is exhausted");
+				const node = jsonObject(request.input.node, "node");
+				const evidenceIds = Array.isArray(node.evidenceIds) ? node.evidenceIds.map(String) : [];
+				return {
+					output: { complete: true, lessons: [lesson(evidenceIds)] },
+					model: { provider: "faux", model: "fixture" },
+				};
+			},
+		});
+
+		await expect(reflector.reflect(input)).rejects.toMatchObject({
+			reasonCode: "reflection-budget-exhausted",
+		});
+	});
+
+	it("rejects a final lesson set that does not fit the Curator boundary", async () => {
+		const { persistence } = await reflectorFixture();
+		const reflector = new RecursiveReflector(
+			{ version: "1.0.0", artifacts: persistence, ledger: persistence },
+			{ maxCuratorLessons: 1, maxUnitsPerSlice: 2 },
+		);
+		const input = reflectInput({
+			async execute(request) {
+				if (request.stage !== "reflector") throw new Error("Unexpected Curator request");
+				const node = jsonObject(request.input.node, "node");
+				const evidenceIds = Array.isArray(node.evidenceIds) ? node.evidenceIds.map(String) : [];
+				const lessons =
+					node.kind === "synthesis" ? [lesson(evidenceIds), lesson(evidenceIds)] : [lesson(evidenceIds)];
+				return {
+					output: { complete: true, lessons },
+					model: { provider: "faux", model: "fixture" },
+				};
+			},
+		});
+
+		await expect(reflector.reflect(input)).rejects.toMatchObject({
+			reasonCode: "reflection-invalid-response",
+		});
 	});
 });

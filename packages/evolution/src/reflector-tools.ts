@@ -254,6 +254,14 @@ export class ReflectorToolRegistry {
 		return this.#toolCalls;
 	}
 
+	get slices(): readonly EvidenceSlice[] {
+		return [...this.#slices.values()];
+	}
+
+	get budgetExhausted(): boolean {
+		return this.#toolCalls > this.#maxToolCalls;
+	}
+
 	revoke(): void {
 		this.#revoked = true;
 	}
@@ -411,6 +419,7 @@ export class ReflectorToolRegistry {
 			if (this.#toolCalls > this.#maxToolCalls) {
 				throw new ReflectorToolDeniedError("tool-budget-exhausted", "Reflector tool-call budget is exhausted");
 			}
+			this.#assertAllowedFields(name, input);
 			const result = this.#run(name, input);
 			resolvedEvidenceIds = result.evidenceIds;
 			resultDigest = computeEvolutionContentDigest(result.output);
@@ -428,6 +437,24 @@ export class ReflectorToolRegistry {
 				resultDigest,
 				denialCode,
 			});
+		}
+	}
+
+	#assertAllowedFields(name: ReflectorToolName, input: JsonObject): void {
+		const allowed: Readonly<Record<ReflectorToolName, ReadonlySet<string>>> = {
+			list_documents: new Set(),
+			inspect_outline: new Set(["documentId"]),
+			search_evidence: new Set(["query", "limit"]),
+			read_slice: new Set(["documentId", "startOrdinal", "endOrdinal"]),
+			inspect_adjacent: new Set(["sliceId", "before", "after"]),
+			refine_slice: new Set(["sliceId", "startOrdinal", "endOrdinal", "splitAtOrdinal"]),
+		};
+		const unexpected = Object.keys(input).find((field) => !allowed[name].has(field));
+		if (unexpected !== undefined) {
+			throw new ReflectorToolDeniedError(
+				"invalid-request",
+				`Reflector tool "${name}" does not permit field "${unexpected}"`,
+			);
 		}
 	}
 
@@ -516,7 +543,17 @@ export class ReflectorToolRegistry {
 					}
 					const left = this.#createSlice(document, slice.cursor.startOrdinal, split - 1);
 					const right = this.#createSlice(document, split, slice.cursor.endOrdinal);
-					return { output: { slices: jsonClone([left, right]) }, evidenceIds: slice.evidenceIds };
+					const linkedLeft = {
+						...left,
+						continuation: { previousSliceId: slice.continuation.previousSliceId, nextSliceId: right.sliceId },
+					};
+					const linkedRight = {
+						...right,
+						continuation: { previousSliceId: left.sliceId, nextSliceId: slice.continuation.nextSliceId },
+					};
+					this.#slices.set(linkedLeft.sliceId, linkedLeft);
+					this.#slices.set(linkedRight.sliceId, linkedRight);
+					return { output: { slices: jsonClone([linkedLeft, linkedRight]) }, evidenceIds: slice.evidenceIds };
 				}
 				const start = integerField(input, "startOrdinal", slice.cursor.startOrdinal);
 				const end = integerField(input, "endOrdinal", slice.cursor.endOrdinal);

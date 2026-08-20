@@ -38,6 +38,7 @@ const DEFAULT_MAX_REFLECTION_ROUNDS = 5;
 const DEFAULT_MAX_RESPONSE_RETRIES = 2;
 const DEFAULT_MAX_UNITS_PER_SLICE = 64;
 const DEFAULT_SYNTHESIS_FANOUT = 8;
+const DEFAULT_MAX_CURATOR_LESSONS = 50;
 
 const LESSON_KINDS = new Set<LessonKind>([
 	"counterexample",
@@ -62,6 +63,7 @@ export interface RecursiveReflectorOptions {
 	readonly maxResponseRetries?: number;
 	readonly maxUnitsPerSlice?: number;
 	readonly synthesisFanout?: number;
+	readonly maxCuratorLessons?: number;
 }
 
 export interface RecursiveReflectorDependencies {
@@ -202,6 +204,7 @@ export class RecursiveReflector implements Reflector {
 	readonly #maxResponseRetries: number;
 	readonly #maxUnitsPerSlice: number;
 	readonly #synthesisFanout: number;
+	readonly #maxCuratorLessons: number;
 
 	constructor(dependencies: RecursiveReflectorDependencies, options: RecursiveReflectorOptions = {}) {
 		this.#dependencies = dependencies;
@@ -228,6 +231,12 @@ export class RecursiveReflector implements Reflector {
 			"maxUnitsPerSlice",
 		);
 		this.#synthesisFanout = positiveInteger(options.synthesisFanout, DEFAULT_SYNTHESIS_FANOUT, "synthesisFanout");
+		if (this.#synthesisFanout < 2) throw new Error("synthesisFanout must be at least 2");
+		this.#maxCuratorLessons = positiveInteger(
+			options.maxCuratorLessons,
+			DEFAULT_MAX_CURATOR_LESSONS,
+			"maxCuratorLessons",
+		);
 	}
 
 	async reflect(input: ReflectorInput): Promise<ReflectionResult> {
@@ -272,6 +281,7 @@ export class RecursiveReflector implements Reflector {
 							retryable: false,
 						});
 					}
+					return modelCalls;
 				});
 				completed.set(plan.nodeId, result);
 			}
@@ -283,7 +293,7 @@ export class RecursiveReflector implements Reflector {
 			const finalLessonIds = rootPlans.flatMap(
 				(plan) => completed.get(plan.nodeId)?.lessons.map((lesson) => lesson.lessonId) ?? [],
 			);
-			const coverage = this.#coverage(input, producer, slices, rootPlans, finalLessonIds);
+			const coverage = this.#coverage(input, producer, registry.slices, rootPlans, finalLessonIds);
 			return { nodes, lessons, coverage, finalLessonIds };
 		} finally {
 			registry.revoke();
@@ -395,20 +405,21 @@ export class RecursiveReflector implements Reflector {
 		registry: ReflectorToolRegistry,
 		plan: NodePlan,
 		completed: ReadonlyMap<string, CompletedNode>,
-		chargeModelCall: () => void,
+		chargeModelCall: () => number,
 	): Promise<CompletedNode> {
 		const permittedEvidenceIds = new Set(plan.evidenceIds);
 		let response: EvolutionModelResponse | null = null;
 		let parsed: ReturnType<typeof parseResponse> | null = null;
 		let lastError: unknown = null;
+		let lastFailure: "model" | "response" | null = null;
 		for (let round = 1; round <= this.#maxReflectionRounds && parsed?.complete !== true; round += 1) {
 			for (let attempt = 1; attempt <= this.#maxResponseRetries; attempt += 1) {
-				chargeModelCall();
+				const modelCallSequence = chargeModelCall();
 				const modelCallId = stableId("reflector-model-call", {
 					idempotencyKey: input.idempotencyKey,
 					nodeId: plan.nodeId,
 					round,
-					attempt,
+					modelCallSequence,
 				});
 				await this.#dependencies.ledger.append(
 					this.#modelCallEvent(input, producer, modelCallId, plan.nodeId, round, attempt),
@@ -418,27 +429,49 @@ export class RecursiveReflector implements Reflector {
 						input.model.execute({
 							stage: "reflector",
 							promptVersion: input.input.promptVersions.reflector,
-							idempotencyKey: `${input.idempotencyKey}:${plan.nodeId}:${round}:${attempt}`,
+							idempotencyKey: `${input.idempotencyKey}:${plan.nodeId}:${round}`,
 							input: this.#modelInput(input, plan, completed, round),
 							tools: registry.tools,
 							signal: input.signal,
 						}),
 						input.signal,
 					);
-					parsed = parseResponse(response, permittedEvidenceIds);
-					lastError = null;
-					break;
 				} catch (error) {
 					input.signal?.throwIfAborted();
 					lastError = error;
+					lastFailure = "model";
+					continue;
+				}
+				if (registry.budgetExhausted) {
+					throw new EvolutionExecutionError("Reflector tool-call budget is exhausted", {
+						reasonCode: "reflection-budget-exhausted",
+						retryable: false,
+					});
+				}
+				try {
+					parsed = parseResponse(response, permittedEvidenceIds);
+					if (plan.parentNodeId === null && parsed.lessons.length > this.#maxCuratorLessons) {
+						throw new Error(`Final lesson set exceeds the Curator limit of ${this.#maxCuratorLessons}`);
+					}
+					lastError = null;
+					lastFailure = null;
+					break;
+				} catch (error) {
+					lastError = error;
+					lastFailure = "response";
 				}
 			}
 			if (lastError !== null) {
-				throw new EvolutionExecutionError(`Reflector returned an invalid response for "${plan.nodeId}"`, {
-					reasonCode: "reflection-invalid-response",
-					retryable: false,
-					cause: lastError,
-				});
+				throw new EvolutionExecutionError(
+					lastFailure === "model"
+						? `Reflector model call failed for "${plan.nodeId}"`
+						: `Reflector returned an invalid response for "${plan.nodeId}"`,
+					{
+						reasonCode: lastFailure === "model" ? "model-call-failed" : "reflection-invalid-response",
+						retryable: lastFailure === "model",
+						cause: lastError,
+					},
+				);
 			}
 		}
 		if (response === null || parsed === null || !parsed.complete) {
@@ -459,7 +492,13 @@ export class RecursiveReflector implements Reflector {
 			const lessonId = stableId("lesson", { nodeId: plan.nodeId, index, draft });
 			const content = { lessonId, ...draft, scope: input.input.metadata.scope };
 			return {
-				metadata: this.#metadata(input, modelProducer, lessonId, plan.evidenceIds, content),
+				metadata: this.#metadata(
+					input,
+					modelProducer,
+					lessonId,
+					unique([...draft.evidenceIds, ...draft.counterevidenceIds]),
+					content,
+				),
 				lessonId,
 				kind: draft.kind,
 				summary: draft.summary,
@@ -651,7 +690,7 @@ export class RecursiveReflector implements Reflector {
 			attempt,
 			reflectionRound,
 			manifestDigest: input.corpus.metadata.contentDigest,
-			idempotencyKey: `${input.idempotencyKey}:${nodeId}:${reflectionRound}:${attempt}`,
+			idempotencyKey: `${input.idempotencyKey}:${nodeId}:${reflectionRound}`,
 			budgetCharge: { modelCalls: 1, reflectionRounds: attempt === 1 ? 1 : 0, toolCalls: 0 },
 		};
 		return {
