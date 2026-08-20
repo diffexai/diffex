@@ -118,6 +118,18 @@ export {
 	type EvolutionJobCreationBlockReason,
 	type EvolutionJobCreationResult,
 } from "./control-plane.ts";
+export {
+	EvolutionControlService,
+	type EvolutionControlServiceDependencies,
+	type EvolutionHarnessControl,
+	type EvolutionJobDetail,
+	type EvolutionJobSummary,
+	type EvolutionOverview,
+	EvolutionProgressBus,
+	type EvolutionProposalDetail,
+	type EvolutionRollbackAction,
+	type EvolutionStartResult,
+} from "./control-service.ts";
 export { DisabledPreReflectionStage } from "./counter.ts";
 export {
 	CURATOR_OUTPUT_SCHEMA,

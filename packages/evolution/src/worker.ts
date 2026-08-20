@@ -54,7 +54,7 @@ export class PollingEvolutionWorkSource implements EvolutionWorkSource {
 			.filter(
 				(job) =>
 					job.resolution === null &&
-					(job.outcome === "active" || job.outcome === "interrupted" || job.outcome === "retryable-failed") &&
+					job.outcome === "active" &&
 					job.stage !== "completed" &&
 					(job.retryNotBefore === null || Date.parse(job.retryNotBefore) <= nowMs),
 			)

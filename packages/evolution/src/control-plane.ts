@@ -830,6 +830,73 @@ export class EvolutionControlPlane implements EvolutionJobRunner {
 		});
 	}
 
+	async requestResume(jobId: string): Promise<EvolutionJob> {
+		const initial = await this.#dependencies.jobs.load(jobId);
+		if (initial === null) throw new Error(`Unknown evolution job "${jobId}"`);
+		if (initial.outcome !== "interrupted" && initial.outcome !== "retryable-failed") {
+			throw new Error(`Evolution job "${jobId}" cannot be resumed from outcome "${initial.outcome}"`);
+		}
+		if (initial.resolution !== null) throw new Error(`Resolved evolution job "${jobId}" cannot be resumed`);
+		const ownerId = this.#dependencies.ids.nextId("lease-owner");
+		const initialLease = await this.#acquireScopeLease(initial.metadata.scope, ownerId);
+		if (initialLease === null) throw new Error(`Evolution scope for job "${jobId}" is already leased`);
+		return this.#withHeartbeat(initialLease, undefined, async (lease) => {
+			const current = await this.#dependencies.jobs.load(jobId);
+			if (current === null) throw new Error(`Unknown evolution job "${jobId}"`);
+			if (current.outcome !== "interrupted" && current.outcome !== "retryable-failed") {
+				throw new Error(`Evolution job "${jobId}" cannot be resumed from outcome "${current.outcome}"`);
+			}
+			const resumed = this.#withJobRevision(current, {
+				outcome: "active",
+				reasonCode: null,
+				failureMessage: null,
+				terminalAt: null,
+				retryNotBefore: null,
+				attempt: current.attempt + 1,
+			});
+			await this.#dependencies.jobs.save(resumed, current.revision, lease());
+			await this.#dependencies.events.emit({
+				jobId: resumed.jobId,
+				emittedAt: resumed.updatedAt,
+				type: "started",
+				stage: resumed.stage,
+			});
+			return resumed;
+		});
+	}
+
+	async interruptJob(jobId: string): Promise<EvolutionJob> {
+		const initial = await this.#dependencies.jobs.load(jobId);
+		if (initial === null) throw new Error(`Unknown evolution job "${jobId}"`);
+		if (initial.outcome !== "active") {
+			throw new Error(`Evolution job "${jobId}" cannot be interrupted from outcome "${initial.outcome}"`);
+		}
+		const ownerId = this.#dependencies.ids.nextId("lease-owner");
+		const initialLease = await this.#acquireScopeLease(initial.metadata.scope, ownerId);
+		if (initialLease === null) throw new Error(`Evolution scope for job "${jobId}" is already leased`);
+		return this.#withHeartbeat(initialLease, undefined, async (lease) => {
+			const current = await this.#dependencies.jobs.load(jobId);
+			if (current === null) throw new Error(`Unknown evolution job "${jobId}"`);
+			if (current.outcome !== "active") return current;
+			const interrupted = this.#withJobRevision(current, {
+				outcome: "interrupted",
+				reasonCode: "cancelled-by-operator",
+				failureMessage: "Evolution job was cancelled by the operator",
+				terminalAt: this.#dependencies.clock.now(),
+				retryNotBefore: null,
+			});
+			await this.#dependencies.jobs.save(interrupted, current.revision, lease());
+			await this.#syncLedger(interrupted);
+			await this.#dependencies.events.emit({
+				jobId: interrupted.jobId,
+				emittedAt: interrupted.updatedAt,
+				type: "failed",
+				stage: interrupted.stage,
+			});
+			return interrupted;
+		});
+	}
+
 	async #resolveJob(
 		jobId: string,
 		kind: EvolutionJobResolution["kind"],

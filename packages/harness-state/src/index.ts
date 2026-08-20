@@ -116,6 +116,19 @@ export interface HarnessAdvanceConflict {
 
 export type HarnessAdvanceResult = HarnessAdvanceSuccess | HarnessAdvanceConflict;
 
+export interface HarnessSelectSuccess {
+	readonly status: "selected";
+	readonly bundle: HarnessVersionBundle;
+}
+
+export interface HarnessSelectConflict {
+	readonly status: "conflict";
+	readonly expectedCurrent: HarnessVersion;
+	readonly actualCurrent: HarnessVersion;
+}
+
+export type HarnessSelectResult = HarnessSelectSuccess | HarnessSelectConflict;
+
 export interface HarnessVersionInput {
 	readonly schemaVersion: 1;
 	readonly base: HarnessVersion | null;
@@ -682,6 +695,23 @@ export class HarnessStateStore {
 			}
 			if (current?.version !== version) await this.#replacePointer(version);
 			return bundle;
+		});
+	}
+
+	async selectVersionIfCurrent(
+		version: HarnessVersion,
+		expectedCurrent: HarnessVersion,
+	): Promise<HarnessSelectResult> {
+		return this.#withLock(async () => {
+			await this.#ensureDirectories();
+			if (!Check(HarnessVersionSchema, expectedCurrent)) throw new Error("Invalid expected current harness version");
+			const current = await this.#loadPointer();
+			if (current.version !== expectedCurrent) {
+				return { status: "conflict", expectedCurrent, actualCurrent: current.version };
+			}
+			const bundle = await this.#loadVersion(version);
+			if (current.version !== version) await this.#replacePointer(version);
+			return { status: "selected", bundle };
 		});
 	}
 

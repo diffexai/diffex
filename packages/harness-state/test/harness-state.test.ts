@@ -426,6 +426,26 @@ describe("HarnessStateStore", () => {
 		expect((await readdir(join(agentDir, "harness-state"))).filter((name) => name.includes(".tmp"))).toEqual([]);
 	});
 
+	test("selects a rollback target only from the expected current revision", async () => {
+		const agentDir = await createTemporaryRoot();
+		const store = new HarnessStateStore(agentDir);
+		const root = await store.initialize();
+		const first = await store.advance({ memory: "first" }, root.manifest.version);
+		if (first.status !== "advanced") throw new Error("Expected first advance to succeed");
+		const second = await store.advance({ memory: "second" }, first.bundle.manifest.version);
+		if (second.status !== "advanced") throw new Error("Expected second advance to succeed");
+
+		expect(await store.selectVersionIfCurrent(first.bundle.manifest.version, root.manifest.version)).toEqual({
+			status: "conflict",
+			expectedCurrent: root.manifest.version,
+			actualCurrent: second.bundle.manifest.version,
+		});
+		expect(await store.selectVersionIfCurrent(first.bundle.manifest.version, second.bundle.manifest.version)).toEqual(
+			{ status: "selected", bundle: first.bundle },
+		);
+		expect(await store.loadCurrent()).toEqual(first.bundle);
+	});
+
 	test("leaves invalid current state untouched", async () => {
 		const agentDir = await createTemporaryRoot();
 		const store = new HarnessStateStore(agentDir);

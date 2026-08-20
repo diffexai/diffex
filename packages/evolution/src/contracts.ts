@@ -615,6 +615,7 @@ export type EvolutionJobOutcome =
 
 export type EvolutionFailureReasonCode =
 	| "artifact-corrupt"
+	| "cancelled-by-operator"
 	| "harness-base-conflict"
 	| "lease-lost"
 	| "model-call-failed"

@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { EvolutionBackgroundWorker, type EvolutionWorkSource } from "../src/index.ts";
+import {
+	EvolutionBackgroundWorker,
+	type EvolutionJob,
+	type EvolutionJobStore,
+	type EvolutionWorkSource,
+	PollingEvolutionWorkSource,
+} from "../src/index.ts";
 
 function waitForAbort(signal: AbortSignal): Promise<void> {
 	if (signal.aborted) return Promise.reject(signal.reason);
@@ -9,6 +15,34 @@ function waitForAbort(signal: AbortSignal): Promise<void> {
 }
 
 describe("evolution background worker", () => {
+	it("does not resume interrupted work without an explicit request", async () => {
+		const jobs: EvolutionJobStore = {
+			async create() {},
+			async save() {},
+			async load() {
+				return null;
+			},
+			async list() {
+				return [
+					{
+						jobId: "job-interrupted",
+						outcome: "interrupted",
+						resolution: null,
+						stage: "reflecting",
+						retryNotBefore: null,
+						trigger: "manual",
+						createdAt: "2026-08-19T12:00:00.000Z",
+					} as EvolutionJob,
+				];
+			},
+		};
+		const source = new PollingEvolutionWorkSource(jobs, {
+			now: () => "2026-08-20T12:00:00.000Z",
+		});
+
+		expect(await source.nextRunnableJob("2026-08-20T12:00:00.000Z")).toBeNull();
+	});
+
 	it("admits durable work only after the interactive priority gate", async () => {
 		const order: string[] = [];
 		const worker = new EvolutionBackgroundWorker({
