@@ -622,6 +622,97 @@ describe("subagent parent messaging foundation", () => {
 			).toHaveLength(1);
 		});
 
+		it("coordinates a same-child retry after explicit consumption releases the prior batch", async () => {
+			const { harness, session } = await setupRoot();
+			const firstWaitStarted = deferred<void>();
+			const retryStarted = deferred<void>();
+			const releaseRetry = deferred<void>();
+			const secondWaitStarted = deferred<void>();
+			const lifecycle: Array<{ type: "start" | "end"; cancelled?: boolean }> = [];
+			session.subscribe((event) => {
+				if (event.type === "subagent_wait_start") {
+					lifecycle.push({ type: "start" });
+					if (lifecycle.filter((entry) => entry.type === "start").length === 1) firstWaitStarted.resolve();
+					else secondWaitStarted.resolve();
+				}
+				if (event.type === "subagent_wait_end") lifecycle.push({ type: "end", cancelled: event.cancelled });
+			});
+			let rootProviderCalls = 0;
+			harness.setResponses(
+				Array.from({ length: 16 }, () => async (context: Context) => {
+					if (hasTool(context, "escalate_to_parent")) {
+						if (getLastUserText(context).includes("retry with correction")) {
+							retryStarted.resolve();
+							await releaseRetry.promise;
+							return fauxAssistantMessage("retry result");
+						}
+						if (!hasToolResult(context, "escalate_to_parent")) {
+							await firstWaitStarted.promise;
+							return fauxAssistantMessage(
+								fauxToolCall("escalate_to_parent", { message: "retry after inspection" }),
+								{ stopReason: "toolUse" },
+							);
+						}
+						return fauxAssistantMessage("failed attempt", {
+							stopReason: "error",
+							errorMessage: "needs correction",
+						});
+					}
+
+					rootProviderCalls += 1;
+					const serialized = JSON.stringify(context.messages);
+					if (rootProviderCalls === 1) {
+						return fauxAssistantMessage(
+							fauxToolCall("spawn_agent", { name: "worker", task: "attempt delegated work" }),
+							{ stopReason: "toolUse" },
+						);
+					}
+					if (rootProviderCalls === 2) return fauxAssistantMessage("wait for first attempt");
+					if (rootProviderCalls === 3) {
+						expect(serialized).toContain("retry after inspection");
+						return fauxAssistantMessage(
+							fauxToolCall("agents", { timeout_ms: 1_000, targets: ["worker"], until: "all" }),
+							{ stopReason: "toolUse" },
+						);
+					}
+					if (rootProviderCalls === 4) {
+						return fauxAssistantMessage(
+							fauxToolCall("agent_action", {
+								target: "worker",
+								action: "message",
+								message: "retry with correction",
+								wake: true,
+							}),
+							{ stopReason: "toolUse" },
+						);
+					}
+					if (rootProviderCalls === 5) return fauxAssistantMessage("wait for retry");
+					if (serialized.includes("subagent_batch_results")) return fauxAssistantMessage("retry synthesis");
+					return fauxAssistantMessage("unexpected continuation");
+				}),
+			);
+
+			const prompt = session.prompt("consume failed result and coordinate its retry");
+			await retryStarted.promise;
+			await secondWaitStarted.promise;
+			releaseRetry.resolve();
+			await prompt;
+
+			expect(rootProviderCalls).toBe(6);
+			expect(lifecycle).toEqual([
+				{ type: "start" },
+				{ type: "end", cancelled: false },
+				{ type: "start" },
+				{ type: "end", cancelled: false },
+			]);
+			expect(session.getLastAssistantText()).toBe("retry synthesis");
+			expect(
+				session.messages.filter(
+					(message) => message.role === "custom" && message.customType === "subagent_results",
+				),
+			).toHaveLength(1);
+		});
+
 		it("gives cancellation precedence over an admitted escalation continuation", async () => {
 			const { harness, session } = await setupRoot();
 			const accept = (session as unknown as EscalationAcceptor)._acceptSubagentEscalation.bind(session);
