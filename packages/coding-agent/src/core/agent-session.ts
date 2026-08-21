@@ -133,6 +133,7 @@ import { type BuildSystemPromptOptions, buildSystemPrompt } from "./system-promp
 import { type CodingAgentTelemetrySpan, startCodingAgentSpan } from "./telemetry.ts";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts";
 import { createAllToolDefinitions } from "./tools/index.ts";
+import { SUBAGENT_ESCALATION_TRUST_GUIDELINE } from "./tools/subagents.ts";
 import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapper.ts";
 import { addUsageToTotals, createUsageTotals } from "./usage-totals.ts";
 
@@ -1451,6 +1452,9 @@ export class AgentSession {
 			if (toolGuidelines) {
 				promptGuidelines.push(...toolGuidelines);
 			}
+		}
+		if (this._subagentController) {
+			promptGuidelines.push(SUBAGENT_ESCALATION_TRUST_GUIDELINE);
 		}
 
 		const loaderSystemPrompt = this._resourceLoader.getSystemPrompt();
