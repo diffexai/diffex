@@ -48,13 +48,24 @@ interface IndexedDocument {
 	readonly evidence: readonly MaterializedEvidence[];
 }
 
-class ReflectorToolDeniedError extends Error {
-	readonly code: string;
+export type ReflectorToolDenialCode =
+	| "document-not-permitted"
+	| "evidence-not-permitted"
+	| "invalid-range"
+	| "invalid-request"
+	| "registry-revoked"
+	| "slice-not-permitted"
+	| "tool-budget-exhausted";
 
-	constructor(code: string, message: string) {
+export class ReflectorToolDeniedError extends Error {
+	readonly code: ReflectorToolDenialCode;
+	readonly recoverable: boolean;
+
+	constructor(code: ReflectorToolDenialCode, message: string) {
 		super(message);
 		this.name = "ReflectorToolDeniedError";
 		this.code = code;
+		this.recoverable = code !== "registry-revoked" && code !== "tool-budget-exhausted";
 	}
 }
 
@@ -186,11 +197,11 @@ export class ReflectorToolRegistry {
 	readonly #jobId: string;
 	readonly #manifestDigest: string;
 	readonly #documents = new Map<string, IndexedDocument>();
+	readonly #evidenceIds = new Set<string>();
 	readonly #slices = new Map<string, EvidenceSlice>();
 	readonly #maxToolCalls: number;
 	readonly #signal?: AbortSignal;
 	readonly #audit: (event: ReflectorToolAudit) => Promise<void>;
-	readonly #tools: readonly EvolutionModelTool[];
 	#revoked = false;
 	#toolCalls = 0;
 
@@ -242,12 +253,23 @@ export class ReflectorToolRegistry {
 				}
 			}
 			this.#documents.set(document.documentId, { descriptor: document, evidence: source.invocation.evidence });
+			for (const evidenceId of document.evidenceIds) this.#evidenceIds.add(evidenceId);
 		}
-		this.#tools = this.#createTools();
 	}
 
-	get tools(): readonly EvolutionModelTool[] {
-		return this.#tools;
+	toolsForEvidence(evidenceIds: readonly string[]): readonly EvolutionModelTool[] {
+		const permittedEvidenceIds = new Set(evidenceIds);
+		const unknownEvidenceId = evidenceIds.find((evidenceId) => !this.#evidenceIds.has(evidenceId));
+		if (unknownEvidenceId !== undefined) {
+			throw new EvolutionExecutionError(
+				`Reflection node cites evidence outside the corpus: "${unknownEvidenceId}"`,
+				{
+					reasonCode: "artifact-corrupt",
+					retryable: false,
+				},
+			);
+		}
+		return this.#createTools(permittedEvidenceIds);
 	}
 
 	get toolCalls(): number {
@@ -345,7 +367,7 @@ export class ReflectorToolRegistry {
 		return slice;
 	}
 
-	#createTools(): readonly EvolutionModelTool[] {
+	#createTools(permittedEvidenceIds: ReadonlySet<string>): readonly EvolutionModelTool[] {
 		const definitions: readonly [ReflectorToolName, string, JsonObject][] = [
 			["list_documents", "List immutable evidence documents.", toolSchema({})],
 			[
@@ -400,11 +422,15 @@ export class ReflectorToolRegistry {
 			name,
 			description,
 			inputSchema,
-			execute: (input) => this.#execute(name, input),
+			execute: (input) => this.#execute(name, input, permittedEvidenceIds),
 		}));
 	}
 
-	async #execute(name: ReflectorToolName, input: JsonObject): Promise<JsonObject> {
+	async #execute(
+		name: ReflectorToolName,
+		input: JsonObject,
+		permittedEvidenceIds: ReadonlySet<string>,
+	): Promise<JsonObject> {
 		this.#toolCalls += 1;
 		const toolCallId = `reflector-tool-${this.#toolCalls}`;
 		const requestedSliceId = typeof input.sliceId === "string" ? input.sliceId : null;
@@ -420,7 +446,7 @@ export class ReflectorToolRegistry {
 				throw new ReflectorToolDeniedError("tool-budget-exhausted", "Reflector tool-call budget is exhausted");
 			}
 			this.#assertAllowedFields(name, input);
-			const result = this.#run(name, input);
+			const result = this.#run(name, input, permittedEvidenceIds);
 			resolvedEvidenceIds = result.evidenceIds;
 			resultDigest = computeEvolutionContentDigest(result.output);
 			return result.output;
@@ -461,34 +487,46 @@ export class ReflectorToolRegistry {
 	#run(
 		name: ReflectorToolName,
 		input: JsonObject,
+		permittedEvidenceIds: ReadonlySet<string>,
 	): { readonly output: JsonObject; readonly evidenceIds: readonly string[] } {
 		switch (name) {
 			case "list_documents":
 				return {
 					output: {
 						manifestDigest: this.#manifestDigest,
-						documents: [...this.#documents.values()].map(({ descriptor }) => ({
-							documentId: descriptor.documentId,
-							materializationId: descriptor.materializationId,
-							traceId: descriptor.traceId,
-							integrity: descriptor.integrity,
-							terminationStatus: descriptor.terminationStatus,
-							unitCount: descriptor.semanticUnits.length,
-							contentDigest: descriptor.contentDigest,
-						})),
+						documents: [...this.#documents.values()]
+							.map(({ descriptor }) => ({
+								descriptor,
+								permittedUnitCount: descriptor.semanticUnits.filter((unit) =>
+									unit.evidenceIds.some((evidenceId) => permittedEvidenceIds.has(evidenceId)),
+								).length,
+							}))
+							.filter(({ permittedUnitCount }) => permittedUnitCount > 0)
+							.map(({ descriptor, permittedUnitCount }) => ({
+								documentId: descriptor.documentId,
+								materializationId: descriptor.materializationId,
+								traceId: descriptor.traceId,
+								integrity: descriptor.integrity,
+								terminationStatus: descriptor.terminationStatus,
+								unitCount: permittedUnitCount,
+								contentDigest: descriptor.contentDigest,
+							})),
 					},
 					evidenceIds: [],
 				};
 			case "inspect_outline": {
-				const document = this.#document(stringField(input, "documentId"));
+				const document = this.#document(stringField(input, "documentId"), permittedEvidenceIds);
+				const semanticUnits = document.descriptor.semanticUnits.filter((unit) =>
+					unit.evidenceIds.some((evidenceId) => permittedEvidenceIds.has(evidenceId)),
+				);
 				return {
 					output: {
 						documentId: document.descriptor.documentId,
 						diagnostics: jsonClone(document.descriptor.diagnostics),
 						orderingAmbiguity: document.descriptor.orderingAmbiguity,
-						semanticUnits: jsonClone(document.descriptor.semanticUnits),
+						semanticUnits: jsonClone(semanticUnits),
 					},
-					evidenceIds: document.descriptor.evidenceIds,
+					evidenceIds: semanticUnits.flatMap((unit) => unit.evidenceIds),
 				};
 			}
 			case "search_evidence": {
@@ -497,6 +535,7 @@ export class ReflectorToolRegistry {
 				const matches: JsonObject[] = [];
 				for (const document of this.#documents.values()) {
 					for (const [ordinal, evidence] of document.evidence.entries()) {
+						if (!permittedEvidenceIds.has(evidence.evidenceId)) continue;
 						if (serializeEvolutionValue(evidence).toLocaleLowerCase().includes(query)) {
 							matches.push({
 								documentId: document.descriptor.documentId,
@@ -515,26 +554,35 @@ export class ReflectorToolRegistry {
 				};
 			}
 			case "read_slice": {
-				const document = this.#document(stringField(input, "documentId"));
-				const slice = this.#createSlice(
-					document,
-					integerField(input, "startOrdinal"),
-					integerField(input, "endOrdinal"),
-				);
+				const document = this.#document(stringField(input, "documentId"), permittedEvidenceIds);
+				const startOrdinal = integerField(input, "startOrdinal");
+				const endOrdinal = integerField(input, "endOrdinal");
+				this.#assertRangePermitted(document, startOrdinal, endOrdinal, permittedEvidenceIds);
+				const slice = this.#createSlice(document, startOrdinal, endOrdinal);
 				return this.#sliceOutput(document, slice);
 			}
 			case "inspect_adjacent": {
-				const slice = this.#slice(stringField(input, "sliceId"));
-				const document = this.#document(slice.cursor.documentId);
+				const slice = this.#slice(stringField(input, "sliceId"), permittedEvidenceIds);
+				const document = this.#document(slice.cursor.documentId, permittedEvidenceIds);
 				const before = Math.min(integerField(input, "before", 1), 20);
 				const after = Math.min(integerField(input, "after", 1), 20);
-				const start = Math.max(0, slice.cursor.startOrdinal - before);
-				const end = Math.min(document.evidence.length - 1, slice.cursor.endOrdinal + after);
+				let start = slice.cursor.startOrdinal;
+				let end = slice.cursor.endOrdinal;
+				for (let count = 0; count < before && start > 0; count += 1) {
+					const adjacent = document.evidence[start - 1];
+					if (adjacent === undefined || !permittedEvidenceIds.has(adjacent.evidenceId)) break;
+					start -= 1;
+				}
+				for (let count = 0; count < after && end < document.evidence.length - 1; count += 1) {
+					const adjacent = document.evidence[end + 1];
+					if (adjacent === undefined || !permittedEvidenceIds.has(adjacent.evidenceId)) break;
+					end += 1;
+				}
 				return this.#sliceOutput(document, this.#createSlice(document, start, end));
 			}
 			case "refine_slice": {
-				const slice = this.#slice(stringField(input, "sliceId"));
-				const document = this.#document(slice.cursor.documentId);
+				const slice = this.#slice(stringField(input, "sliceId"), permittedEvidenceIds);
+				const document = this.#document(slice.cursor.documentId, permittedEvidenceIds);
 				const splitAt = input.splitAtOrdinal;
 				if (splitAt !== undefined) {
 					const split = integerField(input, "splitAtOrdinal");
@@ -565,17 +613,45 @@ export class ReflectorToolRegistry {
 		}
 	}
 
-	#document(documentId: string): IndexedDocument {
+	#document(documentId: string, permittedEvidenceIds: ReadonlySet<string>): IndexedDocument {
 		const document = this.#documents.get(documentId);
-		if (document === undefined) {
+		if (
+			document === undefined ||
+			!document.evidence.some((evidence) => permittedEvidenceIds.has(evidence.evidenceId))
+		) {
 			throw new ReflectorToolDeniedError("document-not-permitted", `Document "${documentId}" is not permitted`);
 		}
 		return document;
 	}
 
-	#slice(sliceId: string): EvidenceSlice {
+	#assertRangePermitted(
+		document: IndexedDocument,
+		startOrdinal: number,
+		endOrdinal: number,
+		permittedEvidenceIds: ReadonlySet<string>,
+	): void {
+		if (startOrdinal > endOrdinal || endOrdinal >= document.evidence.length) {
+			throw new ReflectorToolDeniedError("invalid-range", "Slice range is outside the document");
+		}
+		if (
+			document.evidence
+				.slice(startOrdinal, endOrdinal + 1)
+				.some((evidence) => !permittedEvidenceIds.has(evidence.evidenceId))
+		) {
+			throw new ReflectorToolDeniedError(
+				"evidence-not-permitted",
+				"Slice range is outside the current reflection node",
+			);
+		}
+	}
+
+	#slice(sliceId: string, permittedEvidenceIds: ReadonlySet<string>): EvidenceSlice {
 		const slice = this.#slices.get(sliceId);
-		if (slice === undefined || slice.manifestDigest !== this.#manifestDigest) {
+		if (
+			slice === undefined ||
+			slice.manifestDigest !== this.#manifestDigest ||
+			slice.evidenceIds.some((evidenceId) => !permittedEvidenceIds.has(evidenceId))
+		) {
 			throw new ReflectorToolDeniedError("slice-not-permitted", `Slice "${sliceId}" is not permitted`);
 		}
 		return slice;

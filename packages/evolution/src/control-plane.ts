@@ -27,6 +27,7 @@ import type {
 	EvolutionCursorStore,
 	EvolutionEventSink,
 	EvolutionEvidenceCatalog,
+	EvolutionFailureReporter,
 	EvolutionIdGenerator,
 	EvolutionJobCreationRequest,
 	EvolutionJobRunner,
@@ -86,6 +87,7 @@ export interface EvolutionControlPlaneDependencies {
 	readonly ledger: EvolutionLedger;
 	readonly events: EvolutionEventSink;
 	readonly evidence: EvolutionEvidenceCatalog;
+	readonly failures?: EvolutionFailureReporter;
 	readonly snapshots: EvolutionSnapshotSource;
 	readonly executor: EvolutionStageExecutor;
 }
@@ -717,6 +719,31 @@ export class EvolutionControlPlane implements EvolutionJobRunner {
 			type: "failed",
 			stage: failed.stage,
 		});
+		if (outcome !== "interrupted") {
+			const cause = error instanceof Error ? error.cause : undefined;
+			await this.#dependencies.failures?.record({
+				schemaVersion: 1,
+				jobId: failed.jobId,
+				trigger: failed.trigger,
+				stage: failed.stage,
+				outcome,
+				reasonCode,
+				failedAt: now,
+				attempt: failed.attempt,
+				error: {
+					name: error instanceof Error ? error.name : "Error",
+					message: error instanceof Error ? error.message : String(error),
+					stack: error instanceof Error ? (error.stack ?? null) : null,
+					cause:
+						cause instanceof Error
+							? { name: cause.name, message: cause.message, stack: cause.stack ?? null }
+							: cause === undefined
+								? null
+								: { name: "Error", message: String(cause), stack: null },
+					diagnostics: executionError?.diagnostics ?? null,
+				},
+			});
+		}
 		return failed;
 	}
 

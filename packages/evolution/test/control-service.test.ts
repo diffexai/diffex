@@ -246,7 +246,7 @@ describe("evolution control service", () => {
 			observability: { sliceCoverage: null },
 		});
 		const failedOverview = await fixture.service.overview();
-		expect(failedOverview).toMatchObject({ activeJob: null, lastEvolutionAt: expect.any(String) });
+		expect(failedOverview).toMatchObject({ activeJob: null, lastEvolutionAt: null });
 		expect(failedOverview.cooldownRemainingMs).toBe(0);
 
 		const second = await fixture.service.startManual();
@@ -262,6 +262,7 @@ describe("evolution control service", () => {
 
 		await fixture.controlPlane.runJob(started.job.jobId);
 		const detail = await fixture.service.getJob(started.job.jobId);
+		expect((await fixture.service.overview()).lastEvolutionAt).toBe(detail.terminalAt);
 
 		expect(detail.observability).toEqual({
 			queueAgeMs: expect.any(Number),

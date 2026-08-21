@@ -12,6 +12,8 @@ import {
 	type EvolutionArtifactProducer,
 	EvolutionControlPlane,
 	type EvolutionEventSink,
+	EvolutionExecutionError,
+	type EvolutionFailureRecord,
 	type EvolutionJobStage,
 	type EvolutionMemoryProposal,
 	EvolutionPipeline,
@@ -185,6 +187,7 @@ interface ControlPlaneFixture<TExecutor extends EvolutionStageExecutor = Evoluti
 	readonly controlPlane: EvolutionControlPlane;
 	readonly events: EvolutionProgressEvent[];
 	readonly executor: TExecutor;
+	readonly failureRecords: EvolutionFailureRecord[];
 	readonly persistence: FileEvolutionPersistence;
 }
 
@@ -201,6 +204,7 @@ async function controlPlaneFixture<TExecutor extends EvolutionStageExecutor>(
 	const persistence = new FileEvolutionPersistence(root);
 	const clock = new AdvancingClock();
 	const events: EvolutionProgressEvent[] = [];
+	const failureRecords: EvolutionFailureRecord[] = [];
 	const eventSink: EvolutionEventSink = {
 		emit(event) {
 			events.push(event);
@@ -216,6 +220,11 @@ async function controlPlaneFixture<TExecutor extends EvolutionStageExecutor>(
 			cursors: persistence,
 			leases: persistence,
 			ledger: persistence,
+			failures: {
+				async record(failure) {
+					failureRecords.push(failure);
+				},
+			},
 			events: eventSink,
 			evidence: {
 				async highWaterCursor() {
@@ -236,7 +245,7 @@ async function controlPlaneFixture<TExecutor extends EvolutionStageExecutor>(
 		},
 		{ leaseTtlMs: 5_000, heartbeatIntervalMs: 1_000, retryBaseDelayMs: 0, retryMaxDelayMs: 0 },
 	);
-	return { clock, controlPlane, events, executor, persistence };
+	return { clock, controlPlane, events, executor, failureRecords, persistence };
 }
 
 async function createManualJob(fixture: ControlPlaneFixture) {
@@ -254,6 +263,9 @@ describe("durable evolution control plane", () => {
 		await expect(fixture.controlPlane.runJob(created.jobId)).rejects.toThrow(`simulated crash during ${crashStage}`);
 		const failed = await fixture.persistence.load(created.jobId);
 		expect(failed).toMatchObject({ outcome: "retryable-failed", stage: crashStage });
+		expect(fixture.failureRecords).toMatchObject([
+			{ jobId: created.jobId, stage: crashStage, outcome: "retryable-failed", reasonCode: "stage-failed" },
+		]);
 
 		fixture.clock.advance(1);
 		const completed = await fixture.controlPlane.runJob(created.jobId);
@@ -271,6 +283,34 @@ describe("durable evolution control plane", () => {
 		expect(
 			(await fixture.persistence.read(created.jobId)).filter((event) => event.type === "job-completed"),
 		).toHaveLength(1);
+	});
+
+	it("reports terminal failures with structured diagnostics", async () => {
+		const fixture = await controlPlaneFixture({
+			async execute() {
+				throw new EvolutionExecutionError("invalid reflector output", {
+					reasonCode: "reflection-invalid-response",
+					retryable: false,
+					diagnostics: { rejectedResponses: [{ validationError: "lessons must be an array" }] },
+				});
+			},
+		});
+		const created = await createManualJob(fixture);
+
+		await expect(fixture.controlPlane.runJob(created.jobId)).rejects.toThrow("invalid reflector output");
+
+		expect(fixture.failureRecords).toMatchObject([
+			{
+				jobId: created.jobId,
+				stage: "snapshotting",
+				outcome: "terminal-failed",
+				reasonCode: "reflection-invalid-response",
+				error: {
+					message: "invalid reflector output",
+					diagnostics: { rejectedResponses: [{ validationError: "lessons must be an array" }] },
+				},
+			},
+		]);
 	});
 
 	it("advances the cursor for a validated no-op without writing or activating", async () => {

@@ -157,6 +157,8 @@ export type {
 	EvolutionCursorStore,
 	EvolutionEventSink,
 	EvolutionEvidenceCatalog,
+	EvolutionFailureRecord,
+	EvolutionFailureReporter,
 	EvolutionIdGenerator,
 	EvolutionJobCreationRequest,
 	EvolutionJobRunner,
@@ -213,6 +215,8 @@ export {
 } from "./reflector.ts";
 export {
 	type ReflectorToolAudit,
+	type ReflectorToolDenialCode,
+	ReflectorToolDeniedError,
 	type ReflectorToolName,
 	ReflectorToolRegistry,
 	type ReflectorToolRegistryOptions,

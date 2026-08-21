@@ -306,7 +306,7 @@ export class EvolutionControlService {
 				.at(-1) ?? null;
 		const lastEvolutionAt =
 			jobs
-				.filter((job) => job.terminalAt !== null)
+				.filter((job) => job.outcome === "completed" && job.terminalAt !== null)
 				.map((job) => job.terminalAt as string)
 				.sort()
 				.at(-1) ?? null;

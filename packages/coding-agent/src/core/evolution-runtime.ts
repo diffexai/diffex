@@ -36,6 +36,7 @@ import {
 	type JsonObject,
 	PollingEvolutionWorkSource,
 	RecursiveReflector,
+	ReflectorToolDeniedError,
 	StructuredDeltaCurator,
 	type SuccessfulMaterialization,
 } from "#evolution";
@@ -43,12 +44,14 @@ import { materializeJsonlInvocation } from "#harness-trace";
 import { VERSION } from "../config.ts";
 import type { AgentSession } from "./agent-session.ts";
 import type { AgentSessionLifecycleObserver, AgentSessionOperationSettlement } from "./agent-session-lifecycle.ts";
+import { FileEvolutionFailureReporter } from "./evolution-failure-reporter.ts";
 import { INVOCATION_TRACE_LOCK_STALE_MS, type InvocationTrace } from "./invocation-trace.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
 import type { ResourceLoader } from "./resource-loader.ts";
 
 const execFileAsync = promisify(execFile);
 const EVOLUTION_DIRECTORY_NAME = "evolution";
+const EVOLUTION_FAILURE_DIRECTORY_NAME = "evolution-failures";
 const TRACE_DIRECTORY_NAME = "traces";
 const TRACE_EVIDENCE_INDEX_NAME = ".evolution-index.json";
 const TRACE_EVIDENCE_INDEX_VERSION = 1;
@@ -124,6 +127,15 @@ function parseJsonObject(text: string): JsonObject | null {
 	} catch {
 		return null;
 	}
+}
+
+function evolutionToolError(error: unknown): JsonObject {
+	return {
+		error: {
+			name: error instanceof Error ? error.name : "Error",
+			message: error instanceof Error ? error.message : String(error),
+		},
+	};
 }
 
 function abortableDelay(delayMs: number, signal: AbortSignal): Promise<void> {
@@ -223,24 +235,46 @@ export class CodingAgentEvolutionModelExecutor implements EvolutionModelExecutor
 			const calls = assistant.content.filter((part) => part.type === "toolCall");
 			for (const call of calls) {
 				if (call.name === RESPONSE_TOOL_NAME) {
-					return { output: call.arguments as JsonObject, model: { provider: model.provider, model: model.id } };
+					return {
+						output: call.arguments as JsonObject,
+						submissionMethod: "response-tool",
+						model: { provider: model.provider, model: model.id },
+					};
 				}
 				const tool = evolutionTools.find((candidate) => candidate.name === call.name);
-				const output = tool
-					? await tool.execute(call.arguments as JsonObject)
-					: { error: `Unknown evolution tool ${call.name}` };
+				let output: JsonObject;
+				let isError = false;
+				if (tool === undefined) {
+					output = evolutionToolError(new Error(`Unknown evolution tool ${call.name}`));
+					isError = true;
+				} else {
+					try {
+						output = await tool.execute(call.arguments as JsonObject);
+					} catch (error) {
+						request.signal?.throwIfAborted();
+						if (error instanceof ReflectorToolDeniedError && !error.recoverable) throw error;
+						output = evolutionToolError(error);
+						isError = true;
+					}
+				}
 				messages.push({
 					role: "toolResult",
 					toolCallId: call.id,
 					toolName: call.name,
 					content: [{ type: "text", text: JSON.stringify(output) }],
-					isError: tool === undefined,
+					isError,
 					timestamp: Date.now(),
 				});
 			}
 			if (calls.length === 0) {
 				const parsed = parseJsonObject(contentText(assistant.content));
-				if (parsed) return { output: parsed, model: { provider: model.provider, model: model.id } };
+				if (parsed) {
+					return {
+						output: parsed,
+						submissionMethod: "json-text",
+						model: { provider: model.provider, model: model.id },
+					};
+				}
 				messages.push({
 					role: "user",
 					content: `Return the result through ${RESPONSE_TOOL_NAME}.`,
@@ -518,6 +552,7 @@ export async function createCodingAgentEvolutionRuntime(
 	const scope = GLOBAL_EVOLUTION_SCOPE;
 	const storageRoot = join(options.agentDir, EVOLUTION_DIRECTORY_NAME);
 	const persistence = new FileEvolutionPersistence(storageRoot);
+	const failures = new FileEvolutionFailureReporter(join(options.agentDir, EVOLUTION_FAILURE_DIRECTORY_NAME));
 	const progress = new EvolutionProgressBus();
 	const clock = { now: () => new Date().toISOString() };
 	const priority = new SessionPriorityGate(options.session);
@@ -553,6 +588,7 @@ export async function createCodingAgentEvolutionRuntime(
 		cursors: persistence,
 		leases: persistence,
 		ledger: persistence,
+		failures,
 		events: progress,
 		evidence,
 		snapshots: new CodingAgentSnapshotSource({

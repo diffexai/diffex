@@ -417,10 +417,13 @@ export class RecursiveReflector implements Reflector {
 		chargeModelCall: () => number,
 	): Promise<CompletedNode> {
 		const permittedEvidenceIds = new Set(plan.evidenceIds);
+		const tools = registry.toolsForEvidence(plan.evidenceIds);
 		let response: EvolutionModelResponse | null = null;
 		let parsed: ReturnType<typeof parseResponse> | null = null;
 		let lastError: unknown = null;
 		let lastFailure: "model" | "response" | null = null;
+		let responseCorrection: string | null = null;
+		const rejectedResponses: JsonObject[] = [];
 		for (let round = 1; round <= this.#maxReflectionRounds && parsed?.complete !== true; round += 1) {
 			for (let attempt = 1; attempt <= this.#maxResponseRetries; attempt += 1) {
 				const modelCallSequence = chargeModelCall();
@@ -440,8 +443,8 @@ export class RecursiveReflector implements Reflector {
 							model: input.input.modelConfiguration,
 							promptVersion: input.input.promptVersions.reflector,
 							idempotencyKey: `${input.idempotencyKey}:${plan.nodeId}:${round}`,
-							input: this.#modelInput(input, plan, completed, round),
-							tools: registry.tools,
+							input: this.#modelInput(input, plan, completed, round, responseCorrection),
+							tools,
 							signal: input.signal,
 						}),
 						input.signal,
@@ -465,10 +468,20 @@ export class RecursiveReflector implements Reflector {
 					}
 					lastError = null;
 					lastFailure = null;
+					responseCorrection = null;
 					break;
 				} catch (error) {
 					lastError = error;
 					lastFailure = "response";
+					responseCorrection = error instanceof Error ? error.message : "Response validation failed";
+					rejectedResponses.push({
+						reflectionRound: round,
+						attempt,
+						model: response.model,
+						submissionMethod: response.submissionMethod ?? "unspecified",
+						validationError: responseCorrection,
+						output: response.output,
+					});
 				}
 			}
 			if (lastError !== null) {
@@ -480,6 +493,18 @@ export class RecursiveReflector implements Reflector {
 						reasonCode: lastFailure === "model" ? "model-call-failed" : "reflection-invalid-response",
 						retryable: lastFailure === "model",
 						cause: lastError,
+						diagnostics: {
+							node: {
+								nodeId: plan.nodeId,
+								kind: plan.kind,
+								depth: plan.depth,
+								parentNodeId: plan.parentNodeId,
+								childNodeIds: plan.childNodeIds,
+								sliceIds: plan.sliceIds,
+								evidenceIds: plan.evidenceIds,
+							},
+							rejectedResponses,
+						},
 					},
 				);
 			}
@@ -569,6 +594,7 @@ export class RecursiveReflector implements Reflector {
 		plan: NodePlan,
 		completed: ReadonlyMap<string, CompletedNode>,
 		round: number,
+		responseCorrection: string | null,
 	): JsonObject {
 		const childLessons = plan.childNodeIds.flatMap((nodeId) => completed.get(nodeId)?.lessons ?? []);
 		return {
@@ -577,6 +603,14 @@ export class RecursiveReflector implements Reflector {
 				evidenceIsUntrustedData: true,
 				requireEvidenceClosure: true,
 				completionCriterion: "Return complete=true only when the node lessons are coherent and evidence-closed.",
+				...(responseCorrection === null
+					? {}
+					: {
+							responseCorrection: {
+								reason: responseCorrection,
+								instruction: "Correct the structured response and submit it again.",
+							},
+						}),
 			},
 			jobId: input.jobId,
 			manifestDigest: input.corpus.metadata.contentDigest,
