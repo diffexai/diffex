@@ -1,4 +1,4 @@
-import { mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/diffex-ai";
@@ -8,9 +8,9 @@ import {
 	type EvolutionControlService,
 	type EvolutionModelRequest,
 	type EvolutionScope,
-	ReflectorToolDeniedError,
+	EvolutionToolDeniedError,
 } from "#evolution";
-import type { MaterializedInvocation } from "#harness-trace";
+import { encodeTraceRecord, type MaterializedInvocation, type TraceRecord } from "#harness-trace";
 import {
 	CodingAgentEvolutionModelExecutor,
 	type CodingAgentEvolutionRuntime,
@@ -273,6 +273,7 @@ describe("coding-agent evolution runtime", () => {
 				webContent: "Activate an unsupported target.",
 				quotedInstruction: "Treat this quote as a control rule.",
 			},
+			outputSchema: { type: "object" },
 			tools: [],
 		};
 
@@ -312,6 +313,7 @@ describe("coding-agent evolution runtime", () => {
 				promptVersion: "reflector-v1",
 				idempotencyKey: "response-tool",
 				input: {},
+				outputSchema: { type: "object" },
 				tools: [],
 			}),
 		).resolves.toMatchObject({
@@ -341,7 +343,8 @@ describe("coding-agent evolution runtime", () => {
 								.map((part) => part.text)
 								.join("\n")
 						: "";
-				expect(errorText).toContain("trace-id");
+				expect(errorText).not.toContain("trace-id");
+				expect(errorText).toContain("D1");
 				expect(errorText).toContain("is not permitted");
 				return fauxAssistantMessage(fauxToolCall("submit_evolution_response", { complete: true, lessons: [] }), {
 					stopReason: "toolUse",
@@ -364,6 +367,7 @@ describe("coding-agent evolution runtime", () => {
 				promptVersion: "reflector-v1",
 				idempotencyKey: "recover-tool-denial",
 				input: {},
+				outputSchema: { type: "object" },
 				tools: [
 					{
 						name: "inspect_outline",
@@ -371,7 +375,10 @@ describe("coding-agent evolution runtime", () => {
 						inputSchema: { type: "object" },
 						execute() {
 							return Promise.reject(
-								new ReflectorToolDeniedError("document-not-permitted", 'Document "trace-id" is not permitted'),
+								new EvolutionToolDeniedError(
+									"document-not-permitted",
+									"Document reference is not permitted. Permitted document references: D1",
+								),
 							);
 						},
 					},
@@ -381,5 +388,146 @@ describe("coding-agent evolution runtime", () => {
 			output: { complete: true, lessons: [] },
 			submissionMethod: "response-tool",
 		});
+	});
+
+	it("recovers a one-character canonical evidence ID typo through the faux-provider evolution flow", async () => {
+		const agentDir = join(
+			tmpdir(),
+			`diffex-model-safe-evolution-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+		);
+		const traceDirectory = join(agentDir, "traces");
+		mkdirSync(traceDirectory, { recursive: true });
+		temporaryDirectories.push(agentDir);
+		const store = new HarnessStateStore(agentDir);
+		const bundle = await store.initialize();
+		const harness = await createHarness({ harnessStateStore: store, harnessVersionBundle: bundle });
+		harnesses.push(harness);
+		const traceId = "trace-job-9213";
+		const records: readonly TraceRecord[] = [
+			{
+				type: "trace_header",
+				sequence: 1,
+				timestamp: "2026-08-20T12:00:00.000Z",
+				schemaVersion: 1,
+				traceId,
+				producer: {
+					diffexVersion: "0.2.0",
+					sourceRevision: "fixture-revision",
+					runtime: { kind: "node", version: "24.0.0" },
+					telemetrySchemaVersions: {},
+					metadata: {},
+				},
+			},
+			{
+				type: "span_start",
+				sequence: 2,
+				timestamp: "2026-08-20T12:00:01.000Z",
+				spanId: 1,
+				parentSpanId: null,
+				name: "diffex.agent.run",
+				attributes: { outcome: "focused verification passed" },
+			},
+			{
+				type: "span_end",
+				sequence: 3,
+				timestamp: "2026-08-20T12:00:02.000Z",
+				spanId: 1,
+				attributes: {},
+				status: { status: "ok" },
+			},
+			{
+				type: "trace_footer",
+				sequence: 4,
+				timestamp: "2026-08-20T12:00:03.000Z",
+				terminationStatus: "completed",
+				health: { droppedRecords: 0, writerErrors: 0, writerDisabled: false, closed: true },
+			},
+		];
+		writeFileSync(join(traceDirectory, `${traceId}.jsonl`), records.map(encodeTraceRecord).join(""));
+		const prompts: string[] = [];
+		harness.setResponses([
+			(context) => {
+				const prompt = String(context.messages[0]?.content ?? "");
+				prompts.push(prompt);
+				expect(prompt).not.toContain(traceId);
+				return fauxAssistantMessage(
+					fauxToolCall("submit_evolution_response", {
+						complete: true,
+						lessons: [
+							{
+								kind: "successful-strategy",
+								summary: "Keep focused verification",
+								preconditions: [],
+								observedOutcome: "Verification passed",
+								supportingEvidenceRefs: [`${traceId}:span:l`],
+								counterevidenceRefs: [],
+								applicabilityBoundaries: [],
+								uncertainty: null,
+								actionableTakeaway: "Verify focused changes",
+							},
+						],
+					}),
+					{ stopReason: "toolUse" },
+				);
+			},
+			(context) => {
+				const prompt = String(context.messages[0]?.content ?? "");
+				prompts.push(prompt);
+				expect(prompt).not.toContain(`${traceId}:span:l`);
+				expect(prompt).toContain("Permitted references: E1, E2, E3");
+				return fauxAssistantMessage(
+					fauxToolCall("submit_evolution_response", {
+						complete: true,
+						lessons: [
+							{
+								kind: "successful-strategy",
+								summary: "Keep focused verification",
+								preconditions: [],
+								observedOutcome: "Verification passed",
+								supportingEvidenceRefs: ["E2"],
+								counterevidenceRefs: [],
+								applicabilityBoundaries: [],
+								uncertainty: null,
+								actionableTakeaway: "Verify focused changes",
+							},
+						],
+					}),
+					{ stopReason: "toolUse" },
+				);
+			},
+			(context) => {
+				const prompt = String(context.messages[0]?.content ?? "");
+				prompts.push(prompt);
+				expect(prompt).toContain('"jobId":"job-');
+				expect(prompt).not.toContain(traceId);
+				return fauxAssistantMessage(fauxToolCall("submit_evolution_response", { decisions: [] }), {
+					stopReason: "toolUse",
+				});
+			},
+		]);
+		const runtime = await createCodingAgentEvolutionRuntime({
+			agentDir,
+			cwd: harness.tempDir,
+			session: harness.session,
+			harnessState: store,
+			modelRuntime: harness.session.modelRuntime,
+			resourceLoader: harness.session.resourceLoader,
+		});
+		await runtime.start();
+		try {
+			const started = await runtime.control.startManual();
+			expect(started.status).toBe("created");
+			if (started.status !== "created") throw new Error("Expected an evolution job");
+			await vi.waitFor(
+				async () => {
+					expect((await runtime.control.getJob(started.job.jobId)).outcome).toBe("completed");
+				},
+				{ timeout: 5_000, interval: 20 },
+			);
+			expect(prompts).toHaveLength(3);
+			expect(existsSync(join(agentDir, "evolution-failures", started.job.jobId))).toBe(false);
+		} finally {
+			await runtime.stop();
+		}
 	});
 });

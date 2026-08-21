@@ -69,6 +69,7 @@ export interface ReflectorModelRequest {
 	readonly promptVersion: string;
 	readonly idempotencyKey: string;
 	readonly input: JsonObject;
+	readonly outputSchema: JsonObject;
 	readonly tools: readonly EvolutionModelTool[];
 	readonly signal?: AbortSignal;
 }
@@ -80,7 +81,7 @@ export interface CuratorModelRequest {
 	readonly idempotencyKey: string;
 	readonly input: JsonObject;
 	readonly outputSchema: JsonObject;
-	readonly tools?: never;
+	readonly tools: readonly EvolutionModelTool[];
 	readonly signal?: AbortSignal;
 }
 
@@ -160,6 +161,7 @@ export interface Reflector {
 }
 
 export interface CuratorInput {
+	readonly jobId: string;
 	readonly input: EvolutionInputSnapshot;
 	readonly corpus: EvidenceCorpusManifest;
 	readonly instructions: InstructionSnapshot;

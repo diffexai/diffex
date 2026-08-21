@@ -62,6 +62,11 @@ interface ParsedEvolutionMemory {
 	readonly blocks: readonly MarkdownMemoryBlock[];
 }
 
+export interface EvolutionMemoryBlock {
+	readonly content: string;
+	readonly section: string | null;
+}
+
 interface StoredEvolutionMemoryCatalog {
 	readonly schemaVersion: typeof CATALOG_SCHEMA_VERSION;
 	readonly harnessVersion: HarnessVersion;
@@ -230,6 +235,10 @@ function parseEvolutionMemory(memory: string): ParsedEvolutionMemory {
 		});
 	}
 	return { headings, blocks };
+}
+
+export function parseEvolutionMemoryBlocks(memory: string): readonly EvolutionMemoryBlock[] {
+	return parseEvolutionMemory(memory).blocks.map((block) => ({ content: block.content, section: block.section }));
 }
 
 function validateParsedMemory(memory: string, parsed: ParsedEvolutionMemory, maxMemoryBytes: number): void {

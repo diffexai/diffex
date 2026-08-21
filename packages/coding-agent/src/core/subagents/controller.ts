@@ -964,6 +964,14 @@ export class SubagentController {
 
 	async #message(name: string, message: string, wake: boolean, coordinated: boolean): Promise<SubagentActionResult> {
 		const record = this.#getRecordForAction(name);
+		while (record.status === "queued" && record.session) {
+			const snapshot = this.snapshot();
+			if (record.status !== "queued") break;
+			const wait = await this.waitForChange(snapshot.revision, { timeoutMs: MAX_TIMER_MS });
+			if (wait.reason === "disposed" || wait.reason === "reset") {
+				throw wait.reason === "disposed" ? this.#closedError() : this.#resetError();
+			}
+		}
 		while (record.status === "running" && record.session?.isIdle) {
 			await record.run;
 			this.#assertOpen();
@@ -1111,13 +1119,22 @@ export class SubagentController {
 			}
 
 			runController.signal.throwIfAborted();
-			this.markRunning(record.name);
-			unsubscribe = session.subscribe((event) => {
+			const activeSession = session;
+			let running = false;
+			unsubscribe = activeSession.subscribe((event) => {
+				if (event.type === "agent_start" && !running) {
+					running = true;
+					if (runController.signal.aborted) {
+						void activeSession.abort().catch(() => {});
+					} else {
+						this.markRunning(record.name);
+					}
+				}
 				if (event.type === "message_end" && event.message.role === "assistant") {
 					assistantMessages.push(event.message);
 				}
 			});
-			await session.prompt(prompt);
+			await activeSession.prompt(prompt);
 			if (this.#closed) return;
 
 			const terminalMessage = assistantMessages.at(-1);

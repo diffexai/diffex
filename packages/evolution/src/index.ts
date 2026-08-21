@@ -12,6 +12,7 @@ export {
 	type CounterReportTrend,
 	type CounterSignal,
 	type CounterSignalSource,
+	type CuratorToolCallLedgerEvent,
 	EVOLUTION_MEMORY_ITEM_SCHEMA_VERSION,
 	EVOLUTION_SCHEMA_VERSION,
 	type EvidenceCorpusDiagnostic,
@@ -134,13 +135,22 @@ export {
 } from "./control-service.ts";
 export { DisabledPreReflectionStage } from "./counter.ts";
 export {
-	CURATOR_OUTPUT_SCHEMA,
+	createCuratorOutputSchema,
 	StructuredDeltaCurator,
 	type StructuredDeltaCuratorDependencies,
 	type StructuredDeltaCuratorOptions,
 } from "./curator.ts";
-export { EvolutionExecutionError } from "./errors.ts";
-export { EvolutionMemoryWriter, type EvolutionMemoryWriterOptions } from "./evolution-memory-writer.ts";
+export {
+	EvolutionExecutionError,
+	type EvolutionToolDenialCode,
+	EvolutionToolDeniedError,
+} from "./errors.ts";
+export {
+	type EvolutionMemoryBlock,
+	EvolutionMemoryWriter,
+	type EvolutionMemoryWriterOptions,
+	parseEvolutionMemoryBlocks,
+} from "./evolution-memory-writer.ts";
 export {
 	EvolutionStorageCorruptionError,
 	FileEvolutionPersistence,
@@ -215,8 +225,6 @@ export {
 } from "./reflector.ts";
 export {
 	type ReflectorToolAudit,
-	type ReflectorToolDenialCode,
-	ReflectorToolDeniedError,
 	type ReflectorToolName,
 	ReflectorToolRegistry,
 	type ReflectorToolRegistryOptions,

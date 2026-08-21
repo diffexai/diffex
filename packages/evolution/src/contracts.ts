@@ -785,11 +785,28 @@ export interface ReflectorToolCallLedgerEvent extends EvolutionLedgerEventBase {
 	readonly toolName: string;
 	readonly manifestDigest: string;
 	readonly requestDigest: string;
-	readonly requestedSliceId: string | null;
+	readonly requestedDocumentRef: string | null;
+	readonly requestedSliceRef: string | null;
+	readonly resolvedDocumentIds: readonly string[];
 	readonly resolvedEvidenceIds: readonly string[];
+	readonly resolvedLessonIds: readonly string[];
+	readonly resolvedSliceIds: readonly string[];
 	readonly resultDigest: string | null;
 	readonly denialCode: string | null;
 	readonly budgetCharge: ReflectorBudgetCharge;
+}
+
+export interface CuratorToolCallLedgerEvent extends EvolutionLedgerEventBase {
+	readonly type: "curator-tool-call";
+	readonly toolCallId: string;
+	readonly toolName: string;
+	readonly requestDigest: string;
+	readonly requestedReferences: readonly string[];
+	readonly resolvedInstructionPaths: readonly string[];
+	readonly resolvedLessonIds: readonly string[];
+	readonly resolvedMemoryItemIds: readonly string[];
+	readonly resultDigest: string | null;
+	readonly denialCode: string | null;
 }
 
 export interface ReflectorModelCallLedgerEvent extends EvolutionLedgerEventBase {
@@ -821,5 +838,6 @@ export type EvolutionLedgerEvent =
 	| JobFailedLedgerEvent
 	| ProposalRolledBackLedgerEvent
 	| ReflectionNodeCheckpointedLedgerEvent
+	| CuratorToolCallLedgerEvent
 	| ReflectorModelCallLedgerEvent
 	| ReflectorToolCallLedgerEvent;

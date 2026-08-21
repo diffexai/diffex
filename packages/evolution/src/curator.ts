@@ -2,6 +2,7 @@ import type { HarnessVersion } from "@earendil-works/diffex-harness-state";
 import type { MaterializedEvidence, MaterializedInvocation } from "@earendil-works/diffex-harness-trace";
 import type {
 	ApplicableInstructionReference,
+	CuratorToolCallLedgerEvent,
 	DeferredEvolutionProposal,
 	EvolutionArtifactProducer,
 	EvolutionMemoryAddDelta,
@@ -18,16 +19,13 @@ import type {
 	InstructionStrengthening,
 	InstructionStrengtheningKind,
 	JsonObject,
-	JsonValue,
 	Lesson,
 } from "./contracts.ts";
+import { type CuratorToolAudit, CuratorToolRegistry } from "./curator-tools.ts";
 import { EvolutionExecutionError } from "./errors.ts";
-import type { Curator, CuratorInput, EvolutionModelResponse } from "./ports.ts";
-import {
-	computeEvolutionContentDigest,
-	createEvolutionArtifactMetadata,
-	serializeEvolutionValue,
-} from "./provenance.ts";
+import { EvolutionModelReferenceError, referenceArray } from "./model-references.ts";
+import type { Curator, CuratorInput, EvolutionLedger, EvolutionModelResponse } from "./ports.ts";
+import { computeEvolutionContentDigest, createEvolutionArtifactMetadata } from "./provenance.ts";
 
 const DEFAULT_MAX_RESPONSE_ATTEMPTS = 2;
 const PROPOSAL_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
@@ -44,212 +42,199 @@ const RELATIONSHIPS = new Set<InstructionRelationshipClassification>([
 	"strengthens",
 ]);
 
-export const CURATOR_OUTPUT_SCHEMA = {
-	$defs: {
-		stringArray: {
-			type: "array",
-			items: { type: "string", minLength: 1 },
-		},
-		relationshipReference: {
-			oneOf: [
-				{
-					type: "object",
-					additionalProperties: false,
-					required: ["kind", "path", "locator"],
-					properties: {
-						kind: { const: "applicable-instruction" },
-						path: { type: "string", minLength: 1 },
-						locator: { type: "string", minLength: 1 },
-					},
-				},
-				{
-					type: "object",
-					additionalProperties: false,
-					required: ["kind", "memoryItemId", "locator"],
-					properties: {
-						kind: { const: "evolution-memory" },
-						memoryItemId: { type: ["string", "null"] },
-						locator: { type: "string", minLength: 1 },
-					},
-				},
-			],
-		},
-		relationship: {
-			type: "object",
-			additionalProperties: false,
-			required: ["classification", "relevantEntries", "strengthening"],
-			properties: {
-				classification: { enum: ["conflicts", "duplicate", "novel", "strengthens"] },
-				relevantEntries: {
-					type: "array",
-					items: { $ref: "#/$defs/relationshipReference" },
-				},
-				strengthening: {
-					oneOf: [
-						{ type: "null" },
-						{
-							type: "object",
-							additionalProperties: false,
-							required: ["kind", "description"],
-							properties: {
-								kind: { enum: ["applicability-boundary", "condition", "enforcement", "precision"] },
-								description: { type: "string", minLength: 1 },
-							},
+interface CuratorSchemaReferences {
+	readonly instructionRefs: readonly string[];
+	readonly lessonRefs: readonly string[];
+	readonly memoryRefs: readonly string[];
+}
+
+export function createCuratorOutputSchema(references: CuratorSchemaReferences): JsonObject {
+	const stringArray = { type: "array", uniqueItems: true, items: { type: "string", minLength: 1 } };
+	const referenceArraySchema = (values: readonly string[], minItems = 0): JsonObject => ({
+		type: "array",
+		minItems,
+		uniqueItems: true,
+		items: { type: "string", enum: values },
+	});
+	return {
+		$defs: {
+			strengthening: {
+				oneOf: [
+					{ type: "null" },
+					{
+						type: "object",
+						additionalProperties: false,
+						required: ["kind", "description"],
+						properties: {
+							kind: { enum: [...STRENGTHENING_KINDS] },
+							description: { type: "string", minLength: 1 },
 						},
-					],
-				},
-			},
-		},
-		target: {
-			oneOf: [
-				{
-					type: "object",
-					additionalProperties: false,
-					required: ["kind"],
-					properties: { kind: { const: "evolution-memory" } },
-				},
-				{
-					type: "object",
-					additionalProperties: false,
-					required: ["kind", "skillName"],
-					properties: {
-						kind: { const: "skill" },
-						skillName: { type: "string", minLength: 1 },
 					},
-				},
-				{
-					type: "object",
-					additionalProperties: false,
-					required: ["kind", "sourcePath"],
-					properties: {
-						kind: { const: "orchestration-source" },
-						sourcePath: { type: "string", minLength: 1 },
-					},
-				},
-			],
-		},
-		destination: {
-			type: "object",
-			additionalProperties: false,
-			required: ["section", "anchor"],
-			properties: {
-				section: { type: ["string", "null"] },
-				anchor: { type: ["string", "null"] },
+				],
 			},
-		},
-		addition: {
-			type: "object",
-			additionalProperties: false,
-			required: ["destination", "content", "intendedScope"],
-			properties: {
-				destination: { $ref: "#/$defs/destination" },
-				content: { type: "string", minLength: 1 },
-				intendedScope: { $ref: "#/$defs/stringArray" },
-			},
-		},
-		removal: {
-			type: "object",
-			additionalProperties: false,
-			required: ["memoryItemId", "reason"],
-			properties: {
-				memoryItemId: { type: "string", minLength: 1 },
-				reason: { type: "string", minLength: 1 },
-			},
-		},
-		exactDelta: {
-			oneOf: [
-				{
-					type: "object",
-					additionalProperties: false,
-					required: ["operation", "destination", "content", "intendedScope"],
-					properties: {
-						operation: { const: "ADD" },
-						destination: { $ref: "#/$defs/destination" },
-						content: { type: "string", minLength: 1 },
-						intendedScope: { $ref: "#/$defs/stringArray" },
-					},
-				},
-				{
-					type: "object",
-					additionalProperties: false,
-					required: ["operation", "memoryItemId", "reason"],
-					properties: {
-						operation: { const: "REMOVE" },
-						memoryItemId: { type: "string", minLength: 1 },
-						reason: { type: "string", minLength: 1 },
-					},
-				},
-				{
-					type: "object",
-					additionalProperties: false,
-					required: ["operation", "removal", "addition"],
-					properties: {
-						operation: { const: "REPLACE" },
-						removal: { $ref: "#/$defs/removal" },
-						addition: { $ref: "#/$defs/addition" },
-					},
-				},
-				{ type: "null" },
-			],
-		},
-		proposal: {
-			type: "object",
-			additionalProperties: false,
-			required: [
-				"target",
-				"action",
-				"summary",
-				"exactDelta",
-				"expectedBenefit",
-				"acceptanceCriterion",
-				"risk",
-				"rollbackDescription",
-				"curatorConfidence",
-				"uncertainty",
-				"counterexamples",
-				"conflictingDecisionKeys",
-				"finding",
-			],
-			properties: {
-				target: { $ref: "#/$defs/target" },
-				action: { enum: ["ADD", "DEFER", "REMOVE", "REPLACE"] },
-				summary: { type: "string", minLength: 1 },
-				exactDelta: { $ref: "#/$defs/exactDelta" },
-				expectedBenefit: { type: "string", minLength: 1 },
-				acceptanceCriterion: { type: "string", minLength: 1 },
-				risk: { type: "string", minLength: 1 },
-				rollbackDescription: { type: "string", minLength: 1 },
-				curatorConfidence: { type: "number", minimum: 0, maximum: 1 },
-				uncertainty: { type: ["string", "null"] },
-				counterexamples: { $ref: "#/$defs/stringArray" },
-				conflictingDecisionKeys: { $ref: "#/$defs/stringArray" },
-				finding: { type: ["string", "null"] },
-			},
-		},
-	},
-	type: "object",
-	additionalProperties: false,
-	required: ["decisions"],
-	properties: {
-		decisions: {
-			type: "array",
-			items: {
+			relationship: {
 				type: "object",
 				additionalProperties: false,
-				required: ["decisionKey", "lessonIds", "relationship", "proposal"],
+				required: ["classification", "instructionRefs", "memoryRefs", "strengthening"],
 				properties: {
-					decisionKey: { type: "string", minLength: 1 },
-					lessonIds: { type: "array", minItems: 1, items: { type: "string", minLength: 1 } },
-					relationship: { $ref: "#/$defs/relationship" },
-					proposal: { oneOf: [{ $ref: "#/$defs/proposal" }, { type: "null" }] },
+					classification: { enum: [...RELATIONSHIPS] },
+					instructionRefs: referenceArraySchema(references.instructionRefs),
+					memoryRefs: referenceArraySchema(["M0", ...references.memoryRefs]),
+					strengthening: { $ref: "#/$defs/strengthening" },
+				},
+			},
+			target: {
+				oneOf: [
+					{
+						type: "object",
+						additionalProperties: false,
+						required: ["kind"],
+						properties: { kind: { const: "evolution-memory" } },
+					},
+					{
+						type: "object",
+						additionalProperties: false,
+						required: ["kind", "skillName"],
+						properties: {
+							kind: { const: "skill" },
+							skillName: { type: "string", minLength: 1 },
+						},
+					},
+					{
+						type: "object",
+						additionalProperties: false,
+						required: ["kind", "sourcePath"],
+						properties: {
+							kind: { const: "orchestration-source" },
+							sourcePath: { type: "string", minLength: 1 },
+						},
+					},
+				],
+			},
+			destination: {
+				type: "object",
+				additionalProperties: false,
+				required: ["section", "anchor"],
+				properties: {
+					section: { type: ["string", "null"] },
+					anchor: { type: ["string", "null"] },
+				},
+			},
+			addition: {
+				type: "object",
+				additionalProperties: false,
+				required: ["destination", "content", "intendedScope"],
+				properties: {
+					destination: { $ref: "#/$defs/destination" },
+					content: { type: "string", minLength: 1 },
+					intendedScope: stringArray,
+				},
+			},
+			removal: {
+				type: "object",
+				additionalProperties: false,
+				required: ["memoryRef", "reason"],
+				properties: {
+					memoryRef: { type: "string", enum: references.memoryRefs },
+					reason: { type: "string", minLength: 1 },
+				},
+			},
+			exactDelta: {
+				oneOf: [
+					{
+						type: "object",
+						additionalProperties: false,
+						required: ["operation", "destination", "content", "intendedScope"],
+						properties: {
+							operation: { const: "ADD" },
+							destination: { $ref: "#/$defs/destination" },
+							content: { type: "string", minLength: 1 },
+							intendedScope: stringArray,
+						},
+					},
+					{
+						type: "object",
+						additionalProperties: false,
+						required: ["operation", "memoryRef", "reason"],
+						properties: {
+							operation: { const: "REMOVE" },
+							memoryRef: { type: "string", enum: references.memoryRefs },
+							reason: { type: "string", minLength: 1 },
+						},
+					},
+					{
+						type: "object",
+						additionalProperties: false,
+						required: ["operation", "removal", "addition"],
+						properties: {
+							operation: { const: "REPLACE" },
+							removal: { $ref: "#/$defs/removal" },
+							addition: { $ref: "#/$defs/addition" },
+						},
+					},
+					{ type: "null" },
+				],
+			},
+			proposal: {
+				type: "object",
+				additionalProperties: false,
+				required: [
+					"target",
+					"action",
+					"summary",
+					"exactDelta",
+					"expectedBenefit",
+					"acceptanceCriterion",
+					"risk",
+					"rollbackDescription",
+					"curatorConfidence",
+					"uncertainty",
+					"counterexamples",
+					"conflictingDecisionKeys",
+					"finding",
+				],
+				properties: {
+					target: { $ref: "#/$defs/target" },
+					action: { enum: ["ADD", "DEFER", "REMOVE", "REPLACE"] },
+					summary: { type: "string", minLength: 1 },
+					exactDelta: { $ref: "#/$defs/exactDelta" },
+					expectedBenefit: { type: "string", minLength: 1 },
+					acceptanceCriterion: { type: "string", minLength: 1 },
+					risk: { type: "string", minLength: 1 },
+					rollbackDescription: { type: "string", minLength: 1 },
+					curatorConfidence: { type: "number", minimum: 0, maximum: 1 },
+					uncertainty: { type: ["string", "null"] },
+					counterexamples: stringArray,
+					conflictingDecisionKeys: stringArray,
+					finding: { type: ["string", "null"] },
 				},
 			},
 		},
-	},
-} as const satisfies JsonObject;
+		type: "object",
+		additionalProperties: false,
+		required: ["decisions"],
+		properties: {
+			decisions: {
+				type: "array",
+				items: {
+					type: "object",
+					additionalProperties: false,
+					required: ["decisionKey", "lessonRefs", "relationship", "proposal"],
+					properties: {
+						decisionKey: { type: "string", minLength: 1 },
+						lessonRefs: referenceArraySchema(references.lessonRefs, 1),
+						relationship: { $ref: "#/$defs/relationship" },
+						proposal: { oneOf: [{ $ref: "#/$defs/proposal" }, { type: "null" }] },
+					},
+				},
+			},
+		},
+	};
+}
 
 export interface StructuredDeltaCuratorDependencies {
 	readonly version: string;
+	readonly ledger?: EvolutionLedger;
 }
 
 export interface StructuredDeltaCuratorOptions {
@@ -286,16 +271,12 @@ function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function unique(values: readonly string[]): string[] {
+function unique<T>(values: readonly T[]): T[] {
 	return [...new Set(values)];
 }
 
 function stableId(kind: string, value: unknown): string {
 	return `${kind}-${computeEvolutionContentDigest(value).slice("sha256:".length, "sha256:".length + 32)}`;
-}
-
-function jsonClone(value: unknown): JsonValue {
-	return JSON.parse(serializeEvolutionValue(value)) as JsonValue;
 }
 
 function assertOnlyFields(record: Readonly<Record<string, unknown>>, allowed: readonly string[], name: string): void {
@@ -322,9 +303,9 @@ function stringArray(value: unknown, name: string, allowEmpty = true): readonly 
 	if (!Array.isArray(value) || value.some((item) => typeof item !== "string" || item.length === 0)) {
 		throw new Error(`${name} must be an array of non-empty strings`);
 	}
-	const result = unique(value);
-	if (!allowEmpty && result.length === 0) throw new Error(`${name} must not be empty`);
-	return result;
+	if (new Set(value).size !== value.length) throw new Error(`${name} must not contain duplicates`);
+	if (!allowEmpty && value.length === 0) throw new Error(`${name} must not be empty`);
+	return value;
 }
 
 function confidence(value: unknown): number {
@@ -340,47 +321,6 @@ function positiveInteger(value: number | undefined, fallback: number, name: stri
 	return resolved;
 }
 
-function instructionReference(value: unknown, input: CuratorInput): ExistingInstructionReference {
-	if (!isRecord(value)) throw new Error("relationship reference must be an object");
-	const kind = value.kind;
-	if (kind === "applicable-instruction") {
-		assertOnlyFields(value, ["kind", "path", "locator"], "applicable instruction reference");
-		const path = requiredString(value, "path");
-		const document = input.instructions.documents.find((candidate) => candidate.path === path);
-		if (document === undefined) throw new Error(`Instruction reference uses unknown path "${path}"`);
-		const reference: ApplicableInstructionReference = {
-			kind,
-			path,
-			precedence: document.precedence,
-			contentDigest: document.contentDigest,
-			locator: requiredString(value, "locator"),
-		};
-		return reference;
-	}
-	if (kind === "evolution-memory") {
-		assertOnlyFields(value, ["kind", "memoryItemId", "locator"], "evolution memory reference");
-		const memoryItemId = value.memoryItemId;
-		if (memoryItemId !== null && (typeof memoryItemId !== "string" || memoryItemId.length === 0)) {
-			throw new Error("memoryItemId must be a non-empty string or null");
-		}
-		const item =
-			memoryItemId === null
-				? null
-				: input.input.harness.activeMemoryItems.find((candidate) => candidate.memoryItemId === memoryItemId);
-		if (memoryItemId !== null && item === undefined) {
-			throw new Error(`Evolution memory reference uses unknown item "${memoryItemId}"`);
-		}
-		const reference: EvolutionMemoryReference = {
-			kind,
-			memoryItemId,
-			contentDigest: item?.contentDigest ?? input.input.harness.memoryContentDigest,
-			locator: requiredString(value, "locator"),
-		};
-		return reference;
-	}
-	throw new Error(`Unsupported relationship reference kind "${String(kind)}"`);
-}
-
 function strengthening(value: unknown): InstructionStrengthening | null {
 	if (value === null) return null;
 	if (!isRecord(value)) throw new Error("strengthening must be an object or null");
@@ -394,14 +334,14 @@ function strengthening(value: unknown): InstructionStrengthening | null {
 
 function relationship(
 	value: unknown,
-	input: CuratorInput,
+	registry: CuratorToolRegistry,
 ): {
 	readonly classification: InstructionRelationshipClassification;
 	readonly relevantEntries: readonly ExistingInstructionReference[];
 	readonly strengthening: InstructionStrengthening | null;
 } {
 	if (!isRecord(value)) throw new Error("relationship must be an object");
-	assertOnlyFields(value, ["classification", "relevantEntries", "strengthening"], "relationship");
+	assertOnlyFields(value, ["classification", "instructionRefs", "memoryRefs", "strengthening"], "relationship");
 	const classification = value.classification;
 	if (
 		typeof classification !== "string" ||
@@ -409,8 +349,54 @@ function relationship(
 	) {
 		throw new Error(`Unsupported instruction relationship "${String(classification)}"`);
 	}
-	if (!Array.isArray(value.relevantEntries)) throw new Error("relevantEntries must be an array");
-	const relevantEntries = value.relevantEntries.map((entry) => instructionReference(entry, input));
+	const instructions = referenceArray(value.instructionRefs, "instructionRefs", registry.instructions);
+	if (!Array.isArray(value.memoryRefs) || value.memoryRefs.some((reference) => typeof reference !== "string")) {
+		throw new EvolutionModelReferenceError(
+			"memoryRefs",
+			[],
+			["M0", ...registry.memory.references],
+			"must be an array of references",
+		);
+	}
+	const memoryRefs = value.memoryRefs as readonly string[];
+	if (new Set(memoryRefs).size !== memoryRefs.length) {
+		throw new EvolutionModelReferenceError(
+			"memoryRefs",
+			memoryRefs,
+			["M0", ...registry.memory.references],
+			"contains duplicates",
+		);
+	}
+	const invalidMemoryRefs = memoryRefs.filter(
+		(reference) => reference !== "M0" && !registry.memory.references.includes(reference),
+	);
+	if (invalidMemoryRefs.length > 0) {
+		throw new EvolutionModelReferenceError(
+			"memoryRefs",
+			invalidMemoryRefs,
+			["M0", ...registry.memory.references],
+			"contains an unknown reference",
+		);
+	}
+	const relevantEntries: ExistingInstructionReference[] = instructions.map(
+		(document): ApplicableInstructionReference => ({
+			kind: "applicable-instruction",
+			path: document.path,
+			precedence: document.precedence,
+			contentDigest: document.contentDigest,
+			locator: document.path,
+		}),
+	);
+	for (const reference of memoryRefs) {
+		const binding = reference === "M0" ? null : registry.memory.resolve(reference, "memoryRefs");
+		const memoryReference: EvolutionMemoryReference = {
+			kind: "evolution-memory",
+			memoryItemId: binding?.item.memoryItemId ?? null,
+			contentDigest: binding?.item.contentDigest ?? registry.renderedMemoryDigest,
+			locator: binding?.block.content ?? "complete-memory",
+		};
+		relevantEntries.push(memoryReference);
+	}
 	const parsedStrengthening = strengthening(value.strengthening);
 	if (classification === "strengthens") {
 		if (relevantEntries.length === 0) throw new Error("A strengthening must cite an existing entry");
@@ -466,45 +452,47 @@ function addition(value: unknown, nested = false): EvolutionMemoryAddDelta {
 	};
 }
 
-function removal(value: unknown, input: CuratorInput, nested: boolean): EvolutionMemoryRemoveDelta {
+function removal(value: unknown, registry: CuratorToolRegistry, nested: boolean): EvolutionMemoryRemoveDelta {
 	if (!isRecord(value)) throw new Error("REMOVE exactDelta must be an object");
 	assertOnlyFields(
 		value,
-		nested ? ["memoryItemId", "reason"] : ["operation", "memoryItemId", "reason"],
+		nested ? ["memoryRef", "reason"] : ["operation", "memoryRef", "reason"],
 		"REMOVE exactDelta",
 	);
 	if (!nested && value.operation !== "REMOVE") throw new Error("REMOVE exactDelta operation must be REMOVE");
-	const memoryItemId = requiredString(value, "memoryItemId");
-	const item = input.input.harness.activeMemoryItems.find((candidate) => candidate.memoryItemId === memoryItemId);
-	if (item === undefined) throw new Error(`REMOVE uses unknown memory item "${memoryItemId}"`);
+	const reference = requiredString(value, "memoryRef");
+	const binding = registry.memory.resolve(reference, "memoryRef");
 	return {
 		operation: "REMOVE",
-		memoryItemId,
-		expectedContentDigest: item.contentDigest,
+		memoryItemId: binding.item.memoryItemId,
+		expectedContentDigest: binding.item.contentDigest,
 		reason: requiredString(value, "reason"),
 	};
 }
 
-function replacement(value: unknown, input: CuratorInput): EvolutionMemoryReplaceDelta {
+function replacement(value: unknown, registry: CuratorToolRegistry): EvolutionMemoryReplaceDelta {
 	if (!isRecord(value)) throw new Error("REPLACE exactDelta must be an object");
 	assertOnlyFields(value, ["operation", "removal", "addition"], "REPLACE exactDelta");
 	if (value.operation !== "REPLACE") throw new Error("REPLACE exactDelta operation must be REPLACE");
-	const parsedRemoval = removal(value.removal, input, true);
-	if (!isRecord(value.addition)) throw new Error("REPLACE addition must be an object");
+	const parsedRemoval = removal(value.removal, registry, true);
 	const parsedAddition = addition(value.addition, true);
 	const { operation: _removeOperation, ...removalDelta } = parsedRemoval;
 	const { operation: _addOperation, ...additionDelta } = parsedAddition;
 	return { operation: "REPLACE", removal: removalDelta, addition: additionDelta };
 }
 
-function delta(value: unknown, action: ProposalDraft["action"], input: CuratorInput): EvolutionMemoryDelta | null {
+function delta(
+	value: unknown,
+	action: ProposalDraft["action"],
+	registry: CuratorToolRegistry,
+): EvolutionMemoryDelta | null {
 	if (action === "DEFER") {
 		if (value !== null) throw new Error("Deferred proposals cannot include exactDelta");
 		return null;
 	}
 	if (action === "ADD") return addition(value);
-	if (action === "REMOVE") return removal(value, input, false);
-	return replacement(value, input);
+	if (action === "REMOVE") return removal(value, registry, false);
+	return replacement(value, registry);
 }
 
 function proposalDraft(
@@ -513,6 +501,7 @@ function proposalDraft(
 	lessonIds: readonly string[],
 	parsedRelationship: EvolutionProposalInstructionRelationship,
 	input: CuratorInput,
+	registry: CuratorToolRegistry,
 ): ProposalDraft {
 	if (!isRecord(value)) throw new Error("proposal must be an object");
 	assertOnlyFields(
@@ -547,9 +536,8 @@ function proposalDraft(
 	}
 	const finding = value.finding;
 	if (action === "DEFER") {
-		if (typeof finding !== "string" || finding.length === 0) {
+		if (typeof finding !== "string" || finding.length === 0)
 			throw new Error("Deferred proposals must include a finding");
-		}
 	} else if (finding !== null) {
 		throw new Error("Actionable proposal finding must be null");
 	}
@@ -560,7 +548,7 @@ function proposalDraft(
 		target: parsedTarget,
 		action,
 		summary: requiredString(value, "summary"),
-		exactDelta: delta(value.exactDelta, action, input),
+		exactDelta: delta(value.exactDelta, action, registry),
 		expectedBenefit: requiredString(value, "expectedBenefit"),
 		acceptanceCriterion: requiredString(value, "acceptanceCriterion"),
 		risk: requiredString(value, "risk"),
@@ -575,14 +563,13 @@ function proposalDraft(
 
 function finalLessons(input: CuratorInput): readonly Lesson[] {
 	const lessonsById = new Map(input.reflection.lessons.map((lesson) => [lesson.lessonId, lesson]));
-	const finalIds = unique(input.reflection.finalLessonIds);
-	if (finalIds.length !== input.reflection.finalLessonIds.length) {
+	if (new Set(input.reflection.finalLessonIds).size !== input.reflection.finalLessonIds.length) {
 		throw new EvolutionExecutionError("Final reflection lessons contain duplicate IDs", {
 			reasonCode: "artifact-corrupt",
 			retryable: false,
 		});
 	}
-	return finalIds.map((lessonId) => {
+	return input.reflection.finalLessonIds.map((lessonId) => {
 		const lesson = lessonsById.get(lessonId);
 		if (lesson === undefined) {
 			throw new EvolutionExecutionError(`Final reflection lesson "${lessonId}" is missing`, {
@@ -627,28 +614,38 @@ function evidenceIndex(input: CuratorInput): ReadonlyMap<string, EvidenceContext
 	return result;
 }
 
+function assertLessonEvidence(lessons: readonly Lesson[], index: ReadonlyMap<string, EvidenceContext>): void {
+	for (const lesson of lessons) {
+		for (const evidenceId of [...lesson.evidenceIds, ...lesson.counterevidenceIds]) {
+			if (!index.has(evidenceId)) {
+				throw new EvolutionExecutionError(`Final lesson "${lesson.lessonId}" cites unavailable evidence`, {
+					reasonCode: "artifact-corrupt",
+					retryable: false,
+					diagnostics: { lessonId: lesson.lessonId, evidenceId },
+				});
+			}
+		}
+	}
+}
+
 function parseDecisions(
 	response: EvolutionModelResponse,
 	input: CuratorInput,
-	lessons: readonly Lesson[],
+	registry: CuratorToolRegistry,
 ): readonly ProposalDraft[] {
 	assertOnlyFields(response.output, ["decisions"], "Curator response");
 	if (!Array.isArray(response.output.decisions)) throw new Error("Curator response decisions must be an array");
-	const permittedLessons = new Map(lessons.map((lesson) => [lesson.lessonId, lesson]));
 	const seenDecisionKeys = new Set<string>();
 	const drafts: ProposalDraft[] = [];
 	for (const value of response.output.decisions) {
 		if (!isRecord(value)) throw new Error("Curator decision must be an object");
-		assertOnlyFields(value, ["decisionKey", "lessonIds", "relationship", "proposal"], "Curator decision");
+		assertOnlyFields(value, ["decisionKey", "lessonRefs", "relationship", "proposal"], "Curator decision");
 		const decisionKey = requiredString(value, "decisionKey");
 		if (!PROPOSAL_ID_PATTERN.test(decisionKey)) throw new Error(`Invalid decision key "${decisionKey}"`);
 		if (seenDecisionKeys.has(decisionKey)) throw new Error(`Duplicate decision key "${decisionKey}"`);
 		seenDecisionKeys.add(decisionKey);
-		const lessonIds = stringArray(value.lessonIds, "lessonIds", false);
-		for (const lessonId of lessonIds) {
-			if (!permittedLessons.has(lessonId)) throw new Error(`Decision cites non-final lesson "${lessonId}"`);
-		}
-		const parsedRelationship = relationship(value.relationship, input);
+		const selectedLessons = referenceArray(value.lessonRefs, "lessonRefs", registry.lessons, false);
+		const parsedRelationship = relationship(value.relationship, registry);
 		if (parsedRelationship.classification === "duplicate" || parsedRelationship.classification === "conflicts") {
 			if (value.proposal !== null) {
 				throw new Error(`${parsedRelationship.classification} decisions must not contain a proposal`);
@@ -661,7 +658,16 @@ function parseDecisions(
 			relevantEntries: parsedRelationship.relevantEntries,
 			strengthening: parsedRelationship.strengthening,
 		};
-		drafts.push(proposalDraft(value.proposal, decisionKey, lessonIds, actionableRelationship, input));
+		drafts.push(
+			proposalDraft(
+				value.proposal,
+				decisionKey,
+				selectedLessons.map((lesson) => lesson.lessonId),
+				actionableRelationship,
+				input,
+				registry,
+			),
+		);
 	}
 	const emittedDecisionKeys = new Set(drafts.map((draft) => draft.decisionKey));
 	for (const draft of drafts) {
@@ -866,7 +872,7 @@ function proposalsFromDrafts(
 	});
 }
 
-function modelInput(input: CuratorInput, lessons: readonly Lesson[]): JsonObject {
+function modelInput(input: CuratorInput, registry: CuratorToolRegistry, responseCorrection: string | null): JsonObject {
 	return {
 		control: {
 			objective: "curate-target-neutral-structured-deltas",
@@ -876,31 +882,19 @@ function modelInput(input: CuratorInput, lessons: readonly Lesson[]): JsonObject
 			strengthenOnlyWithConcretePrecision: true,
 			memoryOperations: ["ADD", "REMOVE", "REPLACE"],
 			deferredTargets: ["skill", "orchestration-source"],
+			...(responseCorrection === null
+				? {}
+				: {
+						responseCorrection: {
+							reason: responseCorrection,
+							instruction: "Correct the structured response using only permitted references.",
+						},
+					}),
 		},
-		lessons: jsonClone(lessons),
-		repository: jsonClone(input.input.repository),
-		memoryCatalog: {
-			renderedMemory: input.input.harness.memory,
-			baseDigest: input.input.harness.memoryContentDigest,
-			harnessVersion: input.input.harness.harnessVersion,
-			activeItems: jsonClone(input.input.harness.activeMemoryItems),
-		},
-		instructions: jsonClone(input.instructions.documents),
-		evidenceScope: input.input.evidenceSources.map((source) => ({
-			sourceId: source.sourceId,
-			materializationId: source.materializationId,
-			traceId: source.invocation.traceId,
-			integrity: source.invocation.integrity,
-			runtimeKind: source.invocation.producer?.runtime.kind ?? null,
-			sourceRevision: source.invocation.producer?.sourceRevision ?? null,
-			harnessVersions: harnessVersions(source.invocation),
-			sessionIds: unique(
-				source.invocation.evidence.flatMap((evidence) =>
-					evidence.sessionSource === undefined ? [] : [evidence.sessionSource.sessionId],
-				),
-			),
-			taskLineageIds: taskLineageIds(source.invocation.evidence),
-		})),
+		jobId: input.jobId,
+		lessons: registry.lessonCatalog,
+		instructions: registry.instructionCatalog,
+		memory: registry.memoryCatalog,
 	};
 }
 
@@ -939,31 +933,111 @@ export class StructuredDeltaCurator implements Curator {
 	async curate(input: CuratorInput): Promise<readonly EvolutionProposal[]> {
 		input.signal?.throwIfAborted();
 		const lessons = finalLessons(input);
+		assertLessonEvidence(lessons, evidenceIndex(input));
+		const producer: EvolutionArtifactProducer = {
+			name: "diffex-evolution-curator",
+			version: this.#dependencies.version,
+			promptVersion: input.input.promptVersions.curator,
+			model: input.input.modelConfiguration,
+		};
+		const registry = new CuratorToolRegistry({
+			jobId: input.jobId,
+			input: input.input,
+			lessons,
+			instructions: input.instructions.documents,
+			signal: input.signal,
+			audit: (audit) => this.#auditTool(input, producer, audit),
+		});
+		const schema = createCuratorOutputSchema({
+			instructionRefs: registry.instructions.references,
+			lessonRefs: registry.lessons.references,
+			memoryRefs: registry.memory.references,
+		});
 		let lastError: unknown = null;
-		for (let attempt = 1; attempt <= this.#maxResponseAttempts; attempt += 1) {
-			const response = await abortable(
-				input.model.execute({
-					stage: "curator",
-					model: input.input.modelConfiguration,
-					promptVersion: input.input.promptVersions.curator,
-					idempotencyKey: input.idempotencyKey,
-					input: modelInput(input, lessons),
-					outputSchema: CURATOR_OUTPUT_SCHEMA,
-					signal: input.signal,
-				}),
-				input.signal,
-			);
-			try {
-				const drafts = parseDecisions(response, input, lessons);
-				return proposalsFromDrafts(drafts, input, lessons, response, this.#dependencies.version);
-			} catch (error) {
-				lastError = error;
+		let responseCorrection: string | null = null;
+		const invalidAliases = new Set<string>();
+		const permittedAliases = new Set<string>();
+		const attemptDetails: JsonObject[] = [];
+		try {
+			for (let attempt = 1; attempt <= this.#maxResponseAttempts; attempt += 1) {
+				const response = await abortable(
+					input.model.execute({
+						stage: "curator",
+						model: input.input.modelConfiguration,
+						promptVersion: input.input.promptVersions.curator,
+						idempotencyKey: input.idempotencyKey,
+						input: modelInput(input, registry, responseCorrection),
+						outputSchema: schema,
+						tools: registry.tools,
+						signal: input.signal,
+					}),
+					input.signal,
+				);
+				try {
+					const drafts = parseDecisions(response, input, registry);
+					return proposalsFromDrafts(drafts, input, lessons, response, this.#dependencies.version);
+				} catch (error) {
+					lastError = error;
+					responseCorrection = error instanceof Error ? error.message : "Response validation failed";
+					if (error instanceof EvolutionModelReferenceError) {
+						for (const reference of error.invalidReferences) invalidAliases.add(reference);
+						for (const reference of error.permittedReferences) permittedAliases.add(reference);
+					}
+					attemptDetails.push({
+						attempt,
+						model: response.model,
+						submissionMethod: response.submissionMethod ?? "unspecified",
+						validationError: responseCorrection,
+						output: response.output,
+					});
+				}
 			}
+		} finally {
+			registry.revoke();
 		}
 		throw new EvolutionExecutionError("Curator returned an invalid structured response", {
 			reasonCode: "curation-invalid-response",
 			retryable: false,
 			cause: lastError,
+			diagnostics: {
+				invalidAliases: [...invalidAliases],
+				permittedAliases: [...permittedAliases],
+				attemptDetails,
+				aliasResolutionMaps: {
+					instructions: registry.instructions.resolutionMap((instruction) => instruction.path),
+					lessons: registry.lessons.resolutionMap((lesson) => lesson.lessonId),
+					memory: registry.memory.resolutionMap((binding) => binding.item.memoryItemId),
+				},
+				recoverableToolDenials: registry.recoverableDenials.map((denial) => ({
+					toolName: denial.toolName,
+					denialCode: denial.denialCode,
+					requestedReferences: denial.requestedReferences,
+				})),
+			},
 		});
+	}
+
+	async #auditTool(input: CuratorInput, producer: EvolutionArtifactProducer, audit: CuratorToolAudit): Promise<void> {
+		if (this.#dependencies.ledger === undefined) return;
+		const eventId = stableId("ledger-event", { jobId: input.jobId, type: "curator-tool-call", audit });
+		const event: CuratorToolCallLedgerEvent = {
+			metadata: createEvolutionArtifactMetadata({
+				artifactId: eventId,
+				producer,
+				sourceIds: unique([
+					...audit.resolvedInstructionPaths,
+					...audit.resolvedLessonIds,
+					...audit.resolvedMemoryItemIds,
+				]),
+				scope: input.input.metadata.scope,
+				createdAt: input.input.metadata.createdAt,
+				content: audit,
+			}),
+			eventId,
+			jobId: input.jobId,
+			type: "curator-tool-call",
+			...audit,
+		};
+		await this.#dependencies.ledger.append(event);
 	}
 }

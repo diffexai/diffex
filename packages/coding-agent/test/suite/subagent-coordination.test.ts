@@ -666,11 +666,11 @@ describe("automatic subagent coordination", () => {
 			Array.from({ length: 6 }, () => async (context: Context, options?: SimpleStreamOptions) => {
 				if (!hasTool(context, "spawn_agent")) {
 					return await new Promise<ReturnType<typeof fauxAssistantMessage>>((resolve) => {
-						options?.signal?.addEventListener(
-							"abort",
-							() => resolve(fauxAssistantMessage("child partial", { stopReason: "aborted" })),
-							{ once: true },
-						);
+						const resolveAbort = () => {
+							resolve(fauxAssistantMessage("child partial", { stopReason: "aborted" }));
+						};
+						if (options?.signal?.aborted) resolveAbort();
+						else options?.signal?.addEventListener("abort", resolveAbort, { once: true });
 					});
 				}
 				parentCalls += 1;

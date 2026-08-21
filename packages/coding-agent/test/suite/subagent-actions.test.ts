@@ -437,7 +437,16 @@ describe("subagent actions", () => {
 		const record = spawnTracked(controller, "worker", "initial", createSession);
 		await waitForStatus(controller, "worker", "idle");
 		const wakeResponse = deferred<AssistantMessage>();
-		harness.setResponses([() => wakeResponse.promise]);
+		harness.setResponses([
+			(_context, options) => {
+				options?.signal?.addEventListener(
+					"abort",
+					() => wakeResponse.resolve(fauxAssistantMessage("interrupted", { stopReason: "aborted" })),
+					{ once: true },
+				);
+				return wakeResponse.promise;
+			},
+		]);
 
 		const firstWake = controller.message("worker", "first wake", true);
 		const secondWake = controller.message("worker", "second wake", true);

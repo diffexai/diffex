@@ -31,12 +31,12 @@ import {
 	type EvolutionSnapshotSource,
 	type EvolutionStartResult,
 	EvolutionTargetAdapterRegistry,
+	EvolutionToolDeniedError,
 	FileEvolutionPersistence,
 	type InteractivePriorityGate,
 	type JsonObject,
 	PollingEvolutionWorkSource,
 	RecursiveReflector,
-	ReflectorToolDeniedError,
 	StructuredDeltaCurator,
 	type SuccessfulMaterialization,
 } from "#evolution";
@@ -58,59 +58,6 @@ const TRACE_EVIDENCE_INDEX_VERSION = 1;
 const GLOBAL_EVOLUTION_SCOPE: EvolutionScope = { repositoryId: "global", scopeId: "global" };
 const RESPONSE_TOOL_NAME = "submit_evolution_response";
 const MAX_MODEL_ROUNDS = 24;
-
-const REFLECTOR_RESPONSE_SCHEMA = {
-	type: "object",
-	additionalProperties: false,
-	required: ["complete", "lessons"],
-	properties: {
-		complete: { type: "boolean" },
-		lessons: {
-			type: "array",
-			items: {
-				type: "object",
-				additionalProperties: false,
-				required: [
-					"kind",
-					"summary",
-					"preconditions",
-					"observedOutcome",
-					"supportingEvidenceIds",
-					"counterevidenceIds",
-					"applicabilityBoundaries",
-					"uncertainty",
-					"actionableTakeaway",
-				],
-				properties: {
-					kind: {
-						enum: [
-							"counterexample",
-							"direct-instruction",
-							"failure-workaround",
-							"harmful-memory",
-							"incorrect-source-of-truth",
-							"missing-capability",
-							"missing-verification",
-							"orchestration-inefficiency",
-							"repository-constraint",
-							"successful-strategy",
-							"tool-behavior",
-							"unresolved-work",
-						],
-					},
-					summary: { type: "string", minLength: 1 },
-					preconditions: { type: "array", items: { type: "string", minLength: 1 } },
-					observedOutcome: { type: "string", minLength: 1 },
-					supportingEvidenceIds: { type: "array", minItems: 1, items: { type: "string", minLength: 1 } },
-					counterevidenceIds: { type: "array", items: { type: "string", minLength: 1 } },
-					applicabilityBoundaries: { type: "array", items: { type: "string", minLength: 1 } },
-					uncertainty: { type: ["string", "null"] },
-					actionableTakeaway: { type: "string", minLength: 1 },
-				},
-			},
-		},
-	},
-} as const satisfies JsonObject;
 
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -188,8 +135,8 @@ export class CodingAgentEvolutionModelExecutor implements EvolutionModelExecutor
 
 	async execute(request: EvolutionModelRequest): Promise<EvolutionModelResponse> {
 		const model = this.#model(request);
-		const evolutionTools = request.stage === "reflector" ? request.tools : [];
-		const responseSchema = request.stage === "curator" ? request.outputSchema : REFLECTOR_RESPONSE_SCHEMA;
+		const evolutionTools = request.tools;
+		const responseSchema = request.outputSchema;
 		const responseTool: Tool = {
 			name: RESPONSE_TOOL_NAME,
 			description: "Submit the complete structured response after inspecting all required evidence.",
@@ -252,7 +199,7 @@ export class CodingAgentEvolutionModelExecutor implements EvolutionModelExecutor
 						output = await tool.execute(call.arguments as JsonObject);
 					} catch (error) {
 						request.signal?.throwIfAborted();
-						if (error instanceof ReflectorToolDeniedError && !error.recoverable) throw error;
+						if (error instanceof EvolutionToolDeniedError && !error.recoverable) throw error;
 						output = evolutionToolError(error);
 						isError = true;
 					}
@@ -568,7 +515,7 @@ export async function createCodingAgentEvolutionRuntime(
 	const targets = new EvolutionTargetAdapterRegistry({ writers: [writer] });
 	const model = new CodingAgentEvolutionModelExecutor(options.session, options.modelRuntime, priority);
 	const reflector = new RecursiveReflector({ version: VERSION, artifacts: persistence, ledger: persistence });
-	const curator = new StructuredDeltaCurator({ version: VERSION });
+	const curator = new StructuredDeltaCurator({ version: VERSION, ledger: persistence });
 	const ranker = new DeterministicProposalRanker({ version: VERSION });
 	const pipeline = new EvolutionPipeline({
 		version: VERSION,

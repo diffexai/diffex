@@ -1,13 +1,13 @@
 import type { MaterializedEvidence, MaterializedInvocation } from "@earendil-works/diffex-harness-trace";
 import { describe, expect, it } from "vitest";
 import {
-	CURATOR_OUTPUT_SCHEMA,
 	type CuratorInput,
 	computeEvolutionContentDigest,
 	createEvolutionArtifactMetadata,
 	type EvidenceCorpusManifest,
 	type EvolutionArtifactProducer,
 	type EvolutionInputSnapshot,
+	type EvolutionLedgerEvent,
 	type EvolutionMemoryItem,
 	type EvolutionModelResponse,
 	type InstructionSnapshot,
@@ -19,7 +19,7 @@ import {
 
 const FIRST_HARNESS_VERSION = `sha256:${"1".repeat(64)}`;
 const SECOND_HARNESS_VERSION = `sha256:${"2".repeat(64)}`;
-const MEMORY_ITEM_DIGEST = `sha256:${"3".repeat(64)}`;
+const MEMORY_ITEM_DIGEST = computeEvolutionContentDigest("- Keep focused changes.");
 const MODEL_CONFIGURATION_DIGEST = `sha256:${"4".repeat(64)}`;
 const createdAt = "2026-08-19T12:00:00.000Z";
 const scope = { repositoryId: "diffex", scopeId: "repository" } as const;
@@ -243,6 +243,7 @@ function instructions(input: EvolutionInputSnapshot): InstructionSnapshot {
 function curatorInput(execute: CuratorInput["model"]["execute"]): CuratorInput {
 	const input = fixtureInput();
 	return {
+		jobId: "job-1",
 		input,
 		corpus: corpus(),
 		instructions: instructions(input),
@@ -253,7 +254,7 @@ function curatorInput(execute: CuratorInput["model"]["execute"]): CuratorInput {
 }
 
 function novelRelationship(): JsonObject {
-	return { classification: "novel", relevantEntries: [], strengthening: null };
+	return { classification: "novel", instructionRefs: [], memoryRefs: [], strengthening: null };
 }
 
 function proposal(
@@ -289,18 +290,47 @@ function decision(
 	proposalValue: JsonObject | null,
 	relationship: JsonObject = novelRelationship(),
 ) {
-	return { decisionKey, lessonIds: ["lesson-final"], relationship, proposal: proposalValue };
+	return { decisionKey, lessonRefs: ["L1"], relationship, proposal: proposalValue };
 }
 
 describe("structured delta curator", () => {
 	it("emits a provenance-rich ADD from final lessons and ordered snapshots", async () => {
 		const capturedInputs: JsonObject[] = [];
-		const curator = new StructuredDeltaCurator({ version: "1.2.3" });
+		const toolOutputs: JsonObject[] = [];
+		const ledgerEvents: EvolutionLedgerEvent[] = [];
+		const curator = new StructuredDeltaCurator({
+			version: "1.2.3",
+			ledger: {
+				append(event) {
+					ledgerEvents.push(event);
+					return Promise.resolve();
+				},
+				read() {
+					return Promise.resolve([]);
+				},
+			},
+		});
 		const input = curatorInput(async (request) => {
 			if (request.stage !== "curator") throw new Error("Unexpected Reflector request");
 			capturedInputs.push(request.input);
-			expect(request.outputSchema).toBe(CURATOR_OUTPUT_SCHEMA);
-			expect("tools" in request).toBe(false);
+			expect(request.outputSchema).toMatchObject({ type: "object" });
+			expect(request.tools.map((tool) => tool.name)).toEqual([
+				"inspect_lessons",
+				"inspect_instructions",
+				"inspect_memory",
+			]);
+			const lessonOutput = await request.tools
+				.find((tool) => tool.name === "inspect_lessons")
+				?.execute({ lessonRefs: ["L1"] });
+			const instructionOutput = await request.tools
+				.find((tool) => tool.name === "inspect_instructions")
+				?.execute({ instructionRefs: ["I1"] });
+			const memoryOutput = await request.tools
+				.find((tool) => tool.name === "inspect_memory")
+				?.execute({ memoryRefs: ["M0", "M1"] });
+			for (const output of [lessonOutput, instructionOutput, memoryOutput]) {
+				if (output !== undefined) toolOutputs.push(output);
+			}
 			return response([
 				decision(
 					"focused-add",
@@ -321,13 +351,34 @@ describe("structured delta curator", () => {
 		const first = await curator.curate(input);
 		const second = await curator.curate(input);
 
-		expect(capturedInputs[0]?.lessons).toEqual([expect.objectContaining({ lessonId: "lesson-final" })]);
-		expect(capturedInputs[0]?.instructions).toEqual(input.instructions.documents);
-		expect(capturedInputs[0]?.memoryCatalog).toMatchObject({
-			renderedMemory: input.input.harness.memory,
-			baseDigest: input.input.harness.memoryContentDigest,
-			activeItems: [expect.objectContaining({ memoryItemId: "memory-1" })],
-		});
+		expect(capturedInputs[0]?.jobId).toBe("job-1");
+		expect(capturedInputs[0]?.lessons).toEqual([
+			expect.objectContaining({ lessonRef: "L1", summary: "Keep changes focused" }),
+		]);
+		expect(capturedInputs[0]?.instructions).toEqual([
+			expect.objectContaining({ instructionRef: "I1", label: "Instruction 1" }),
+			expect.objectContaining({ instructionRef: "I2", label: "Instruction 2" }),
+		]);
+		expect(capturedInputs[0]?.memory).toEqual([
+			expect.objectContaining({ memoryRef: "M0" }),
+			expect.objectContaining({ memoryRef: "M1" }),
+		]);
+		expect(JSON.stringify(capturedInputs[0])).not.toContain("memory-1");
+		expect(JSON.stringify(capturedInputs[0])).not.toContain("lesson-final");
+		expect(JSON.stringify(capturedInputs[0])).not.toContain("/repo/AGENTS.md");
+		expect(JSON.stringify(toolOutputs)).not.toContain("memory-1");
+		expect(JSON.stringify(toolOutputs)).not.toContain("lesson-final");
+		expect(JSON.stringify(toolOutputs)).not.toContain("/repo/AGENTS.md");
+		expect(ledgerEvents.filter((event) => event.type === "curator-tool-call")).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ toolName: "inspect_lessons", resolvedLessonIds: ["lesson-final"] }),
+				expect.objectContaining({
+					toolName: "inspect_instructions",
+					resolvedInstructionPaths: ["/repo/AGENTS.md"],
+				}),
+				expect.objectContaining({ toolName: "inspect_memory", resolvedMemoryItemIds: ["memory-1"] }),
+			]),
+		);
 		expect(first).toHaveLength(1);
 		expect(first[0]).toMatchObject({
 			disposition: "actionable",
@@ -382,7 +433,7 @@ describe("structured delta curator", () => {
 								{ kind: "evolution-memory" },
 								{
 									operation: "REMOVE",
-									memoryItemId: "memory-1",
+									memoryRef: "M1",
 									reason: "Counterevidence shows the rule is harmful",
 								},
 							),
@@ -395,7 +446,7 @@ describe("structured delta curator", () => {
 								{
 									operation: "REPLACE",
 									removal: {
-										memoryItemId: "memory-1",
+										memoryRef: "M1",
 										reason: "Narrow the existing rule",
 									},
 									addition: {
@@ -496,19 +547,22 @@ describe("structured delta curator", () => {
 		const input = curatorInput(() =>
 			Promise.resolve(
 				response([
+					decision("duplicate-whole-memory", null, {
+						classification: "duplicate",
+						instructionRefs: [],
+						memoryRefs: ["M0"],
+						strengthening: null,
+					}),
 					decision("duplicate-rule", null, {
 						classification: "duplicate",
-						relevantEntries: [
-							{ kind: "applicable-instruction", path: "/repo/AGENTS.md", locator: "Repository guidance" },
-						],
+						instructionRefs: ["I1"],
+						memoryRefs: [],
 						strengthening: null,
 					}),
 					decision("conflicting-rule", null, {
 						classification: "conflicts",
-						relevantEntries: [
-							{ kind: "applicable-instruction", path: "/repo/AGENTS.md", locator: "Repository guidance" },
-							{ kind: "applicable-instruction", path: "/repo/CLAUDE.md", locator: "Nested guidance" },
-						],
+						instructionRefs: ["I1", "I2"],
+						memoryRefs: [],
 						strengthening: null,
 					}),
 					decision(
@@ -525,13 +579,8 @@ describe("structured delta curator", () => {
 						),
 						{
 							classification: "strengthens",
-							relevantEntries: [
-								{
-									kind: "applicable-instruction",
-									path: "/repo/CLAUDE.md",
-									locator: "Nested guidance",
-								},
-							],
+							instructionRefs: ["I2"],
+							memoryRefs: [],
 							strengthening: { kind: "enforcement", description: "Adds a verification requirement" },
 						},
 					),
@@ -561,16 +610,16 @@ describe("structured delta curator", () => {
 
 	it("retries invalid structured output without changing the idempotency key", async () => {
 		const keys: string[] = [];
+		const inputs: JsonObject[] = [];
 		let calls = 0;
 		const curator = new StructuredDeltaCurator({ version: "1.2.3" });
 		const proposals = await curator.curate(
 			curatorInput((request) => {
 				keys.push(request.idempotencyKey);
+				inputs.push(request.input);
 				calls += 1;
 				if (calls === 1) {
-					return Promise.resolve(
-						response([{ ...decision("invalid", null), lessonIds: ["lesson-intermediate"], proposal: null }]),
-					);
+					return Promise.resolve(response([{ ...decision("invalid", null), lessonRefs: ["L2"], proposal: null }]));
 				}
 				return Promise.resolve(
 					response([
@@ -594,6 +643,11 @@ describe("structured delta curator", () => {
 
 		expect(proposals).toHaveLength(1);
 		expect(keys).toEqual(["job-1:curating", "job-1:curating"]);
+		expect(inputs[1]?.lessons).toEqual(inputs[0]?.lessons);
+		expect(inputs[1]?.instructions).toEqual(inputs[0]?.instructions);
+		expect(inputs[1]?.memory).toEqual(inputs[0]?.memory);
+		expect(JSON.stringify(inputs[1]?.control)).not.toContain("L2");
+		expect(JSON.stringify(inputs[1]?.control)).toContain("L1");
 	});
 
 	it("rejects unsupported writer routes after bounded attempts", async () => {
@@ -644,7 +698,8 @@ describe("structured delta curator", () => {
 				response([
 					decision("unknown-instruction", addProposal, {
 						classification: "strengthens",
-						relevantEntries: [{ kind: "applicable-instruction", path: "/repo/missing.md", locator: "Missing" }],
+						instructionRefs: ["I99"],
+						memoryRefs: [],
 						strengthening: { kind: "precision", description: "Adds exact guidance" },
 					}),
 				]),
@@ -660,8 +715,26 @@ describe("structured delta curator", () => {
 							{ kind: "evolution-memory" },
 							{
 								operation: "REMOVE",
-								memoryItemId: "missing-memory",
+								memoryRef: "M99",
 								reason: "Remove stale guidance",
+							},
+						),
+					),
+				]),
+			),
+		);
+		const wholeMemoryRemoval = curatorInput(() =>
+			Promise.resolve(
+				response([
+					decision(
+						"whole-memory-removal",
+						proposal(
+							"REMOVE",
+							{ kind: "evolution-memory" },
+							{
+								operation: "REMOVE",
+								memoryRef: "M0",
+								reason: "Invalid whole-memory removal",
 							},
 						),
 					),
@@ -687,8 +760,11 @@ describe("structured delta curator", () => {
 		await expect(curator.curate(unknownMemoryItem)).rejects.toMatchObject({
 			reasonCode: "curation-invalid-response",
 		});
-		await expect(curator.curate(unknownEvidence)).rejects.toMatchObject({
+		await expect(curator.curate(wholeMemoryRemoval)).rejects.toMatchObject({
 			reasonCode: "curation-invalid-response",
+		});
+		await expect(curator.curate(unknownEvidence)).rejects.toMatchObject({
+			reasonCode: "artifact-corrupt",
 		});
 	});
 });

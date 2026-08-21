@@ -2,18 +2,21 @@ import type { MaterializedEvidence } from "@earendil-works/diffex-harness-trace"
 import type {
 	EvidenceCorpusDocument,
 	EvidenceCorpusManifest,
+	EvidenceSemanticUnit,
 	EvidenceSlice,
 	EvidenceSliceEdge,
 	EvidenceSliceOpenReason,
 	EvolutionInputSnapshot,
 	JsonObject,
 	JsonValue,
+	Lesson,
 } from "./contracts.ts";
-import { EvolutionExecutionError } from "./errors.ts";
+import { EvolutionExecutionError, EvolutionToolDeniedError } from "./errors.ts";
+import { EvolutionModelReferenceCatalog, referenceArray } from "./model-references.ts";
 import type { EvolutionModelTool } from "./ports.ts";
 import { computeEvolutionContentDigest, serializeEvolutionValue } from "./provenance.ts";
 
-const TOOL_NAMES = [
+const EVIDENCE_TOOL_NAMES = [
 	"list_documents",
 	"inspect_outline",
 	"search_evidence",
@@ -22,14 +25,18 @@ const TOOL_NAMES = [
 	"refine_slice",
 ] as const;
 
-export type ReflectorToolName = (typeof TOOL_NAMES)[number];
+export type ReflectorToolName = (typeof EVIDENCE_TOOL_NAMES)[number] | "inspect_child_lessons";
 
 export interface ReflectorToolAudit {
 	readonly toolCallId: string;
 	readonly toolName: ReflectorToolName;
 	readonly requestDigest: string;
-	readonly requestedSliceId: string | null;
+	readonly requestedDocumentRef: string | null;
+	readonly requestedSliceRef: string | null;
+	readonly resolvedDocumentIds: readonly string[];
 	readonly resolvedEvidenceIds: readonly string[];
+	readonly resolvedLessonIds: readonly string[];
+	readonly resolvedSliceIds: readonly string[];
 	readonly resultDigest: string | null;
 	readonly denialCode: string | null;
 }
@@ -48,25 +55,26 @@ interface IndexedDocument {
 	readonly evidence: readonly MaterializedEvidence[];
 }
 
-export type ReflectorToolDenialCode =
-	| "document-not-permitted"
-	| "evidence-not-permitted"
-	| "invalid-range"
-	| "invalid-request"
-	| "registry-revoked"
-	| "slice-not-permitted"
-	| "tool-budget-exhausted";
+interface IndexedEvidence {
+	readonly document: IndexedDocument;
+	readonly evidence: MaterializedEvidence;
+	readonly unit: EvidenceSemanticUnit;
+	readonly ordinal: number;
+}
 
-export class ReflectorToolDeniedError extends Error {
-	readonly code: ReflectorToolDenialCode;
-	readonly recoverable: boolean;
+export interface ReflectorNodeReferences {
+	readonly documents: EvolutionModelReferenceCatalog<IndexedDocument>;
+	readonly evidence: EvolutionModelReferenceCatalog<IndexedEvidence>;
+	readonly documentCatalog: readonly JsonObject[];
+	readonly evidenceCatalog: readonly JsonObject[];
+	readonly sliceCatalog: readonly JsonObject[];
+}
 
-	constructor(code: ReflectorToolDenialCode, message: string) {
-		super(message);
-		this.name = "ReflectorToolDeniedError";
-		this.code = code;
-		this.recoverable = code !== "registry-revoked" && code !== "tool-budget-exhausted";
-	}
+export interface ReflectorRecoverableToolDenial {
+	readonly toolName: ReflectorToolName;
+	readonly denialCode: string;
+	readonly requestedDocumentRef: string | null;
+	readonly requestedSliceRef: string | null;
 }
 
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
@@ -76,7 +84,7 @@ function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
 function stringField(input: JsonObject, name: string): string {
 	const value = input[name];
 	if (typeof value !== "string" || value.length === 0) {
-		throw new ReflectorToolDeniedError("invalid-request", `${name} must be a non-empty string`);
+		throw new EvolutionToolDeniedError("invalid-request", `${name} must be a non-empty reference`);
 	}
 	return value;
 }
@@ -85,7 +93,7 @@ function integerField(input: JsonObject, name: string, fallback?: number): numbe
 	const value = input[name];
 	if (value === undefined && fallback !== undefined) return fallback;
 	if (!Number.isSafeInteger(value) || (value as number) < 0) {
-		throw new ReflectorToolDeniedError("invalid-request", `${name} must be a non-negative integer`);
+		throw new EvolutionToolDeniedError("invalid-request", `${name} must be a non-negative integer`);
 	}
 	return value as number;
 }
@@ -185,23 +193,22 @@ function edge(
 }
 
 function toolSchema(properties: JsonObject, required: readonly string[] = []): JsonObject {
-	return {
-		type: "object",
-		additionalProperties: false,
-		properties,
-		required,
-	};
+	return { type: "object", additionalProperties: false, properties, required };
 }
 
 export class ReflectorToolRegistry {
 	readonly #jobId: string;
 	readonly #manifestDigest: string;
-	readonly #documents = new Map<string, IndexedDocument>();
-	readonly #evidenceIds = new Set<string>();
+	readonly #documents: readonly IndexedDocument[];
+	readonly #documentReferences: EvolutionModelReferenceCatalog<IndexedDocument>;
+	readonly #evidenceReferences: EvolutionModelReferenceCatalog<IndexedEvidence>;
 	readonly #slices = new Map<string, EvidenceSlice>();
+	readonly #sliceReferences = new Map<string, string>();
+	readonly #sensitiveReplacements = new Map<string, string>();
 	readonly #maxToolCalls: number;
 	readonly #signal?: AbortSignal;
 	readonly #audit: (event: ReflectorToolAudit) => Promise<void>;
+	readonly #recoverableDenials: ReflectorRecoverableToolDenial[] = [];
 	#revoked = false;
 	#toolCalls = 0;
 
@@ -223,53 +230,55 @@ export class ReflectorToolRegistry {
 			});
 		}
 		const sources = new Map(options.input.evidenceSources.map((source) => [source.sourceId, source]));
-		for (const document of options.corpus.documents) {
-			const source = sources.get(document.sourceId);
+		const documents: IndexedDocument[] = [];
+		const evidence: IndexedEvidence[] = [];
+		for (const descriptor of options.corpus.documents) {
+			const source = sources.get(descriptor.sourceId);
 			if (
 				source === undefined ||
-				source.materializationId !== document.materializationId ||
-				source.contentDigest !== document.contentDigest ||
-				computeEvolutionContentDigest(source.invocation) !== document.contentDigest ||
-				source.invocation.evidence.length !== document.semanticUnits.length
+				source.materializationId !== descriptor.materializationId ||
+				source.contentDigest !== descriptor.contentDigest ||
+				computeEvolutionContentDigest(source.invocation) !== descriptor.contentDigest ||
+				source.invocation.evidence.length !== descriptor.semanticUnits.length
 			) {
-				throw new EvolutionExecutionError(`Corpus document "${document.documentId}" is not bound to its source`, {
+				throw new EvolutionExecutionError(`Corpus document "${descriptor.documentId}" is not bound to its source`, {
 					reasonCode: "artifact-corrupt",
 					retryable: false,
 				});
 			}
-			for (const [ordinal, unit] of document.semanticUnits.entries()) {
-				const evidence = source.invocation.evidence[ordinal];
+			const document = { descriptor, evidence: source.invocation.evidence };
+			documents.push(document);
+			for (const [ordinal, unit] of descriptor.semanticUnits.entries()) {
+				const item = source.invocation.evidence[ordinal];
 				if (
-					evidence === undefined ||
+					item === undefined ||
 					unit.ordinal !== ordinal ||
 					unit.evidenceIds.length !== 1 ||
-					unit.evidenceIds[0] !== evidence.evidenceId ||
-					unit.contentDigest !== computeEvolutionContentDigest(evidence)
+					unit.evidenceIds[0] !== item.evidenceId ||
+					unit.contentDigest !== computeEvolutionContentDigest(item)
 				) {
 					throw new EvolutionExecutionError(`Corpus unit "${unit.unitId}" failed integrity validation`, {
 						reasonCode: "artifact-corrupt",
 						retryable: false,
 					});
 				}
+				evidence.push({ document, evidence: item, unit, ordinal });
 			}
-			this.#documents.set(document.documentId, { descriptor: document, evidence: source.invocation.evidence });
-			for (const evidenceId of document.evidenceIds) this.#evidenceIds.add(evidenceId);
+			this.#sensitiveReplacements.set(descriptor.materializationId, "[source-reference]");
+			if (descriptor.traceId !== null) this.#sensitiveReplacements.set(descriptor.traceId, "[source-reference]");
 		}
-	}
-
-	toolsForEvidence(evidenceIds: readonly string[]): readonly EvolutionModelTool[] {
-		const permittedEvidenceIds = new Set(evidenceIds);
-		const unknownEvidenceId = evidenceIds.find((evidenceId) => !this.#evidenceIds.has(evidenceId));
-		if (unknownEvidenceId !== undefined) {
-			throw new EvolutionExecutionError(
-				`Reflection node cites evidence outside the corpus: "${unknownEvidenceId}"`,
-				{
-					reasonCode: "artifact-corrupt",
-					retryable: false,
-				},
-			);
+		this.#documents = documents;
+		this.#documentReferences = new EvolutionModelReferenceCatalog("document", documents);
+		this.#evidenceReferences = new EvolutionModelReferenceCatalog("evidence", evidence);
+		for (const entry of this.#documentReferences.entries) {
+			this.#sensitiveReplacements.set(entry.value.descriptor.documentId, entry.ref);
 		}
-		return this.#createTools(permittedEvidenceIds);
+		for (const entry of this.#evidenceReferences.entries) {
+			this.#sensitiveReplacements.set(entry.value.evidence.evidenceId, entry.ref);
+		}
+		for (const item of options.input.harness.activeMemoryItems) {
+			this.#sensitiveReplacements.set(item.memoryItemId, "[memory-reference]");
+		}
 	}
 
 	get toolCalls(): number {
@@ -284,8 +293,130 @@ export class ReflectorToolRegistry {
 		return this.#toolCalls > this.#maxToolCalls;
 	}
 
+	get recoverableDenials(): readonly ReflectorRecoverableToolDenial[] {
+		return this.#recoverableDenials;
+	}
+
 	revoke(): void {
 		this.#revoked = true;
+	}
+
+	nodeReferences(evidenceIds: readonly string[]): ReflectorNodeReferences {
+		const permittedIds = new Set(evidenceIds);
+		const evidenceValues = this.#evidenceReferences.entries
+			.filter((entry) => permittedIds.has(entry.value.evidence.evidenceId))
+			.map((entry) => entry.value);
+		if (evidenceValues.length !== permittedIds.size) {
+			throw new EvolutionExecutionError("Reflection node cites evidence outside the corpus", {
+				reasonCode: "artifact-corrupt",
+				retryable: false,
+			});
+		}
+		const documentValues = this.#documents.filter((document) =>
+			evidenceValues.some((entry) => entry.document === document),
+		);
+		const documents = this.#documentReferences.select(documentValues);
+		const evidence = this.#evidenceReferences.select(evidenceValues);
+		return {
+			documents,
+			evidence,
+			documentCatalog: documents.entries.map((entry) => ({
+				documentRef: entry.ref,
+				integrity: entry.value.descriptor.integrity,
+				terminationStatus: entry.value.descriptor.terminationStatus,
+				unitCount: evidenceValues.filter((item) => item.document === entry.value).length,
+			})),
+			evidenceCatalog: evidence.entries.map((entry) => ({
+				evidenceRef: entry.ref,
+				documentRef: documents.refFor(entry.value.document),
+				ordinal: entry.value.ordinal,
+				kind: entry.value.unit.kind,
+				preview: this.#preview(entry.value.evidence),
+			})),
+			sliceCatalog: [...this.#slices.values()]
+				.filter((slice) => slice.evidenceIds.every((evidenceId) => permittedIds.has(evidenceId)))
+				.map((slice) => this.#sliceDescriptor(slice, evidence, documents)),
+		};
+	}
+
+	toolsForEvidence(references: ReflectorNodeReferences): readonly EvolutionModelTool[] {
+		const permittedEvidenceIds = new Set(references.evidence.entries.map((entry) => entry.value.evidence.evidenceId));
+		const definitions: readonly [Exclude<ReflectorToolName, "inspect_child_lessons">, string, JsonObject][] = [
+			["list_documents", "List immutable evidence documents.", toolSchema({})],
+			[
+				"inspect_outline",
+				"Inspect safe document metadata and semantic-unit outlines.",
+				toolSchema({ documentRef: { type: "string", enum: references.documents.references } }, ["documentRef"]),
+			],
+			[
+				"search_evidence",
+				"Search permitted evidence with a bounded literal query.",
+				toolSchema({ query: { type: "string" }, limit: { type: "integer", minimum: 1 } }, ["query"]),
+			],
+			[
+				"read_slice",
+				"Read a contiguous inclusive range of semantic units.",
+				toolSchema(
+					{
+						documentRef: { type: "string", enum: references.documents.references },
+						startOrdinal: { type: "integer", minimum: 0 },
+						endOrdinal: { type: "integer", minimum: 0 },
+					},
+					["documentRef", "startOrdinal", "endOrdinal"],
+				),
+			],
+			[
+				"inspect_adjacent",
+				"Inspect bounded semantic units immediately adjacent to a slice.",
+				toolSchema(
+					{
+						sliceRef: { type: "string", pattern: "^S[1-9][0-9]*$" },
+						before: { type: "integer", minimum: 0 },
+						after: { type: "integer", minimum: 0 },
+					},
+					["sliceRef"],
+				),
+			],
+			[
+				"refine_slice",
+				"Shrink a slice or split it at a semantic-unit boundary.",
+				toolSchema(
+					{
+						sliceRef: { type: "string", pattern: "^S[1-9][0-9]*$" },
+						startOrdinal: { type: "integer", minimum: 0 },
+						endOrdinal: { type: "integer", minimum: 0 },
+						splitAtOrdinal: { type: "integer", minimum: 0 },
+					},
+					["sliceRef"],
+				),
+			],
+		];
+		return definitions.map(([name, description, inputSchema]) => ({
+			name,
+			description,
+			inputSchema,
+			execute: (input) => this.#executeEvidence(name, input, references, permittedEvidenceIds),
+		}));
+	}
+
+	toolsForLessons(lessons: EvolutionModelReferenceCatalog<Lesson>): readonly EvolutionModelTool[] {
+		return [
+			{
+				name: "inspect_child_lessons",
+				description: "Inspect complete child lesson content without opening raw corpus evidence.",
+				inputSchema: toolSchema(
+					{
+						lessonRefs: {
+							type: "array",
+							minItems: 1,
+							items: { type: "string", enum: lessons.references },
+						},
+					},
+					["lessonRefs"],
+				),
+				execute: (input) => this.#executeLessonInspection(input, lessons),
+			},
+		];
 	}
 
 	planInitialSlices(maxUnitsPerSlice: number): readonly EvidenceSlice[] {
@@ -293,7 +424,7 @@ export class ReflectorToolRegistry {
 			throw new Error("maxUnitsPerSlice must be a positive integer");
 		}
 		const slices: EvidenceSlice[] = [];
-		for (const document of this.#documents.values()) {
+		for (const document of this.#documents) {
 			if (document.descriptor.integrity === "incompatible") continue;
 			let start = 0;
 			while (start < document.evidence.length) {
@@ -312,25 +443,325 @@ export class ReflectorToolRegistry {
 		return slices.map((slice, index) => {
 			const previous = slices[index - 1];
 			const next = slices[index + 1];
-			const continuation = {
-				previousSliceId:
-					previous?.cursor.documentId === slice.cursor.documentId && slice.leftEdge.status === "open"
-						? previous.sliceId
-						: null,
-				nextSliceId:
-					next?.cursor.documentId === slice.cursor.documentId && slice.rightEdge.status === "open"
-						? next.sliceId
-						: null,
+			const linked = {
+				...slice,
+				continuation: {
+					previousSliceId:
+						previous?.cursor.documentId === slice.cursor.documentId && slice.leftEdge.status === "open"
+							? previous.sliceId
+							: null,
+					nextSliceId:
+						next?.cursor.documentId === slice.cursor.documentId && slice.rightEdge.status === "open"
+							? next.sliceId
+							: null,
+				},
 			};
-			const linked = { ...slice, continuation };
 			this.#slices.set(linked.sliceId, linked);
 			return linked;
 		});
 	}
 
+	async #executeEvidence(
+		name: Exclude<ReflectorToolName, "inspect_child_lessons">,
+		input: JsonObject,
+		references: ReflectorNodeReferences,
+		permittedEvidenceIds: ReadonlySet<string>,
+	): Promise<JsonObject> {
+		return this.#execute(name, input, () => this.#runEvidence(name, input, references, permittedEvidenceIds));
+	}
+
+	async #executeLessonInspection(
+		input: JsonObject,
+		lessons: EvolutionModelReferenceCatalog<Lesson>,
+	): Promise<JsonObject> {
+		return this.#execute("inspect_child_lessons", input, () => {
+			this.#assertAllowedFields("inspect_child_lessons", input, ["lessonRefs"]);
+			const selected = referenceArray(input.lessonRefs, "lessonRefs", lessons, false);
+			return {
+				output: {
+					lessons: selected.map((lesson) => ({
+						lessonRef: lessons.refFor(lesson),
+						kind: lesson.kind,
+						summary: lesson.summary,
+						preconditions: lesson.preconditions,
+						observedOutcome: lesson.observedOutcome,
+						applicabilityBoundaries: lesson.applicabilityBoundaries,
+						uncertainty: lesson.uncertainty,
+						actionableTakeaway: lesson.actionableTakeaway,
+						supportingEvidenceCount: lesson.evidenceIds.length,
+						counterevidenceCount: lesson.counterevidenceIds.length,
+					})),
+				},
+				resolvedDocumentIds: [],
+				resolvedEvidenceIds: [],
+				resolvedLessonIds: selected.map((lesson) => lesson.lessonId),
+				resolvedSliceIds: [],
+			};
+		});
+	}
+
+	async #execute(
+		name: ReflectorToolName,
+		input: JsonObject,
+		run: () => {
+			readonly output: JsonObject;
+			readonly resolvedDocumentIds: readonly string[];
+			readonly resolvedEvidenceIds: readonly string[];
+			readonly resolvedLessonIds: readonly string[];
+			readonly resolvedSliceIds: readonly string[];
+		},
+	): Promise<JsonObject> {
+		this.#toolCalls += 1;
+		const toolCallId = `reflector-tool-${this.#toolCalls}`;
+		const requestedDocumentRef = typeof input.documentRef === "string" ? input.documentRef : null;
+		const requestedSliceRef = typeof input.sliceRef === "string" ? input.sliceRef : null;
+		const requestDigest = computeEvolutionContentDigest(input);
+		let resolvedDocumentIds: readonly string[] = [];
+		let resolvedEvidenceIds: readonly string[] = [];
+		let resolvedLessonIds: readonly string[] = [];
+		let resolvedSliceIds: readonly string[] = [];
+		let resultDigest: string | null = null;
+		let denialCode: string | null = null;
+		try {
+			if (this.#revoked)
+				throw new EvolutionToolDeniedError("registry-revoked", "Reflector tool registry is revoked");
+			this.#signal?.throwIfAborted();
+			if (this.#toolCalls > this.#maxToolCalls) {
+				throw new EvolutionToolDeniedError("tool-budget-exhausted", "Reflector tool-call budget is exhausted");
+			}
+			const result = run();
+			resolvedDocumentIds = result.resolvedDocumentIds;
+			resolvedEvidenceIds = result.resolvedEvidenceIds;
+			resolvedLessonIds = result.resolvedLessonIds;
+			resolvedSliceIds = result.resolvedSliceIds;
+			resultDigest = computeEvolutionContentDigest(result.output);
+			return result.output;
+		} catch (error) {
+			denialCode = error instanceof EvolutionToolDeniedError ? error.code : "tool-failed";
+			if (error instanceof EvolutionToolDeniedError && error.recoverable) {
+				this.#recoverableDenials.push({ toolName: name, denialCode, requestedDocumentRef, requestedSliceRef });
+			}
+			throw error;
+		} finally {
+			await this.#audit({
+				toolCallId,
+				toolName: name,
+				requestDigest,
+				requestedDocumentRef,
+				requestedSliceRef,
+				resolvedDocumentIds,
+				resolvedEvidenceIds,
+				resolvedLessonIds,
+				resolvedSliceIds,
+				resultDigest,
+				denialCode,
+			});
+		}
+	}
+
+	#runEvidence(
+		name: Exclude<ReflectorToolName, "inspect_child_lessons">,
+		input: JsonObject,
+		references: ReflectorNodeReferences,
+		permittedEvidenceIds: ReadonlySet<string>,
+	): {
+		readonly output: JsonObject;
+		readonly resolvedDocumentIds: readonly string[];
+		readonly resolvedEvidenceIds: readonly string[];
+		readonly resolvedLessonIds: readonly string[];
+		readonly resolvedSliceIds: readonly string[];
+	} {
+		const result = (
+			output: JsonObject,
+			documents: readonly IndexedDocument[] = [],
+			evidenceIds: readonly string[] = [],
+			slices: readonly EvidenceSlice[] = [],
+		) => ({
+			output,
+			resolvedDocumentIds: documents.map((document) => document.descriptor.documentId),
+			resolvedEvidenceIds: evidenceIds,
+			resolvedLessonIds: [],
+			resolvedSliceIds: slices.map((slice) => slice.sliceId),
+		});
+		switch (name) {
+			case "list_documents":
+				this.#assertAllowedFields(name, input, []);
+				return result({ documents: references.documentCatalog });
+			case "inspect_outline": {
+				this.#assertAllowedFields(name, input, ["documentRef"]);
+				const document = this.#document(stringField(input, "documentRef"), references.documents);
+				const semanticUnits = document.descriptor.semanticUnits.filter((unit) =>
+					unit.evidenceIds.some((evidenceId) => permittedEvidenceIds.has(evidenceId)),
+				);
+				return result(
+					{
+						documentRef: references.documents.refFor(document),
+						diagnostics: document.descriptor.diagnostics.map((diagnostic) => ({
+							code: diagnostic.code,
+							recoverable: diagnostic.recoverable,
+						})),
+						semanticUnits: semanticUnits.map((unit) => ({
+							ordinal: unit.ordinal,
+							kind: unit.kind,
+							evidenceRefs: unit.evidenceIds.map((evidenceId) =>
+								this.#evidenceRef(evidenceId, references.evidence),
+							),
+						})),
+					},
+					[document],
+					semanticUnits.flatMap((unit) => unit.evidenceIds),
+				);
+			}
+			case "search_evidence": {
+				this.#assertAllowedFields(name, input, ["query", "limit"]);
+				const query = stringField(input, "query").toLocaleLowerCase();
+				const limit = Math.min(integerField(input, "limit", 20), 100);
+				const matches = references.evidence.entries
+					.filter((entry) => serializeEvolutionValue(entry.value.evidence).toLocaleLowerCase().includes(query))
+					.slice(0, limit);
+				return result(
+					{
+						query,
+						matches: matches.map((entry) => ({
+							documentRef: references.documents.refFor(entry.value.document),
+							ordinal: entry.value.ordinal,
+							evidenceRef: entry.ref,
+						})),
+					},
+					unique(matches.map((entry) => entry.value.document)),
+					matches.map((entry) => entry.value.evidence.evidenceId),
+				);
+			}
+			case "read_slice": {
+				this.#assertAllowedFields(name, input, ["documentRef", "startOrdinal", "endOrdinal"]);
+				const document = this.#document(stringField(input, "documentRef"), references.documents);
+				const startOrdinal = integerField(input, "startOrdinal");
+				const endOrdinal = integerField(input, "endOrdinal");
+				this.#assertRangePermitted(document, startOrdinal, endOrdinal, permittedEvidenceIds);
+				return this.#sliceOutput(document, this.#createSlice(document, startOrdinal, endOrdinal), references);
+			}
+			case "inspect_adjacent": {
+				this.#assertAllowedFields(name, input, ["sliceRef", "before", "after"]);
+				const slice = this.#slice(stringField(input, "sliceRef"), permittedEvidenceIds);
+				const document = this.#documents.find(
+					(candidate) => candidate.descriptor.documentId === slice.cursor.documentId,
+				);
+				if (document === undefined) throw new Error("Resolved slice document is unavailable");
+				const before = Math.min(integerField(input, "before", 1), 20);
+				const after = Math.min(integerField(input, "after", 1), 20);
+				let start = slice.cursor.startOrdinal;
+				let end = slice.cursor.endOrdinal;
+				for (let count = 0; count < before && start > 0; count += 1) {
+					const adjacent = document.evidence[start - 1];
+					if (adjacent === undefined || !permittedEvidenceIds.has(adjacent.evidenceId)) break;
+					start -= 1;
+				}
+				for (let count = 0; count < after && end < document.evidence.length - 1; count += 1) {
+					const adjacent = document.evidence[end + 1];
+					if (adjacent === undefined || !permittedEvidenceIds.has(adjacent.evidenceId)) break;
+					end += 1;
+				}
+				return this.#sliceOutput(document, this.#createSlice(document, start, end), references);
+			}
+			case "refine_slice": {
+				this.#assertAllowedFields(name, input, ["sliceRef", "startOrdinal", "endOrdinal", "splitAtOrdinal"]);
+				const slice = this.#slice(stringField(input, "sliceRef"), permittedEvidenceIds);
+				const document = this.#documents.find(
+					(candidate) => candidate.descriptor.documentId === slice.cursor.documentId,
+				);
+				if (document === undefined) throw new Error("Resolved slice document is unavailable");
+				if (input.splitAtOrdinal !== undefined) {
+					const split = integerField(input, "splitAtOrdinal");
+					if (split <= slice.cursor.startOrdinal || split > slice.cursor.endOrdinal) {
+						throw new EvolutionToolDeniedError("invalid-range", "splitAtOrdinal must be inside the slice");
+					}
+					const left = this.#createSlice(document, slice.cursor.startOrdinal, split - 1);
+					const right = this.#createSlice(document, split, slice.cursor.endOrdinal);
+					const linkedLeft = {
+						...left,
+						continuation: { previousSliceId: slice.continuation.previousSliceId, nextSliceId: right.sliceId },
+					};
+					const linkedRight = {
+						...right,
+						continuation: { previousSliceId: left.sliceId, nextSliceId: slice.continuation.nextSliceId },
+					};
+					this.#slices.set(linkedLeft.sliceId, linkedLeft);
+					this.#slices.set(linkedRight.sliceId, linkedRight);
+					return result(
+						{
+							slices: [
+								this.#sliceDescriptor(linkedLeft, references.evidence, references.documents),
+								this.#sliceDescriptor(linkedRight, references.evidence, references.documents),
+							],
+						},
+						[document],
+						slice.evidenceIds,
+						[linkedLeft, linkedRight],
+					);
+				}
+				const start = integerField(input, "startOrdinal", slice.cursor.startOrdinal);
+				const end = integerField(input, "endOrdinal", slice.cursor.endOrdinal);
+				if (start < slice.cursor.startOrdinal || end > slice.cursor.endOrdinal) {
+					throw new EvolutionToolDeniedError("invalid-range", "Refinement cannot expand a slice");
+				}
+				return this.#sliceOutput(document, this.#createSlice(document, start, end), references);
+			}
+		}
+	}
+
+	#assertAllowedFields(name: ReflectorToolName, input: JsonObject, allowed: readonly string[]): void {
+		const permitted = new Set(allowed);
+		const unexpected = Object.keys(input).find((field) => !permitted.has(field));
+		if (unexpected !== undefined) {
+			throw new EvolutionToolDeniedError("invalid-request", `Tool "${name}" does not permit field "${unexpected}"`);
+		}
+	}
+
+	#document(reference: string, catalog: EvolutionModelReferenceCatalog<IndexedDocument>): IndexedDocument {
+		try {
+			return catalog.resolve(reference, "documentRef");
+		} catch {
+			throw new EvolutionToolDeniedError(
+				"document-not-permitted",
+				`Document reference is not permitted. Permitted document references: ${catalog.references.join(", ")}`,
+			);
+		}
+	}
+
+	#assertRangePermitted(
+		document: IndexedDocument,
+		startOrdinal: number,
+		endOrdinal: number,
+		permittedEvidenceIds: ReadonlySet<string>,
+	): void {
+		if (startOrdinal > endOrdinal || endOrdinal >= document.evidence.length) {
+			throw new EvolutionToolDeniedError("invalid-range", "Slice range is outside the document");
+		}
+		if (
+			document.evidence
+				.slice(startOrdinal, endOrdinal + 1)
+				.some((evidence) => !permittedEvidenceIds.has(evidence.evidenceId))
+		) {
+			throw new EvolutionToolDeniedError("evidence-not-permitted", "Slice range is outside the current node");
+		}
+	}
+
+	#slice(reference: string, permittedEvidenceIds: ReadonlySet<string>): EvidenceSlice {
+		const sliceId = [...this.#sliceReferences.entries()].find(([, value]) => value === reference)?.[0];
+		const slice = sliceId === undefined ? undefined : this.#slices.get(sliceId);
+		if (
+			slice === undefined ||
+			slice.manifestDigest !== this.#manifestDigest ||
+			slice.evidenceIds.some((evidenceId) => !permittedEvidenceIds.has(evidenceId))
+		) {
+			throw new EvolutionToolDeniedError("slice-not-permitted", "Slice reference is not permitted");
+		}
+		return slice;
+	}
+
 	#createSlice(document: IndexedDocument, startOrdinal: number, endOrdinal: number): EvidenceSlice {
 		if (startOrdinal > endOrdinal || endOrdinal >= document.evidence.length) {
-			throw new ReflectorToolDeniedError("invalid-range", "Slice range is outside the document");
+			throw new EvolutionToolDeniedError("invalid-range", "Slice range is outside the document");
 		}
 		const units = document.descriptor.semanticUnits.slice(startOrdinal, endOrdinal + 1);
 		const cursorContent = {
@@ -347,312 +778,25 @@ export class ReflectorToolRegistry {
 			cursor,
 		}).slice("sha256:".length, "sha256:".length + 32)}`;
 		const evidenceIds = units.flatMap((unit) => unit.evidenceIds);
-		const contentDigest = computeEvolutionContentDigest({
-			manifestDigest: this.#manifestDigest,
-			cursor,
-			unitDigests: units.map((unit) => unit.contentDigest),
-		});
 		const slice: EvidenceSlice = {
 			sliceId,
 			manifestDigest: this.#manifestDigest,
 			cursor,
 			unitIds: units.map((unit) => unit.unitId),
 			evidenceIds,
-			contentDigest,
+			contentDigest: computeEvolutionContentDigest({
+				manifestDigest: this.#manifestDigest,
+				cursor,
+				unitDigests: units.map((unit) => unit.contentDigest),
+			}),
 			leftEdge: edge(document, startOrdinal, endOrdinal, "left"),
 			rightEdge: edge(document, startOrdinal, endOrdinal, "right"),
 			continuation: { previousSliceId: null, nextSliceId: null },
 		};
 		this.#slices.set(sliceId, slice);
-		return slice;
-	}
-
-	#createTools(permittedEvidenceIds: ReadonlySet<string>): readonly EvolutionModelTool[] {
-		const definitions: readonly [ReflectorToolName, string, JsonObject][] = [
-			["list_documents", "List immutable evidence documents.", toolSchema({})],
-			[
-				"inspect_outline",
-				"Inspect safe document metadata and semantic-unit outlines.",
-				toolSchema({ documentId: { type: "string" } }, ["documentId"]),
-			],
-			[
-				"search_evidence",
-				"Search permitted evidence with a bounded literal query.",
-				toolSchema({ query: { type: "string" }, limit: { type: "integer", minimum: 1 } }, ["query"]),
-			],
-			[
-				"read_slice",
-				"Read a contiguous inclusive range of semantic units.",
-				toolSchema(
-					{
-						documentId: { type: "string" },
-						startOrdinal: { type: "integer", minimum: 0 },
-						endOrdinal: { type: "integer", minimum: 0 },
-					},
-					["documentId", "startOrdinal", "endOrdinal"],
-				),
-			],
-			[
-				"inspect_adjacent",
-				"Inspect bounded semantic units immediately adjacent to a slice.",
-				toolSchema(
-					{
-						sliceId: { type: "string" },
-						before: { type: "integer", minimum: 0 },
-						after: { type: "integer", minimum: 0 },
-					},
-					["sliceId"],
-				),
-			],
-			[
-				"refine_slice",
-				"Shrink a slice or split it at a semantic-unit boundary.",
-				toolSchema(
-					{
-						sliceId: { type: "string" },
-						startOrdinal: { type: "integer", minimum: 0 },
-						endOrdinal: { type: "integer", minimum: 0 },
-						splitAtOrdinal: { type: "integer", minimum: 0 },
-					},
-					["sliceId"],
-				),
-			],
-		];
-		return definitions.map(([name, description, inputSchema]) => ({
-			name,
-			description,
-			inputSchema,
-			execute: (input) => this.#execute(name, input, permittedEvidenceIds),
-		}));
-	}
-
-	async #execute(
-		name: ReflectorToolName,
-		input: JsonObject,
-		permittedEvidenceIds: ReadonlySet<string>,
-	): Promise<JsonObject> {
-		this.#toolCalls += 1;
-		const toolCallId = `reflector-tool-${this.#toolCalls}`;
-		const requestedSliceId = typeof input.sliceId === "string" ? input.sliceId : null;
-		const requestDigest = computeEvolutionContentDigest(input);
-		let resolvedEvidenceIds: readonly string[] = [];
-		let resultDigest: string | null = null;
-		let denialCode: string | null = null;
-		try {
-			if (this.#revoked)
-				throw new ReflectorToolDeniedError("registry-revoked", "Reflector tool registry is revoked");
-			this.#signal?.throwIfAborted();
-			if (this.#toolCalls > this.#maxToolCalls) {
-				throw new ReflectorToolDeniedError("tool-budget-exhausted", "Reflector tool-call budget is exhausted");
-			}
-			this.#assertAllowedFields(name, input);
-			const result = this.#run(name, input, permittedEvidenceIds);
-			resolvedEvidenceIds = result.evidenceIds;
-			resultDigest = computeEvolutionContentDigest(result.output);
-			return result.output;
-		} catch (error) {
-			denialCode = error instanceof ReflectorToolDeniedError ? error.code : "tool-failed";
-			throw error;
-		} finally {
-			await this.#audit({
-				toolCallId,
-				toolName: name,
-				requestDigest,
-				requestedSliceId,
-				resolvedEvidenceIds,
-				resultDigest,
-				denialCode,
-			});
-		}
-	}
-
-	#assertAllowedFields(name: ReflectorToolName, input: JsonObject): void {
-		const allowed: Readonly<Record<ReflectorToolName, ReadonlySet<string>>> = {
-			list_documents: new Set(),
-			inspect_outline: new Set(["documentId"]),
-			search_evidence: new Set(["query", "limit"]),
-			read_slice: new Set(["documentId", "startOrdinal", "endOrdinal"]),
-			inspect_adjacent: new Set(["sliceId", "before", "after"]),
-			refine_slice: new Set(["sliceId", "startOrdinal", "endOrdinal", "splitAtOrdinal"]),
-		};
-		const unexpected = Object.keys(input).find((field) => !allowed[name].has(field));
-		if (unexpected !== undefined) {
-			throw new ReflectorToolDeniedError(
-				"invalid-request",
-				`Reflector tool "${name}" does not permit field "${unexpected}"`,
-			);
-		}
-	}
-
-	#run(
-		name: ReflectorToolName,
-		input: JsonObject,
-		permittedEvidenceIds: ReadonlySet<string>,
-	): { readonly output: JsonObject; readonly evidenceIds: readonly string[] } {
-		switch (name) {
-			case "list_documents":
-				return {
-					output: {
-						manifestDigest: this.#manifestDigest,
-						documents: [...this.#documents.values()]
-							.map(({ descriptor }) => ({
-								descriptor,
-								permittedUnitCount: descriptor.semanticUnits.filter((unit) =>
-									unit.evidenceIds.some((evidenceId) => permittedEvidenceIds.has(evidenceId)),
-								).length,
-							}))
-							.filter(({ permittedUnitCount }) => permittedUnitCount > 0)
-							.map(({ descriptor, permittedUnitCount }) => ({
-								documentId: descriptor.documentId,
-								materializationId: descriptor.materializationId,
-								traceId: descriptor.traceId,
-								integrity: descriptor.integrity,
-								terminationStatus: descriptor.terminationStatus,
-								unitCount: permittedUnitCount,
-								contentDigest: descriptor.contentDigest,
-							})),
-					},
-					evidenceIds: [],
-				};
-			case "inspect_outline": {
-				const document = this.#document(stringField(input, "documentId"), permittedEvidenceIds);
-				const semanticUnits = document.descriptor.semanticUnits.filter((unit) =>
-					unit.evidenceIds.some((evidenceId) => permittedEvidenceIds.has(evidenceId)),
-				);
-				return {
-					output: {
-						documentId: document.descriptor.documentId,
-						diagnostics: jsonClone(document.descriptor.diagnostics),
-						orderingAmbiguity: document.descriptor.orderingAmbiguity,
-						semanticUnits: jsonClone(semanticUnits),
-					},
-					evidenceIds: semanticUnits.flatMap((unit) => unit.evidenceIds),
-				};
-			}
-			case "search_evidence": {
-				const query = stringField(input, "query").toLocaleLowerCase();
-				const limit = Math.min(integerField(input, "limit", 20), 100);
-				const matches: JsonObject[] = [];
-				for (const document of this.#documents.values()) {
-					for (const [ordinal, evidence] of document.evidence.entries()) {
-						if (!permittedEvidenceIds.has(evidence.evidenceId)) continue;
-						if (serializeEvolutionValue(evidence).toLocaleLowerCase().includes(query)) {
-							matches.push({
-								documentId: document.descriptor.documentId,
-								ordinal,
-								evidenceId: evidence.evidenceId,
-								unitId: document.descriptor.semanticUnits[ordinal]?.unitId ?? "",
-							});
-							if (matches.length === limit) break;
-						}
-					}
-					if (matches.length === limit) break;
-				}
-				return {
-					output: { query, matches },
-					evidenceIds: matches.map((match) => String(match.evidenceId)),
-				};
-			}
-			case "read_slice": {
-				const document = this.#document(stringField(input, "documentId"), permittedEvidenceIds);
-				const startOrdinal = integerField(input, "startOrdinal");
-				const endOrdinal = integerField(input, "endOrdinal");
-				this.#assertRangePermitted(document, startOrdinal, endOrdinal, permittedEvidenceIds);
-				const slice = this.#createSlice(document, startOrdinal, endOrdinal);
-				return this.#sliceOutput(document, slice);
-			}
-			case "inspect_adjacent": {
-				const slice = this.#slice(stringField(input, "sliceId"), permittedEvidenceIds);
-				const document = this.#document(slice.cursor.documentId, permittedEvidenceIds);
-				const before = Math.min(integerField(input, "before", 1), 20);
-				const after = Math.min(integerField(input, "after", 1), 20);
-				let start = slice.cursor.startOrdinal;
-				let end = slice.cursor.endOrdinal;
-				for (let count = 0; count < before && start > 0; count += 1) {
-					const adjacent = document.evidence[start - 1];
-					if (adjacent === undefined || !permittedEvidenceIds.has(adjacent.evidenceId)) break;
-					start -= 1;
-				}
-				for (let count = 0; count < after && end < document.evidence.length - 1; count += 1) {
-					const adjacent = document.evidence[end + 1];
-					if (adjacent === undefined || !permittedEvidenceIds.has(adjacent.evidenceId)) break;
-					end += 1;
-				}
-				return this.#sliceOutput(document, this.#createSlice(document, start, end));
-			}
-			case "refine_slice": {
-				const slice = this.#slice(stringField(input, "sliceId"), permittedEvidenceIds);
-				const document = this.#document(slice.cursor.documentId, permittedEvidenceIds);
-				const splitAt = input.splitAtOrdinal;
-				if (splitAt !== undefined) {
-					const split = integerField(input, "splitAtOrdinal");
-					if (split <= slice.cursor.startOrdinal || split > slice.cursor.endOrdinal) {
-						throw new ReflectorToolDeniedError("invalid-range", "splitAtOrdinal must be inside the slice");
-					}
-					const left = this.#createSlice(document, slice.cursor.startOrdinal, split - 1);
-					const right = this.#createSlice(document, split, slice.cursor.endOrdinal);
-					const linkedLeft = {
-						...left,
-						continuation: { previousSliceId: slice.continuation.previousSliceId, nextSliceId: right.sliceId },
-					};
-					const linkedRight = {
-						...right,
-						continuation: { previousSliceId: left.sliceId, nextSliceId: slice.continuation.nextSliceId },
-					};
-					this.#slices.set(linkedLeft.sliceId, linkedLeft);
-					this.#slices.set(linkedRight.sliceId, linkedRight);
-					return { output: { slices: jsonClone([linkedLeft, linkedRight]) }, evidenceIds: slice.evidenceIds };
-				}
-				const start = integerField(input, "startOrdinal", slice.cursor.startOrdinal);
-				const end = integerField(input, "endOrdinal", slice.cursor.endOrdinal);
-				if (start < slice.cursor.startOrdinal || end > slice.cursor.endOrdinal) {
-					throw new ReflectorToolDeniedError("invalid-range", "Refinement cannot expand a slice");
-				}
-				return this.#sliceOutput(document, this.#createSlice(document, start, end));
-			}
-		}
-	}
-
-	#document(documentId: string, permittedEvidenceIds: ReadonlySet<string>): IndexedDocument {
-		const document = this.#documents.get(documentId);
-		if (
-			document === undefined ||
-			!document.evidence.some((evidence) => permittedEvidenceIds.has(evidence.evidenceId))
-		) {
-			throw new ReflectorToolDeniedError("document-not-permitted", `Document "${documentId}" is not permitted`);
-		}
-		return document;
-	}
-
-	#assertRangePermitted(
-		document: IndexedDocument,
-		startOrdinal: number,
-		endOrdinal: number,
-		permittedEvidenceIds: ReadonlySet<string>,
-	): void {
-		if (startOrdinal > endOrdinal || endOrdinal >= document.evidence.length) {
-			throw new ReflectorToolDeniedError("invalid-range", "Slice range is outside the document");
-		}
-		if (
-			document.evidence
-				.slice(startOrdinal, endOrdinal + 1)
-				.some((evidence) => !permittedEvidenceIds.has(evidence.evidenceId))
-		) {
-			throw new ReflectorToolDeniedError(
-				"evidence-not-permitted",
-				"Slice range is outside the current reflection node",
-			);
-		}
-	}
-
-	#slice(sliceId: string, permittedEvidenceIds: ReadonlySet<string>): EvidenceSlice {
-		const slice = this.#slices.get(sliceId);
-		if (
-			slice === undefined ||
-			slice.manifestDigest !== this.#manifestDigest ||
-			slice.evidenceIds.some((evidenceId) => !permittedEvidenceIds.has(evidenceId))
-		) {
-			throw new ReflectorToolDeniedError("slice-not-permitted", `Slice "${sliceId}" is not permitted`);
+		if (!this.#sliceReferences.has(sliceId)) {
+			this.#sliceReferences.set(sliceId, `S${this.#sliceReferences.size + 1}`);
+			this.#sensitiveReplacements.set(sliceId, this.#sliceReferences.get(sliceId) as string);
 		}
 		return slice;
 	}
@@ -660,21 +804,90 @@ export class ReflectorToolRegistry {
 	#sliceOutput(
 		document: IndexedDocument,
 		slice: EvidenceSlice,
-	): { readonly output: JsonObject; readonly evidenceIds: readonly string[] } {
+		references: ReflectorNodeReferences,
+	): {
+		readonly output: JsonObject;
+		readonly resolvedDocumentIds: readonly string[];
+		readonly resolvedEvidenceIds: readonly string[];
+		readonly resolvedLessonIds: readonly string[];
+		readonly resolvedSliceIds: readonly string[];
+	} {
 		const evidence = document.evidence
 			.slice(slice.cursor.startOrdinal, slice.cursor.endOrdinal + 1)
 			.map((item, offset) => ({
-				unit: document.descriptor.semanticUnits[slice.cursor.startOrdinal + offset],
-				evidence: jsonClone({
-					evidenceId: item.evidenceId,
-					kind: item.kind,
-					...(item.kind === "session_item" ? { itemType: item.itemType } : {}),
-					payload: item.payload,
-				}),
+				ordinal: slice.cursor.startOrdinal + offset,
+				evidenceRef: this.#evidenceRef(item.evidenceId, references.evidence),
+				kind: item.kind,
+				...(item.kind === "session_item" ? { itemType: item.itemType } : {}),
+				payload: this.#modelSafeClone(item.payload),
 			}));
 		return {
-			output: { slice: jsonClone(slice), evidence: jsonClone(evidence), untrustedData: true },
-			evidenceIds: slice.evidenceIds,
+			output: {
+				slice: this.#sliceDescriptor(slice, references.evidence, references.documents),
+				evidence,
+				untrustedData: true,
+			},
+			resolvedDocumentIds: [document.descriptor.documentId],
+			resolvedEvidenceIds: slice.evidenceIds,
+			resolvedLessonIds: [],
+			resolvedSliceIds: [slice.sliceId],
 		};
+	}
+
+	#sliceDescriptor(
+		slice: EvidenceSlice,
+		evidence: EvolutionModelReferenceCatalog<IndexedEvidence>,
+		documents: EvolutionModelReferenceCatalog<IndexedDocument>,
+	): JsonObject {
+		const document = this.#documents.find((candidate) => candidate.descriptor.documentId === slice.cursor.documentId);
+		if (document === undefined) throw new Error("Slice document is unavailable");
+		const edgeDescriptor = (value: EvidenceSliceEdge): JsonObject => ({
+			status: value.status,
+			reasons: value.reasons,
+			evidenceRefs: value.evidenceIds.map((evidenceId) => this.#evidenceRef(evidenceId, evidence)),
+		});
+		const continuationRef = (sliceId: string | null) =>
+			sliceId === null ? null : (this.#sliceReferences.get(sliceId) ?? null);
+		return {
+			sliceRef: this.#sliceReferences.get(slice.sliceId) as string,
+			documentRef: documents.refFor(document),
+			startOrdinal: slice.cursor.startOrdinal,
+			endOrdinal: slice.cursor.endOrdinal,
+			evidenceRefs: slice.evidenceIds.map((evidenceId) => this.#evidenceRef(evidenceId, evidence)),
+			leftEdge: edgeDescriptor(slice.leftEdge),
+			rightEdge: edgeDescriptor(slice.rightEdge),
+			continuation: {
+				previousSliceRef: continuationRef(slice.continuation.previousSliceId),
+				nextSliceRef: continuationRef(slice.continuation.nextSliceId),
+			},
+		};
+	}
+
+	#evidenceRef(evidenceId: string, catalog: EvolutionModelReferenceCatalog<IndexedEvidence>): string {
+		const entry = catalog.entries.find((candidate) => candidate.value.evidence.evidenceId === evidenceId);
+		if (entry === undefined) throw new Error("Evidence is outside the current node reference catalog");
+		return entry.ref;
+	}
+
+	#preview(evidence: MaterializedEvidence): string {
+		const value = evidence.kind === "session_item" ? evidence.payload : evidence;
+		const serialized = serializeEvolutionValue(this.#modelSafeClone(value));
+		return serialized.length <= 240 ? serialized : `${serialized.slice(0, 237)}...`;
+	}
+
+	#modelSafeClone(value: unknown): JsonValue {
+		const replace = (candidate: unknown): JsonValue => {
+			if (typeof candidate === "string") {
+				let result = candidate;
+				for (const [sensitive, replacement] of this.#sensitiveReplacements) {
+					result = result.replaceAll(sensitive, replacement);
+				}
+				return result;
+			}
+			if (Array.isArray(candidate)) return candidate.map(replace);
+			if (!isRecord(candidate)) return candidate as JsonValue;
+			return Object.fromEntries(Object.entries(candidate).map(([key, child]) => [key, replace(child)]));
+		};
+		return replace(jsonClone(value));
 	}
 }

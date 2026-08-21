@@ -592,6 +592,7 @@ export class EvolutionPipeline implements EvolutionStageExecutor {
 				let proposals: readonly EvolutionProposal[];
 				try {
 					proposals = await this.#dependencies.curator.curate({
+						jobId: context.job.jobId,
 						input: context.input,
 						corpus,
 						instructions,

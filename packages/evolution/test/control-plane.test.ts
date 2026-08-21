@@ -475,6 +475,7 @@ describe("checkpointed evolution pipeline", () => {
 						promptVersion: "reflector-v1",
 						idempotencyKey: input.idempotencyKey,
 						input: {},
+						outputSchema: {},
 						tools: [],
 						signal: input.signal,
 					});
@@ -531,6 +532,7 @@ describe("checkpointed evolution pipeline", () => {
 						idempotencyKey: input.idempotencyKey,
 						input: {},
 						outputSchema: {},
+						tools: [],
 						signal: input.signal,
 					});
 					const exactDelta = {
