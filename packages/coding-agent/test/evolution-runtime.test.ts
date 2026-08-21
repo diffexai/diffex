@@ -326,14 +326,14 @@ describe("coding-agent evolution runtime", () => {
 		const harness = await createHarness();
 		harnesses.push(harness);
 		harness.setResponses([
-			fauxAssistantMessage(fauxToolCall("inspect_outline", { documentId: "trace-id" }), {
+			fauxAssistantMessage(fauxToolCall("read_slice", { documentRef: "trace-id", startOrdinal: 0, endOrdinal: 1 }), {
 				stopReason: "toolUse",
 			}),
 			(context) => {
 				const toolResult = context.messages.find((message) => message.role === "toolResult");
 				expect(toolResult).toMatchObject({
 					role: "toolResult",
-					toolName: "inspect_outline",
+					toolName: "read_slice",
 					isError: true,
 				});
 				const errorText =
@@ -370,8 +370,8 @@ describe("coding-agent evolution runtime", () => {
 				outputSchema: { type: "object" },
 				tools: [
 					{
-						name: "inspect_outline",
-						description: "Inspect an evidence outline.",
+						name: "read_slice",
+						description: "Read a contiguous evidence slice.",
 						inputSchema: { type: "object" },
 						execute() {
 							return Promise.reject(
@@ -390,7 +390,7 @@ describe("coding-agent evolution runtime", () => {
 		});
 	});
 
-	it("recovers a one-character canonical evidence ID typo through the faux-provider evolution flow", async () => {
+	it("normalizes a missing evidence prefix through the faux-provider evolution flow", async () => {
 		const agentDir = join(
 			tmpdir(),
 			`diffex-model-safe-evolution-${Date.now()}-${Math.random().toString(36).slice(2)}`,
@@ -459,32 +459,7 @@ describe("coding-agent evolution runtime", () => {
 								summary: "Keep focused verification",
 								preconditions: [],
 								observedOutcome: "Verification passed",
-								supportingEvidenceRefs: [`${traceId}:span:l`],
-								counterevidenceRefs: [],
-								applicabilityBoundaries: [],
-								uncertainty: null,
-								actionableTakeaway: "Verify focused changes",
-							},
-						],
-					}),
-					{ stopReason: "toolUse" },
-				);
-			},
-			(context) => {
-				const prompt = String(context.messages[0]?.content ?? "");
-				prompts.push(prompt);
-				expect(prompt).not.toContain(`${traceId}:span:l`);
-				expect(prompt).toContain("Permitted references: E1, E2, E3");
-				return fauxAssistantMessage(
-					fauxToolCall("submit_evolution_response", {
-						complete: true,
-						lessons: [
-							{
-								kind: "successful-strategy",
-								summary: "Keep focused verification",
-								preconditions: [],
-								observedOutcome: "Verification passed",
-								supportingEvidenceRefs: ["E2"],
+								supportingEvidenceRefs: ["2"],
 								counterevidenceRefs: [],
 								applicabilityBoundaries: [],
 								uncertainty: null,
@@ -524,7 +499,7 @@ describe("coding-agent evolution runtime", () => {
 				},
 				{ timeout: 5_000, interval: 20 },
 			);
-			expect(prompts).toHaveLength(3);
+			expect(prompts).toHaveLength(2);
 			expect(existsSync(join(agentDir, "evolution-failures", started.job.jobId))).toBe(false);
 		} finally {
 			await runtime.stop();

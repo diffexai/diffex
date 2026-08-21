@@ -18,7 +18,7 @@ export interface CuratorMemoryBinding {
 
 export interface CuratorToolAudit {
 	readonly toolCallId: string;
-	readonly toolName: "inspect_instructions" | "inspect_lessons" | "inspect_memory";
+	readonly toolName: "inspect_existing_guidance" | "inspect_lessons";
 	readonly requestDigest: string;
 	readonly requestedReferences: readonly string[];
 	readonly resolvedInstructionPaths: readonly string[];
@@ -158,34 +158,27 @@ export class CuratorToolRegistry {
 				execute: (input) => this.#inspectLessons(input),
 			},
 			{
-				name: "inspect_instructions",
-				description: "Inspect complete applicable instruction content.",
-				inputSchema: schema(
-					{
-						instructionRefs: {
-							type: "array",
-							minItems: 1,
-							items: { type: "string", enum: this.instructions.references },
+				name: "inspect_existing_guidance",
+				description: "Inspect complete applicable instructions, rendered memory, or active memory items.",
+				inputSchema: {
+					...schema(
+						{
+							instructionRefs: {
+								type: "array",
+								minItems: 1,
+								items: { type: "string", enum: this.instructions.references },
+							},
+							memoryRefs: {
+								type: "array",
+								minItems: 1,
+								items: { type: "string", enum: ["M0", ...this.memory.references] },
+							},
 						},
-					},
-					["instructionRefs"],
-				),
-				execute: (input) => this.#inspectInstructions(input),
-			},
-			{
-				name: "inspect_memory",
-				description: "Inspect complete rendered memory or active memory items.",
-				inputSchema: schema(
-					{
-						memoryRefs: {
-							type: "array",
-							minItems: 1,
-							items: { type: "string", enum: ["M0", ...this.memory.references] },
-						},
-					},
-					["memoryRefs"],
-				),
-				execute: (input) => this.#inspectMemory(input),
+						[],
+					),
+					anyOf: [{ required: ["instructionRefs"] }, { required: ["memoryRefs"] }],
+				},
+				execute: (input) => this.#inspectExistingGuidance(input),
 			},
 		];
 	}
@@ -196,7 +189,7 @@ export class CuratorToolRegistry {
 
 	async #inspectLessons(input: JsonObject): Promise<JsonObject> {
 		return this.#execute("inspect_lessons", input, () => {
-			this.#assertOnlyField(input, "lessonRefs");
+			this.#assertAllowedFields(input, ["lessonRefs"]);
 			const selected = referenceArray(input.lessonRefs, "lessonRefs", this.lessons, { allowEmpty: false });
 			return {
 				output: {
@@ -218,41 +211,29 @@ export class CuratorToolRegistry {
 		});
 	}
 
-	async #inspectInstructions(input: JsonObject): Promise<JsonObject> {
-		return this.#execute("inspect_instructions", input, () => {
-			this.#assertOnlyField(input, "instructionRefs");
-			const selected = referenceArray(input.instructionRefs, "instructionRefs", this.instructions, {
-				allowEmpty: false,
-			});
-			return {
-				output: {
-					instructions: selected.map((instruction) => ({
-						instructionRef: this.instructions.refFor(instruction),
-						precedence: instruction.precedence,
-						content: instruction.content,
-					})),
-				},
-				instructions: selected,
-				lessons: [],
-				memory: [],
-			};
-		});
-	}
-
-	async #inspectMemory(input: JsonObject): Promise<JsonObject> {
-		return this.#execute("inspect_memory", input, () => {
-			this.#assertOnlyField(input, "memoryRefs");
-			if (!Array.isArray(input.memoryRefs) || input.memoryRefs.some((value) => typeof value !== "string")) {
+	async #inspectExistingGuidance(input: JsonObject): Promise<JsonObject> {
+		return this.#execute("inspect_existing_guidance", input, () => {
+			this.#assertAllowedFields(input, ["instructionRefs", "memoryRefs"]);
+			const instructionRefs = input.instructionRefs ?? [];
+			const memoryRefs = input.memoryRefs ?? [];
+			if (!Array.isArray(instructionRefs) || !Array.isArray(memoryRefs)) {
+				throw new EvolutionToolDeniedError("invalid-reference", "Guidance references must be arrays");
+			}
+			if (instructionRefs.length === 0 && memoryRefs.length === 0) {
+				throw new EvolutionToolDeniedError("invalid-reference", "At least one guidance reference is required");
+			}
+			const selectedInstructions = referenceArray(instructionRefs, "instructionRefs", this.instructions);
+			if (memoryRefs.some((value) => typeof value !== "string")) {
 				throw new EvolutionToolDeniedError("invalid-reference", "memoryRefs must be an array of references");
 			}
-			const refs = input.memoryRefs as readonly string[];
-			if (new Set(refs).size !== refs.length || refs.length === 0) {
-				throw new EvolutionToolDeniedError("invalid-reference", "memoryRefs must be non-empty and unique");
+			const refs = memoryRefs as readonly string[];
+			if (new Set(refs).size !== refs.length) {
+				throw new EvolutionToolDeniedError("invalid-reference", "memoryRefs must be unique");
 			}
 			const itemRefs = refs.filter((reference) => reference !== "M0");
-			let selected: readonly CuratorMemoryBinding[];
+			let selectedMemory: readonly CuratorMemoryBinding[];
 			try {
-				selected = referenceArray(itemRefs, "memoryRefs", this.memory);
+				selectedMemory = referenceArray(itemRefs, "memoryRefs", this.memory);
 			} catch (error) {
 				if (error instanceof EvolutionModelReferenceError) {
 					throw new EvolutionToolDeniedError(
@@ -264,6 +245,11 @@ export class CuratorToolRegistry {
 			}
 			return {
 				output: {
+					instructions: selectedInstructions.map((instruction) => ({
+						instructionRef: this.instructions.refFor(instruction),
+						precedence: instruction.precedence,
+						content: instruction.content,
+					})),
 					memory: refs.map((reference) => {
 						if (reference === "M0") {
 							return {
@@ -284,15 +270,16 @@ export class CuratorToolRegistry {
 						};
 					}),
 				},
-				instructions: [],
+				instructions: selectedInstructions,
 				lessons: [],
-				memory: selected,
+				memory: selectedMemory,
 			};
 		});
 	}
 
-	#assertOnlyField(input: JsonObject, field: string): void {
-		const unexpected = Object.keys(input).find((candidate) => candidate !== field);
+	#assertAllowedFields(input: JsonObject, fields: readonly string[]): void {
+		const allowed = new Set(fields);
+		const unexpected = Object.keys(input).find((candidate) => !allowed.has(candidate));
 		if (unexpected !== undefined) {
 			throw new EvolutionToolDeniedError("invalid-request", `Tool request does not permit field "${unexpected}"`);
 		}

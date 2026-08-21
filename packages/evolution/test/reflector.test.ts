@@ -95,7 +95,13 @@ function invocation(): MaterializedInvocation {
 			ambiguity: [],
 		},
 		evidence,
-		diagnostics: [],
+		diagnostics: [
+			{
+				code: "session_missing",
+				message: "The session transcript was unavailable.",
+				recoverable: true,
+			},
+		],
 	};
 }
 
@@ -271,33 +277,24 @@ describe("recursive reflector", () => {
 					expect(JSON.stringify(request.input)).not.toContain(canonicalId);
 				}
 				expect(request.tools.map((tool) => tool.name)).toEqual(
-					node.kind === "leaf"
-						? [
-								"list_documents",
-								"inspect_outline",
-								"search_evidence",
-								"read_slice",
-								"inspect_adjacent",
-								"refine_slice",
-							]
-						: ["inspect_child_lessons"],
+					node.kind === "leaf" ? ["search_evidence", "read_slice", "inspect_adjacent"] : ["inspect_child_lessons"],
 				);
 				if (!inspectedTools && node.kind === "leaf") {
 					inspectedTools = true;
+					expect(request.input.documents).toEqual([
+						expect.objectContaining({
+							diagnostics: [{ code: "session_missing", recoverable: true }],
+						}),
+					]);
 					const byName = new Map(request.tools.map((tool) => [tool.name, tool]));
-					const listed = await byName.get("list_documents")?.execute({});
-					expect(JSON.stringify(listed)).not.toContain("/private/");
-					expect(JSON.stringify(listed)).not.toContain("document-1");
-					await byName.get("inspect_outline")?.execute({ documentRef: "D1" });
 					const read = await byName
 						.get("read_slice")
 						?.execute({ documentRef: "D1", startOrdinal: 0, endOrdinal: 1 });
 					const slice = jsonObject(read?.slice, "slice");
 					const sliceRef = String(slice.sliceRef);
 					await byName.get("inspect_adjacent")?.execute({ sliceRef, after: 1 });
-					await byName.get("refine_slice")?.execute({ sliceRef, splitAtOrdinal: 1 });
 					await byName.get("search_evidence")?.execute({ query: "indexed source", limit: 5 });
-					staleTool = byName.get("list_documents") ?? null;
+					staleTool = byName.get("search_evidence") ?? null;
 				}
 				return {
 					output: { complete: true, lessons: [lessonForRequest(request.input)] },
@@ -322,7 +319,7 @@ describe("recursive reflector", () => {
 		await expect(capturedTool.execute({})).rejects.toThrow("revoked");
 		const events = await persistence.read("job-1");
 		expect(events.filter((event) => event.type === "reflection-node-checkpointed")).toHaveLength(4);
-		expect(events.filter((event) => event.type === "reflector-tool-call")).toHaveLength(7);
+		expect(events.filter((event) => event.type === "reflector-tool-call")).toHaveLength(4);
 		expect(events).toContainEqual(
 			expect.objectContaining({ type: "reflector-tool-call", denialCode: "registry-revoked" }),
 		);
@@ -336,9 +333,10 @@ describe("recursive reflector", () => {
 				if (request.stage !== "reflector") throw new Error("Unexpected Curator request");
 				if (!checkedDenials) {
 					checkedDenials = true;
-					const outline = request.tools.find((tool) => tool.name === "inspect_outline");
-					await expect(outline?.execute({ documentRef: "D99" })).rejects.toThrow("not permitted");
 					const read = request.tools.find((tool) => tool.name === "read_slice");
+					await expect(read?.execute({ documentRef: "D99", startOrdinal: 0, endOrdinal: 1 })).rejects.toThrow(
+						"not permitted",
+					);
 					await expect(
 						read?.execute({
 							documentRef: "D1",
@@ -360,7 +358,7 @@ describe("recursive reflector", () => {
 		expect(await persistence.read("job-1")).toContainEqual(
 			expect.objectContaining({
 				type: "reflector-tool-call",
-				toolName: "inspect_outline",
+				toolName: "read_slice",
 				denialCode: "document-not-permitted",
 			}),
 		);
@@ -384,14 +382,6 @@ describe("recursive reflector", () => {
 					const evidenceRefs = references(request.input, "evidence", "evidenceRef");
 					expect(evidenceRefs).toEqual(["E1", "E2"]);
 					const byName = new Map(request.tools.map((tool) => [tool.name, tool]));
-					const outline = await byName.get("inspect_outline")?.execute({ documentRef: "D1" });
-					const semanticUnits = Array.isArray(outline?.semanticUnits) ? outline.semanticUnits : [];
-					expect(
-						semanticUnits.flatMap((unit) => {
-							const record = jsonObject(unit, "semantic unit");
-							return Array.isArray(record.evidenceRefs) ? record.evidenceRefs.map(String) : [];
-						}),
-					).toEqual(evidenceRefs);
 					await expect(byName.get("search_evidence")?.execute({ query: "focused test passed" })).resolves.toEqual({
 						query: "focused test passed",
 						matches: [],
@@ -630,7 +620,11 @@ describe("recursive reflector", () => {
 		const checkpoints = (await persistence.read("job-1")).filter(
 			(event) => event.type === "reflection-node-checkpointed",
 		);
-		expect(checkpoints.flatMap((event) => event.referenceNormalizations)).toEqual([
+		expect(
+			checkpoints
+				.flatMap((event) => event.referenceNormalizations)
+				.sort((left, right) => left.normalizedReference.localeCompare(right.normalizedReference)),
+		).toEqual([
 			{ field: "supportingEvidenceRefs", providedReference: "1", normalizedReference: "E1" },
 			{ field: "supportingEvidenceRefs", providedReference: "2", normalizedReference: "E2" },
 			{ field: "supportingEvidenceRefs", providedReference: "3", normalizedReference: "E3" },
@@ -751,9 +745,9 @@ describe("recursive reflector", () => {
 		const input = reflectInput({
 			async execute(request) {
 				if (request.stage !== "reflector") throw new Error("Unexpected Curator request");
-				const list = request.tools.find((tool) => tool.name === "list_documents");
-				await list?.execute({});
-				await expect(list?.execute({})).rejects.toThrow("budget is exhausted");
+				const search = request.tools.find((tool) => tool.name === "search_evidence");
+				await search?.execute({ query: "indexed" });
+				await expect(search?.execute({ query: "indexed" })).rejects.toThrow("budget is exhausted");
 				return {
 					output: { complete: true, lessons: [lessonForRequest(request.input)] },
 					model: { provider: "faux", model: "fixture" },

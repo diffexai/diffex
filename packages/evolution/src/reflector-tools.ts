@@ -16,14 +16,7 @@ import { EvolutionModelReferenceCatalog, referenceArray } from "./model-referenc
 import type { EvolutionModelTool } from "./ports.ts";
 import { computeEvolutionContentDigest, serializeEvolutionValue } from "./provenance.ts";
 
-const EVIDENCE_TOOL_NAMES = [
-	"list_documents",
-	"inspect_outline",
-	"search_evidence",
-	"read_slice",
-	"inspect_adjacent",
-	"refine_slice",
-] as const;
+const EVIDENCE_TOOL_NAMES = ["search_evidence", "read_slice", "inspect_adjacent"] as const;
 
 export type ReflectorToolName = (typeof EVIDENCE_TOOL_NAMES)[number] | "inspect_child_lessons";
 
@@ -325,6 +318,10 @@ export class ReflectorToolRegistry {
 				integrity: entry.value.descriptor.integrity,
 				terminationStatus: entry.value.descriptor.terminationStatus,
 				unitCount: evidenceValues.filter((item) => item.document === entry.value).length,
+				diagnostics: entry.value.descriptor.diagnostics.map((diagnostic) => ({
+					code: diagnostic.code,
+					recoverable: diagnostic.recoverable,
+				})),
 			})),
 			evidenceCatalog: evidence.entries.map((entry) => ({
 				evidenceRef: entry.ref,
@@ -342,12 +339,6 @@ export class ReflectorToolRegistry {
 	toolsForEvidence(references: ReflectorNodeReferences): readonly EvolutionModelTool[] {
 		const permittedEvidenceIds = new Set(references.evidence.entries.map((entry) => entry.value.evidence.evidenceId));
 		const definitions: readonly [Exclude<ReflectorToolName, "inspect_child_lessons">, string, JsonObject][] = [
-			["list_documents", "List immutable evidence documents.", toolSchema({})],
-			[
-				"inspect_outline",
-				"Inspect safe document metadata and semantic-unit outlines.",
-				toolSchema({ documentRef: { type: "string", enum: references.documents.references } }, ["documentRef"]),
-			],
 			[
 				"search_evidence",
 				"Search permitted evidence with a bounded literal query.",
@@ -373,19 +364,6 @@ export class ReflectorToolRegistry {
 						sliceRef: { type: "string", pattern: "^S[1-9][0-9]*$" },
 						before: { type: "integer", minimum: 0 },
 						after: { type: "integer", minimum: 0 },
-					},
-					["sliceRef"],
-				),
-			],
-			[
-				"refine_slice",
-				"Shrink a slice or split it at a semantic-unit boundary.",
-				toolSchema(
-					{
-						sliceRef: { type: "string", pattern: "^S[1-9][0-9]*$" },
-						startOrdinal: { type: "integer", minimum: 0 },
-						endOrdinal: { type: "integer", minimum: 0 },
-						splitAtOrdinal: { type: "integer", minimum: 0 },
 					},
 					["sliceRef"],
 				),
@@ -584,34 +562,6 @@ export class ReflectorToolRegistry {
 			resolvedSliceIds: slices.map((slice) => slice.sliceId),
 		});
 		switch (name) {
-			case "list_documents":
-				this.#assertAllowedFields(name, input, []);
-				return result({ documents: references.documentCatalog });
-			case "inspect_outline": {
-				this.#assertAllowedFields(name, input, ["documentRef"]);
-				const document = this.#document(stringField(input, "documentRef"), references.documents);
-				const semanticUnits = document.descriptor.semanticUnits.filter((unit) =>
-					unit.evidenceIds.some((evidenceId) => permittedEvidenceIds.has(evidenceId)),
-				);
-				return result(
-					{
-						documentRef: references.documents.refFor(document),
-						diagnostics: document.descriptor.diagnostics.map((diagnostic) => ({
-							code: diagnostic.code,
-							recoverable: diagnostic.recoverable,
-						})),
-						semanticUnits: semanticUnits.map((unit) => ({
-							ordinal: unit.ordinal,
-							kind: unit.kind,
-							evidenceRefs: unit.evidenceIds.map((evidenceId) =>
-								this.#evidenceRef(evidenceId, references.evidence),
-							),
-						})),
-					},
-					[document],
-					semanticUnits.flatMap((unit) => unit.evidenceIds),
-				);
-			}
 			case "search_evidence": {
 				this.#assertAllowedFields(name, input, ["query", "limit"]);
 				const query = stringField(input, "query").toLocaleLowerCase();
@@ -660,49 +610,6 @@ export class ReflectorToolRegistry {
 					const adjacent = document.evidence[end + 1];
 					if (adjacent === undefined || !permittedEvidenceIds.has(adjacent.evidenceId)) break;
 					end += 1;
-				}
-				return this.#sliceOutput(document, this.#createSlice(document, start, end), references);
-			}
-			case "refine_slice": {
-				this.#assertAllowedFields(name, input, ["sliceRef", "startOrdinal", "endOrdinal", "splitAtOrdinal"]);
-				const slice = this.#slice(stringField(input, "sliceRef"), permittedEvidenceIds);
-				const document = this.#documents.find(
-					(candidate) => candidate.descriptor.documentId === slice.cursor.documentId,
-				);
-				if (document === undefined) throw new Error("Resolved slice document is unavailable");
-				if (input.splitAtOrdinal !== undefined) {
-					const split = integerField(input, "splitAtOrdinal");
-					if (split <= slice.cursor.startOrdinal || split > slice.cursor.endOrdinal) {
-						throw new EvolutionToolDeniedError("invalid-range", "splitAtOrdinal must be inside the slice");
-					}
-					const left = this.#createSlice(document, slice.cursor.startOrdinal, split - 1);
-					const right = this.#createSlice(document, split, slice.cursor.endOrdinal);
-					const linkedLeft = {
-						...left,
-						continuation: { previousSliceId: slice.continuation.previousSliceId, nextSliceId: right.sliceId },
-					};
-					const linkedRight = {
-						...right,
-						continuation: { previousSliceId: left.sliceId, nextSliceId: slice.continuation.nextSliceId },
-					};
-					this.#slices.set(linkedLeft.sliceId, linkedLeft);
-					this.#slices.set(linkedRight.sliceId, linkedRight);
-					return result(
-						{
-							slices: [
-								this.#sliceDescriptor(linkedLeft, references.evidence, references.documents),
-								this.#sliceDescriptor(linkedRight, references.evidence, references.documents),
-							],
-						},
-						[document],
-						slice.evidenceIds,
-						[linkedLeft, linkedRight],
-					);
-				}
-				const start = integerField(input, "startOrdinal", slice.cursor.startOrdinal);
-				const end = integerField(input, "endOrdinal", slice.cursor.endOrdinal);
-				if (start < slice.cursor.startOrdinal || end > slice.cursor.endOrdinal) {
-					throw new EvolutionToolDeniedError("invalid-range", "Refinement cannot expand a slice");
 				}
 				return this.#sliceOutput(document, this.#createSlice(document, start, end), references);
 			}
@@ -777,6 +684,8 @@ export class ReflectorToolRegistry {
 			manifestDigest: this.#manifestDigest,
 			cursor,
 		}).slice("sha256:".length, "sha256:".length + 32)}`;
+		const existing = this.#slices.get(sliceId);
+		if (existing !== undefined) return existing;
 		const evidenceIds = units.flatMap((unit) => unit.evidenceIds);
 		const slice: EvidenceSlice = {
 			sliceId,

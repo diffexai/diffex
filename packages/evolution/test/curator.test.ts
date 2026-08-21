@@ -314,21 +314,14 @@ describe("structured delta curator", () => {
 			if (request.stage !== "curator") throw new Error("Unexpected Reflector request");
 			capturedInputs.push(request.input);
 			expect(request.outputSchema).toMatchObject({ type: "object" });
-			expect(request.tools.map((tool) => tool.name)).toEqual([
-				"inspect_lessons",
-				"inspect_instructions",
-				"inspect_memory",
-			]);
+			expect(request.tools.map((tool) => tool.name)).toEqual(["inspect_lessons", "inspect_existing_guidance"]);
 			const lessonOutput = await request.tools
 				.find((tool) => tool.name === "inspect_lessons")
 				?.execute({ lessonRefs: ["L1"] });
-			const instructionOutput = await request.tools
-				.find((tool) => tool.name === "inspect_instructions")
-				?.execute({ instructionRefs: ["I1"] });
-			const memoryOutput = await request.tools
-				.find((tool) => tool.name === "inspect_memory")
-				?.execute({ memoryRefs: ["M0", "M1"] });
-			for (const output of [lessonOutput, instructionOutput, memoryOutput]) {
+			const guidanceOutput = await request.tools
+				.find((tool) => tool.name === "inspect_existing_guidance")
+				?.execute({ instructionRefs: ["I1"], memoryRefs: ["M0", "M1"] });
+			for (const output of [lessonOutput, guidanceOutput]) {
 				if (output !== undefined) toolOutputs.push(output);
 			}
 			return response([
@@ -373,10 +366,10 @@ describe("structured delta curator", () => {
 			expect.arrayContaining([
 				expect.objectContaining({ toolName: "inspect_lessons", resolvedLessonIds: ["lesson-final"] }),
 				expect.objectContaining({
-					toolName: "inspect_instructions",
+					toolName: "inspect_existing_guidance",
 					resolvedInstructionPaths: ["/repo/AGENTS.md"],
+					resolvedMemoryItemIds: ["memory-1"],
 				}),
-				expect.objectContaining({ toolName: "inspect_memory", resolvedMemoryItemIds: ["memory-1"] }),
 			]),
 		);
 		expect(first).toHaveLength(1);
