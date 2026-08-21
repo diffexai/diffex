@@ -812,6 +812,8 @@ export class AgentSession {
 		if (event.type === "message_start" && this._pendingSubagentEscalationEnvelope?.message === event.message) {
 			// The exact queued object is now entering parent context. Seal it so later reports form a new envelope.
 			this._pendingSubagentEscalationEnvelope = undefined;
+			const coordination = this._subagentCoordination;
+			if (coordination?.exitReason === "escalation") coordination.exitReason = undefined;
 		}
 		// When a user message starts, check if it's from either queue and remove it BEFORE emitting
 		// This ensures the UI sees the updated queue state

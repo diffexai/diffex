@@ -408,6 +408,103 @@ describe("subagent parent messaging foundation", () => {
 			expect(session.getLastAssistantText()).toBe("terminal synthesis");
 		});
 
+		it("reblocks after successive reports without an empty provider continuation", async () => {
+			const { harness, session } = await setupRoot();
+			const firstWaitStarted = deferred<void>();
+			const firstRootContinuationStarted = deferred<void>();
+			const secondReportAccepted = deferred<void>();
+			const secondRootContinuationFinished = deferred<void>();
+			const releaseChild = deferred<void>();
+			const lifecycle: Array<{ type: "start" | "end"; cancelled?: boolean }> = [];
+			session.subscribe((event) => {
+				if (event.type === "subagent_wait_start") {
+					lifecycle.push({ type: "start" });
+					firstWaitStarted.resolve();
+				}
+				if (event.type === "subagent_wait_end") lifecycle.push({ type: "end", cancelled: event.cancelled });
+			});
+			let rootProviderCalls = 0;
+			let terminalResultContexts = 0;
+			harness.setResponses(
+				Array.from({ length: 12 }, () => async (context: Context) => {
+					if (hasTool(context, "escalate_to_parent")) {
+						const reportResults = context.messages.filter(
+							(message) => message.role === "toolResult" && message.toolName === "escalate_to_parent",
+						).length;
+						if (reportResults === 0) {
+							await firstWaitStarted.promise;
+							return fauxAssistantMessage(fauxToolCall("escalate_to_parent", { message: "first report" }), {
+								stopReason: "toolUse",
+							});
+						}
+						if (reportResults === 1) {
+							await firstRootContinuationStarted.promise;
+							return fauxAssistantMessage(fauxToolCall("escalate_to_parent", { message: "second report" }), {
+								stopReason: "toolUse",
+							});
+						}
+						secondReportAccepted.resolve();
+						await releaseChild.promise;
+						return fauxAssistantMessage("child result");
+					}
+
+					rootProviderCalls += 1;
+					const serialized = JSON.stringify(context.messages);
+					if (rootProviderCalls === 1) {
+						return fauxAssistantMessage(
+							fauxToolCall("spawn_agent", { name: "worker", task: "report twice before finishing" }),
+							{ stopReason: "toolUse" },
+						);
+					}
+					if (rootProviderCalls === 2) return fauxAssistantMessage("wait for reports");
+					if (rootProviderCalls === 3) {
+						expect(serialized).toContain("first report");
+						expect(serialized).not.toContain("second report");
+						firstRootContinuationStarted.resolve();
+						await secondReportAccepted.promise;
+						return fauxAssistantMessage("handled first report");
+					}
+					if (rootProviderCalls === 4) {
+						expect(serialized).toContain("second report");
+						secondRootContinuationFinished.resolve();
+						return fauxAssistantMessage("handled second report");
+					}
+					if (serialized.includes("subagent_batch_results")) {
+						terminalResultContexts += 1;
+						return fauxAssistantMessage("terminal synthesis");
+					}
+					return fauxAssistantMessage("unexpected empty continuation");
+				}),
+			);
+
+			const prompt = session.prompt("delegate and handle successive reports");
+			await secondRootContinuationFinished.promise;
+			await vi.waitFor(() => {
+				expect(
+					(
+						session as unknown as {
+							_subagentCoordination?: { currentWaitAbortController?: AbortController };
+						}
+					)._subagentCoordination?.currentWaitAbortController,
+				).toBeDefined();
+			});
+			expect(rootProviderCalls).toBe(4);
+
+			releaseChild.resolve();
+			await prompt;
+			expect(rootProviderCalls).toBe(5);
+			expect(terminalResultContexts).toBe(1);
+			expect(lifecycle).toEqual([{ type: "start" }, { type: "end", cancelled: false }]);
+			const terminalMessages = session.messages.flatMap((message) =>
+				message.role === "custom" && message.customType === "subagent_results" ? [message] : [],
+			);
+			expect(terminalMessages).toHaveLength(1);
+			expect(JSON.parse(terminalMessages[0]!.content as string).agents).toEqual([
+				expect.objectContaining({ name: "worker", result: "child result" }),
+			]);
+			expect(session.getLastAssistantText()).toBe("terminal synthesis");
+		});
+
 		it("gates terminal frozen wake until explicit agents consumption", async () => {
 			const { harness, services, session } = await setupRoot();
 			const controller = (session as unknown as { _subagentController: SubagentController })._subagentController;
