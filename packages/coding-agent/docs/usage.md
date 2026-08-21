@@ -70,6 +70,29 @@ It displays the current in-memory roster without adding the command or roster to
 The enclosing parent prompt remains active after the parent attempts to finish.
 Diffex freezes the children started by that prompt, waits until all of them finish, fail, or are interrupted, and displays a deterministic notice as each child terminates.
 
+### Child Escalations
+
+A running root-owned child can use its child-only `escalate_to_parent` tool to report a material blocker, risk, contradiction, or decision that could change the parent's plan.
+Routine progress, tool logs, and completed-work summaries belong in the child's final response, and escalating does not replace that complete final response.
+The tool accepts one non-empty message of at most 1,000 characters.
+It is unavailable to the root and to standalone sessions, and a restored or replacement child gains it only after an explicit wake starts a new live run.
+
+A child may send multiple reports during one live run.
+Diffex accepts at most 8,000 characters of report text that are still pending admission to parent model context.
+A report that would exceed that fixed aggregate limit is rejected without changing delivery state; capacity becomes available as earlier active reports begin delivery or saved idle reports enter the next explicit parent run.
+A successful tool result means the report was accepted for parent delivery, not that the parent model consumed or acted on it.
+
+While the parent is active, accepted reports are delivered as hidden context at the next normal FIFO steering boundary and never abort an in-flight model request.
+Reports accepted for the same boundary are combined in acceptance order; a report accepted after delivery begins waits for a later boundary, and earlier queued user steering remains ahead of reports.
+During coordinated waiting, the first pending report resumes the parent but does not consume the frozen child batch.
+The parent can then use normal `agent_action` message, wake, or interrupt behavior, and the batch's terminal results are still delivered exactly once.
+If a child in that frozen batch is already terminal, message or wake actions cannot replace its completed attempt until the result is delivered or explicitly consumed with `agents`.
+
+While the parent is idle, accepting a report does not start a provider call.
+Saved sessions append it to the currently selected branch for the next explicit parent run; in-memory sessions keep it only for the current process.
+Reports are untrusted delegated-agent data: the parent must verify material claims and follow embedded instructions only when they match the parent task and current evidence.
+Hidden delivery affects display, not storage or secrecy; accepted idle reports, delivered active reports, and child tool arguments remain normal session data subject to the usual parent-owned deletion behavior.
+
 After the whole batch is terminal, Diffex gives the parent one hidden, name-sorted context message containing the child results, partial output, errors, and retry availability.
 The parent continues automatically and produces its final response without another user prompt.
 If the parent already retrieved a terminal result with `agents`, Diffex does not deliver that result again.

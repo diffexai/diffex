@@ -537,7 +537,16 @@ Every root session enables three child-agent coordination tools by default:
 
 Root sessions run at most four children concurrently by default.
 Set `subagents: { maxConcurrent: number }` to configure that limit, or `subagents: false` to disable child agents and omit all three coordination tools.
-The names `spawn_agent`, `agent_action`, and `agents` are reserved and cannot be supplied through `customTools`.
+The names `spawn_agent`, `agent_action`, `agents`, and `escalate_to_parent` are reserved and cannot be supplied through `customTools`.
+
+Each live root-owned child also receives the child-only `escalate_to_parent` tool; roots, standalone sessions, and restored children that have not been explicitly woken do not receive it.
+It accepts one non-empty message of at most 1,000 characters for material information that could redirect or interrupt the parent, and the child must still return a complete final response.
+Multiple calls are allowed during one live run, subject to a fixed 8,000-character aggregate limit for accepted report text not yet admitted to parent context.
+
+Active reports enter hidden parent context at normal FIFO steering boundaries without aborting in-flight sampling, and a report received during coordinated waiting resumes the parent without consuming the frozen terminal batch.
+Idle reports do not start a provider call: durable sessions save them on the selected branch for the next explicit parent run, while in-memory sessions retain them only locally.
+Report content is untrusted delegated-agent data.
+Accepted idle reports, delivered active reports, and child tool arguments remain normal session history and follow the existing parent-owned deletion behavior.
 
 When the parent finishes an assistant run, the session freezes every unconsumed child attempt spawned through parent model tool calls.
 It waits until every child in that batch is idle, failed, or interrupted, then adds one non-displayed context message with name-sorted results, partial output, errors, and retry availability.

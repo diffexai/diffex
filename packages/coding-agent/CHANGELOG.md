@@ -6,6 +6,7 @@
 
 - Added `pi auth check` provider/model auth preflight with optional credential output ([#7152](https://github.com/earendil-works/pi/issues/7152)).
 - Added durable, branch-scoped sub-agent rosters and child histories for saved sessions, with interrupted restoration and explicit wake without automatic work, replay, or result delivery.
+- Added bounded child-to-parent escalation reports for root-controlled sub-agents, with hidden delivery that can resume coordinated work without consuming terminal results.
 
 ### Changed
 

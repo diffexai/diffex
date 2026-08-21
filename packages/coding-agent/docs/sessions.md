@@ -40,6 +40,13 @@ For the JSONL file format and SessionManager API, see [Session Format](session-f
 Saved parent sessions automatically preserve their branch-scoped sub-agent roster and usable child histories. Reopening a parent restores terminal records as recorded and changes children that were queued or running to interrupted. Reopening does not resume provider work, replay the original task, or redeliver a completed result.
 
 An explicit wake resumes a child from its saved history when that history is usable. If the history is missing, unsafe, or invalid, Diffex creates an isolated replacement and runs only the wake message. A wake uses the child's complete captured model, thinking level, tools, and harness when all remain usable; otherwise it uses the complete current parent configuration and reports a warning rather than mixing configurations.
+Restored and replacement children receive the child-only `escalate_to_parent` tool only after an explicit wake starts a live run.
+
+Escalation reports delivered to the root are hidden from the transcript but are not secret or redacted.
+Accepted idle reports, delivered active reports, and the child's tool-call arguments remain normal session history.
+An idle report in a saved session is appended to the currently selected parent branch without starting a provider call and is supplied to the parent on its next explicit run; an in-memory parent keeps the report only in the live session.
+Branch navigation retains only the selected branch's pending saved reports for capacity accounting.
+Deleting a parent session continues to delete its parent history and owned child-session namespace through the normal parent-owned deletion behavior.
 
 Branch navigation and session-context resets reconcile the roster only after the transition is safe. In-memory parents and `--no-session` sessions keep sub-agents ephemeral. Setting `subagents: false` disables the sub-agent tools without erasing a saved roster.
 
