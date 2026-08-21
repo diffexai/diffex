@@ -1227,6 +1227,9 @@ export class SubagentController {
 			await record.run;
 			this.#assertOpen();
 		}
+		if (wake && isTerminalStatus(record.status) && record.coordinatedRun?.delivery === "frozen") {
+			throw new Error(`Cannot wake subagent while its coordinated result is pending delivery: ${name}`);
+		}
 
 		if (record.status === "queued") {
 			throw new Error(`Cannot message queued subagent: ${name}`);

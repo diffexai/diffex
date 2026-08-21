@@ -381,6 +381,15 @@ interface PendingSubagentEscalationEnvelope {
 	messageCharacters: number;
 }
 
+interface SubagentCoordination {
+	readonly batch: SubagentDeliveryBatch;
+	readonly names: readonly string[];
+	readonly terminalNotices: Set<string>;
+	currentWaitAbortController?: AbortController;
+	exitReason?: "escalation" | "cancellation";
+	waitStarted: boolean;
+}
+
 function estimateMessagesTokens(messages: AgentMessage[]): number {
 	let tokens = 0;
 	for (const message of messages) {
@@ -483,7 +492,7 @@ export class AgentSession {
 	private readonly _telemetryContext: TelemetryContext;
 	private readonly _lifecycleObserver: AgentSessionLifecycleObserver | undefined;
 	private _harnessSwitchInProgress = false;
-	private _subagentWaitAbortController: AbortController | undefined;
+	private _subagentCoordination: SubagentCoordination | undefined;
 	private _pendingSubagentEscalationEnvelope: PendingSubagentEscalationEnvelope | undefined;
 	private readonly _pendingIdleSubagentEscalations = new Map<string, number>();
 	private _agentRunAborted = false;
@@ -1043,6 +1052,7 @@ export class AgentSession {
 			rejectDispose = reject;
 		});
 		this._disposePromise = disposePromise;
+		this._exitSubagentCoordination("cancellation");
 		let childCleanup: Promise<void> | undefined;
 		try {
 			childCleanup = this._subagentController?.shutdown();
@@ -1564,7 +1574,18 @@ export class AgentSession {
 				if (firstRun) await this.agent.prompt(messages);
 				else await this.agent.continue();
 				firstRun = false;
-				if (await this._handlePostAgentRun()) continue;
+				if (await this._handlePostAgentRun()) {
+					if (this._agentRunAborted) {
+						const coordination = this._subagentCoordination;
+						if (coordination) {
+							this._exitSubagentCoordination("cancellation");
+							await this._waitForSubagentCoordination(coordination);
+						}
+						break;
+					}
+					continue;
+				}
+				if (this._agentRunAborted) break;
 
 				// No await is permitted between the inactive mark and final queue recheck.
 				this._isAgentRunActive = false;
@@ -1628,46 +1649,98 @@ export class AgentSession {
 		};
 	}
 
-	private async _waitForSubagentBatch(
-		batch: SubagentDeliveryBatch,
-	): Promise<{ cancelled: boolean; results: readonly SubagentBatchResult[] }> {
-		const controller = this._subagentController;
-		if (!controller) return { cancelled: false, results: Object.freeze([]) };
+	private _getOrCreateSubagentCoordination(): SubagentCoordination | undefined {
+		if (this._subagentCoordination) return this._subagentCoordination;
+		const batch = this._subagentController?.freezeUnconsumedBatch();
+		if (!batch) return undefined;
+		const coordination: SubagentCoordination = {
+			batch,
+			names: Object.freeze(batch.attempts.map((attempt) => attempt.name)),
+			terminalNotices: new Set(),
+			waitStarted: false,
+		};
+		this._subagentCoordination = coordination;
+		return coordination;
+	}
 
-		const names = Object.freeze(batch.attempts.map((attempt) => attempt.name));
-		const noticed = new Set<string>();
+	private _exitSubagentCoordination(reason: "escalation" | "cancellation"): void {
+		const coordination = this._subagentCoordination;
+		if (!coordination) return;
+		if (reason === "cancellation" || coordination.exitReason === undefined) {
+			coordination.exitReason = reason;
+		}
+		coordination.currentWaitAbortController?.abort(new Error(`Subagent coordination ${reason}`));
+	}
+
+	private _clearSubagentCoordination(coordination: SubagentCoordination, cancelled: boolean): void {
+		if (this._subagentCoordination !== coordination) return;
+		this._subagentCoordination = undefined;
+		coordination.currentWaitAbortController = undefined;
+		if (coordination.waitStarted) {
+			this._emit({ type: "subagent_wait_end", names: coordination.names, cancelled });
+		}
+	}
+
+	private async _waitForSubagentCoordination(
+		coordination: SubagentCoordination,
+	): Promise<
+		| { reason: "terminal"; results: readonly SubagentBatchResult[] }
+		| { reason: "escalation" }
+		| { reason: "cancellation" }
+	> {
+		const controller = this._subagentController;
+		if (!controller) return { reason: "terminal", results: Object.freeze([]) };
+
 		const emitNotice = (result: SubagentBatchResult): void => {
-			if (noticed.has(result.name)) return;
-			noticed.add(result.name);
+			if (coordination.terminalNotices.has(result.name)) return;
+			coordination.terminalNotices.add(result.name);
 			this._emit(this._createSubagentNotice(result));
 		};
 		const waitAbortController = new AbortController();
-		this._subagentWaitAbortController = waitAbortController;
-		if (this._agentRunAborted) {
-			waitAbortController.abort(new Error("Subagent coordination cancelled"));
+		coordination.currentWaitAbortController = waitAbortController;
+		if (this._agentRunAborted || coordination.exitReason === "cancellation") {
+			coordination.exitReason = "cancellation";
+			waitAbortController.abort(new Error("Subagent coordination cancellation"));
+		} else if (coordination.exitReason === "escalation") {
+			waitAbortController.abort(new Error("Subagent coordination escalation"));
 		}
-		this._emit({ type: "subagent_wait_start", names });
+		if (!coordination.waitStarted) {
+			coordination.waitStarted = true;
+			this._emit({ type: "subagent_wait_start", names: coordination.names });
+		}
 
-		let cancelled = false;
 		try {
 			try {
-				await controller.waitForBatch(batch, {
+				await controller.waitForBatch(coordination.batch, {
 					signal: waitAbortController.signal,
 					onTerminal: emitNotice,
 				});
 			} catch (error) {
 				if (!waitAbortController.signal.aborted) throw error;
-				cancelled = true;
-				await controller.interruptBatch(batch);
-				await controller.waitForBatch(batch, { onTerminal: emitNotice });
+				const exitReason =
+					coordination.exitReason === "cancellation" || this._agentRunAborted
+						? "cancellation"
+						: coordination.exitReason;
+				if (!exitReason) throw error;
+				if (exitReason === "escalation") {
+					coordination.exitReason = undefined;
+					return { reason: "escalation" };
+				}
+				if (!this._disposePromise) {
+					await controller.interruptBatch(coordination.batch);
+					await controller.waitForBatch(coordination.batch, { onTerminal: emitNotice });
+					controller.consumeBatch(coordination.batch);
+				}
+				this._clearSubagentCoordination(coordination, true);
+				return { reason: "cancellation" };
 			}
-			const results = controller.consumeBatch(batch);
-			return { cancelled, results };
+			const results = controller.consumeBatch(coordination.batch);
+			this._clearSubagentCoordination(coordination, false);
+			return { reason: "terminal", results };
 		} finally {
-			if (this._subagentWaitAbortController === waitAbortController) {
-				this._subagentWaitAbortController = undefined;
+			if (coordination.currentWaitAbortController === waitAbortController) {
+				coordination.currentWaitAbortController = undefined;
 			}
-			this._emit({ type: "subagent_wait_end", names, cancelled });
 		}
 	}
 
@@ -1696,10 +1769,25 @@ export class AgentSession {
 			return true;
 		}
 
-		const batch = this._subagentController?.freezeUnconsumedBatch();
-		if (batch) {
-			const delivery = await this._waitForSubagentBatch(batch);
-			if (delivery.cancelled) return false;
+		// Reports already queued by this run must enter context before a new batch is frozen
+		// or an escalation-suspended coordination resumes waiting.
+		if (this.agent.hasQueuedMessages()) return true;
+
+		const coordination = this._getOrCreateSubagentCoordination();
+		if (coordination) {
+			if (coordination.exitReason === "cancellation" || this._agentRunAborted) {
+				this._exitSubagentCoordination("cancellation");
+			}
+			const delivery = await this._waitForSubagentCoordination(coordination);
+			if (delivery.reason === "cancellation") return false;
+			if (delivery.reason === "escalation") {
+				if (coordination.exitReason === "cancellation" || this._agentRunAborted) {
+					this._exitSubagentCoordination("cancellation");
+					await this._waitForSubagentCoordination(coordination);
+					return false;
+				}
+				return true;
+			}
 			if (delivery.results.length > 0) {
 				const message = this._createSubagentResultMessage(delivery.results);
 				await this.sendCustomMessage(message, { deliverAs: "steer" });
@@ -2161,6 +2249,7 @@ export class AgentSession {
 				}
 				throw error;
 			}
+			this._exitSubagentCoordination("escalation");
 			return;
 		}
 
@@ -2289,13 +2378,15 @@ export class AgentSession {
 	 * Abort current operation and wait for agent to become idle.
 	 */
 	async abort(): Promise<void> {
+		if (this._isAgentRunActive) this._agentRunAborted = true;
+		this._exitSubagentCoordination("cancellation");
 		return this._traceOperation("abort", () => this._abort());
 	}
 
 	private async _abort(): Promise<void> {
 		this.abortRetry();
 		if (this._isAgentRunActive) this._agentRunAborted = true;
-		this._subagentWaitAbortController?.abort(new Error("Subagent coordination cancelled"));
+		this._exitSubagentCoordination("cancellation");
 		this.agent.abort();
 		await this.waitForIdle();
 	}

@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { AgentTool } from "@earendil-works/diffex-agent-core";
-import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/diffex-ai";
+import { type Context, fauxAssistantMessage, fauxToolCall } from "@earendil-works/diffex-ai";
 import { Type } from "typebox";
 import { Check } from "typebox/value";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -37,6 +37,14 @@ function testTool(name: string): ToolDefinition {
 		parameters: Type.Object({}),
 		execute: async () => ({ content: [{ type: "text", text: name }], details: {} }),
 	};
+}
+
+function hasTool(context: Context, name: string): boolean {
+	return context.tools?.some((tool) => tool.name === name) ?? false;
+}
+
+function hasToolResult(context: Context, name: string): boolean {
+	return context.messages.some((message) => message.role === "toolResult" && message.toolName === name);
 }
 
 describe("subagent parent messaging foundation", () => {
@@ -193,6 +201,13 @@ describe("subagent parent messaging foundation", () => {
 			await started.promise;
 			await waitForStatus(controller, name, "running");
 			expect(woken?.getActiveToolNames()).toContain("escalate_to_parent");
+			await getTool(woken!, "escalate_to_parent").execute("restored-report", {
+				message: `${name} live report`,
+			});
+			expect(session.messages.at(-1)).toMatchObject({
+				customType: "subagent_escalations",
+				details: { names: [name] },
+			});
 			await controller.interrupt(name);
 			await controller.reset();
 		}
@@ -324,5 +339,250 @@ describe("subagent parent messaging foundation", () => {
 		await expect(accept("worker", "over branch capacity")).rejects.toThrow("pending capacity exceeded");
 		await session.navigateTree(branchTarget.id);
 		await expect(accept("worker", "capacity reopened after branch change")).resolves.toBeUndefined();
+	});
+
+	describe("coordination", () => {
+		it("resumes one frozen wait for escalation actions and delivers terminal results exactly once", async () => {
+			const { harness, session } = await setupRoot();
+			const waitStarted = deferred<void>();
+			const childBlocked = deferred<void>();
+			const lifecycle: Array<{ type: "start" | "end"; cancelled?: boolean }> = [];
+			session.subscribe((event) => {
+				if (event.type === "subagent_wait_start") {
+					lifecycle.push({ type: "start" });
+					waitStarted.resolve();
+				}
+				if (event.type === "subagent_wait_end") lifecycle.push({ type: "end", cancelled: event.cancelled });
+			});
+			let rootProviderCalls = 0;
+			harness.setResponses(
+				Array.from({ length: 12 }, () => async (context: Context, options) => {
+					if (hasTool(context, "escalate_to_parent")) {
+						if (!hasToolResult(context, "escalate_to_parent")) {
+							await waitStarted.promise;
+							return fauxAssistantMessage(
+								fauxToolCall("escalate_to_parent", { message: "redirect before completion" }),
+								{ stopReason: "toolUse" },
+							);
+						}
+						childBlocked.resolve();
+						return new Promise((resolve) => {
+							const finish = (): void =>
+								resolve(fauxAssistantMessage("child stopped", { stopReason: "aborted" }));
+							if (options?.signal?.aborted) finish();
+							else options?.signal?.addEventListener("abort", finish, { once: true });
+						});
+					}
+
+					rootProviderCalls += 1;
+					const serialized = JSON.stringify(context.messages);
+					if (serialized.includes("subagent_batch_results")) return fauxAssistantMessage("terminal synthesis");
+					if (serialized.includes("subagent_escalations") && !hasToolResult(context, "agent_action")) {
+						return fauxAssistantMessage(fauxToolCall("agent_action", { target: "worker", action: "interrupt" }), {
+							stopReason: "toolUse",
+						});
+					}
+					if (hasToolResult(context, "spawn_agent")) return fauxAssistantMessage("wait for delegated work");
+					return fauxAssistantMessage(
+						fauxToolCall("spawn_agent", { name: "worker", task: "long delegated work" }),
+						{ stopReason: "toolUse" },
+					);
+				}),
+			);
+
+			await session.prompt("delegate and react to material reports");
+			await childBlocked.promise;
+
+			expect(rootProviderCalls).toBe(5);
+			expect(lifecycle).toEqual([{ type: "start" }, { type: "end", cancelled: false }]);
+			expect(
+				session.messages.filter(
+					(message) => message.role === "custom" && message.customType === "subagent_escalations",
+				),
+			).toHaveLength(1);
+			expect(
+				session.messages.filter(
+					(message) => message.role === "custom" && message.customType === "subagent_results",
+				),
+			).toHaveLength(1);
+			expect(session.getLastAssistantText()).toBe("terminal synthesis");
+		});
+
+		it("gates terminal frozen wake until explicit agents consumption", async () => {
+			const { harness, services, session } = await setupRoot();
+			const controller = (session as unknown as { _subagentController: SubagentController })._subagentController;
+			const config = captureSubagentSessionConfig(session, services.agentDir);
+			harness.setResponses([fauxAssistantMessage("initial result"), fauxAssistantMessage("woken result")]);
+			controller.spawn(
+				"worker",
+				"initial task",
+				(signal, escalateToParent) => createSubagentSession(config, { signal, escalateToParent }),
+				{
+					type: "agent_tool_call",
+					toolCallId: "spawn",
+					assistantEntryId: "assistant",
+					contextEntryId: null,
+				},
+			);
+			await waitForStatus(controller, "worker", "idle");
+			expect(controller.freezeUnconsumedBatch()).toBeDefined();
+
+			await expect(controller.message("worker", "replace frozen run", true)).rejects.toThrow(
+				"coordinated result is pending delivery",
+			);
+			await getTool(session, "agents").execute("consume", {
+				timeout_ms: 0,
+				targets: ["worker"],
+				until: "all",
+			});
+			await expect(controller.message("worker", "wake after consumption", true)).resolves.toMatchObject({
+				status: "queued",
+				delivery: "prompt",
+			});
+			await waitForStatus(controller, "worker", "idle");
+		});
+
+		it("gives cancellation precedence over an admitted escalation continuation", async () => {
+			const { harness, session } = await setupRoot();
+			const accept = (session as unknown as EscalationAcceptor)._acceptSubagentEscalation.bind(session);
+			const waitStarted = deferred<void>();
+			const lifecycle: Array<{ type: "start" | "end"; cancelled?: boolean }> = [];
+			session.subscribe((event) => {
+				if (event.type === "subagent_wait_start") {
+					lifecycle.push({ type: "start" });
+					waitStarted.resolve();
+				}
+				if (event.type === "subagent_wait_end") lifecycle.push({ type: "end", cancelled: event.cancelled });
+			});
+			let rootProviderCalls = 0;
+			const rootContexts: string[] = [];
+			harness.setResponses(
+				Array.from({ length: 6 }, () => async (context: Context, options) => {
+					if (!hasTool(context, "spawn_agent")) {
+						return new Promise((resolve) => {
+							const finish = (): void =>
+								resolve(fauxAssistantMessage("child cancelled", { stopReason: "aborted" }));
+							if (options?.signal?.aborted) finish();
+							else options?.signal?.addEventListener("abort", finish, { once: true });
+						});
+					}
+					rootProviderCalls += 1;
+					rootContexts.push(JSON.stringify(context.messages));
+					if (hasToolResult(context, "spawn_agent")) return fauxAssistantMessage("wait for child");
+					return fauxAssistantMessage(fauxToolCall("spawn_agent", { name: "worker", task: "block" }), {
+						stopReason: "toolUse",
+					});
+				}),
+			);
+
+			const prompt = session.prompt("cancel coordinated work");
+			await waitStarted.promise;
+			const accepted = accept("worker", "do not continue after cancellation");
+			const cancellation = session.abort();
+			expect(
+				(session as unknown as { _agentRunAborted: boolean; _subagentCoordination?: { exitReason?: string } })
+					._agentRunAborted,
+			).toBe(true);
+			expect(
+				(session as unknown as { _subagentCoordination?: { exitReason?: string } })._subagentCoordination
+					?.exitReason,
+			).toBe("cancellation");
+			await Promise.all([accepted, cancellation, prompt]);
+
+			expect(rootContexts.filter((context) => context.includes("subagent_escalations"))).toEqual([]);
+			expect(rootProviderCalls).toBe(2);
+			expect(lifecycle).toEqual([{ type: "start" }, { type: "end", cancelled: true }]);
+			expect(
+				session.messages.some((message) => message.role === "custom" && message.customType === "subagent_results"),
+			).toBe(false);
+		});
+	});
+
+	describe("persistent integration", () => {
+		it("invalidates reconciled capabilities while retaining ordinary hidden history", async () => {
+			const { harness, services, session } = await setupRoot();
+			harness.setResponses([fauxAssistantMessage("seed")]);
+			await session.prompt("seed history");
+			const target = session.sessionManager.getBranch()[0]!;
+			const controller = (session as unknown as { _subagentController: SubagentController })._subagentController;
+			const config = captureSubagentSessionConfig(session, services.agentDir);
+			let child: AgentSession | undefined;
+			const started = deferred<void>();
+			harness.setResponses([
+				fauxAssistantMessage(fauxToolCall("escalate_to_parent", { message: "persisted hidden report" }), {
+					stopReason: "toolUse",
+				}),
+				(_context, options) =>
+					new Promise((resolve) => {
+						started.resolve();
+						options?.signal?.addEventListener(
+							"abort",
+							() => resolve(fauxAssistantMessage("reconciled", { stopReason: "aborted" })),
+							{ once: true },
+						);
+					}),
+			]);
+			controller.spawn("worker", "work", async (signal, escalateToParent) => {
+				child = await createSubagentSession(config, { signal, escalateToParent });
+				return child;
+			});
+			await started.promise;
+			await waitForStatus(controller, "worker", "running");
+			const tool = getTool(child!, "escalate_to_parent");
+			expect(JSON.stringify(session.sessionManager.getEntries())).toContain("persisted hidden report");
+			expect(JSON.stringify(child!.sessionManager.getEntries())).toContain("persisted hidden report");
+			expect(JSON.stringify(controller.snapshot())).not.toContain("persisted hidden report");
+
+			await session.navigateTree(target.id);
+			await expect(tool.execute("stale", { message: "after reconciliation" })).rejects.toThrow();
+			expect(JSON.stringify(controller.snapshot())).not.toContain("persisted hidden report");
+		});
+
+		it("disposes a suspended coordination without continuation, result injection, or queued capacity", async () => {
+			const { harness, session } = await setupRoot();
+			const accept = (session as unknown as EscalationAcceptor)._acceptSubagentEscalation.bind(session);
+			const waitStarted = deferred<void>();
+			const lifecycle: Array<{ type: "start" | "end"; cancelled?: boolean }> = [];
+			session.subscribe((event) => {
+				if (event.type === "subagent_wait_start") {
+					lifecycle.push({ type: "start" });
+					waitStarted.resolve();
+				}
+				if (event.type === "subagent_wait_end") lifecycle.push({ type: "end", cancelled: event.cancelled });
+			});
+			let rootProviderCalls = 0;
+			harness.setResponses(
+				Array.from({ length: 6 }, () => async (context: Context, options) => {
+					if (!hasTool(context, "spawn_agent")) {
+						return new Promise((resolve) => {
+							const finish = (): void =>
+								resolve(fauxAssistantMessage("disposed child", { stopReason: "aborted" }));
+							if (options?.signal?.aborted) finish();
+							else options?.signal?.addEventListener("abort", finish, { once: true });
+						});
+					}
+					rootProviderCalls += 1;
+					if (hasToolResult(context, "spawn_agent")) return fauxAssistantMessage("wait for child");
+					return fauxAssistantMessage(fauxToolCall("spawn_agent", { name: "worker", task: "block" }), {
+						stopReason: "toolUse",
+					});
+				}),
+			);
+
+			const prompt = session.prompt("dispose coordinated work");
+			await waitStarted.promise;
+			const accepted = accept("worker", "discard on disposal");
+			const disposal = session.dispose();
+			await accepted;
+			await Promise.allSettled([prompt, disposal]);
+
+			expect(rootProviderCalls).toBe(2);
+			expect(lifecycle).toEqual([{ type: "start" }, { type: "end", cancelled: true }]);
+			expect(session.pendingMessageCount).toBe(0);
+			expect(session.getSubagents()).toEqual([]);
+			expect(
+				session.messages.some((message) => message.role === "custom" && message.customType === "subagent_results"),
+			).toBe(false);
+		});
 	});
 });
