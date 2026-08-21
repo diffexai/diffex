@@ -266,7 +266,6 @@ function proposal(
 	return {
 		target,
 		action,
-		summary: `${action} focused guidance`,
 		exactDelta,
 		expectedBenefit: "Future changes remain focused",
 		acceptanceCriterion: "The guidance is independently addressable",

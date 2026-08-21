@@ -430,7 +430,6 @@ function proposalShapeIssues(
 		proposal.scope.repositoryRevision !== input.input.repository.revision ||
 		proposal.lessonIds.length === 0 ||
 		proposal.supportingEvidenceIds.length === 0 ||
-		proposal.summary.trim().length === 0 ||
 		proposal.expectedBenefit.trim().length === 0 ||
 		proposal.acceptanceCriterion.trim().length === 0 ||
 		proposal.risk.trim().length === 0 ||

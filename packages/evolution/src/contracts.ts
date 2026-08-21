@@ -446,7 +446,6 @@ export type EvolutionMemoryDelta = EvolutionMemoryAddDelta | EvolutionMemoryRemo
 interface EvolutionProposalBase {
 	readonly metadata: EvolutionArtifactMetadata;
 	readonly proposalId: string;
-	readonly summary: string;
 	readonly scope: EvolutionProposalScope;
 	readonly lessonIds: readonly string[];
 	readonly supportingEvidenceIds: readonly string[];

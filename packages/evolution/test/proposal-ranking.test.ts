@@ -133,7 +133,6 @@ function proposal(
 	};
 	const body = {
 		proposalId,
-		summary: `Add ${content}`,
 		scope: {
 			repository: scope,
 			repositoryRevision: input.repository.revision,

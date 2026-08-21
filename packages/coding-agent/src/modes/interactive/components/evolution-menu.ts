@@ -38,6 +38,12 @@ type MenuView =
 	| { readonly kind: "jobs" }
 	| { readonly kind: "job"; readonly jobId: string }
 	| { readonly kind: "proposal"; readonly jobId: string; readonly proposalId: string }
+	| {
+			readonly kind: "proposal-evidence";
+			readonly jobId: string;
+			readonly proposalId: string;
+			readonly evidenceKind: "supporting" | "contradicting";
+	  }
 	| { readonly kind: "confirm"; readonly action: "cancel" | "resume" | "rollback" | "start" };
 
 interface MenuEntry {
@@ -74,6 +80,15 @@ export function formatEvolutionTimestamp(value: string | null, now = new Date())
 		checkpoint.getMonth() === now.getMonth() &&
 		checkpoint.getDate() === now.getDate();
 	return isToday ? `Today at ${time}` : `${checkpoint.getMonth() + 1}/${checkpoint.getDate()} at ${time}`;
+}
+
+export function formatEvolutionProposalOutcome(proposal: EvolutionProposalDetail["proposal"]): string {
+	if (proposal.disposition === "deferred") return proposal.finding;
+	if (proposal.exactDelta.operation === "ADD") return proposal.exactDelta.content;
+	if (proposal.exactDelta.operation === "REMOVE") {
+		return `Remove the existing evolution-memory entry because ${proposal.exactDelta.reason}`;
+	}
+	return proposal.exactDelta.addition.content;
 }
 
 export class EvolutionMenuComponent extends Container implements Focusable {
@@ -167,7 +182,7 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 			const view = this.#view();
 			if (view.kind === "jobs") this.#jobs = await this.#client.listJobs();
 			if (view.kind === "job") this.#job = await this.#client.jobDetail(view.jobId);
-			if (view.kind === "proposal") {
+			if (view.kind === "proposal" || view.kind === "proposal-evidence") {
 				this.#proposal = await this.#client.proposalDetail(view.jobId, view.proposalId);
 			}
 		} catch (error) {
@@ -357,17 +372,51 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 
 	#renderProposal(detail: EvolutionProposalDetail): void {
 		this.#addLine(`Proposal: ${detail.proposal.proposalId}`);
-		this.#addLine(`Summary: ${detail.proposal.summary}`);
-		this.#addLine(`Action: ${detail.proposal.action}`);
+		this.addChild(new Spacer(1));
 		this.#addLine(`Validation: ${detail.validationDisposition ?? "pending"}`);
-		this.#addLine(`Structured delta: ${JSON.stringify(detail.proposal.exactDelta)}`);
-		this.#addLine(`Evidence ranking: ${detail.score ? JSON.stringify(detail.score.scoreComponents) : "pending"}`);
-		this.#addLine(`Supporting evidence: ${detail.proposal.supportingEvidenceIds.join(", ") || "none"}`);
-		this.#addLine(`Contradicting evidence: ${detail.proposal.contradictingEvidenceIds.join(", ") || "none"}`);
-		this.#addLine(
-			`Applied diff: ${detail.exactAppliedDiff ? JSON.stringify(detail.exactAppliedDiff) : "not applied"}`,
-		);
-		this.#addLine(`Rollback target: ${abbreviate(detail.rollbackTarget)}`);
+		this.addChild(new Spacer(1));
+		this.#addLine(`Outcome: ${formatEvolutionProposalOutcome(detail.proposal)}`);
+	}
+
+	#proposalEvidenceEntries(detail: EvolutionProposalDetail, jobId: string, proposalId: string): readonly MenuEntry[] {
+		return [
+			{
+				label: `Supporting evidence (${detail.proposal.supportingEvidenceIds.length})`,
+				enabled: true,
+				select: () =>
+					this.#push({
+						kind: "proposal-evidence",
+						jobId,
+						proposalId,
+						evidenceKind: "supporting",
+					}),
+			},
+			{
+				label: `Contradicting evidence (${detail.proposal.contradictingEvidenceIds.length})`,
+				enabled: true,
+				select: () =>
+					this.#push({
+						kind: "proposal-evidence",
+						jobId,
+						proposalId,
+						evidenceKind: "contradicting",
+					}),
+			},
+		];
+	}
+
+	#renderProposalEvidence(detail: EvolutionProposalDetail, evidenceKind: "supporting" | "contradicting"): void {
+		const supporting = evidenceKind === "supporting";
+		const label = supporting ? "Supporting evidence" : "Contradicting evidence";
+		const evidenceIds = supporting ? detail.proposal.supportingEvidenceIds : detail.proposal.contradictingEvidenceIds;
+		this.#addLine(`${label} (${evidenceIds.length})`, "accent");
+		if (evidenceIds.length === 0) {
+			this.#addLine(`No ${label.toLowerCase()}`, "muted");
+			return;
+		}
+		for (const [index, evidenceId] of evidenceIds.entries()) {
+			this.#addLine(`${index + 1}. ${evidenceId}`);
+		}
 	}
 
 	#renderEntries(entries: readonly MenuEntry[]): void {
@@ -420,6 +469,10 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 				if (this.#job.proposalIds.length === 0) this.#addLine("No proposals emitted", "muted");
 			} else if (view.kind === "proposal" && this.#proposal) {
 				this.#renderProposal(this.#proposal);
+				this.addChild(new Spacer(1));
+				this.#renderEntries(this.#proposalEvidenceEntries(this.#proposal, view.jobId, view.proposalId));
+			} else if (view.kind === "proposal-evidence" && this.#proposal) {
+				this.#renderProposalEvidence(this.#proposal, view.evidenceKind);
 				this.#entries = [];
 			} else if (view.kind === "confirm") {
 				for (const line of this.#confirmationLines(view.action)) this.#addLine(line, "warning");

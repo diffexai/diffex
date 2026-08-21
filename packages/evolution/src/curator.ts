@@ -181,7 +181,6 @@ export function createCuratorOutputSchema(references: CuratorSchemaReferences): 
 				required: [
 					"target",
 					"action",
-					"summary",
 					"exactDelta",
 					"expectedBenefit",
 					"acceptanceCriterion",
@@ -196,7 +195,6 @@ export function createCuratorOutputSchema(references: CuratorSchemaReferences): 
 				properties: {
 					target: { $ref: "#/$defs/target" },
 					action: { enum: ["ADD", "DEFER", "REMOVE", "REPLACE"] },
-					summary: { type: "string", minLength: 1 },
 					exactDelta: { $ref: "#/$defs/exactDelta" },
 					expectedBenefit: { type: "string", minLength: 1 },
 					acceptanceCriterion: { type: "string", minLength: 1 },
@@ -247,7 +245,6 @@ interface ProposalDraft {
 	readonly relationship: EvolutionProposalInstructionRelationship;
 	readonly target: EvolutionTarget;
 	readonly action: "ADD" | "DEFER" | "REMOVE" | "REPLACE";
-	readonly summary: string;
 	readonly exactDelta: EvolutionMemoryDelta | null;
 	readonly expectedBenefit: string;
 	readonly acceptanceCriterion: string;
@@ -509,7 +506,6 @@ function proposalDraft(
 		[
 			"target",
 			"action",
-			"summary",
 			"exactDelta",
 			"expectedBenefit",
 			"acceptanceCriterion",
@@ -547,7 +543,6 @@ function proposalDraft(
 		relationship: parsedRelationship,
 		target: parsedTarget,
 		action,
-		summary: requiredString(value, "summary"),
 		exactDelta: delta(value.exactDelta, action, registry),
 		expectedBenefit: requiredString(value, "expectedBenefit"),
 		acceptanceCriterion: requiredString(value, "acceptanceCriterion"),
@@ -802,7 +797,6 @@ function proposalsFromDrafts(
 		if (proposalId === undefined) throw new Error(`Proposal ID for "${draft.decisionKey}" is unavailable`);
 		const common = {
 			proposalId,
-			summary: draft.summary,
 			scope: proposalScope(input, selectedLessons, references, evidence),
 			lessonIds: draft.lessonIds,
 			...references,

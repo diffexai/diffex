@@ -1,11 +1,19 @@
 import type { HarnessVersion } from "@earendil-works/diffex-harness-state";
 import { setKeybindings } from "@earendil-works/diffex-tui";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import type { EvolutionJobDetail, EvolutionJobSummary, EvolutionOverview, EvolutionProgressEvent } from "#evolution";
+import type {
+	EvolutionJobDetail,
+	EvolutionJobSummary,
+	EvolutionMemoryProposal,
+	EvolutionOverview,
+	EvolutionProgressEvent,
+	EvolutionProposalDetail,
+} from "#evolution";
 import { KeybindingsManager } from "../src/core/keybindings.ts";
 import {
 	type EvolutionMenuClient,
 	EvolutionMenuComponent,
+	formatEvolutionProposalOutcome,
 	formatEvolutionTimestamp,
 	sanitizeEvolutionText,
 } from "../src/modes/interactive/components/evolution-menu.ts";
@@ -94,6 +102,66 @@ function overview(overrides: Partial<EvolutionOverview> = {}): EvolutionOverview
 	};
 }
 
+function proposalDetail(): EvolutionProposalDetail {
+	const proposalId = "proposal-focused-verification";
+	const proposal: EvolutionMemoryProposal = {
+		metadata: {
+			schemaVersion: 1,
+			artifactId: proposalId,
+			producer: { name: "test-curator", version: "1.0.0", promptVersion: "curator-v1", model: null },
+			sourceIds: ["lesson-1"],
+			contentDigest: `sha256:${"b".repeat(64)}`,
+			scope: { repositoryId: "repository", scopeId: "repository" },
+			createdAt: "2026-08-20T00:00:00.000Z",
+		},
+		proposalId,
+		scope: {
+			repository: { repositoryId: "repository", scopeId: "repository" },
+			repositoryRevision: "abc123",
+			materializationIds: ["materialization-1"],
+			traceIds: ["trace-1"],
+			sessionIds: ["session-1"],
+			taskLineageIds: ["task-1"],
+			runtimeKinds: ["node"],
+			runtimeVersions: ["22.0.0"],
+			sourceRevisions: ["abc123"],
+			harnessVersions: [rootVersion],
+			applicabilityBoundaries: ["repository changes"],
+		},
+		lessonIds: ["lesson-1"],
+		supportingEvidenceIds: ["evidence-1"],
+		contradictingEvidenceIds: ["evidence-2"],
+		supportingTraceIds: ["trace-1"],
+		contradictingTraceIds: ["trace-2"],
+		expectedBenefit: "Future changes are verified",
+		acceptanceCriterion: "Focused verification is recorded",
+		risk: "The guidance could be too broad",
+		rollbackDescription: "Remove the guidance",
+		curatorConfidence: 0.9,
+		uncertainty: null,
+		counterexamples: [],
+		conflictingProposalIds: [],
+		instructionRelationship: { classification: "novel", relevantEntries: [], strengthening: null },
+		disposition: "actionable",
+		target: { kind: "evolution-memory", expectedHarnessVersion: rootVersion },
+		action: "ADD",
+		exactDelta: {
+			operation: "ADD",
+			destination: { section: "Verification", anchor: null },
+			content: "Run focused verification before considering a change complete.",
+			intendedScope: ["repository changes"],
+		},
+		expectedBaseDigest: `sha256:${"c".repeat(64)}`,
+	};
+	return {
+		proposal,
+		score: null,
+		validationDisposition: "rejected",
+		exactAppliedDiff: null,
+		rollbackTarget: null,
+	};
+}
+
 function client(currentOverview: EvolutionOverview): {
 	client: EvolutionMenuClient;
 	emit: (event: EvolutionProgressEvent) => void;
@@ -102,6 +170,7 @@ function client(currentOverview: EvolutionOverview): {
 	overviewCall: ReturnType<typeof vi.fn>;
 	listJobs: ReturnType<typeof vi.fn>;
 	jobDetailCall: ReturnType<typeof vi.fn>;
+	proposalDetailCall: ReturnType<typeof vi.fn>;
 } {
 	let listener: ((event: EvolutionProgressEvent) => void) | undefined;
 	const unsubscribed = vi.fn();
@@ -109,6 +178,7 @@ function client(currentOverview: EvolutionOverview): {
 	const overviewCall = vi.fn().mockResolvedValue(currentOverview);
 	const listJobs = vi.fn().mockResolvedValue([]);
 	const jobDetailCall = vi.fn().mockRejectedValue(new Error("unused"));
+	const proposalDetailCall = vi.fn().mockRejectedValue(new Error("unused"));
 	return {
 		client: {
 			subscribe: (next) => {
@@ -118,7 +188,7 @@ function client(currentOverview: EvolutionOverview): {
 			overview: overviewCall,
 			listJobs,
 			jobDetail: jobDetailCall,
-			proposalDetail: vi.fn().mockRejectedValue(new Error("unused")),
+			proposalDetail: proposalDetailCall,
 			startManual,
 			resumeNewest: vi.fn().mockRejectedValue(new Error("unused")),
 			cancelActive: vi.fn().mockRejectedValue(new Error("unused")),
@@ -130,6 +200,7 @@ function client(currentOverview: EvolutionOverview): {
 		overviewCall,
 		listJobs,
 		jobDetailCall,
+		proposalDetailCall,
 	};
 }
 
@@ -309,6 +380,97 @@ describe("EvolutionMenuComponent", () => {
 		]) {
 			expect(output).not.toContain(removedLabel);
 		}
+	});
+
+	it("renders a readable proposal outcome without internal mutation diagnostics", async () => {
+		const detail = proposalDetail();
+		const fixture = client(overview());
+		fixture.listJobs.mockResolvedValue([job()]);
+		fixture.jobDetailCall.mockResolvedValue(jobDetail({ proposalIds: [detail.proposal.proposalId] }));
+		fixture.proposalDetailCall.mockResolvedValue(detail);
+		const component = new EvolutionMenuComponent(
+			fixture.client,
+			() => {},
+			() => {},
+			() => {},
+		);
+		await vi.waitFor(() => expect(stripAnsi(component.render(180).join("\n"))).toContain("Browse"));
+
+		for (let index = 0; index < 4; index += 1) component.handleInput("\u001b[B");
+		component.handleInput("\n");
+		await vi.waitFor(() => expect(stripAnsi(component.render(180).join("\n"))).toContain("job-active"));
+		component.handleInput("\n");
+		await vi.waitFor(() =>
+			expect(stripAnsi(component.render(180).join("\n"))).toContain(`Proposal ${detail.proposal.proposalId}`),
+		);
+		component.handleInput("\n");
+		await vi.waitFor(() => expect(fixture.proposalDetailCall).toHaveBeenCalledOnce());
+
+		const output = stripAnsi(component.render(180).join("\n"));
+		expect(output).toContain(`Proposal: ${detail.proposal.proposalId}`);
+		expect(output).toContain("Validation: rejected");
+		expect(output).toContain("Outcome: Run focused verification before considering a change complete.");
+		expect(output).toContain("Supporting evidence (1)");
+		expect(output).toContain("Contradicting evidence (1)");
+		expect(output).not.toContain("Supporting evidence: evidence-1");
+		expect(output).not.toContain("Contradicting evidence: evidence-2");
+		for (const removedLabel of [
+			"Summary:",
+			"Action:",
+			"Structured delta:",
+			"Evidence ranking:",
+			"Applied diff:",
+			"Rollback target:",
+		]) {
+			expect(output).not.toContain(removedLabel);
+		}
+
+		component.handleInput("\n");
+		await vi.waitFor(() => expect(stripAnsi(component.render(180).join("\n"))).toContain("1. evidence-1"));
+		component.handleInput("\u001b");
+		await vi.waitFor(() =>
+			expect(stripAnsi(component.render(180).join("\n"))).toContain("Contradicting evidence (1)"),
+		);
+		component.handleInput("\u001b[B");
+		component.handleInput("\n");
+		await vi.waitFor(() => expect(stripAnsi(component.render(180).join("\n"))).toContain("1. evidence-2"));
+		component.dispose();
+	});
+
+	it("formats non-add proposal outcomes as readable text", () => {
+		const detail = proposalDetail();
+		if (detail.proposal.disposition !== "actionable") throw new Error("Expected an actionable proposal");
+		expect(
+			formatEvolutionProposalOutcome({
+				...detail.proposal,
+				action: "REMOVE",
+				exactDelta: {
+					operation: "REMOVE",
+					memoryItemId: "memory-1",
+					expectedContentDigest: `sha256:${"d".repeat(64)}`,
+					reason: "it is obsolete",
+				},
+			}),
+		).toBe("Remove the existing evolution-memory entry because it is obsolete");
+		expect(
+			formatEvolutionProposalOutcome({
+				...detail.proposal,
+				action: "REPLACE",
+				exactDelta: {
+					operation: "REPLACE",
+					removal: {
+						memoryItemId: "memory-1",
+						expectedContentDigest: `sha256:${"d".repeat(64)}`,
+						reason: "it is imprecise",
+					},
+					addition: {
+						destination: { section: "Verification", anchor: null },
+						content: "Use precise verification guidance.",
+						intendedScope: ["repository changes"],
+					},
+				},
+			}),
+		).toBe("Use precise verification guidance.");
 	});
 
 	it("formats evolution timestamps for today and earlier dates", () => {

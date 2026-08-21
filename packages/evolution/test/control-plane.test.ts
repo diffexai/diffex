@@ -544,7 +544,6 @@ describe("checkpointed evolution pipeline", () => {
 					const proposal: EvolutionMemoryProposal = {
 						metadata: metadata("proposal-1", ["lesson-1"], exactDelta),
 						proposalId: "proposal-1",
-						summary: "Append one focused rule",
 						scope: {
 							repository: scope,
 							repositoryRevision: "abc123",
