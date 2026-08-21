@@ -5,19 +5,21 @@ import type { HarnessStateStore, HarnessVersionBundle } from "@earendil-works/di
 import type { AgentSession } from "../agent-session.ts";
 import {
 	type AgentSessionServices,
-	createAgentSessionFromServices,
 	createAgentSessionServices,
+	createInternalAgentSessionFromServices,
 } from "../agent-session-services.ts";
+import type { ToolDefinition } from "../extensions/types.ts";
 import type { ModelRuntime } from "../model-runtime.ts";
 import type { SessionManager } from "../session-manager.ts";
 import type { SettingsManager } from "../settings-manager.ts";
 import { allToolNames, type ToolName } from "../tools/index.ts";
+import { createEscalateToParentTool } from "../tools/subagents.ts";
 import {
 	RootLocalEphemeralSubagentSessionManagerFactory,
 	type SubagentSessionManagerFactory,
 } from "./session-manager-factory.ts";
 import { markFixedHarnessSubagentSession } from "./session-runtime.ts";
-import type { CapturedSubagentConfig, SubagentSpawnOrigin } from "./types.ts";
+import type { CapturedSubagentConfig, SubagentEscalationCallback, SubagentSpawnOrigin } from "./types.ts";
 
 export interface CreateSubagentServicesOptions {
 	cwd: string;
@@ -50,6 +52,7 @@ export interface CreateSubagentSessionOptions {
 	readonly origin?: SubagentSpawnOrigin;
 	readonly sessionManagerFactory?: SubagentSessionManagerFactory;
 	readonly sessionManager?: SessionManager;
+	readonly escalateToParent?: SubagentEscalationCallback;
 }
 
 export interface ResolvedRestoredSubagentConfig {
@@ -212,16 +215,21 @@ export async function createSubagentSession(
 			}),
 		);
 	markFixedHarnessSubagentSession(sessionManager);
-	const { session } = await createAgentSessionFromServices({
-		services,
-		sessionManager,
-		model: config.model,
-		thinkingLevel: config.thinkingLevel,
-		tools: [...config.tools],
-		scopedModels: [],
-		customTools: [],
-		subagents: false,
-	});
+	const { session } = await createInternalAgentSessionFromServices(
+		{
+			services,
+			sessionManager,
+			model: config.model,
+			thinkingLevel: config.thinkingLevel,
+			tools: [...config.tools],
+			scopedModels: [],
+			customTools: [],
+			subagents: false,
+		},
+		options.escalateToParent
+			? [createEscalateToParentTool(options.escalateToParent) as unknown as ToolDefinition]
+			: undefined,
+	);
 
 	try {
 		options.signal?.throwIfAborted();

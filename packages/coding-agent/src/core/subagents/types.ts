@@ -13,7 +13,12 @@ export interface SubagentSummary {
 	readonly task: string;
 }
 
-export type CreateSubagentSession = (signal: AbortSignal) => Promise<AgentSession>;
+export type SubagentEscalationCallback = (message: string) => Promise<void>;
+
+export type CreateSubagentSession = (
+	signal: AbortSignal,
+	escalateToParent?: SubagentEscalationCallback,
+) => Promise<AgentSession>;
 
 export interface CapturedSubagentConfig {
 	readonly model: { readonly provider: string; readonly id: string };

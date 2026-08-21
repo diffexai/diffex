@@ -180,6 +180,7 @@ export class SubagentController {
 	#closed = false;
 	#resetting = false;
 	#parent: AgentSession | undefined;
+	#deliverEscalation: ((name: string, message: string) => Promise<void>) | undefined;
 	#resetPromise: Promise<void> | undefined;
 	#resetCleanupPromise: Promise<unknown[]> | undefined;
 	#shutdownPromise: Promise<void> | undefined;
@@ -228,12 +229,13 @@ export class SubagentController {
 		return definitions.map((definition) => definition as unknown as ToolDefinition);
 	}
 
-	bindParent(session: AgentSession): void {
+	bindParent(session: AgentSession, deliverEscalation?: (name: string, message: string) => Promise<void>): void {
 		this.#assertOpen();
 		if (this.#parent) {
 			throw new Error("Subagent controller parent is already bound");
 		}
 		this.#parent = session;
+		this.#deliverEscalation = deliverEscalation;
 	}
 
 	beginCoordinationCycle(): void {
@@ -705,6 +707,7 @@ export class SubagentController {
 			const resetCleanup = this.#resetCleanupPromise;
 			const records = this.#detachRecords(closedError);
 			this.#parent = undefined;
+			this.#deliverEscalation = undefined;
 			const shutdownCleanup = this.#cleanupRecords(records);
 			this.#publish(
 				(revision) => ({
@@ -1353,6 +1356,7 @@ export class SubagentController {
 	async #runPromptInner(record: SubagentRecord, prompt: string, runController: AbortController): Promise<void> {
 		let permit: SubagentPermit | undefined;
 		let session = record.session;
+		let createdSession: AgentSession | undefined;
 		const assistantMessages: AssistantMessage[] = [];
 		let unsubscribe: (() => void) | undefined;
 		try {
@@ -1362,7 +1366,10 @@ export class SubagentController {
 				if (!createSession) {
 					throw new Error(`Subagent session factory is unavailable: ${record.name}`);
 				}
-				session = await createSession(runController.signal);
+				session = await createSession(runController.signal, (message) =>
+					this.#routeEscalation(record, createdSession, message),
+				);
+				createdSession = session;
 				if (this.#closed || this.#resetting || runController.signal.aborted) {
 					try {
 						await session.dispose();
@@ -1426,6 +1433,20 @@ export class SubagentController {
 				record.runController = undefined;
 			}
 		}
+	}
+
+	async #routeEscalation(record: SubagentRecord, session: AgentSession | undefined, message: string): Promise<void> {
+		this.#assertOpen();
+		if (!this.#parent || !this.#deliverEscalation) {
+			throw new Error("Subagent parent escalation delivery is unavailable");
+		}
+		if (this.#records.get(record.name) !== record || !session || record.session !== session) {
+			throw new Error("Subagent escalation capability is stale");
+		}
+		if (record.status !== "running") {
+			throw new Error(`Subagent cannot escalate while ${record.status}: ${record.name}`);
+		}
+		await this.#deliverEscalation(record.name, message);
 	}
 
 	#rejectPermitQueue(error: Error): void {

@@ -230,6 +230,7 @@ function createSessionId(): string {
 
 const PERSIST_SESSION_HEADER = Symbol("persistSessionHeader");
 const PERSIST_SESSION_STATE = Symbol("persistSessionState");
+const APPEND_CUSTOM_MESSAGE_WITH_ROLLBACK = Symbol("appendCustomMessageWithRollback");
 
 export function assertValidSessionId(id: string): void {
 	if (!/^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/.test(id)) {
@@ -1261,6 +1262,36 @@ export class SessionManager {
 		return entry.id;
 	}
 
+	[APPEND_CUSTOM_MESSAGE_WITH_ROLLBACK]<T = unknown>(
+		customType: string,
+		content: string | (TextContent | ImageContent)[],
+		display: boolean,
+		details?: T,
+	): string {
+		const previousLeafId = this.leafId;
+		const previousFlushed = this.flushed;
+		const entry: CustomMessageEntry<T> = {
+			type: "custom_message",
+			customType,
+			content,
+			display,
+			details,
+			id: generateId(this.byId),
+			parentId: previousLeafId,
+			timestamp: new Date().toISOString(),
+		};
+		try {
+			this._appendEntry(entry);
+			return entry.id;
+		} catch (error) {
+			if (this.fileEntries.at(-1) === entry) this.fileEntries.pop();
+			this.byId.delete(entry.id);
+			this.leafId = previousLeafId;
+			this.flushed = previousFlushed;
+			throw error;
+		}
+	}
+
 	// =========================================================================
 	// Tree Traversal
 	// =========================================================================
@@ -1847,4 +1878,15 @@ export function persistSessionHeader(sessionManager: SessionManager): void {
 /** Internal seam for durably admitting state that normal creation may still buffer. */
 export function persistSessionState(sessionManager: SessionManager): void {
 	sessionManager[PERSIST_SESSION_STATE]();
+}
+
+/** Internal synchronous selected-branch append with live-state rollback on persistence failure. */
+export function appendCustomMessageWithRollback<T = unknown>(
+	sessionManager: SessionManager,
+	customType: string,
+	content: string | (TextContent | ImageContent)[],
+	display: boolean,
+	details?: T,
+): string {
+	return sessionManager[APPEND_CUSTOM_MESSAGE_WITH_ROLLBACK](customType, content, display, details);
 }

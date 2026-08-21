@@ -110,7 +110,12 @@ import type { ModelRuntime } from "./model-runtime.ts";
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.ts";
 import type { ResourceExtensionPaths, ResourceLoader } from "./resource-loader.ts";
 import type { BranchSummaryEntry, CompactionEntry, SessionEntry, SessionManager } from "./session-manager.ts";
-import { CURRENT_SESSION_VERSION, getLatestCompactionEntry, type SessionHeader } from "./session-manager.ts";
+import {
+	appendCustomMessageWithRollback,
+	CURRENT_SESSION_VERSION,
+	getLatestCompactionEntry,
+	type SessionHeader,
+} from "./session-manager.ts";
 import type { SettingsManager } from "./settings-manager.ts";
 import {
 	createSkillReferenceSnapshot,
@@ -364,6 +369,17 @@ interface ToolDefinitionEntry {
 	sourceInfo: SourceInfo;
 }
 
+interface SubagentEscalationEntry {
+	readonly name: string;
+	readonly message: string;
+}
+
+interface PendingSubagentEscalationEnvelope {
+	readonly message: CustomMessage<{ names: string[] }>;
+	readonly escalations: SubagentEscalationEntry[];
+	messageCharacters: number;
+}
+
 function estimateMessagesTokens(messages: AgentMessage[]): number {
 	let tokens = 0;
 	for (const message of messages) {
@@ -381,6 +397,7 @@ const THINKING_LEVELS: ThinkingLevel[] = ["off", "minimal", "low", "medium", "hi
 const CURRENT_PLAN_RESTORATION_CUSTOM_TYPE = "diffex.current-plan-restoration";
 const CURRENT_PLAN_RESTORATION_REMINDER =
 	"Reminder: restored context is not proof of completion. Verify current state before claiming work is done.";
+const MAX_PENDING_SUBAGENT_ESCALATION_CHARACTERS = 8_000;
 
 // ============================================================================
 // AgentSession Class
@@ -466,6 +483,8 @@ export class AgentSession {
 	private readonly _lifecycleObserver: AgentSessionLifecycleObserver | undefined;
 	private _harnessSwitchInProgress = false;
 	private _subagentWaitAbortController: AbortController | undefined;
+	private _pendingSubagentEscalationEnvelope: PendingSubagentEscalationEnvelope | undefined;
+	private readonly _pendingIdleSubagentEscalations = new Map<string, number>();
 	private _agentRunAborted = false;
 	private _disposePromise: Promise<void> | undefined;
 
@@ -503,6 +522,7 @@ export class AgentSession {
 			activeToolNames: this._initialActiveToolNames,
 			includeAllExtensionTools: true,
 		});
+		this._subagentController?.bindParent(this, (name, message) => this._acceptSubagentEscalation(name, message));
 	}
 
 	get modelRuntime(): ModelRuntime {
@@ -779,6 +799,10 @@ export class AgentSession {
 
 	/** Internal handler for agent events - shared by subscribe and reconnect */
 	private _handleAgentEvent = async (event: AgentEvent): Promise<void> => {
+		if (event.type === "message_start" && this._pendingSubagentEscalationEnvelope?.message === event.message) {
+			// The exact queued object is now entering parent context. Seal it so later reports form a new envelope.
+			this._pendingSubagentEscalationEnvelope = undefined;
+		}
 		// When a user message starts, check if it's from either queue and remove it BEFORE emitting
 		// This ensures the UI sees the updated queue state
 		if (event.type === "message_start" && event.message.role === "user") {
@@ -1060,6 +1084,7 @@ export class AgentSession {
 
 	private async _finishDispose(childCleanup: Promise<void> | undefined): Promise<void> {
 		const failures: unknown[] = [];
+		this._pendingIdleSubagentEscalations.clear();
 		try {
 			this.clearQueue();
 		} catch (error) {
@@ -1530,9 +1555,17 @@ export class AgentSession {
 		this._agentRunAborted = false;
 		this._isAgentRunActive = true;
 		try {
-			await this.agent.prompt(messages);
-			while (await this._handlePostAgentRun()) {
-				await this.agent.continue();
+			let firstRun = true;
+			while (true) {
+				if (firstRun) await this.agent.prompt(messages);
+				else await this.agent.continue();
+				firstRun = false;
+				if (await this._handlePostAgentRun()) continue;
+
+				// No await is permitted between the inactive mark and final queue recheck.
+				this._isAgentRunActive = false;
+				if (!this.agent.hasQueuedMessages()) break;
+				this._isAgentRunActive = true;
 			}
 		} finally {
 			this._systemPromptOverride = undefined;
@@ -1857,6 +1890,7 @@ export class AgentSession {
 		}
 
 		preflightResult?.(true);
+		this._releaseIdleSubagentEscalationsForSelectedBranch();
 		await this._runAgentPrompt(messages);
 	}
 
@@ -2079,6 +2113,99 @@ export class AgentSession {
 		}
 	}
 
+	private async _acceptSubagentEscalation(name: string, message: string): Promise<void> {
+		if (this._disposePromise) throw new Error("Agent session is disposed");
+		const pendingCharacters =
+			(this._pendingSubagentEscalationEnvelope?.messageCharacters ?? 0) +
+			[...this._pendingIdleSubagentEscalations.values()].reduce((sum, length) => sum + length, 0);
+		if (pendingCharacters + message.length > MAX_PENDING_SUBAGENT_ESCALATION_CHARACTERS) {
+			throw new Error("Subagent escalation pending capacity exceeded");
+		}
+
+		if (this.isStreaming) {
+			const pending = this._pendingSubagentEscalationEnvelope;
+			if (pending) {
+				pending.escalations.push({ name, message });
+				pending.messageCharacters += message.length;
+				pending.message.content = JSON.stringify({
+					type: "subagent_escalations",
+					escalations: pending.escalations,
+				});
+				pending.message.details = { names: pending.escalations.map((entry) => entry.name) };
+				return;
+			}
+
+			const escalations: SubagentEscalationEntry[] = [{ name, message }];
+			const appMessage: CustomMessage<{ names: string[] }> = {
+				role: "custom",
+				customType: "subagent_escalations",
+				content: JSON.stringify({ type: "subagent_escalations", escalations }),
+				display: false,
+				details: { names: [name] },
+				timestamp: Date.now(),
+			};
+			this._pendingSubagentEscalationEnvelope = {
+				message: appMessage,
+				escalations,
+				messageCharacters: message.length,
+			};
+			try {
+				this.agent.steer(appMessage);
+			} catch (error) {
+				if (this._pendingSubagentEscalationEnvelope?.message === appMessage) {
+					this._pendingSubagentEscalationEnvelope = undefined;
+				}
+				throw error;
+			}
+			return;
+		}
+
+		const appMessage: CustomMessage<{ names: string[] }> = {
+			role: "custom",
+			customType: "subagent_escalations",
+			content: JSON.stringify({
+				type: "subagent_escalations",
+				escalations: [{ name, message }],
+			}),
+			display: false,
+			details: { names: [name] },
+			timestamp: Date.now(),
+		};
+		const entryId = appendCustomMessageWithRollback(
+			this.sessionManager,
+			appMessage.customType,
+			appMessage.content,
+			appMessage.display,
+			appMessage.details,
+		);
+		this.agent.state.messages.push(appMessage);
+		this._pendingIdleSubagentEscalations.set(entryId, message.length);
+		this._emitEscalationObservation({ type: "message_start", message: appMessage });
+		this._emitEscalationObservation({ type: "message_end", message: appMessage });
+	}
+
+	private _emitEscalationObservation(event: AgentSessionEvent): void {
+		for (const listener of [...this._eventListeners]) {
+			try {
+				listener(event);
+			} catch {
+				// Idle escalation admission is already committed; passive listener failures are isolated.
+			}
+		}
+	}
+
+	private _filterPendingIdleSubagentEscalationsToSelectedBranch(): void {
+		const selectedIds = new Set(this.sessionManager.getBranch().map((entry) => entry.id));
+		for (const entryId of this._pendingIdleSubagentEscalations.keys()) {
+			if (!selectedIds.has(entryId)) this._pendingIdleSubagentEscalations.delete(entryId);
+		}
+	}
+
+	private _releaseIdleSubagentEscalationsForSelectedBranch(): void {
+		this._filterPendingIdleSubagentEscalationsToSelectedBranch();
+		this._pendingIdleSubagentEscalations.clear();
+	}
+
 	/**
 	 * Send a user message to the agent. Always triggers a turn.
 	 * When the agent is streaming, use deliverAs to specify how to queue the message.
@@ -2129,6 +2256,7 @@ export class AgentSession {
 		const followUp = [...this._followUpMessages];
 		this._steeringMessages = [];
 		this._followUpMessages = [];
+		this._pendingSubagentEscalationEnvelope = undefined;
 		this.agent.clearAllQueues();
 		this._emitQueueUpdate();
 		return { steering, followUp };
@@ -3803,6 +3931,7 @@ export class AgentSession {
 			// Update agent state
 			const sessionContext = this.sessionManager.buildSessionContext();
 			this.agent.state.messages = sessionContext.messages;
+			this._filterPendingIdleSubagentEscalationsToSelectedBranch();
 
 			// Emit session_tree event
 			await this._extensionRunner.emit({

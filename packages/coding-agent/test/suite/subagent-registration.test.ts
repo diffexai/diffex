@@ -440,7 +440,7 @@ describe("root subagent tool registration", () => {
 
 		expect(captured?.model.id).toBe("faux-1");
 		expect(captured?.options?.reasoning).toBe("high");
-		expect(captured?.toolNames).toEqual(["read", "bash", "edit", "write", "update_plan"]);
+		expect(captured?.toolNames).toEqual(["read", "bash", "edit", "write", "update_plan", "escalate_to_parent"]);
 	});
 
 	it("creates an independent empty controller after runtime replacement", async () => {

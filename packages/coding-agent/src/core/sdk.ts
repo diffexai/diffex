@@ -42,6 +42,7 @@ import {
 	resolveRestoredSubagentConfig,
 } from "./subagents/services.ts";
 import { RootLocalEphemeralSubagentSessionManagerFactory } from "./subagents/session-manager-factory.ts";
+import type { SubagentEscalationCallback } from "./subagents/types.ts";
 import { time } from "./timings.ts";
 import {
 	createBashTool,
@@ -64,7 +65,7 @@ import {
 setDefaultStreamFn(streamSimple);
 
 const DEFAULT_SUBAGENT_CONCURRENCY = 4;
-const RESERVED_SUBAGENT_TOOL_NAMES = new Set(["spawn_agent", "agent_action", "agents"]);
+const RESERVED_SUBAGENT_TOOL_NAMES = new Set(["spawn_agent", "agent_action", "agents", "escalate_to_parent"]);
 
 export interface SubagentOptions {
 	/** Maximum number of child agents that may run concurrently. Default: 4 */
@@ -233,12 +234,13 @@ function createRootSubagentController(
 			return Object.freeze({
 				sessionManager,
 				config: capturePersistedSubagentConfig(config),
-				createSession: (signal: AbortSignal) =>
+				createSession: (signal: AbortSignal, escalateToParent?: SubagentEscalationCallback) =>
 					createSubagentSession(config, {
 						signal,
 						childName,
 						origin,
 						sessionManager,
+						escalateToParent,
 					}),
 			});
 		},
@@ -270,8 +272,8 @@ function createPreparedSubagentWake(
 		sessionManager,
 		config: resolved.persistedConfig,
 		...(resolved.warning === undefined ? {} : { warning: resolved.warning }),
-		createSession: (signal: AbortSignal) =>
-			createSubagentSession(resolved.sessionConfig, { signal, childName, sessionManager }),
+		createSession: (signal: AbortSignal, escalateToParent?: SubagentEscalationCallback) =>
+			createSubagentSession(resolved.sessionConfig, { signal, childName, sessionManager, escalateToParent }),
 	});
 }
 
@@ -399,6 +401,14 @@ function restoreRootSubagents(
  * ```
  */
 export async function createAgentSession(options: CreateAgentSessionOptions = {}): Promise<CreateAgentSessionResult> {
+	return createInternalAgentSession(options);
+}
+
+/** Internal construction lane for controller-owned tools that are never accepted from SDK callers. */
+export async function createInternalAgentSession(
+	options: CreateAgentSessionOptions = {},
+	internalCustomTools: readonly ToolDefinition[] = [],
+): Promise<CreateAgentSessionResult> {
 	const cwd = resolvePath(options.cwd ?? options.sessionManager?.getCwd() ?? process.cwd());
 	const agentDir = options.agentDir ? resolvePath(options.agentDir) : getDefaultAgentDir();
 	const loadedHarnessState = options.harnessStateStore
@@ -419,7 +429,11 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		subagentOptions === false
 			? undefined
 			: createRootSubagentController(subagentOptions.maxConcurrent, agentDir, telemetryContext, sessionManager);
-	const customTools = [...(options.customTools ?? []), ...(subagentController?.createToolDefinitions() ?? [])];
+	const customTools = [
+		...(options.customTools ?? []),
+		...(subagentController?.createToolDefinitions() ?? []),
+		...internalCustomTools,
+	];
 
 	if (!resourceLoader) {
 		resourceLoader = new DefaultResourceLoader({ cwd, agentDir, settingsManager });
@@ -486,12 +500,18 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	}
 
 	const defaultActiveToolNames: ToolName[] = ["read", "bash", "edit", "write", "update_plan"];
-	const allowedToolNames = options.tools ?? (options.noTools === "all" ? [] : undefined);
+	const allowedToolNames = options.tools
+		? [...options.tools, ...internalCustomTools.map((tool) => tool.name)]
+		: options.noTools === "all"
+			? internalCustomTools.map((tool) => tool.name)
+			: undefined;
 	const excludedToolNames = options.excludeTools;
 	const excludedToolNameSet = excludedToolNames ? new Set(excludedToolNames) : undefined;
 	const initialActiveToolNames: string[] = (
 		options.tools ? [...options.tools] : options.noTools ? [] : defaultActiveToolNames
-	).filter((name) => !excludedToolNameSet?.has(name));
+	)
+		.filter((name) => !excludedToolNameSet?.has(name))
+		.concat(internalCustomTools.map((tool) => tool.name));
 
 	let agent: Agent;
 
@@ -644,7 +664,6 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			// Lifecycle observers are passive and never change session creation.
 		}
 	}
-	subagentController?.bindParent(session);
 	if (subagentController) restoreRootSubagents(subagentController, session, agentDir, sessionManager);
 	const extensionsResult = resourceLoader.getExtensions();
 

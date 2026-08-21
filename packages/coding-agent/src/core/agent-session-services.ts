@@ -14,7 +14,7 @@ import {
 	type ResourceLoader,
 	type ResourceLoaderReloadOptions,
 } from "./resource-loader.ts";
-import { type CreateAgentSessionOptions, type CreateAgentSessionResult, createAgentSession } from "./sdk.ts";
+import { type CreateAgentSessionOptions, type CreateAgentSessionResult, createInternalAgentSession } from "./sdk.ts";
 import type { SessionManager } from "./session-manager.ts";
 import { SettingsManager } from "./settings-manager.ts";
 import { registerSubagentRuntimeDiagnosticSink } from "./subagents/runtime-diagnostics.ts";
@@ -228,26 +228,37 @@ export async function createAgentSessionServices(
 export async function createAgentSessionFromServices(
 	options: CreateAgentSessionFromServicesOptions,
 ): Promise<CreateAgentSessionResult> {
+	return createInternalAgentSessionFromServices(options);
+}
+
+/** Internal construction lane for controller-owned tools. */
+export async function createInternalAgentSessionFromServices(
+	options: CreateAgentSessionFromServicesOptions,
+	internalCustomTools: readonly ToolDefinition[] = [],
+): Promise<CreateAgentSessionResult> {
 	registerSubagentRuntimeDiagnosticSink(options.sessionManager, options.services.diagnostics);
-	return createAgentSession({
-		cwd: options.services.cwd,
-		agentDir: options.services.agentDir,
-		modelRuntime: options.services.modelRuntime,
-		settingsManager: options.services.settingsManager,
-		resourceLoader: options.services.resourceLoader,
-		harnessStateStore: options.services.harnessStateStore,
-		harnessVersionBundle: options.services.harnessVersionBundle,
-		telemetryContext: options.services.telemetryContext,
-		sessionManager: options.sessionManager,
-		model: options.model,
-		thinkingLevel: options.thinkingLevel,
-		scopedModels: options.scopedModels,
-		tools: options.tools,
-		excludeTools: options.excludeTools,
-		noTools: options.noTools,
-		customTools: options.customTools,
-		subagents: options.subagents,
-		lifecycleObserver: options.lifecycleObserver,
-		sessionStartEvent: options.sessionStartEvent,
-	});
+	return createInternalAgentSession(
+		{
+			cwd: options.services.cwd,
+			agentDir: options.services.agentDir,
+			modelRuntime: options.services.modelRuntime,
+			settingsManager: options.services.settingsManager,
+			resourceLoader: options.services.resourceLoader,
+			harnessStateStore: options.services.harnessStateStore,
+			harnessVersionBundle: options.services.harnessVersionBundle,
+			telemetryContext: options.services.telemetryContext,
+			sessionManager: options.sessionManager,
+			model: options.model,
+			thinkingLevel: options.thinkingLevel,
+			scopedModels: options.scopedModels,
+			tools: options.tools,
+			excludeTools: options.excludeTools,
+			noTools: options.noTools,
+			customTools: options.customTools,
+			subagents: options.subagents,
+			lifecycleObserver: options.lifecycleObserver,
+			sessionStartEvent: options.sessionStartEvent,
+		},
+		internalCustomTools,
+	);
 }
