@@ -197,7 +197,7 @@ export class CuratorToolRegistry {
 	async #inspectLessons(input: JsonObject): Promise<JsonObject> {
 		return this.#execute("inspect_lessons", input, () => {
 			this.#assertOnlyField(input, "lessonRefs");
-			const selected = referenceArray(input.lessonRefs, "lessonRefs", this.lessons, false);
+			const selected = referenceArray(input.lessonRefs, "lessonRefs", this.lessons, { allowEmpty: false });
 			return {
 				output: {
 					lessons: selected.map((lesson) => ({
@@ -221,7 +221,9 @@ export class CuratorToolRegistry {
 	async #inspectInstructions(input: JsonObject): Promise<JsonObject> {
 		return this.#execute("inspect_instructions", input, () => {
 			this.#assertOnlyField(input, "instructionRefs");
-			const selected = referenceArray(input.instructionRefs, "instructionRefs", this.instructions, false);
+			const selected = referenceArray(input.instructionRefs, "instructionRefs", this.instructions, {
+				allowEmpty: false,
+			});
 			return {
 				output: {
 					instructions: selected.map((instruction) => ({

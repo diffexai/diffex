@@ -606,6 +606,84 @@ describe("recursive reflector", () => {
 		expect(events.filter((event) => event.type === "reflection-node-checkpointed")).toHaveLength(0);
 	});
 
+	it("normalizes permitted bare evidence aliases and audits each correction", async () => {
+		const { persistence, reflector } = await reflectorFixture();
+		const input = reflectInput({
+			async execute(request) {
+				if (request.stage !== "reflector") throw new Error("Unexpected Curator request");
+				const node = jsonObject(request.input.node, "node");
+				const lesson =
+					node.kind === "leaf"
+						? leafLesson(references(request.input, "evidence", "evidenceRef").map((ref) => ref.slice(1)))
+						: lessonForRequest(request.input);
+				return {
+					output: {
+						complete: true,
+						lessons: [lesson],
+					},
+					model: { provider: "faux", model: "fixture" },
+				};
+			},
+		});
+
+		await expect(reflector.reflect(input)).resolves.toMatchObject({ nodes: expect.any(Array) });
+		const checkpoints = (await persistence.read("job-1")).filter(
+			(event) => event.type === "reflection-node-checkpointed",
+		);
+		expect(checkpoints.flatMap((event) => event.referenceNormalizations)).toEqual([
+			{ field: "supportingEvidenceRefs", providedReference: "1", normalizedReference: "E1" },
+			{ field: "supportingEvidenceRefs", providedReference: "2", normalizedReference: "E2" },
+			{ field: "supportingEvidenceRefs", providedReference: "3", normalizedReference: "E3" },
+			{ field: "supportingEvidenceRefs", providedReference: "4", normalizedReference: "E4" },
+			{ field: "supportingEvidenceRefs", providedReference: "5", normalizedReference: "E5" },
+			{ field: "supportingEvidenceRefs", providedReference: "6", normalizedReference: "E6" },
+		]);
+	});
+
+	it.each([
+		{
+			caseName: "wrong-kind aliases",
+			references: ["L1"],
+			validationError: "supportingEvidenceRefs contains an unknown reference. Permitted references: E1, E2",
+		},
+		{
+			caseName: "unavailable numbers",
+			references: ["99"],
+			validationError:
+				'supportingEvidenceRefs contains an unknown reference; "99" omitted the required type prefix and would be "E99", which is not permitted. Permitted references: E1, E2',
+		},
+		{
+			caseName: "duplicates after normalization",
+			references: ["E1", "1"],
+			validationError: "supportingEvidenceRefs contains duplicates. Permitted references: E1, E2",
+		},
+		{
+			caseName: "cross-node aliases",
+			references: ["3"],
+			validationError:
+				'supportingEvidenceRefs contains an unknown reference; "3" omitted the required type prefix and would be "E3", which is not permitted. Permitted references: E1, E2',
+		},
+	])("continues rejecting $caseName", async ({ references: invalidReferences, validationError }) => {
+		const { persistence } = await reflectorFixture();
+		const reflector = new RecursiveReflector(
+			{ version: "1.0.0", artifacts: persistence, ledger: persistence },
+			{ maxResponseRetries: 1, maxUnitsPerSlice: 2, synthesisFanout: 8 },
+		);
+		const input = reflectInput({
+			execute() {
+				return Promise.resolve({
+					output: { complete: true, lessons: [leafLesson(invalidReferences)] },
+					model: { provider: "faux", model: "fixture" },
+				});
+			},
+		});
+
+		await expect(reflector.reflect(input)).rejects.toMatchObject({
+			reasonCode: "reflection-invalid-response",
+			diagnostics: { attemptDetails: [{ validationError }] },
+		});
+	});
+
 	it("explains an invalid response when retrying the same reflection node", async () => {
 		const { reflector } = await reflectorFixture();
 		let calls = 0;
@@ -616,14 +694,15 @@ describe("recursive reflector", () => {
 				if (calls === 1) {
 					expect(request.input.control).not.toHaveProperty("responseCorrection");
 					return {
-						output: { complete: true, lessons: [leafLesson(["E3"])] },
+						output: { complete: true, lessons: [leafLesson(["3"])] },
 						model: { provider: "faux", model: "fixture" },
 					};
 				}
 				if (calls === 2) {
 					expect(request.input.control).toMatchObject({
 						responseCorrection: {
-							reason: "supportingEvidenceRefs contains an unknown reference. Permitted references: E1, E2",
+							reason:
+								'supportingEvidenceRefs contains an unknown reference; "3" omitted the required type prefix and would be "E3", which is not permitted. Permitted references: E1, E2',
 						},
 					});
 				} else {

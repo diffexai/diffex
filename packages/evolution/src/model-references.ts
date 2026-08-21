@@ -1,4 +1,4 @@
-import type { JsonObject } from "./contracts.ts";
+import type { EvolutionReferenceNormalization, JsonObject } from "./contracts.ts";
 
 export type EvolutionModelReferenceKind = "document" | "evidence" | "instruction" | "lesson" | "memory" | "slice";
 
@@ -14,6 +14,12 @@ const REFERENCE_PREFIXES: Readonly<Record<EvolutionModelReferenceKind, string>> 
 export interface EvolutionModelReferenceEntry<T> {
 	readonly ref: string;
 	readonly value: T;
+}
+
+export interface EvolutionModelReferenceArrayOptions {
+	readonly allowEmpty?: boolean;
+	readonly normalizeBare?: boolean;
+	readonly normalizations?: EvolutionReferenceNormalization[];
 }
 
 export class EvolutionModelReferenceError extends Error {
@@ -94,13 +100,26 @@ export function referenceArray<T>(
 	value: unknown,
 	field: string,
 	catalog: EvolutionModelReferenceCatalog<T>,
-	allowEmpty = true,
+	options: EvolutionModelReferenceArrayOptions = {},
 ): readonly T[] {
 	if (!Array.isArray(value) || value.some((item) => typeof item !== "string" || item.length === 0)) {
 		throw new EvolutionModelReferenceError(field, [], catalog.references, "must be an array of references");
 	}
 	const references = value as readonly string[];
-	const duplicates = references.filter((reference, index) => references.indexOf(reference) !== index);
+	const permitted = new Set(catalog.references);
+	const normalizations: EvolutionReferenceNormalization[] = [];
+	const normalizedReferences = references.map((reference) => {
+		if (!options.normalizeBare || permitted.has(reference) || !/^(?:0|[1-9][0-9]*)$/u.test(reference)) {
+			return reference;
+		}
+		const candidate = `${REFERENCE_PREFIXES[catalog.kind]}${reference}`;
+		if (!permitted.has(candidate)) return reference;
+		normalizations.push({ field, providedReference: reference, normalizedReference: candidate });
+		return candidate;
+	});
+	const duplicates = references.filter(
+		(_reference, index) => normalizedReferences.indexOf(normalizedReferences[index] as string) !== index,
+	);
 	if (duplicates.length > 0) {
 		throw new EvolutionModelReferenceError(
 			field,
@@ -109,12 +128,25 @@ export function referenceArray<T>(
 			"contains duplicates",
 		);
 	}
-	if (!allowEmpty && references.length === 0) {
+	if (options.allowEmpty === false && references.length === 0) {
 		throw new EvolutionModelReferenceError(field, [], catalog.references, "must not be empty");
 	}
-	const invalid = references.filter((reference) => !catalog.references.includes(reference));
+	const invalid = references.filter((_reference, index) => !permitted.has(normalizedReferences[index] as string));
 	if (invalid.length > 0) {
-		throw new EvolutionModelReferenceError(field, invalid, catalog.references, "contains an unknown reference");
+		const bare = options.normalizeBare ? invalid.filter((reference) => /^(?:0|[1-9][0-9]*)$/u.test(reference)) : [];
+		const omittedPrefix = bare.map(
+			(reference) =>
+				`"${reference}" omitted the required type prefix and would be "${REFERENCE_PREFIXES[catalog.kind]}${reference}"`,
+		);
+		throw new EvolutionModelReferenceError(
+			field,
+			invalid,
+			catalog.references,
+			omittedPrefix.length === 0
+				? "contains an unknown reference"
+				: `contains an unknown reference; ${omittedPrefix.join("; ")}, which is not permitted`,
+		);
 	}
-	return references.map((reference) => catalog.resolve(reference, field));
+	options.normalizations?.push(...normalizations);
+	return normalizedReferences.map((reference) => catalog.resolve(reference, field));
 }

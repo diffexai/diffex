@@ -304,6 +304,12 @@ export interface EvidenceCoverageMap {
 
 export type ReflectionNodeStatus = "pending" | "complete" | "failed";
 
+export interface EvolutionReferenceNormalization {
+	readonly field: string;
+	readonly providedReference: string;
+	readonly normalizedReference: string;
+}
+
 export interface ReflectionNode {
 	readonly metadata: EvolutionArtifactMetadata;
 	readonly nodeId: string;
@@ -826,6 +832,7 @@ export interface ReflectionNodeCheckpointedLedgerEvent extends EvolutionLedgerEv
 	readonly manifestDigest: string;
 	readonly node: EvolutionArtifactReference;
 	readonly lessons: readonly EvolutionArtifactReference[];
+	readonly referenceNormalizations: readonly EvolutionReferenceNormalization[];
 }
 
 export type EvolutionLedgerEvent =

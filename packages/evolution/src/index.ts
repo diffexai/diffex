@@ -65,6 +65,7 @@ export {
 	type EvolutionProposalInstructionRelationship,
 	type EvolutionProposalLedgerDisposition,
 	type EvolutionProposalScope,
+	type EvolutionReferenceNormalization,
 	type EvolutionRepositorySnapshot,
 	type EvolutionScope,
 	type EvolutionStageCheckpoint,

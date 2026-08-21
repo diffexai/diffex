@@ -5,6 +5,7 @@ import type {
 	EvolutionArtifactMetadata,
 	EvolutionArtifactProducer,
 	EvolutionLedgerEvent,
+	EvolutionReferenceNormalization,
 	JsonObject,
 	Lesson,
 	LessonKind,
@@ -150,10 +151,21 @@ function lessonContent(
 	};
 }
 
-function parseLeafLessonDraft(value: unknown, evidence: ReflectorNodeReferences["evidence"]): LessonDraft {
+function parseLeafLessonDraft(
+	value: unknown,
+	evidence: ReflectorNodeReferences["evidence"],
+	normalizations: EvolutionReferenceNormalization[],
+): LessonDraft {
 	if (!isRecord(value)) throw new Error("lesson must be an object");
-	const supporting = referenceArray(value.supportingEvidenceRefs, "supportingEvidenceRefs", evidence, false);
-	const counter = referenceArray(value.counterevidenceRefs, "counterevidenceRefs", evidence);
+	const supporting = referenceArray(value.supportingEvidenceRefs, "supportingEvidenceRefs", evidence, {
+		allowEmpty: false,
+		normalizeBare: true,
+		normalizations,
+	});
+	const counter = referenceArray(value.counterevidenceRefs, "counterevidenceRefs", evidence, {
+		normalizeBare: true,
+		normalizations,
+	});
 	const evidenceIds = supporting.map((entry) => entry.evidence.evidenceId);
 	const counterevidenceIds = counter.map((entry) => entry.evidence.evidenceId);
 	if (evidenceIds.length === 0) throw new Error("A lesson must cite supporting evidence");
@@ -167,7 +179,7 @@ function parseLeafLessonDraft(value: unknown, evidence: ReflectorNodeReferences[
 
 function parseSynthesisLessonDraft(value: unknown, lessons: EvolutionModelReferenceCatalog<Lesson>): LessonDraft {
 	if (!isRecord(value)) throw new Error("lesson must be an object");
-	const sources = referenceArray(value.sourceLessonRefs, "sourceLessonRefs", lessons, false);
+	const sources = referenceArray(value.sourceLessonRefs, "sourceLessonRefs", lessons, { allowEmpty: false });
 	const counters = referenceArray(value.counterLessonRefs, "counterLessonRefs", lessons);
 	const counterIds = new Set(counters.map((lesson) => lesson.lessonId));
 	if (sources.some((lesson) => counterIds.has(lesson.lessonId))) {
@@ -200,18 +212,24 @@ function parseResponse(
 	context:
 		| { readonly kind: "leaf"; readonly evidence: ReflectorNodeReferences["evidence"] }
 		| { readonly kind: "synthesis"; readonly lessons: EvolutionModelReferenceCatalog<Lesson> },
-): { readonly complete: boolean; readonly lessons: readonly LessonDraft[] } {
+): {
+	readonly complete: boolean;
+	readonly lessons: readonly LessonDraft[];
+	readonly referenceNormalizations: readonly EvolutionReferenceNormalization[];
+} {
 	if (response.output.complete !== true && response.output.complete !== false) {
 		throw new Error("Reflector response complete must be boolean");
 	}
 	if (!Array.isArray(response.output.lessons)) throw new Error("Reflector response lessons must be an array");
+	const referenceNormalizations: EvolutionReferenceNormalization[] = [];
 	return {
 		complete: response.output.complete,
 		lessons: response.output.lessons.map((lesson) =>
 			context.kind === "leaf"
-				? parseLeafLessonDraft(lesson, context.evidence)
+				? parseLeafLessonDraft(lesson, context.evidence, referenceNormalizations)
 				: parseSynthesisLessonDraft(lesson, context.lessons),
 		),
+		referenceNormalizations,
 	};
 }
 
@@ -717,6 +735,7 @@ export class RecursiveReflector implements Reflector {
 			manifestDigest: input.corpus.metadata.contentDigest,
 			node: nodeReference,
 			lessons: lessonArtifactReferences,
+			referenceNormalizations: parsed.referenceNormalizations,
 		};
 		const checkpoint: ReflectionNodeCheckpointedLedgerEvent = {
 			metadata: this.#metadata(input, producer, checkpointId, [node.nodeId], checkpointContent),

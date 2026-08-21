@@ -644,7 +644,7 @@ function parseDecisions(
 		if (!PROPOSAL_ID_PATTERN.test(decisionKey)) throw new Error(`Invalid decision key "${decisionKey}"`);
 		if (seenDecisionKeys.has(decisionKey)) throw new Error(`Duplicate decision key "${decisionKey}"`);
 		seenDecisionKeys.add(decisionKey);
-		const selectedLessons = referenceArray(value.lessonRefs, "lessonRefs", registry.lessons, false);
+		const selectedLessons = referenceArray(value.lessonRefs, "lessonRefs", registry.lessons, { allowEmpty: false });
 		const parsedRelationship = relationship(value.relationship, registry);
 		if (parsedRelationship.classification === "duplicate" || parsedRelationship.classification === "conflicts") {
 			if (value.proposal !== null) {

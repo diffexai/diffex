@@ -476,7 +476,7 @@ export class ReflectorToolRegistry {
 	): Promise<JsonObject> {
 		return this.#execute("inspect_child_lessons", input, () => {
 			this.#assertAllowedFields("inspect_child_lessons", input, ["lessonRefs"]);
-			const selected = referenceArray(input.lessonRefs, "lessonRefs", lessons, false);
+			const selected = referenceArray(input.lessonRefs, "lessonRefs", lessons, { allowEmpty: false });
 			return {
 				output: {
 					lessons: selected.map((lesson) => ({
