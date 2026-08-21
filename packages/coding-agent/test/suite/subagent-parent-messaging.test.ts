@@ -442,6 +442,89 @@ describe("subagent parent messaging foundation", () => {
 			await waitForStatus(controller, "worker", "idle");
 		});
 
+		it("coordinates a new child after explicit consumption empties the frozen batch", async () => {
+			const { harness, session } = await setupRoot();
+			const controller = (session as unknown as { _subagentController: SubagentController })._subagentController;
+			const firstWaitStarted = deferred<void>();
+			const firstFinished = deferred<void>();
+			const secondStarted = deferred<void>();
+			const releaseSecond = deferred<void>();
+			const secondWaitStarted = deferred<void>();
+			let waitStarts = 0;
+			session.subscribe((event) => {
+				if (event.type !== "subagent_wait_start") return;
+				waitStarts += 1;
+				if (waitStarts === 1) firstWaitStarted.resolve();
+				if (waitStarts === 2) secondWaitStarted.resolve();
+			});
+			let rootProviderCalls = 0;
+			harness.setResponses(
+				Array.from({ length: 16 }, () => async (context: Context) => {
+					if (hasTool(context, "escalate_to_parent")) {
+						if (getLastUserText(context).includes("second delegated work")) {
+							secondStarted.resolve();
+							await releaseSecond.promise;
+							return fauxAssistantMessage("second result");
+						}
+						if (!hasToolResult(context, "escalate_to_parent")) {
+							await firstWaitStarted.promise;
+							return fauxAssistantMessage(
+								fauxToolCall("escalate_to_parent", { message: "consume first, start second" }),
+								{ stopReason: "toolUse" },
+							);
+						}
+						firstFinished.resolve();
+						return fauxAssistantMessage("first result");
+					}
+
+					rootProviderCalls += 1;
+					if (rootProviderCalls === 1) {
+						return fauxAssistantMessage(
+							fauxToolCall("spawn_agent", { name: "first", task: "first delegated work" }),
+							{ stopReason: "toolUse" },
+						);
+					}
+					if (rootProviderCalls === 2) return fauxAssistantMessage("wait for first");
+					if (rootProviderCalls === 3) {
+						await firstFinished.promise;
+						await waitForStatus(controller, "first", "idle");
+						return fauxAssistantMessage(
+							fauxToolCall("agents", { timeout_ms: 0, targets: ["first"], until: "all" }),
+							{ stopReason: "toolUse" },
+						);
+					}
+					if (rootProviderCalls === 4) {
+						return fauxAssistantMessage(
+							fauxToolCall("spawn_agent", { name: "second", task: "second delegated work" }),
+							{ stopReason: "toolUse" },
+						);
+					}
+					if (rootProviderCalls === 5) return fauxAssistantMessage("wait for second");
+					return fauxAssistantMessage("second synthesis");
+				}),
+			);
+
+			const prompt = session.prompt("consume then delegate again");
+			await secondStarted.promise;
+			await secondWaitStarted.promise;
+			let settled = false;
+			void prompt.finally(() => {
+				settled = true;
+			});
+			await Promise.resolve();
+			expect(settled).toBe(false);
+
+			releaseSecond.resolve();
+			await prompt;
+			expect(rootProviderCalls).toBe(6);
+			expect(session.getLastAssistantText()).toBe("second synthesis");
+			expect(
+				session.messages.filter(
+					(message) => message.role === "custom" && message.customType === "subagent_results",
+				),
+			).toHaveLength(1);
+		});
+
 		it("gives cancellation precedence over an admitted escalation continuation", async () => {
 			const { harness, session } = await setupRoot();
 			const accept = (session as unknown as EscalationAcceptor)._acceptSubagentEscalation.bind(session);

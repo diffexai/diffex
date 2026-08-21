@@ -1773,8 +1773,9 @@ export class AgentSession {
 		// or an escalation-suspended coordination resumes waiting.
 		if (this.agent.hasQueuedMessages()) return true;
 
-		const coordination = this._getOrCreateSubagentCoordination();
-		if (coordination) {
+		while (true) {
+			const coordination = this._getOrCreateSubagentCoordination();
+			if (!coordination) break;
 			if (coordination.exitReason === "cancellation" || this._agentRunAborted) {
 				this._exitSubagentCoordination("cancellation");
 			}
@@ -1793,6 +1794,8 @@ export class AgentSession {
 				await this.sendCustomMessage(message, { deliverAs: "steer" });
 				return true;
 			}
+			// Explicit agents consumption can empty this batch while the same continuation
+			// starts another coordinated child. Freeze that pending run before settling.
 		}
 
 		// The agent loop drains both queues before emitting agent_end. Any messages
