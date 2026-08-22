@@ -251,6 +251,7 @@ export class InvocationTrace implements AgentSessionLifecycleObserver, Telemetry
 
 	operationSettled(options: {
 		operationId: string;
+		taskLineageId?: string;
 		sessionManager: SessionManager;
 		firstEntryOrdinal: number;
 	}): Promise<void> {
@@ -265,6 +266,7 @@ export class InvocationTrace implements AgentSessionLifecycleObserver, Telemetry
 						bindingId,
 						lane: "main",
 						operationId: options.operationId,
+						...(options.taskLineageId === undefined ? {} : { taskLineageId: options.taskLineageId }),
 						cursor: { kind: "coding-agent-v3", ...cursor },
 					});
 				}

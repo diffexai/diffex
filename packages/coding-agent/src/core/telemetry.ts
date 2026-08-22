@@ -56,6 +56,12 @@ export const CODING_AGENT_TELEMETRY_SCHEMA = {
 					cardinality: "high",
 					description: "Operation-local stable id",
 				},
+				"diffex.task.lineage.id": {
+					type: "string",
+					required: false,
+					cardinality: "high",
+					description: "Stable lineage id shared by evidence from one prompt task",
+				},
 				"diffex.session.id": {
 					type: "string",
 					required: true,

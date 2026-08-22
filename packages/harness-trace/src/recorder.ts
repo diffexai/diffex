@@ -330,6 +330,7 @@ class JsonlTraceRecorder implements JsonlTraceContext {
 				bindingId: segment.bindingId,
 				lane: segment.lane,
 				operationId: segment.operationId,
+				...(segment.taskLineageId === undefined ? {} : { taskLineageId: segment.taskLineageId }),
 				cursor: copySessionSegmentCursor(segment.cursor),
 			});
 		} catch {

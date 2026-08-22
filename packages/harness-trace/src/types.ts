@@ -95,6 +95,7 @@ export interface SessionSegment {
 	readonly bindingId: string;
 	readonly lane: string;
 	readonly operationId: string;
+	readonly taskLineageId?: string;
 	readonly cursor: SessionSegmentCursor;
 }
 

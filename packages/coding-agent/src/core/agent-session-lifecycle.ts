@@ -5,6 +5,7 @@ export type InvocationSessionAttachmentReason = "startup" | "resume" | "new" | "
 
 export interface AgentSessionOperationSettlement {
 	operationId: string;
+	taskLineageId?: string;
 	sessionManager: SessionManager;
 	firstEntryOrdinal: number;
 }

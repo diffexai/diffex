@@ -38,6 +38,7 @@ interface SessionTraceOptions {
 	readonly formatVersion: number;
 	readonly reason: "resume" | "switch";
 	readonly cursor: SessionSegmentCursor;
+	readonly taskLineageId?: string;
 	readonly terminationStatus?: "completed" | "failed" | "aborted";
 }
 
@@ -75,6 +76,7 @@ function sessionTrace(options: SessionTraceOptions): TraceRecord[] {
 			bindingId: `${options.traceId}-binding`,
 			lane: "main",
 			operationId: `${options.traceId}-operation`,
+			...(options.taskLineageId === undefined ? {} : { taskLineageId: options.taskLineageId }),
 			cursor: options.cursor,
 		},
 		{
@@ -271,6 +273,7 @@ describe("invocation materializer", () => {
 				sessionFormat: "coding-agent",
 				formatVersion: 3,
 				reason: "resume",
+				taskLineageId: "prompt-task-1",
 				cursor: await codingAgentCursor(sessionPath, 0, 3, { start: "prefix", end: "content" }),
 			}),
 		);
@@ -289,6 +292,7 @@ describe("invocation materializer", () => {
 				traceSequence: 3,
 				sessionPosition: 1,
 				causalIdentifiers: [
+					{ name: "diffex.task.lineage.id", value: "prompt-task-1" },
 					{ name: "id", value: "entry-1" },
 					{ name: "message.content.id", value: "tool-1" },
 					{ name: "parentId", value: "entry-0" },

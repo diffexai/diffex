@@ -256,12 +256,20 @@ describe("CLI invocation tracing", () => {
 		);
 		const firstPath = trace.destinationPath;
 		if (!firstPath) throw new Error("Invocation trace path was not created");
-		await trace.operationSettled({ operationId: "operation-1", sessionManager: manager, firstEntryOrdinal });
+		await trace.operationSettled({
+			operationId: "operation-1",
+			taskLineageId: "operation-1",
+			sessionManager: manager,
+			firstEntryOrdinal,
+		});
 
 		await expect(lockfile.check(firstPath, { realpath: false })).resolves.toBe(false);
 		expect(await catalog.highWaterCursor(scope)).toBe(1);
 		expect(await catalog.listSuccessful(scope, 0, 1)).toHaveLength(1);
 		expect(footer(await readTrace(firstPath))?.terminationStatus).toBe("completed");
+		expect((await readTrace(firstPath)).find((record) => record.type === "session_segment")).toMatchObject({
+			taskLineageId: "operation-1",
+		});
 
 		const secondEntryOrdinal = manager.getEntryCount();
 		manager.appendSessionInfo("second operation");

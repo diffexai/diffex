@@ -1373,12 +1373,14 @@ export class AgentSession {
 		callback: (telemetryContext: TelemetryContext) => Result | Promise<Result>,
 	): Promise<Result> {
 		const operationId = uuidv7();
+		const taskLineageId = kind === "prompt" ? operationId : undefined;
 		const firstEntryOrdinal = this.sessionManager.getEntryCount();
 		const operation = startCodingAgentSpan(
 			this.agent.telemetryContext,
 			"diffex.coding_agent.operation",
 			{
 				"diffex.operation.id": operationId,
+				...(taskLineageId === undefined ? {} : { "diffex.task.lineage.id": taskLineageId }),
 				"diffex.session.id": this.sessionId,
 				"diffex.operation.kind": kind,
 			},
@@ -1406,10 +1408,14 @@ export class AgentSession {
 				}
 			},
 		);
-		return operation.finally(() => this._notifyOperationSettled({ operationId, firstEntryOrdinal }));
+		return operation.finally(() => this._notifyOperationSettled({ operationId, taskLineageId, firstEntryOrdinal }));
 	}
 
-	private async _notifyOperationSettled(options: { operationId: string; firstEntryOrdinal: number }): Promise<void> {
+	private async _notifyOperationSettled(options: {
+		operationId: string;
+		taskLineageId?: string;
+		firstEntryOrdinal: number;
+	}): Promise<void> {
 		try {
 			await this._lifecycleObserver?.operationSettled({
 				...options,

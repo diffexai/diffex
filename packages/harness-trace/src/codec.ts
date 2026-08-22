@@ -339,7 +339,12 @@ function sessionSegmentCursorValue(value: unknown): SessionSegmentCursor {
 }
 
 function parseSessionSegment(value: Record<string, unknown>): TraceSessionSegmentRecord {
-	commonRecord(value, ["bindingId", "lane", "operationId", "cursor"], "session_segment");
+	optionalKeys(
+		value,
+		["type", "sequence", "timestamp", "bindingId", "lane", "operationId", "cursor"],
+		["taskLineageId"],
+		"session_segment",
+	);
 	return {
 		type: "session_segment",
 		sequence: positiveIntegerValue(value.sequence, "sequence"),
@@ -347,6 +352,9 @@ function parseSessionSegment(value: Record<string, unknown>): TraceSessionSegmen
 		bindingId: nonEmptyStringValue(value.bindingId, "bindingId"),
 		lane: nonEmptyStringValue(value.lane, "lane"),
 		operationId: nonEmptyStringValue(value.operationId, "operationId"),
+		...(value.taskLineageId === undefined
+			? {}
+			: { taskLineageId: nonEmptyStringValue(value.taskLineageId, "taskLineageId") }),
 		cursor: sessionSegmentCursorValue(value.cursor),
 	};
 }

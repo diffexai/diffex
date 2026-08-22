@@ -173,7 +173,12 @@ function sessionEvidence(
 			traceSequence,
 			timestamp: sessionTimestamp(payload.timestamp),
 			sessionPosition,
-			causalIdentifiers: causalIdentifiers(payload),
+			causalIdentifiers: causalIdentifiers(
+				payload,
+				...segments.map((segment) =>
+					segment.taskLineageId === undefined ? null : { "diffex.task.lineage.id": segment.taskLineageId },
+				),
+			),
 			ambiguity: [SESSION_ORDER_AMBIGUITY],
 		},
 		traceSources: traceSources(request, segments),
