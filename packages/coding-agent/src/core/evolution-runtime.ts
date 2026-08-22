@@ -36,6 +36,7 @@ import {
 	FileEvolutionPersistence,
 	type InteractivePriorityGate,
 	type JsonObject,
+	NON_SUBSTANTIVE_RUNTIME_TRACE_REASON,
 	PollingEvolutionWorkSource,
 	RecursiveReflector,
 	StructuredDeltaCurator,
@@ -57,6 +58,8 @@ const EVOLUTION_FAILURE_DIRECTORY_NAME = "evolution-failures";
 const TRACE_DIRECTORY_NAME = "traces";
 const TRACE_EVIDENCE_INDEX_NAME = ".evolution-index.json";
 const TRACE_EVIDENCE_INDEX_VERSION = 1;
+const TRACE_EXCLUSION_INDEX_NAME = ".evolution-exclusions.json";
+const TRACE_EXCLUSION_INDEX_VERSION = 1;
 const GLOBAL_EVOLUTION_SCOPE: EvolutionScope = { repositoryId: "global", scopeId: "global" };
 const RESPONSE_TOOL_NAME = "submit_evolution_response";
 const MAX_MODEL_ROUNDS = 24;
@@ -239,6 +242,7 @@ export class TraceEvidenceCatalog implements EvolutionEvidenceCatalog {
 	readonly #traceDirectory: string;
 	readonly #indexPath: string;
 	readonly #indexLockPath: string;
+	readonly #exclusionIndexPath: string;
 	readonly #scope: EvolutionScope;
 	readonly #materializeInvocation: typeof materializeJsonlInvocation;
 	readonly #isTraceActive: (path: string) => Promise<boolean>;
@@ -253,6 +257,7 @@ export class TraceEvidenceCatalog implements EvolutionEvidenceCatalog {
 		this.#traceDirectory = join(options.agentDir, TRACE_DIRECTORY_NAME);
 		this.#indexPath = join(this.#traceDirectory, TRACE_EVIDENCE_INDEX_NAME);
 		this.#indexLockPath = join(this.#traceDirectory, ".evolution-index");
+		this.#exclusionIndexPath = join(this.#traceDirectory, TRACE_EXCLUSION_INDEX_NAME);
 		this.#scope = options.scope;
 		this.#materializeInvocation = options.materializeInvocation ?? materializeJsonlInvocation;
 		this.#isTraceActive =
@@ -307,6 +312,74 @@ export class TraceEvidenceCatalog implements EvolutionEvidenceCatalog {
 		}
 	}
 
+	async #readExclusions(): Promise<
+		Array<{
+			materializationId: string;
+			traceName: string;
+			reason: typeof NON_SUBSTANTIVE_RUNTIME_TRACE_REASON;
+		}>
+	> {
+		try {
+			const parsed: unknown = JSON.parse(await readFile(this.#exclusionIndexPath, "utf8"));
+			if (
+				!isRecord(parsed) ||
+				parsed.version !== TRACE_EXCLUSION_INDEX_VERSION ||
+				!Array.isArray(parsed.exclusions) ||
+				!parsed.exclusions.every(
+					(exclusion) =>
+						isRecord(exclusion) &&
+						typeof exclusion.materializationId === "string" &&
+						typeof exclusion.traceName === "string" &&
+						exclusion.reason === NON_SUBSTANTIVE_RUNTIME_TRACE_REASON,
+				)
+			) {
+				throw new Error("Evolution trace exclusion index is invalid");
+			}
+			return parsed.exclusions as Array<{
+				materializationId: string;
+				traceName: string;
+				reason: typeof NON_SUBSTANTIVE_RUNTIME_TRACE_REASON;
+			}>;
+		} catch (error) {
+			if (error instanceof Error && "code" in error && error.code === "ENOENT") return [];
+			throw error;
+		}
+	}
+
+	async #recordExclusion(path: string, materializationId: string): Promise<void> {
+		const release = await lockfile.lock(this.#indexLockPath, {
+			lockfilePath: `${this.#indexLockPath}.lock`,
+			realpath: false,
+			retries: { retries: 200, factor: 1, minTimeout: 5, maxTimeout: 25, randomize: true },
+			stale: INVOCATION_TRACE_LOCK_STALE_MS,
+			update: 10_000,
+		});
+		try {
+			const exclusions = await this.#readExclusions();
+			const traceName = basename(path);
+			if (exclusions.some((exclusion) => exclusion.traceName === traceName)) return;
+			exclusions.push({
+				materializationId,
+				traceName,
+				reason: NON_SUBSTANTIVE_RUNTIME_TRACE_REASON,
+			});
+			const temporaryPath = join(this.#traceDirectory, `.${TRACE_EXCLUSION_INDEX_NAME}.${randomUUID()}.tmp`);
+			try {
+				await writeFile(
+					temporaryPath,
+					`${JSON.stringify({ version: TRACE_EXCLUSION_INDEX_VERSION, exclusions }, null, 2)}\n`,
+					{ encoding: "utf8", flag: "wx", mode: 0o600 },
+				);
+				await rename(temporaryPath, this.#exclusionIndexPath);
+			} catch (error) {
+				await unlink(temporaryPath).catch(() => {});
+				throw error;
+			}
+		} finally {
+			await release();
+		}
+	}
+
 	async #paths(): Promise<readonly string[]> {
 		await mkdir(this.#traceDirectory, { recursive: true, mode: 0o700 });
 		const release = await lockfile.lock(this.#indexLockPath, {
@@ -358,11 +431,17 @@ export class TraceEvidenceCatalog implements EvolutionEvidenceCatalog {
 
 	async #materialize(path: string, ingestionCursor: number): Promise<SuccessfulMaterialization | null> {
 		const materialized = await this.#materializeInvocation(path);
-		if (!classifyEvolutionEvidence(materialized).eligible) return null;
+		const materializationId =
+			materialized.traceId ??
+			`materialization-${computeEvolutionContentDigest(materialized).slice("sha256:".length)}`;
+		if (!classifyEvolutionEvidence(materialized).eligible) {
+			await this.#recordExclusion(path, materializationId);
+			return null;
+		}
 		const invocation = selectEvolutionEvidence(materialized);
 		const contentDigest = computeEvolutionContentDigest(invocation);
 		return {
-			materializationId: invocation.traceId ?? `materialization-${contentDigest.slice("sha256:".length)}`,
+			materializationId,
 			ingestionCursor,
 			origin: "product-runtime",
 			contentDigest,

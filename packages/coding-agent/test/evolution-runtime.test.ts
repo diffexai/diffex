@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/diffex-ai";
@@ -239,6 +239,36 @@ describe("coding-agent evolution runtime", () => {
 		expect(await peerCatalog.listSuccessful(scope, 2, 3)).toMatchObject([
 			{ materializationId: "active", ingestionCursor: 3 },
 		]);
+	});
+
+	it("persists the reason for excluding a lifecycle-only trace", async () => {
+		const root = join(tmpdir(), `diffex-excluded-evidence-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+		const traceDirectory = join(root, "traces");
+		mkdirSync(traceDirectory, { recursive: true });
+		temporaryDirectories.push(root);
+		const tracePath = join(traceDirectory, "lifecycle.jsonl");
+		writeFileSync(tracePath, "lifecycle\n");
+		const scope: EvolutionScope = { repositoryId: "global", scopeId: "global" };
+		const catalog = new TraceEvidenceCatalog({
+			agentDir: root,
+			scope,
+			materializeInvocation: async () => ({
+				...materializedInvocation("lifecycle", "/session.jsonl"),
+				evidence: [],
+			}),
+		});
+
+		expect(await catalog.listSuccessful(scope, 0, await catalog.highWaterCursor(scope))).toEqual([]);
+		expect(JSON.parse(readFileSync(join(traceDirectory, ".evolution-exclusions.json"), "utf8"))).toEqual({
+			version: 1,
+			exclusions: [
+				{
+					materializationId: "lifecycle",
+					traceName: "lifecycle.jsonl",
+					reason: "non-substantive-runtime-trace",
+				},
+			],
+		});
 	});
 
 	it("keeps adversarial evidence outside model control instructions", async () => {
