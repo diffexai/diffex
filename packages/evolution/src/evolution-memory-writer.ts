@@ -372,7 +372,13 @@ function contentWithoutMetadata(batch: MutationBatch): Omit<MutationBatch, "meta
 	return content;
 }
 
-function insertionOffset(memory: string, parsed: ParsedEvolutionMemory, delta: EvolutionMemoryAddDelta): number {
+function insertionOffset(
+	memory: string,
+	parsed: ParsedEvolutionMemory,
+	delta: EvolutionMemoryAddDelta,
+	bootstrappingBlankMemory: boolean,
+): number {
+	if (bootstrappingBlankMemory) return parsed.blocks.at(-1)?.end ?? memory.trimEnd().length;
 	if (delta.destination.anchor !== null) {
 		const matchingBlocks = parsed.blocks.filter(
 			(block) =>
@@ -660,6 +666,7 @@ export class EvolutionMemoryWriter implements EvolutionTargetWriter {
 		}
 
 		let memory = current.state.memory;
+		const bootstrappingBlankMemory = memory.trim() === "";
 		let items = [...baseCatalog.items];
 		const activeOrder = [...baseCatalog.activeOrder];
 		const addedIds = new Set<string>();
@@ -692,7 +699,7 @@ export class EvolutionMemoryWriter implements EvolutionTargetWriter {
 				throw new Error("Each EVOLVE.md addition must contain exactly one non-heading memory item");
 			}
 			const parsed = parseEvolutionMemory(memory);
-			const offset = insertionOffset(memory, parsed, delta);
+			const offset = insertionOffset(memory, parsed, delta, bootstrappingBlankMemory);
 			const insertionIndex = parsed.blocks.filter((block) => block.end <= offset).length;
 			memory = insertMemory(memory, offset, delta.content);
 			const memoryItemId = `memory-item-${createHash("sha256").update(mutation.mutationId).digest("hex").slice(0, 32)}`;

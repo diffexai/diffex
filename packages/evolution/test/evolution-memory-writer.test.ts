@@ -52,6 +52,20 @@ async function fixture() {
 	return { harnessState, initial: initial.bundle, initialMemory, snapshot, writer };
 }
 
+async function emptyFixture() {
+	const root = await mkdtemp(join(tmpdir(), "diffex-evolution-empty-writer-"));
+	temporaryDirectories.push(root);
+	const harnessState = new HarnessStateStore(join(root, "agent"));
+	const initial = await harnessState.initialize();
+	const writer = new EvolutionMemoryWriter({
+		version: "1.0.0",
+		harnessState,
+		statePath: join(root, "writer-state"),
+	});
+	const snapshot = await writer.captureSnapshot();
+	return { harnessState, initial, snapshot, writer };
+}
+
 function batch(
 	snapshot: Awaited<ReturnType<EvolutionMemoryWriter["captureSnapshot"]>>,
 	mutations: readonly EvolutionMutation[],
@@ -80,6 +94,64 @@ function batch(
 }
 
 describe("evolution memory writer", () => {
+	it("bootstraps blank memory by appending additions in mutation order", async () => {
+		const { harnessState, initial, snapshot, writer } = await emptyFixture();
+		const selectedBatch = batch(snapshot, [
+			{
+				mutationId: "mutation-verification",
+				proposalId: "proposal-verification",
+				target: { kind: "evolution-memory", expectedHarnessVersion: snapshot.harnessVersion },
+				payload: {
+					operation: "ADD",
+					destination: { section: "verification", anchor: "runtime-verification-for-ui-scene-flows" },
+					content: "- Verify UI and scene-flow changes in a real runtime.",
+					intendedScope: ["verification"],
+				},
+			},
+			{
+				mutationId: "mutation-capability-honesty",
+				proposalId: "proposal-capability-honesty",
+				target: { kind: "evolution-memory", expectedHarnessVersion: snapshot.harnessVersion },
+				payload: {
+					operation: "ADD",
+					destination: { section: "capability-honesty", anchor: "durable-memory-commitments" },
+					content: "- Confirm persistence before promising durable recall.",
+					intendedScope: ["capability-honesty"],
+				},
+			},
+		]);
+
+		const writeResult = await writer.write(selectedBatch, {
+			idempotencyKey: "write-empty",
+			lease: writerLease,
+		});
+		expect(writeResult.status).toBe("written");
+		expect((await harnessState.loadCurrent()).state.memory).toBe("");
+
+		const activation = await writer.activate(selectedBatch, writeResult, {
+			idempotencyKey: "activate-empty",
+			lease: writerLease,
+		});
+
+		expect(activation.status).toBe("activated");
+		expect(activation.resultingHarnessVersion).not.toBe(initial.manifest.version);
+		expect((await harnessState.loadCurrent()).state.memory).toBe(
+			"- Verify UI and scene-flow changes in a real runtime.\n\n- Confirm persistence before promising durable recall.\n",
+		);
+		const activatedSnapshot = await writer.captureSnapshot();
+		expect(activatedSnapshot.activeMemoryItems).toHaveLength(2);
+		expect(activatedSnapshot.activeMemoryItems).toEqual([
+			expect.objectContaining({
+				contentDigest: computeEvolutionContentDigest("- Verify UI and scene-flow changes in a real runtime."),
+				ledger: { origin: "evolution", creationEventId: "activation-event-1", supersessionEventId: null },
+			}),
+			expect.objectContaining({
+				contentDigest: computeEvolutionContentDigest("- Confirm persistence before promising durable recall."),
+				ledger: { origin: "evolution", creationEventId: "activation-event-1", supersessionEventId: null },
+			}),
+		]);
+	});
+
 	it("stages selected deltas and atomically activates one harness revision", async () => {
 		const { harnessState, initial, initialMemory, snapshot, writer } = await fixture();
 		const mutations: readonly EvolutionMutation[] = [
