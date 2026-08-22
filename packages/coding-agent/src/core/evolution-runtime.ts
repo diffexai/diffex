@@ -40,6 +40,7 @@ import {
 	RecursiveReflector,
 	StructuredDeltaCurator,
 	type SuccessfulMaterialization,
+	selectEvolutionEvidence,
 } from "#evolution";
 import { materializeJsonlInvocation } from "#harness-trace";
 import { VERSION } from "../config.ts";
@@ -356,8 +357,9 @@ export class TraceEvidenceCatalog implements EvolutionEvidenceCatalog {
 	}
 
 	async #materialize(path: string, ingestionCursor: number): Promise<SuccessfulMaterialization | null> {
-		const invocation = await this.#materializeInvocation(path);
-		if (!classifyEvolutionEvidence(invocation).eligible) return null;
+		const materialized = await this.#materializeInvocation(path);
+		if (!classifyEvolutionEvidence(materialized).eligible) return null;
+		const invocation = selectEvolutionEvidence(materialized);
 		const contentDigest = computeEvolutionContentDigest(invocation);
 		return {
 			materializationId: invocation.traceId ?? `materialization-${contentDigest.slice("sha256:".length)}`,

@@ -459,7 +459,7 @@ describe("coding-agent evolution runtime", () => {
 								summary: "Keep focused verification",
 								preconditions: [],
 								observedOutcome: "Verification passed",
-								supportingEvidenceRefs: ["2"],
+								supportingEvidenceRefs: ["1"],
 								counterevidenceRefs: [],
 								applicabilityBoundaries: [],
 								uncertainty: null,

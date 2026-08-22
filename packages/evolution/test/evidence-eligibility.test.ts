@@ -1,6 +1,6 @@
 import type { MaterializedEvidence, MaterializedInvocation } from "@earendil-works/diffex-harness-trace";
 import { describe, expect, it } from "vitest";
-import { classifyEvolutionEvidence } from "../src/evidence-eligibility.ts";
+import { classifyEvolutionEvidence, selectEvolutionEvidence } from "../src/evidence-eligibility.ts";
 
 function invocation(evidence: readonly MaterializedEvidence[]): MaterializedInvocation {
 	return {
@@ -99,5 +99,22 @@ describe("substantive runtime traces", () => {
 			payload: { message: { role, content: "substantive payload" } },
 		};
 		expect(classifyEvolutionEvidence(invocation([evidence]))).toEqual({ eligible: true });
+	});
+
+	it("retains task evidence while removing trailing shutdown metadata", () => {
+		const userMessage: MaterializedEvidence = {
+			kind: "session_item",
+			evidenceId: "example:user",
+			itemType: "message",
+			order: { traceSequence: 1, timestamp: null, causalIdentifiers: [], ambiguity: [] },
+			traceSources: [],
+			payload: { message: { role: "user", content: "Fix the failing test" } },
+		};
+		const selected = selectEvolutionEvidence(
+			invocation([userMessage, operationSpan("abort"), traceRecord("trace_footer")]),
+		);
+
+		expect(classifyEvolutionEvidence(selected)).toEqual({ eligible: true });
+		expect(selected.evidence).toEqual([userMessage]);
 	});
 });

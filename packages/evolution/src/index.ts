@@ -150,6 +150,7 @@ export {
 	classifyEvolutionEvidence,
 	type EvolutionEvidenceEligibility,
 	NON_SUBSTANTIVE_RUNTIME_TRACE_REASON,
+	selectEvolutionEvidence,
 } from "./evidence-eligibility.ts";
 export {
 	type EvolutionMemoryBlock,

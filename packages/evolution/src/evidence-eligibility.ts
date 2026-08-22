@@ -33,10 +33,19 @@ function hasSubstantiveOperation(evidence: MaterializedEvidence): boolean {
 	return operationKind !== "abort" && evidence.payload.name !== "diffex.coding_agent.diagnostic";
 }
 
+function isEvolutionEvidence(evidence: MaterializedEvidence): boolean {
+	return hasSubstantiveMessage(evidence) || hasSubstantiveOperation(evidence);
+}
+
 /** Classifies whether a materialized runtime trace can inform future harness behavior. */
 export function classifyEvolutionEvidence(invocation: MaterializedInvocation): EvolutionEvidenceEligibility {
-	if (invocation.evidence.some((evidence) => hasSubstantiveMessage(evidence) || hasSubstantiveOperation(evidence))) {
+	if (invocation.evidence.some(isEvolutionEvidence)) {
 		return { eligible: true };
 	}
 	return { eligible: false, reason: NON_SUBSTANTIVE_RUNTIME_TRACE_REASON };
+}
+
+/** Retains only evidence that can inform future harness behavior. */
+export function selectEvolutionEvidence(invocation: MaterializedInvocation): MaterializedInvocation {
+	return { ...invocation, evidence: invocation.evidence.filter(isEvolutionEvidence) };
 }
