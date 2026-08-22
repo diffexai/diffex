@@ -1,4 +1,4 @@
-import { mkdir } from "node:fs/promises";
+import { mkdir, unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
 	AGENT_RUNTIME_TELEMETRY_SCHEMA,
@@ -10,9 +10,11 @@ import {
 } from "@earendil-works/diffex-agent-core";
 import { uuidv7 } from "@earendil-works/diffex-ai";
 import lockfile from "proper-lockfile";
+import { classifyEvolutionEvidence } from "#evolution";
 import {
 	createJsonlTraceContext,
 	type JsonlTraceContext,
+	materializeJsonlInvocation,
 	type SessionAttachmentReason,
 	type TraceTerminationStatus,
 } from "#harness-trace";
@@ -321,10 +323,21 @@ export class InvocationTrace implements AgentSessionLifecycleObserver, Telemetry
 		this.#recorderHarnessVersion = undefined;
 		this.#intervalTerminationStatus = "completed";
 		if (!recorder) return;
+		const finalStatus = finalTerminationStatus(terminationStatus, this.#signalTermination);
 		try {
-			await recorder.close(finalTerminationStatus(terminationStatus, this.#signalTermination));
+			await recorder.close(finalStatus);
 		} finally {
 			await releaseTraceLock?.();
+		}
+		if (finalStatus !== "completed") return;
+		try {
+			const invocation = await materializeJsonlInvocation(recorder.destinationPath);
+			if (!classifyEvolutionEvidence(invocation).eligible) {
+				await unlink(recorder.destinationPath);
+				if (this.#lastDestinationPath === recorder.destinationPath) this.#lastDestinationPath = undefined;
+			}
+		} catch {
+			// Preserve traces that cannot be classified safely.
 		}
 	}
 

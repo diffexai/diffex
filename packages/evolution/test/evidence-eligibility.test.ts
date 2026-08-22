@@ -51,7 +51,7 @@ function traceRecord(type: "harness_activate" | "trace_footer"): MaterializedEvi
 	};
 }
 
-function operationSpan(kind: string): MaterializedEvidence {
+function operationSpan(kind: string, status: "error" | "ok" = "ok"): MaterializedEvidence {
 	return {
 		kind: "span",
 		evidenceId: `example:operation:${kind}`,
@@ -66,7 +66,7 @@ function operationSpan(kind: string): MaterializedEvidence {
 			startAttributes: { "diffex.operation.kind": kind },
 			endAttributes: {},
 			events: [],
-			status: { status: "ok" },
+			status: status === "ok" ? { status } : { status, error: { name: "Error", message: "failed turn" } },
 			settled: true,
 		},
 	};
@@ -109,6 +109,17 @@ it("does not count an idle shutdown operation as learning evidence", () => {
 	});
 });
 
+it("does not count an empty successful prompt operation as learning evidence", () => {
+	expect(classifyEvolutionEvidence(invocation([operationSpan("prompt")]))).toEqual({
+		eligible: false,
+		reason: "non-substantive-runtime-trace",
+	});
+});
+
+it("retains a failed prompt operation as meaningful failure evidence", () => {
+	expect(classifyEvolutionEvidence(invocation([operationSpan("prompt", "error")]))).toEqual({ eligible: true });
+});
+
 it("keeps standalone runtime diagnostics outside evolution", () => {
 	expect(classifyEvolutionEvidence(invocation([errorDiagnostic()]))).toEqual({
 		eligible: false,
@@ -147,7 +158,7 @@ describe("substantive runtime traces", () => {
 	});
 
 	it("retains error diagnostics that accompany substantive work", () => {
-		const task = operationSpan("prompt");
+		const task = operationSpan("prompt", "error");
 		const diagnostic = errorDiagnostic();
 
 		expect(selectEvolutionEvidence(invocation([task, diagnostic])).evidence).toEqual([task, diagnostic]);

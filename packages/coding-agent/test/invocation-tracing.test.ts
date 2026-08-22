@@ -246,7 +246,11 @@ describe("CLI invocation tracing", () => {
 
 		expect(await catalog.highWaterCursor(scope)).toBe(0);
 		const firstEntryOrdinal = manager.getEntryCount();
-		manager.appendSessionInfo("first operation");
+		manager.appendMessage({
+			role: "user",
+			content: [{ type: "text", text: "first operation" }],
+			timestamp: Date.now(),
+		});
 		await trace.startSpan(
 			{
 				name: "diffex.coding_agent.operation",
@@ -254,6 +258,7 @@ describe("CLI invocation tracing", () => {
 			},
 			() => {},
 		);
+		await trace.startSpan({ name: "test.task" }, () => {});
 		const firstPath = trace.destinationPath;
 		if (!firstPath) throw new Error("Invocation trace path was not created");
 		await trace.operationSettled({
@@ -272,7 +277,11 @@ describe("CLI invocation tracing", () => {
 		});
 
 		const secondEntryOrdinal = manager.getEntryCount();
-		manager.appendSessionInfo("second operation");
+		manager.appendMessage({
+			role: "user",
+			content: [{ type: "text", text: "second operation" }],
+			timestamp: Date.now(),
+		});
 		await trace.startSpan(
 			{
 				name: "diffex.coding_agent.operation",
@@ -280,6 +289,7 @@ describe("CLI invocation tracing", () => {
 			},
 			() => {},
 		);
+		await trace.startSpan({ name: "test.task" }, () => {});
 		const secondPath = trace.destinationPath;
 		if (!secondPath) throw new Error("Second invocation trace path was not created");
 		expect(secondPath).not.toBe(firstPath);
@@ -311,8 +321,20 @@ describe("CLI invocation tracing", () => {
 			firstTrace.attachSession(firstManager, "startup"),
 			secondTrace.attachSession(secondManager, "startup"),
 		]);
-		firstManager.appendSessionInfo("first process");
-		secondManager.appendSessionInfo("second process");
+		await Promise.all([
+			firstTrace.startSpan({ name: "test.task" }, () => {}),
+			secondTrace.startSpan({ name: "test.task" }, () => {}),
+		]);
+		firstManager.appendMessage({
+			role: "user",
+			content: [{ type: "text", text: "first process" }],
+			timestamp: Date.now(),
+		});
+		secondManager.appendMessage({
+			role: "user",
+			content: [{ type: "text", text: "second process" }],
+			timestamp: Date.now(),
+		});
 		await Promise.all([
 			firstTrace.startSpan(
 				{
@@ -483,6 +505,109 @@ describe("CLI invocation tracing", () => {
 		expect(tracePaths(directories.agentDir)).toEqual([]);
 	});
 
+	it("keeps exit-only startup, resume, and switch flows out of evolution", async () => {
+		const directories = setup();
+		const initial = SessionManager.create(directories.projectDir, join(directories.agentDir, "sessions"));
+		const replacementDirectory = join(directories.projectDir, "replacement");
+		mkdirSync(replacementDirectory);
+		const replacement = SessionManager.create(replacementDirectory, join(directories.agentDir, "sessions"));
+		const { trace } = await createInvocationTrace({
+			agentDir: directories.agentDir,
+			sessionManager: initial,
+		});
+		await trace.attachSession(initial, "startup");
+		await trace.harnessActivated("version-1");
+		await trace.attachSession(replacement, "switch");
+		await trace.close();
+		const resumed = await createInvocationTrace({ agentDir: directories.agentDir, sessionManager: initial });
+		await resumed.trace.attachSession(initial, "resume");
+		await resumed.trace.close();
+
+		const scope: EvolutionScope = { repositoryId: "global", scopeId: "global" };
+		const catalog = new TraceEvidenceCatalog({ agentDir: directories.agentDir, scope });
+		expect(tracePaths(directories.agentDir)).toEqual([]);
+		expect(await catalog.highWaterCursor(scope)).toBe(0);
+		expect(await catalog.listSuccessful(scope, 0, 0)).toEqual([]);
+	});
+
+	it("removes a completed prompt trace when no substantive payload was recorded", async () => {
+		const directories = setup();
+		const manager = SessionManager.create(directories.projectDir, join(directories.agentDir, "sessions"));
+		const { trace } = await createInvocationTrace({ agentDir: directories.agentDir, sessionManager: manager });
+		await trace.attachSession(manager, "startup");
+		await trace.startSpan(
+			{
+				name: "diffex.coding_agent.operation",
+				attributes: { "diffex.operation.id": "empty-prompt", "diffex.operation.kind": "prompt" },
+			},
+			() => {},
+		);
+		await trace.operationSettled({ operationId: "empty-prompt", sessionManager: manager, firstEntryOrdinal: 0 });
+
+		expect(trace.destinationPath).toBeUndefined();
+		expect(tracePaths(directories.agentDir)).toEqual([]);
+		await trace.close();
+	});
+
+	it("keeps a substantive prompt eligible while excluding its trailing shutdown", async () => {
+		const directories = setup();
+		const manager = SessionManager.create(directories.projectDir, join(directories.agentDir, "sessions"));
+		const { trace } = await createInvocationTrace({ agentDir: directories.agentDir, sessionManager: manager });
+		await trace.attachSession(manager, "startup");
+		const firstEntryOrdinal = manager.getEntryCount();
+		manager.appendMessage({
+			role: "user",
+			content: [{ type: "text", text: "Make a focused change" }],
+			timestamp: Date.now(),
+		});
+		manager.appendMessage(fauxAssistantMessage("Focused change verified"));
+		await trace.startSpan(
+			{
+				name: "diffex.coding_agent.operation",
+				attributes: {
+					"diffex.operation.id": "prompt-operation",
+					"diffex.operation.kind": "prompt",
+					"diffex.task.lineage.id": "prompt-operation",
+				},
+			},
+			() => {},
+		);
+		await trace.operationSettled({
+			operationId: "prompt-operation",
+			taskLineageId: "prompt-operation",
+			sessionManager: manager,
+			firstEntryOrdinal,
+		});
+		await trace.startSpan(
+			{
+				name: "diffex.coding_agent.operation",
+				attributes: { "diffex.operation.id": "exit-operation", "diffex.operation.kind": "abort" },
+			},
+			() => {},
+		);
+		await trace.operationSettled({
+			operationId: "exit-operation",
+			sessionManager: manager,
+			firstEntryOrdinal: manager.getEntryCount(),
+		});
+
+		const scope: EvolutionScope = { repositoryId: "global", scopeId: "global" };
+		const catalog = new TraceEvidenceCatalog({ agentDir: directories.agentDir, scope });
+		const materializations = await catalog.listSuccessful(scope, 0, await catalog.highWaterCursor(scope));
+		expect(materializations).toHaveLength(1);
+		expect(
+			materializations[0]?.invocation.evidence.some((entry) => JSON.stringify(entry).includes("exit-operation")),
+		).toBe(false);
+		expect(
+			materializations[0]?.invocation.evidence.some((entry) =>
+				entry.order.causalIdentifiers.some(
+					(identifier) => identifier.name === "diffex.task.lineage.id" && identifier.value === "prompt-operation",
+				),
+			),
+		).toBe(true);
+		await trace.close();
+	});
+
 	it("continues after trace creation fails and reports one warning", async () => {
 		const directories = setup();
 		writeFileSync(join(directories.agentDir, "traces"), "not a directory");
@@ -505,6 +630,9 @@ describe("CLI invocation tracing", () => {
 		expect(result.stderr).toContain("intentional tracing test failure");
 		const records = await readTrace(onlyTracePath(directories.agentDir));
 		expect(footer(records)?.terminationStatus).toBe("failed");
+		const scope: EvolutionScope = { repositoryId: "global", scopeId: "global" };
+		const catalog = new TraceEvidenceCatalog({ agentDir: directories.agentDir, scope });
+		expect(await catalog.listSuccessful(scope, 0, await catalog.highWaterCursor(scope))).toHaveLength(1);
 	});
 
 	it.each([

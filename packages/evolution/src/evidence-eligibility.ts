@@ -30,7 +30,11 @@ function hasSubstantiveMessage(evidence: MaterializedEvidence): boolean {
 function hasSubstantiveOperation(evidence: MaterializedEvidence): boolean {
 	if (evidence.kind !== "span") return false;
 	const operationKind = evidence.payload.startAttributes["diffex.operation.kind"];
-	return operationKind !== "abort" && evidence.payload.name !== "diffex.coding_agent.diagnostic";
+	if (evidence.payload.name === "diffex.coding_agent.diagnostic" || operationKind === "abort") return false;
+	if (evidence.payload.name === "diffex.coding_agent.operation") {
+		return evidence.payload.status?.status === "error";
+	}
+	return true;
 }
 
 function isTaskEvidence(evidence: MaterializedEvidence): boolean {
