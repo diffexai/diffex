@@ -293,6 +293,40 @@ describe("recursive reflector", () => {
 		expect(leaves.every((node) => node.lessonIds.length === 3)).toBe(true);
 	});
 
+	it("uses separate synthesis and final lesson limits", async () => {
+		const { persistence } = await reflectorFixture();
+		const reflector = new RecursiveReflector(
+			{ version: "1.0.0", artifacts: persistence, ledger: persistence },
+			{ maxUnitsPerSlice: 1, synthesisFanout: 2 },
+		);
+		const observedLimits = new Set<number>();
+		const input = reflectInput({
+			async execute(request) {
+				if (request.stage !== "reflector") throw new Error("Unexpected Curator request");
+				const lessonSchema = jsonObject(
+					jsonObject(request.outputSchema.properties, "schema properties").lessons,
+					"lesson schema",
+				);
+				const maxItems = Number(lessonSchema.maxItems);
+				observedLimits.add(maxItems);
+				expect(request.input.control).toMatchObject({ maximumLessons: maxItems });
+				const lesson = lessonForRequest(request.input);
+				return {
+					output: {
+						complete: true,
+						lessons: maxItems === 10 ? Array.from({ length: 10 }, () => lesson) : [lesson],
+					},
+					model: { provider: "faux", model: "fixture" },
+				};
+			},
+		});
+
+		const result = await reflector.reflect(input);
+
+		expect([...observedLimits].sort((left, right) => left - right)).toEqual([3, 5, 10]);
+		expect(result.finalLessonIds).toHaveLength(10);
+	});
+
 	it("reflects a larger corpus recursively without changing foreground tools", async () => {
 		const { persistence, reflector } = await reflectorFixture();
 		const foregroundTools = [{ name: "read" }, { name: "edit" }];
