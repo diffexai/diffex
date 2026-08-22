@@ -72,6 +72,30 @@ function operationSpan(kind: string, status: "error" | "ok" = "ok"): Materialize
 	};
 }
 
+function extensionHookSpan(): MaterializedEvidence {
+	return {
+		kind: "span",
+		evidenceId: "example:extension-hook:session-start",
+		order: { traceSequence: 1, timestamp: null, causalIdentifiers: [], ambiguity: [] },
+		traceSources: [],
+		payload: {
+			spanId: 1,
+			parentSpanId: null,
+			name: "diffex.coding_agent.extension_hook",
+			startedAt: "2026-08-22T12:00:00.000Z",
+			endedAt: "2026-08-22T12:00:01.000Z",
+			startAttributes: {
+				"diffex.extension.hook": "session_start",
+				"diffex.extension.path": "/extensions/widget.ts",
+			},
+			endAttributes: { "diffex.extension.outcome": "completed" },
+			events: [],
+			status: { status: "ok" },
+			settled: true,
+		},
+	};
+}
+
 function errorDiagnostic(): MaterializedEvidence {
 	return {
 		kind: "span",
@@ -116,6 +140,16 @@ it("does not count an empty successful prompt operation as learning evidence", (
 	});
 });
 
+it("does not count a successful lifecycle extension hook as learning evidence", () => {
+	const candidate = invocation([extensionHookSpan(), operationSpan("abort"), traceRecord("trace_footer")]);
+
+	expect(classifyEvolutionEvidence(candidate)).toEqual({
+		eligible: false,
+		reason: "non-substantive-runtime-trace",
+	});
+	expect(selectEvolutionEvidence(candidate).evidence).toEqual([]);
+});
+
 it("retains a failed prompt operation as meaningful failure evidence", () => {
 	expect(classifyEvolutionEvidence(invocation([operationSpan("prompt", "error")]))).toEqual({ eligible: true });
 });
@@ -155,6 +189,23 @@ describe("substantive runtime traces", () => {
 
 		expect(classifyEvolutionEvidence(selected)).toEqual({ eligible: true });
 		expect(selected.evidence).toEqual([userMessage]);
+	});
+
+	it("retains supporting spans only when substantive payload anchors the trace", () => {
+		const userMessage: MaterializedEvidence = {
+			kind: "session_item",
+			evidenceId: "example:user-with-extension",
+			itemType: "message",
+			order: { traceSequence: 1, timestamp: null, causalIdentifiers: [], ambiguity: [] },
+			traceSources: [],
+			payload: { message: { role: "user", content: "Fix the extension behavior" } },
+		};
+		const supportingSpan = extensionHookSpan();
+
+		expect(selectEvolutionEvidence(invocation([supportingSpan, userMessage])).evidence).toEqual([
+			supportingSpan,
+			userMessage,
+		]);
 	});
 
 	it("retains error diagnostics that accompany substantive work", () => {
