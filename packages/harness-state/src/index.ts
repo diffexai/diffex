@@ -34,6 +34,25 @@ export interface HarnessState {
 	readonly memory: string;
 }
 
+export const HarnessVersionMetadataSchema = Type.Readonly(
+	Type.Object(
+		{
+			evolutionMemory: Type.Readonly(
+				Type.Object({ nextLessonNumber: Type.Integer({ minimum: 1 }) }, { additionalProperties: false }),
+			),
+		},
+		{ additionalProperties: false },
+	),
+);
+export interface HarnessVersionMetadata {
+	readonly evolutionMemory: {
+		readonly nextLessonNumber: number;
+	};
+}
+export const INITIAL_HARNESS_VERSION_METADATA: HarnessVersionMetadata = {
+	evolutionMemory: { nextLessonNumber: 1 },
+};
+
 export const HarnessArtifactManifestSchema = Type.Readonly(
 	Type.Object(
 		{
@@ -56,6 +75,7 @@ export const HarnessVersionManifestSchema = Type.Readonly(
 			schemaVersion: Type.Literal(1),
 			version: HarnessVersionSchema,
 			base: Type.Union([Type.Null(), HarnessVersionSchema]),
+			metadata: HarnessVersionMetadataSchema,
 			artifacts: Type.Readonly(Type.Array(HarnessArtifactManifestSchema)),
 		},
 		{ additionalProperties: false },
@@ -65,6 +85,7 @@ export interface HarnessVersionManifest {
 	readonly schemaVersion: 1;
 	readonly version: HarnessVersion;
 	readonly base: HarnessVersion | null;
+	readonly metadata: HarnessVersionMetadata;
 	readonly artifacts: readonly HarnessArtifactManifest[];
 }
 
@@ -132,6 +153,7 @@ export type HarnessSelectResult = HarnessSelectSuccess | HarnessSelectConflict;
 export interface HarnessVersionInput {
 	readonly schemaVersion: 1;
 	readonly base: HarnessVersion | null;
+	readonly metadata: HarnessVersionMetadata;
 	readonly artifacts: readonly HarnessArtifactManifest[];
 }
 
@@ -163,12 +185,20 @@ export function serializeHarnessVersion(input: HarnessVersionInput): string {
 	) {
 		throw new Error("Invalid harness version artifacts");
 	}
+	if (!Check(HarnessVersionMetadataSchema, input.metadata)) {
+		throw new Error("Invalid harness version metadata");
+	}
 	const artifacts = [...input.artifacts].sort(compareArtifacts).map(({ kind, path, contentHash }) => ({
 		kind,
 		path,
 		contentHash,
 	}));
-	return JSON.stringify({ schemaVersion: 1, base: input.base, artifacts });
+	return JSON.stringify({
+		schemaVersion: 1,
+		base: input.base,
+		metadata: input.metadata,
+		artifacts,
+	});
 }
 
 export function computeHarnessVersion(input: HarnessVersionInput): HarnessVersion {
@@ -426,17 +456,28 @@ export async function saveHarnessState(
 	state: unknown,
 	destinationPath: string,
 	base: HarnessVersion | null,
+	metadata: HarnessVersionMetadata,
 ): Promise<HarnessVersionBundle> {
 	if (!Check(HarnessStateSchema, state)) throw new Error("Invalid harness state to save");
 	if (!Check(Type.Union([Type.Null(), HarnessVersionSchema]), base)) throw new Error("Invalid harness base version");
+	if (!Check(HarnessVersionMetadataSchema, metadata)) {
+		throw new Error("Invalid harness version metadata");
+	}
 	const memoryBytes = UTF8_ENCODER.encode(state.memory);
 	const artifact: HarnessArtifactManifest = {
 		kind: SUPPORTED_ARTIFACT_KIND,
 		path: EVOLUTION_MEMORY_NAME,
 		contentHash: computeContentHash(memoryBytes),
 	};
-	const version = computeHarnessVersion({ schemaVersion: 1, base, artifacts: [artifact] });
-	const manifest: HarnessVersionManifest = { schemaVersion: 1, version, base, artifacts: [artifact] };
+	const versionInput = { schemaVersion: 1 as const, base, metadata, artifacts: [artifact] };
+	const version = computeHarnessVersion(versionInput);
+	const manifest: HarnessVersionManifest = {
+		schemaVersion: 1,
+		version,
+		base,
+		metadata,
+		artifacts: [artifact],
+	};
 	const bundle: HarnessVersionBundle = { state, manifest };
 	const absoluteDestinationPath = resolve(destinationPath);
 	await assertDirectoryParent(absoluteDestinationPath);
@@ -591,7 +632,7 @@ export class HarnessStateStore {
 				const pointer = await this.#loadPointer();
 				return this.#loadVersion(pointer.version);
 			}
-			const root = await this.saveVersion({ memory: "" }, null);
+			const root = await this.saveVersion({ memory: "" }, null, INITIAL_HARNESS_VERSION_METADATA);
 			await this.#replacePointer(root.manifest.version);
 			return root;
 		});
@@ -669,7 +710,11 @@ export class HarnessStateStore {
 		return { versions, diagnostics, currentVersion };
 	}
 
-	async saveVersion(state: HarnessState, base: HarnessVersion | null): Promise<HarnessVersionBundle> {
+	async saveVersion(
+		state: HarnessState,
+		base: HarnessVersion | null,
+		metadata?: HarnessVersionMetadata,
+	): Promise<HarnessVersionBundle> {
 		await this.#ensureDirectories();
 		if (!Check(HarnessStateSchema, state)) throw new Error("Invalid harness state to save");
 		if (!Check(Type.Union([Type.Null(), HarnessVersionSchema]), base))
@@ -679,8 +724,16 @@ export class HarnessStateStore {
 			path: EVOLUTION_MEMORY_NAME,
 			contentHash: computeContentHash(UTF8_ENCODER.encode(state.memory)),
 		};
-		const version = computeHarnessVersion({ schemaVersion: 1, base, artifacts: [artifact] });
-		return saveHarnessState(state, this.#versionPath(version), base);
+		const baseMetadata = base === null ? undefined : (await this.#loadVersion(base)).manifest.metadata;
+		const inheritedMetadata = metadata ?? baseMetadata;
+		if (inheritedMetadata === undefined) throw new Error("Root harness versions require metadata");
+		const version = computeHarnessVersion({
+			schemaVersion: 1,
+			base,
+			metadata: inheritedMetadata,
+			artifacts: [artifact],
+		});
+		return saveHarnessState(state, this.#versionPath(version), base, inheritedMetadata);
 	}
 
 	async selectVersion(version: HarnessVersion): Promise<HarnessVersionBundle> {
@@ -715,7 +768,11 @@ export class HarnessStateStore {
 		});
 	}
 
-	async advance(state: HarnessState, expectedBase: HarnessVersion): Promise<HarnessAdvanceResult> {
+	async advance(
+		state: HarnessState,
+		expectedBase: HarnessVersion,
+		metadata?: HarnessVersionMetadata,
+	): Promise<HarnessAdvanceResult> {
 		return this.#withLock(async () => {
 			await this.#ensureDirectories();
 			if (!Check(HarnessStateSchema, state)) throw new Error("Invalid harness state to advance");
@@ -724,8 +781,8 @@ export class HarnessStateStore {
 			if (current.version !== expectedBase) {
 				return { status: "conflict", expectedBase, actualBase: current.version };
 			}
-			await this.#loadVersion(current.version);
-			const bundle = await this.saveVersion(state, expectedBase);
+			const currentBundle = await this.#loadVersion(current.version);
+			const bundle = await this.saveVersion(state, expectedBase, metadata ?? currentBundle.manifest.metadata);
 			await this.#replacePointer(bundle.manifest.version);
 			return { status: "advanced", bundle };
 		});

@@ -115,12 +115,21 @@ describe("global harness state startup", () => {
 			{ kind: "evolution-memory", path: "EVOLVE.md", contentHash: contentHash(memory) },
 			{ kind: "skill", path: "skills/future/SKILL.md", contentHash: contentHash(skill) },
 		];
-		const version = computeHarnessVersion({ schemaVersion: 1, base: root.manifest.version, artifacts });
+		const version = computeHarnessVersion({
+			schemaVersion: 1,
+			base: root.manifest.version,
+			metadata: root.manifest.metadata,
+			artifacts,
+		});
 		const bundlePath = join(agentDir, "harness-state", "versions", harnessVersionDirectoryName(version));
 		mkdirSync(join(bundlePath, "skills", "future"), { recursive: true });
 		writeFileSync(
 			join(bundlePath, "manifest.json"),
-			`${JSON.stringify({ schemaVersion: 1, version, base: root.manifest.version, artifacts }, null, 2)}\n`,
+			`${JSON.stringify(
+				{ schemaVersion: 1, version, base: root.manifest.version, metadata: root.manifest.metadata, artifacts },
+				null,
+				2,
+			)}\n`,
 		);
 		writeFileSync(join(bundlePath, "EVOLVE.md"), memory);
 		writeFileSync(join(bundlePath, "skills", "future", "SKILL.md"), skill);

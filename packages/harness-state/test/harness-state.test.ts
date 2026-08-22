@@ -16,8 +16,11 @@ import {
 	HarnessVersionBundleSchema,
 	type HarnessVersionManifest,
 	HarnessVersionManifestSchema,
+	type HarnessVersionMetadata,
+	HarnessVersionMetadataSchema,
 	HarnessVersionPointerSchema,
 	harnessVersionDirectoryName,
+	INITIAL_HARNESS_VERSION_METADATA,
 	loadHarnessState,
 	saveHarnessState,
 	serializeHarnessVersion,
@@ -25,6 +28,7 @@ import {
 
 const temporaryRoots: string[] = [];
 const EXTERNAL_VERSION = `sha256:${"0".repeat(64)}`;
+const LESSON_METADATA: HarnessVersionMetadata = { evolutionMemory: { nextLessonNumber: 7 } };
 
 afterEach(async () => {
 	await Promise.all(temporaryRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
@@ -51,11 +55,13 @@ function createArtifact(
 function createManifest(
 	artifacts: readonly HarnessArtifactManifest[],
 	base: HarnessVersion | null = null,
+	metadata: HarnessVersionMetadata = INITIAL_HARNESS_VERSION_METADATA,
 ): HarnessVersionManifest {
 	return {
 		schemaVersion: 1,
-		version: computeHarnessVersion({ schemaVersion: 1, base, artifacts }),
+		version: computeHarnessVersion({ schemaVersion: 1, base, metadata, artifacts }),
 		base,
+		metadata,
 		artifacts: [...artifacts],
 	};
 }
@@ -103,28 +109,56 @@ describe("canonical harness versions", () => {
 	test("hashes the exact canonical schema, base, and sorted artifact descriptors", () => {
 		const first = createArtifact("first", "future-kind", "nested/z.txt");
 		const second = createArtifact("second", "evolution-memory", "EVOLVE.md");
-		const input = { schemaVersion: 1 as const, base: EXTERNAL_VERSION, artifacts: [first, second] };
+		const input = {
+			schemaVersion: 1 as const,
+			base: EXTERNAL_VERSION,
+			metadata: INITIAL_HARNESS_VERSION_METADATA,
+			artifacts: [first, second],
+		};
 		const canonical = serializeHarnessVersion(input);
 
-		expect(canonical).toBe(JSON.stringify({ schemaVersion: 1, base: EXTERNAL_VERSION, artifacts: [second, first] }));
+		expect(canonical).toBe(
+			JSON.stringify({
+				schemaVersion: 1,
+				base: EXTERNAL_VERSION,
+				metadata: INITIAL_HARNESS_VERSION_METADATA,
+				artifacts: [second, first],
+			}),
+		);
 		expect(computeHarnessVersion(input)).toBe(hash(canonical));
 		expect(computeHarnessVersion({ ...input, artifacts: [second, first] })).toBe(computeHarnessVersion(input));
 	});
 
 	test("changes independently for base, bytes, and artifact metadata", () => {
 		const original = createArtifact("memory");
-		const version = computeHarnessVersion({ schemaVersion: 1, base: null, artifacts: [original] });
+		const version = computeHarnessVersion({
+			schemaVersion: 1,
+			base: null,
+			metadata: INITIAL_HARNESS_VERSION_METADATA,
+			artifacts: [original],
+		});
 
-		expect(computeHarnessVersion({ schemaVersion: 1, base: EXTERNAL_VERSION, artifacts: [original] })).not.toBe(
-			version,
-		);
-		expect(computeHarnessVersion({ schemaVersion: 1, base: null, artifacts: [createArtifact("changed")] })).not.toBe(
-			version,
-		);
+		expect(
+			computeHarnessVersion({
+				schemaVersion: 1,
+				base: EXTERNAL_VERSION,
+				metadata: INITIAL_HARNESS_VERSION_METADATA,
+				artifacts: [original],
+			}),
+		).not.toBe(version);
 		expect(
 			computeHarnessVersion({
 				schemaVersion: 1,
 				base: null,
+				metadata: INITIAL_HARNESS_VERSION_METADATA,
+				artifacts: [createArtifact("changed")],
+			}),
+		).not.toBe(version);
+		expect(
+			computeHarnessVersion({
+				schemaVersion: 1,
+				base: null,
+				metadata: INITIAL_HARNESS_VERSION_METADATA,
 				artifacts: [{ ...original, kind: "future-kind" }],
 			}),
 		).not.toBe(version);
@@ -132,8 +166,12 @@ describe("canonical harness versions", () => {
 			computeHarnessVersion({
 				schemaVersion: 1,
 				base: null,
+				metadata: INITIAL_HARNESS_VERSION_METADATA,
 				artifacts: [{ ...original, path: "nested/EVOLVE.md" }],
 			}),
+		).not.toBe(version);
+		expect(
+			computeHarnessVersion({ schemaVersion: 1, base: null, metadata: LESSON_METADATA, artifacts: [original] }),
 		).not.toBe(version);
 	});
 
@@ -148,7 +186,11 @@ describe("canonical harness versions", () => {
 		expect(Check(HarnessStateSchema, { memory: "memory", extra: true })).toBe(false);
 		expect(Check(HarnessArtifactManifestSchema, artifact)).toBe(true);
 		expect(Check(HarnessArtifactManifestSchema, { ...artifact, extra: true })).toBe(false);
+		expect(Check(HarnessVersionMetadataSchema, LESSON_METADATA)).toBe(true);
+		expect(Check(HarnessVersionMetadataSchema, { evolutionMemory: { nextLessonNumber: 0 } })).toBe(false);
 		expect(Check(HarnessVersionManifestSchema, manifest)).toBe(true);
+		const { metadata: _metadata, ...manifestWithoutMetadata } = manifest;
+		expect(Check(HarnessVersionManifestSchema, manifestWithoutMetadata)).toBe(false);
 		expect(Check(HarnessVersionManifestSchema, { ...manifest, extra: true })).toBe(false);
 		expect(Check(HarnessVersionPointerSchema, { version: manifest.version })).toBe(true);
 		expect(Check(HarnessVersionPointerSchema, { version: manifest.version, extra: true })).toBe(false);
@@ -165,7 +207,7 @@ describe("bundle persistence and validation", () => {
 	] as const)("preserves %s EVOLVE bytes", async (_label, memory) => {
 		const root = await createTemporaryRoot();
 		const destination = join(root, "bundle");
-		const saved = await saveHarnessState({ memory }, destination, EXTERNAL_VERSION);
+		const saved = await saveHarnessState({ memory }, destination, EXTERNAL_VERSION, INITIAL_HARNESS_VERSION_METADATA);
 
 		expect(await readFile(join(destination, "EVOLVE.md"), "utf8")).toBe(memory);
 		expect(saved.manifest.base).toBe(EXTERNAL_VERSION);
@@ -177,19 +219,41 @@ describe("bundle persistence and validation", () => {
 	test("is idempotent only for the same immutable revision", async () => {
 		const root = await createTemporaryRoot();
 		const destination = join(root, "bundle");
-		const first = await saveHarnessState({ memory: "same" }, destination, null);
-		const second = await saveHarnessState({ memory: "same" }, destination, null);
+		const first = await saveHarnessState({ memory: "same" }, destination, null, INITIAL_HARNESS_VERSION_METADATA);
+		const second = await saveHarnessState({ memory: "same" }, destination, null, INITIAL_HARNESS_VERSION_METADATA);
 		expect(second).toEqual(first);
 
-		await expect(saveHarnessState({ memory: "different" }, destination, null)).rejects.toThrow(/different content/i);
+		await expect(
+			saveHarnessState({ memory: "different" }, destination, null, INITIAL_HARNESS_VERSION_METADATA),
+		).rejects.toThrow(/different content/i);
 		expect((await loadHarnessState(destination)).state.memory).toBe("same");
+	});
+
+	test("stores lesson numbering metadata in the content-addressed manifest", async () => {
+		const root = await createTemporaryRoot();
+		const destination = join(root, "bundle");
+		const saved = await saveHarnessState(
+			{ memory: "Lesson 6: Existing lesson.\n" },
+			destination,
+			null,
+			LESSON_METADATA,
+		);
+
+		expect(saved.manifest.metadata).toEqual(LESSON_METADATA);
+		expect(saved.manifest.version).toBe(computeHarnessVersion(saved.manifest));
+		expect(await loadHarnessState(destination)).toEqual(saved);
 	});
 
 	test("cleans its staged directory after a destination race", async () => {
 		const root = await createTemporaryRoot();
 		const destination = join(root, "bundle");
 		const temporaryPrefix = `.${basename(destination)}.tmp-`;
-		const saving = saveHarnessState({ memory: "x".repeat(16 * 1024 * 1024) }, destination, null).then(
+		const saving = saveHarnessState(
+			{ memory: "x".repeat(16 * 1024 * 1024) },
+			destination,
+			null,
+			INITIAL_HARNESS_VERSION_METADATA,
+		).then(
 			() => ({ ok: true as const }),
 			(error: unknown) => ({ ok: false as const, error }),
 		);
@@ -216,14 +280,16 @@ describe("bundle persistence and validation", () => {
 	test.each([" \t\r\n", "\uFEFFmemory"])("rejects invalid memory %j before writing", async (memory) => {
 		const root = await createTemporaryRoot();
 		const destination = join(root, "bundle");
-		await expect(saveHarnessState({ memory }, destination, null)).rejects.toThrow(/invalid harness state/i);
+		await expect(saveHarnessState({ memory }, destination, null, INITIAL_HARNESS_VERSION_METADATA)).rejects.toThrow(
+			/invalid harness state/i,
+		);
 		expect(await pathExists(destination)).toBe(false);
 	});
 
 	test("rejects an undeclared file and exact-casing mismatch", async () => {
 		const root = await createTemporaryRoot();
 		const destination = join(root, "bundle");
-		await saveHarnessState({ memory: "memory" }, destination, null);
+		await saveHarnessState({ memory: "memory" }, destination, null, INITIAL_HARNESS_VERSION_METADATA);
 		await writeFile(join(destination, "extra.txt"), "extra");
 		await expect(loadHarnessState(destination)).rejects.toThrow(/inventory mismatch.*undeclared/i);
 		await rm(join(destination, "extra.txt"));
@@ -234,7 +300,7 @@ describe("bundle persistence and validation", () => {
 	test("rejects an undeclared empty directory", async () => {
 		const root = await createTemporaryRoot();
 		const destination = join(root, "bundle");
-		await saveHarnessState({ memory: "memory" }, destination, null);
+		await saveHarnessState({ memory: "memory" }, destination, null, INITIAL_HARNESS_VERSION_METADATA);
 		await mkdir(join(destination, "undeclared"));
 		await expect(loadHarnessState(destination)).rejects.toThrow(/undeclared directories/i);
 	});
@@ -291,7 +357,7 @@ describe("bundle persistence and validation", () => {
 	test("rejects symbolic links and non-regular artifact entries", async () => {
 		const root = await createTemporaryRoot();
 		const destination = join(root, "bundle");
-		await saveHarnessState({ memory: "memory" }, destination, null);
+		await saveHarnessState({ memory: "memory" }, destination, null, INITIAL_HARNESS_VERSION_METADATA);
 		await rm(join(destination, "EVOLVE.md"));
 		await writeFile(join(root, "outside"), "memory");
 		await symlink(join(root, "outside"), join(destination, "EVOLVE.md"));
@@ -305,7 +371,7 @@ describe("bundle persistence and validation", () => {
 	test("rejects content hash and revision hash mismatches", async () => {
 		const root = await createTemporaryRoot();
 		const destination = join(root, "bundle");
-		await saveHarnessState({ memory: "memory" }, destination, null);
+		await saveHarnessState({ memory: "memory" }, destination, null, INITIAL_HARNESS_VERSION_METADATA);
 		await writeFile(join(destination, "EVOLVE.md"), "changed");
 		await expect(loadHarnessState(destination)).rejects.toThrow(/content hash mismatch/i);
 
@@ -356,6 +422,7 @@ describe("HarnessStateStore", () => {
 		expect(roots.every((candidate) => candidate.manifest.version === root.manifest.version)).toBe(true);
 		expect(root.state.memory).toBe("");
 		expect(root.manifest.base).toBeNull();
+		expect(root.manifest.metadata).toEqual(INITIAL_HARNESS_VERSION_METADATA);
 		expect(root.manifest.artifacts[0]?.contentHash).toBe(
 			"sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
 		);
@@ -388,6 +455,41 @@ describe("HarnessStateStore", () => {
 			actualBase: second.bundle.manifest.version,
 		});
 		expect((await store.loadCurrent()).manifest.version).toBe(second.bundle.manifest.version);
+	});
+
+	test("inherits durable harness metadata across ordinary advances", async () => {
+		const agentDir = await createTemporaryRoot();
+		const store = new HarnessStateStore(agentDir);
+		const root = await store.initialize();
+		const first = await store.advance(
+			{ memory: "Lesson 6: Existing lesson.\n" },
+			root.manifest.version,
+			LESSON_METADATA,
+		);
+		if (first.status !== "advanced") throw new Error("Expected metadata advance to succeed");
+		const second = await store.advance({ memory: "Updated memory." }, first.bundle.manifest.version);
+		if (second.status !== "advanced") throw new Error("Expected inherited metadata advance to succeed");
+
+		expect(first.bundle.manifest.metadata).toEqual(LESSON_METADATA);
+		expect(second.bundle.manifest.metadata).toEqual(LESSON_METADATA);
+	});
+
+	test("allows lesson metadata to decrease when lessons are removed", async () => {
+		const agentDir = await createTemporaryRoot();
+		const store = new HarnessStateStore(agentDir);
+		const root = await store.initialize();
+		const first = await store.advance({ memory: "Current memory." }, root.manifest.version, LESSON_METADATA);
+		if (first.status !== "advanced") throw new Error("Expected metadata advance to succeed");
+
+		const second = await store.advance({ memory: "Compacted successor." }, first.bundle.manifest.version, {
+			evolutionMemory: { nextLessonNumber: 6 },
+		});
+		if (second.status !== "advanced") throw new Error("Expected compacted metadata advance to succeed");
+
+		expect(second.bundle.manifest.metadata).toEqual({
+			evolutionMemory: { nextLessonNumber: 6 },
+		});
+		expect(await store.loadCurrent()).toEqual(second.bundle);
 	});
 
 	test("serializes concurrent advances so exactly one succeeds", async () => {

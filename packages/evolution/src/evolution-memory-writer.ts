@@ -6,6 +6,7 @@ import {
 	type HarnessStateStore,
 	type HarnessVersion,
 	type HarnessVersionBundle,
+	type HarnessVersionMetadata,
 } from "@earendil-works/diffex-harness-state";
 import type {
 	EvolutionMemoryAddDelta,
@@ -29,7 +30,7 @@ import { computeEvolutionContentDigest, serializeEvolutionValue } from "./proven
 import type { EvolutionTargetWriter } from "./targets.ts";
 
 const CATALOG_SCHEMA_VERSION = 1 as const;
-const CANDIDATE_SCHEMA_VERSION = 1 as const;
+const CANDIDATE_SCHEMA_VERSION = 2 as const;
 const DEFAULT_MAX_MEMORY_BYTES = 64 * 1024;
 const VERSION_PATTERN = /^sha256:[0-9a-f]{64}$/;
 const SAFE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/;
@@ -92,6 +93,7 @@ interface StoredEvolutionMemoryCandidate {
 	readonly expectedBaseDigest: string;
 	readonly resultingHarnessVersion: HarnessVersion;
 	readonly resultingMemoryDigest: string;
+	readonly harnessMetadata: HarnessVersionMetadata;
 	readonly operationIds: readonly string[];
 	readonly beforeMemory: string;
 	readonly afterMemory: string;
@@ -289,10 +291,15 @@ function memoryArtifactContentHash(memory: string): HarnessVersion {
 	return `sha256:${createHash("sha256").update(memory, "utf8").digest("hex")}`;
 }
 
-function resultingHarnessVersion(memory: string, base: HarnessVersion): HarnessVersion {
+function resultingHarnessVersion(
+	memory: string,
+	base: HarnessVersion,
+	metadata: HarnessVersionMetadata,
+): HarnessVersion {
 	return computeHarnessVersion({
 		schemaVersion: 1,
 		base,
+		metadata,
 		artifacts: [{ kind: "evolution-memory", path: "EVOLVE.md", contentHash: memoryArtifactContentHash(memory) }],
 	});
 }
@@ -388,7 +395,9 @@ function insertionOffset(
 		const matchingBlocks = parsed.blocks.filter(
 			(block) =>
 				block.content === delta.destination.anchor ||
-				normalizedText(block.content) === normalizedText(delta.destination.anchor ?? ""),
+				normalizedText(block.content) === normalizedText(delta.destination.anchor ?? "") ||
+				normalizedText(evolutionMemoryLessonBody(block.content)) ===
+					normalizedText(evolutionMemoryLessonBody(delta.destination.anchor ?? "")),
 		);
 		if (matchingBlocks.length !== 1) throw new Error("EVOLVE.md addition anchor must match exactly one memory item");
 		const block = matchingBlocks[0] as MarkdownMemoryBlock;
@@ -431,6 +440,17 @@ function removeMemoryBlock(memory: string, block: MarkdownMemoryBlock): string {
 		while (start > 0 && (memory[start - 1] === "\n" || memory[start - 1] === "\r")) start -= 1;
 	}
 	return `${memory.slice(0, start)}${memory.slice(end)}`;
+}
+
+function compactLessonNumbers(memory: string, removedLessonNumber: number): string {
+	let compacted = memory;
+	for (const block of [...parseEvolutionMemory(memory).blocks].reverse()) {
+		const lessonNumber = evolutionMemoryLessonNumber(block.content);
+		if (lessonNumber === null || lessonNumber <= removedLessonNumber) continue;
+		const content = numberEvolutionMemoryLesson(block.content, lessonNumber - 1);
+		compacted = `${compacted.slice(0, block.start)}${content}${compacted.slice(block.end)}`;
+	}
+	return compacted;
 }
 
 function parseWriteOutput(result: MutationWriteResult): EvolutionMemoryWriteOutput {
@@ -585,6 +605,11 @@ export class EvolutionMemoryWriter implements EvolutionTargetWriter {
 			typeof parsed.writerVersion !== "string" ||
 			parsed.batchId !== batchId ||
 			typeof parsed.candidateDigest !== "string" ||
+			!isRecord(parsed.harnessMetadata) ||
+			!isRecord(parsed.harnessMetadata.evolutionMemory) ||
+			typeof parsed.harnessMetadata.evolutionMemory.nextLessonNumber !== "number" ||
+			!Number.isSafeInteger(parsed.harnessMetadata.evolutionMemory.nextLessonNumber) ||
+			parsed.harnessMetadata.evolutionMemory.nextLessonNumber < 1 ||
 			!isRecord(parsed.catalog)
 		) {
 			throw new Error(`Evolution memory candidate for "${batchId}" is invalid`);
@@ -674,11 +699,21 @@ export class EvolutionMemoryWriter implements EvolutionTargetWriter {
 		const bootstrappingBlankMemory = memory.trim() === "";
 		let items = [...baseCatalog.items];
 		const activeOrder = [...baseCatalog.activeOrder];
-		const existingLessonNumbers = parseEvolutionMemory(memory).blocks.flatMap((block) => {
-			const lessonNumber = evolutionMemoryLessonNumber(block.content);
-			return lessonNumber === null ? [] : [lessonNumber];
-		});
-		let nextLessonNumber = Math.max(baseCatalog.items.length, 0, ...existingLessonNumbers) + 1;
+		const existingLessonNumbers = parseEvolutionMemory(memory)
+			.blocks.flatMap((block) => {
+				const lessonNumber = evolutionMemoryLessonNumber(block.content);
+				return lessonNumber === null ? [] : [lessonNumber];
+			})
+			.sort((left, right) => left - right);
+		const visibleNextLessonNumber = existingLessonNumbers.length + 1;
+		const durableNextLessonNumber = current.manifest.metadata.evolutionMemory.nextLessonNumber;
+		if (
+			existingLessonNumbers.some((lessonNumber, index) => lessonNumber !== index + 1) ||
+			durableNextLessonNumber !== visibleNextLessonNumber
+		) {
+			throw new Error("Harness lesson-number metadata does not match EVOLVE.md content");
+		}
+		let nextLessonNumber = durableNextLessonNumber;
 		const addedIds = new Set<string>();
 		const removedIds = new Set<string>();
 		const remove = (memoryItemId: string, expectedContentDigest: string): void => {
@@ -687,16 +722,31 @@ export class EvolutionMemoryWriter implements EvolutionTargetWriter {
 			const parsed = parseEvolutionMemory(memory);
 			const block = parsed.blocks[activeIndex];
 			const item = itemById(items, memoryItemId);
+			const baseItem = itemById(baseCatalog.items, memoryItemId);
+			const removedLessonNumber = block === undefined ? null : evolutionMemoryLessonNumber(block.content);
 			if (
 				block === undefined ||
-				item.contentDigest !== expectedContentDigest ||
-				itemDigest(block.content) !== expectedContentDigest ||
+				removedLessonNumber === null ||
+				baseItem.contentDigest !== expectedContentDigest ||
+				itemDigest(block.content) !== item.contentDigest ||
 				item.ledger.origin !== "evolution"
 			) {
 				throw new Error(`Mutation cannot automatically remove memory item "${memoryItemId}"`);
 			}
-			memory = removeMemoryBlock(memory, block);
+			memory = compactLessonNumbers(removeMemoryBlock(memory, block), removedLessonNumber);
 			activeOrder.splice(activeIndex, 1);
+			const compactedBlocks = parseEvolutionMemory(memory).blocks;
+			const activeDigests = new Map(
+				activeOrder.map((activeMemoryItemId, index) => [
+					activeMemoryItemId,
+					itemDigest(compactedBlocks[index]?.content ?? ""),
+				]),
+			);
+			items = items.map((candidate) => {
+				const contentDigest = activeDigests.get(candidate.memoryItemId);
+				return contentDigest === undefined ? candidate : { ...candidate, contentDigest };
+			});
+			nextLessonNumber -= 1;
 			removedIds.add(memoryItemId);
 		};
 		const add = (mutation: EvolutionMutation, delta: EvolutionMemoryAddDelta): void => {
@@ -760,7 +810,8 @@ export class EvolutionMemoryWriter implements EvolutionTargetWriter {
 		) {
 			throw new Error("EVOLVE.md candidate item index is inconsistent after applying mutations");
 		}
-		const nextVersion = resultingHarnessVersion(memory, batch.expectedBaseVersion);
+		const harnessMetadata: HarnessVersionMetadata = { evolutionMemory: { nextLessonNumber } };
+		const nextVersion = resultingHarnessVersion(memory, batch.expectedBaseVersion, harnessMetadata);
 		items = items.map((item) => {
 			if (addedIds.has(item.memoryItemId)) return { ...item, creationRevision: nextVersion };
 			if (removedIds.has(item.memoryItemId)) {
@@ -790,6 +841,7 @@ export class EvolutionMemoryWriter implements EvolutionTargetWriter {
 			expectedBaseDigest: batch.expectedBaseDigest,
 			resultingHarnessVersion: nextVersion,
 			resultingMemoryDigest: catalog.memoryContentDigest,
+			harnessMetadata,
 			operationIds: batch.mutations.map((mutation) => mutation.mutationId),
 			beforeMemory: current.state.memory,
 			afterMemory: memory,
@@ -829,7 +881,8 @@ export class EvolutionMemoryWriter implements EvolutionTargetWriter {
 		if (current.manifest.version === candidate.resultingHarnessVersion) {
 			if (
 				current.manifest.base !== candidate.expectedBaseVersion ||
-				current.state.memory !== candidate.afterMemory
+				current.state.memory !== candidate.afterMemory ||
+				serializeEvolutionValue(current.manifest.metadata) !== serializeEvolutionValue(candidate.harnessMetadata)
 			) {
 				throw new Error(`Activated harness revision for batch "${batch.batchId}" has different content`);
 			}
@@ -849,6 +902,7 @@ export class EvolutionMemoryWriter implements EvolutionTargetWriter {
 		const advanced = await this.#harnessState.advance(
 			{ memory: candidate.afterMemory },
 			candidate.expectedBaseVersion,
+			candidate.harnessMetadata,
 		);
 		if (advanced.status === "conflict") {
 			throw new EvolutionExecutionError(
