@@ -444,6 +444,24 @@ function combinedSignal(...signals: readonly (AbortSignal | undefined)[]): Abort
 	return AbortSignal.any(signals.filter((signal): signal is AbortSignal => signal !== undefined));
 }
 
+async function runBounded<T>(
+	values: readonly T[],
+	concurrency: number,
+	run: (value: T) => Promise<void>,
+): Promise<void> {
+	let nextIndex = 0;
+	const workers = Array.from({ length: Math.min(concurrency, values.length) }, async () => {
+		while (nextIndex < values.length) {
+			const value = values[nextIndex];
+			nextIndex += 1;
+			if (value !== undefined) await run(value);
+		}
+	});
+	const results = await Promise.allSettled(workers);
+	const failure = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
+	if (failure !== undefined) throw failure.reason;
+}
+
 export class RecursiveReflector implements Reflector {
 	readonly #dependencies: RecursiveReflectorDependencies;
 	readonly #maxToolCalls: number;
@@ -550,7 +568,7 @@ export class RecursiveReflector implements Reflector {
 			const plans = this.#buildPlan(input, slices);
 			const completed = await this.#loadCompleted(input, plans, priorEvents);
 			let modelCalls = priorModelCalls;
-			for (const plan of plans) {
+			const executePlan = async (plan: NodePlan) => {
 				if (stageDeadline.expired) {
 					throw new EvolutionExecutionError("Reflector stage active-compute deadline was exhausted", {
 						reasonCode: "reflection-budget-exhausted",
@@ -558,11 +576,11 @@ export class RecursiveReflector implements Reflector {
 						cause: stageDeadline.signal.reason,
 					});
 				}
-				if (completed.has(plan.nodeId)) continue;
+				if (completed.has(plan.nodeId)) return;
 				const timedOutChild = plan.childNodeIds.some((nodeId) => completed.get(nodeId)?.node.status !== "complete");
 				if (timedOutChild) {
 					completed.set(plan.nodeId, await this.#checkpointTimedOut(input, producer, plan, newNodeRuntime()));
-					continue;
+					return;
 				}
 				const nodeDeadline = new ActiveComputeDeadline(this.#nodeDeadlineMs, `Reflection node ${plan.nodeId}`);
 				const runtime = newNodeRuntime();
@@ -603,6 +621,14 @@ export class RecursiveReflector implements Reflector {
 					nodeDeadline.dispose();
 				}
 				completed.set(plan.nodeId, result);
+			};
+			await runBounded(
+				plans.filter((plan) => plan.kind === "leaf"),
+				2,
+				executePlan,
+			);
+			for (const plan of plans) {
+				if (plan.kind === "synthesis") await executePlan(plan);
 			}
 			const nodes = plans
 				.map((plan) => completed.get(plan.nodeId)?.node)
@@ -757,19 +783,21 @@ export class RecursiveReflector implements Reflector {
 		const rejectedResponses: JsonObject[] = [];
 		const invalidReferences = new Set<string>();
 		const permittedReferences = new Set<string>();
+		let nodeModelCallSequence = 0;
 		for (let round = 1; round <= this.#maxReflectionRounds && parsed?.complete !== true; round += 1) {
 			for (let attempt = 1; attempt <= this.#maxResponseRetries; attempt += 1) {
 				if (attempt > 1) runtime.retries += 1;
 				let providerCalls = 0;
 				const beforeProviderCall = async () => {
-					const modelCallSequence = chargeModelCall();
+					chargeModelCall();
 					providerCalls += 1;
 					runtime.providerCalls += 1;
+					nodeModelCallSequence += 1;
 					const modelCallId = stableId("reflector-model-call", {
 						idempotencyKey: input.idempotencyKey,
 						nodeId: plan.nodeId,
 						round,
-						modelCallSequence,
+						nodeModelCallSequence,
 					});
 					await this.#dependencies.ledger.append(
 						this.#modelCallEvent(input, producer, modelCallId, plan.nodeId, round, attempt),
