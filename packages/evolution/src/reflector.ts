@@ -1077,6 +1077,14 @@ export class RecursiveReflector implements Reflector {
 							: this.#maxLessonsPerSynthesisNode,
 				lessonSelection:
 					"Return only the highest-impact, non-overlapping lessons that would change future behavior.",
+				behaviorChangingLessonsOnly: true,
+				requireUserTaskOrMeaningfulFailure: true,
+				requireCausalAgentBehavior: true,
+				requireConcreteFutureBehaviorChange: true,
+				requireVerifiableExpectedResult: true,
+				omitObserverDocumentation: true,
+				omitTelemetryFormatFacts: true,
+				consolidateOverlappingLessons: plan.kind === "synthesis",
 				maximumToolCalls:
 					plan.kind === "leaf" ? this.#maxEvidenceToolCallsPerLeaf : this.#maxLessonToolCallsPerSynthesisNode,
 				maximumRefinementRounds: this.#maxReflectionRounds,

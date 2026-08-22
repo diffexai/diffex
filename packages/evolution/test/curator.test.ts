@@ -289,7 +289,20 @@ function decision(
 	proposalValue: JsonObject | null,
 	relationship: JsonObject = novelRelationship(),
 ) {
-	return { decisionKey, lessonRefs: ["L1"], relationship, proposal: proposalValue };
+	return {
+		decisionKey,
+		lessonRefs: ["L1"],
+		relevance: {
+			userTaskOrFailure: "A repository task required a focused change",
+			causalAgentBehavior: "The agent kept the change scoped",
+			futureBehaviorChange: "Keep future changes focused",
+			verifiableExpectedResult: "The resulting diff contains only task-required files",
+			observerDocumentationOnly: false,
+			telemetryFormatOnly: false,
+		},
+		relationship,
+		proposal: proposalValue,
+	};
 }
 
 describe("structured delta curator", () => {
@@ -355,6 +368,13 @@ describe("structured delta curator", () => {
 			expect.objectContaining({ memoryRef: "M0" }),
 			expect.objectContaining({ memoryRef: "M1" }),
 		]);
+		expect(capturedInputs[0]?.control).toMatchObject({
+			consolidateOverlappingLessons: true,
+			emitOnlyBehaviorChangingProposals: true,
+			omitObserverDocumentation: true,
+			omitTelemetryFormatFacts: true,
+			routeUsefulTelemetryFactsToDebuggingDocumentation: true,
+		});
 		expect(JSON.stringify(capturedInputs[0])).not.toContain("memory-1");
 		expect(JSON.stringify(capturedInputs[0])).not.toContain("lesson-final");
 		expect(JSON.stringify(capturedInputs[0])).not.toContain("/repo/AGENTS.md");
@@ -757,6 +777,40 @@ describe("structured delta curator", () => {
 		});
 		await expect(curator.curate(unknownEvidence)).rejects.toMatchObject({
 			reasonCode: "artifact-corrupt",
+		});
+	});
+
+	it("rejects observer documentation as evolution memory", async () => {
+		const curator = new StructuredDeltaCurator({ version: "1.2.3" }, { maxResponseAttempts: 1 });
+		const candidate = decision(
+			"observer-fact",
+			proposal(
+				"ADD",
+				{ kind: "evolution-memory" },
+				{
+					operation: "ADD",
+					destination: { section: "Diagnostics", anchor: null },
+					content: "Completed spans include a status field.",
+					intendedScope: ["Trace inspection"],
+				},
+			),
+		);
+		const input = curatorInput(() =>
+			Promise.resolve(
+				response([
+					{
+						...candidate,
+						relevance: { ...candidate.relevance, observerDocumentationOnly: true, telemetryFormatOnly: true },
+					},
+				]),
+			),
+		);
+
+		await expect(curator.curate(input)).rejects.toMatchObject({
+			reasonCode: "curation-invalid-response",
+			cause: expect.objectContaining({
+				message: "Observer documentation and telemetry-format facts are not actionable evolution memory",
+			}),
 		});
 	});
 });

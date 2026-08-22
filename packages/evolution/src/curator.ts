@@ -58,6 +58,26 @@ export function createCuratorOutputSchema(references: CuratorSchemaReferences): 
 	});
 	return {
 		$defs: {
+			relevance: {
+				type: "object",
+				additionalProperties: false,
+				required: [
+					"userTaskOrFailure",
+					"causalAgentBehavior",
+					"futureBehaviorChange",
+					"verifiableExpectedResult",
+					"observerDocumentationOnly",
+					"telemetryFormatOnly",
+				],
+				properties: {
+					userTaskOrFailure: { type: "string", minLength: 1 },
+					causalAgentBehavior: { type: "string", minLength: 1 },
+					futureBehaviorChange: { type: "string", minLength: 1 },
+					verifiableExpectedResult: { type: "string", minLength: 1 },
+					observerDocumentationOnly: { const: false },
+					telemetryFormatOnly: { const: false },
+				},
+			},
 			strengthening: {
 				oneOf: [
 					{ type: "null" },
@@ -217,10 +237,11 @@ export function createCuratorOutputSchema(references: CuratorSchemaReferences): 
 				items: {
 					type: "object",
 					additionalProperties: false,
-					required: ["decisionKey", "lessonRefs", "relationship", "proposal"],
+					required: ["decisionKey", "lessonRefs", "relevance", "relationship", "proposal"],
 					properties: {
 						decisionKey: { type: "string", minLength: 1 },
 						lessonRefs: referenceArraySchema(references.lessonRefs, 1),
+						relevance: { $ref: "#/$defs/relevance" },
 						relationship: { $ref: "#/$defs/relationship" },
 						proposal: { oneOf: [{ $ref: "#/$defs/proposal" }, { type: "null" }] },
 					},
@@ -634,11 +655,39 @@ function parseDecisions(
 	const drafts: ProposalDraft[] = [];
 	for (const value of response.output.decisions) {
 		if (!isRecord(value)) throw new Error("Curator decision must be an object");
-		assertOnlyFields(value, ["decisionKey", "lessonRefs", "relationship", "proposal"], "Curator decision");
+		assertOnlyFields(
+			value,
+			["decisionKey", "lessonRefs", "relevance", "relationship", "proposal"],
+			"Curator decision",
+		);
 		const decisionKey = requiredString(value, "decisionKey");
 		if (!PROPOSAL_ID_PATTERN.test(decisionKey)) throw new Error(`Invalid decision key "${decisionKey}"`);
 		if (seenDecisionKeys.has(decisionKey)) throw new Error(`Duplicate decision key "${decisionKey}"`);
 		seenDecisionKeys.add(decisionKey);
+		if (!isRecord(value.relevance)) throw new Error("relevance must be an object");
+		assertOnlyFields(
+			value.relevance,
+			[
+				"userTaskOrFailure",
+				"causalAgentBehavior",
+				"futureBehaviorChange",
+				"verifiableExpectedResult",
+				"observerDocumentationOnly",
+				"telemetryFormatOnly",
+			],
+			"relevance",
+		);
+		for (const field of [
+			"userTaskOrFailure",
+			"causalAgentBehavior",
+			"futureBehaviorChange",
+			"verifiableExpectedResult",
+		] as const) {
+			requiredString(value.relevance, field);
+		}
+		if (value.relevance.observerDocumentationOnly !== false || value.relevance.telemetryFormatOnly !== false) {
+			throw new Error("Observer documentation and telemetry-format facts are not actionable evolution memory");
+		}
 		const selectedLessons = referenceArray(value.lessonRefs, "lessonRefs", registry.lessons, { allowEmpty: false });
 		const parsedRelationship = relationship(value.relationship, registry);
 		if (parsedRelationship.classification === "duplicate" || parsedRelationship.classification === "conflicts") {
@@ -874,6 +923,15 @@ function modelInput(input: CuratorInput, registry: CuratorToolRegistry, response
 			omitDuplicates: true,
 			omitHigherPriorityConflicts: true,
 			strengthenOnlyWithConcretePrecision: true,
+			consolidateOverlappingLessons: true,
+			emitOnlyBehaviorChangingProposals: true,
+			requireUserTaskOrMeaningfulFailure: true,
+			requireCausalAgentBehavior: true,
+			requireConcreteFutureBehaviorChange: true,
+			requireVerifiableExpectedResult: true,
+			omitObserverDocumentation: true,
+			omitTelemetryFormatFacts: true,
+			routeUsefulTelemetryFactsToDebuggingDocumentation: true,
 			memoryOperations: ["ADD", "REMOVE", "REPLACE"],
 			deferredTargets: ["skill", "orchestration-source"],
 			...(responseCorrection === null
