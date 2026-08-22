@@ -227,6 +227,7 @@ describe("CLI invocation tracing", () => {
 		const directories = setup();
 		const manager = SessionManager.create(directories.projectDir, join(directories.agentDir, "sessions"));
 		const { trace } = await createInvocationTrace({ agentDir: directories.agentDir, sessionManager: manager });
+		await trace.startSpan({ name: "test.operation" }, () => {});
 		const path = trace.destinationPath;
 		if (!path) throw new Error("Invocation trace path was not created");
 
@@ -242,8 +243,6 @@ describe("CLI invocation tracing", () => {
 		await trace.attachSession(manager, "startup");
 		const scope: EvolutionScope = { repositoryId: "global", scopeId: "global" };
 		const catalog = new TraceEvidenceCatalog({ agentDir: directories.agentDir, scope });
-		const firstPath = trace.destinationPath;
-		if (!firstPath) throw new Error("Invocation trace path was not created");
 
 		expect(await catalog.highWaterCursor(scope)).toBe(0);
 		const firstEntryOrdinal = manager.getEntryCount();
@@ -255,6 +254,8 @@ describe("CLI invocation tracing", () => {
 			},
 			() => {},
 		);
+		const firstPath = trace.destinationPath;
+		if (!firstPath) throw new Error("Invocation trace path was not created");
 		await trace.operationSettled({ operationId: "operation-1", sessionManager: manager, firstEntryOrdinal });
 
 		await expect(lockfile.check(firstPath, { realpath: false })).resolves.toBe(false);
@@ -461,6 +462,19 @@ describe("CLI invocation tracing", () => {
 		expect(tracePaths(directories.agentDir)).toEqual([]);
 	});
 
+	it("does not create a trace for persisted startup and routine shutdown", async () => {
+		const directories = setup();
+		const manager = SessionManager.create(directories.projectDir, join(directories.agentDir, "sessions"));
+		const { trace } = await createInvocationTrace({ agentDir: directories.agentDir, sessionManager: manager });
+
+		await trace.attachSession(manager, "startup");
+		await trace.harnessActivated("version-1");
+		await trace.close();
+
+		expect(trace.destinationPath).toBeUndefined();
+		expect(tracePaths(directories.agentDir)).toEqual([]);
+	});
+
 	it("continues after trace creation fails and reports one warning", async () => {
 		const directories = setup();
 		writeFileSync(join(directories.agentDir, "traces"), "not a directory");
@@ -509,6 +523,15 @@ describe("CLI invocation tracing", () => {
 		const directories = setup();
 		const manager = SessionManager.create(directories.projectDir, join(directories.agentDir, "sessions"));
 		const { trace } = await createInvocationTrace({ agentDir: directories.agentDir, sessionManager: manager });
+		let finishOperation: (() => void) | undefined;
+		const operation = trace.startSpan(
+			{ name: "test.operation" },
+			() =>
+				new Promise<void>((resolveOperation) => {
+					finishOperation = resolveOperation;
+				}),
+		);
+		await vi.waitFor(() => expect(trace.destinationPath).toBeDefined());
 		const probePath = join(directories.root, "probe", "writer.jsonl");
 		await mkdir(dirname(probePath), { recursive: true });
 		const probe = await open(probePath, "wx");
@@ -520,6 +543,8 @@ describe("CLI invocation tracing", () => {
 
 		await expect(trace.attachSession(manager, "startup")).resolves.toBeUndefined();
 		manager.appendSessionInfo("writer survived");
+		finishOperation?.();
+		await operation;
 		await expect(
 			trace.operationSettled({ operationId: "operation", sessionManager: manager, firstEntryOrdinal: 0 }),
 		).resolves.toBeUndefined();
@@ -527,7 +552,7 @@ describe("CLI invocation tracing", () => {
 		await trace.close("completed");
 
 		const result = await readJsonlTraceFile(trace.destinationPath!);
-		expect(result.records.map((record) => record.type)).toEqual(["trace_header"]);
+		expect(result.records.map((record) => record.type)).toEqual(["trace_header", "span_start"]);
 		expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toContain("missing_footer");
 	});
 });

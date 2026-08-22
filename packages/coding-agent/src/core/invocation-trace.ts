@@ -40,6 +40,7 @@ export interface CreateInvocationTraceOptions {
 	sessionManager: SessionManager;
 	diffexVersion?: string;
 	sourceRevision?: string;
+	onDiagnostic?: (diagnostic: AgentSessionRuntimeDiagnostic) => void;
 }
 
 interface InvocationTraceRecorderHandle {
@@ -79,6 +80,7 @@ function finalTerminationStatus(
 export class InvocationTrace implements AgentSessionLifecycleObserver, TelemetryContext {
 	readonly telemetryContext: TelemetryContext = this;
 	readonly #createRecorder: InvocationTraceRecorderFactory | undefined;
+	readonly #onDiagnostic: ((diagnostic: AgentSessionRuntimeDiagnostic) => void) | undefined;
 	readonly #sessions = new Map<SessionManager, InvocationSessionAttachmentReason>();
 	readonly #sessionBindings = new Map<SessionManager, string>();
 	readonly #pendingOperations = new Set<string>();
@@ -94,12 +96,18 @@ export class InvocationTrace implements AgentSessionLifecycleObserver, Telemetry
 	#signalTermination: TraceTerminationStatus | undefined;
 	#settlementQueue: Promise<void> = Promise.resolve();
 	#closed = false;
+	#recorderUnavailableReported = false;
 
-	constructor(initial?: InvocationTraceRecorderHandle, createRecorder?: InvocationTraceRecorderFactory) {
+	constructor(
+		initial?: InvocationTraceRecorderHandle,
+		createRecorder?: InvocationTraceRecorderFactory,
+		onDiagnostic?: (diagnostic: AgentSessionRuntimeDiagnostic) => void,
+	) {
 		this.#recorder = initial?.recorder;
 		this.#releaseTraceLock = initial?.releaseTraceLock;
 		this.#lastDestinationPath = initial?.recorder.destinationPath;
 		this.#createRecorder = createRecorder;
+		this.#onDiagnostic = onDiagnostic;
 		if (initial || createRecorder) this.#registerSignalObservers();
 	}
 
@@ -113,6 +121,7 @@ export class InvocationTrace implements AgentSessionLifecycleObserver, Telemetry
 		for (const signal of signals) {
 			const handler = () => {
 				this.#signalTermination = "aborted";
+				void this.#ensureRecorder();
 			};
 			process.on(signal, handler);
 			this.#signalCleanupHandlers.push(() => process.off(signal, handler));
@@ -165,7 +174,16 @@ export class InvocationTrace implements AgentSessionLifecycleObserver, Telemetry
 					await this.#initializeRecorder(handle.recorder);
 					return handle.recorder;
 				})
-				.catch(() => undefined)
+				.catch((error: unknown) => {
+					if (!this.#recorderUnavailableReported) {
+						this.#recorderUnavailableReported = true;
+						this.#onDiagnostic?.({
+							type: "warning",
+							message: `Invocation tracing is unavailable: ${errorMessage(error)}`,
+						});
+					}
+					return undefined;
+				})
 				.finally(() => {
 					this.#recorderCreation = undefined;
 				});
@@ -214,7 +232,7 @@ export class InvocationTrace implements AgentSessionLifecycleObserver, Telemetry
 	async attachSession(sessionManager: SessionManager, reason: InvocationSessionAttachmentReason): Promise<void> {
 		if (!sessionManager.isPersisted()) return;
 		if (!this.#sessions.has(sessionManager)) this.#sessions.set(sessionManager, reason);
-		const recorder = await this.#ensureRecorder();
+		const recorder = this.#recorder ?? (await this.#recorderCreation);
 		if (!recorder || this.#sessionBindings.has(sessionManager)) return;
 		const path = sessionManager.getSessionFile();
 		if (!path) return;
@@ -261,7 +279,7 @@ export class InvocationTrace implements AgentSessionLifecycleObserver, Telemetry
 
 	async harnessActivated(version: string): Promise<void> {
 		this.#activeHarnessVersion = version;
-		const recorder = await this.#ensureRecorder();
+		const recorder = this.#recorder ?? (await this.#recorderCreation);
 		if (!recorder || version === this.#recorderHarnessVersion) return;
 		recorder.activateHarness({
 			harnessVersion: version,
@@ -356,16 +374,5 @@ export async function createInvocationTrace(
 		}
 	};
 
-	try {
-		const initial = await createRecorder();
-		return { trace: new InvocationTrace(initial, createRecorder) };
-	} catch (error) {
-		return {
-			trace: new InvocationTrace(undefined, createRecorder),
-			diagnostic: {
-				type: "warning",
-				message: `Invocation tracing is unavailable: ${errorMessage(error)}`,
-			},
-		};
-	}
+	return { trace: new InvocationTrace(undefined, createRecorder, options.onDiagnostic) };
 }
