@@ -8,6 +8,7 @@ import type { HarnessStateStore, HarnessVersion } from "@earendil-works/diffex-h
 import lockfile from "proper-lockfile";
 import type { TSchema } from "typebox";
 import {
+	classifyEvolutionEvidence,
 	computeEvolutionContentDigest,
 	DeterministicProposalRanker,
 	EvolutionBackgroundWorker,
@@ -356,6 +357,7 @@ export class TraceEvidenceCatalog implements EvolutionEvidenceCatalog {
 
 	async #materialize(path: string, ingestionCursor: number): Promise<SuccessfulMaterialization | null> {
 		const invocation = await this.#materializeInvocation(path);
+		if (!classifyEvolutionEvidence(invocation).eligible) return null;
 		const contentDigest = computeEvolutionContentDigest(invocation);
 		return {
 			materializationId: invocation.traceId ?? `materialization-${contentDigest.slice("sha256:".length)}`,

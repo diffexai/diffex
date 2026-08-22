@@ -147,6 +147,11 @@ export {
 	EvolutionToolDeniedError,
 } from "./errors.ts";
 export {
+	classifyEvolutionEvidence,
+	type EvolutionEvidenceEligibility,
+	NON_SUBSTANTIVE_RUNTIME_TRACE_REASON,
+} from "./evidence-eligibility.ts";
+export {
 	type EvolutionMemoryBlock,
 	EvolutionMemoryWriter,
 	type EvolutionMemoryWriterOptions,
