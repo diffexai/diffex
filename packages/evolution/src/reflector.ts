@@ -11,6 +11,7 @@ import type {
 	LessonKind,
 	ReflectionNode,
 	ReflectionNodeCheckpointedLedgerEvent,
+	ReflectionNodeRuntime,
 	ReflectorModelCallLedgerEvent,
 	ReflectorToolCallLedgerEvent,
 } from "./contracts.ts";
@@ -94,6 +95,40 @@ interface NodePlan {
 interface CompletedNode {
 	readonly node: ReflectionNode;
 	readonly lessons: readonly Lesson[];
+}
+
+interface MutableNodeRuntime {
+	providerCalls: number;
+	providerLatencyMs: number;
+	internalToolRounds: number;
+	outputTokens: number;
+	retries: number;
+	foregroundWaitMs: number;
+	readonly startedAt: number;
+}
+
+function nodeRuntime(runtime: MutableNodeRuntime): ReflectionNodeRuntime {
+	return {
+		providerCalls: runtime.providerCalls,
+		providerLatencyMs: runtime.providerLatencyMs,
+		internalToolRounds: runtime.internalToolRounds,
+		outputTokens: runtime.outputTokens,
+		retries: runtime.retries,
+		foregroundWaitMs: runtime.foregroundWaitMs,
+		nodeDurationMs: performance.now() - runtime.startedAt,
+	};
+}
+
+function newNodeRuntime(): MutableNodeRuntime {
+	return {
+		providerCalls: 0,
+		providerLatencyMs: 0,
+		internalToolRounds: 0,
+		outputTokens: 0,
+		retries: 0,
+		foregroundWaitMs: 0,
+		startedAt: performance.now(),
+	};
 }
 
 interface LessonDraft {
@@ -526,10 +561,11 @@ export class RecursiveReflector implements Reflector {
 				if (completed.has(plan.nodeId)) continue;
 				const timedOutChild = plan.childNodeIds.some((nodeId) => completed.get(nodeId)?.node.status !== "complete");
 				if (timedOutChild) {
-					completed.set(plan.nodeId, await this.#checkpointTimedOut(input, producer, plan));
+					completed.set(plan.nodeId, await this.#checkpointTimedOut(input, producer, plan, newNodeRuntime()));
 					continue;
 				}
 				const nodeDeadline = new ActiveComputeDeadline(this.#nodeDeadlineMs, `Reflection node ${plan.nodeId}`);
+				const runtime = newNodeRuntime();
 				let result: CompletedNode;
 				try {
 					result = await this.#executeNode(
@@ -550,6 +586,7 @@ export class RecursiveReflector implements Reflector {
 						},
 						stageDeadline,
 						nodeDeadline,
+						runtime,
 					);
 				} catch (error) {
 					input.signal?.throwIfAborted();
@@ -561,7 +598,7 @@ export class RecursiveReflector implements Reflector {
 						});
 					}
 					if (!nodeDeadline.expired) throw error;
-					result = await this.#checkpointTimedOut(input, producer, plan);
+					result = await this.#checkpointTimedOut(input, producer, plan, runtime);
 				} finally {
 					nodeDeadline.dispose();
 				}
@@ -691,6 +728,7 @@ export class RecursiveReflector implements Reflector {
 		chargeModelCall: () => number,
 		stageDeadline: ActiveComputeDeadline,
 		nodeDeadline: ActiveComputeDeadline,
+		runtime: MutableNodeRuntime,
 	): Promise<CompletedNode> {
 		const nodeReferences = registry.nodeReferences(plan.evidenceIds);
 		const childLessons = plan.childNodeIds.flatMap((nodeId) => completed.get(nodeId)?.lessons ?? []);
@@ -721,10 +759,12 @@ export class RecursiveReflector implements Reflector {
 		const permittedReferences = new Set<string>();
 		for (let round = 1; round <= this.#maxReflectionRounds && parsed?.complete !== true; round += 1) {
 			for (let attempt = 1; attempt <= this.#maxResponseRetries; attempt += 1) {
+				if (attempt > 1) runtime.retries += 1;
 				let providerCalls = 0;
 				const beforeProviderCall = async () => {
 					const modelCallSequence = chargeModelCall();
 					providerCalls += 1;
+					runtime.providerCalls += 1;
 					const modelCallId = stableId("reflector-model-call", {
 						idempotencyKey: input.idempotencyKey,
 						nodeId: plan.nodeId,
@@ -746,11 +786,20 @@ export class RecursiveReflector implements Reflector {
 							outputSchema,
 							tools,
 							beforeProviderCall,
+							onProviderCallComplete: (metrics) => {
+								runtime.providerLatencyMs += metrics.durationMs;
+								runtime.outputTokens += metrics.outputTokens;
+								if (metrics.retry) runtime.retries += 1;
+							},
+							onInternalToolRound: () => {
+								runtime.internalToolRounds += 1;
+							},
 							onForegroundWaitStart: () => {
 								stageDeadline.pause();
 								nodeDeadline.pause();
 							},
-							onForegroundWaitEnd: () => {
+							onForegroundWaitEnd: (durationMs) => {
+								runtime.foregroundWaitMs += durationMs;
 								nodeDeadline.resume();
 								stageDeadline.resume();
 							},
@@ -886,6 +935,7 @@ export class RecursiveReflector implements Reflector {
 			lessonIds: lessons.map((lesson) => lesson.lessonId),
 			resultDigest,
 			status: "complete" as const,
+			runtime: nodeRuntime(runtime),
 		};
 		const node: ReflectionNode = {
 			metadata: this.#metadata(input, modelProducer, plan.nodeId, plan.evidenceIds, nodeContent),
@@ -923,6 +973,7 @@ export class RecursiveReflector implements Reflector {
 		input: ReflectorInput,
 		producer: EvolutionArtifactProducer,
 		plan: NodePlan,
+		runtime: MutableNodeRuntime,
 	): Promise<CompletedNode> {
 		const nodeContent = {
 			nodeId: plan.nodeId,
@@ -935,6 +986,7 @@ export class RecursiveReflector implements Reflector {
 			lessonIds: [],
 			resultDigest: computeEvolutionContentDigest({ reason: "node-timeout" }),
 			status: "timed-out" as const,
+			runtime: nodeRuntime(runtime),
 		};
 		const node: ReflectionNode = {
 			metadata: this.#metadata(input, producer, plan.nodeId, plan.evidenceIds, nodeContent),

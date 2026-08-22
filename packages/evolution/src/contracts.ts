@@ -304,6 +304,16 @@ export interface EvidenceCoverageMap {
 
 export type ReflectionNodeStatus = "pending" | "complete" | "failed" | "timed-out";
 
+export interface ReflectionNodeRuntime {
+	readonly providerCalls: number;
+	readonly providerLatencyMs: number;
+	readonly internalToolRounds: number;
+	readonly outputTokens: number;
+	readonly retries: number;
+	readonly foregroundWaitMs: number;
+	readonly nodeDurationMs: number;
+}
+
 export interface EvolutionReferenceNormalization {
 	readonly field: string;
 	readonly providedReference: string;
@@ -322,6 +332,7 @@ export interface ReflectionNode {
 	readonly lessonIds: readonly string[];
 	readonly resultDigest: string;
 	readonly status: ReflectionNodeStatus;
+	readonly runtime?: ReflectionNodeRuntime;
 }
 
 export type LessonKind =

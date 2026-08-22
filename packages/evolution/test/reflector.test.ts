@@ -336,8 +336,23 @@ describe("recursive reflector", () => {
 		const input = reflectInput({
 			async execute(request) {
 				if (request.stage !== "reflector") throw new Error("Unexpected Curator request");
+				request.onForegroundWaitStart?.();
+				request.onForegroundWaitEnd?.(5);
 				await request.beforeProviderCall?.();
+				request.onProviderCallComplete?.({
+					durationMs: 10,
+					outputTokens: 3,
+					outcome: "completed",
+					retry: false,
+				});
 				await request.beforeProviderCall?.();
+				request.onProviderCallComplete?.({
+					durationMs: 20,
+					outputTokens: 4,
+					outcome: "completed",
+					retry: true,
+				});
+				request.onInternalToolRound?.();
 				return {
 					output: { complete: true, lessons: [lessonForRequest(request.input)] },
 					model: { provider: "faux", model: "fixture" },
@@ -349,6 +364,13 @@ describe("recursive reflector", () => {
 
 		const events = await persistence.read("job-1");
 		expect(events.filter((event) => event.type === "reflector-model-call")).toHaveLength(result.nodes.length * 2);
+		expect(result.nodes.every((node) => node.runtime?.providerCalls === 2)).toBe(true);
+		expect(result.nodes.every((node) => node.runtime?.providerLatencyMs === 30)).toBe(true);
+		expect(result.nodes.every((node) => node.runtime?.internalToolRounds === 1)).toBe(true);
+		expect(result.nodes.every((node) => node.runtime?.outputTokens === 7)).toBe(true);
+		expect(result.nodes.every((node) => node.runtime?.retries === 1)).toBe(true);
+		expect(result.nodes.every((node) => node.runtime?.foregroundWaitMs === 5)).toBe(true);
+		expect(result.nodes.every((node) => (node.runtime?.nodeDurationMs ?? -1) >= 0)).toBe(true);
 	});
 
 	it("checkpoints timed-out nodes and continues independent leaves", async () => {

@@ -188,10 +188,27 @@ export class CodingAgentEvolutionModelExecutor implements EvolutionModelExecutor
 			let assistant: AssistantMessage;
 			for (let providerAttempt = 1; ; providerAttempt += 1) {
 				if (request.stage === "reflector") await request.beforeProviderCall?.();
+				const providerStartedAt = performance.now();
 				try {
 					assistant = await this.#completeProviderCall(model, messages, tools, request);
+					if (request.stage === "reflector") {
+						request.onProviderCallComplete?.({
+							durationMs: performance.now() - providerStartedAt,
+							outputTokens: assistant.usage.output,
+							outcome: "completed",
+							retry: providerAttempt > 1,
+						});
+					}
 					break;
 				} catch (error) {
+					if (request.stage === "reflector") {
+						request.onProviderCallComplete?.({
+							durationMs: performance.now() - providerStartedAt,
+							outputTokens: 0,
+							outcome: error instanceof EvolutionProviderTimeoutError ? "timed-out" : "failed",
+							retry: providerAttempt > 1,
+						});
+					}
 					request.signal?.throwIfAborted();
 					if (!(error instanceof EvolutionProviderTimeoutError) || providerAttempt >= 2) throw error;
 				}
@@ -201,6 +218,9 @@ export class CodingAgentEvolutionModelExecutor implements EvolutionModelExecutor
 			}
 			messages.push(assistant);
 			const calls = assistant.content.filter((part) => part.type === "toolCall");
+			if (request.stage === "reflector" && calls.some((call) => call.name !== RESPONSE_TOOL_NAME)) {
+				request.onInternalToolRound?.();
+			}
 			for (const call of calls) {
 				if (call.name === RESPONSE_TOOL_NAME) {
 					return {
