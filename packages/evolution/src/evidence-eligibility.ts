@@ -33,13 +33,21 @@ function hasSubstantiveOperation(evidence: MaterializedEvidence): boolean {
 	return operationKind !== "abort" && evidence.payload.name !== "diffex.coding_agent.diagnostic";
 }
 
-function isEvolutionEvidence(evidence: MaterializedEvidence): boolean {
+function isTaskEvidence(evidence: MaterializedEvidence): boolean {
 	return hasSubstantiveMessage(evidence) || hasSubstantiveOperation(evidence);
+}
+
+function isMeaningfulDiagnostic(evidence: MaterializedEvidence): boolean {
+	return (
+		evidence.kind === "span" &&
+		evidence.payload.name === "diffex.coding_agent.diagnostic" &&
+		evidence.payload.status?.status === "error"
+	);
 }
 
 /** Classifies whether a materialized runtime trace can inform future harness behavior. */
 export function classifyEvolutionEvidence(invocation: MaterializedInvocation): EvolutionEvidenceEligibility {
-	if (invocation.evidence.some(isEvolutionEvidence)) {
+	if (invocation.evidence.some(isTaskEvidence)) {
 		return { eligible: true };
 	}
 	return { eligible: false, reason: NON_SUBSTANTIVE_RUNTIME_TRACE_REASON };
@@ -47,5 +55,11 @@ export function classifyEvolutionEvidence(invocation: MaterializedInvocation): E
 
 /** Retains only evidence that can inform future harness behavior. */
 export function selectEvolutionEvidence(invocation: MaterializedInvocation): MaterializedInvocation {
-	return { ...invocation, evidence: invocation.evidence.filter(isEvolutionEvidence) };
+	const hasTaskEvidence = invocation.evidence.some(isTaskEvidence);
+	return {
+		...invocation,
+		evidence: invocation.evidence.filter(
+			(evidence) => isTaskEvidence(evidence) || (hasTaskEvidence && isMeaningfulDiagnostic(evidence)),
+		),
+	};
 }

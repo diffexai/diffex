@@ -72,6 +72,27 @@ function operationSpan(kind: string): MaterializedEvidence {
 	};
 }
 
+function errorDiagnostic(): MaterializedEvidence {
+	return {
+		kind: "span",
+		evidenceId: "example:diagnostic",
+		order: { traceSequence: 2, timestamp: null, causalIdentifiers: [], ambiguity: [] },
+		traceSources: [],
+		payload: {
+			spanId: 2,
+			parentSpanId: null,
+			name: "diffex.coding_agent.diagnostic",
+			startedAt: "2026-08-22T12:00:00.000Z",
+			endedAt: "2026-08-22T12:00:01.000Z",
+			startAttributes: { "diffex.diagnostic.severity": "error" },
+			endAttributes: {},
+			events: [],
+			status: { status: "error", error: { name: "Error", message: "provider disconnected" } },
+			settled: true,
+		},
+	};
+}
+
 it("excludes lifecycle-only runtime traces", () => {
 	expect(
 		classifyEvolutionEvidence(invocation([traceRecord("harness_activate"), traceRecord("trace_footer")])),
@@ -83,6 +104,13 @@ it("excludes lifecycle-only runtime traces", () => {
 
 it("does not count an idle shutdown operation as learning evidence", () => {
 	expect(classifyEvolutionEvidence(invocation([operationSpan("abort"), traceRecord("trace_footer")]))).toEqual({
+		eligible: false,
+		reason: "non-substantive-runtime-trace",
+	});
+});
+
+it("keeps standalone runtime diagnostics outside evolution", () => {
+	expect(classifyEvolutionEvidence(invocation([errorDiagnostic()]))).toEqual({
 		eligible: false,
 		reason: "non-substantive-runtime-trace",
 	});
@@ -116,5 +144,12 @@ describe("substantive runtime traces", () => {
 
 		expect(classifyEvolutionEvidence(selected)).toEqual({ eligible: true });
 		expect(selected.evidence).toEqual([userMessage]);
+	});
+
+	it("retains error diagnostics that accompany substantive work", () => {
+		const task = operationSpan("prompt");
+		const diagnostic = errorDiagnostic();
+
+		expect(selectEvolutionEvidence(invocation([task, diagnostic])).evidence).toEqual([task, diagnostic]);
 	});
 });
