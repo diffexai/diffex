@@ -14,6 +14,7 @@ import {
 	type EvolutionScope,
 	type EvolutionSnapshotContext,
 	type EvolutionStageExecutor,
+	estimateEvolutionTokens,
 	FileEvolutionPersistence,
 	PollingEvolutionWorkSource,
 	type SuccessfulMaterialization,
@@ -91,6 +92,10 @@ async function serviceFixture(
 			return { artifacts: [], state: {}, directive: "continue" as const };
 		},
 	},
+	evidenceOptions: {
+		readonly highWaterCursor?: number;
+		readonly materializations?: readonly SuccessfulMaterialization[];
+	} = {},
 ): Promise<ServiceFixture> {
 	const root = await mkdtemp(join(tmpdir(), "diffex-evolution-service-"));
 	temporaryDirectories.push(root);
@@ -99,7 +104,11 @@ async function serviceFixture(
 	const harness = await harnesses.initialize();
 	const clock = new FixedClock();
 	const progress = new EvolutionProgressBus();
-	const materializations = [materialization(1), materialization(2), materialization(3)];
+	const materializations = evidenceOptions.materializations ?? [
+		materialization(1),
+		materialization(2),
+		materialization(3),
+	];
 	const snapshots = {
 		async capture(): Promise<EvolutionSnapshotContext> {
 			const memory = harness.state.memory;
@@ -130,7 +139,7 @@ async function serviceFixture(
 	};
 	const evidence = {
 		async highWaterCursor() {
-			return 3;
+			return evidenceOptions.highWaterCursor ?? 3;
 		},
 		async listSuccessful(_scope: EvolutionScope, afterCursor: number, throughCursor: number) {
 			return materializations.filter(
@@ -179,6 +188,31 @@ async function serviceFixture(
 }
 
 describe("evolution control service", () => {
+	it("uses only eligible materializations for totals and frozen input", async () => {
+		const eligible = materialization(2);
+		const fixture = await serviceFixture(undefined, {
+			highWaterCursor: 3,
+			materializations: [eligible],
+		});
+
+		const overview = await fixture.service.overview();
+		expect(overview).toMatchObject({
+			ingestionHighWaterCursor: 3,
+			settledInvocationCount: 1,
+			unprocessedEstimatedTokens: estimateEvolutionTokens([eligible.invocation]),
+			automaticEligibility: { eligible: false, reason: "insufficient-invocations" },
+		});
+		const started = await fixture.service.startManual();
+		if (started.status !== "created") throw new Error("Expected a created job");
+		const job = await fixture.store.load(started.job.jobId);
+		if (job === null) throw new Error("Expected the created job");
+		const snapshot = await fixture.store.get(job.inputSnapshot);
+		if (!("evidenceSources" in snapshot)) throw new Error("Expected an input snapshot");
+		expect(snapshot.evidenceSources.map((source) => source.materializationId)).toEqual(["materialization-2"]);
+		expect(snapshot.tokenMeasurement.estimatedTokens).toBe(estimateEvolutionTokens([eligible.invocation]));
+		await fixture.service.cancelActive();
+	});
+
 	it("projects eligibility and attaches a concurrent manual trigger", async () => {
 		const fixture = await serviceFixture();
 		const events: string[] = [];
