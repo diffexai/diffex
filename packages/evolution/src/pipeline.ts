@@ -578,7 +578,7 @@ export class EvolutionPipeline implements EvolutionStageExecutor {
 						coverageMapId: reflection.coverage.metadata.artifactId,
 						finalLessonIds: reflection.finalLessonIds,
 					},
-					directive: "continue",
+					directive: reflection.finalLessonIds.length === 0 ? "complete-no-op" : "continue",
 				};
 			}
 			case "curating": {

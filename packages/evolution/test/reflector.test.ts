@@ -351,6 +351,39 @@ describe("recursive reflector", () => {
 		expect(events.filter((event) => event.type === "reflector-model-call")).toHaveLength(result.nodes.length * 2);
 	});
 
+	it("checkpoints timed-out nodes and continues independent leaves", async () => {
+		const { persistence } = await reflectorFixture();
+		const reflector = new RecursiveReflector(
+			{ version: "1.0.0", artifacts: persistence, ledger: persistence },
+			{ maxUnitsPerSlice: 2, synthesisFanout: 8, nodeDeadlineMs: 10 },
+		);
+		let calls = 0;
+		const input = reflectInput({
+			async execute(request) {
+				if (request.stage !== "reflector") throw new Error("Unexpected Curator request");
+				calls += 1;
+				if (calls === 1) return new Promise<never>(() => {});
+				return {
+					output: { complete: true, lessons: [lessonForRequest(request.input)] },
+					model: { provider: "faux", model: "fixture" },
+				};
+			},
+		});
+
+		const result = await reflector.reflect(input);
+
+		expect(result.nodes.map((node) => node.status)).toEqual(["timed-out", "complete", "complete", "timed-out"]);
+		expect(result.finalLessonIds).toEqual([]);
+		expect(result.coverage.entries.slice(0, 2)).toEqual([
+			expect.objectContaining({ disposition: "skipped", diagnosticCodes: expect.arrayContaining(["node-timeout"]) }),
+			expect.objectContaining({ disposition: "skipped", diagnosticCodes: expect.arrayContaining(["node-timeout"]) }),
+		]);
+		expect(result.coverage.entries.slice(2).every((entry) => entry.disposition === "analyzed")).toBe(true);
+		expect(
+			(await persistence.read("job-1")).filter((event) => event.type === "reflection-node-checkpointed"),
+		).toHaveLength(4);
+	});
+
 	it("reflects a larger corpus recursively without changing foreground tools", async () => {
 		const { persistence, reflector } = await reflectorFixture();
 		const foregroundTools = [{ name: "read" }, { name: "edit" }];

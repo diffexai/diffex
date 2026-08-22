@@ -302,7 +302,7 @@ export interface EvidenceCoverageMap {
 	readonly finalLessonIds: readonly string[];
 }
 
-export type ReflectionNodeStatus = "pending" | "complete" | "failed";
+export type ReflectionNodeStatus = "pending" | "complete" | "failed" | "timed-out";
 
 export interface EvolutionReferenceNormalization {
 	readonly field: string;

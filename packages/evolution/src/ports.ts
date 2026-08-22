@@ -72,6 +72,8 @@ export interface ReflectorModelRequest {
 	readonly outputSchema: JsonObject;
 	readonly tools: readonly EvolutionModelTool[];
 	readonly beforeProviderCall?: () => void | Promise<void>;
+	readonly onForegroundWaitStart?: () => void;
+	readonly onForegroundWaitEnd?: (durationMs: number) => void;
 	readonly signal?: AbortSignal;
 }
 
