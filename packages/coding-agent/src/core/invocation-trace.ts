@@ -332,7 +332,7 @@ export class InvocationTrace implements AgentSessionLifecycleObserver, Telemetry
 		if (finalStatus !== "completed") return;
 		try {
 			const invocation = await materializeJsonlInvocation(recorder.destinationPath);
-			if (!classifyEvolutionEvidence(invocation).eligible) {
+			if (invocation.integrity === "complete" && !classifyEvolutionEvidence(invocation).eligible) {
 				await unlink(recorder.destinationPath);
 				if (this.#lastDestinationPath === recorder.destinationPath) this.#lastDestinationPath = undefined;
 			}

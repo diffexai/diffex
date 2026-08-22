@@ -251,6 +251,7 @@ describe("CLI invocation tracing", () => {
 			content: [{ type: "text", text: "first operation" }],
 			timestamp: Date.now(),
 		});
+		manager.appendMessage(fauxAssistantMessage("first response"));
 		await trace.startSpan(
 			{
 				name: "diffex.coding_agent.operation",
@@ -282,6 +283,7 @@ describe("CLI invocation tracing", () => {
 			content: [{ type: "text", text: "second operation" }],
 			timestamp: Date.now(),
 		});
+		manager.appendMessage(fauxAssistantMessage("second response"));
 		await trace.startSpan(
 			{
 				name: "diffex.coding_agent.operation",
@@ -335,6 +337,8 @@ describe("CLI invocation tracing", () => {
 			content: [{ type: "text", text: "second process" }],
 			timestamp: Date.now(),
 		});
+		firstManager.appendMessage(fauxAssistantMessage("first process response"));
+		secondManager.appendMessage(fauxAssistantMessage("second process response"));
 		await Promise.all([
 			firstTrace.startSpan(
 				{
@@ -529,6 +533,39 @@ describe("CLI invocation tracing", () => {
 		expect(await catalog.highWaterCursor(scope)).toBe(0);
 		expect(await catalog.listSuccessful(scope, 0, 0)).toEqual([]);
 	});
+
+	it.each([
+		{ terminationStatus: "completed" as const, expectedRawTraceCount: 0 },
+		{ terminationStatus: "aborted" as const, expectedRawTraceCount: 1 },
+	])(
+		"keeps lifecycle extension hooks out of evolution after $terminationStatus shutdown",
+		async ({ terminationStatus, expectedRawTraceCount }) => {
+			const directories = setup();
+			const manager = SessionManager.create(directories.projectDir, join(directories.agentDir, "sessions"));
+			const { trace } = await createInvocationTrace({ agentDir: directories.agentDir, sessionManager: manager });
+			await trace.attachSession(manager, "startup");
+			await trace.harnessActivated("version-1");
+			await trace.startSpan(
+				{
+					name: "diffex.coding_agent.extension_hook",
+					attributes: {
+						"diffex.extension.hook": "session_start",
+						"diffex.extension.path": "/extensions/widget.ts",
+					},
+				},
+				() => {},
+			);
+			await trace.close(terminationStatus);
+
+			const scope: EvolutionScope = { repositoryId: "global", scopeId: "global" };
+			const catalog = new TraceEvidenceCatalog({ agentDir: directories.agentDir, scope });
+			expect(tracePaths(directories.agentDir)).toHaveLength(expectedRawTraceCount);
+			expect(await catalog.listSuccessful(scope, 0, await catalog.highWaterCursor(scope))).toEqual([]);
+			expect(await catalog.excludedThroughCursor(scope, 0, await catalog.highWaterCursor(scope))).toBe(
+				expectedRawTraceCount,
+			);
+		},
+	);
 
 	it("removes a completed prompt trace when no substantive payload was recorded", async () => {
 		const directories = setup();

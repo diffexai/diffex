@@ -488,8 +488,11 @@ describe("coding-agent evolution runtime", () => {
 				timestamp: "2026-08-20T12:00:01.000Z",
 				spanId: 1,
 				parentSpanId: null,
-				name: "diffex.agent.run",
-				attributes: { outcome: "focused verification passed" },
+				name: "diffex.coding_agent.operation",
+				attributes: {
+					"diffex.operation.kind": "prompt",
+					outcome: "focused verification failed",
+				},
 			},
 			{
 				type: "span_end",
@@ -497,7 +500,10 @@ describe("coding-agent evolution runtime", () => {
 				timestamp: "2026-08-20T12:00:02.000Z",
 				spanId: 1,
 				attributes: {},
-				status: { status: "ok" },
+				status: {
+					status: "error",
+					error: { name: "Error", message: "focused verification failed" },
+				},
 			},
 			{
 				type: "trace_footer",
