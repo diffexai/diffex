@@ -327,6 +327,30 @@ describe("recursive reflector", () => {
 		expect(result.finalLessonIds).toHaveLength(10);
 	});
 
+	it("charges every provider round reported by the model executor", async () => {
+		const { persistence } = await reflectorFixture();
+		const reflector = new RecursiveReflector(
+			{ version: "1.0.0", artifacts: persistence, ledger: persistence },
+			{ maxUnitsPerSlice: 64 },
+		);
+		const input = reflectInput({
+			async execute(request) {
+				if (request.stage !== "reflector") throw new Error("Unexpected Curator request");
+				await request.beforeProviderCall?.();
+				await request.beforeProviderCall?.();
+				return {
+					output: { complete: true, lessons: [lessonForRequest(request.input)] },
+					model: { provider: "faux", model: "fixture" },
+				};
+			},
+		});
+
+		const result = await reflector.reflect(input);
+
+		const events = await persistence.read("job-1");
+		expect(events.filter((event) => event.type === "reflector-model-call")).toHaveLength(result.nodes.length * 2);
+	});
+
 	it("reflects a larger corpus recursively without changing foreground tools", async () => {
 		const { persistence, reflector } = await reflectorFixture();
 		const foregroundTools = [{ name: "read" }, { name: "edit" }];

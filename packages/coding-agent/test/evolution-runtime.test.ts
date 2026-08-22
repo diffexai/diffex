@@ -353,6 +353,39 @@ describe("coding-agent evolution runtime", () => {
 		});
 	});
 
+	it("stops the internal evolution tool loop after ten provider rounds", async () => {
+		const harness = await createHarness();
+		harnesses.push(harness);
+		harness.setResponses(
+			Array.from({ length: 10 }, () => fauxAssistantMessage(fauxToolCall("inspect", {}), { stopReason: "toolUse" })),
+		);
+		const executor = new CodingAgentEvolutionModelExecutor(harness.session, harness.session.modelRuntime, {
+			async waitUntilBackgroundAllowed() {},
+		});
+		const model = harness.getModel();
+		let providerCalls = 0;
+
+		await expect(
+			executor.execute({
+				stage: "reflector",
+				model: {
+					provider: model.provider,
+					model: model.id,
+					configurationDigest: `sha256:${"1".repeat(64)}`,
+				},
+				promptVersion: "reflector-v1",
+				idempotencyKey: "bounded-provider-rounds",
+				input: {},
+				outputSchema: { type: "object" },
+				tools: [],
+				beforeProviderCall() {
+					providerCalls += 1;
+				},
+			}),
+		).rejects.toThrow("exceeded 10 tool rounds");
+		expect(providerCalls).toBe(10);
+	});
+
 	it("returns a denied evidence-tool request to the model for correction", async () => {
 		const harness = await createHarness();
 		harnesses.push(harness);

@@ -71,6 +71,7 @@ export interface ReflectorModelRequest {
 	readonly input: JsonObject;
 	readonly outputSchema: JsonObject;
 	readonly tools: readonly EvolutionModelTool[];
+	readonly beforeProviderCall?: () => void | Promise<void>;
 	readonly signal?: AbortSignal;
 }
 

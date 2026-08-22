@@ -600,16 +600,20 @@ export class RecursiveReflector implements Reflector {
 		const permittedReferences = new Set<string>();
 		for (let round = 1; round <= this.#maxReflectionRounds && parsed?.complete !== true; round += 1) {
 			for (let attempt = 1; attempt <= this.#maxResponseRetries; attempt += 1) {
-				const modelCallSequence = chargeModelCall();
-				const modelCallId = stableId("reflector-model-call", {
-					idempotencyKey: input.idempotencyKey,
-					nodeId: plan.nodeId,
-					round,
-					modelCallSequence,
-				});
-				await this.#dependencies.ledger.append(
-					this.#modelCallEvent(input, producer, modelCallId, plan.nodeId, round, attempt),
-				);
+				let providerCalls = 0;
+				const beforeProviderCall = async () => {
+					const modelCallSequence = chargeModelCall();
+					providerCalls += 1;
+					const modelCallId = stableId("reflector-model-call", {
+						idempotencyKey: input.idempotencyKey,
+						nodeId: plan.nodeId,
+						round,
+						modelCallSequence,
+					});
+					await this.#dependencies.ledger.append(
+						this.#modelCallEvent(input, producer, modelCallId, plan.nodeId, round, attempt),
+					);
+				};
 				try {
 					response = await abortable(
 						input.model.execute({
@@ -620,12 +624,16 @@ export class RecursiveReflector implements Reflector {
 							input: this.#modelInput(input, plan, nodeReferences, lessonReferences, round, responseCorrection),
 							outputSchema,
 							tools,
+							beforeProviderCall,
 							signal: input.signal,
 						}),
 						input.signal,
 					);
+					if (providerCalls === 0) await beforeProviderCall();
 				} catch (error) {
 					input.signal?.throwIfAborted();
+					if (error instanceof EvolutionExecutionError) throw error;
+					if (providerCalls === 0) await beforeProviderCall();
 					lastError = error;
 					lastFailure = "model";
 					continue;

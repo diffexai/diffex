@@ -62,7 +62,7 @@ const TRACE_EXCLUSION_INDEX_NAME = ".evolution-exclusions.json";
 const TRACE_EXCLUSION_INDEX_VERSION = 1;
 const GLOBAL_EVOLUTION_SCOPE: EvolutionScope = { repositoryId: "global", scopeId: "global" };
 const RESPONSE_TOOL_NAME = "submit_evolution_response";
-const MAX_MODEL_ROUNDS = 24;
+const MAX_MODEL_ROUNDS = 10;
 
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -166,6 +166,7 @@ export class CodingAgentEvolutionModelExecutor implements EvolutionModelExecutor
 		for (let round = 0; round < MAX_MODEL_ROUNDS; round += 1) {
 			request.signal?.throwIfAborted();
 			await this.#priority.waitUntilBackgroundAllowed(request.signal ?? new AbortController().signal);
+			if (request.stage === "reflector") await request.beforeProviderCall?.();
 			const assistant = await this.#modelRuntime.completeSimple(
 				model,
 				{
