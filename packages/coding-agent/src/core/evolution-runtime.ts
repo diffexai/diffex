@@ -475,6 +475,19 @@ export class TraceEvidenceCatalog implements EvolutionEvidenceCatalog {
 		);
 		return materializations.filter((entry): entry is SuccessfulMaterialization => entry !== null);
 	}
+
+	async excludedThroughCursor(scope: EvolutionScope, afterCursor: number, throughCursor: number): Promise<number> {
+		this.#assertScope(scope);
+		await this.listSuccessful(scope, afterCursor, throughCursor);
+		const excludedNames = new Set((await this.#readExclusions()).map((exclusion) => exclusion.traceName));
+		const paths = await this.#paths();
+		let cursor = afterCursor;
+		for (const path of paths.slice(afterCursor, Math.min(throughCursor, paths.length))) {
+			if (!excludedNames.has(basename(path))) break;
+			cursor += 1;
+		}
+		return cursor;
+	}
 }
 
 class CodingAgentSnapshotSource implements EvolutionSnapshotSource {

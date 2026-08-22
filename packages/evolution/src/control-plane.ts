@@ -433,7 +433,36 @@ export class EvolutionControlPlane implements EvolutionJobRunner {
 				previousCursor = materialization.ingestionCursor;
 			}
 
-			if (materializations.length === 0) return { status: "not-created", reason: "no-new-evidence" };
+			if (materializations.length === 0) {
+				const excludedThroughCursor =
+					(await this.#dependencies.evidence.excludedThroughCursor?.(
+						request.scope,
+						processedCursor.sequence,
+						ingestionHighWaterCursor,
+					)) ?? processedCursor.sequence;
+				if (excludedThroughCursor > processedCursor.sequence) {
+					const commitId = `excluded-${computeEvolutionContentDigest({
+						scope: request.scope,
+						afterCursor: processedCursor.sequence,
+						throughCursor: excludedThroughCursor,
+					}).slice("sha256:".length, "sha256:".length + 32)}`;
+					const committed = await this.#dependencies.cursors.commit(
+						request.scope,
+						processedCursor.sequence,
+						excludedThroughCursor,
+						commitId,
+						this.#dependencies.clock.now(),
+						lease(),
+					);
+					if (committed === "conflict") {
+						throw new EvolutionExecutionError("Excluded evidence cursor conflicted", {
+							reasonCode: "snapshot-invalid",
+							retryable: false,
+						});
+					}
+				}
+				return { status: "not-created", reason: "no-new-evidence" };
+			}
 			const evidenceRange = {
 				afterCursor: processedCursor.sequence,
 				throughCursor: ingestionHighWaterCursor,

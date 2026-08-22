@@ -266,6 +266,7 @@ export interface EvolutionEvidenceCatalog {
 		afterCursor: number,
 		throughCursor: number,
 	): Promise<readonly SuccessfulMaterialization[]>;
+	excludedThroughCursor?(scope: EvolutionScope, afterCursor: number, throughCursor: number): Promise<number>;
 }
 
 export interface EvolutionSnapshotContext {

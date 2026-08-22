@@ -269,6 +269,7 @@ describe("coding-agent evolution runtime", () => {
 				},
 			],
 		});
+		expect(await catalog.excludedThroughCursor(scope, 0, 1)).toBe(1);
 	});
 
 	it("keeps adversarial evidence outside model control instructions", async () => {
