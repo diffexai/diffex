@@ -23,6 +23,10 @@ import type {
 } from "./contracts.ts";
 import { type CuratorToolAudit, CuratorToolRegistry } from "./curator-tools.ts";
 import { EvolutionExecutionError } from "./errors.ts";
+import {
+	assertEvolutionMemoryLessonContent,
+	EVOLUTION_MEMORY_MAX_LESSON_SENTENCES,
+} from "./evolution-memory-lessons.ts";
 import { EvolutionModelReferenceError, referenceArray } from "./model-references.ts";
 import type { Curator, CuratorInput, EvolutionLedger, EvolutionModelResponse } from "./ports.ts";
 import { computeEvolutionContentDigest, createEvolutionArtifactMetadata } from "./provenance.ts";
@@ -146,7 +150,11 @@ export function createCuratorOutputSchema(references: CuratorSchemaReferences): 
 				required: ["destination", "content", "intendedScope"],
 				properties: {
 					destination: { $ref: "#/$defs/destination" },
-					content: { type: "string", minLength: 1 },
+					content: {
+						type: "string",
+						minLength: 1,
+						description: "Lesson prose of at most three sentences. Omit the deterministic Lesson number.",
+					},
 					intendedScope: stringArray,
 				},
 			},
@@ -168,7 +176,11 @@ export function createCuratorOutputSchema(references: CuratorSchemaReferences): 
 						properties: {
 							operation: { const: "ADD" },
 							destination: { $ref: "#/$defs/destination" },
-							content: { type: "string", minLength: 1 },
+							content: {
+								type: "string",
+								minLength: 1,
+								description: "Lesson prose of at most three sentences. Omit the deterministic Lesson number.",
+							},
 							intendedScope: stringArray,
 						},
 					},
@@ -462,10 +474,12 @@ function addition(value: unknown, nested = false): EvolutionMemoryAddDelta {
 	const section = nullableString(value.destination, "section");
 	const anchor = nullableString(value.destination, "anchor");
 	if (section === null && anchor === null) throw new Error("ADD must identify a destination section or anchor");
+	const content = requiredString(value, "content");
+	assertEvolutionMemoryLessonContent(content);
 	return {
 		operation: "ADD",
 		destination: { section, anchor },
-		content: requiredString(value, "content"),
+		content,
 		intendedScope: stringArray(value.intendedScope, "intendedScope", false),
 	};
 }
@@ -934,6 +948,8 @@ function modelInput(input: CuratorInput, registry: CuratorToolRegistry, response
 			routeUsefulTelemetryFactsToDebuggingDocumentation: true,
 			memoryOperations: ["ADD", "REMOVE", "REPLACE"],
 			deferredTargets: ["skill", "orchestration-source"],
+			maxEvolutionMemoryLessonSentences: EVOLUTION_MEMORY_MAX_LESSON_SENTENCES,
+			omitEvolutionMemoryLessonNumber: true,
 			...(responseCorrection === null
 				? {}
 				: {

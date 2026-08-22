@@ -371,7 +371,9 @@ describe("structured delta curator", () => {
 		expect(capturedInputs[0]?.control).toMatchObject({
 			consolidateOverlappingLessons: true,
 			emitOnlyBehaviorChangingProposals: true,
+			maxEvolutionMemoryLessonSentences: 3,
 			omitObserverDocumentation: true,
+			omitEvolutionMemoryLessonNumber: true,
 			omitTelemetryFormatFacts: true,
 			routeUsefulTelemetryFactsToDebuggingDocumentation: true,
 		});
@@ -660,6 +662,41 @@ describe("structured delta curator", () => {
 		expect(inputs[1]?.memory).toEqual(inputs[0]?.memory);
 		expect(JSON.stringify(inputs[1]?.control)).not.toContain("L2");
 		expect(JSON.stringify(inputs[1]?.control)).toContain("L1");
+	});
+
+	it("retries model-authored lessons longer than three sentences", async () => {
+		const inputs: JsonObject[] = [];
+		const curator = new StructuredDeltaCurator({ version: "1.2.3" });
+		const proposals = await curator.curate(
+			curatorInput((request) => {
+				inputs.push(request.input);
+				const content =
+					inputs.length === 1
+						? "First sentence. Second sentence. Third sentence. Fourth sentence."
+						: "First sentence. Second sentence. Third sentence.";
+				return Promise.resolve(
+					response([
+						decision(
+							"bounded-lesson",
+							proposal(
+								"ADD",
+								{ kind: "evolution-memory" },
+								{
+									operation: "ADD",
+									destination: { section: "Engineering", anchor: null },
+									content,
+									intendedScope: ["Repository code changes"],
+								},
+							),
+						),
+					]),
+				);
+			}),
+		);
+
+		expect(proposals).toHaveLength(1);
+		expect(inputs).toHaveLength(2);
+		expect(JSON.stringify(inputs[1]?.control)).toContain("at most 3 sentences");
 	});
 
 	it("rejects unsupported writer routes after bounded attempts", async () => {

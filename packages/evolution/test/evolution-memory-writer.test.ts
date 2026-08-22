@@ -94,6 +94,63 @@ function batch(
 }
 
 describe("evolution memory writer", () => {
+	it("numbers model-authored lessons and rejects lessons longer than three sentences", async () => {
+		const { harnessState, snapshot, writer } = await emptyFixture();
+		const numberedBatch = batch(
+			snapshot,
+			[
+				{
+					mutationId: "mutation-numbered",
+					proposalId: "proposal-numbered",
+					target: { kind: "evolution-memory", expectedHarnessVersion: snapshot.harnessVersion },
+					payload: {
+						operation: "ADD",
+						destination: { section: "verification", anchor: "runtime-verification" },
+						content: "Lesson 99: Verify the runtime. Capture the result. Fix visible regressions.",
+						intendedScope: ["verification"],
+					},
+				},
+			],
+			{ batchId: "batch-numbered", activationEventId: "activation-numbered" },
+		);
+		const numberedWrite = await writer.write(numberedBatch, {
+			idempotencyKey: "write-numbered",
+			lease: writerLease,
+		});
+		await writer.activate(numberedBatch, numberedWrite, {
+			idempotencyKey: "activate-numbered",
+			lease: writerLease,
+		});
+		expect((await harnessState.loadCurrent()).state.memory).toBe(
+			"Lesson 1: Verify the runtime. Capture the result. Fix visible regressions.\n",
+		);
+
+		const numberedSnapshot = await writer.captureSnapshot();
+		const overlongBatch = batch(
+			numberedSnapshot,
+			[
+				{
+					mutationId: "mutation-overlong",
+					proposalId: "proposal-overlong",
+					target: { kind: "evolution-memory", expectedHarnessVersion: numberedSnapshot.harnessVersion },
+					payload: {
+						operation: "ADD",
+						destination: { section: "verification", anchor: "runtime-verification" },
+						content: "First sentence. Second sentence. Third sentence. Fourth sentence.",
+						intendedScope: ["verification"],
+					},
+				},
+			],
+			{ batchId: "batch-overlong", activationEventId: "activation-overlong" },
+		);
+		await expect(
+			writer.write(overlongBatch, { idempotencyKey: "write-overlong", lease: writerLease }),
+		).rejects.toThrow("at most 3 sentences");
+		expect((await harnessState.loadCurrent()).state.memory).toBe(
+			"Lesson 1: Verify the runtime. Capture the result. Fix visible regressions.\n",
+		);
+	});
+
 	it("bootstraps blank memory by appending additions in mutation order", async () => {
 		const { harnessState, initial, snapshot, writer } = await emptyFixture();
 		const selectedBatch = batch(snapshot, [
@@ -136,17 +193,21 @@ describe("evolution memory writer", () => {
 		expect(activation.status).toBe("activated");
 		expect(activation.resultingHarnessVersion).not.toBe(initial.manifest.version);
 		expect((await harnessState.loadCurrent()).state.memory).toBe(
-			"- Verify UI and scene-flow changes in a real runtime.\n\n- Confirm persistence before promising durable recall.\n",
+			"Lesson 1: Verify UI and scene-flow changes in a real runtime.\n\nLesson 2: Confirm persistence before promising durable recall.\n",
 		);
 		const activatedSnapshot = await writer.captureSnapshot();
 		expect(activatedSnapshot.activeMemoryItems).toHaveLength(2);
 		expect(activatedSnapshot.activeMemoryItems).toEqual([
 			expect.objectContaining({
-				contentDigest: computeEvolutionContentDigest("- Verify UI and scene-flow changes in a real runtime."),
+				contentDigest: computeEvolutionContentDigest(
+					"Lesson 1: Verify UI and scene-flow changes in a real runtime.",
+				),
 				ledger: { origin: "evolution", creationEventId: "activation-event-1", supersessionEventId: null },
 			}),
 			expect.objectContaining({
-				contentDigest: computeEvolutionContentDigest("- Confirm persistence before promising durable recall."),
+				contentDigest: computeEvolutionContentDigest(
+					"Lesson 2: Confirm persistence before promising durable recall.",
+				),
 				ledger: { origin: "evolution", creationEventId: "activation-event-1", supersessionEventId: null },
 			}),
 		]);
@@ -195,12 +256,12 @@ describe("evolution memory writer", () => {
 		const current = await harnessState.loadCurrent();
 		expect(current.manifest.base).toBe(initial.manifest.version);
 		expect(current.state.memory).toBe(
-			"# Evolution memory\n\n## Existing\n\n- Preserve this manual rule.\n\nTail bytes stay exact.\n\n- Apply selected deltas as one batch.\n",
+			"# Evolution memory\n\n## Existing\n\n- Preserve this manual rule.\n\nTail bytes stay exact.\n\nLesson 3: Apply selected deltas as one batch.\n",
 		);
 		const activatedSnapshot = await writer.captureSnapshot();
 		expect(activatedSnapshot.activeMemoryItems).toHaveLength(3);
 		expect(activatedSnapshot.activeMemoryItems.at(-1)).toMatchObject({
-			contentDigest: computeEvolutionContentDigest("- Apply selected deltas as one batch."),
+			contentDigest: computeEvolutionContentDigest("Lesson 3: Apply selected deltas as one batch."),
 			creationRevision: current.manifest.version,
 			ledger: { origin: "evolution", creationEventId: "activation-event-1", supersessionEventId: null },
 		});

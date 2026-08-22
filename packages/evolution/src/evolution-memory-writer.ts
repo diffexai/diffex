@@ -20,6 +20,11 @@ import type {
 } from "./contracts.ts";
 import { EVOLUTION_MEMORY_ITEM_SCHEMA_VERSION } from "./contracts.ts";
 import { EvolutionExecutionError } from "./errors.ts";
+import {
+	evolutionMemoryLessonBody,
+	evolutionMemoryLessonNumber,
+	numberEvolutionMemoryLesson,
+} from "./evolution-memory-lessons.ts";
 import { computeEvolutionContentDigest, serializeEvolutionValue } from "./provenance.ts";
 import type { EvolutionTargetWriter } from "./targets.ts";
 
@@ -250,7 +255,7 @@ function validateParsedMemory(memory: string, parsed: ParsedEvolutionMemory, max
 	}
 	const normalizedItems = new Set<string>();
 	for (const block of parsed.blocks) {
-		const normalized = normalizedText(block.content);
+		const normalized = normalizedText(evolutionMemoryLessonBody(block.content));
 		if (normalized === "") throw new Error("EVOLVE.md contains an empty memory item");
 		if (normalizedItems.has(normalized)) throw new Error("EVOLVE.md contains duplicate normalized memory items");
 		normalizedItems.add(normalized);
@@ -669,6 +674,11 @@ export class EvolutionMemoryWriter implements EvolutionTargetWriter {
 		const bootstrappingBlankMemory = memory.trim() === "";
 		let items = [...baseCatalog.items];
 		const activeOrder = [...baseCatalog.activeOrder];
+		const existingLessonNumbers = parseEvolutionMemory(memory).blocks.flatMap((block) => {
+			const lessonNumber = evolutionMemoryLessonNumber(block.content);
+			return lessonNumber === null ? [] : [lessonNumber];
+		});
+		let nextLessonNumber = Math.max(baseCatalog.items.length, 0, ...existingLessonNumbers) + 1;
 		const addedIds = new Set<string>();
 		const removedIds = new Set<string>();
 		const remove = (memoryItemId: string, expectedContentDigest: string): void => {
@@ -698,10 +708,12 @@ export class EvolutionMemoryWriter implements EvolutionTargetWriter {
 			) {
 				throw new Error("Each EVOLVE.md addition must contain exactly one non-heading memory item");
 			}
+			const numberedContent = numberEvolutionMemoryLesson(delta.content, nextLessonNumber);
+			nextLessonNumber += 1;
 			const parsed = parseEvolutionMemory(memory);
 			const offset = insertionOffset(memory, parsed, delta, bootstrappingBlankMemory);
 			const insertionIndex = parsed.blocks.filter((block) => block.end <= offset).length;
-			memory = insertMemory(memory, offset, delta.content);
+			memory = insertMemory(memory, offset, numberedContent);
 			const memoryItemId = `memory-item-${createHash("sha256").update(mutation.mutationId).digest("hex").slice(0, 32)}`;
 			if (items.some((item) => item.memoryItemId === memoryItemId)) {
 				throw new Error(`Mutation reuses memory item ID "${memoryItemId}"`);
@@ -709,7 +721,7 @@ export class EvolutionMemoryWriter implements EvolutionTargetWriter {
 			items.push({
 				schemaVersion: EVOLUTION_MEMORY_ITEM_SCHEMA_VERSION,
 				memoryItemId,
-				contentDigest: itemDigest(delta.content),
+				contentDigest: itemDigest(numberedContent),
 				creationRevision: batch.expectedBaseVersion,
 				supersessionRevision: null,
 				ledger: {
