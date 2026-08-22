@@ -31,8 +31,10 @@ import { type ReflectorNodeReferences, type ReflectorToolAudit, ReflectorToolReg
 const DEFAULT_MAX_TOOL_CALLS = 200;
 const DEFAULT_MAX_MODEL_CALLS = 100;
 const DEFAULT_MAX_RECURSION_DEPTH = 8;
-const DEFAULT_MAX_REFLECTION_ROUNDS = 5;
+const DEFAULT_MAX_REFLECTION_ROUNDS = 2;
 const DEFAULT_MAX_RESPONSE_RETRIES = 2;
+const DEFAULT_MAX_EVIDENCE_TOOL_CALLS_PER_LEAF = 6;
+const DEFAULT_MAX_LESSON_TOOL_CALLS_PER_SYNTHESIS_NODE = 2;
 const DEFAULT_MAX_LESSONS_PER_LEAF = 3;
 const DEFAULT_MAX_UNITS_PER_SLICE = 64;
 const DEFAULT_SYNTHESIS_FANOUT = 8;
@@ -60,6 +62,8 @@ export interface RecursiveReflectorOptions {
 	readonly maxRecursionDepth?: number;
 	readonly maxReflectionRounds?: number;
 	readonly maxResponseRetries?: number;
+	readonly maxEvidenceToolCallsPerLeaf?: number;
+	readonly maxLessonToolCallsPerSynthesisNode?: number;
 	readonly maxLessonsPerLeaf?: number;
 	readonly maxLessonsPerSynthesisNode?: number;
 	readonly maxUnitsPerSlice?: number;
@@ -356,6 +360,8 @@ export class RecursiveReflector implements Reflector {
 	readonly #maxRecursionDepth: number;
 	readonly #maxReflectionRounds: number;
 	readonly #maxResponseRetries: number;
+	readonly #maxEvidenceToolCallsPerLeaf: number;
+	readonly #maxLessonToolCallsPerSynthesisNode: number;
 	readonly #maxLessonsPerLeaf: number;
 	readonly #maxLessonsPerSynthesisNode: number;
 	readonly #maxUnitsPerSlice: number;
@@ -380,6 +386,16 @@ export class RecursiveReflector implements Reflector {
 			options.maxResponseRetries,
 			DEFAULT_MAX_RESPONSE_RETRIES,
 			"maxResponseRetries",
+		);
+		this.#maxEvidenceToolCallsPerLeaf = positiveInteger(
+			options.maxEvidenceToolCallsPerLeaf,
+			DEFAULT_MAX_EVIDENCE_TOOL_CALLS_PER_LEAF,
+			"maxEvidenceToolCallsPerLeaf",
+		);
+		this.#maxLessonToolCallsPerSynthesisNode = positiveInteger(
+			options.maxLessonToolCallsPerSynthesisNode,
+			DEFAULT_MAX_LESSON_TOOL_CALLS_PER_SYNTHESIS_NODE,
+			"maxLessonToolCallsPerSynthesisNode",
 		);
 		this.#maxLessonsPerLeaf = positiveInteger(
 			options.maxLessonsPerLeaf,
@@ -577,7 +593,9 @@ export class RecursiveReflector implements Reflector {
 		const childLessons = plan.childNodeIds.flatMap((nodeId) => completed.get(nodeId)?.lessons ?? []);
 		const lessonReferences = new EvolutionModelReferenceCatalog("lesson", childLessons);
 		const tools =
-			plan.kind === "leaf" ? registry.toolsForEvidence(nodeReferences) : registry.toolsForLessons(lessonReferences);
+			plan.kind === "leaf"
+				? registry.toolsForEvidence(nodeReferences, this.#maxEvidenceToolCallsPerLeaf)
+				: registry.toolsForLessons(lessonReferences, this.#maxLessonToolCallsPerSynthesisNode);
 		const maxLessons =
 			plan.kind === "leaf"
 				? this.#maxLessonsPerLeaf
@@ -823,6 +841,10 @@ export class RecursiveReflector implements Reflector {
 							: this.#maxLessonsPerSynthesisNode,
 				lessonSelection:
 					"Return only the highest-impact, non-overlapping lessons that would change future behavior.",
+				maximumToolCalls:
+					plan.kind === "leaf" ? this.#maxEvidenceToolCallsPerLeaf : this.#maxLessonToolCallsPerSynthesisNode,
+				maximumRefinementRounds: this.#maxReflectionRounds,
+				structuredResponseRetries: this.#maxResponseRetries,
 				...(responseCorrection === null
 					? {}
 					: {

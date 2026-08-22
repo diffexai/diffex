@@ -805,7 +805,7 @@ describe("recursive reflector", () => {
 		await expect(reflector.reflect(input)).resolves.toMatchObject({ nodes: expect.any(Array) });
 	});
 
-	it("stops after five incomplete refinement rounds by default", async () => {
+	it("stops after two incomplete refinement rounds by default", async () => {
 		const { persistence } = await reflectorFixture();
 		const reflector = new RecursiveReflector(
 			{ version: "1.0.0", artifacts: persistence, ledger: persistence },
@@ -825,8 +825,72 @@ describe("recursive reflector", () => {
 			reasonCode: "reflection-budget-exhausted",
 		});
 		expect((await persistence.read("job-1")).filter((event) => event.type === "reflector-model-call")).toHaveLength(
-			5,
+			2,
 		);
+	});
+
+	it("limits each leaf to six evidence-tool calls", async () => {
+		const { persistence } = await reflectorFixture();
+		const reflector = new RecursiveReflector(
+			{ version: "1.0.0", artifacts: persistence, ledger: persistence },
+			{ maxUnitsPerSlice: 64 },
+		);
+		const input = reflectInput({
+			async execute(request) {
+				if (request.stage !== "reflector") throw new Error("Unexpected Curator request");
+				const node = jsonObject(request.input.node, "node");
+				if (node.kind === "leaf") {
+					expect(request.input.control).toMatchObject({
+						maximumToolCalls: 6,
+						maximumRefinementRounds: 2,
+						structuredResponseRetries: 2,
+					});
+					const search = request.tools.find((tool) => tool.name === "search_evidence");
+					for (let count = 0; count < 6; count += 1) await search?.execute({ query: "evidence" });
+					await expect(search?.execute({ query: "evidence" })).rejects.toThrow("node tool-call budget");
+				}
+				return {
+					output: { complete: true, lessons: [lessonForRequest(request.input)] },
+					model: { provider: "faux", model: "fixture" },
+				};
+			},
+		});
+
+		await expect(reflector.reflect(input)).rejects.toMatchObject({ reasonCode: "reflection-budget-exhausted" });
+		expect(
+			(await persistence.read("job-1")).filter(
+				(event) => event.type === "reflector-tool-call" && event.denialCode === "tool-budget-exhausted",
+			),
+		).toHaveLength(1);
+	});
+
+	it("limits synthesis nodes to two lesson inspections", async () => {
+		const { persistence, reflector } = await reflectorFixture();
+		const input = reflectInput({
+			async execute(request) {
+				if (request.stage !== "reflector") throw new Error("Unexpected Curator request");
+				const node = jsonObject(request.input.node, "node");
+				if (node.kind === "synthesis") {
+					expect(request.input.control).toMatchObject({ maximumToolCalls: 2 });
+					const inspect = request.tools.find((tool) => tool.name === "inspect_child_lessons");
+					const lessonRefs = references(request.input, "childLessons", "lessonRef");
+					await inspect?.execute({ lessonRefs });
+					await inspect?.execute({ lessonRefs });
+					await expect(inspect?.execute({ lessonRefs })).rejects.toThrow("node tool-call budget");
+				}
+				return {
+					output: { complete: true, lessons: [lessonForRequest(request.input)] },
+					model: { provider: "faux", model: "fixture" },
+				};
+			},
+		});
+
+		await expect(reflector.reflect(input)).rejects.toMatchObject({ reasonCode: "reflection-budget-exhausted" });
+		expect(
+			(await persistence.read("job-1")).filter(
+				(event) => event.type === "reflector-tool-call" && event.denialCode === "tool-budget-exhausted",
+			),
+		).toHaveLength(1);
 	});
 
 	it("fails when a model catches a hard tool-budget denial", async () => {
