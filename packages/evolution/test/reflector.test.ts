@@ -258,6 +258,41 @@ function jsonObject(value: unknown, description: string): JsonObject {
 }
 
 describe("recursive reflector", () => {
+	it("limits each leaf to three high-impact lessons", async () => {
+		const { persistence } = await reflectorFixture();
+		const reflector = new RecursiveReflector(
+			{ version: "1.0.0", artifacts: persistence, ledger: persistence },
+			{ maxUnitsPerSlice: 64 },
+		);
+		const input = reflectInput({
+			async execute(request) {
+				if (request.stage !== "reflector") throw new Error("Unexpected Curator request");
+				const node = jsonObject(request.input.node, "node");
+				const lesson = lessonForRequest(request.input);
+				if (node.kind !== "leaf") {
+					return {
+						output: { complete: true, lessons: [lesson] },
+						model: { provider: "faux", model: "fixture" },
+					};
+				}
+				expect(request.input.control).toMatchObject({ maximumLessons: 3 });
+				expect(jsonObject(request.outputSchema.properties, "schema properties").lessons).toMatchObject({
+					maxItems: 3,
+				});
+				return {
+					output: { complete: true, lessons: [lesson, lesson, lesson, lesson] },
+					model: { provider: "faux", model: "fixture" },
+				};
+			},
+		});
+
+		const result = await reflector.reflect(input);
+
+		const leaves = result.nodes.filter((node) => node.kind === "leaf");
+		expect(leaves.length).toBeGreaterThan(0);
+		expect(leaves.every((node) => node.lessonIds.length === 3)).toBe(true);
+	});
+
 	it("reflects a larger corpus recursively without changing foreground tools", async () => {
 		const { persistence, reflector } = await reflectorFixture();
 		const foregroundTools = [{ name: "read" }, { name: "edit" }];

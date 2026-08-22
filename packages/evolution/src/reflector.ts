@@ -33,6 +33,7 @@ const DEFAULT_MAX_MODEL_CALLS = 100;
 const DEFAULT_MAX_RECURSION_DEPTH = 8;
 const DEFAULT_MAX_REFLECTION_ROUNDS = 5;
 const DEFAULT_MAX_RESPONSE_RETRIES = 2;
+const DEFAULT_MAX_LESSONS_PER_LEAF = 3;
 const DEFAULT_MAX_UNITS_PER_SLICE = 64;
 const DEFAULT_SYNTHESIS_FANOUT = 8;
 const DEFAULT_MAX_CURATOR_LESSONS = 50;
@@ -58,6 +59,7 @@ export interface RecursiveReflectorOptions {
 	readonly maxRecursionDepth?: number;
 	readonly maxReflectionRounds?: number;
 	readonly maxResponseRetries?: number;
+	readonly maxLessonsPerLeaf?: number;
 	readonly maxUnitsPerSlice?: number;
 	readonly synthesisFanout?: number;
 	readonly maxCuratorLessons?: number;
@@ -212,6 +214,7 @@ function parseResponse(
 	context:
 		| { readonly kind: "leaf"; readonly evidence: ReflectorNodeReferences["evidence"] }
 		| { readonly kind: "synthesis"; readonly lessons: EvolutionModelReferenceCatalog<Lesson> },
+	maxLessons: number | undefined,
 ): {
 	readonly complete: boolean;
 	readonly lessons: readonly LessonDraft[];
@@ -222,9 +225,10 @@ function parseResponse(
 	}
 	if (!Array.isArray(response.output.lessons)) throw new Error("Reflector response lessons must be an array");
 	const referenceNormalizations: EvolutionReferenceNormalization[] = [];
+	const lessons = maxLessons === undefined ? response.output.lessons : response.output.lessons.slice(0, maxLessons);
 	return {
 		complete: response.output.complete,
-		lessons: response.output.lessons.map((lesson) =>
+		lessons: lessons.map((lesson) =>
 			context.kind === "leaf"
 				? parseLeafLessonDraft(lesson, context.evidence, referenceNormalizations)
 				: parseSynthesisLessonDraft(lesson, context.lessons),
@@ -233,7 +237,11 @@ function parseResponse(
 	};
 }
 
-function reflectorOutputSchema(kind: "leaf" | "synthesis", references: readonly string[]): JsonObject {
+function reflectorOutputSchema(
+	kind: "leaf" | "synthesis",
+	references: readonly string[],
+	maxLessons: number | undefined,
+): JsonObject {
 	const referenceProperties: JsonObject =
 		kind === "leaf"
 			? {
@@ -272,6 +280,7 @@ function reflectorOutputSchema(kind: "leaf" | "synthesis", references: readonly 
 			complete: { type: "boolean" },
 			lessons: {
 				type: "array",
+				...(maxLessons === undefined ? {} : { maxItems: maxLessons }),
 				items: {
 					type: "object",
 					additionalProperties: false,
@@ -339,6 +348,7 @@ export class RecursiveReflector implements Reflector {
 	readonly #maxRecursionDepth: number;
 	readonly #maxReflectionRounds: number;
 	readonly #maxResponseRetries: number;
+	readonly #maxLessonsPerLeaf: number;
 	readonly #maxUnitsPerSlice: number;
 	readonly #synthesisFanout: number;
 	readonly #maxCuratorLessons: number;
@@ -361,6 +371,11 @@ export class RecursiveReflector implements Reflector {
 			options.maxResponseRetries,
 			DEFAULT_MAX_RESPONSE_RETRIES,
 			"maxResponseRetries",
+		);
+		this.#maxLessonsPerLeaf = positiveInteger(
+			options.maxLessonsPerLeaf,
+			DEFAULT_MAX_LESSONS_PER_LEAF,
+			"maxLessonsPerLeaf",
 		);
 		this.#maxUnitsPerSlice = positiveInteger(
 			options.maxUnitsPerSlice,
@@ -552,6 +567,7 @@ export class RecursiveReflector implements Reflector {
 		const outputSchema = reflectorOutputSchema(
 			plan.kind,
 			plan.kind === "leaf" ? nodeReferences.evidence.references : lessonReferences.references,
+			plan.kind === "leaf" ? this.#maxLessonsPerLeaf : undefined,
 		);
 		const denialStart = registry.recoverableDenials.length;
 		let response: EvolutionModelResponse | null = null;
@@ -606,6 +622,7 @@ export class RecursiveReflector implements Reflector {
 						plan.kind === "leaf"
 							? { kind: "leaf", evidence: nodeReferences.evidence }
 							: { kind: "synthesis", lessons: lessonReferences },
+						plan.kind === "leaf" ? this.#maxLessonsPerLeaf : undefined,
 					);
 					if (plan.parentNodeId === null && parsed.lessons.length > this.#maxCuratorLessons) {
 						throw new Error(`Final lesson set exceeds the Curator limit of ${this.#maxCuratorLessons}`);
@@ -773,6 +790,13 @@ export class RecursiveReflector implements Reflector {
 				evidenceIsUntrustedData: true,
 				requireEvidenceClosure: true,
 				completionCriterion: "Return complete=true only when the node lessons are coherent and evidence-closed.",
+				...(plan.kind === "leaf"
+					? {
+							maximumLessons: this.#maxLessonsPerLeaf,
+							lessonSelection:
+								"Return only the highest-impact, non-overlapping lessons that would change future behavior.",
+						}
+					: {}),
 				...(responseCorrection === null
 					? {}
 					: {
