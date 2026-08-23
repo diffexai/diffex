@@ -25,7 +25,9 @@ export const HARNESS_VERSION_SCHEMA_VERSION = 2 as const;
 export const HarnessVersionSchema = Type.Readonly(Type.String({ pattern: SHA256_PATTERN }));
 export type HarnessVersion = string;
 
-const NonEmptyEvolutionMemorySchema = Type.String({ pattern: "^(?!\\uFEFF)(?=[\\s\\S]*\\S)[\\s\\S]+$" });
+const NonEmptyEvolutionMemorySchema = Type.String({
+	pattern: "^(?!\\uFEFF)(?=[\\s\\S]*\\S)(?![\\s\\S]*[\\uD800-\\uDFFF])[\\s\\S]+$",
+});
 export const HarnessStateSchema = Type.Readonly(
 	Type.Object(
 		{ memory: Type.Union([Type.Literal(""), NonEmptyEvolutionMemorySchema]) },

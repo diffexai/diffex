@@ -189,6 +189,9 @@ describe("canonical harness versions", () => {
 		expect(Check(HarnessStateSchema, { memory: "" })).toBe(true);
 		expect(Check(HarnessStateSchema, { memory: " \t\n" })).toBe(false);
 		expect(Check(HarnessStateSchema, { memory: "\uFEFFmemory" })).toBe(false);
+		expect(Check(HarnessStateSchema, { memory: "\uD800" })).toBe(false);
+		expect(Check(HarnessStateSchema, { memory: "\uDC00" })).toBe(false);
+		expect(Check(HarnessStateSchema, { memory: "\uD800\uDC00" })).toBe(true);
 		expect(Check(HarnessStateSchema, { memory: "memory", extra: true })).toBe(false);
 		expect(Check(HarnessArtifactManifestSchema, artifact)).toBe(true);
 		expect(Check(HarnessArtifactManifestSchema, { ...artifact, extra: true })).toBe(false);
@@ -291,6 +294,21 @@ describe("bundle persistence and validation", () => {
 			/invalid harness state/i,
 		);
 		expect(await pathExists(destination)).toBe(false);
+	});
+
+	test.each([
+		["high", "\uD800"],
+		["low", "\uDC00"],
+	] as const)("rejects a lone %s surrogate across repeated saves", async (_label, memory) => {
+		const root = await createTemporaryRoot();
+		const destination = join(root, "bundle");
+
+		for (let attempt = 0; attempt < 2; attempt++) {
+			await expect(
+				saveHarnessState({ memory }, destination, null, INITIAL_HARNESS_VERSION_METADATA),
+			).rejects.toThrow(/invalid harness state/i);
+			expect(await pathExists(destination)).toBe(false);
+		}
 	});
 
 	test("rejects an undeclared file and exact-casing mismatch", async () => {
