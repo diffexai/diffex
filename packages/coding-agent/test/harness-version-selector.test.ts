@@ -14,24 +14,48 @@ const root: HarnessVersionSelectorItem = {
 	version: `sha256:${"a".repeat(64)}`,
 	base: null,
 	memory: "",
+	display: {
+		version: `sha256:${"a".repeat(64)}`,
+		kind: "default",
+		evolvedAt: null,
+		evolvedIn: null,
+	},
 };
 
 const child: HarnessVersionSelectorItem = {
 	version: `sha256:${"b".repeat(64)}`,
 	base: root.version,
 	memory: "\nPrefer precise answers.\nMore detail.",
+	display: {
+		version: `sha256:${"b".repeat(64)}`,
+		kind: "evolved",
+		evolvedAt: new Date(2026, 6, 28, 21, 30).toISOString(),
+		evolvedIn: "/projects/child",
+	},
 };
 
 const branch: HarnessVersionSelectorItem = {
 	version: `sha256:${"c".repeat(64)}`,
 	base: root.version,
 	memory: "Use branch memory.",
+	display: {
+		version: `sha256:${"c".repeat(64)}`,
+		kind: "evolved",
+		evolvedAt: new Date(2026, 6, 29, 10, 15).toISOString(),
+		evolvedIn: "/projects/branch",
+	},
 };
 
 const unavailable: HarnessVersionSelectorItem = {
 	version: `sha256:${"0".repeat(64)}`,
 	base: child.version,
 	memory: undefined,
+	display: {
+		version: `sha256:${"0".repeat(64)}`,
+		kind: "evolved",
+		evolvedAt: null,
+		evolvedIn: null,
+	},
 	diagnostic: "unsupported artifact kind: skill",
 };
 
@@ -66,11 +90,34 @@ describe("HarnessVersionSelectorComponent", () => {
 					},
 					{ version: null, message: "current.json is malformed" },
 				],
+				[
+					{
+						version: child.version,
+						kind: "evolved",
+						evolvedAt: child.display.evolvedAt,
+						evolvedIn: child.display.evolvedIn,
+					},
+					unavailable.display,
+				],
 			),
 		).toEqual([child, { ...unavailable, memory: "Future skill revision." }]);
 	});
 
-	it("renders lineage, memory previews, current state, and unavailable diagnostics", () => {
+	it("excludes evolved harnesses without provenance for the current directory", () => {
+		expect(
+			createHarnessVersionSelectorItems(
+				[
+					{ manifest: { version: root.version, base: null }, state: { memory: root.memory ?? "" } },
+					{ manifest: { version: child.version, base: root.version }, state: { memory: child.memory ?? "" } },
+					{ manifest: { version: branch.version, base: root.version }, state: { memory: branch.memory ?? "" } },
+				],
+				[],
+				[root.display, child.display],
+			).map((item) => item.version),
+		).toEqual([root.version, child.version]);
+	});
+
+	it("renders semantic default and evolved harness labels with current state and diagnostics", () => {
 		const selector = new HarnessVersionSelectorComponent(
 			[unavailable, branch, root, child],
 			child.version,
@@ -79,20 +126,19 @@ describe("HarnessVersionSelectorComponent", () => {
 		);
 
 		const output = stripAnsi(selector.render(180).join("\n"));
-		const childIndex = output.indexOf("sha256:bbbbbbbbbbbb [current]");
-		const rootIndex = output.indexOf("sha256:aaaaaaaaaaaa");
-		const branchIndex = output.indexOf("sha256:cccccccccccc");
+		const childIndex = output.indexOf("[current] Evolved Diffex Agent 7/28 at 9:30 pm: /projects/child");
+		const rootIndex = output.indexOf("Default Diffex Agent");
+		const branchIndex = output.indexOf("Evolved Diffex Agent 7/29 at 10:15 am: /projects/branch");
 
 		expect(childIndex).toBeGreaterThanOrEqual(0);
 		expect(rootIndex).toBeGreaterThan(childIndex);
 		expect(branchIndex).toBeGreaterThan(rootIndex);
-		expect(output).toContain("base sha256:aaaaaaaaaaaa - Prefer precise answers.");
-		expect(output).toContain("root - (empty EVOLVE.md)");
-		expect(output).toContain("(EVOLVE.md unavailable)");
+		expect(output).not.toContain("sha256:");
+		expect(output).not.toContain("EVOLVE.md");
 		expect(output).toContain("unavailable: unsupported artifact kind: skill");
 	});
 
-	it("removes terminal control sequences from memory and diagnostics", () => {
+	it("removes terminal control sequences from diagnostics", () => {
 		const selector = new HarnessVersionSelectorComponent(
 			[
 				{
@@ -110,7 +156,6 @@ describe("HarnessVersionSelectorComponent", () => {
 		expect(output).not.toContain("\u001b]8;;https://example.com");
 		expect(output).not.toContain("\u001b[2J");
 		expect(output).not.toContain("\r");
-		expect(stripAnsi(output)).toContain("unsafe");
 		expect(stripAnsi(output)).toContain("bundle diagnostic");
 	});
 
@@ -124,14 +169,14 @@ describe("HarnessVersionSelectorComponent", () => {
 
 		selector.handleInput("c".repeat(20));
 		let output = stripAnsi(selector.render(180).join("\n"));
-		expect(output).toContain("sha256:cccccccccccc");
-		expect(output).not.toContain("sha256:bbbbbbbbbbbb");
+		expect(output).toContain("/projects/branch");
+		expect(output).not.toContain("/projects/child");
 
 		selector.getSearchInput().setValue("");
 		selector.handleInput("branch");
 		output = stripAnsi(selector.render(180).join("\n"));
-		expect(output).toContain("Use branch memory.");
-		expect(output).not.toContain("Prefer precise answers.");
+		expect(output).toContain("/projects/branch");
+		expect(output).not.toContain("/projects/child");
 	});
 
 	it("navigates, selects available versions, and ignores unavailable versions", () => {

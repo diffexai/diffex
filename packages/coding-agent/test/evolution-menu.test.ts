@@ -13,6 +13,9 @@ import { KeybindingsManager } from "../src/core/keybindings.ts";
 import {
 	type EvolutionMenuClient,
 	EvolutionMenuComponent,
+	formatEvolutionEvidencePreview,
+	formatEvolutionJobLabel,
+	formatEvolutionProposalLabel,
 	formatEvolutionProposalOutcome,
 	formatEvolutionTimestamp,
 	sanitizeEvolutionText,
@@ -52,9 +55,16 @@ function jobDetail(overrides: Partial<EvolutionJobDetail> = {}): EvolutionJobDet
 		lastCheckpointAt: "2026-08-20T12:34:00.000Z",
 		errorMessage: null,
 		baseHarnessVersion: rootVersion,
+		baseHarnessInfo: {
+			version: rootVersion,
+			kind: "default",
+			evolvedAt: null,
+			evolvedIn: null,
+		},
 		activatedHarnessVersion: null,
 		nextPromptWillRefresh: false,
 		proposalIds: [],
+		proposals: [],
 		observability: {
 			queueAgeMs: 10,
 			stageLatencies: [{ stage: "reflecting", durationMs: 20 }],
@@ -155,10 +165,23 @@ function proposalDetail(): EvolutionProposalDetail {
 	};
 	return {
 		proposal,
+		supportingEvidence: [evidence("evidence-1", "Run the focused browser verification before declaring success.")],
+		contradictingEvidence: [evidence("evidence-2", "The static checks passed without a browser run.")],
 		score: null,
 		validationDisposition: "rejected",
 		exactAppliedDiff: null,
 		rollbackTarget: null,
+	};
+}
+
+function evidence(evidenceId: string, text: string): EvolutionProposalDetail["supportingEvidence"][number] {
+	return {
+		evidenceId,
+		kind: "session_item",
+		itemType: "message",
+		order: { traceSequence: 1, timestamp: null, causalIdentifiers: [], ambiguity: [] },
+		traceSources: [],
+		payload: { message: { content: [{ type: "text", text }] } },
 	};
 }
 
@@ -168,6 +191,8 @@ function client(currentOverview: EvolutionOverview): {
 	unsubscribed: ReturnType<typeof vi.fn>;
 	startManual: ReturnType<typeof vi.fn>;
 	overviewCall: ReturnType<typeof vi.fn>;
+	listHarnessVersionInfo: ReturnType<typeof vi.fn>;
+	listCurrentDirectoryHarnessVersionInfo: ReturnType<typeof vi.fn>;
 	listJobs: ReturnType<typeof vi.fn>;
 	jobDetailCall: ReturnType<typeof vi.fn>;
 	proposalDetailCall: ReturnType<typeof vi.fn>;
@@ -179,6 +204,10 @@ function client(currentOverview: EvolutionOverview): {
 	const unsubscribed = vi.fn();
 	const startManual = vi.fn().mockResolvedValue({ status: "created", job: job() });
 	const overviewCall = vi.fn().mockResolvedValue(currentOverview);
+	const listHarnessVersionInfo = vi
+		.fn()
+		.mockResolvedValue([{ version: rootVersion, kind: "default", evolvedAt: null, evolvedIn: null }]);
+	const listCurrentDirectoryHarnessVersionInfo = vi.fn().mockResolvedValue([]);
 	const listJobs = vi.fn().mockResolvedValue([]);
 	const jobDetailCall = vi.fn().mockRejectedValue(new Error("unused"));
 	const proposalDetailCall = vi.fn().mockRejectedValue(new Error("unused"));
@@ -195,6 +224,8 @@ function client(currentOverview: EvolutionOverview): {
 				return unsubscribed;
 			},
 			overview: overviewCall,
+			listHarnessVersionInfo,
+			listCurrentDirectoryHarnessVersionInfo,
 			listJobs,
 			jobDetail: jobDetailCall,
 			proposalDetail: proposalDetailCall,
@@ -207,6 +238,8 @@ function client(currentOverview: EvolutionOverview): {
 		unsubscribed,
 		startManual,
 		overviewCall,
+		listHarnessVersionInfo,
+		listCurrentDirectoryHarnessVersionInfo,
 		listJobs,
 		jobDetailCall,
 		proposalDetailCall,
@@ -234,12 +267,13 @@ describe("EvolutionMenuComponent", () => {
 			() => {},
 			() => {},
 		);
-		await vi.waitFor(() => expect(fixture.overviewCall).toHaveBeenCalled());
+		await vi.waitFor(() => expect(stripAnsi(component.render(180).join("\n"))).toContain("Browse"));
 
 		const output = stripAnsi(component.render(180).join("\n"));
 		expect(output).toContain("Evolution tokens: 1,100,001");
 		expect(output).toContain("Evolution invocations: 6");
 		expect(output).toContain("Last evolution: never");
+		expect(output).toContain("Session harness: [current] Default Diffex Agent");
 		expect(output).toContain("Next automatic evolution: blocking-job");
 		expect(output.indexOf("Next automatic evolution")).toBeLessThan(output.indexOf("Cooldown"));
 		expect(output).not.toContain("Evidence scope");
@@ -278,7 +312,7 @@ describe("EvolutionMenuComponent", () => {
 			() => {},
 			() => {},
 		);
-		await vi.waitFor(() => expect(fixture.overviewCall).toHaveBeenCalled());
+		await vi.waitFor(() => expect(stripAnsi(component.render(180).join("\n"))).toContain("Browse"));
 
 		const output = stripAnsi(component.render(180).join("\n"));
 		expect(output).toContain("Last evolution: Today at 11:10 am");
@@ -291,7 +325,30 @@ describe("EvolutionMenuComponent", () => {
 		expect(output).toContain("Cancel [unavailable]");
 	});
 
-	it("polls durable job state and explains a reflection failure without false zero coverage", async () => {
+	it("persists the self-evolution toggle and disables every other action", async () => {
+		const fixture = client(overview());
+		const component = new EvolutionMenuComponent(
+			fixture.client,
+			() => {},
+			() => {},
+			() => {},
+		);
+		await vi.waitFor(() => expect(stripAnsi(component.render(180).join("\n"))).toContain("Toggle [on]"));
+
+		for (let index = 0; index < 7; index += 1) component.handleInput("\u001b[B");
+		component.handleInput("\n");
+
+		expect(fixture.setEnabled).toHaveBeenCalledWith(false);
+		await vi.waitFor(() => expect(stripAnsi(component.render(180).join("\n"))).toContain("Toggle [off]"));
+		const output = stripAnsi(component.render(180).join("\n"));
+		expect(output).toContain("Toggle [off]");
+		expect(output).toContain("Next automatic evolution: Disabled");
+		for (const action of ["Refresh", "Evolve", "View", "Resume", "Browse", "Rollback", "Cancel"]) {
+			expect(output).toContain(`${action} [unavailable]`);
+		}
+	});
+
+	it("polls durable job state without rendering removed diagnostics", async () => {
 		const terminalAt = new Date();
 		terminalAt.setHours(13, 25, 0, 0);
 		const fixture = client(
@@ -327,16 +384,24 @@ describe("EvolutionMenuComponent", () => {
 
 		for (let index = 0; index < 4; index += 1) component.handleInput("\u001b[B");
 		component.handleInput("\n");
-		await vi.waitFor(() => expect(stripAnsi(component.render(180).join("\n"))).toContain("job-active"));
+		await vi.waitFor(() =>
+			expect(stripAnsi(component.render(180).join("\n"))).toContain(formatEvolutionJobLabel(job())),
+		);
 		component.handleInput("\n");
 		await vi.waitFor(() => expect(fixture.jobDetailCall.mock.calls.length).toBeGreaterThanOrEqual(2));
 
 		const output = stripAnsi(component.render(180).join("\n"));
-		expect(output).toContain("Result: Failed during reflection before proposals could be generated");
 		expect(output).toContain("Finished: Today at 1:25 pm");
-		expect(output).toContain("Coverage: unavailable - reflection did not complete");
-		expect(output).toContain("Last error: Reflector returned an invalid response");
-		expect(output).not.toContain("Coverage: 0 analyzed");
+		for (const removedLabel of [
+			"Result:",
+			"Proposals:",
+			"Reflector budget:",
+			"Coverage:",
+			"Recovery attempts:",
+			"Last error:",
+		]) {
+			expect(output).not.toContain(removedLabel);
+		}
 		component.dispose();
 	});
 
@@ -356,23 +421,19 @@ describe("EvolutionMenuComponent", () => {
 
 		for (let index = 0; index < 4; index += 1) component.handleInput("\u001b[B");
 		component.handleInput("\n");
-		await vi.waitFor(() => expect(stripAnsi(component.render(180).join("\n"))).toContain("job-active"));
+		await vi.waitFor(() =>
+			expect(stripAnsi(component.render(180).join("\n"))).toContain(formatEvolutionJobLabel(job())),
+		);
 		component.handleInput("\n");
 		await vi.waitFor(() => expect(fixture.jobDetailCall).toHaveBeenCalledWith("job-active"));
 
 		const output = stripAnsi(component.render(180).join("\n"));
 		expect(output).toContain("Trigger: manual");
 		expect(output).toContain("Stage: reflecting (active)");
-		expect(output).toContain("Result: In progress");
 		expect(output).toContain("Finished: never");
-		expect(output).toContain("Proposals: 2 emitted / 1 eligible");
 		expect(output).toContain("Evolution token: 12,345");
-		expect(output).toContain("Reflector budget: 5 model / 2 rounds / 3 tools");
-		expect(output).toContain("Coverage: 3 analyzed / 0 corrupt / 1 skipped / 0 unreadable");
-		expect(output).toContain("Recovery attempts: 1");
 		expect(output).toContain("Last checkpoint: Today at 9:05 am");
-		expect(output).toContain("Last error: none");
-		expect(output).toContain("Base harness: sha256:aaaaaaaaaaaa");
+		expect(output).toContain("Base harness: [current] Default Diffex Agent");
 		for (const removedLabel of [
 			"Job:",
 			"Evidence high-water cursor:",
@@ -388,6 +449,12 @@ describe("EvolutionMenuComponent", () => {
 			"Rollback available:",
 			"Activated harness:",
 			"Next prompt will refresh:",
+			"Result:",
+			"Proposals:",
+			"Reflector budget:",
+			"Coverage:",
+			"Recovery attempts:",
+			"Last error:",
 		]) {
 			expect(output).not.toContain(removedLabel);
 		}
@@ -397,7 +464,9 @@ describe("EvolutionMenuComponent", () => {
 		const detail = proposalDetail();
 		const fixture = client(overview());
 		fixture.listJobs.mockResolvedValue([job()]);
-		fixture.jobDetailCall.mockResolvedValue(jobDetail({ proposalIds: [detail.proposal.proposalId] }));
+		fixture.jobDetailCall.mockResolvedValue(
+			jobDetail({ proposalIds: [detail.proposal.proposalId], proposals: [detail.proposal] }),
+		);
 		fixture.proposalDetailCall.mockResolvedValue(detail);
 		const component = new EvolutionMenuComponent(
 			fixture.client,
@@ -409,16 +478,19 @@ describe("EvolutionMenuComponent", () => {
 
 		for (let index = 0; index < 4; index += 1) component.handleInput("\u001b[B");
 		component.handleInput("\n");
-		await vi.waitFor(() => expect(stripAnsi(component.render(180).join("\n"))).toContain("job-active"));
+		await vi.waitFor(() =>
+			expect(stripAnsi(component.render(180).join("\n"))).toContain(formatEvolutionJobLabel(job())),
+		);
 		component.handleInput("\n");
 		await vi.waitFor(() =>
-			expect(stripAnsi(component.render(180).join("\n"))).toContain(`Proposal ${detail.proposal.proposalId}`),
+			expect(stripAnsi(component.render(180).join("\n"))).toContain(formatEvolutionProposalLabel(detail.proposal)),
 		);
 		component.handleInput("\n");
 		await vi.waitFor(() => expect(fixture.proposalDetailCall).toHaveBeenCalledOnce());
 
 		const output = stripAnsi(component.render(180).join("\n"));
-		expect(output).toContain(`Proposal: ${detail.proposal.proposalId}`);
+		expect(output).toContain(formatEvolutionProposalLabel(detail.proposal));
+		expect(output).not.toContain(detail.proposal.proposalId);
 		expect(output).toContain("Validation: rejected");
 		expect(output).toContain("Outcome: Run focused verification before considering a change complete.");
 		expect(output).toContain("Supporting evidence (1)");
@@ -437,14 +509,22 @@ describe("EvolutionMenuComponent", () => {
 		}
 
 		component.handleInput("\n");
-		await vi.waitFor(() => expect(stripAnsi(component.render(180).join("\n"))).toContain("1. evidence-1"));
+		await vi.waitFor(() =>
+			expect(stripAnsi(component.render(180).join("\n"))).toContain(
+				"1. Run the focused browser verification before declaring success.",
+			),
+		);
 		component.handleInput("\u001b");
 		await vi.waitFor(() =>
 			expect(stripAnsi(component.render(180).join("\n"))).toContain("Contradicting evidence (1)"),
 		);
 		component.handleInput("\u001b[B");
 		component.handleInput("\n");
-		await vi.waitFor(() => expect(stripAnsi(component.render(180).join("\n"))).toContain("1. evidence-2"));
+		await vi.waitFor(() =>
+			expect(stripAnsi(component.render(180).join("\n"))).toContain(
+				"1. The static checks passed without a browser run.",
+			),
+		);
 		component.dispose();
 	});
 
@@ -488,6 +568,22 @@ describe("EvolutionMenuComponent", () => {
 		const now = new Date(2026, 7, 20, 15, 0);
 		expect(formatEvolutionTimestamp(new Date(2026, 7, 20, 9, 5).toISOString(), now)).toBe("Today at 9:05 am");
 		expect(formatEvolutionTimestamp(new Date(2026, 6, 28, 21, 30).toISOString(), now)).toBe("7/28 at 9:30 pm");
+		expect(
+			formatEvolutionJobLabel(
+				job({ trigger: "automatic", stage: "completed", createdAt: new Date(2026, 7, 20, 9, 5).toISOString() }),
+				now,
+			),
+		).toBe("Today at 9:05 am - auto - completed");
+	});
+
+	it("limits semantic proposal and evidence labels by Unicode characters", () => {
+		const detail = proposalDetail();
+		expect(formatEvolutionProposalLabel(detail.proposal)).toBe(
+			"Proposal Run focused verification before considering a chan",
+		);
+		const preview = formatEvolutionEvidencePreview(evidence("evidence-long", `${"🙂".repeat(100)} trailing content`));
+		expect([...preview]).toHaveLength(100);
+		expect(preview).toBe("🙂".repeat(100));
 	});
 
 	it("confirms a manual start before invoking the control service", async () => {
@@ -547,7 +643,7 @@ describe("EvolutionMenuComponent", () => {
 			() => {},
 			() => {},
 		);
-		await vi.waitFor(() => expect(fixture.overviewCall).toHaveBeenCalledOnce());
+		await vi.waitFor(() => expect(stripAnsi(component.render(160).join("\n"))).toContain("Browse"));
 		component.handleInput("\u001b[B");
 		component.handleInput("\n");
 		await vi.waitFor(() =>
@@ -574,7 +670,7 @@ describe("EvolutionMenuComponent", () => {
 			() => {},
 			render,
 		);
-		await vi.waitFor(() => expect(fixture.overviewCall).toHaveBeenCalledOnce());
+		await vi.waitFor(() => expect(stripAnsi(component.render(160).join("\n"))).toContain("Browse"));
 		fixture.emit({
 			jobId: "job-active",
 			emittedAt: "2026-08-20T00:02:00.000Z",
@@ -592,29 +688,6 @@ describe("EvolutionMenuComponent", () => {
 			stage: "completed",
 		});
 		expect(fixture.overviewCall).toHaveBeenCalledTimes(2);
-	});
-
-	it("persists the self-evolution toggle and disables every other action", async () => {
-		const fixture = client(overview());
-		const component = new EvolutionMenuComponent(
-			fixture.client,
-			() => {},
-			() => {},
-			() => {},
-		);
-		await vi.waitFor(() => expect(stripAnsi(component.render(180).join("\n"))).toContain("Toggle [on]"));
-
-		for (let index = 0; index < 7; index += 1) component.handleInput("\u001b[B");
-		component.handleInput("\n");
-
-		expect(fixture.setEnabled).toHaveBeenCalledWith(false);
-		await vi.waitFor(() => expect(stripAnsi(component.render(180).join("\n"))).toContain("Toggle [off]"));
-		const output = stripAnsi(component.render(180).join("\n"));
-		expect(output).toContain("Toggle [off]");
-		expect(output).toContain("Next automatic evolution: Disabled");
-		for (const action of ["Refresh", "Evolve", "View", "Resume", "Browse", "Rollback", "Cancel"]) {
-			expect(output).toContain(`${action} [unavailable]`);
-		}
 	});
 
 	it("sanitizes terminal control text", () => {

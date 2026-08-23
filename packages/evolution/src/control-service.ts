@@ -1,4 +1,5 @@
 import type { HarnessSelectResult, HarnessVersion, HarnessVersionList } from "@earendil-works/diffex-harness-state";
+import type { MaterializedEvidence } from "@earendil-works/diffex-harness-trace";
 import type {
 	EvolutionFailureReasonCode,
 	EvolutionInputSnapshot,
@@ -9,6 +10,7 @@ import type {
 	EvolutionMemoryExactDiff,
 	EvolutionProposal,
 	EvolutionProposalLedgerDisposition,
+	EvolutionRepositorySnapshot,
 	EvolutionScope,
 	HarnessActivatedLedgerEvent,
 	ScoredProposal,
@@ -53,6 +55,13 @@ export interface EvolutionJobSummary {
 	readonly cancellable: boolean;
 }
 
+export interface EvolutionHarnessVersionInfo {
+	readonly version: HarnessVersion;
+	readonly kind: "default" | "evolved";
+	readonly evolvedAt: string | null;
+	readonly evolvedIn: string | null;
+}
+
 export interface EvolutionRollbackAction {
 	readonly jobId: string;
 	readonly fromHarnessVersion: HarnessVersion;
@@ -93,9 +102,11 @@ export interface EvolutionJobDetail extends EvolutionJobSummary {
 	readonly lastCheckpointAt: string | null;
 	readonly errorMessage: string | null;
 	readonly baseHarnessVersion: HarnessVersion;
+	readonly baseHarnessInfo: EvolutionHarnessVersionInfo;
 	readonly activatedHarnessVersion: HarnessVersion | null;
 	readonly nextPromptWillRefresh: boolean;
 	readonly proposalIds: readonly string[];
+	readonly proposals: readonly EvolutionProposal[];
 	readonly observability: EvolutionJobObservability;
 }
 
@@ -128,6 +139,8 @@ export interface EvolutionJobObservability {
 
 export interface EvolutionProposalDetail {
 	readonly proposal: EvolutionProposal;
+	readonly supportingEvidence: readonly MaterializedEvidence[];
+	readonly contradictingEvidence: readonly MaterializedEvidence[];
 	readonly score: ScoredProposal | null;
 	readonly validationDisposition: string | null;
 	readonly exactAppliedDiff: EvolutionMemoryExactDiff | null;
@@ -152,6 +165,11 @@ export interface EvolutionControlServiceDependencies {
 	readonly harnesses: EvolutionHarnessControl;
 	readonly progress: EvolutionProgressBus;
 	readonly observedHarnessVersion: () => HarnessVersion | undefined;
+	readonly currentDirectory: {
+		readonly directoryId: string;
+		readonly rootPath: string;
+		containsRevision(revision: string): Promise<boolean>;
+	};
 }
 
 function isInputSnapshot(artifact: EvolutionArtifact): artifact is EvolutionInputSnapshot {
@@ -357,6 +375,72 @@ export class EvolutionControlService {
 			.map(summary);
 	}
 
+	async #repositoryMatchesCurrentDirectory(repository: EvolutionRepositorySnapshot): Promise<boolean> {
+		if (repository.directoryId !== undefined) {
+			return repository.directoryId === this.#dependencies.currentDirectory.directoryId;
+		}
+		if (repository.rootPath === this.#dependencies.currentDirectory.rootPath) return true;
+		return this.#dependencies.currentDirectory.containsRevision(repository.revision);
+	}
+
+	async #listHarnessVersionInfo(currentDirectoryOnly: boolean): Promise<readonly EvolutionHarnessVersionInfo[]> {
+		const [versions, jobs] = await Promise.all([
+			this.#dependencies.harnesses.listVersions(),
+			this.#dependencies.jobs.list(this.#dependencies.scope),
+		]);
+		const info = new Map<HarnessVersion, EvolutionHarnessVersionInfo>(
+			versions.versions
+				.filter((bundle) => !currentDirectoryOnly || bundle.manifest.base === null)
+				.map((bundle) => [
+					bundle.manifest.version,
+					{
+						version: bundle.manifest.version,
+						kind: bundle.manifest.base === null ? "default" : "evolved",
+						evolvedAt: null,
+						evolvedIn: null,
+					},
+				]),
+		);
+		const activations = await Promise.all(
+			jobs.map(async (job) => ({
+				job,
+				activation: await this.#dependencies.ledger.read(job.jobId).then(harnessActivation),
+			})),
+		);
+		activations.sort(
+			(left, right) =>
+				(right.job.terminalAt ?? right.job.updatedAt).localeCompare(left.job.terminalAt ?? left.job.updatedAt) ||
+				right.job.jobId.localeCompare(left.job.jobId),
+		);
+
+		for (const { job, activation } of activations) {
+			if (activation === null) continue;
+			const existing = info.get(activation.resultingHarnessVersion);
+			if (!currentDirectoryOnly && existing !== undefined && existing.evolvedAt !== null) continue;
+			const inputArtifact = await this.#dependencies.artifacts.get(job.inputSnapshot).catch(() => null);
+			const input = inputArtifact !== null && isInputSnapshot(inputArtifact) ? inputArtifact : null;
+			if (input === null) continue;
+			if (currentDirectoryOnly && !(await this.#repositoryMatchesCurrentDirectory(input.repository))) continue;
+			if (existing !== undefined && existing.evolvedAt !== null) continue;
+			info.set(activation.resultingHarnessVersion, {
+				version: activation.resultingHarnessVersion,
+				kind: "evolved",
+				evolvedAt: job.terminalAt ?? job.updatedAt,
+				evolvedIn: input.repository.rootPath,
+			});
+		}
+
+		return [...info.values()];
+	}
+
+	listHarnessVersionInfo(): Promise<readonly EvolutionHarnessVersionInfo[]> {
+		return this.#listHarnessVersionInfo(false);
+	}
+
+	listCurrentDirectoryHarnessVersionInfo(): Promise<readonly EvolutionHarnessVersionInfo[]> {
+		return this.#listHarnessVersionInfo(true);
+	}
+
 	async #start(trigger: "automatic" | "manual"): Promise<EvolutionStartResult> {
 		for (let contentionAttempt = 0; contentionAttempt < 20; contentionAttempt += 1) {
 			const result = await this.#dependencies.controlPlane.createJob({ scope: this.#dependencies.scope, trigger });
@@ -451,6 +535,14 @@ export class EvolutionControlService {
 				),
 			),
 		];
+		const proposals = proposalIds.flatMap((proposalId) => {
+			const scoredProposal = scored.find((entry) => entry.proposal.proposalId === proposalId)?.proposal;
+			if (scoredProposal !== undefined) return [scoredProposal];
+			const proposal = artifacts.find(
+				(artifact): artifact is EvolutionProposal => "proposalId" in artifact && artifact.proposalId === proposalId,
+			);
+			return proposal === undefined ? [] : [proposal];
+		});
 		const activation = harnessActivation(events);
 		const modelCalls = events.filter((event) => event.type === "reflector-model-call").length;
 		const modelRetries = events.filter((event) => event.type === "reflector-model-call" && event.attempt > 1).length;
@@ -523,10 +615,17 @@ export class EvolutionControlService {
 			lastCheckpointAt: job.checkpoints.at(-1)?.completedAt ?? null,
 			errorMessage: job.failureMessage,
 			baseHarnessVersion: input.expectedHarnessBaseVersion,
+			baseHarnessInfo: {
+				version: input.expectedHarnessBaseVersion,
+				kind: input.harness.baseVersion === null ? "default" : "evolved",
+				evolvedAt: null,
+				evolvedIn: null,
+			},
 			activatedHarnessVersion: activation?.resultingHarnessVersion ?? null,
 			nextPromptWillRefresh:
 				versions.currentVersion !== null && observed !== null && versions.currentVersion !== observed,
 			proposalIds,
+			proposals,
 			observability: {
 				queueAgeMs,
 				stageLatencies,
@@ -559,10 +658,25 @@ export class EvolutionControlService {
 				(artifact): artifact is EvolutionProposal => "proposalId" in artifact && artifact.proposalId === proposalId,
 			) as EvolutionProposal | undefined);
 		if (proposal === undefined) throw new Error(`Unknown evolution proposal "${proposalId}"`);
+		const input = artifacts.find(isInputSnapshot);
+		if (input === undefined) throw new Error(`Evolution job "${jobId}" has no input snapshot`);
+		const evidence = new Map(
+			input.evidenceSources.flatMap((source) =>
+				source.invocation.evidence.map((item) => [item.evidenceId, item] as const),
+			),
+		);
+		const resolveEvidence = (evidenceIds: readonly string[]): MaterializedEvidence[] =>
+			evidenceIds.map((evidenceId) => {
+				const item = evidence.get(evidenceId);
+				if (item === undefined) throw new Error(`Evolution evidence "${evidenceId}" is unavailable`);
+				return item;
+			});
 		const validation = artifacts.find(isValidationReport);
 		const activation = harnessActivation(events);
 		return {
 			proposal,
+			supportingEvidence: resolveEvidence(proposal.supportingEvidenceIds),
+			contradictingEvidence: resolveEvidence(proposal.contradictingEvidenceIds),
 			score,
 			validationDisposition:
 				validation?.proposalResults.find((result) => result.proposalId === proposalId)?.disposition ?? null,

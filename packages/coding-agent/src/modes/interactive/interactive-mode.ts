@@ -139,6 +139,7 @@ import { ExtensionEditorComponent } from "./components/extension-editor.ts";
 import { ExtensionInputComponent } from "./components/extension-input.ts";
 import { ExtensionSelectorComponent } from "./components/extension-selector.ts";
 import { FooterComponent, formatCwdForFooter, formatTokens } from "./components/footer.ts";
+import { formatHarnessVersionLabel } from "./components/harness-version-display.ts";
 import {
 	createHarnessVersionSelectorItems,
 	HarnessVersionSelectorComponent,
@@ -976,6 +977,7 @@ export class InteractiveMode {
 			this.headerContainer.addChild(this.builtInHeader);
 		}
 		this.ui.requestRender();
+		await this.selectDefaultHarnessForLaunch();
 
 		// Initialize extensions first so resources are shown before messages
 		await this.rebindCurrentSession();
@@ -4643,8 +4645,11 @@ export class InteractiveMode {
 
 	private async showHarnessVersionSelector(): Promise<void> {
 		try {
-			const { versions, diagnostics, currentVersion } = await this.session.listHarnessVersions();
-			const items = createHarnessVersionSelectorItems(versions, diagnostics);
+			const [{ versions, diagnostics, currentVersion }, versionInfo] = await Promise.all([
+				this.session.listHarnessVersions(),
+				this.options.evolution?.listCurrentDirectoryHarnessVersionInfo() ?? Promise.resolve([]),
+			]);
+			const items = createHarnessVersionSelectorItems(versions, diagnostics, versionInfo);
 			if (items.length === 0) {
 				this.showStatus("No harness versions available");
 				return;
@@ -4652,6 +4657,10 @@ export class InteractiveMode {
 
 			this.showSelector((done) => {
 				let switching = false;
+				const label = (version: string, selectedVersion: string | undefined) => {
+					const item = items.find((candidate) => candidate.version === version);
+					return item === undefined ? "Diffex Agent" : formatHarnessVersionLabel(item.display, selectedVersion);
+				};
 				const selector = new HarnessVersionSelectorComponent(
 					items,
 					currentVersion ?? this.session.activeHarnessVersion,
@@ -4659,7 +4668,7 @@ export class InteractiveMode {
 						if (switching) return;
 						if (version === this.session.activeHarnessVersion) {
 							done();
-							this.showStatus(`Harness version already active: ${version}`);
+							this.showStatus(`Harness version already active: ${label(version, version)}`);
 							return;
 						}
 						switching = true;
@@ -4667,7 +4676,7 @@ export class InteractiveMode {
 							.switchHarnessVersion(version)
 							.then(() => {
 								done();
-								this.showStatus(`Harness version: ${version}`);
+								this.showStatus(`Harness version: ${label(version, version)}`);
 							})
 							.catch((error: unknown) => {
 								done();
@@ -4683,6 +4692,20 @@ export class InteractiveMode {
 			});
 		} catch (error: unknown) {
 			this.showError(`Could not list harness versions: ${error instanceof Error ? error.message : String(error)}`);
+		}
+	}
+
+	private async selectDefaultHarnessForLaunch(): Promise<void> {
+		try {
+			const { versions } = await this.session.listHarnessVersions();
+			const defaultHarness = versions.find((bundle) => bundle.manifest.base === null);
+			if (defaultHarness === undefined) throw new Error("Default harness version was not found");
+			await this.session.switchHarnessVersion(defaultHarness.manifest.version);
+			this.showStatus("Default Diffex Agent selected for this launch");
+		} catch (error: unknown) {
+			this.showError(
+				`Could not select Default Diffex Agent: ${error instanceof Error ? error.message : String(error)}`,
+			);
 		}
 	}
 

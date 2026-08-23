@@ -15,6 +15,7 @@ import {
 	EvolutionControlPlane,
 	EvolutionControlService,
 	type EvolutionEvidenceCatalog,
+	type EvolutionHarnessVersionInfo,
 	type EvolutionJobDetail,
 	type EvolutionJobRunner,
 	type EvolutionJobSummary,
@@ -66,6 +67,29 @@ const MAX_MODEL_ROUNDS = 10;
 const PROVIDER_FIRST_BYTE_TIMEOUT_MS = 60_000;
 const PROVIDER_STREAM_IDLE_TIMEOUT_MS = 120_000;
 const PROVIDER_ABSOLUTE_TIMEOUT_MS = 300_000;
+
+export async function resolveEvolutionDirectoryIdentity(cwd: string): Promise<{
+	readonly directoryId: string;
+	readonly rootPath: string;
+}> {
+	const rootPath = await realpath(cwd).catch(() => resolve(cwd));
+	const directory = await stat(rootPath, { bigint: true });
+	const identity =
+		directory.ino === 0n
+			? { kind: "canonical-path-v1", rootPath }
+			: { kind: "filesystem-directory-v1", device: directory.dev.toString(), inode: directory.ino.toString() };
+	return { directoryId: computeEvolutionContentDigest(identity), rootPath };
+}
+
+async function gitRepositoryContainsRevision(rootPath: string, revision: string): Promise<boolean> {
+	if (!/^[0-9a-f]{40,64}$/iu.test(revision)) return false;
+	try {
+		await execFileAsync("git", ["-C", rootPath, "cat-file", "-e", `${revision}^{commit}`]);
+		return true;
+	} catch {
+		return false;
+	}
+}
 
 class EvolutionProviderTimeoutError extends Error {
 	readonly deadline: "absolute" | "first-byte" | "stream-idle";
@@ -590,6 +614,7 @@ export class TraceEvidenceCatalog implements EvolutionEvidenceCatalog {
 
 class CodingAgentSnapshotSource implements EvolutionSnapshotSource {
 	readonly #cwd: string;
+	readonly #directoryId: string;
 	readonly #scope: EvolutionScope;
 	readonly #harnessState: HarnessStateStore;
 	readonly #resourceLoader: ResourceLoader;
@@ -598,6 +623,7 @@ class CodingAgentSnapshotSource implements EvolutionSnapshotSource {
 
 	constructor(options: {
 		cwd: string;
+		directoryId: string;
 		scope: EvolutionScope;
 		harnessState: HarnessStateStore;
 		resourceLoader: ResourceLoader;
@@ -605,6 +631,7 @@ class CodingAgentSnapshotSource implements EvolutionSnapshotSource {
 		writer: EvolutionMemoryWriter;
 	}) {
 		this.#cwd = options.cwd;
+		this.#directoryId = options.directoryId;
 		this.#scope = options.scope;
 		this.#harnessState = options.harnessState;
 		this.#resourceLoader = options.resourceLoader;
@@ -638,6 +665,7 @@ class CodingAgentSnapshotSource implements EvolutionSnapshotSource {
 		return {
 			repository: {
 				repositoryId: scope.repositoryId,
+				directoryId: this.#directoryId,
 				rootPath: this.#cwd,
 				revision: await this.#revision(),
 			},
@@ -689,7 +717,7 @@ export interface CreateCodingAgentEvolutionRuntimeOptions {
 export async function createCodingAgentEvolutionRuntime(
 	options: CreateCodingAgentEvolutionRuntimeOptions,
 ): Promise<CodingAgentEvolutionRuntime> {
-	const repositoryRoot = await realpath(options.cwd).catch(() => resolve(options.cwd));
+	const currentDirectory = await resolveEvolutionDirectoryIdentity(options.cwd);
 	const scope = GLOBAL_EVOLUTION_SCOPE;
 	const storageRoot = join(options.agentDir, EVOLUTION_DIRECTORY_NAME);
 	const persistence = new FileEvolutionPersistence(storageRoot);
@@ -733,7 +761,8 @@ export async function createCodingAgentEvolutionRuntime(
 		events: progress,
 		evidence,
 		snapshots: new CodingAgentSnapshotSource({
-			cwd: repositoryRoot,
+			cwd: currentDirectory.rootPath,
+			directoryId: currentDirectory.directoryId,
 			scope,
 			harnessState: options.harnessState,
 			resourceLoader: options.resourceLoader,
@@ -771,6 +800,10 @@ export async function createCodingAgentEvolutionRuntime(
 		harnesses: options.harnessState,
 		progress,
 		observedHarnessVersion: () => options.session.activeHarnessVersion,
+		currentDirectory: {
+			...currentDirectory,
+			containsRevision: (revision) => gitRepositoryContainsRevision(currentDirectory.rootPath, revision),
+		},
 	});
 	return {
 		control,
@@ -866,6 +899,14 @@ export class EvolutionRuntimeCoordinator implements AgentSessionLifecycleObserve
 
 	listJobs(): Promise<readonly EvolutionJobSummary[]> {
 		return this.#control().listJobs();
+	}
+
+	listHarnessVersionInfo(): Promise<readonly EvolutionHarnessVersionInfo[]> {
+		return this.#control().listHarnessVersionInfo();
+	}
+
+	listCurrentDirectoryHarnessVersionInfo(): Promise<readonly EvolutionHarnessVersionInfo[]> {
+		return this.#control().listCurrentDirectoryHarnessVersionInfo();
 	}
 
 	jobDetail(jobId: string): Promise<EvolutionJobDetail> {

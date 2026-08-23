@@ -124,6 +124,7 @@ export {
 	EvolutionControlService,
 	type EvolutionControlServiceDependencies,
 	type EvolutionHarnessControl,
+	type EvolutionHarnessVersionInfo,
 	type EvolutionJobDetail,
 	type EvolutionJobObservability,
 	type EvolutionJobSummary,

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/diffex-ai";
@@ -16,6 +16,7 @@ import {
 	type CodingAgentEvolutionRuntime,
 	createCodingAgentEvolutionRuntime,
 	EvolutionRuntimeCoordinator,
+	resolveEvolutionDirectoryIdentity,
 	TraceEvidenceCatalog,
 } from "../src/core/evolution-runtime.ts";
 import type { InvocationTrace } from "../src/core/invocation-trace.ts";
@@ -76,6 +77,21 @@ describe("coding-agent evolution runtime", () => {
 			const path = temporaryDirectories.pop();
 			if (path) rmSync(path, { recursive: true, force: true });
 		}
+	});
+
+	it("keeps a directory identity stable when its path changes", async () => {
+		const parent = join(tmpdir(), `diffex-directory-identity-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+		const originalPath = join(parent, "before");
+		const renamedPath = join(parent, "after");
+		mkdirSync(originalPath, { recursive: true });
+		temporaryDirectories.push(parent);
+
+		const original = await resolveEvolutionDirectoryIdentity(originalPath);
+		renameSync(originalPath, renamedPath);
+		const renamed = await resolveEvolutionDirectoryIdentity(renamedPath);
+
+		expect(renamed.directoryId).toBe(original.directoryId);
+		expect(renamed.rootPath).toBe(realpathSync(renamedPath));
 	});
 
 	it("shares one global control scope across working directories", async () => {

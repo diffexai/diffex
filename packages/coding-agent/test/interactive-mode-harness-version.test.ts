@@ -9,6 +9,11 @@ const rootVersion = `sha256:${"a".repeat(64)}`;
 const childVersion = `sha256:${"b".repeat(64)}`;
 
 interface HarnessModeFixture {
+	options: {
+		evolution: {
+			listCurrentDirectoryHarnessVersionInfo: ReturnType<typeof vi.fn>;
+		};
+	};
 	session: {
 		activeHarnessVersion: string | undefined;
 		listHarnessVersions: ReturnType<typeof vi.fn>;
@@ -27,13 +32,14 @@ interface HarnessModeFixture {
 	showError: ReturnType<typeof vi.fn>;
 }
 
-const showHarnessVersionSelector = (
+const interactiveHarnessMethods = (
 	InteractiveMode as unknown as {
 		prototype: {
 			showHarnessVersionSelector(this: HarnessModeFixture): Promise<void>;
+			selectDefaultHarnessForLaunch(this: HarnessModeFixture): Promise<void>;
 		};
 	}
-).prototype.showHarnessVersionSelector;
+).prototype;
 
 function createFixture(switchHarnessVersion = vi.fn().mockResolvedValue(undefined)): {
 	fixture: HarnessModeFixture;
@@ -43,6 +49,19 @@ function createFixture(switchHarnessVersion = vi.fn().mockResolvedValue(undefine
 	let selector: HarnessVersionSelectorComponent | undefined;
 	const done = vi.fn();
 	const fixture: HarnessModeFixture = {
+		options: {
+			evolution: {
+				listCurrentDirectoryHarnessVersionInfo: vi.fn().mockResolvedValue([
+					{ version: rootVersion, kind: "default", evolvedAt: null, evolvedIn: null },
+					{
+						version: childVersion,
+						kind: "evolved",
+						evolvedAt: new Date(2026, 6, 28, 21, 30).toISOString(),
+						evolvedIn: "/projects/child",
+					},
+				]),
+			},
+		},
 		session: {
 			activeHarnessVersion: rootVersion,
 			listHarnessVersions: vi.fn().mockResolvedValue({
@@ -89,25 +108,27 @@ describe("InteractiveMode harness version selector", () => {
 
 	it("treats selecting the current revision as a no-op", async () => {
 		const { fixture, getSelector, done } = createFixture();
-		await showHarnessVersionSelector.call(fixture);
+		await interactiveHarnessMethods.showHarnessVersionSelector.call(fixture);
 
 		getSelector().handleInput("\n");
 
 		expect(done).toHaveBeenCalledOnce();
 		expect(fixture.session.switchHarnessVersion).not.toHaveBeenCalled();
-		expect(fixture.showStatus).toHaveBeenCalledWith(`Harness version already active: ${rootVersion}`);
+		expect(fixture.showStatus).toHaveBeenCalledWith("Harness version already active: [current] Default Diffex Agent");
 	});
 
 	it("switches the active revision selected through list navigation", async () => {
 		const { fixture, getSelector, done } = createFixture();
-		await showHarnessVersionSelector.call(fixture);
+		await interactiveHarnessMethods.showHarnessVersionSelector.call(fixture);
 
 		getSelector().handleInput("\u001b[B");
 		getSelector().handleInput("\n");
 
 		await vi.waitFor(() => {
 			expect(fixture.session.switchHarnessVersion).toHaveBeenCalledWith(childVersion);
-			expect(fixture.showStatus).toHaveBeenCalledWith(`Harness version: ${childVersion}`);
+			expect(fixture.showStatus).toHaveBeenCalledWith(
+				"Harness version: [current] Evolved Diffex Agent 7/28 at 9:30 pm: /projects/child",
+			);
 		});
 		expect(done).toHaveBeenCalledOnce();
 	});
@@ -119,7 +140,7 @@ describe("InteractiveMode harness version selector", () => {
 	])("surfaces the AgentSession operation guard: %s", async (message) => {
 		const switchHarnessVersion = vi.fn().mockRejectedValue(new Error(message));
 		const { fixture, getSelector } = createFixture(switchHarnessVersion);
-		await showHarnessVersionSelector.call(fixture);
+		await interactiveHarnessMethods.showHarnessVersionSelector.call(fixture);
 
 		getSelector().handleInput("\u001b[B");
 		getSelector().handleInput("\n");
@@ -131,11 +152,22 @@ describe("InteractiveMode harness version selector", () => {
 
 	it("cancels without changing the active revision", async () => {
 		const { fixture, getSelector, done } = createFixture();
-		await showHarnessVersionSelector.call(fixture);
+		await interactiveHarnessMethods.showHarnessVersionSelector.call(fixture);
 
 		getSelector().handleInput("\u001b");
 
 		expect(done).toHaveBeenCalledOnce();
 		expect(fixture.session.switchHarnessVersion).not.toHaveBeenCalled();
+	});
+
+	it("selects and announces the default harness for a Diffex launch", async () => {
+		const { fixture } = createFixture();
+		fixture.session.activeHarnessVersion = childVersion;
+
+		await interactiveHarnessMethods.selectDefaultHarnessForLaunch.call(fixture);
+
+		expect(fixture.session.switchHarnessVersion).toHaveBeenCalledWith(rootVersion);
+		expect(fixture.showStatus).toHaveBeenCalledWith("Default Diffex Agent selected for this launch");
+		expect(fixture.showError).not.toHaveBeenCalled();
 	});
 });

@@ -9,14 +9,17 @@ import {
 	TruncatedText,
 	UNSELECTED_LIST_PREFIX,
 } from "@earendil-works/diffex-tui";
+import type { EvolutionHarnessVersionInfo } from "#evolution";
 import { theme } from "../theme/theme.ts";
 import { DynamicBorder } from "./dynamic-border.ts";
+import { formatHarnessVersionLabel, sanitizeDisplayText } from "./harness-version-display.ts";
 import { keyHint, rawKeyHint } from "./keybinding-hints.ts";
 
 export interface HarnessVersionSelectorItem {
 	version: string;
 	base: string | null | undefined;
 	memory: string | undefined;
+	display: EvolutionHarnessVersionInfo;
 	diagnostic?: string;
 }
 
@@ -40,18 +43,34 @@ interface HarnessVersionSelectorDiagnostic {
 export function createHarnessVersionSelectorItems(
 	versions: readonly HarnessVersionSelectorBundle[],
 	diagnostics: readonly HarnessVersionSelectorDiagnostic[],
+	versionInfo: readonly EvolutionHarnessVersionInfo[] = [],
 ): HarnessVersionSelectorItem[] {
+	const infoByVersion = new Map(versionInfo.map((info) => [info.version, info]));
 	const items = new Map<string, HarnessVersionSelectorItem>();
 	for (const bundle of versions) {
+		const info =
+			infoByVersion.get(bundle.manifest.version) ??
+			(bundle.manifest.base === null
+				? {
+						version: bundle.manifest.version,
+						kind: "default" as const,
+						evolvedAt: null,
+						evolvedIn: null,
+					}
+				: undefined);
+		if (info === undefined) continue;
 		items.set(bundle.manifest.version, {
 			version: bundle.manifest.version,
 			base: bundle.manifest.base,
 			memory: bundle.state.memory,
+			display: info,
 		});
 	}
 
 	for (const diagnostic of diagnostics) {
 		if (!diagnostic.version) continue;
+		const info = infoByVersion.get(diagnostic.version);
+		if (info === undefined && diagnostic.manifest?.base !== null) continue;
 		const existing = items.get(diagnostic.version);
 		if (existing) {
 			existing.diagnostic = existing.diagnostic
@@ -63,6 +82,14 @@ export function createHarnessVersionSelectorItems(
 			version: diagnostic.version,
 			base: diagnostic.manifest?.base,
 			memory: diagnostic.state?.memory,
+			display: {
+				...(info ?? {
+					version: diagnostic.version,
+					kind: "default" as const,
+					evolvedAt: null,
+					evolvedIn: null,
+				}),
+			},
 			diagnostic: diagnostic.message,
 		});
 	}
@@ -70,14 +97,8 @@ export function createHarnessVersionSelectorItems(
 	return [...items.values()];
 }
 
-function abbreviateVersion(version: string): string {
-	const [algorithm, digest] = version.split(":", 2);
-	if (!algorithm || !digest) return version;
-	return `${algorithm}:${digest.slice(0, 12)}`;
-}
-
 function sanitizeTerminalText(value: string): string {
-	return value.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, " ");
+	return sanitizeDisplayText(value);
 }
 
 function compareVersions(left: HarnessVersionSelectorItem, right: HarnessVersionSelectorItem): number {
@@ -204,17 +225,9 @@ export class HarnessVersionSelectorComponent extends Container implements Focusa
 			if (!item) continue;
 			const selected = index === this.selectedIndex;
 			const prefix = selected ? SELECTED_LIST_PREFIX : UNSELECTED_LIST_PREFIX;
-			const version = abbreviateVersion(item.version);
-			const relation =
-				item.base === null
-					? "root"
-					: item.base === undefined
-						? "base unknown"
-						: `base ${abbreviateVersion(item.base)}`;
-			const current = item.version === this.currentVersion ? " [current]" : "";
-			const preview = getMemoryPreview(item.memory);
+			const label = formatHarnessVersionLabel(item.display, this.currentVersion);
 			const unavailable = item.diagnostic ? ` - unavailable: ${sanitizeTerminalText(item.diagnostic)}` : "";
-			const line = `${prefix}${version}${current} - ${relation} - ${preview}${unavailable}`;
+			const line = `${prefix}${label}${unavailable}`;
 			this.listContainer.addChild(
 				new TruncatedText(
 					selected

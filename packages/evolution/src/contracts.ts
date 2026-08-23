@@ -130,6 +130,7 @@ export type EvolutionTriggerKind = "automatic" | "manual";
 
 export interface EvolutionRepositorySnapshot {
 	readonly repositoryId: string;
+	readonly directoryId?: string;
 	readonly rootPath: string;
 	readonly revision: string;
 }

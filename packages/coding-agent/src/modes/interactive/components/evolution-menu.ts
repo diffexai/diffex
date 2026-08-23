@@ -9,6 +9,7 @@ import {
 	UNSELECTED_LIST_PREFIX,
 } from "@earendil-works/diffex-tui";
 import type {
+	EvolutionHarnessVersionInfo,
 	EvolutionJobDetail,
 	EvolutionJobSummary,
 	EvolutionOverview,
@@ -19,13 +20,22 @@ import type {
 } from "#evolution";
 import { theme } from "../theme/theme.ts";
 import { DynamicBorder } from "./dynamic-border.ts";
+import {
+	formatEvolutionTimestamp,
+	formatHarnessVersionReference,
+	sanitizeDisplayText,
+} from "./harness-version-display.ts";
 import { keyHint, rawKeyHint } from "./keybinding-hints.ts";
+
+export { formatEvolutionTimestamp } from "./harness-version-display.ts";
 
 export interface EvolutionMenuClient {
 	getEnabled(): boolean;
 	setEnabled(enabled: boolean): Promise<void>;
 	subscribe(listener: (event: EvolutionProgressEvent) => void): () => void;
 	overview(): Promise<EvolutionOverview>;
+	listHarnessVersionInfo(): Promise<readonly EvolutionHarnessVersionInfo[]>;
+	listCurrentDirectoryHarnessVersionInfo(): Promise<readonly EvolutionHarnessVersionInfo[]>;
 	listJobs(): Promise<readonly EvolutionJobSummary[]>;
 	jobDetail(jobId: string): Promise<EvolutionJobDetail>;
 	proposalDetail(jobId: string, proposalId: string): Promise<EvolutionProposalDetail>;
@@ -56,32 +66,13 @@ interface MenuEntry {
 }
 
 export function sanitizeEvolutionText(value: string): string {
-	return value.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, " ");
-}
-
-function abbreviate(value: string | null): string {
-	if (value === null) return "none";
-	const [algorithm, digest] = value.split(":", 2);
-	return algorithm && digest ? `${algorithm}:${digest.slice(0, 12)}` : sanitizeEvolutionText(value);
+	return sanitizeDisplayText(value);
 }
 
 function duration(milliseconds: number): string {
 	if (milliseconds <= 0) return "ready";
 	const minutes = Math.ceil(milliseconds / 60_000);
 	return `${minutes} minute${minutes === 1 ? "" : "s"}`;
-}
-
-export function formatEvolutionTimestamp(value: string | null, now = new Date()): string {
-	if (value === null) return "never";
-	const checkpoint = new Date(value);
-	if (!Number.isFinite(checkpoint.getTime())) return sanitizeEvolutionText(value);
-	const hours = checkpoint.getHours();
-	const time = `${hours % 12 || 12}:${checkpoint.getMinutes().toString().padStart(2, "0")} ${hours < 12 ? "am" : "pm"}`;
-	const isToday =
-		checkpoint.getFullYear() === now.getFullYear() &&
-		checkpoint.getMonth() === now.getMonth() &&
-		checkpoint.getDate() === now.getDate();
-	return isToday ? `Today at ${time}` : `${checkpoint.getMonth() + 1}/${checkpoint.getDate()} at ${time}`;
 }
 
 export function formatEvolutionProposalOutcome(proposal: EvolutionProposalDetail["proposal"]): string {
@@ -91,6 +82,54 @@ export function formatEvolutionProposalOutcome(proposal: EvolutionProposalDetail
 		return `Remove the existing evolution-memory entry because ${proposal.exactDelta.reason}`;
 	}
 	return proposal.exactDelta.addition.content;
+}
+
+function firstCharacters(value: string, maximum: number): string {
+	return [...sanitizeEvolutionText(value).replace(/\s+/gu, " ").trim()].slice(0, maximum).join("");
+}
+
+export function formatEvolutionJobLabel(job: EvolutionJobSummary, now = new Date()): string {
+	const trigger = job.trigger === "automatic" ? "auto" : "manual";
+	return `${formatEvolutionTimestamp(job.createdAt, now)} - ${trigger} - ${job.stage}`;
+}
+
+export function formatEvolutionProposalLabel(proposal: EvolutionProposalDetail["proposal"]): string {
+	return `Proposal ${firstCharacters(formatEvolutionProposalOutcome(proposal), 50)}`;
+}
+
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function evidenceContent(value: unknown): string {
+	if (typeof value === "string") return value;
+	if (Array.isArray(value)) {
+		const visibleText = value.flatMap((item) =>
+			isRecord(item) && item.type === "text" && typeof item.text === "string" ? [item.text] : [],
+		);
+		if (visibleText.length > 0) return visibleText.join(" ");
+		return value.map(evidenceContent).filter(Boolean).join(" ");
+	}
+	if (!isRecord(value)) return "";
+	if (isRecord(value.message)) return evidenceContent(value.message);
+	if ("content" in value) {
+		const content = evidenceContent(value.content);
+		if (content) return content;
+	}
+	for (const key of ["text", "output", "error", "command", "thinking"] as const) {
+		if (typeof value[key] === "string") return value[key];
+	}
+	if (value.type === "toolCall" && typeof value.name === "string") {
+		return `${value.name}: ${JSON.stringify(value.arguments ?? {})}`;
+	}
+	return "";
+}
+
+export function formatEvolutionEvidencePreview(
+	evidence: EvolutionProposalDetail["supportingEvidence"][number],
+): string {
+	const content = evidenceContent(evidence.payload) || JSON.stringify(evidence.payload);
+	return firstCharacters(content, 100);
 }
 
 export class EvolutionMenuComponent extends Container implements Focusable {
@@ -103,6 +142,8 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 	readonly #viewStack: MenuView[] = [{ kind: "overview" }];
 	#overview: EvolutionOverview | null = null;
 	#jobs: readonly EvolutionJobSummary[] = [];
+	#harnessVersionInfo: readonly EvolutionHarnessVersionInfo[] = [];
+	#harnessVersionInfoLoaded = false;
 	#job: EvolutionJobDetail | null = null;
 	#proposal: EvolutionProposalDetail | null = null;
 	#entries: readonly MenuEntry[] = [];
@@ -134,7 +175,8 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 		this.#onStatus = onStatus;
 		this.#requestRender = requestRender;
 		this.#pollIntervalMs = pollIntervalMs;
-		this.#unsubscribe = client.subscribe(() => {
+		this.#unsubscribe = client.subscribe((event) => {
+			if (event.type === "completed") this.#harnessVersionInfoLoaded = false;
 			void this.refresh();
 		});
 		this.rebuild();
@@ -181,6 +223,10 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 		this.rebuild();
 		try {
 			this.#overview = await this.#client.overview();
+			if (!this.#harnessVersionInfoLoaded) {
+				this.#harnessVersionInfo = await this.#client.listHarnessVersionInfo();
+				this.#harnessVersionInfoLoaded = true;
+			}
 			const view = this.#view();
 			if (view.kind === "jobs") this.#jobs = await this.#client.listJobs();
 			if (view.kind === "job") this.#job = await this.#client.jobDetail(view.jobId);
@@ -295,18 +341,18 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 		}
 		if (action === "resume") {
 			return [
-				`Resume ${overview?.newestResumableJob?.jobId ?? "the newest interrupted job"}?`,
+				`Resume ${overview?.newestResumableJob ? formatEvolutionJobLabel(overview.newestResumableJob) : "the newest interrupted job"}?`,
 				"The durable checkpoint will become active background work.",
 			];
 		}
 		if (action === "cancel") {
 			return [
-				`Cancel ${overview?.activeJob?.jobId ?? "the active job"}?`,
+				`Cancel ${overview?.activeJob ? formatEvolutionJobLabel(overview.activeJob) : "the active job"}?`,
 				"The current stage will be interrupted and remain resumable.",
 			];
 		}
 		return [
-			`Roll back ${abbreviate(overview?.rollbackAction?.fromHarnessVersion ?? null)} to ${abbreviate(overview?.rollbackAction?.toHarnessVersion ?? null)}?`,
+			`Roll back ${formatHarnessVersionReference(overview?.rollbackAction?.fromHarnessVersion ?? null, this.#harnessVersionInfo, overview?.currentHarnessVersion)} to ${formatHarnessVersionReference(overview?.rollbackAction?.toHarnessVersion ?? null, this.#harnessVersionInfo, overview?.currentHarnessVersion)}?`,
 			"The selected harness pointer will change. The next fresh prompt will observe it.",
 		];
 	}
@@ -318,7 +364,8 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 					() => this.#client.startManual(),
 					(result) => {
 						if (result.status === "created") return "Evolution job started";
-						if (result.status === "attached") return `Attached to evolution job ${result.job.jobId}`;
+						if (result.status === "attached")
+							return `Attached to evolution job ${formatEvolutionJobLabel(result.job)}`;
 						if (result.reason === "no-new-evidence") return "No new settled evidence is available";
 						return `Evolution job was not started: ${result.reason}`;
 					},
@@ -355,46 +402,36 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 						}`,
 		);
 		this.#addLine(`Cooldown: ${duration(overview.cooldownRemainingMs)}`);
-		this.#addLine(`Session harness: ${abbreviate(overview.observedHarnessVersion)}`);
+		this.#addLine(
+			`Session harness: ${formatHarnessVersionReference(
+				overview.observedHarnessVersion,
+				this.#harnessVersionInfo,
+				overview.currentHarnessVersion,
+			)}`,
+		);
 		if (overview.nextPromptWillRefresh) this.#addLine("Next prompt will refresh the selected harness", "accent");
 	}
 
 	#renderJob(job: EvolutionJobDetail): void {
-		const coverage = job.observability.sliceCoverage;
-		let result: string;
-		if (job.outcome === "active") result = "In progress";
-		else if (job.outcome === "completed") {
-			result = job.emittedProposals === 0 ? "Completed with no proposals" : "Completed with proposals";
-		} else if (job.outcome === "terminal-failed" && job.stage === "reflecting" && job.emittedProposals === 0) {
-			result = "Failed during reflection before proposals could be generated";
-		} else if (job.outcome === "terminal-failed") result = `Failed during ${job.stage}`;
-		else if (job.outcome === "retryable-failed") result = "Paused after a recoverable failure";
-		else if (job.outcome === "interrupted") result = "Interrupted";
-		else result = "Superseded";
 		for (const line of [
 			`Trigger: ${job.trigger}`,
 			`Stage: ${job.stage} (${job.outcome})`,
-			`Result: ${result}`,
 			`Finished: ${formatEvolutionTimestamp(job.terminalAt)}`,
-			`Proposals: ${job.emittedProposals} emitted / ${job.eligibleProposals} eligible`,
 			`Evolution token: ${job.observability.estimatedEvidenceTokens.toLocaleString()}`,
-			`Reflector budget: ${job.observability.reflectorBudget.modelCalls} model / ${job.observability.reflectorBudget.reflectionRounds} rounds / ${job.observability.reflectorBudget.toolCalls} tools`,
-			coverage === null
-				? job.outcome === "active"
-					? "Coverage: pending"
-					: "Coverage: unavailable - reflection did not complete"
-				: `Coverage: ${coverage.analyzed} analyzed / ${coverage.corrupt} corrupt / ${coverage.skipped} skipped / ${coverage.unreadable} unreadable`,
-			`Recovery attempts: ${job.observability.recoveryAttempts}`,
 			`Last checkpoint: ${formatEvolutionTimestamp(job.lastCheckpointAt)}`,
-			`Last error: ${job.errorMessage ?? "none"}`,
-			`Base harness: ${abbreviate(job.baseHarnessVersion)}`,
+			`Base harness: ${formatHarnessVersionReference(
+				job.baseHarnessVersion,
+				this.#harnessVersionInfo,
+				this.#overview?.currentHarnessVersion,
+				job.baseHarnessInfo,
+			)}`,
 		]) {
 			this.#addLine(line);
 		}
 	}
 
 	#renderProposal(detail: EvolutionProposalDetail): void {
-		this.#addLine(`Proposal: ${detail.proposal.proposalId}`);
+		this.#addLine(formatEvolutionProposalLabel(detail.proposal));
 		this.addChild(new Spacer(1));
 		this.#addLine(`Validation: ${detail.validationDisposition ?? "pending"}`);
 		this.addChild(new Spacer(1));
@@ -431,14 +468,14 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 	#renderProposalEvidence(detail: EvolutionProposalDetail, evidenceKind: "supporting" | "contradicting"): void {
 		const supporting = evidenceKind === "supporting";
 		const label = supporting ? "Supporting evidence" : "Contradicting evidence";
-		const evidenceIds = supporting ? detail.proposal.supportingEvidenceIds : detail.proposal.contradictingEvidenceIds;
-		this.#addLine(`${label} (${evidenceIds.length})`, "accent");
-		if (evidenceIds.length === 0) {
+		const evidence = supporting ? detail.supportingEvidence : detail.contradictingEvidence;
+		this.#addLine(`${label} (${evidence.length})`, "accent");
+		if (evidence.length === 0) {
 			this.#addLine(`No ${label.toLowerCase()}`, "muted");
 			return;
 		}
-		for (const [index, evidenceId] of evidenceIds.entries()) {
-			this.#addLine(`${index + 1}. ${evidenceId}`);
+		for (const [index, item] of evidence.entries()) {
+			this.#addLine(`${index + 1}. ${formatEvolutionEvidencePreview(item)}`);
 		}
 	}
 
@@ -473,7 +510,7 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 			} else if (view.kind === "jobs") {
 				this.#renderEntries(
 					this.#jobs.map((job) => ({
-						label: `${job.jobId} - ${job.trigger} - ${job.stage} - ${job.outcome}`,
+						label: formatEvolutionJobLabel(job),
 						enabled: true,
 						select: () => this.#push({ kind: "job", jobId: job.jobId }),
 					})),
@@ -483,13 +520,13 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 				this.#renderJob(this.#job);
 				this.addChild(new Spacer(1));
 				this.#renderEntries(
-					this.#job.proposalIds.map((proposalId) => ({
-						label: `Proposal ${proposalId}`,
+					this.#job.proposals.map((proposal) => ({
+						label: formatEvolutionProposalLabel(proposal),
 						enabled: true,
-						select: () => this.#push({ kind: "proposal", jobId: view.jobId, proposalId }),
+						select: () => this.#push({ kind: "proposal", jobId: view.jobId, proposalId: proposal.proposalId }),
 					})),
 				);
-				if (this.#job.proposalIds.length === 0) this.#addLine("No proposals emitted", "muted");
+				if (this.#job.proposals.length === 0) this.#addLine("No proposals emitted", "muted");
 			} else if (view.kind === "proposal" && this.#proposal) {
 				this.#renderProposal(this.#proposal);
 				this.addChild(new Spacer(1));

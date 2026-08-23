@@ -1,15 +1,20 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { HarnessStateStore } from "@earendil-works/diffex-harness-state";
+import { HarnessStateStore, type HarnessVersion, type HarnessVersionList } from "@earendil-works/diffex-harness-state";
 import type { MaterializedInvocation } from "@earendil-works/diffex-harness-trace";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	computeEvolutionContentDigest,
+	type EvolutionArtifactReference,
 	EvolutionBackgroundWorker,
 	EvolutionControlPlane,
 	EvolutionControlService,
+	type EvolutionControlServiceDependencies,
 	EvolutionExecutionError,
+	type EvolutionInputSnapshot,
+	type EvolutionJob,
+	type EvolutionLedgerEvent,
 	EvolutionProgressBus,
 	type EvolutionScope,
 	type EvolutionSnapshotContext,
@@ -183,11 +188,106 @@ async function serviceFixture(
 		harnesses,
 		progress,
 		observedHarnessVersion: () => harness.manifest.version,
+		currentDirectory: {
+			directoryId: "directory-1",
+			rootPath: "/repo",
+			containsRevision: async () => false,
+		},
 	});
 	return { service, store, progress, controlPlane };
 }
 
 describe("evolution control service", () => {
+	it("limits directory harnesses by durable identity and legacy repository history", async () => {
+		const rootVersion = `sha256:${"a".repeat(64)}`;
+		const renamedDirectoryVersion = `sha256:${"b".repeat(64)}`;
+		const otherDirectoryVersion = `sha256:${"c".repeat(64)}`;
+		const legacyVersion = `sha256:${"d".repeat(64)}`;
+		const versions = [
+			{ version: rootVersion, base: null },
+			{ version: renamedDirectoryVersion, base: rootVersion },
+			{ version: otherDirectoryVersion, base: rootVersion },
+			{ version: legacyVersion, base: rootVersion },
+		];
+		const jobs = versions.slice(1).map(({ version }, index) => {
+			const jobId = `job-${index + 1}`;
+			return {
+				jobId,
+				inputSnapshot: { artifactId: jobId, contentDigest: `sha256:${"0".repeat(64)}` },
+				updatedAt: `2026-08-2${index + 1}T12:00:00.000Z`,
+				terminalAt: `2026-08-2${index + 1}T12:00:00.000Z`,
+				resultingHarnessVersion: version,
+			} as unknown as EvolutionJob & { readonly resultingHarnessVersion: HarnessVersion };
+		});
+		const repositories = [
+			{ repositoryId: "diffex", directoryId: "current-directory", rootPath: "/renamed/repo", revision: "a1" },
+			{ repositoryId: "diffex", directoryId: "other-directory", rootPath: "/repo", revision: "b2" },
+			{ repositoryId: "diffex", rootPath: "/old/repo", revision: "c".repeat(40) },
+		];
+		const snapshots = new Map(
+			jobs.map((job, index) => [
+				job.jobId,
+				{
+					ingestionHighWaterCursor: 0,
+					evidenceSources: [],
+					harness: {},
+					repository: repositories[index],
+				} as unknown as EvolutionInputSnapshot,
+			]),
+		);
+		const versionList = {
+			versions: versions.map(({ version, base }) => ({
+				manifest: { version, base },
+				state: { memory: "" },
+			})),
+			diagnostics: [],
+			currentVersion: rootVersion,
+		} as unknown as HarnessVersionList;
+		const containsRevision = vi.fn(async (revision: string) => revision === "c".repeat(40));
+		const service = new EvolutionControlService({
+			scope,
+			jobs: { list: async () => jobs },
+			harnesses: { listVersions: async () => versionList },
+			artifacts: {
+				get: async (reference: EvolutionArtifactReference) => {
+					const snapshot = snapshots.get(reference.artifactId);
+					if (snapshot === undefined) throw new Error("Unknown snapshot");
+					return snapshot;
+				},
+			},
+			ledger: {
+				read: async (jobId: string) => {
+					const job = jobs.find((candidate) => candidate.jobId === jobId);
+					if (job === undefined) return [];
+					return [
+						{
+							type: "harness-activated",
+							resultingHarnessVersion: job.resultingHarnessVersion,
+						} as EvolutionLedgerEvent,
+					];
+				},
+			},
+			currentDirectory: {
+				directoryId: "current-directory",
+				rootPath: "/current/repo",
+				containsRevision,
+			},
+		} as unknown as EvolutionControlServiceDependencies);
+
+		expect((await service.listCurrentDirectoryHarnessVersionInfo()).map((info) => info.version)).toEqual([
+			rootVersion,
+			legacyVersion,
+			renamedDirectoryVersion,
+		]);
+		expect((await service.listHarnessVersionInfo()).map((info) => info.version)).toEqual([
+			rootVersion,
+			renamedDirectoryVersion,
+			otherDirectoryVersion,
+			legacyVersion,
+		]);
+		expect(containsRevision).toHaveBeenCalledWith("c".repeat(40));
+	});
+
 	it("uses only eligible materializations for totals and frozen input", async () => {
 		const eligible = materialization(2);
 		const fixture = await serviceFixture(undefined, {
@@ -196,6 +296,14 @@ describe("evolution control service", () => {
 		});
 
 		const overview = await fixture.service.overview();
+		expect(await fixture.service.listHarnessVersionInfo()).toEqual([
+			{
+				version: overview.currentHarnessVersion,
+				kind: "default",
+				evolvedAt: null,
+				evolvedIn: null,
+			},
+		]);
 		expect(overview).toMatchObject({
 			ingestionHighWaterCursor: 3,
 			settledInvocationCount: 1,
