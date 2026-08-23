@@ -154,6 +154,64 @@ describe("coding-agent evolution runtime", () => {
 		expect(runtime.stop).toHaveBeenCalledOnce();
 	});
 
+	it("does not schedule automatic evolution when self-evolution is disabled", async () => {
+		const trace = {
+			operationSettled: vi.fn(async () => {}),
+			harnessActivated: vi.fn(async () => {}),
+		} as unknown as InvocationTrace;
+		const runtime: CodingAgentEvolutionRuntime = {
+			control: { subscribe: () => () => {} } as unknown as EvolutionControlService,
+			start: vi.fn(async () => {}),
+			evaluateAutomatic: vi.fn(),
+			stop: vi.fn(async () => {}),
+		};
+		const coordinator = new EvolutionRuntimeCoordinator(trace, {
+			getEnabled: () => false,
+			setEnabled: vi.fn(),
+		});
+		await coordinator.replace(runtime);
+		expect(runtime.start).not.toHaveBeenCalled();
+
+		await coordinator.operationSettled({
+			operationId: "operation-disabled",
+			sessionManager: {} as never,
+			firstEntryOrdinal: 0,
+		});
+
+		expect(trace.operationSettled).toHaveBeenCalledOnce();
+		expect(runtime.evaluateAutomatic).not.toHaveBeenCalled();
+	});
+
+	it("stops and restarts evolution collection within the same session", async () => {
+		let enabled = true;
+		const trace = {
+			operationSettled: vi.fn(async () => {}),
+			harnessActivated: vi.fn(async () => {}),
+			setEnabled: vi.fn(async () => {}),
+		} as unknown as InvocationTrace;
+		const runtime: CodingAgentEvolutionRuntime = {
+			control: { subscribe: () => () => {} } as unknown as EvolutionControlService,
+			start: vi.fn(async () => {}),
+			evaluateAutomatic: vi.fn(),
+			stop: vi.fn(async () => {}),
+		};
+		const coordinator = new EvolutionRuntimeCoordinator(trace, {
+			getEnabled: () => enabled,
+			setEnabled: async (next) => {
+				enabled = next;
+			},
+		});
+		await coordinator.replace(runtime);
+
+		await coordinator.setEnabled(false);
+		expect(trace.setEnabled).toHaveBeenCalledWith(false);
+		expect(runtime.stop).toHaveBeenCalledOnce();
+
+		await coordinator.setEnabled(true);
+		expect(trace.setEnabled).toHaveBeenCalledWith(true);
+		expect(runtime.start).toHaveBeenCalledTimes(2);
+	});
+
 	it("keeps trace cursors stable and isolates unreadable evidence", async () => {
 		const root = join(tmpdir(), `diffex-evidence-catalog-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 		const traceDirectory = join(root, "traces");

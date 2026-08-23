@@ -477,6 +477,16 @@ describe("CLI invocation tracing", () => {
 		expect(footer(resumedRecords)?.terminationStatus).toBe("completed");
 	});
 
+	it("does not store invocation traces when persisted self-evolution is off", async () => {
+		const directories = setup();
+		writeFileSync(join(directories.agentDir, "settings.json"), JSON.stringify({ evolution: { enabled: false } }));
+
+		const result = await runCli(directories, [...commonArgs(directories), "-p", "hello"]);
+
+		expect(result).toMatchObject({ code: 0, signal: null, stdout: "first response\n", stderr: "" });
+		expect(tracePaths(directories.agentDir)).toEqual([]);
+	});
+
 	it("attaches a new binding when the active session is replaced", async () => {
 		const directories = setup();
 		const result = await runCli(directories, [...commonArgs(directories), "-p", "/replace-trace-session"]);
@@ -507,6 +517,84 @@ describe("CLI invocation tracing", () => {
 
 		expect(trace.destinationPath).toBeUndefined();
 		expect(tracePaths(directories.agentDir)).toEqual([]);
+	});
+
+	it("starts tracing in the same session after self-evolution is enabled", async () => {
+		const directories = setup();
+		const manager = SessionManager.create(directories.projectDir, join(directories.agentDir, "sessions"));
+		const { trace } = await createInvocationTrace({
+			agentDir: directories.agentDir,
+			sessionManager: manager,
+			enabled: false,
+		});
+		await trace.attachSession(manager, "startup");
+
+		const disabledEntryOrdinal = manager.getEntryCount();
+		manager.appendMessage({
+			role: "user",
+			content: [{ type: "text", text: "disabled operation" }],
+			timestamp: Date.now(),
+		});
+		manager.appendMessage(fauxAssistantMessage("disabled response"));
+		await trace.startSpan(
+			{
+				name: "diffex.coding_agent.operation",
+				attributes: { "diffex.operation.id": "disabled-operation" },
+			},
+			() => {},
+		);
+		await trace.operationSettled({
+			operationId: "disabled-operation",
+			sessionManager: manager,
+			firstEntryOrdinal: disabledEntryOrdinal,
+		});
+		expect(tracePaths(directories.agentDir)).toEqual([]);
+
+		await trace.setEnabled(true);
+		const enabledEntryOrdinal = manager.getEntryCount();
+		manager.appendMessage({
+			role: "user",
+			content: [{ type: "text", text: "enabled operation" }],
+			timestamp: Date.now(),
+		});
+		manager.appendMessage(fauxAssistantMessage("enabled response"));
+		await trace.startSpan(
+			{
+				name: "diffex.coding_agent.operation",
+				attributes: { "diffex.operation.id": "enabled-operation" },
+			},
+			() => {},
+		);
+		await trace.operationSettled({
+			operationId: "enabled-operation",
+			sessionManager: manager,
+			firstEntryOrdinal: enabledEntryOrdinal,
+		});
+
+		const records = await readTrace(onlyTracePath(directories.agentDir));
+		expect(records.find((record) => record.type === "session_segment")).toMatchObject({
+			operationId: "enabled-operation",
+			cursor: { start: { entryOrdinal: enabledEntryOrdinal } },
+		});
+		expect(JSON.stringify(records)).not.toContain("disabled-operation");
+		await trace.close();
+	});
+
+	it("discards an open trace and stops collecting after self-evolution is disabled", async () => {
+		const directories = setup();
+		const manager = SessionManager.create(directories.projectDir, join(directories.agentDir, "sessions"));
+		const { trace } = await createInvocationTrace({ agentDir: directories.agentDir, sessionManager: manager });
+		await trace.attachSession(manager, "startup");
+		await trace.recordDiagnostics([{ type: "warning", message: "open trace" }]);
+		expect(tracePaths(directories.agentDir)).toHaveLength(1);
+
+		await trace.setEnabled(false);
+		expect(tracePaths(directories.agentDir)).toEqual([]);
+
+		await trace.startSpan({ name: "test.operation" }, () => {});
+		await trace.recordDiagnostics([{ type: "warning", message: "disabled trace" }]);
+		expect(tracePaths(directories.agentDir)).toEqual([]);
+		await trace.close();
 	});
 
 	it("keeps exit-only startup, resume, and switch flows out of evolution", async () => {

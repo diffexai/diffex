@@ -216,6 +216,29 @@ describe("SettingsManager", () => {
 		});
 	});
 
+	describe("self-evolution", () => {
+		it("defaults to enabled and persists the global selection across sessions", async () => {
+			const manager = SettingsManager.create(projectDir, agentDir);
+
+			expect(manager.getEvolutionEnabled()).toBe(true);
+
+			manager.setEvolutionEnabled(false);
+			await manager.flush();
+
+			expect(SettingsManager.create(projectDir, agentDir).getEvolutionEnabled()).toBe(false);
+			expect(JSON.parse(readFileSync(join(agentDir, "settings.json"), "utf-8"))).toMatchObject({
+				evolution: { enabled: false },
+			});
+		});
+
+		it("uses only the global selection", () => {
+			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ evolution: { enabled: false } }));
+			writeFileSync(join(projectDir, ".diffex", "settings.json"), JSON.stringify({ evolution: { enabled: true } }));
+
+			expect(SettingsManager.create(projectDir, agentDir).getEvolutionEnabled()).toBe(false);
+		});
+	});
+
 	describe("error tracking", () => {
 		it("should collect and clear load errors via drainErrors", () => {
 			const globalSettingsPath = join(agentDir, "settings.json");

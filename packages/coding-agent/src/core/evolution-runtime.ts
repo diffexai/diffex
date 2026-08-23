@@ -793,12 +793,25 @@ export async function createCodingAgentEvolutionRuntime(
 /** Process-owned bridge that keeps trace flushing ordered before automatic evolution checks. */
 export class EvolutionRuntimeCoordinator implements AgentSessionLifecycleObserver {
 	readonly #trace: InvocationTrace;
+	readonly #getEnabled: () => boolean;
+	readonly #setEnabled: (enabled: boolean) => void | Promise<void>;
 	readonly #listeners = new Set<(event: EvolutionProgressEvent) => void>();
 	#runtime: CodingAgentEvolutionRuntime | null = null;
 	#unsubscribe: (() => void) | null = null;
 
-	constructor(trace: InvocationTrace) {
+	constructor(
+		trace: InvocationTrace,
+		toggle: {
+			readonly getEnabled: () => boolean;
+			readonly setEnabled: (enabled: boolean) => void | Promise<void>;
+		} = {
+			getEnabled: () => true,
+			setEnabled: () => {},
+		},
+	) {
 		this.#trace = trace;
+		this.#getEnabled = toggle.getEnabled;
+		this.#setEnabled = toggle.setEnabled;
 	}
 
 	async replace(runtime: CodingAgentEvolutionRuntime): Promise<void> {
@@ -807,7 +820,7 @@ export class EvolutionRuntimeCoordinator implements AgentSessionLifecycleObserve
 		this.#unsubscribe = null;
 		this.#runtime = null;
 		await previous?.stop();
-		await runtime.start();
+		if (this.#getEnabled()) await runtime.start();
 		this.#runtime = runtime;
 		this.#unsubscribe = runtime.control.subscribe((event) => {
 			for (const listener of this.#listeners) listener(event);
@@ -816,7 +829,21 @@ export class EvolutionRuntimeCoordinator implements AgentSessionLifecycleObserve
 
 	async operationSettled(settlement: AgentSessionOperationSettlement): Promise<void> {
 		await this.#trace.operationSettled(settlement);
-		this.#runtime?.evaluateAutomatic();
+		if (this.#getEnabled()) this.#runtime?.evaluateAutomatic();
+	}
+
+	getEnabled(): boolean {
+		return this.#getEnabled();
+	}
+
+	async setEnabled(enabled: boolean): Promise<void> {
+		if (this.#getEnabled() === enabled) return;
+		await Promise.all([
+			this.#setEnabled(enabled),
+			this.#trace.setEnabled(enabled),
+			enabled ? Promise.resolve() : this.#runtime?.stop(),
+		]);
+		if (enabled) await this.#runtime?.start();
 	}
 
 	harnessActivated(version: HarnessVersion): Promise<void> {

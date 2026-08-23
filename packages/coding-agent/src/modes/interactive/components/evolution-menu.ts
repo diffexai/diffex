@@ -22,6 +22,8 @@ import { DynamicBorder } from "./dynamic-border.ts";
 import { keyHint, rawKeyHint } from "./keybinding-hints.ts";
 
 export interface EvolutionMenuClient {
+	getEnabled(): boolean;
+	setEnabled(enabled: boolean): Promise<void>;
 	subscribe(listener: (event: EvolutionProgressEvent) => void): () => void;
 	overview(): Promise<EvolutionOverview>;
 	listJobs(): Promise<readonly EvolutionJobSummary[]>;
@@ -227,40 +229,58 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 	}
 
 	#overviewEntries(overview: EvolutionOverview): readonly MenuEntry[] {
+		const evolutionEnabled = this.#client.getEnabled();
 		return [
-			{ label: "Refresh", enabled: true, select: () => void this.refresh() },
+			{ label: "Refresh", enabled: evolutionEnabled, select: () => void this.refresh() },
 			{
 				label: "Evolve",
-				enabled: overview.activeJob === null,
-				disabledStatus: overview.activeJob === null ? undefined : "Started",
+				enabled: evolutionEnabled && overview.activeJob === null,
+				disabledStatus: evolutionEnabled && overview.activeJob !== null ? "Started" : undefined,
 				select: () => this.#confirm("start"),
 			},
 			{
 				label: "View",
-				enabled: overview.activeJob !== null,
+				enabled: evolutionEnabled && overview.activeJob !== null,
 				select: () => {
 					if (overview.activeJob) this.#push({ kind: "job", jobId: overview.activeJob.jobId });
 				},
 			},
 			{
 				label: "Resume",
-				enabled: overview.newestResumableJob !== null && overview.activeJob === null,
+				enabled: evolutionEnabled && overview.newestResumableJob !== null && overview.activeJob === null,
 				select: () => this.#confirm("resume"),
 			},
 			{
 				label: "Browse",
-				enabled: true,
+				enabled: evolutionEnabled,
 				select: () => this.#push({ kind: "jobs" }),
 			},
 			{
 				label: "Rollback",
-				enabled: overview.rollbackAction !== null,
+				enabled: evolutionEnabled && overview.rollbackAction !== null,
 				select: () => this.#confirm("rollback"),
 			},
 			{
 				label: "Cancel",
-				enabled: overview.activeJob?.cancellable === true,
+				enabled: evolutionEnabled && overview.activeJob?.cancellable === true,
 				select: () => this.#confirm("cancel"),
+			},
+			{
+				label: `Toggle [${evolutionEnabled ? "on" : "off"}]`,
+				enabled: true,
+				select: () => {
+					const enabled = !this.#client.getEnabled();
+					void this.#client
+						.setEnabled(enabled)
+						.then(() => {
+							this.#onStatus(`Self-evolution ${enabled ? "enabled" : "disabled"}`, false);
+							this.rebuild();
+							this.#requestRender();
+						})
+						.catch((error: unknown) => {
+							this.#onStatus(error instanceof Error ? error.message : String(error), true);
+						});
+				},
 			},
 		];
 	}
@@ -319,17 +339,20 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 	}
 
 	#renderOverview(overview: EvolutionOverview): void {
+		const evolutionEnabled = this.#client.getEnabled();
 		this.#addLine(`Evolution tokens: ${overview.unprocessedEstimatedTokens.toLocaleString()}`);
 		this.#addLine(`Evolution invocations: ${overview.settledInvocationCount}`);
 		this.#addLine(`Last evolution: ${formatEvolutionTimestamp(overview.lastEvolutionAt)}`);
 		this.#addLine(
-			overview.automaticEligibility.eligible
-				? "Next automatic evolution: Eligible"
-				: `Next automatic evolution: ${
-						overview.automaticEligibility.reason === "insufficient-tokens"
-							? "Insufficient information"
-							: overview.automaticEligibility.reason
-					}`,
+			!evolutionEnabled
+				? "Next automatic evolution: Disabled"
+				: overview.automaticEligibility.eligible
+					? "Next automatic evolution: Eligible"
+					: `Next automatic evolution: ${
+							overview.automaticEligibility.reason === "insufficient-tokens"
+								? "Insufficient information"
+								: overview.automaticEligibility.reason
+						}`,
 		);
 		this.#addLine(`Cooldown: ${duration(overview.cooldownRemainingMs)}`);
 		this.#addLine(`Session harness: ${abbreviate(overview.observedHarnessVersion)}`);

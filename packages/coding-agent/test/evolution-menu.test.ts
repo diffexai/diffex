@@ -171,16 +171,25 @@ function client(currentOverview: EvolutionOverview): {
 	listJobs: ReturnType<typeof vi.fn>;
 	jobDetailCall: ReturnType<typeof vi.fn>;
 	proposalDetailCall: ReturnType<typeof vi.fn>;
+	getEnabled: ReturnType<typeof vi.fn>;
+	setEnabled: ReturnType<typeof vi.fn>;
 } {
 	let listener: ((event: EvolutionProgressEvent) => void) | undefined;
+	let enabled = true;
 	const unsubscribed = vi.fn();
 	const startManual = vi.fn().mockResolvedValue({ status: "created", job: job() });
 	const overviewCall = vi.fn().mockResolvedValue(currentOverview);
 	const listJobs = vi.fn().mockResolvedValue([]);
 	const jobDetailCall = vi.fn().mockRejectedValue(new Error("unused"));
 	const proposalDetailCall = vi.fn().mockRejectedValue(new Error("unused"));
+	const getEnabled = vi.fn(() => enabled);
+	const setEnabled = vi.fn(async (next: boolean) => {
+		enabled = next;
+	});
 	return {
 		client: {
+			getEnabled,
+			setEnabled,
 			subscribe: (next) => {
 				listener = next;
 				return unsubscribed;
@@ -201,6 +210,8 @@ function client(currentOverview: EvolutionOverview): {
 		listJobs,
 		jobDetailCall,
 		proposalDetailCall,
+		getEnabled,
+		setEnabled,
 	};
 }
 
@@ -581,6 +592,29 @@ describe("EvolutionMenuComponent", () => {
 			stage: "completed",
 		});
 		expect(fixture.overviewCall).toHaveBeenCalledTimes(2);
+	});
+
+	it("persists the self-evolution toggle and disables every other action", async () => {
+		const fixture = client(overview());
+		const component = new EvolutionMenuComponent(
+			fixture.client,
+			() => {},
+			() => {},
+			() => {},
+		);
+		await vi.waitFor(() => expect(stripAnsi(component.render(180).join("\n"))).toContain("Toggle [on]"));
+
+		for (let index = 0; index < 7; index += 1) component.handleInput("\u001b[B");
+		component.handleInput("\n");
+
+		expect(fixture.setEnabled).toHaveBeenCalledWith(false);
+		await vi.waitFor(() => expect(stripAnsi(component.render(180).join("\n"))).toContain("Toggle [off]"));
+		const output = stripAnsi(component.render(180).join("\n"));
+		expect(output).toContain("Toggle [off]");
+		expect(output).toContain("Next automatic evolution: Disabled");
+		for (const action of ["Refresh", "Evolve", "View", "Resume", "Browse", "Rollback", "Cancel"]) {
+			expect(output).toContain(`${action} [unavailable]`);
+		}
 	});
 
 	it("sanitizes terminal control text", () => {

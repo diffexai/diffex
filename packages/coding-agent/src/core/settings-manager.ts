@@ -65,6 +65,10 @@ export interface WarningSettings {
 	anthropicExtraUsage?: boolean; // default: true
 }
 
+export interface EvolutionSettings {
+	enabled?: boolean; // default: true
+}
+
 export type DefaultProjectTrust = "ask" | "always" | "never";
 
 export type TransportSetting = Transport;
@@ -128,6 +132,7 @@ export interface Settings {
 	showHardwareCursor?: boolean; // Show terminal cursor while still positioning it for IME
 	markdown?: MarkdownSettings;
 	warnings?: WarningSettings;
+	evolution?: EvolutionSettings;
 	sessionDir?: string; // Custom session storage directory (same format as --session-dir CLI flag)
 	httpProxy?: string; // Proxy URL applied as HTTP_PROXY and HTTPS_PROXY for Diffex-managed HTTP clients
 	httpIdleTimeoutMs?: number; // HTTP header/body idle timeout in milliseconds; 0 disables it
@@ -772,6 +777,17 @@ export class SettingsManager {
 		}
 		this.globalSettings.compaction.enabled = enabled;
 		this.markModified("compaction", "enabled");
+		this.save();
+	}
+
+	getEvolutionEnabled(): boolean {
+		return this.globalSettings.evolution?.enabled ?? true;
+	}
+
+	setEvolutionEnabled(enabled: boolean): void {
+		this.globalSettings.evolution ??= {};
+		this.globalSettings.evolution.enabled = enabled;
+		this.markModified("evolution", "enabled");
 		this.save();
 	}
 

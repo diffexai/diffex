@@ -40,6 +40,7 @@ export interface InvocationTraceCreationResult {
 export interface CreateInvocationTraceOptions {
 	agentDir: string;
 	sessionManager: SessionManager;
+	enabled?: boolean;
 	diffexVersion?: string;
 	sourceRevision?: string;
 	onDiagnostic?: (diagnostic: AgentSessionRuntimeDiagnostic) => void;
@@ -97,6 +98,7 @@ export class InvocationTrace implements AgentSessionLifecycleObserver, Telemetry
 	#intervalTerminationStatus: TraceTerminationStatus = "completed";
 	#signalTermination: TraceTerminationStatus | undefined;
 	#settlementQueue: Promise<void> = Promise.resolve();
+	#enabled: boolean;
 	#closed = false;
 	#recorderUnavailableReported = false;
 
@@ -104,12 +106,14 @@ export class InvocationTrace implements AgentSessionLifecycleObserver, Telemetry
 		initial?: InvocationTraceRecorderHandle,
 		createRecorder?: InvocationTraceRecorderFactory,
 		onDiagnostic?: (diagnostic: AgentSessionRuntimeDiagnostic) => void,
+		enabled = true,
 	) {
 		this.#recorder = initial?.recorder;
 		this.#releaseTraceLock = initial?.releaseTraceLock;
 		this.#lastDestinationPath = initial?.recorder.destinationPath;
 		this.#createRecorder = createRecorder;
 		this.#onDiagnostic = onDiagnostic;
+		this.#enabled = enabled;
 		if (initial || createRecorder) this.#registerSignalObservers();
 	}
 
@@ -123,7 +127,7 @@ export class InvocationTrace implements AgentSessionLifecycleObserver, Telemetry
 		for (const signal of signals) {
 			const handler = () => {
 				this.#signalTermination = "aborted";
-				void this.#ensureRecorder();
+				if (this.#enabled) void this.#ensureRecorder();
 			};
 			process.on(signal, handler);
 			this.#signalCleanupHandlers.push(() => process.off(signal, handler));
@@ -156,17 +160,24 @@ export class InvocationTrace implements AgentSessionLifecycleObserver, Telemetry
 	}
 
 	async #ensureRecorder(): Promise<JsonlTraceContext | undefined> {
-		if (this.#closed) return undefined;
+		if (this.#closed || !this.#enabled) return undefined;
 		if (this.#recorder) return this.#recorder;
 		if (!this.#createRecorder) return undefined;
 		if (!this.#recorderCreation) {
 			this.#recorderCreation = this.#createRecorder()
 				.then(async (handle) => {
-					if (this.#closed) {
+					if (this.#closed || !this.#enabled) {
+						const destinationPath = handle.recorder.destinationPath;
 						try {
-							await handle.recorder.close(finalTerminationStatus("completed", this.#signalTermination));
+							await handle.recorder.close("aborted");
 						} finally {
-							await handle.releaseTraceLock();
+							try {
+								await handle.releaseTraceLock();
+							} finally {
+								await unlink(destinationPath).catch((error: NodeJS.ErrnoException) => {
+									if (error.code !== "ENOENT") throw error;
+								});
+							}
 						}
 						return undefined;
 					}
@@ -210,6 +221,10 @@ export class InvocationTrace implements AgentSessionLifecycleObserver, Telemetry
 			options.name === OPERATION_SPAN_NAME && typeof options.attributes?.[OPERATION_ID_ATTRIBUTE] === "string"
 				? options.attributes[OPERATION_ID_ATTRIBUTE]
 				: undefined;
+		if (!this.#enabled) {
+			if (operationId) this.#untracedOperations.add(operationId);
+			return NOOP_TELEMETRY_CONTEXT.startSpan(options, callback);
+		}
 		const skipsIdleAbort =
 			operationId !== undefined &&
 			options.attributes?.[OPERATION_KIND_ATTRIBUTE] === "abort" &&
@@ -294,7 +309,7 @@ export class InvocationTrace implements AgentSessionLifecycleObserver, Telemetry
 	}
 
 	async recordDiagnostics(diagnostics: readonly AgentSessionRuntimeDiagnostic[]): Promise<void> {
-		if (diagnostics.length === 0) return;
+		if (!this.#enabled || diagnostics.length === 0) return;
 		const recorder = await this.#ensureRecorder();
 		if (!recorder) return;
 		for (const diagnostic of diagnostics) {
@@ -312,6 +327,27 @@ export class InvocationTrace implements AgentSessionLifecycleObserver, Telemetry
 			);
 		}
 		await recorder.flush();
+	}
+
+	async setEnabled(enabled: boolean): Promise<void> {
+		if (this.#enabled === enabled) return;
+		this.#enabled = enabled;
+		if (enabled) return;
+		await this.#settlementQueue;
+		await this.#recorderCreation;
+		const destinationPath = this.#recorder?.destinationPath;
+		try {
+			await this.#closeCurrentRecorder("aborted");
+		} finally {
+			if (destinationPath) {
+				await unlink(destinationPath).catch((error: NodeJS.ErrnoException) => {
+					if (error.code !== "ENOENT") throw error;
+				});
+				if (this.#lastDestinationPath === destinationPath) this.#lastDestinationPath = undefined;
+			}
+		}
+		this.#pendingOperations.clear();
+		this.#untracedOperations.clear();
 	}
 
 	async #closeCurrentRecorder(terminationStatus: TraceTerminationStatus): Promise<void> {
@@ -389,5 +425,5 @@ export async function createInvocationTrace(
 		}
 	};
 
-	return { trace: new InvocationTrace(undefined, createRecorder, options.onDiagnostic) };
+	return { trace: new InvocationTrace(undefined, createRecorder, options.onDiagnostic, options.enabled) };
 }
