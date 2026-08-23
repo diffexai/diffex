@@ -19,6 +19,7 @@ Revision identifiers use canonical `sha256:<digest>` strings in APIs and data.
 Directory names replace the colon with a dash for Windows portability.
 
 Each manifest contains `schemaVersion`, `version`, `base`, content-addressed harness metadata including the next evolution lesson number, and a deterministic artifact inventory.
+The current manifest schema version is 2.
 The revision hash covers the schema version, parent revision, harness metadata, and sorted artifact descriptors, but not the `version` field itself.
 Each artifact retains its own content hash over its exact bytes.
 Including the parent revision makes repeated evolution with identical artifact content produce a distinct successor.

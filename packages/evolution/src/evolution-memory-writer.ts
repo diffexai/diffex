@@ -3,6 +3,7 @@ import { link, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { basename, dirname, join, resolve } from "node:path";
 import {
 	computeHarnessVersion,
+	HARNESS_VERSION_SCHEMA_VERSION,
 	type HarnessStateStore,
 	type HarnessVersion,
 	type HarnessVersionBundle,
@@ -297,7 +298,7 @@ function resultingHarnessVersion(
 	metadata: HarnessVersionMetadata,
 ): HarnessVersion {
 	return computeHarnessVersion({
-		schemaVersion: 1,
+		schemaVersion: HARNESS_VERSION_SCHEMA_VERSION,
 		base,
 		metadata,
 		artifacts: [{ kind: "evolution-memory", path: "EVOLVE.md", contentHash: memoryArtifactContentHash(memory) }],

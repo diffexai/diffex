@@ -72,6 +72,19 @@ describe("AgentSession harness revisions", () => {
 		);
 	});
 
+	it("switches repeatedly between valid revisions", async () => {
+		const { harness, store, rootVersion } = await createVersionedHarness();
+		const branch = await store.saveVersion({ memory: "Use the alternate harness." }, rootVersion);
+
+		await harness.session.switchHarnessVersion(branch.manifest.version);
+		expect(harness.session.activeHarnessVersion).toBe(branch.manifest.version);
+		expect((await store.loadCurrent()).manifest.version).toBe(branch.manifest.version);
+
+		await harness.session.switchHarnessVersion(rootVersion);
+		expect(harness.session.activeHarnessVersion).toBe(rootVersion);
+		expect((await store.loadCurrent()).manifest.version).toBe(rootVersion);
+	});
+
 	it("refreshes the selected harness before the next admitted request", async () => {
 		const { harness, store, rootVersion } = await createVersionedHarness();
 		const providerPrompts: string[] = [];

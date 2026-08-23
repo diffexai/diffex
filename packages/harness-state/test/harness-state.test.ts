@@ -6,6 +6,7 @@ import { Check } from "typebox/value";
 import { afterEach, describe, expect, test } from "vitest";
 import {
 	computeHarnessVersion,
+	HARNESS_VERSION_SCHEMA_VERSION,
 	type HarnessArtifactManifest,
 	HarnessArtifactManifestSchema,
 	type HarnessState,
@@ -58,8 +59,8 @@ function createManifest(
 	metadata: HarnessVersionMetadata = INITIAL_HARNESS_VERSION_METADATA,
 ): HarnessVersionManifest {
 	return {
-		schemaVersion: 1,
-		version: computeHarnessVersion({ schemaVersion: 1, base, metadata, artifacts }),
+		schemaVersion: HARNESS_VERSION_SCHEMA_VERSION,
+		version: computeHarnessVersion({ schemaVersion: HARNESS_VERSION_SCHEMA_VERSION, base, metadata, artifacts }),
 		base,
 		metadata,
 		artifacts: [...artifacts],
@@ -110,7 +111,7 @@ describe("canonical harness versions", () => {
 		const first = createArtifact("first", "future-kind", "nested/z.txt");
 		const second = createArtifact("second", "evolution-memory", "EVOLVE.md");
 		const input = {
-			schemaVersion: 1 as const,
+			schemaVersion: HARNESS_VERSION_SCHEMA_VERSION,
 			base: EXTERNAL_VERSION,
 			metadata: INITIAL_HARNESS_VERSION_METADATA,
 			artifacts: [first, second],
@@ -119,7 +120,7 @@ describe("canonical harness versions", () => {
 
 		expect(canonical).toBe(
 			JSON.stringify({
-				schemaVersion: 1,
+				schemaVersion: HARNESS_VERSION_SCHEMA_VERSION,
 				base: EXTERNAL_VERSION,
 				metadata: INITIAL_HARNESS_VERSION_METADATA,
 				artifacts: [second, first],
@@ -132,7 +133,7 @@ describe("canonical harness versions", () => {
 	test("changes independently for base, bytes, and artifact metadata", () => {
 		const original = createArtifact("memory");
 		const version = computeHarnessVersion({
-			schemaVersion: 1,
+			schemaVersion: HARNESS_VERSION_SCHEMA_VERSION,
 			base: null,
 			metadata: INITIAL_HARNESS_VERSION_METADATA,
 			artifacts: [original],
@@ -140,7 +141,7 @@ describe("canonical harness versions", () => {
 
 		expect(
 			computeHarnessVersion({
-				schemaVersion: 1,
+				schemaVersion: HARNESS_VERSION_SCHEMA_VERSION,
 				base: EXTERNAL_VERSION,
 				metadata: INITIAL_HARNESS_VERSION_METADATA,
 				artifacts: [original],
@@ -148,7 +149,7 @@ describe("canonical harness versions", () => {
 		).not.toBe(version);
 		expect(
 			computeHarnessVersion({
-				schemaVersion: 1,
+				schemaVersion: HARNESS_VERSION_SCHEMA_VERSION,
 				base: null,
 				metadata: INITIAL_HARNESS_VERSION_METADATA,
 				artifacts: [createArtifact("changed")],
@@ -156,7 +157,7 @@ describe("canonical harness versions", () => {
 		).not.toBe(version);
 		expect(
 			computeHarnessVersion({
-				schemaVersion: 1,
+				schemaVersion: HARNESS_VERSION_SCHEMA_VERSION,
 				base: null,
 				metadata: INITIAL_HARNESS_VERSION_METADATA,
 				artifacts: [{ ...original, kind: "future-kind" }],
@@ -164,14 +165,19 @@ describe("canonical harness versions", () => {
 		).not.toBe(version);
 		expect(
 			computeHarnessVersion({
-				schemaVersion: 1,
+				schemaVersion: HARNESS_VERSION_SCHEMA_VERSION,
 				base: null,
 				metadata: INITIAL_HARNESS_VERSION_METADATA,
 				artifacts: [{ ...original, path: "nested/EVOLVE.md" }],
 			}),
 		).not.toBe(version);
 		expect(
-			computeHarnessVersion({ schemaVersion: 1, base: null, metadata: LESSON_METADATA, artifacts: [original] }),
+			computeHarnessVersion({
+				schemaVersion: HARNESS_VERSION_SCHEMA_VERSION,
+				base: null,
+				metadata: LESSON_METADATA,
+				artifacts: [original],
+			}),
 		).not.toBe(version);
 	});
 
@@ -189,6 +195,7 @@ describe("canonical harness versions", () => {
 		expect(Check(HarnessVersionMetadataSchema, LESSON_METADATA)).toBe(true);
 		expect(Check(HarnessVersionMetadataSchema, { evolutionMemory: { nextLessonNumber: 0 } })).toBe(false);
 		expect(Check(HarnessVersionManifestSchema, manifest)).toBe(true);
+		expect(Check(HarnessVersionManifestSchema, { ...manifest, schemaVersion: 1 })).toBe(false);
 		const { metadata: _metadata, ...manifestWithoutMetadata } = manifest;
 		expect(Check(HarnessVersionManifestSchema, manifestWithoutMetadata)).toBe(false);
 		expect(Check(HarnessVersionManifestSchema, { ...manifest, extra: true })).toBe(false);
@@ -407,6 +414,17 @@ describe("bundle persistence and validation", () => {
 			join(destination, "manifest.json"),
 			JSON.stringify({ ...createManifest([createArtifact("memory")]), extra: true }),
 		);
+		await expect(loadHarnessState(destination)).rejects.toThrow(/invalid harness version manifest/i);
+	});
+
+	test("rejects prior manifest schema versions", async () => {
+		const root = await createTemporaryRoot();
+		const destination = join(root, "bundle");
+		const manifest = createManifest([createArtifact("memory")]);
+		await mkdir(destination);
+		await writeFile(join(destination, "manifest.json"), JSON.stringify({ ...manifest, schemaVersion: 1 }));
+		await writeFile(join(destination, "EVOLVE.md"), "memory");
+
 		await expect(loadHarnessState(destination)).rejects.toThrow(/invalid harness version manifest/i);
 	});
 });

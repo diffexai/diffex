@@ -1,6 +1,7 @@
 import { InMemoryTelemetryContext } from "@earendil-works/diffex-agent-core";
 import { fauxAssistantMessage } from "@earendil-works/diffex-ai";
 import {
+	HARNESS_VERSION_SCHEMA_VERSION,
 	HarnessStateStore,
 	type HarnessVersionBundle,
 	INITIAL_HARNESS_VERSION_METADATA,
@@ -179,7 +180,7 @@ describe("coding-agent runtime telemetry", () => {
 		const bundle: HarnessVersionBundle = {
 			state: { memory: "captured memory" },
 			manifest: {
-				schemaVersion: 1,
+				schemaVersion: HARNESS_VERSION_SCHEMA_VERSION,
 				version,
 				base: null,
 				metadata: INITIAL_HARNESS_VERSION_METADATA,

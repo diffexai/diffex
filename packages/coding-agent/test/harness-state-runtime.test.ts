@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
 	computeHarnessVersion,
+	HARNESS_VERSION_SCHEMA_VERSION,
 	HarnessStateStore,
 	harnessVersionDirectoryName,
 } from "@earendil-works/diffex-harness-state";
@@ -116,7 +117,7 @@ describe("global harness state startup", () => {
 			{ kind: "skill", path: "skills/future/SKILL.md", contentHash: contentHash(skill) },
 		];
 		const version = computeHarnessVersion({
-			schemaVersion: 1,
+			schemaVersion: HARNESS_VERSION_SCHEMA_VERSION,
 			base: root.manifest.version,
 			metadata: root.manifest.metadata,
 			artifacts,
@@ -126,7 +127,13 @@ describe("global harness state startup", () => {
 		writeFileSync(
 			join(bundlePath, "manifest.json"),
 			`${JSON.stringify(
-				{ schemaVersion: 1, version, base: root.manifest.version, metadata: root.manifest.metadata, artifacts },
+				{
+					schemaVersion: HARNESS_VERSION_SCHEMA_VERSION,
+					version,
+					base: root.manifest.version,
+					metadata: root.manifest.metadata,
+					artifacts,
+				},
 				null,
 				2,
 			)}\n`,

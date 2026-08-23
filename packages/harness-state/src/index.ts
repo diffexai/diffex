@@ -20,6 +20,8 @@ const SUPPORTED_ARTIFACT_KIND = "evolution-memory";
 const UTF8_DECODER = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
 const UTF8_ENCODER = new TextEncoder();
 
+export const HARNESS_VERSION_SCHEMA_VERSION = 2 as const;
+
 export const HarnessVersionSchema = Type.Readonly(Type.String({ pattern: SHA256_PATTERN }));
 export type HarnessVersion = string;
 
@@ -72,7 +74,7 @@ export interface HarnessArtifactManifest {
 export const HarnessVersionManifestSchema = Type.Readonly(
 	Type.Object(
 		{
-			schemaVersion: Type.Literal(1),
+			schemaVersion: Type.Literal(HARNESS_VERSION_SCHEMA_VERSION),
 			version: HarnessVersionSchema,
 			base: Type.Union([Type.Null(), HarnessVersionSchema]),
 			metadata: HarnessVersionMetadataSchema,
@@ -82,7 +84,7 @@ export const HarnessVersionManifestSchema = Type.Readonly(
 	),
 );
 export interface HarnessVersionManifest {
-	readonly schemaVersion: 1;
+	readonly schemaVersion: typeof HARNESS_VERSION_SCHEMA_VERSION;
 	readonly version: HarnessVersion;
 	readonly base: HarnessVersion | null;
 	readonly metadata: HarnessVersionMetadata;
@@ -151,7 +153,7 @@ export interface HarnessSelectConflict {
 export type HarnessSelectResult = HarnessSelectSuccess | HarnessSelectConflict;
 
 export interface HarnessVersionInput {
-	readonly schemaVersion: 1;
+	readonly schemaVersion: typeof HARNESS_VERSION_SCHEMA_VERSION;
 	readonly base: HarnessVersion | null;
 	readonly metadata: HarnessVersionMetadata;
 	readonly artifacts: readonly HarnessArtifactManifest[];
@@ -176,7 +178,10 @@ function compareArtifacts(left: HarnessArtifactManifest, right: HarnessArtifactM
 }
 
 export function serializeHarnessVersion(input: HarnessVersionInput): string {
-	if (input.schemaVersion !== 1 || !Check(Type.Union([Type.Null(), HarnessVersionSchema]), input.base)) {
+	if (
+		input.schemaVersion !== HARNESS_VERSION_SCHEMA_VERSION ||
+		!Check(Type.Union([Type.Null(), HarnessVersionSchema]), input.base)
+	) {
 		throw new Error("Invalid harness version input");
 	}
 	if (
@@ -194,7 +199,7 @@ export function serializeHarnessVersion(input: HarnessVersionInput): string {
 		contentHash,
 	}));
 	return JSON.stringify({
-		schemaVersion: 1,
+		schemaVersion: HARNESS_VERSION_SCHEMA_VERSION,
 		base: input.base,
 		metadata: input.metadata,
 		artifacts,
@@ -469,10 +474,10 @@ export async function saveHarnessState(
 		path: EVOLUTION_MEMORY_NAME,
 		contentHash: computeContentHash(memoryBytes),
 	};
-	const versionInput = { schemaVersion: 1 as const, base, metadata, artifacts: [artifact] };
+	const versionInput = { schemaVersion: HARNESS_VERSION_SCHEMA_VERSION, base, metadata, artifacts: [artifact] };
 	const version = computeHarnessVersion(versionInput);
 	const manifest: HarnessVersionManifest = {
-		schemaVersion: 1,
+		schemaVersion: HARNESS_VERSION_SCHEMA_VERSION,
 		version,
 		base,
 		metadata,
@@ -728,7 +733,7 @@ export class HarnessStateStore {
 		const inheritedMetadata = metadata ?? baseMetadata;
 		if (inheritedMetadata === undefined) throw new Error("Root harness versions require metadata");
 		const version = computeHarnessVersion({
-			schemaVersion: 1,
+			schemaVersion: HARNESS_VERSION_SCHEMA_VERSION,
 			base,
 			metadata: inheritedMetadata,
 			artifacts: [artifact],
