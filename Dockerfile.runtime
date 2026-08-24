@@ -3,6 +3,7 @@ FROM node:24-bookworm-slim AS build
 WORKDIR /opt/diffex
 
 COPY package.json package-lock.json ./
+COPY tsconfig.base.json ./
 COPY packages ./packages
 COPY scripts ./scripts
 
