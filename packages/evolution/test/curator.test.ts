@@ -249,7 +249,7 @@ function curatorInput(execute: CuratorInput["model"]["execute"]): CuratorInput {
 		corpus: corpus(),
 		instructions: instructions(input),
 		reflection: reflection(),
-		model: { execute },
+		model: { maxProviderCallsPerExecution: 20, execute },
 		idempotencyKey: "job-1:curating",
 	};
 }

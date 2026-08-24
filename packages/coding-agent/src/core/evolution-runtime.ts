@@ -176,6 +176,7 @@ class SessionPriorityGate implements InteractivePriorityGate {
 }
 
 export class CodingAgentEvolutionModelExecutor implements EvolutionModelExecutor {
+	readonly maxProviderCallsPerExecution = MAX_MODEL_ROUNDS * 2;
 	readonly #session: AgentSession;
 	readonly #modelRuntime: ModelRuntime;
 	readonly #priority: InteractivePriorityGate;

@@ -193,7 +193,10 @@ async function reflectorFixture() {
 	};
 }
 
-function reflectInput(model: ReflectorInput["model"]): ReflectorInput {
+function reflectInput(
+	model: Pick<ReflectorInput["model"], "execute"> &
+		Partial<Pick<ReflectorInput["model"], "maxProviderCallsPerExecution">>,
+): ReflectorInput {
 	const { input, corpus } = fixtureInput();
 	return {
 		jobId: "job-1",
@@ -201,7 +204,7 @@ function reflectInput(model: ReflectorInput["model"]): ReflectorInput {
 		corpus,
 		counterReport: null,
 		instructions: instructionSnapshot(),
-		model,
+		model: { maxProviderCallsPerExecution: 20, ...model },
 		idempotencyKey: "job-1:reflecting",
 	};
 }

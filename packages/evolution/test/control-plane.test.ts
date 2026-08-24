@@ -516,6 +516,7 @@ describe("checkpointed evolution pipeline", () => {
 		const pipeline = new EvolutionPipeline({
 			version: "1.0.0",
 			model: {
+				maxProviderCallsPerExecution: 20,
 				async execute(request) {
 					modelKeys.push(request.idempotencyKey);
 					return { output: { accepted: true }, model: { provider: "faux", model: "fixture" } };

@@ -585,7 +585,10 @@ describe("deterministic proposal evidence ranking", () => {
 		const ranker = new DeterministicProposalRanker({ version: "1" }, { eligibilityThreshold: 100 });
 		const pipeline = new EvolutionPipeline({
 			version: "1",
-			model: { execute: () => Promise.reject(new Error("Model execution is not expected")) },
+			model: {
+				maxProviderCallsPerExecution: 20,
+				execute: () => Promise.reject(new Error("Model execution is not expected")),
+			},
 			reflector: { reflect: () => Promise.reject(new Error("Reflection is not expected")) },
 			curator: { curate: () => Promise.reject(new Error("Curation is not expected")) },
 			validator: ranker,

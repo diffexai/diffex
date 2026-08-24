@@ -541,6 +541,7 @@ describe("coding-agent evolution runtime", () => {
 		const model = harness.getModel();
 		let providerCalls = 0;
 
+		expect(executor.maxProviderCallsPerExecution).toBe(20);
 		await expect(
 			executor.execute({
 				stage: "reflector",

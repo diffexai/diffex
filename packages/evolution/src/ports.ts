@@ -110,6 +110,7 @@ export interface EvolutionModelResponse {
 }
 
 export interface EvolutionModelExecutor {
+	readonly maxProviderCallsPerExecution: number;
 	execute(request: EvolutionModelRequest): Promise<EvolutionModelResponse>;
 }
 
