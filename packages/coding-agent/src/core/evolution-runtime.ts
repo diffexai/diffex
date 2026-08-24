@@ -7,6 +7,7 @@ import { type AssistantMessage, contentText, type Message, type Model, type Tool
 import type { HarnessStateStore, HarnessVersion } from "@earendil-works/diffex-harness-state";
 import lockfile from "proper-lockfile";
 import type { TSchema } from "typebox";
+import { Check, Errors } from "typebox/value";
 import {
 	classifyEvolutionEvidence,
 	computeEvolutionContentDigest,
@@ -15,6 +16,7 @@ import {
 	EvolutionControlPlane,
 	EvolutionControlService,
 	type EvolutionEvidenceCatalog,
+	EvolutionExecutionError,
 	type EvolutionHarnessVersionInfo,
 	type EvolutionJobDetail,
 	type EvolutionJobRunner,
@@ -127,6 +129,25 @@ function evolutionToolError(error: unknown): JsonObject {
 	};
 }
 
+function validateEvolutionOutput(request: EvolutionModelRequest, output: JsonObject): string | null {
+	const schema = request.outputSchema as TSchema;
+	if (!Check(schema, output)) {
+		const issue = [...Errors(schema, output)][0];
+		return issue?.message ?? "Response does not match the required schema";
+	}
+	if (request.stage !== "reflector" || request.validateOutput === undefined) return null;
+	try {
+		request.validateOutput(output);
+		return null;
+	} catch (error) {
+		return error instanceof Error ? error.message : "Response validation failed";
+	}
+}
+
+function correctionMessage(reason: string): string {
+	return `The submitted response is invalid: ${reason}. Correct it and submit it again through ${RESPONSE_TOOL_NAME}.`;
+}
+
 function abortableDelay(delayMs: number, signal: AbortSignal): Promise<void> {
 	if (signal.aborted) return Promise.reject(signal.reason);
 	return new Promise((resolveDelay, reject) => {
@@ -200,6 +221,7 @@ export class CodingAgentEvolutionModelExecutor implements EvolutionModelExecutor
 				timestamp: Date.now(),
 			},
 		];
+		let lastCorrection: string | null = null;
 		for (let round = 0; round < MAX_MODEL_ROUNDS; round += 1) {
 			request.signal?.throwIfAborted();
 			const waitStartedAt = performance.now();
@@ -247,11 +269,30 @@ export class CodingAgentEvolutionModelExecutor implements EvolutionModelExecutor
 			}
 			for (const call of calls) {
 				if (call.name === RESPONSE_TOOL_NAME) {
-					return {
-						output: call.arguments as JsonObject,
-						submissionMethod: "response-tool",
-						model: { provider: model.provider, model: model.id },
-					};
+					const output = call.arguments as JsonObject;
+					const validationError = validateEvolutionOutput(request, output);
+					if (validationError === null) {
+						return {
+							output,
+							submissionMethod: "response-tool",
+							model: { provider: model.provider, model: model.id },
+						};
+					}
+					lastCorrection = validationError;
+					messages.push({
+						role: "toolResult",
+						toolCallId: call.id,
+						toolName: call.name,
+						content: [
+							{
+								type: "text",
+								text: JSON.stringify(evolutionToolError(new Error(correctionMessage(validationError)))),
+							},
+						],
+						isError: true,
+						timestamp: Date.now(),
+					});
+					continue;
 				}
 				const tool = evolutionTools.find((candidate) => candidate.name === call.name);
 				let output: JsonObject;
@@ -280,19 +321,29 @@ export class CodingAgentEvolutionModelExecutor implements EvolutionModelExecutor
 			}
 			if (calls.length === 0) {
 				const parsed = parseJsonObject(contentText(assistant.content));
-				if (parsed) {
+				const validationError =
+					parsed === null ? "Response is not a JSON object" : validateEvolutionOutput(request, parsed);
+				if (parsed !== null && validationError === null) {
 					return {
 						output: parsed,
 						submissionMethod: "json-text",
 						model: { provider: model.provider, model: model.id },
 					};
 				}
+				lastCorrection = validationError;
 				messages.push({
 					role: "user",
-					content: `Return the result through ${RESPONSE_TOOL_NAME}.`,
+					content: correctionMessage(validationError ?? "Response validation failed"),
 					timestamp: Date.now(),
 				});
 			}
+		}
+		if (lastCorrection !== null) {
+			throw new EvolutionExecutionError(`Evolution model did not submit a valid response: ${lastCorrection}`, {
+				reasonCode: "reflection-invalid-response",
+				retryable: false,
+				diagnostics: { lastCorrection },
+			});
 		}
 		throw new Error(`Evolution model exceeded ${MAX_MODEL_ROUNDS} tool rounds`);
 	}

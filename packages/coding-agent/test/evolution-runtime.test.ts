@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/diffex-ai";
+import { fauxAssistantMessage, fauxToolCall, type Message } from "@earendil-works/diffex-ai";
 import { HarnessStateStore } from "@earendil-works/diffex-harness-state";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -20,6 +20,7 @@ import {
 	TraceEvidenceCatalog,
 } from "../src/core/evolution-runtime.ts";
 import type { InvocationTrace } from "../src/core/invocation-trace.ts";
+import type { ModelRuntime } from "../src/core/model-runtime.ts";
 import { createHarness, type Harness } from "./suite/harness.ts";
 
 function materializedInvocation(traceId: string, sessionPath: string): MaterializedInvocation {
@@ -427,6 +428,107 @@ describe("coding-agent evolution runtime", () => {
 		});
 	});
 
+	it("corrects an invalid response-tool submission within the active transcript", async () => {
+		const harness = await createHarness();
+		harnesses.push(harness);
+		harness.setResponses([
+			fauxAssistantMessage(fauxToolCall("submit_evolution_response", { complete: false, lessons: [] }), {
+				stopReason: "toolUse",
+			}),
+			(context) => {
+				expect(context.messages).toHaveLength(3);
+				expect(context.messages[1]).toMatchObject({
+					role: "assistant",
+					content: [expect.objectContaining({ type: "toolCall", name: "submit_evolution_response" })],
+				});
+				expect(context.messages[2]).toMatchObject({
+					role: "toolResult",
+					toolName: "submit_evolution_response",
+					isError: true,
+				});
+				return fauxAssistantMessage(fauxToolCall("submit_evolution_response", { complete: true, lessons: [] }), {
+					stopReason: "toolUse",
+				});
+			},
+		]);
+		const executor = new CodingAgentEvolutionModelExecutor(harness.session, harness.session.modelRuntime, {
+			async waitUntilBackgroundAllowed() {},
+		});
+		const model = harness.getModel();
+		let validations = 0;
+
+		await expect(
+			executor.execute({
+				stage: "reflector",
+				model: {
+					provider: model.provider,
+					model: model.id,
+					configurationDigest: `sha256:${"1".repeat(64)}`,
+				},
+				promptVersion: "reflector-v1",
+				idempotencyKey: "response-tool-correction",
+				input: {},
+				outputSchema: {
+					type: "object",
+					required: ["complete", "lessons"],
+					properties: { complete: { enum: [true] }, lessons: { type: "array" } },
+				},
+				tools: [],
+				validateOutput() {
+					validations += 1;
+				},
+			}),
+		).resolves.toMatchObject({
+			output: { complete: true, lessons: [] },
+			submissionMethod: "response-tool",
+		});
+		expect(validations).toBe(1);
+	});
+
+	it("isolates transcripts between node executor invocations", async () => {
+		const harness = await createHarness();
+		harnesses.push(harness);
+		const initialPrompts: string[] = [];
+		harness.setResponses([
+			(context) => {
+				expect(context.messages).toHaveLength(1);
+				initialPrompts.push(String(context.messages[0]?.content));
+				return fauxAssistantMessage(fauxToolCall("submit_evolution_response", { complete: true, lessons: [] }), {
+					stopReason: "toolUse",
+				});
+			},
+			(context) => {
+				expect(context.messages).toHaveLength(1);
+				initialPrompts.push(String(context.messages[0]?.content));
+				return fauxAssistantMessage(fauxToolCall("submit_evolution_response", { complete: true, lessons: [] }), {
+					stopReason: "toolUse",
+				});
+			},
+		]);
+		const executor = new CodingAgentEvolutionModelExecutor(harness.session, harness.session.modelRuntime, {
+			async waitUntilBackgroundAllowed() {},
+		});
+		const model = harness.getModel();
+		const request = (node: string): EvolutionModelRequest => ({
+			stage: "reflector",
+			model: {
+				provider: model.provider,
+				model: model.id,
+				configurationDigest: `sha256:${"1".repeat(64)}`,
+			},
+			promptVersion: "reflector-v1",
+			idempotencyKey: `isolation-${node}`,
+			input: { node },
+			outputSchema: { type: "object" },
+			tools: [],
+		});
+
+		await executor.execute(request("first"));
+		await executor.execute(request("second"));
+
+		expect(initialPrompts).toEqual(['{"node":"first"}', '{"node":"second"}']);
+	});
+
 	it("stops the internal evolution tool loop after ten provider rounds", async () => {
 		const harness = await createHarness();
 		harnesses.push(harness);
@@ -460,30 +562,117 @@ describe("coding-agent evolution runtime", () => {
 		expect(providerCalls).toBe(10);
 	});
 
-	it("returns a denied evidence-tool request to the model for correction", async () => {
+	it("retries a timed-out transport with the unchanged active transcript", async () => {
+		vi.useFakeTimers();
+		const harness = await createHarness();
+		harnesses.push(harness);
+		const model = harness.getModel();
+		const response = fauxAssistantMessage(
+			fauxToolCall("submit_evolution_response", { complete: true, lessons: [] }),
+			{ stopReason: "toolUse" },
+		);
+		const transcripts: Message[][] = [];
+		let calls = 0;
+		const modelRuntime = {
+			getModel() {
+				return model;
+			},
+			streamSimple(_model: unknown, context: { messages: Message[] }, options?: { signal?: AbortSignal }) {
+				calls += 1;
+				transcripts.push(structuredClone(context.messages));
+				if (calls === 1) {
+					return {
+						[Symbol.asyncIterator]() {
+							return {
+								next: () =>
+									new Promise<never>((_resolve, reject) => {
+										options?.signal?.addEventListener("abort", () => reject(options.signal?.reason), {
+											once: true,
+										});
+									}),
+							};
+						},
+					};
+				}
+				return {
+					[Symbol.asyncIterator]() {
+						return {
+							next: async () => ({ done: false as const, value: { type: "done" as const, message: response } }),
+						};
+					},
+				};
+			},
+		} as unknown as ModelRuntime;
+		const executor = new CodingAgentEvolutionModelExecutor(harness.session, modelRuntime, {
+			async waitUntilBackgroundAllowed() {},
+		});
+
+		try {
+			const execution = executor.execute({
+				stage: "reflector",
+				model: {
+					provider: model.provider,
+					model: model.id,
+					configurationDigest: `sha256:${"1".repeat(64)}`,
+				},
+				promptVersion: "reflector-v1",
+				idempotencyKey: "transport-retry",
+				input: { node: "isolated" },
+				outputSchema: { type: "object" },
+				tools: [],
+			});
+			await vi.advanceTimersByTimeAsync(60_001);
+
+			await expect(execution).resolves.toMatchObject({ output: { complete: true, lessons: [] } });
+			expect(calls).toBe(2);
+			expect(transcripts[1]).toEqual(transcripts[0]);
+			expect(transcripts[0]).toHaveLength(1);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("preserves successful evidence, a denial, and adjacent inspection in one transcript", async () => {
 		const harness = await createHarness();
 		harnesses.push(harness);
 		harness.setResponses([
-			fauxAssistantMessage(fauxToolCall("read_slice", { documentRef: "trace-id", startOrdinal: 0, endOrdinal: 1 }), {
-				stopReason: "toolUse",
-			}),
+			fauxAssistantMessage(fauxToolCall("search_evidence", { query: "adjacent" }), { stopReason: "toolUse" }),
 			(context) => {
-				const toolResult = context.messages.find((message) => message.role === "toolResult");
-				expect(toolResult).toMatchObject({
+				expect(context.messages).toHaveLength(3);
+				expect(context.messages[2]).toMatchObject({
 					role: "toolResult",
-					toolName: "read_slice",
-					isError: true,
+					toolName: "search_evidence",
+					isError: false,
 				});
+				return fauxAssistantMessage(
+					fauxToolCall("read_slice", { documentRef: "trace-id", startOrdinal: 0, endOrdinal: 1 }),
+					{ stopReason: "toolUse" },
+				);
+			},
+			(context) => {
+				expect(context.messages).toHaveLength(5);
+				const denial = context.messages[4];
+				expect(denial).toMatchObject({ role: "toolResult", toolName: "read_slice", isError: true });
 				const errorText =
-					toolResult?.role === "toolResult"
-						? toolResult.content
+					denial?.role === "toolResult"
+						? denial.content
 								.filter((part): part is { type: "text"; text: string } => part.type === "text")
 								.map((part) => part.text)
 								.join("\n")
 						: "";
 				expect(errorText).not.toContain("trace-id");
 				expect(errorText).toContain("D1");
-				expect(errorText).toContain("is not permitted");
+				return fauxAssistantMessage(fauxToolCall("inspect_adjacent", { sliceRef: "S1", after: 1 }), {
+					stopReason: "toolUse",
+				});
+			},
+			(context) => {
+				expect(context.messages).toHaveLength(7);
+				expect(context.messages.filter((message) => message.role === "toolResult")).toMatchObject([
+					{ toolName: "search_evidence", isError: false },
+					{ toolName: "read_slice", isError: true },
+					{ toolName: "inspect_adjacent", isError: false },
+				]);
 				return fauxAssistantMessage(fauxToolCall("submit_evolution_response", { complete: true, lessons: [] }), {
 					stopReason: "toolUse",
 				});
@@ -508,6 +697,14 @@ describe("coding-agent evolution runtime", () => {
 				outputSchema: { type: "object" },
 				tools: [
 					{
+						name: "search_evidence",
+						description: "Search permitted evidence.",
+						inputSchema: { type: "object" },
+						execute() {
+							return Promise.resolve({ matches: [{ sliceRef: "S1" }] });
+						},
+					},
+					{
 						name: "read_slice",
 						description: "Read a contiguous evidence slice.",
 						inputSchema: { type: "object" },
@@ -518,6 +715,14 @@ describe("coding-agent evolution runtime", () => {
 									"Document reference is not permitted. Permitted document references: D1",
 								),
 							);
+						},
+					},
+					{
+						name: "inspect_adjacent",
+						description: "Inspect permitted adjacent evidence.",
+						inputSchema: { type: "object" },
+						execute() {
+							return Promise.resolve({ sliceRef: "S1", evidenceRefs: ["E2"] });
 						},
 					},
 				],
