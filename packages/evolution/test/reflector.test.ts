@@ -16,6 +16,7 @@ import {
 	RecursiveReflector,
 	type ReflectorInput,
 } from "../src/index.ts";
+import { findUnsupportedCodexSchemaKeywords } from "./structured-output-schema.ts";
 
 const temporaryDirectories: string[] = [];
 const HARNESS_VERSION = `sha256:${"1".repeat(64)}`;
@@ -258,6 +259,26 @@ function jsonObject(value: unknown, description: string): JsonObject {
 }
 
 describe("recursive reflector", () => {
+	it("publishes Codex-compatible response schemas", async () => {
+		const { reflector } = await reflectorFixture();
+		const schemas: JsonObject[] = [];
+		const input = reflectInput({
+			async execute(request) {
+				if (request.stage !== "reflector") throw new Error("Unexpected Curator request");
+				schemas.push(request.outputSchema);
+				return {
+					output: { complete: true, lessons: [lessonForRequest(request.input)] },
+					model: { provider: "faux", model: "fixture" },
+				};
+			},
+		});
+
+		await reflector.reflect(input);
+
+		expect(schemas.length).toBeGreaterThan(1);
+		for (const schema of schemas) expect(findUnsupportedCodexSchemaKeywords(schema)).toEqual([]);
+	});
+
 	it("limits each leaf to three high-impact lessons", async () => {
 		const { persistence } = await reflectorFixture();
 		const reflector = new RecursiveReflector(

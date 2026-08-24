@@ -299,12 +299,10 @@ function reflectorOutputSchema(
 					supportingEvidenceRefs: {
 						type: "array",
 						minItems: 1,
-						uniqueItems: true,
 						items: { type: "string", enum: references },
 					},
 					counterevidenceRefs: {
 						type: "array",
-						uniqueItems: true,
 						items: { type: "string", enum: references },
 					},
 				}
@@ -312,12 +310,10 @@ function reflectorOutputSchema(
 					sourceLessonRefs: {
 						type: "array",
 						minItems: 1,
-						uniqueItems: true,
 						items: { type: "string", enum: references },
 					},
 					counterLessonRefs: {
 						type: "array",
-						uniqueItems: true,
 						items: { type: "string", enum: references },
 					},
 				};
@@ -348,12 +344,11 @@ function reflectorOutputSchema(
 					properties: {
 						kind: { enum: [...LESSON_KINDS] },
 						summary: { type: "string", minLength: 1 },
-						preconditions: { type: "array", uniqueItems: true, items: { type: "string", minLength: 1 } },
+						preconditions: { type: "array", items: { type: "string", minLength: 1 } },
 						observedOutcome: { type: "string", minLength: 1 },
 						...referenceProperties,
 						applicabilityBoundaries: {
 							type: "array",
-							uniqueItems: true,
 							items: { type: "string", minLength: 1 },
 						},
 						uncertainty: { type: ["string", "null"] },

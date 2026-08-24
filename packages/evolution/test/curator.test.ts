@@ -16,6 +16,7 @@ import {
 	type ReflectionResult,
 	StructuredDeltaCurator,
 } from "../src/index.ts";
+import { findUnsupportedCodexSchemaKeywords } from "./structured-output-schema.ts";
 
 const FIRST_HARNESS_VERSION = `sha256:${"1".repeat(64)}`;
 const SECOND_HARNESS_VERSION = `sha256:${"2".repeat(64)}`;
@@ -306,6 +307,17 @@ function decision(
 }
 
 describe("structured delta curator", () => {
+	it("publishes a Codex-compatible response schema", async () => {
+		const curator = new StructuredDeltaCurator({ version: "1.2.3" });
+
+		await curator.curate(
+			curatorInput((request) => {
+				expect(findUnsupportedCodexSchemaKeywords(request.outputSchema)).toEqual([]);
+				return Promise.resolve(response([]));
+			}),
+		);
+	});
+
 	it("emits a provenance-rich ADD from final lessons and ordered snapshots", async () => {
 		const capturedInputs: JsonObject[] = [];
 		const toolOutputs: JsonObject[] = [];

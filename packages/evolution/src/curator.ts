@@ -53,11 +53,10 @@ interface CuratorSchemaReferences {
 }
 
 export function createCuratorOutputSchema(references: CuratorSchemaReferences): JsonObject {
-	const stringArray = { type: "array", uniqueItems: true, items: { type: "string", minLength: 1 } };
+	const stringArray = { type: "array", items: { type: "string", minLength: 1 } };
 	const referenceArraySchema = (values: readonly string[], minItems = 0): JsonObject => ({
 		type: "array",
 		minItems,
-		uniqueItems: true,
 		items: { type: "string", enum: values },
 	});
 	return {
@@ -78,12 +77,12 @@ export function createCuratorOutputSchema(references: CuratorSchemaReferences): 
 					causalAgentBehavior: { type: "string", minLength: 1 },
 					futureBehaviorChange: { type: "string", minLength: 1 },
 					verifiableExpectedResult: { type: "string", minLength: 1 },
-					observerDocumentationOnly: { const: false },
-					telemetryFormatOnly: { const: false },
+					observerDocumentationOnly: { enum: [false] },
+					telemetryFormatOnly: { enum: [false] },
 				},
 			},
 			strengthening: {
-				oneOf: [
+				anyOf: [
 					{ type: "null" },
 					{
 						type: "object",
@@ -108,19 +107,19 @@ export function createCuratorOutputSchema(references: CuratorSchemaReferences): 
 				},
 			},
 			target: {
-				oneOf: [
+				anyOf: [
 					{
 						type: "object",
 						additionalProperties: false,
 						required: ["kind"],
-						properties: { kind: { const: "evolution-memory" } },
+						properties: { kind: { enum: ["evolution-memory"] } },
 					},
 					{
 						type: "object",
 						additionalProperties: false,
 						required: ["kind", "skillName"],
 						properties: {
-							kind: { const: "skill" },
+							kind: { enum: ["skill"] },
 							skillName: { type: "string", minLength: 1 },
 						},
 					},
@@ -129,7 +128,7 @@ export function createCuratorOutputSchema(references: CuratorSchemaReferences): 
 						additionalProperties: false,
 						required: ["kind", "sourcePath"],
 						properties: {
-							kind: { const: "orchestration-source" },
+							kind: { enum: ["orchestration-source"] },
 							sourcePath: { type: "string", minLength: 1 },
 						},
 					},
@@ -168,13 +167,13 @@ export function createCuratorOutputSchema(references: CuratorSchemaReferences): 
 				},
 			},
 			exactDelta: {
-				oneOf: [
+				anyOf: [
 					{
 						type: "object",
 						additionalProperties: false,
 						required: ["operation", "destination", "content", "intendedScope"],
 						properties: {
-							operation: { const: "ADD" },
+							operation: { enum: ["ADD"] },
 							destination: { $ref: "#/$defs/destination" },
 							content: {
 								type: "string",
@@ -189,7 +188,7 @@ export function createCuratorOutputSchema(references: CuratorSchemaReferences): 
 						additionalProperties: false,
 						required: ["operation", "memoryRef", "reason"],
 						properties: {
-							operation: { const: "REMOVE" },
+							operation: { enum: ["REMOVE"] },
 							memoryRef: { type: "string", enum: references.memoryRefs },
 							reason: { type: "string", minLength: 1 },
 						},
@@ -199,7 +198,7 @@ export function createCuratorOutputSchema(references: CuratorSchemaReferences): 
 						additionalProperties: false,
 						required: ["operation", "removal", "addition"],
 						properties: {
-							operation: { const: "REPLACE" },
+							operation: { enum: ["REPLACE"] },
 							removal: { $ref: "#/$defs/removal" },
 							addition: { $ref: "#/$defs/addition" },
 						},
@@ -255,7 +254,7 @@ export function createCuratorOutputSchema(references: CuratorSchemaReferences): 
 						lessonRefs: referenceArraySchema(references.lessonRefs, 1),
 						relevance: { $ref: "#/$defs/relevance" },
 						relationship: { $ref: "#/$defs/relationship" },
-						proposal: { oneOf: [{ $ref: "#/$defs/proposal" }, { type: "null" }] },
+						proposal: { anyOf: [{ $ref: "#/$defs/proposal" }, { type: "null" }] },
 					},
 				},
 			},
