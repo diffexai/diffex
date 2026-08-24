@@ -1,0 +1,15 @@
+{
+	"extends": "../../tsconfig.base.json",
+	"compilerOptions": {
+		"outDir": "./dist",
+		"rootDir": "./src",
+		"paths": {
+			"@earendil-works/diffex-coding-agent": ["../coding-agent/dist/index.d.ts"],
+			"@earendil-works/diffex-protocol": ["../protocol/dist/index.d.ts"],
+			"@earendil-works/diffex-server": ["../server/dist/index.d.ts"],
+			"@earendil-works/diffex-server/websocket": ["../server/dist/transports/websocket/index.d.ts"]
+		}
+	},
+	"include": ["src/**/*.ts"],
+	"exclude": ["node_modules", "dist", "test"]
+}

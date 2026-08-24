@@ -17,6 +17,10 @@
 		"./unix": {
 			"types": "./dist/transports/unix/index.d.ts",
 			"import": "./dist/transports/unix/index.js"
+		},
+		"./websocket": {
+			"types": "./dist/transports/websocket/index.d.ts",
+			"import": "./dist/transports/websocket/index.js"
 		}
 	},
 	"files": [
@@ -48,9 +52,11 @@
 	},
 	"dependencies": {
 		"@earendil-works/diffex-ai": "^0.2.0",
-		"@earendil-works/diffex-protocol": "^0.2.0"
+		"@earendil-works/diffex-protocol": "^0.2.0",
+		"ws": "8.21.0"
 	},
 	"devDependencies": {
+		"@types/ws": "8.18.1",
 		"shx": "0.4.0",
 		"vitest": "4.1.9"
 	}

@@ -41,6 +41,8 @@ export interface SessionHeader {
 export interface NewSessionOptions {
 	id?: string;
 	parentSession?: string;
+	/** Persist the session header immediately, even before the first assistant response. */
+	persistImmediately?: boolean;
 }
 
 export interface SessionEntryBase {
@@ -967,6 +969,10 @@ export class SessionManager {
 		if (this.persist) {
 			const fileTimestamp = timestamp.replace(/[:.]/g, "-");
 			this.sessionFile = join(this.getSessionDir(), `${fileTimestamp}_${this.sessionId}.jsonl`);
+			if (options?.persistImmediately) {
+				writeFileSync(this.sessionFile, `${JSON.stringify(header)}\n`, { flag: "wx" });
+				this.flushed = true;
+			}
 		}
 		return this.sessionFile;
 	}

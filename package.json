@@ -13,8 +13,8 @@
 	],
 	"scripts": {
 		"clean": "npm run clean --workspaces",
-		"build": "cd packages/harness-state && npm run build && cd ../tui && npm run build && cd ../telemetry && npm run build && cd ../harness-trace && npm run build && cd ../evolution && npm run build && cd ../ai && npm run build && cd ../agent && npm run build && cd ../session-backends/sqlite-node && npm run build && cd ../../protocol && npm run build && cd ../client && npm run build && cd ../server && npm run build && cd ../coding-agent && npm run build",
-		"build:offline": "cd packages/harness-state && npm run build && cd ../tui && npm run build && cd ../telemetry && npm run build && cd ../harness-trace && npm run build && cd ../evolution && npm run build && cd ../ai && npm run build:offline && cd ../agent && npm run build && cd ../session-backends/sqlite-node && npm run build && cd ../../protocol && npm run build && cd ../client && npm run build && cd ../server && npm run build && cd ../coding-agent && npm run build",
+		"build": "cd packages/harness-state && npm run build && cd ../tui && npm run build && cd ../telemetry && npm run build && cd ../harness-trace && npm run build && cd ../evolution && npm run build && cd ../ai && npm run build && cd ../agent && npm run build && cd ../session-backends/sqlite-node && npm run build && cd ../../protocol && npm run build && cd ../client && npm run build && cd ../server && npm run build && cd ../coding-agent && npm run build && cd ../coding-agent-server && npm run build",
+		"build:offline": "cd packages/harness-state && npm run build && cd ../tui && npm run build && cd ../telemetry && npm run build && cd ../harness-trace && npm run build && cd ../evolution && npm run build && cd ../ai && npm run build:offline && cd ../agent && npm run build && cd ../session-backends/sqlite-node && npm run build && cd ../../protocol && npm run build && cd ../client && npm run build && cd ../server && npm run build && cd ../coding-agent && npm run build && cd ../coding-agent-server && npm run build",
 		"check": "biome check --write --error-on-warnings . && npm run check:pinned-deps && npm run check:ts-imports && npm run check:shrinkwrap && npm run check:install-lock:coding-agent && tsgo --noEmit && npm run check:browser-smoke",
 		"check:browser-smoke": "node scripts/check-browser-smoke.mjs",
 		"check:pinned-deps": "node scripts/check-pinned-deps.mjs",
@@ -65,6 +65,7 @@
 	},
 	"version": "0.0.3",
 	"overrides": {
+		"nanoid": "3.3.18",
 		"protobufjs": "7.6.5",
 		"rimraf": "6.1.2",
 		"gaxios": {

@@ -1,0 +1,31 @@
+{
+	"name": "@earendil-works/diffex-coding-agent-server",
+	"version": "0.2.0",
+	"description": "Hosted Diffex protocol service backed by the Pi-derived coding-agent runtime",
+	"type": "module",
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"bin": { "diffex-runtime-server": "./dist/cli.js" },
+	"exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
+	"files": ["dist", "README.md"],
+	"scripts": {
+		"clean": "shx rm -rf dist",
+		"build": "tsgo -p tsconfig.build.json && shx chmod +x dist/cli.js",
+		"test": "vitest --run",
+		"typecheck": "tsgo -p tsconfig.test.json",
+		"prepublishOnly": "npm run clean && npm run build"
+	},
+	"engines": { "node": ">=22.19.0" },
+	"license": "Apache-2.0",
+	"dependencies": {
+		"@earendil-works/diffex-coding-agent": "^0.2.0",
+		"@earendil-works/diffex-protocol": "^0.2.0",
+		"@earendil-works/diffex-server": "^0.2.0"
+	},
+	"devDependencies": {
+		"@earendil-works/diffex-client": "^0.2.0",
+		"shx": "0.4.0",
+		"vitest": "4.1.9",
+		"ws": "8.21.0"
+	}
+}
