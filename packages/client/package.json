@@ -18,6 +18,10 @@
 			"types": "./dist/websocket.d.ts",
 			"import": "./dist/websocket.js"
 		},
+		"./cloud": {
+			"types": "./dist/cloud.d.ts",
+			"import": "./dist/cloud.js"
+		},
 		"./package.json": "./package.json"
 	},
 	"sideEffects": false,

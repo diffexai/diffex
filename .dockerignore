@@ -1,0 +1,13 @@
+.git
+.github
+.artifacts
+.npm
+coverage
+node_modules
+packages/*/dist
+packages/*/dist-chrome
+packages/*/dist-firefox
+packages/ai/src/providers/data
+packages/coding-agent/binaries
+*.log
+*.tsbuildinfo

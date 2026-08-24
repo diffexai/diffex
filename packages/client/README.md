@@ -61,3 +61,49 @@ await client.connect();
 `maxPendingBytes` bounds queued outbound data. It defaults to four times the protocol frame limit. The transport preserves send order and waits for socket backpressure before resolving each send.
 
 The `@earendil-works/diffex-client` root remains transport- and runtime-neutral. Importing the Node-compatible transport requires the explicit `@earendil-works/diffex-client/unix` subpath.
+
+## Hosted Diffex cloud
+
+Use the separately exported cloud client for the authenticated REST lifecycle and native WebSocket attachment:
+
+```ts
+import { DiffexClient } from "@earendil-works/diffex-client";
+import { DiffexCloudClient } from "@earendil-works/diffex-client/cloud";
+
+const cloud = new DiffexCloudClient({
+  baseUrl: "https://api.diffex.ai",
+  accessToken: () => tokenStore.currentAccessToken(),
+});
+const session = await cloud.createSession();
+const client = await DiffexClient.connect({
+  transportFactory: cloud.createTransportFactory(session.session_id),
+});
+const lease = await client.acquireSession(session.session_id);
+```
+
+The access token is sent only to the HTTPS control plane.
+Every transport connection obtains a fresh, short-lived attachment URL, and only its scoped one-time ticket appears in the WebSocket URL.
+
+## WebSocket transport
+
+Browser and Node runtimes with a global `WebSocket` implementation can use the separately exported transport:
+
+```ts
+import { DiffexClient } from "@earendil-works/diffex-client";
+import { createWebSocketTransportFactory } from "@earendil-works/diffex-client/websocket";
+
+const client = new DiffexClient({
+  transportFactory: createWebSocketTransportFactory({
+    url: async () => {
+      const response = await fetch("https://api.diffex.ai/v1/cloud/sessions/session-id/attach", {
+        method: "POST",
+        headers: { authorization: `Bearer ${accessToken}` },
+      });
+      const { attachment } = await response.json();
+      return attachment.url;
+    },
+  }),
+});
+```
+
+Resolve a fresh attachment URL for every connection attempt because cloud attachment credentials are short-lived and scoped.

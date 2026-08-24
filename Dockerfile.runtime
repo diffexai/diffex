@@ -1,0 +1,27 @@
+FROM node:24-bookworm-slim AS build
+
+WORKDIR /opt/diffex
+
+COPY package.json package-lock.json ./
+COPY packages ./packages
+COPY scripts ./scripts
+
+RUN npm ci --ignore-scripts
+RUN npm run build
+RUN npm prune --omit=dev --ignore-scripts
+
+FROM node:24-bookworm-slim AS runtime
+
+RUN apt-get update \
+	&& apt-get install -y --no-install-recommends ca-certificates fd-find git openssh-client ripgrep \
+	&& ln -s /usr/bin/fdfind /usr/local/bin/fd \
+	&& rm -rf /var/lib/apt/lists/*
+
+COPY --from=build /opt/diffex /opt/diffex
+
+RUN ln -s /opt/diffex/packages/coding-agent-server/dist/cli.js /usr/local/bin/diffex-runtime-server
+
+WORKDIR /workspace
+
+LABEL org.opencontainers.image.source="https://github.com/diffexai/diffex"
+LABEL org.opencontainers.image.description="Pi-based hosted Diffex coding-agent runtime"
