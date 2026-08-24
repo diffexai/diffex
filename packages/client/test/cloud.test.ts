@@ -93,6 +93,36 @@ describe("DiffexCloudClient", () => {
 		});
 	});
 
+	it("rejects cleartext cloud credentials and attachment tickets outside localhost", async () => {
+		expect(
+			() =>
+				new DiffexCloudClient({
+					baseUrl: "http://api.diffex.ai",
+					accessToken: "access-secret",
+				}),
+		).toThrow(/HTTPS outside localhost/u);
+
+		const fetch = vi.fn<CloudFetch>().mockResolvedValue(
+			response(200, {
+				attachment: {
+					url: `ws://api.diffex.ai/v1/runtime/sessions/${SESSION_ID}?ticket=one-time`,
+					expires_at: "2026-08-23T00:02:00.000Z",
+					protocol_version: 1,
+				},
+			}),
+		);
+		const client = new DiffexCloudClient({
+			baseUrl: "https://api.diffex.ai",
+			accessToken: "access-secret",
+			fetch,
+		});
+
+		await expect(client.createAttachment(SESSION_ID)).rejects.toMatchObject({
+			status: 502,
+			code: "invalid_response",
+		});
+	});
+
 	it("resolves a fresh one-time attachment for each transport connection", async () => {
 		const fetch = vi
 			.fn<CloudFetch>()

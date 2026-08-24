@@ -126,8 +126,12 @@ export class DiffexCloudClient {
 
 function normalizedBaseUrl(input: string | URL): URL {
 	const value = new URL(input);
-	if (value.protocol !== "https:" && value.protocol !== "http:") {
-		throw new TypeError("Diffex cloud baseUrl must use HTTP or HTTPS");
+	if (
+		value.username ||
+		value.password ||
+		(value.protocol !== "https:" && !(value.protocol === "http:" && isLoopbackHostname(value.hostname)))
+	) {
+		throw new TypeError("Diffex cloud baseUrl must use HTTPS outside localhost");
 	}
 	value.pathname = value.pathname.endsWith("/") ? value.pathname : `${value.pathname}/`;
 	value.search = "";
@@ -175,7 +179,13 @@ function cloudAttachment(input: unknown): CloudRuntimeAttachment {
 	const value = record(input);
 	const url = stringValue(value.url);
 	const parsedUrl = new URL(url);
-	if (parsedUrl.protocol !== "wss:" && parsedUrl.protocol !== "ws:") throw invalidResponse();
+	if (
+		parsedUrl.username ||
+		parsedUrl.password ||
+		(parsedUrl.protocol !== "wss:" && !(parsedUrl.protocol === "ws:" && isLoopbackHostname(parsedUrl.hostname)))
+	) {
+		throw invalidResponse();
+	}
 	const protocolVersion = value.protocol_version;
 	if (protocolVersion !== PROTOCOL_VERSION) {
 		throw new DiffexCloudApiError({
@@ -189,6 +199,11 @@ function cloudAttachment(input: unknown): CloudRuntimeAttachment {
 		expires_at: isoTimestamp(value.expires_at),
 		protocol_version: Number(protocolVersion),
 	};
+}
+
+function isLoopbackHostname(hostname: string): boolean {
+	const normalized = hostname.toLowerCase().replace(/^\[(.*)\]$/u, "$1");
+	return normalized === "localhost" || normalized === "127.0.0.1" || normalized === "::1";
 }
 
 function isCloudSessionStatus(value: string): value is CloudSessionStatus {
