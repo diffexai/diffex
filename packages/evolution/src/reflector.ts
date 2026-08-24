@@ -31,8 +31,6 @@ import type {
 import { computeEvolutionContentDigest, createEvolutionArtifactMetadata } from "./provenance.ts";
 import { type ReflectorNodeReferences, type ReflectorToolAudit, ReflectorToolRegistry } from "./reflector-tools.ts";
 
-const DEFAULT_MAX_TOOL_CALLS = 200;
-const DEFAULT_MAX_MODEL_CALLS = 100;
 const DEFAULT_MAX_RECURSION_DEPTH = 8;
 const DEFAULT_MAX_EVIDENCE_TOOL_CALLS_PER_LEAF = 6;
 const DEFAULT_MAX_LESSON_TOOL_CALLS_PER_SYNTHESIS_NODE = 2;
@@ -93,6 +91,11 @@ interface NodePlan {
 interface CompletedNode {
 	readonly node: ReflectionNode;
 	readonly lessons: readonly Lesson[];
+}
+
+interface RemainingReflectionBudget {
+	readonly modelCalls: number;
+	readonly toolCalls: number;
 }
 
 interface MutableNodeRuntime {
@@ -460,8 +463,8 @@ async function runBounded<T>(
 
 export class RecursiveReflector implements Reflector {
 	readonly #dependencies: RecursiveReflectorDependencies;
-	readonly #maxToolCalls: number;
-	readonly #maxModelCalls: number;
+	readonly #maxToolCalls: number | null;
+	readonly #maxModelCalls: number | null;
 	readonly #maxRecursionDepth: number;
 	readonly #maxEvidenceToolCallsPerLeaf: number;
 	readonly #maxLessonToolCallsPerSynthesisNode: number;
@@ -475,8 +478,10 @@ export class RecursiveReflector implements Reflector {
 
 	constructor(dependencies: RecursiveReflectorDependencies, options: RecursiveReflectorOptions = {}) {
 		this.#dependencies = dependencies;
-		this.#maxToolCalls = positiveInteger(options.maxToolCalls, DEFAULT_MAX_TOOL_CALLS, "maxToolCalls");
-		this.#maxModelCalls = positiveInteger(options.maxModelCalls, DEFAULT_MAX_MODEL_CALLS, "maxModelCalls");
+		this.#maxToolCalls =
+			options.maxToolCalls === undefined ? null : positiveInteger(options.maxToolCalls, 1, "maxToolCalls");
+		this.#maxModelCalls =
+			options.maxModelCalls === undefined ? null : positiveInteger(options.maxModelCalls, 1, "maxModelCalls");
 		this.#maxRecursionDepth = positiveInteger(
 			options.maxRecursionDepth,
 			DEFAULT_MAX_RECURSION_DEPTH,
@@ -525,12 +530,11 @@ export class RecursiveReflector implements Reflector {
 		const priorEvents = await this.#dependencies.ledger.read(input.jobId);
 		const priorToolCalls = priorEvents.filter((event) => event.type === "reflector-tool-call").length;
 		const priorModelCalls = priorEvents.filter((event) => event.type === "reflector-model-call").length;
-		if (priorToolCalls >= this.#maxToolCalls || priorModelCalls >= this.#maxModelCalls) {
-			throw new EvolutionExecutionError("Reflector budget was exhausted by prior attempts", {
-				reasonCode: "reflection-budget-exhausted",
-				retryable: false,
-			});
-		}
+		const providerCallAllowance = positiveInteger(
+			input.model.maxProviderCallsPerExecution,
+			1,
+			"maxProviderCallsPerExecution",
+		);
 		const producer: EvolutionArtifactProducer = {
 			name: "diffex-evolution-reflector",
 			version: this.#dependencies.version,
@@ -541,7 +545,7 @@ export class RecursiveReflector implements Reflector {
 			jobId: input.jobId,
 			input: input.input,
 			corpus: input.corpus,
-			maxToolCalls: this.#maxToolCalls - priorToolCalls,
+			maxToolCalls: Number.MAX_SAFE_INTEGER,
 			signal: stageSignal,
 			audit: (audit) => this.#auditTool(input, producer, audit),
 		});
@@ -553,6 +557,16 @@ export class RecursiveReflector implements Reflector {
 			const completed = await this.#loadCompleted(input, plans, priorEvents);
 			const retryPending = this.#loadRetryPending(input, plans, priorEvents, completed);
 			let modelCalls = priorModelCalls;
+			let effectiveModelCallLimit = priorModelCalls;
+			const refreshBudgetEnvelope = () => {
+				const remaining = this.#remainingBudget(plans, completed, retryPending, providerCallAllowance);
+				const toolCalls = priorToolCalls + registry.toolCalls;
+				this.#assertBudgetFits(remaining, modelCalls, toolCalls);
+				effectiveModelCallLimit = this.#maxModelCalls ?? modelCalls + remaining.modelCalls;
+				const effectiveToolCallLimit = this.#maxToolCalls ?? toolCalls + remaining.toolCalls;
+				registry.setMaxToolCalls(Math.max(registry.toolCalls, effectiveToolCallLimit - priorToolCalls));
+			};
+			refreshBudgetEnvelope();
 			const executePlan = async (plan: NodePlan) => {
 				if (stageDeadline.expired) {
 					throw new EvolutionExecutionError("Reflector stage active-compute deadline was exhausted", {
@@ -574,6 +588,7 @@ export class RecursiveReflector implements Reflector {
 						plan.nodeId,
 						await this.#checkpointEmptySynthesis(input, producer, plan, unavailableChildNodeIds),
 					);
+					refreshBudgetEnvelope();
 					return;
 				}
 				const pending = retryPending.get(plan.nodeId);
@@ -604,7 +619,7 @@ export class RecursiveReflector implements Reflector {
 							nodeAttempt,
 							priorAttemptModelCalls,
 							() => {
-								if (modelCalls >= this.#maxModelCalls) {
+								if (modelCalls >= effectiveModelCallLimit) {
 									throw new EvolutionExecutionError("Reflector model-call budget is exhausted", {
 										reasonCode: "reflection-budget-exhausted",
 										retryable: false,
@@ -631,6 +646,7 @@ export class RecursiveReflector implements Reflector {
 						if (plan.kind === "leaf" && nodeAttempt === 1 && (timedOut || this.#isRetryableLeafFailure(error))) {
 							const retry = await this.#checkpointRetryPending(input, producer, plan, failure, runtime);
 							retryPending.set(plan.nodeId, retry);
+							refreshBudgetEnvelope();
 							runtime = newNodeRuntime(retry.runtime);
 							nodeAttempt = 2;
 							continue;
@@ -656,6 +672,7 @@ export class RecursiveReflector implements Reflector {
 					}
 				}
 				completed.set(plan.nodeId, result);
+				refreshBudgetEnvelope();
 			};
 			await runBounded(
 				plans.filter((plan) => plan.kind === "leaf"),
@@ -729,6 +746,62 @@ export class RecursiveReflector implements Reflector {
 			depth += 1;
 		}
 		return plans;
+	}
+
+	#remainingBudget(
+		plans: readonly NodePlan[],
+		completed: ReadonlyMap<string, CompletedNode>,
+		retryPending: ReadonlyMap<string, ReflectionLeafRetryPendingLedgerEvent>,
+		providerCallAllowance: number,
+	): RemainingReflectionBudget {
+		let modelCalls = 0;
+		let toolCalls = 0;
+		for (const plan of plans) {
+			if (completed.has(plan.nodeId)) continue;
+			let conversations: number;
+			let toolCallAllowance: number;
+			if (plan.kind === "leaf") {
+				conversations = retryPending.has(plan.nodeId) ? 1 : 2;
+				toolCallAllowance = this.#maxEvidenceToolCallsPerLeaf;
+			} else {
+				const childrenTerminal = plan.childNodeIds.every((nodeId) => completed.has(nodeId));
+				const hasSuccessfulChildLessons = plan.childNodeIds.some(
+					(nodeId) => (completed.get(nodeId)?.lessons.length ?? 0) > 0,
+				);
+				conversations = childrenTerminal && !hasSuccessfulChildLessons ? 0 : 1;
+				toolCallAllowance = this.#maxLessonToolCallsPerSynthesisNode;
+			}
+			modelCalls += conversations * providerCallAllowance;
+			toolCalls += conversations * toolCallAllowance;
+			if (!Number.isSafeInteger(modelCalls) || !Number.isSafeInteger(toolCalls)) {
+				throw new EvolutionExecutionError("Reflector remaining-plan budget exceeds safe integer limits", {
+					reasonCode: "reflection-budget-exhausted",
+					retryable: false,
+				});
+			}
+		}
+		return { modelCalls, toolCalls };
+	}
+
+	#assertBudgetFits(remaining: RemainingReflectionBudget, modelCalls: number, toolCalls: number): void {
+		const availableModelCalls =
+			this.#maxModelCalls === null ? remaining.modelCalls : Math.max(0, this.#maxModelCalls - modelCalls);
+		const availableToolCalls =
+			this.#maxToolCalls === null ? remaining.toolCalls : Math.max(0, this.#maxToolCalls - toolCalls);
+		if (availableModelCalls >= remaining.modelCalls && availableToolCalls >= remaining.toolCalls) return;
+		throw new EvolutionExecutionError(
+			`Reflector remaining plan requires ${remaining.modelCalls} model calls and ${remaining.toolCalls} tool calls, but only ${availableModelCalls} model calls and ${availableToolCalls} tool calls are available`,
+			{
+				reasonCode: "reflection-budget-exhausted",
+				retryable: false,
+				diagnostics: {
+					required: { modelCalls: remaining.modelCalls, toolCalls: remaining.toolCalls },
+					available: { modelCalls: availableModelCalls, toolCalls: availableToolCalls },
+					consumed: { modelCalls, toolCalls },
+					ceilings: { modelCalls: this.#maxModelCalls, toolCalls: this.#maxToolCalls },
+				},
+			},
+		);
 	}
 
 	async #loadCompleted(

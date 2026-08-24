@@ -62,7 +62,7 @@ function sessionEvidence(
 	};
 }
 
-function invocation(): MaterializedInvocation {
+function invocation(evidenceCount = 6): MaterializedInvocation {
 	const evidence: MaterializedEvidence[] = [
 		sessionEvidence("evidence-user-1", 0, {
 			role: "user",
@@ -83,6 +83,14 @@ function invocation(): MaterializedInvocation {
 		sessionEvidence("evidence-user-2", 4, { role: "user", content: "Verify the result." }),
 		sessionEvidence("evidence-verified", 5, { role: "assistant", content: "The focused test passed." }),
 	];
+	for (let position = evidence.length; position < evidenceCount; position += 1) {
+		evidence.push(
+			sessionEvidence(`evidence-extra-${position}`, position, {
+				role: "assistant",
+				content: `Additional verified result ${position}`,
+			}),
+		);
+	}
 	return {
 		version: 1,
 		tracePath: "/private/trace.jsonl",
@@ -106,8 +114,11 @@ function invocation(): MaterializedInvocation {
 	};
 }
 
-function fixtureInput(): { readonly input: EvolutionInputSnapshot; readonly corpus: EvidenceCorpusManifest } {
-	const materialized = invocation();
+function fixtureInput(evidenceCount = 6): {
+	readonly input: EvolutionInputSnapshot;
+	readonly corpus: EvidenceCorpusManifest;
+} {
+	const materialized = invocation(evidenceCount);
 	const contentDigest = computeEvolutionContentDigest(materialized);
 	const source = {
 		sourceId: "source-1",
@@ -196,8 +207,9 @@ async function reflectorFixture() {
 function reflectInput(
 	model: Pick<ReflectorInput["model"], "execute"> &
 		Partial<Pick<ReflectorInput["model"], "maxProviderCallsPerExecution">>,
+	evidenceCount = 6,
 ): ReflectorInput {
-	const { input, corpus } = fixtureInput();
+	const { input, corpus } = fixtureInput(evidenceCount);
 	return {
 		jobId: "job-1",
 		input,
@@ -395,6 +407,74 @@ describe("recursive reflector", () => {
 		expect(result.nodes.every((node) => node.runtime?.retries === 1)).toBe(true);
 		expect(result.nodes.every((node) => node.runtime?.foregroundWaitMs === 5)).toBe(true);
 		expect(result.nodes.every((node) => (node.runtime?.nodeDurationMs ?? -1) >= 0)).toBe(true);
+	});
+
+	it("derives default envelopes for every remaining leaf attempt and synthesis node", async () => {
+		const { persistence } = await reflectorFixture();
+		const reflector = new RecursiveReflector(
+			{ version: "1.0.0", artifacts: persistence, ledger: persistence },
+			{ maxUnitsPerSlice: 1, synthesisFanout: 8 },
+		);
+		let providerCalls = 0;
+		const input = reflectInput(
+			{
+				maxProviderCallsPerExecution: 10,
+				async execute(request) {
+					if (request.stage !== "reflector") throw new Error("Unexpected Curator request");
+					for (let call = 0; call < 3; call += 1) {
+						await request.beforeProviderCall?.();
+						providerCalls += 1;
+					}
+					return {
+						output: { complete: true, lessons: [lessonForRequest(request.input)] },
+						model: { provider: "faux", model: "fixture" },
+					};
+				},
+			},
+			40,
+		);
+
+		const result = await reflector.reflect(input);
+
+		expect(result.nodes.filter((node) => node.kind === "leaf")).toHaveLength(40);
+		expect(result.nodes.filter((node) => node.kind === "synthesis")).toHaveLength(6);
+		expect(providerCalls).toBe(138);
+		expect((await persistence.read("job-1")).filter((event) => event.type === "reflector-model-call")).toHaveLength(
+			138,
+		);
+	});
+
+	it.each([
+		{ maxModelCalls: 859, maxToolCalls: 492 },
+		{ maxModelCalls: 860, maxToolCalls: 491 },
+	])("fails before work when explicit ceilings cannot fit the remaining plan", async (ceilings) => {
+		const { persistence } = await reflectorFixture();
+		const reflector = new RecursiveReflector(
+			{ version: "1.0.0", artifacts: persistence, ledger: persistence },
+			{ ...ceilings, maxUnitsPerSlice: 1, synthesisFanout: 8 },
+		);
+		let executions = 0;
+		const input = reflectInput(
+			{
+				maxProviderCallsPerExecution: 10,
+				execute() {
+					executions += 1;
+					throw new Error("Model execution must not start");
+				},
+			},
+			40,
+		);
+
+		await expect(reflector.reflect(input)).rejects.toMatchObject({
+			reasonCode: "reflection-budget-exhausted",
+			diagnostics: {
+				required: { modelCalls: 860, toolCalls: 492 },
+				available: { modelCalls: ceilings.maxModelCalls, toolCalls: ceilings.maxToolCalls },
+				consumed: { modelCalls: 0, toolCalls: 0 },
+			},
+		});
+		expect(executions).toBe(0);
+		expect(await persistence.read("job-1")).toEqual([]);
 	});
 
 	it("checkpoints timed-out nodes and continues independent leaves", async () => {
@@ -821,6 +901,67 @@ describe("recursive reflector", () => {
 			lessonIds: [],
 		});
 		expect(result.finalLessonIds).toHaveLength(1);
+	});
+
+	it("reconstructs a tight envelope from durable retry state after restart", async () => {
+		const { persistence } = await reflectorFixture();
+		const firstReflector = new RecursiveReflector(
+			{ version: "1.0.0", artifacts: persistence, ledger: persistence },
+			{ maxUnitsPerSlice: 2, synthesisFanout: 8 },
+		);
+		const controller = new AbortController();
+		let hangingExecutions = 0;
+		let signalAllHanging: (() => void) | undefined;
+		const allHanging = new Promise<void>((resolveHanging) => {
+			signalAllHanging = resolveHanging;
+		});
+		const firstRun = reflectInput({
+			maxProviderCallsPerExecution: 10,
+			async execute(request) {
+				if (request.stage !== "reflector") throw new Error("Unexpected Curator request");
+				const node = jsonObject(request.input.node, "node");
+				const target = node.kind === "leaf" && references(request.input, "evidence", "evidenceRef").includes("E1");
+				if (target && request.idempotencyKey.endsWith("attempt-1")) {
+					throw new Error("retryable leaf failure");
+				}
+				hangingExecutions += 1;
+				if (hangingExecutions === 2) signalAllHanging?.();
+				return new Promise<never>(() => {});
+			},
+		});
+		const interrupted = firstReflector.reflect({ ...firstRun, signal: controller.signal });
+		await allHanging;
+		controller.abort(new Error("simulated worker restart"));
+		await expect(interrupted).rejects.toThrow("simulated worker restart");
+		expect(
+			(await persistence.read("job-1")).filter((event) => event.type === "reflection-leaf-retry-pending"),
+		).toHaveLength(1);
+
+		const resumedReflector = new RecursiveReflector(
+			{ version: "1.0.0", artifacts: persistence, ledger: persistence },
+			{ maxModelCalls: 61, maxToolCalls: 32, maxUnitsPerSlice: 2, synthesisFanout: 8 },
+		);
+		const targetAttempts: string[] = [];
+		const resumed = reflectInput({
+			maxProviderCallsPerExecution: 10,
+			async execute(request) {
+				if (request.stage !== "reflector") throw new Error("Unexpected Curator request");
+				const node = jsonObject(request.input.node, "node");
+				if (node.kind === "leaf" && references(request.input, "evidence", "evidenceRef").includes("E1")) {
+					targetAttempts.push(request.idempotencyKey);
+				}
+				return {
+					output: { complete: true, lessons: [lessonForRequest(request.input)] },
+					model: { provider: "faux", model: "fixture" },
+				};
+			},
+		});
+
+		const result = await resumedReflector.reflect(resumed);
+
+		expect(result.nodes).toHaveLength(4);
+		expect(targetAttempts).toHaveLength(1);
+		expect(targetAttempts[0]).toContain("attempt-2");
 	});
 
 	it.each(["model", "slice-tool"] as const)(
