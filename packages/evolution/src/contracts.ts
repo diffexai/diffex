@@ -321,6 +321,11 @@ export interface EvolutionReferenceNormalization {
 	readonly normalizedReference: string;
 }
 
+export interface ReflectionNodeFailure {
+	readonly diagnosticCode: string;
+	readonly message: string;
+}
+
 export interface ReflectionNode {
 	readonly metadata: EvolutionArtifactMetadata;
 	readonly nodeId: string;
@@ -333,6 +338,7 @@ export interface ReflectionNode {
 	readonly lessonIds: readonly string[];
 	readonly resultDigest: string;
 	readonly status: ReflectionNodeStatus;
+	readonly failure?: ReflectionNodeFailure;
 	readonly runtime?: ReflectionNodeRuntime;
 }
 
@@ -837,6 +843,14 @@ export interface ReflectorModelCallLedgerEvent extends EvolutionLedgerEventBase 
 	readonly budgetCharge: ReflectorBudgetCharge;
 }
 
+export interface ReflectionLeafRetryPendingLedgerEvent extends EvolutionLedgerEventBase {
+	readonly type: "reflection-leaf-retry-pending";
+	readonly nodeId: string;
+	readonly manifestDigest: string;
+	readonly failure: ReflectionNodeFailure;
+	readonly runtime: ReflectionNodeRuntime;
+}
+
 export interface ReflectionNodeCheckpointedLedgerEvent extends EvolutionLedgerEventBase {
 	readonly type: "reflection-node-checkpointed";
 	readonly nodeId: string;
@@ -855,6 +869,7 @@ export type EvolutionLedgerEvent =
 	| JobCompletedLedgerEvent
 	| JobFailedLedgerEvent
 	| ProposalRolledBackLedgerEvent
+	| ReflectionLeafRetryPendingLedgerEvent
 	| ReflectionNodeCheckpointedLedgerEvent
 	| CuratorToolCallLedgerEvent
 	| ReflectorModelCallLedgerEvent

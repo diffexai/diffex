@@ -13,6 +13,7 @@
 
 ### Fixed
 
+- Fixed evolution reflection nodes losing tool and denial history between response corrections, and continued synthesis past terminal leaf failures.
 - Fixed assistant Markdown headings and fenced code blocks appearing with literal source delimiters in the interactive transcript.
 - Fixed extension TUI method wrappers recursing indefinitely when delegating to the original method ([#7731](https://github.com/earendil-works/pi/issues/7731)).
 - Fixed right-click not pasting clipboard text in fullscreen mode on Windows.
