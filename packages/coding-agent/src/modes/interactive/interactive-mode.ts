@@ -615,7 +615,18 @@ export class InteractiveMode {
 		this.editorContainer = new Container();
 		this.editorContainer.addChild(this.editor as Component);
 		this.footerDataProvider = new FooterDataProvider(this.sessionManager.getCwd());
-		this.footer = new FooterComponent(this.session, this.footerDataProvider);
+		this.footer = new FooterComponent(this.session, this.footerDataProvider, {
+			evolution: options.evolution,
+			requestRender: () => this.ui.requestRender(),
+			onSelectedHarnessChange: async (version) => {
+				if (version === this.session.activeHarnessVersion) return;
+				try {
+					await this.session.switchHarnessVersion(version);
+				} catch {
+					// A busy session refreshes the selected harness at its next prompt boundary.
+				}
+			},
+		});
 		this.footerContainer = new Container();
 		this.footerContainer.addChild(this.footer);
 
@@ -4662,7 +4673,7 @@ export class InteractiveMode {
 				};
 				const selector = new HarnessVersionSelectorComponent(
 					items,
-					this.session.activeHarnessVersion ?? currentVersion,
+					this.session.activeHarnessVersion ?? currentVersion ?? undefined,
 					(version) => {
 						if (switching) return;
 						if (version === this.session.activeHarnessVersion) {

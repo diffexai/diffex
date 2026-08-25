@@ -1,8 +1,12 @@
+import type { HarnessVersion } from "@earendil-works/diffex-harness-state";
 import { visibleWidth } from "@earendil-works/diffex-tui";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
+import type { EvolutionHarnessVersionInfo, EvolutionOverview, EvolutionProgressEvent } from "#evolution";
 import type { AgentSession } from "../src/core/agent-session.ts";
 import type { ReadonlyFooterDataProvider } from "../src/core/footer-data-provider.ts";
+import type { EvolutionFooterStatusClient } from "../src/modes/interactive/components/evolution-footer-status.ts";
 import { FooterComponent, formatCwdForFooter } from "../src/modes/interactive/components/footer.ts";
+import { formatEvolutionTimestamp } from "../src/modes/interactive/components/harness-version-display.ts";
 import { initTheme } from "../src/modes/interactive/theme/theme.ts";
 import { stripAnsi } from "../src/utils/ansi.ts";
 
@@ -25,6 +29,7 @@ function createSession(options: {
 	compactionUsage?: AssistantUsage;
 	toolUsage?: AssistantUsage;
 	usingSubscription?: boolean;
+	activeHarnessVersion?: string;
 }): AgentSession {
 	const usage = options.usage;
 	const entries: Array<Record<string, unknown>> = [];
@@ -82,9 +87,45 @@ function createSession(options: {
 		modelRuntime: {
 			isUsingSubscription: () => options.usingSubscription ?? false,
 		},
+		activeHarnessVersion: options.activeHarnessVersion,
 	};
 
 	return session as unknown as AgentSession;
+}
+
+function createEvolutionClient(
+	currentOverview: EvolutionOverview,
+	versionInfo: readonly EvolutionHarnessVersionInfo[],
+): EvolutionFooterStatusClient {
+	return {
+		subscribe: (_listener: (event: EvolutionProgressEvent) => void) => () => {},
+		overview: async () => currentOverview,
+		listHarnessVersionInfo: async () => versionInfo,
+	};
+}
+
+function evolutionOverview(
+	currentHarnessVersion: HarnessVersion,
+	activeJob: EvolutionOverview["activeJob"] = null,
+): EvolutionOverview {
+	return {
+		scope: { repositoryId: "repository", scopeId: "repository" },
+		processedEvidenceCursor: 0,
+		ingestionHighWaterCursor: 0,
+		unprocessedEstimatedTokens: 0,
+		settledInvocationCount: 0,
+		automaticTokenThreshold: 1_000_000,
+		automaticMinimumInvocations: 5,
+		lastEvolutionAt: null,
+		cooldownRemainingMs: 0,
+		automaticEligibility: { eligible: false, reason: "insufficient-tokens" },
+		activeJob,
+		newestResumableJob: null,
+		currentHarnessVersion,
+		observedHarnessVersion: currentHarnessVersion,
+		nextPromptWillRefresh: false,
+		rollbackAction: null,
+	};
 }
 
 function createFooterData(providerCount: number): ReadonlyFooterDataProvider {
@@ -161,7 +202,60 @@ describe("FooterComponent width handling", () => {
 		const footer = new FooterComponent(session, createFooterData(1));
 
 		const statsLine = stripAnsi(footer.render(120)[0]);
-		expect(statsLine).toBe("gpt-5.5 medium • Context 12.3% used • 200k window");
+		expect(statsLine).toBe("gpt-5.5 medium • Context 12.3% used • 200k window • Harness default");
+	});
+
+	it("shows the active evolved harness completion time", async () => {
+		const version = `sha256:${"b".repeat(64)}` as HarnessVersion;
+		const evolvedAt = new Date();
+		evolvedAt.setHours(12, 48, 0, 0);
+		const session = createSession({ sessionName: "", activeHarnessVersion: version });
+		const footer = new FooterComponent(session, createFooterData(1), {
+			evolution: createEvolutionClient(evolutionOverview(version), [
+				{
+					version,
+					kind: "evolved",
+					evolvedAt: evolvedAt.toISOString(),
+					evolvedIn: "/projects/diffex",
+				},
+			]),
+		});
+
+		await vi.waitFor(() => {
+			expect(stripAnsi(footer.render(200)[0])).toContain(
+				`Harness ${formatEvolutionTimestamp(evolvedAt.toISOString())}`,
+			);
+		});
+		footer.dispose();
+	});
+
+	it("shows a spinner to the right of the harness time while evolution runs", async () => {
+		const version = `sha256:${"b".repeat(64)}` as HarnessVersion;
+		const evolvedAt = new Date().toISOString();
+		const activeJob = {
+			jobId: "job-active",
+			trigger: "automatic",
+			stage: "reflecting",
+			outcome: "active",
+			reasonCode: null,
+			createdAt: evolvedAt,
+			updatedAt: evolvedAt,
+			terminalAt: null,
+			resumable: false,
+			cancellable: true,
+		} satisfies NonNullable<EvolutionOverview["activeJob"]>;
+		const session = createSession({ sessionName: "", activeHarnessVersion: version });
+		const footer = new FooterComponent(session, createFooterData(1), {
+			evolution: createEvolutionClient(evolutionOverview(version, activeJob), [
+				{ version, kind: "evolved", evolvedAt, evolvedIn: "/projects/diffex" },
+			]),
+		});
+
+		await vi.waitFor(() => {
+			const statsLine = stripAnsi(footer.render(200)[0]);
+			expect(statsLine).toMatch(new RegExp(`Harness ${formatEvolutionTimestamp(evolvedAt)} [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]`));
+		});
+		footer.dispose();
 	});
 
 	it("does not show the project directory in the footer", () => {
