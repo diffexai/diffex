@@ -193,7 +193,7 @@ describe("FooterComponent width handling", () => {
 		}
 	});
 
-	it("shows model, thinking level, context usage, and context window", () => {
+	it("shows harness status on a second row aligned below the model", () => {
 		const session = createSession({
 			sessionName: "",
 			modelId: "gpt-5.5",
@@ -201,8 +201,11 @@ describe("FooterComponent width handling", () => {
 		});
 		const footer = new FooterComponent(session, createFooterData(1));
 
-		const statsLine = stripAnsi(footer.render(120)[0]);
-		expect(statsLine).toBe("gpt-5.5 medium • Context 12.3% used • 200k window • Harness default");
+		const [statsLine, harnessLine] = footer.render(120).map(stripAnsi);
+		expect(statsLine).toBe("gpt-5.5 medium • Context 12.3% used • 200k window");
+		expect(harnessLine).toBe("Harness default");
+		expect(statsLine?.startsWith("gpt-5.5")).toBe(true);
+		expect(harnessLine?.startsWith("Harness")).toBe(true);
 	});
 
 	it("shows the active evolved harness completion time", async () => {
@@ -222,9 +225,7 @@ describe("FooterComponent width handling", () => {
 		});
 
 		await vi.waitFor(() => {
-			expect(stripAnsi(footer.render(200)[0])).toContain(
-				`Harness ${formatEvolutionTimestamp(evolvedAt.toISOString())}`,
-			);
+			expect(stripAnsi(footer.render(200)[1])).toBe(`Harness ${formatEvolutionTimestamp(evolvedAt.toISOString())}`);
 		});
 		footer.dispose();
 	});
@@ -252,8 +253,8 @@ describe("FooterComponent width handling", () => {
 		});
 
 		await vi.waitFor(() => {
-			const statsLine = stripAnsi(footer.render(200)[0]);
-			expect(statsLine).toMatch(new RegExp(`Harness ${formatEvolutionTimestamp(evolvedAt)} [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]`));
+			const harnessLine = stripAnsi(footer.render(200)[1]);
+			expect(harnessLine).toMatch(new RegExp(`Harness ${formatEvolutionTimestamp(evolvedAt)} [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]`));
 		});
 		footer.dispose();
 	});

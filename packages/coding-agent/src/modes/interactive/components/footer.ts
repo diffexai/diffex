@@ -133,14 +133,17 @@ export class FooterComponent implements Component {
 		const evolutionSpinner = evolutionSnapshot?.running
 			? ` ${theme.fg("accent", evolutionSnapshot.spinnerFrame)}`
 			: "";
-		const harnessDisplay = `Harness ${harnessVersion}${evolutionSpinner}`;
-		let statsLine = `${modelName} ${thinkingLevel} • ${contextPercentStr} • ${windowDisplay} • ${harnessDisplay}`;
+		let statsLine = `${modelName} ${thinkingLevel} • ${contextPercentStr} • ${windowDisplay}`;
+		let harnessLine = `Harness ${harnessVersion}${evolutionSpinner}`;
 
 		if (visibleWidth(statsLine) > width) {
 			statsLine = truncateToWidth(statsLine, width, "...");
 		}
+		if (visibleWidth(harnessLine) > width) {
+			harnessLine = truncateToWidth(harnessLine, width, "...");
+		}
 
-		const lines = [theme.fg("dim", statsLine)];
+		const lines = [theme.fg("dim", statsLine), theme.fg("dim", harnessLine)];
 
 		// Add extension statuses on a single line, sorted by key alphabetically
 		const extensionStatuses = this.footerData.getExtensionStatuses();
