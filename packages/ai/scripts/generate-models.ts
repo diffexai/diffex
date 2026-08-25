@@ -2269,6 +2269,24 @@ async function generateModels() {
 			!((model.provider === "opencode" || model.provider === "opencode-go") && model.id === "gpt-5.3-codex-spark"),
 	);
 
+	// Cloudflare AI Gateway exposes Workers AI models through its OpenAI-compatible
+	// endpoint even when models.dev omits the duplicated gateway catalog entries.
+	for (const model of allModels.filter((candidate) => candidate.provider === "cloudflare-workers-ai")) {
+		const id = `workers-ai/${model.id}`;
+		if (allModels.some((candidate) => candidate.provider === "cloudflare-ai-gateway" && candidate.id === id)) continue;
+		const gatewayModel = {
+			...model,
+			id,
+			provider: "cloudflare-ai-gateway",
+			baseUrl: CLOUDFLARE_AI_GATEWAY_COMPAT_BASE_URL,
+			cost: { ...model.cost },
+			compat: { ...model.compat, sendSessionAffinityHeaders: true },
+		};
+		allModels.push(gatewayModel);
+		const reasoningOptions = modelsDevReasoningOptions.get(getModelKey(model));
+		if (reasoningOptions) modelsDevReasoningOptions.set(getModelKey(gatewayModel), reasoningOptions);
+	}
+
 	// Temporary overrides until upstream model metadata is corrected.
 	for (const candidate of allModels) {
 		if (candidate.provider === "github-copilot" && GITHUB_COPILOT_EXTENDED_CONTEXT_MODELS.has(candidate.id)) {
