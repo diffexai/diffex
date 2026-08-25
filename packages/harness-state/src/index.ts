@@ -650,6 +650,10 @@ export class HarnessStateStore {
 		return this.#loadVersion(pointer.version);
 	}
 
+	loadVersion(version: HarnessVersion): Promise<HarnessVersionBundle> {
+		return this.#loadVersion(version);
+	}
+
 	async listVersions(): Promise<HarnessVersionList> {
 		let entries: Dirent[];
 		try {

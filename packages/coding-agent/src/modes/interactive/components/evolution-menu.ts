@@ -41,7 +41,7 @@ export interface EvolutionMenuClient {
 	proposalDetail(jobId: string, proposalId: string): Promise<EvolutionProposalDetail>;
 	startManual(): Promise<EvolutionStartResult>;
 	resumeNewest(): Promise<EvolutionJobSummary>;
-	cancelActive(): Promise<EvolutionJobSummary>;
+	cancelActive(): Promise<void>;
 	rollback(): Promise<EvolutionRollbackAction>;
 }
 
@@ -348,7 +348,7 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 		if (action === "cancel") {
 			return [
 				`Cancel ${overview?.activeJob ? formatEvolutionJobLabel(overview.activeJob) : "the active job"}?`,
-				"The current stage will be interrupted and remain resumable.",
+				"The evolution round will be removed. Its tokens and invocations will remain available.",
 			];
 		}
 		return [
@@ -372,7 +372,7 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 				);
 			}
 			if (action === "resume") this.#run(() => this.#client.resumeNewest(), "Evolution job resumed");
-			if (action === "cancel") this.#run(() => this.#client.cancelActive(), "Evolution job interrupted");
+			if (action === "cancel") this.#run(() => this.#client.cancelActive(), "Evolution round removed");
 			if (action === "rollback") this.#run(() => this.#client.rollback(), "Harness revision rolled back");
 		};
 		return [

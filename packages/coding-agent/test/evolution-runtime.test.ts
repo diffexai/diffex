@@ -139,6 +139,84 @@ describe("coding-agent evolution runtime", () => {
 		}
 	});
 
+	it("freezes the session harness even when another harness is globally selected", async () => {
+		const agentDir = join(
+			tmpdir(),
+			`diffex-session-harness-evolution-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+		);
+		const traceDirectory = join(agentDir, "traces");
+		mkdirSync(traceDirectory, { recursive: true });
+		temporaryDirectories.push(agentDir);
+		const traceId = "trace-session-harness";
+		const records: readonly TraceRecord[] = [
+			{
+				type: "trace_header",
+				sequence: 1,
+				timestamp: "2026-08-20T12:00:00.000Z",
+				schemaVersion: 1,
+				traceId,
+				producer: {
+					diffexVersion: "0.2.0",
+					sourceRevision: "fixture-revision",
+					runtime: { kind: "node", version: "24.0.0" },
+					telemetrySchemaVersions: {},
+					metadata: {},
+				},
+			},
+			{
+				type: "span_start",
+				sequence: 2,
+				timestamp: "2026-08-20T12:00:01.000Z",
+				spanId: 1,
+				parentSpanId: null,
+				name: "diffex.coding_agent.operation",
+				attributes: { "diffex.operation.kind": "prompt" },
+			},
+			{
+				type: "span_end",
+				sequence: 3,
+				timestamp: "2026-08-20T12:00:02.000Z",
+				spanId: 1,
+				attributes: {},
+				status: { status: "error", error: { name: "Error", message: "verification failed" } },
+			},
+			{
+				type: "trace_footer",
+				sequence: 4,
+				timestamp: "2026-08-20T12:00:03.000Z",
+				terminationStatus: "completed",
+				health: { droppedRecords: 0, writerErrors: 0, writerDisabled: false, closed: true },
+			},
+		];
+		writeFileSync(join(traceDirectory, `${traceId}.jsonl`), records.map(encodeTraceRecord).join(""));
+		const store = new HarnessStateStore(agentDir);
+		const globallySelected = await store.initialize();
+		const sessionHarness = await store.saveVersion(
+			{ memory: "Use the session-specific evolution memory.\n" },
+			globallySelected.manifest.version,
+		);
+		const harness = await createHarness({ harnessStateStore: store, harnessVersionBundle: sessionHarness });
+		harnesses.push(harness);
+		expect(harness.session.activeHarnessVersion).toBe(sessionHarness.manifest.version);
+		expect((await store.loadCurrent()).manifest.version).toBe(globallySelected.manifest.version);
+		const runtime = await createCodingAgentEvolutionRuntime({
+			agentDir,
+			cwd: harness.tempDir,
+			session: harness.session,
+			harnessState: store,
+			modelRuntime: harness.session.modelRuntime,
+			resourceLoader: harness.session.resourceLoader,
+		});
+
+		const started = await runtime.control.startManual();
+		if (started.status !== "created") throw new Error("Expected an evolution job");
+		expect((await runtime.control.getJob(started.job.jobId)).baseHarnessVersion).toBe(
+			sessionHarness.manifest.version,
+		);
+		expect((await store.loadCurrent()).manifest.version).toBe(globallySelected.manifest.version);
+		await runtime.control.cancelActive();
+	});
+
 	it("flushes the trace before scheduling an automatic eligibility check", async () => {
 		const order: string[] = [];
 		const trace = {

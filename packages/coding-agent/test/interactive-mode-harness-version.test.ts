@@ -12,6 +12,7 @@ interface HarnessModeFixture {
 	options: {
 		evolution: {
 			listCurrentDirectoryHarnessVersionInfo: ReturnType<typeof vi.fn>;
+			overview: ReturnType<typeof vi.fn>;
 		};
 	};
 	session: {
@@ -29,6 +30,7 @@ interface HarnessModeFixture {
 		},
 	) => void;
 	showStatus: ReturnType<typeof vi.fn>;
+	showWarning: ReturnType<typeof vi.fn>;
 	showError: ReturnType<typeof vi.fn>;
 }
 
@@ -51,6 +53,7 @@ function createFixture(switchHarnessVersion = vi.fn().mockResolvedValue(undefine
 	const fixture: HarnessModeFixture = {
 		options: {
 			evolution: {
+				overview: vi.fn().mockResolvedValue({ activeJob: null }),
 				listCurrentDirectoryHarnessVersionInfo: vi.fn().mockResolvedValue([
 					{ version: rootVersion, kind: "default", evolvedAt: null, evolvedIn: null },
 					{
@@ -85,6 +88,7 @@ function createFixture(switchHarnessVersion = vi.fn().mockResolvedValue(undefine
 			selector = create(done).component;
 		},
 		showStatus: vi.fn(),
+		showWarning: vi.fn(),
 		showError: vi.fn(),
 	};
 	return {
@@ -131,6 +135,22 @@ describe("InteractiveMode harness version selector", () => {
 			);
 		});
 		expect(done).toHaveBeenCalledOnce();
+	});
+
+	it("warns when switching harnesses during an active evolution", async () => {
+		const { fixture, getSelector } = createFixture();
+		fixture.options.evolution.overview.mockResolvedValue({ activeJob: { jobId: "job-active" } });
+		await interactiveHarnessMethods.showHarnessVersionSelector.call(fixture);
+
+		getSelector().handleInput("\u001b[B");
+		getSelector().handleInput("\n");
+
+		await vi.waitFor(() => {
+			expect(fixture.showWarning).toHaveBeenCalledWith(
+				"An active evolution is running from its original harness and will not apply to the selected harness.",
+			);
+		});
+		expect(fixture.showStatus).not.toHaveBeenCalledWith(expect.stringContaining("Harness version:"));
 	});
 
 	it.each([

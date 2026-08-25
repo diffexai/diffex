@@ -227,6 +227,10 @@ function resumableJob(jobs: readonly EvolutionJob[]): EvolutionJob | null {
 	);
 }
 
+function isCancelledJob(job: EvolutionJob): boolean {
+	return job.resolution?.reasonCode === "cancelled-by-operator";
+}
+
 async function loadArtifacts(job: EvolutionJob, store: EvolutionArtifactStore): Promise<readonly EvolutionArtifact[]> {
 	const artifacts: EvolutionArtifact[] = [await store.get(job.inputSnapshot)];
 	for (const checkpoint of job.checkpoints) {
@@ -318,7 +322,7 @@ export class EvolutionControlService {
 		const estimatedTokens = estimateEvolutionTokens(materializations.map((entry) => entry.invocation));
 		const lastAutomaticRunAt =
 			jobs
-				.filter((job) => job.trigger === "automatic" && job.terminalAt !== null)
+				.filter((job) => !isCancelledJob(job) && job.trigger === "automatic" && job.terminalAt !== null)
 				.map((job) => job.terminalAt as string)
 				.sort()
 				.at(-1) ?? null;
@@ -370,7 +374,7 @@ export class EvolutionControlService {
 
 	async listJobs(): Promise<readonly EvolutionJobSummary[]> {
 		return (await this.#dependencies.jobs.list(this.#dependencies.scope))
-			.slice()
+			.filter((job) => !isCancelledJob(job))
 			.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || right.jobId.localeCompare(left.jobId))
 			.map(summary);
 	}
@@ -477,15 +481,15 @@ export class EvolutionControlService {
 		return summary(await this.#dependencies.controlPlane.requestResume(job.jobId));
 	}
 
-	async cancelActive(): Promise<EvolutionJobSummary> {
+	async cancelActive(): Promise<void> {
 		const active = activeJob(await this.#dependencies.jobs.list(this.#dependencies.scope));
 		if (active === null) throw new Error("No active evolution job is available");
 		await this.#dependencies.worker.stop(new Error("Evolution job cancelled by the operator"));
-		let current = await this.#dependencies.jobs.load(active.jobId);
-		if (current?.outcome === "active") current = await this.#dependencies.controlPlane.interruptJob(active.jobId);
-		if (this.#started) this.#dependencies.worker.start();
-		if (current === null) throw new Error(`Unknown evolution job "${active.jobId}"`);
-		return summary(current);
+		try {
+			await this.#dependencies.controlPlane.cancelJob(active.jobId);
+		} finally {
+			if (this.#started) this.#dependencies.worker.start();
+		}
 	}
 
 	async rollback(): Promise<EvolutionRollbackAction> {
@@ -507,7 +511,11 @@ export class EvolutionControlService {
 
 	async getJob(jobId: string): Promise<EvolutionJobDetail> {
 		const job = await this.#dependencies.jobs.load(jobId);
-		if (job === null || job.metadata.scope.repositoryId !== this.#dependencies.scope.repositoryId) {
+		if (
+			job === null ||
+			isCancelledJob(job) ||
+			job.metadata.scope.repositoryId !== this.#dependencies.scope.repositoryId
+		) {
 			throw new Error(`Unknown evolution job "${jobId}"`);
 		}
 		const [artifacts, events, versions] = await Promise.all([
@@ -645,7 +653,7 @@ export class EvolutionControlService {
 
 	async getProposal(jobId: string, proposalId: string): Promise<EvolutionProposalDetail> {
 		const job = await this.#dependencies.jobs.load(jobId);
-		if (job === null) throw new Error(`Unknown evolution job "${jobId}"`);
+		if (job === null || isCancelledJob(job)) throw new Error(`Unknown evolution job "${jobId}"`);
 		const [artifacts, events] = await Promise.all([
 			loadArtifacts(job, this.#dependencies.artifacts),
 			this.#dependencies.ledger.read(jobId),

@@ -346,23 +346,80 @@ describe("evolution control service", () => {
 		expect(events).toHaveLength(1);
 	});
 
-	it("cancels queued work and explicitly resumes the newest interrupted job", async () => {
+	it("removes a cancelled round while preserving its pending tokens and invocations", async () => {
 		const fixture = await serviceFixture();
+		const before = await fixture.service.overview();
 		const started = await fixture.service.startManual();
 		if (started.status !== "created") throw new Error("Expected a created job");
 
-		const cancelled = await fixture.service.cancelActive();
-		expect(cancelled).toMatchObject({
-			jobId: started.job.jobId,
+		await fixture.service.cancelActive();
+
+		expect(await fixture.store.load(started.job.jobId)).toMatchObject({
 			outcome: "interrupted",
 			reasonCode: "cancelled-by-operator",
-			resumable: true,
+			resolution: {
+				kind: "administratively-resolved",
+				reasonCode: "cancelled-by-operator",
+			},
 		});
-		expect((await fixture.service.overview()).newestResumableJob?.jobId).toBe(started.job.jobId);
+		expect(await fixture.service.listJobs()).toEqual([]);
+		await expect(fixture.service.getJob(started.job.jobId)).rejects.toThrow(`Unknown evolution job`);
+		await expect(fixture.service.resumeNewest()).rejects.toThrow("No interrupted or retryable evolution job");
+		expect(await fixture.store.read(started.job.jobId)).toContainEqual(
+			expect.objectContaining({
+				type: "job-failed",
+				reasonCode: "cancelled-by-operator",
+			}),
+		);
+		expect(await fixture.service.overview()).toMatchObject({
+			activeJob: null,
+			newestResumableJob: null,
+			processedEvidenceCursor: before.processedEvidenceCursor,
+			unprocessedEstimatedTokens: before.unprocessedEstimatedTokens,
+			settledInvocationCount: before.settledInvocationCount,
+		});
 
-		const resumed = await fixture.service.resumeNewest();
-		expect(resumed).toMatchObject({ jobId: started.job.jobId, outcome: "active", resumable: false });
-		expect(await fixture.store.load(started.job.jobId)).toMatchObject({ attempt: 1, retryNotBefore: null });
+		const replacement = await fixture.service.startManual();
+		expect(replacement).toMatchObject({ status: "created" });
+		if (replacement.status === "created") expect(replacement.job.jobId).not.toBe(started.job.jobId);
+		await fixture.service.cancelActive();
+	});
+
+	it("removes a running round after worker shutdown settles it", async () => {
+		let startedExecution: (() => void) | undefined;
+		const executionStarted = new Promise<void>((resolve) => {
+			startedExecution = resolve;
+		});
+		const fixture = await serviceFixture({
+			async execute(context) {
+				startedExecution?.();
+				await new Promise<void>((_resolve, reject) => {
+					const signal = context.signal;
+					if (signal?.aborted) {
+						reject(signal.reason);
+						return;
+					}
+					signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+				});
+				throw new Error("Unreachable evolution execution");
+			},
+		});
+		const started = await fixture.service.startManual();
+		if (started.status !== "created") throw new Error("Expected a created job");
+		fixture.service.start();
+		try {
+			await executionStarted;
+			await fixture.service.cancelActive();
+
+			expect(await fixture.store.load(started.job.jobId)).toMatchObject({
+				outcome: "interrupted",
+				reasonCode: "cancelled-by-operator",
+				resolution: { reasonCode: "cancelled-by-operator" },
+			});
+			expect(await fixture.service.listJobs()).toEqual([]);
+		} finally {
+			await fixture.service.stop();
+		}
 	});
 
 	it("starts fresh work after a terminal failure and reports incomplete reflection coverage", async () => {

@@ -668,7 +668,6 @@ class CodingAgentSnapshotSource implements EvolutionSnapshotSource {
 	readonly #cwd: string;
 	readonly #directoryId: string;
 	readonly #scope: EvolutionScope;
-	readonly #harnessState: HarnessStateStore;
 	readonly #resourceLoader: ResourceLoader;
 	readonly #session: AgentSession;
 	readonly #writer: EvolutionMemoryWriter;
@@ -677,7 +676,6 @@ class CodingAgentSnapshotSource implements EvolutionSnapshotSource {
 		cwd: string;
 		directoryId: string;
 		scope: EvolutionScope;
-		harnessState: HarnessStateStore;
 		resourceLoader: ResourceLoader;
 		session: AgentSession;
 		writer: EvolutionMemoryWriter;
@@ -685,7 +683,6 @@ class CodingAgentSnapshotSource implements EvolutionSnapshotSource {
 		this.#cwd = options.cwd;
 		this.#directoryId = options.directoryId;
 		this.#scope = options.scope;
-		this.#harnessState = options.harnessState;
 		this.#resourceLoader = options.resourceLoader;
 		this.#session = options.session;
 		this.#writer = options.writer;
@@ -705,7 +702,9 @@ class CodingAgentSnapshotSource implements EvolutionSnapshotSource {
 			throw new Error("Evolution snapshot scope does not match the repository runtime");
 		}
 		signal?.throwIfAborted();
-		const bundle = await this.#harnessState.loadCurrent();
+		const harnessVersion = this.#session.activeHarnessVersion;
+		if (harnessVersion === undefined) throw new Error("Evolution requires an active session harness");
+		const harness = await this.#writer.captureSnapshot(harnessVersion);
 		const model = this.#session.model;
 		if (!model) throw new Error("Evolution requires an active model");
 		const instructions = this.#resourceLoader.getAgentsFiles().agentsFiles.map((file, precedence) => ({
@@ -721,13 +720,7 @@ class CodingAgentSnapshotSource implements EvolutionSnapshotSource {
 				rootPath: this.#cwd,
 				revision: await this.#revision(),
 			},
-			harness: {
-				harnessVersion: bundle.manifest.version,
-				baseVersion: bundle.manifest.base,
-				memory: bundle.state.memory,
-				memoryContentDigest: computeEvolutionContentDigest(bundle.state.memory),
-				activeMemoryItems: await this.#writer.loadActiveMemoryItems(bundle),
-			},
+			harness,
 			instructions,
 			modelConfiguration: {
 				provider: model.provider,
@@ -816,7 +809,6 @@ export async function createCodingAgentEvolutionRuntime(
 			cwd: currentDirectory.rootPath,
 			directoryId: currentDirectory.directoryId,
 			scope,
-			harnessState: options.harnessState,
 			resourceLoader: options.resourceLoader,
 			session: options.session,
 			writer,
@@ -977,7 +969,7 @@ export class EvolutionRuntimeCoordinator implements AgentSessionLifecycleObserve
 		return this.#control().resumeNewest();
 	}
 
-	cancelActive(): Promise<EvolutionJobSummary> {
+	cancelActive(): Promise<void> {
 		return this.#control().cancelActive();
 	}
 

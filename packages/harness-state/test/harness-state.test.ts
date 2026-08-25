@@ -558,6 +558,7 @@ describe("HarnessStateStore", () => {
 		const root = await store.initialize();
 		const branch = await store.saveVersion({ memory: "branch" }, root.manifest.version);
 		expect((await store.loadCurrent()).manifest.version).toBe(root.manifest.version);
+		expect(await store.loadVersion(branch.manifest.version)).toEqual(branch);
 
 		expect(await store.selectVersion(branch.manifest.version)).toEqual(branch);
 		expect((await store.loadCurrent()).manifest.version).toBe(branch.manifest.version);

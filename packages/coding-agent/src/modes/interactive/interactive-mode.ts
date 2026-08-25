@@ -4674,9 +4674,19 @@ export class InteractiveMode {
 						switching = true;
 						void this.session
 							.switchHarnessVersion(version)
-							.then(() => {
+							.then(async () => {
 								done();
-								this.showStatus(`Harness version: ${label(version, version)}`);
+								const activeEvolution = await this.options.evolution
+									?.overview()
+									.then((overview) => overview.activeJob !== null)
+									.catch(() => false);
+								if (activeEvolution) {
+									this.showWarning(
+										"An active evolution is running from its original harness and will not apply to the selected harness.",
+									);
+								} else {
+									this.showStatus(`Harness version: ${label(version, version)}`);
+								}
 							})
 							.catch((error: unknown) => {
 								done();

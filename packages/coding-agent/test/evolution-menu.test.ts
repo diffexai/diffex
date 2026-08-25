@@ -190,6 +190,7 @@ function client(currentOverview: EvolutionOverview): {
 	emit: (event: EvolutionProgressEvent) => void;
 	unsubscribed: ReturnType<typeof vi.fn>;
 	startManual: ReturnType<typeof vi.fn>;
+	cancelActive: ReturnType<typeof vi.fn>;
 	overviewCall: ReturnType<typeof vi.fn>;
 	listHarnessVersionInfo: ReturnType<typeof vi.fn>;
 	listCurrentDirectoryHarnessVersionInfo: ReturnType<typeof vi.fn>;
@@ -203,6 +204,7 @@ function client(currentOverview: EvolutionOverview): {
 	let enabled = true;
 	const unsubscribed = vi.fn();
 	const startManual = vi.fn().mockResolvedValue({ status: "created", job: job() });
+	const cancelActive = vi.fn().mockResolvedValue(undefined);
 	const overviewCall = vi.fn().mockResolvedValue(currentOverview);
 	const listHarnessVersionInfo = vi
 		.fn()
@@ -231,12 +233,13 @@ function client(currentOverview: EvolutionOverview): {
 			proposalDetail: proposalDetailCall,
 			startManual,
 			resumeNewest: vi.fn().mockRejectedValue(new Error("unused")),
-			cancelActive: vi.fn().mockRejectedValue(new Error("unused")),
+			cancelActive,
 			rollback: vi.fn().mockRejectedValue(new Error("unused")),
 		},
 		emit: (event) => listener?.(event),
 		unsubscribed,
 		startManual,
+		cancelActive,
 		overviewCall,
 		listHarnessVersionInfo,
 		listCurrentDirectoryHarnessVersionInfo,
@@ -608,6 +611,32 @@ describe("EvolutionMenuComponent", () => {
 
 		component.handleInput("\n");
 		await vi.waitFor(() => expect(fixture.startManual).toHaveBeenCalledOnce());
+	});
+
+	it("confirms that cancellation removes the round but preserves pending usage", async () => {
+		const fixture = client(overview({ activeJob: job() }));
+		const status = vi.fn();
+		const component = new EvolutionMenuComponent(
+			fixture.client,
+			() => {},
+			status,
+			() => {},
+		);
+		await vi.waitFor(() => expect(stripAnsi(component.render(160).join("\n"))).toContain("Cancel"));
+
+		for (let index = 0; index < 6; index += 1) component.handleInput("\u001b[B");
+		component.handleInput("\n");
+		await vi.waitFor(() =>
+			expect(stripAnsi(component.render(160).join("\n"))).toContain(
+				"The evolution round will be removed. Its tokens and invocations will remain available.",
+			),
+		);
+		expect(fixture.cancelActive).not.toHaveBeenCalled();
+
+		component.handleInput("\n");
+		await vi.waitFor(() => expect(fixture.cancelActive).toHaveBeenCalledOnce());
+		await vi.waitFor(() => expect(status).toHaveBeenCalledWith("Evolution round removed", false));
+		component.dispose();
 	});
 
 	it("reports when a manual start has no settled evidence", async () => {

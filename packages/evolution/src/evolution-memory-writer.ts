@@ -626,8 +626,9 @@ export class EvolutionMemoryWriter implements EvolutionTargetWriter {
 		return candidate;
 	}
 
-	async captureSnapshot(): Promise<ImmutableHarnessSnapshot> {
-		const bundle = await this.#harnessState.loadCurrent();
+	async captureSnapshot(version?: HarnessVersion): Promise<ImmutableHarnessSnapshot> {
+		const bundle =
+			version === undefined ? await this.#harnessState.loadCurrent() : await this.#harnessState.loadVersion(version);
 		const catalog = await this.#loadCatalog(bundle);
 		return {
 			harnessVersion: bundle.manifest.version,
@@ -674,21 +675,15 @@ export class EvolutionMemoryWriter implements EvolutionTargetWriter {
 			};
 		}
 
-		const current = await this.#harnessState.loadCurrent();
-		if (current.manifest.version !== batch.expectedBaseVersion) {
-			throw new EvolutionExecutionError(
-				`Harness base changed from ${batch.expectedBaseVersion} to ${current.manifest.version} before writing`,
-				{ reasonCode: "harness-base-conflict", retryable: false },
-			);
-		}
-		const currentDigest = computeEvolutionContentDigest(current.state.memory);
-		if (currentDigest !== batch.expectedBaseDigest) {
-			throw new EvolutionExecutionError("Harness memory changed before writing", {
+		const base = await this.#harnessState.loadVersion(batch.expectedBaseVersion);
+		const baseDigest = computeEvolutionContentDigest(base.state.memory);
+		if (baseDigest !== batch.expectedBaseDigest) {
+			throw new EvolutionExecutionError("Frozen harness memory no longer matches its content digest", {
 				reasonCode: "harness-base-conflict",
 				retryable: false,
 			});
 		}
-		const baseCatalog = await this.#loadCatalog(current);
+		const baseCatalog = await this.#loadCatalog(base);
 		if (!sameMemoryItems(activeItems(baseCatalog), batch.baseMemoryItems)) {
 			throw new EvolutionExecutionError("Harness memory item catalog changed before writing", {
 				reasonCode: "harness-base-conflict",
@@ -696,7 +691,7 @@ export class EvolutionMemoryWriter implements EvolutionTargetWriter {
 			});
 		}
 
-		let memory = current.state.memory;
+		let memory = base.state.memory;
 		const bootstrappingBlankMemory = memory.trim() === "";
 		let items = [...baseCatalog.items];
 		const activeOrder = [...baseCatalog.activeOrder];
@@ -707,7 +702,7 @@ export class EvolutionMemoryWriter implements EvolutionTargetWriter {
 			})
 			.sort((left, right) => left - right);
 		const visibleNextLessonNumber = existingLessonNumbers.length + 1;
-		const durableNextLessonNumber = current.manifest.metadata.evolutionMemory.nextLessonNumber;
+		const durableNextLessonNumber = base.manifest.metadata.evolutionMemory.nextLessonNumber;
 		if (
 			existingLessonNumbers.some((lessonNumber, index) => lessonNumber !== index + 1) ||
 			durableNextLessonNumber !== visibleNextLessonNumber
@@ -844,9 +839,9 @@ export class EvolutionMemoryWriter implements EvolutionTargetWriter {
 			resultingMemoryDigest: catalog.memoryContentDigest,
 			harnessMetadata,
 			operationIds: batch.mutations.map((mutation) => mutation.mutationId),
-			beforeMemory: current.state.memory,
+			beforeMemory: base.state.memory,
 			afterMemory: memory,
-			diff: exactDiff(current.state.memory, memory),
+			diff: exactDiff(base.state.memory, memory),
 			catalog,
 		};
 		const candidate: StoredEvolutionMemoryCandidate = {
@@ -878,46 +873,24 @@ export class EvolutionMemoryWriter implements EvolutionTargetWriter {
 			throw new Error(`Mutation batch "${batch.batchId}" write receipt does not match its durable candidate`);
 		}
 		await this.#writeImmutable(this.#catalogFile(candidate.resultingHarnessVersion), candidate.catalog);
-		const current = await this.#harnessState.loadCurrent();
-		if (current.manifest.version === candidate.resultingHarnessVersion) {
-			if (
-				current.manifest.base !== candidate.expectedBaseVersion ||
-				current.state.memory !== candidate.afterMemory ||
-				serializeEvolutionValue(current.manifest.metadata) !== serializeEvolutionValue(candidate.harnessMetadata)
-			) {
-				throw new Error(`Activated harness revision for batch "${batch.batchId}" has different content`);
-			}
-			return {
-				batchId: batch.batchId,
-				status: "activated",
-				resultingHarnessVersion: candidate.resultingHarnessVersion,
-				message: null,
-			};
-		}
-		if (current.manifest.version !== candidate.expectedBaseVersion) {
-			throw new EvolutionExecutionError(
-				`Harness base changed from ${candidate.expectedBaseVersion} to ${current.manifest.version} before activation`,
-				{ reasonCode: "harness-base-conflict", retryable: false },
-			);
-		}
-		const advanced = await this.#harnessState.advance(
+		const evolved = await this.#harnessState.saveVersion(
 			{ memory: candidate.afterMemory },
 			candidate.expectedBaseVersion,
 			candidate.harnessMetadata,
 		);
-		if (advanced.status === "conflict") {
-			throw new EvolutionExecutionError(
-				`Harness base changed from ${advanced.expectedBase} to ${advanced.actualBase} before activation`,
-				{ reasonCode: "harness-base-conflict", retryable: false },
-			);
-		}
-		if (advanced.bundle.manifest.version !== candidate.resultingHarnessVersion) {
+		if (
+			evolved.manifest.version !== candidate.resultingHarnessVersion ||
+			evolved.manifest.base !== candidate.expectedBaseVersion ||
+			evolved.state.memory !== candidate.afterMemory ||
+			serializeEvolutionValue(evolved.manifest.metadata) !== serializeEvolutionValue(candidate.harnessMetadata)
+		) {
 			throw new Error(`Harness activation for batch "${batch.batchId}" produced an unexpected revision`);
 		}
+		await this.#harnessState.selectVersionIfCurrent(evolved.manifest.version, candidate.expectedBaseVersion);
 		return {
 			batchId: batch.batchId,
 			status: "activated",
-			resultingHarnessVersion: advanced.bundle.manifest.version,
+			resultingHarnessVersion: evolved.manifest.version,
 			message: null,
 		};
 	}
