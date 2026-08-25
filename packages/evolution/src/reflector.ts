@@ -98,6 +98,11 @@ interface RemainingReflectionBudget {
 	readonly toolCalls: number;
 }
 
+interface MutableAttemptConsumption {
+	modelCalls: number;
+	toolCalls: number;
+}
+
 interface MutableNodeRuntime {
 	providerCalls: number;
 	providerLatencyMs: number;
@@ -556,10 +561,17 @@ export class RecursiveReflector implements Reflector {
 			const plans = this.#buildPlan(input, slices);
 			const completed = await this.#loadCompleted(input, plans, priorEvents);
 			const retryPending = this.#loadRetryPending(input, plans, priorEvents, completed);
+			const attemptConsumption = new Map<string, MutableAttemptConsumption>();
 			let modelCalls = priorModelCalls;
 			let effectiveModelCallLimit = priorModelCalls;
 			const refreshBudgetEnvelope = () => {
-				const remaining = this.#remainingBudget(plans, completed, retryPending, providerCallAllowance);
+				const remaining = this.#remainingBudget(
+					plans,
+					completed,
+					retryPending,
+					attemptConsumption,
+					providerCallAllowance,
+				);
 				const toolCalls = priorToolCalls + registry.toolCalls;
 				this.#assertBudgetFits(remaining, modelCalls, toolCalls);
 				effectiveModelCallLimit = this.#maxModelCalls ?? modelCalls + remaining.modelCalls;
@@ -586,7 +598,19 @@ export class RecursiveReflector implements Reflector {
 				if (plan.kind === "synthesis" && childLessons.length === 0) {
 					completed.set(
 						plan.nodeId,
-						await this.#checkpointEmptySynthesis(input, producer, plan, unavailableChildNodeIds),
+						unavailableChildNodeIds.length === 0
+							? await this.#checkpointEmptySynthesis(input, producer, plan, unavailableChildNodeIds)
+							: await this.#checkpointUnavailable(
+									input,
+									producer,
+									plan,
+									"failed",
+									{
+										diagnosticCode: "child-nodes-unavailable",
+										message: "All child reflection lessons are unavailable",
+									},
+									newNodeRuntime(),
+								),
 					);
 					refreshBudgetEnvelope();
 					return;
@@ -603,6 +627,8 @@ export class RecursiveReflector implements Reflector {
 							event.attempt === nodeAttempt,
 					).length;
 					runtime.providerCalls += priorAttemptModelCalls;
+					const consumption = { modelCalls: priorAttemptModelCalls, toolCalls: 0 };
+					attemptConsumption.set(plan.nodeId, consumption);
 					const nodeDeadline = new ActiveComputeDeadline(
 						this.#nodeDeadlineMs,
 						`Reflection node ${plan.nodeId} attempt ${nodeAttempt}`,
@@ -630,6 +656,7 @@ export class RecursiveReflector implements Reflector {
 							stageDeadline,
 							nodeDeadline,
 							runtime,
+							consumption,
 						);
 						break;
 					} catch (error) {
@@ -645,6 +672,7 @@ export class RecursiveReflector implements Reflector {
 						const failure = this.#nodeFailure(error, timedOut);
 						if (plan.kind === "leaf" && nodeAttempt === 1 && (timedOut || this.#isRetryableLeafFailure(error))) {
 							const retry = await this.#checkpointRetryPending(input, producer, plan, failure, runtime);
+							attemptConsumption.delete(plan.nodeId);
 							retryPending.set(plan.nodeId, retry);
 							refreshBudgetEnvelope();
 							runtime = newNodeRuntime(retry.runtime);
@@ -671,6 +699,7 @@ export class RecursiveReflector implements Reflector {
 						nodeDeadline.dispose();
 					}
 				}
+				attemptConsumption.delete(plan.nodeId);
 				completed.set(plan.nodeId, result);
 				refreshBudgetEnvelope();
 			};
@@ -687,6 +716,16 @@ export class RecursiveReflector implements Reflector {
 				.filter((node): node is ReflectionNode => node !== undefined);
 			const lessons = plans.flatMap((plan) => completed.get(plan.nodeId)?.lessons ?? []);
 			const rootPlans = plans.filter((plan) => plan.parentNodeId === null);
+			const unavailableRootNodeIds = rootPlans
+				.filter((plan) => completed.get(plan.nodeId)?.node.status !== "complete")
+				.map((plan) => plan.nodeId);
+			if (unavailableRootNodeIds.length > 0) {
+				throw new EvolutionExecutionError("Reflector root is unavailable", {
+					reasonCode: "model-call-failed",
+					retryable: true,
+					diagnostics: { unavailableRootNodeIds },
+				});
+			}
 			const finalLessonIds = rootPlans.flatMap(
 				(plan) => completed.get(plan.nodeId)?.lessons.map((lesson) => lesson.lessonId) ?? [],
 			);
@@ -752,6 +791,7 @@ export class RecursiveReflector implements Reflector {
 		plans: readonly NodePlan[],
 		completed: ReadonlyMap<string, CompletedNode>,
 		retryPending: ReadonlyMap<string, ReflectionLeafRetryPendingLedgerEvent>,
+		attemptConsumption: ReadonlyMap<string, MutableAttemptConsumption>,
 		providerCallAllowance: number,
 	): RemainingReflectionBudget {
 		let modelCalls = 0;
@@ -771,8 +811,9 @@ export class RecursiveReflector implements Reflector {
 				conversations = childrenTerminal && !hasSuccessfulChildLessons ? 0 : 1;
 				toolCallAllowance = this.#maxLessonToolCallsPerSynthesisNode;
 			}
-			modelCalls += conversations * providerCallAllowance;
-			toolCalls += conversations * toolCallAllowance;
+			const consumption = attemptConsumption.get(plan.nodeId);
+			modelCalls += Math.max(0, conversations * providerCallAllowance - (consumption?.modelCalls ?? 0));
+			toolCalls += Math.max(0, conversations * toolCallAllowance - (consumption?.toolCalls ?? 0));
 			if (!Number.isSafeInteger(modelCalls) || !Number.isSafeInteger(toolCalls)) {
 				throw new EvolutionExecutionError("Reflector remaining-plan budget exceeds safe integer limits", {
 					reasonCode: "reflection-budget-exhausted",
@@ -892,14 +933,23 @@ export class RecursiveReflector implements Reflector {
 		stageDeadline: ActiveComputeDeadline,
 		nodeDeadline: ActiveComputeDeadline,
 		runtime: MutableNodeRuntime,
+		consumption: MutableAttemptConsumption,
 	): Promise<CompletedNode> {
 		const nodeReferences = registry.nodeReferences(plan.evidenceIds);
 		const childLessons = plan.childNodeIds.flatMap((nodeId) => completed.get(nodeId)?.lessons ?? []);
 		const lessonReferences = new EvolutionModelReferenceCatalog("lesson", childLessons);
+		const chargeToolCall = () => {
+			consumption.toolCalls += 1;
+		};
 		const tools =
 			plan.kind === "leaf"
-				? registry.toolsForEvidence(nodeReferences, this.#maxEvidenceToolCallsPerLeaf, input.signal)
-				: registry.toolsForLessons(lessonReferences, this.#maxLessonToolCallsPerSynthesisNode, input.signal);
+				? registry.toolsForEvidence(nodeReferences, this.#maxEvidenceToolCallsPerLeaf, input.signal, chargeToolCall)
+				: registry.toolsForLessons(
+						lessonReferences,
+						this.#maxLessonToolCallsPerSynthesisNode,
+						input.signal,
+						chargeToolCall,
+					);
 		const maxLessons =
 			plan.kind === "leaf"
 				? this.#maxLessonsPerLeaf
@@ -918,6 +968,7 @@ export class RecursiveReflector implements Reflector {
 		const beforeProviderCall = async () => {
 			providerCallHookInvoked = true;
 			chargeModelCall();
+			consumption.modelCalls += 1;
 			providerCalls += 1;
 			runtime.providerCalls += 1;
 			nodeModelCallSequence += 1;
