@@ -604,6 +604,69 @@ describe("TUI differential rendering", () => {
 		tui.stop();
 	});
 
+	it("does not redraw a visible panel for an offscreen spinner update", async () => {
+		const terminal = new LoggingVirtualTerminal(40, 10);
+		const tui: TUI = new TuiMainScreen(terminal);
+		const component = new TestComponent();
+		tui.addChild(component);
+
+		const panel = Array.from({ length: 12 }, (_, i) => `Panel row ${i}`);
+		component.lines = ["History 0", "History 1", "History 2", "History 3", "Working |", ...panel, "Footer"];
+		tui.start();
+		await terminal.waitForRender();
+		const viewportBeforeUpdate = terminal.getViewport();
+		const redrawsBeforeUpdate = tui.fullRedraws;
+		terminal.clearWrites();
+
+		component.lines = ["History 0", "History 1", "History 2", "History 3", "Working /", ...panel, "Footer"];
+		tui.requestRender();
+		await terminal.waitForRender();
+
+		assert.strictEqual(tui.fullRedraws, redrawsBeforeUpdate, "offscreen animation should not trigger a full redraw");
+		assert.strictEqual(terminal.getWrites(), "", "unchanged visible rows should not be repainted");
+		assert.deepStrictEqual(terminal.getViewport(), viewportBeforeUpdate);
+
+		tui.stop();
+	});
+
+	it("preserves a stable panel when streamed content grows above it", async () => {
+		const terminal = new LoggingVirtualTerminal(40, 10);
+		const tui: TUI = new TuiMainScreen(terminal);
+		const component = new TestComponent();
+		tui.addChild(component);
+
+		const history = Array.from({ length: 8 }, (_, i) => `History ${i}`);
+		const panel = ["╭ Model selector", "│ Model one", "│ Model two", "╰ Select a model"];
+		component.lines = [...history, "Response partial", ...panel, "Footer idle"];
+		tui.start();
+		await terminal.waitForRender();
+		const redrawsBeforeUpdate = tui.fullRedraws;
+		terminal.clearWrites();
+
+		component.lines = [...history, "Response updated", "New wrapped line", ...panel, "Footer streaming"];
+		tui.requestRender();
+		await terminal.waitForRender();
+
+		const writes = terminal.getWrites();
+		assert.strictEqual(tui.fullRedraws, redrawsBeforeUpdate, "stream growth should not trigger a full redraw");
+		assert.ok(writes.includes("\x1b[1L"), "stream growth should insert space above the stable panel");
+		for (const line of panel) {
+			assert.ok(!writes.includes(line), `stable panel line should not be repainted: ${line}`);
+		}
+		assert.deepStrictEqual(terminal.getViewport(), [
+			"History 5",
+			"History 6",
+			"History 7",
+			"Response updated",
+			"New wrapped line",
+			...panel,
+			"Footer streaming",
+		]);
+		assert.ok(terminal.getScrollBuffer().includes("History 4"), "displaced content should remain in scrollback");
+
+		tui.stop();
+	});
+
 	it("resets styles after each rendered line", async () => {
 		const terminal = new VirtualTerminal(20, 6);
 		const tui: TUI = new TuiMainScreen(terminal);

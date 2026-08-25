@@ -3,6 +3,8 @@ import { type Component, truncateToWidth, visibleWidth } from "@earendil-works/d
 import type { AgentSession } from "../../../core/agent-session.ts";
 import type { ReadonlyFooterDataProvider } from "../../../core/footer-data-provider.ts";
 import { theme } from "../theme/theme.ts";
+import { EvolutionFooterStatus, type EvolutionFooterStatusClient } from "./evolution-footer-status.ts";
+import { formatEvolutionTimestamp } from "./harness-version-display.ts";
 
 /**
  * Sanitize text for display in a single-line status.
@@ -45,17 +47,33 @@ export function formatCwdForFooter(cwd: string, home: string | undefined): strin
  * Footer component that shows model, thinking, and context usage.
  * Gets context usage from the session and extension statuses from provider.
  */
+export interface FooterComponentOptions {
+	readonly evolution?: EvolutionFooterStatusClient;
+	readonly requestRender?: () => void;
+	readonly onSelectedHarnessChange?: (version: string) => void | Promise<void>;
+}
+
 export class FooterComponent implements Component {
 	private session: AgentSession;
 	private footerData: ReadonlyFooterDataProvider;
+	private readonly evolutionStatus: EvolutionFooterStatus | undefined;
 
-	constructor(session: AgentSession, footerData: ReadonlyFooterDataProvider) {
+	constructor(session: AgentSession, footerData: ReadonlyFooterDataProvider, options: FooterComponentOptions = {}) {
 		this.session = session;
 		this.footerData = footerData;
+		this.evolutionStatus = options.evolution
+			? new EvolutionFooterStatus({
+					client: options.evolution,
+					getActiveHarnessVersion: () => this.session.activeHarnessVersion,
+					requestRender: options.requestRender ?? (() => {}),
+					onSelectedHarnessChange: options.onSelectedHarnessChange,
+				})
+			: undefined;
 	}
 
 	setSession(session: AgentSession): void {
 		this.session = session;
+		void this.evolutionStatus?.refresh();
 	}
 
 	/**
@@ -71,7 +89,7 @@ export class FooterComponent implements Component {
 	 * Git watcher cleanup now handled by provider.
 	 */
 	dispose(): void {
-		// Git watcher cleanup handled by provider
+		this.evolutionStatus?.dispose();
 	}
 
 	render(width: number): string[] {
@@ -98,13 +116,34 @@ export class FooterComponent implements Component {
 		const modelName = state.model?.id || "no-model";
 		const thinkingLevel = state.thinkingLevel || "off";
 		const windowDisplay = `${formatTokens(contextWindow)} window`;
+		const evolutionSnapshot = this.evolutionStatus?.getSnapshot();
+		const harnessInfo = evolutionSnapshot?.activeVersionInfo;
+		const harnessVersion =
+			evolutionSnapshot === undefined
+				? "default"
+				: !evolutionSnapshot.loaded
+					? "..."
+					: harnessInfo?.kind === "evolved"
+						? harnessInfo.evolvedAt === null
+							? "evolved"
+							: formatEvolutionTimestamp(harnessInfo.evolvedAt)
+						: harnessInfo?.kind === "default"
+							? "default"
+							: "unknown";
+		const evolutionSpinner = evolutionSnapshot?.running
+			? ` ${theme.fg("accent", evolutionSnapshot.spinnerFrame)}`
+			: "";
 		let statsLine = `${modelName} ${thinkingLevel} • ${contextPercentStr} • ${windowDisplay}`;
+		let harnessLine = `Harness ${harnessVersion}${evolutionSpinner}`;
 
 		if (visibleWidth(statsLine) > width) {
 			statsLine = truncateToWidth(statsLine, width, "...");
 		}
+		if (visibleWidth(harnessLine) > width) {
+			harnessLine = truncateToWidth(harnessLine, width, "...");
+		}
 
-		const lines = [theme.fg("dim", statsLine)];
+		const lines = [theme.fg("dim", statsLine), theme.fg("dim", harnessLine)];
 
 		// Add extension statuses on a single line, sorted by key alphabetically
 		const extensionStatuses = this.footerData.getExtensionStatuses();

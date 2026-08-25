@@ -177,6 +177,112 @@ export class TuiMainScreen extends TuiBase implements TUI {
 		return this.deleteKittyImages(ids);
 	}
 
+	private findViewportGrowthAnchor(
+		newLines: string[],
+		growth: number,
+		previousViewportTop: number,
+		nextViewportTop: number,
+		height: number,
+	): number | undefined {
+		if (growth <= 0 || nextViewportTop !== previousViewportTop + growth) return undefined;
+
+		let bestStart = -1;
+		let bestLength = 0;
+		let runStart = -1;
+		let runLength = 0;
+		let runVisibleLines = 0;
+		const maxOldIndex = Math.min(this.previousLines.length, nextViewportTop + height - growth);
+		for (let oldIndex = nextViewportTop; oldIndex < maxOldIndex; oldIndex++) {
+			if (this.previousLines[oldIndex] === newLines[oldIndex + growth]) {
+				if (runStart === -1) runStart = oldIndex;
+				runLength += 1;
+				if (visibleWidth(this.previousLines[oldIndex] ?? "") > 0) runVisibleLines += 1;
+				if (runVisibleLines >= 2 && runLength > bestLength) {
+					bestStart = runStart;
+					bestLength = runLength;
+				}
+			} else {
+				runStart = -1;
+				runLength = 0;
+				runVisibleLines = 0;
+			}
+		}
+		return bestStart === -1 ? undefined : bestStart;
+	}
+
+	private renderViewportGrowth(
+		newLines: string[],
+		cursorPos: { row: number; col: number } | null,
+		width: number,
+		height: number,
+		previousViewportTop: number,
+		nextViewportTop: number,
+		growth: number,
+		anchorOldIndex: number,
+	): boolean {
+		const shiftedAnchorRow = anchorOldIndex - nextViewportTop;
+		if (shiftedAnchorRow < 0 || shiftedAnchorRow + growth > height) return false;
+
+		const previousViewport = this.previousLines.slice(previousViewportTop, previousViewportTop + height);
+		const nextViewport = newLines.slice(nextViewportTop, nextViewportTop + height);
+		if (previousViewport.some(isImageLine) || nextViewport.some(isImageLine)) return false;
+
+		const physicalLines: string[] = [];
+		for (let row = 0; row < height; row++) {
+			if (row < shiftedAnchorRow) {
+				physicalLines.push(this.previousLines[nextViewportTop + row] ?? "");
+			} else if (row < shiftedAnchorRow + growth) {
+				physicalLines.push("");
+			} else {
+				physicalLines.push(this.previousLines[previousViewportTop + row] ?? "");
+			}
+		}
+
+		const changedRows: number[] = [];
+		for (let row = 0; row < height; row++) {
+			const line = newLines[nextViewportTop + row] ?? "";
+			if (line !== physicalLines[row]) {
+				if (visibleWidth(line) > width) return false;
+				changedRows.push(row);
+			}
+		}
+
+		let buffer = "\x1b[?2026h";
+		let currentScreenRow = Math.max(0, Math.min(height - 1, this.hardwareCursorRow - previousViewportTop));
+		const bottomDelta = height - 1 - currentScreenRow;
+		if (bottomDelta > 0) buffer += `\x1b[${bottomDelta}B`;
+		buffer += "\r";
+		for (let i = 0; i < growth; i++) buffer += "\r\n";
+		currentScreenRow = height - 1;
+
+		const anchorDelta = shiftedAnchorRow - currentScreenRow;
+		if (anchorDelta > 0) buffer += `\x1b[${anchorDelta}B`;
+		else if (anchorDelta < 0) buffer += `\x1b[${-anchorDelta}A`;
+		buffer += `\r\x1b[${growth}L`;
+		currentScreenRow = shiftedAnchorRow;
+
+		for (const row of changedRows) {
+			const rowDelta = row - currentScreenRow;
+			if (rowDelta > 0) buffer += `\x1b[${rowDelta}B`;
+			else if (rowDelta < 0) buffer += `\x1b[${-rowDelta}A`;
+			buffer += `\r\x1b[2K${newLines[nextViewportTop + row] ?? ""}`;
+			currentScreenRow = row;
+		}
+		buffer += "\x1b[?2026l";
+		this.terminal.write(buffer);
+
+		this.cursorRow = Math.max(0, newLines.length - 1);
+		this.hardwareCursorRow = nextViewportTop + currentScreenRow;
+		this.maxLinesRendered = Math.max(this.maxLinesRendered, newLines.length);
+		this.previousViewportTop = nextViewportTop;
+		this.positionHardwareCursor(cursorPos, newLines.length);
+		this.previousLines = newLines;
+		this.previousKittyImageIds = this.collectKittyImageIds(newLines);
+		this.previousWidth = width;
+		this.previousHeight = height;
+		return true;
+	}
+
 	protected doRender(): void {
 		if (this.stopped) return;
 		const width = this.terminal.columns;
@@ -377,8 +483,62 @@ export class TuiMainScreen extends TuiBase implements TUI {
 			return;
 		}
 
+		// Ignore same-length offscreen changes instead of clearing visible content.
+		// Terminal scrollback cannot be edited in place, but the current viewport can
+		// still be updated safely from its first visible changed row.
+		if (firstChanged < prevViewportTop && newLines.length === this.previousLines.length) {
+			const viewportEnd = Math.min(newLines.length, prevViewportTop + height);
+			const changedAreaHasImages = this.previousLines
+				.slice(firstChanged, viewportEnd)
+				.some((line, index) => isImageLine(line) || isImageLine(newLines[firstChanged + index] ?? ""));
+			if (!changedAreaHasImages) {
+				firstChanged = -1;
+				lastChanged = -1;
+				const viewportEnd = Math.min(newLines.length, prevViewportTop + height);
+				for (let i = prevViewportTop; i < viewportEnd; i++) {
+					if (this.previousLines[i] === newLines[i]) continue;
+					if (firstChanged === -1) firstChanged = i;
+					lastChanged = i;
+				}
+				if (firstChanged === -1) {
+					this.positionHardwareCursor(cursorPos, newLines.length);
+					this.previousLines = newLines;
+					this.previousKittyImageIds = this.collectKittyImageIds(newLines);
+					this.previousWidth = width;
+					this.previousHeight = height;
+					this.previousViewportTop = prevViewportTop;
+					return;
+				}
+			}
+		}
+
+		// When content grows above a stable visible panel, scroll the new lines into
+		// history and insert space above that panel. This preserves the panel rows
+		// instead of clearing and repainting them on terminals without synchronized output.
+		if (newLines.length > this.previousLines.length) {
+			const growth = newLines.length - this.previousLines.length;
+			const nextViewportTop = Math.max(0, newLines.length - height);
+			const anchor = this.findViewportGrowthAnchor(newLines, growth, prevViewportTop, nextViewportTop, height);
+			if (
+				anchor !== undefined &&
+				this.renderViewportGrowth(
+					newLines,
+					cursorPos,
+					width,
+					height,
+					prevViewportTop,
+					nextViewportTop,
+					growth,
+					anchor,
+				)
+			) {
+				return;
+			}
+		}
+
 		// Differential rendering can only touch what was actually visible.
-		// If the first changed line is above the previous viewport, we need a full redraw.
+		// If the first changed line is above the previous viewport and no safe
+		// viewport-relative update applies, fall back to a full redraw.
 		if (firstChanged < prevViewportTop) {
 			logRedraw(`firstChanged < viewportTop (${firstChanged} < ${prevViewportTop})`);
 			fullRender(true);

@@ -615,7 +615,18 @@ export class InteractiveMode {
 		this.editorContainer = new Container();
 		this.editorContainer.addChild(this.editor as Component);
 		this.footerDataProvider = new FooterDataProvider(this.sessionManager.getCwd());
-		this.footer = new FooterComponent(this.session, this.footerDataProvider);
+		this.footer = new FooterComponent(this.session, this.footerDataProvider, {
+			evolution: options.evolution,
+			requestRender: () => this.ui.requestRender(),
+			onSelectedHarnessChange: async (version) => {
+				if (version === this.session.activeHarnessVersion) return;
+				try {
+					await this.session.switchHarnessVersion(version);
+				} catch {
+					// A busy session refreshes the selected harness at its next prompt boundary.
+				}
+			},
+		});
 		this.footerContainer = new Container();
 		this.footerContainer.addChild(this.footer);
 
@@ -977,7 +988,6 @@ export class InteractiveMode {
 			this.headerContainer.addChild(this.builtInHeader);
 		}
 		this.ui.requestRender();
-		await this.selectDefaultHarnessForLaunch();
 
 		// Initialize extensions first so resources are shown before messages
 		await this.rebindCurrentSession();
@@ -4663,7 +4673,7 @@ export class InteractiveMode {
 				};
 				const selector = new HarnessVersionSelectorComponent(
 					items,
-					currentVersion ?? this.session.activeHarnessVersion,
+					this.session.activeHarnessVersion ?? currentVersion ?? undefined,
 					(version) => {
 						if (switching) return;
 						if (version === this.session.activeHarnessVersion) {
@@ -4702,20 +4712,6 @@ export class InteractiveMode {
 			});
 		} catch (error: unknown) {
 			this.showError(`Could not list harness versions: ${error instanceof Error ? error.message : String(error)}`);
-		}
-	}
-
-	private async selectDefaultHarnessForLaunch(): Promise<void> {
-		try {
-			const { versions } = await this.session.listHarnessVersions();
-			const defaultHarness = versions.find((bundle) => bundle.manifest.base === null);
-			if (defaultHarness === undefined) throw new Error("Default harness version was not found");
-			await this.session.switchHarnessVersion(defaultHarness.manifest.version);
-			this.showStatus("Default Diffex Agent selected for this launch");
-		} catch (error: unknown) {
-			this.showError(
-				`Could not select Default Diffex Agent: ${error instanceof Error ? error.message : String(error)}`,
-			);
 		}
 	}
 
