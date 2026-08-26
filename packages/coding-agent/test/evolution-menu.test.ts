@@ -613,7 +613,7 @@ describe("EvolutionMenuComponent", () => {
 		await vi.waitFor(() => expect(fixture.startManual).toHaveBeenCalledOnce());
 	});
 
-	it("confirms that cancellation removes the round but preserves pending usage", async () => {
+	it("confirms that cancellation removes the round and refreshes past its interruption event", async () => {
 		const fixture = client(overview({ activeJob: job() }));
 		const status = vi.fn();
 		const component = new EvolutionMenuComponent(
@@ -633,9 +633,40 @@ describe("EvolutionMenuComponent", () => {
 		);
 		expect(fixture.cancelActive).not.toHaveBeenCalled();
 
+		const overviewCallsBeforeCancellation = fixture.overviewCall.mock.calls.length;
+		let resolveInterruptedOverview: ((value: EvolutionOverview) => void) | undefined;
+		const interruptedOverview = new Promise<EvolutionOverview>((resolve) => {
+			resolveInterruptedOverview = resolve;
+		});
+		fixture.overviewCall.mockImplementationOnce(() => interruptedOverview).mockResolvedValue(overview());
+		fixture.cancelActive.mockImplementation(async () => {
+			fixture.emit({
+				jobId: "job-active",
+				emittedAt: "2026-08-20T00:02:00.000Z",
+				type: "failed",
+				stage: "reflecting",
+			});
+			await Promise.resolve();
+		});
+
 		component.handleInput("\n");
 		await vi.waitFor(() => expect(fixture.cancelActive).toHaveBeenCalledOnce());
-		await vi.waitFor(() => expect(status).toHaveBeenCalledWith("Evolution round removed", false));
+		await vi.waitFor(() => expect(fixture.overviewCall).toHaveBeenCalledTimes(overviewCallsBeforeCancellation + 1));
+		resolveInterruptedOverview?.(
+			overview({
+				newestResumableJob: job({
+					outcome: "interrupted",
+					reasonCode: "shutdown",
+					terminalAt: "2026-08-20T00:02:00.000Z",
+					resumable: true,
+					cancellable: false,
+				}),
+			}),
+		);
+
+		await vi.waitFor(() => expect(fixture.overviewCall).toHaveBeenCalledTimes(overviewCallsBeforeCancellation + 2));
+		await vi.waitFor(() => expect(stripAnsi(component.render(160).join("\n"))).toContain("Resume [unavailable]"));
+		expect(status).toHaveBeenCalledWith("Evolution round removed", false);
 		component.dispose();
 	});
 

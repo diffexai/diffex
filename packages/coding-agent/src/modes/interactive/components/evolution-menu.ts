@@ -153,6 +153,7 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 	#focused = false;
 	#pollTimeout: ReturnType<typeof setTimeout> | null = null;
 	#refreshPromise: Promise<void> | null = null;
+	#refreshQueued = false;
 
 	get focused(): boolean {
 		return this.#focused;
@@ -213,8 +214,16 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 
 	refresh(): Promise<void> {
 		if (this.#disposed) return Promise.resolve();
+		this.#refreshQueued = true;
 		if (this.#refreshPromise !== null) return this.#refreshPromise;
-		this.#refreshPromise = this.#refresh();
+		this.#refreshPromise = (async () => {
+			do {
+				this.#refreshQueued = false;
+				await this.#refresh();
+			} while (this.#refreshQueued && !this.#disposed);
+		})().finally(() => {
+			this.#refreshPromise = null;
+		});
 		return this.#refreshPromise;
 	}
 
@@ -236,7 +245,6 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 		} catch (error) {
 			this.#onStatus(error instanceof Error ? error.message : String(error), true);
 		} finally {
-			this.#refreshPromise = null;
 			this.#loading = false;
 			this.rebuild();
 			this.#requestRender();
