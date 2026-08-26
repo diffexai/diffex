@@ -679,6 +679,11 @@ describe("EvolutionMenuComponent", () => {
 		});
 
 		component.handleInput("\n");
+		const cancellingOutput = stripAnsi(component.render(160).join("\n"));
+		expect(cancellingOutput).toContain(
+			"The evolution round will be removed. Its tokens and invocations will remain available.",
+		);
+		expect(cancellingOutput).not.toContain("Loading durable evolution state...");
 		await vi.waitFor(() => expect(fixture.cancelJob).toHaveBeenCalledWith("job-active"));
 		await vi.waitFor(() => expect(fixture.overviewCall).toHaveBeenCalledTimes(overviewCallsBeforeCancellation + 1));
 		resolveInterruptedOverview?.(
@@ -782,6 +787,42 @@ describe("EvolutionMenuComponent", () => {
 		await vi.waitFor(() => expect(stripAnsi(component.render(160).join("\n"))).toContain("Browse"));
 		expect(stripAnsi(component.render(160).join("\n"))).not.toContain("Loading durable evolution state...");
 		expect(render).toHaveBeenCalled();
+		component.dispose();
+	});
+
+	it("preserves the current view while refreshing an active job", async () => {
+		const activeOverview = overview({ activeJob: job() });
+		const fixture = client(activeOverview);
+		let resolveRefreshedOverview: ((value: EvolutionOverview) => void) | undefined;
+		fixture.overviewCall.mockResolvedValueOnce(activeOverview).mockImplementationOnce(
+			() =>
+				new Promise<EvolutionOverview>((resolve) => {
+					resolveRefreshedOverview = resolve;
+				}),
+		);
+		const component = new EvolutionMenuComponent(
+			fixture.client,
+			() => {},
+			() => {},
+			() => {},
+			60_000,
+		);
+		await vi.waitFor(() => expect(stripAnsi(component.render(160).join("\n"))).toContain("Evolution tokens:"));
+
+		fixture.emit({
+			jobId: "job-active",
+			emittedAt: "2026-08-20T00:02:00.000Z",
+			type: "checkpoint",
+			stage: "reflecting",
+		});
+		await vi.waitFor(() => expect(fixture.overviewCall).toHaveBeenCalledTimes(2));
+
+		const refreshingOutput = stripAnsi(component.render(160).join("\n"));
+		expect(refreshingOutput).toContain("Evolution tokens: 1,100,001");
+		expect(refreshingOutput).not.toContain("Loading durable evolution state...");
+
+		resolveRefreshedOverview?.(activeOverview);
+		await vi.waitFor(() => expect(stripAnsi(component.render(160).join("\n"))).toContain("Browse"));
 		component.dispose();
 	});
 

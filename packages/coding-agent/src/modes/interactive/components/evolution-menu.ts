@@ -146,6 +146,7 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 	readonly #viewStack: MenuView[] = [{ kind: "overview" }];
 	#overview: EvolutionOverview | null = null;
 	#jobs: readonly EvolutionJobSummary[] = [];
+	#jobsLoaded = false;
 	#harnessVersionInfo: readonly EvolutionHarnessVersionInfo[] = [];
 	#harnessVersionInfoLoaded = false;
 	#job: EvolutionJobDetail | null = null;
@@ -153,6 +154,7 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 	#entries: readonly MenuEntry[] = [];
 	#selectedIndex = 0;
 	#loading = true;
+	#actionPending = false;
 	#disposed = false;
 	#focused = false;
 	#pollTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -199,9 +201,19 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 		return this.#viewStack[this.#viewStack.length - 1] ?? { kind: "overview" };
 	}
 
+	#hasData(view: MenuView): boolean {
+		if (view.kind === "overview" || view.kind === "confirm") return this.#overview !== null;
+		if (view.kind === "jobs") return this.#jobsLoaded;
+		if (view.kind === "job") return this.#job?.jobId === view.jobId;
+		return this.#proposal?.proposal.proposalId === view.proposalId;
+	}
+
 	#push(view: MenuView): void {
 		this.#viewStack.push(view);
 		this.#selectedIndex = 0;
+		this.#loading = !this.#hasData(view);
+		this.rebuild();
+		this.#requestRender();
 		void this.refresh();
 	}
 
@@ -209,6 +221,9 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 		if (this.#viewStack.length > 1) {
 			this.#viewStack.pop();
 			this.#selectedIndex = 0;
+			this.#loading = !this.#hasData(this.#view());
+			this.rebuild();
+			this.#requestRender();
 			void this.refresh();
 			return;
 		}
@@ -232,8 +247,11 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 	}
 
 	async #refresh(): Promise<void> {
-		this.#loading = true;
-		this.rebuild();
+		if (!this.#hasData(this.#view())) {
+			this.#loading = true;
+			this.rebuild();
+			this.#requestRender();
+		}
 		try {
 			this.#overview = await this.#client.overview();
 			if (!this.#harnessVersionInfoLoaded) {
@@ -241,7 +259,10 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 				this.#harnessVersionInfoLoaded = true;
 			}
 			const view = this.#view();
-			if (view.kind === "jobs") this.#jobs = await this.#client.listJobs();
+			if (view.kind === "jobs") {
+				this.#jobs = await this.#client.listJobs();
+				this.#jobsLoaded = true;
+			}
 			if (view.kind === "job") this.#job = await this.#client.jobDetail(view.jobId);
 			if (view.kind === "proposal" || view.kind === "proposal-evidence") {
 				this.#proposal = await this.#client.proposalDetail(view.jobId, view.proposalId);
@@ -269,20 +290,28 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 	}
 
 	#run<T>(action: () => Promise<T>, success: string | ((result: T) => string)): void {
-		this.#loading = true;
+		if (this.#actionPending) return;
+		this.#actionPending = true;
 		this.rebuild();
 		this.#requestRender();
-		void action()
-			.then((result) => {
+		void (async () => {
+			try {
+				const result = await action();
 				this.#onStatus(typeof success === "string" ? success : success(result), false);
 				this.#viewStack.splice(1);
-				return this.refresh();
-			})
-			.catch((error: unknown) => {
+				await this.refresh();
+			} catch (error) {
 				this.#onStatus(error instanceof Error ? error.message : String(error), true);
 				this.#viewStack.pop();
-				return this.refresh();
-			});
+				await this.refresh();
+			} finally {
+				this.#actionPending = false;
+				if (!this.#disposed) {
+					this.rebuild();
+					this.#requestRender();
+				}
+			}
+		})();
 	}
 
 	#confirm(action: "cancel" | "resume" | "rollback" | "start", jobId?: string): void {
@@ -403,8 +432,18 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 			if (action === "rollback") this.#run(() => this.#client.rollback(), "Harness revision rolled back");
 		};
 		return [
-			{ label: `Confirm ${action}`, enabled: true, select: run },
-			{ label: "Back without changing state", enabled: true, select: () => this.#back() },
+			{
+				label: `Confirm ${action}`,
+				enabled: !this.#actionPending,
+				disabledStatus: "Working",
+				select: run,
+			},
+			{
+				label: "Back without changing state",
+				enabled: !this.#actionPending,
+				disabledStatus: "Working",
+				select: () => this.#back(),
+			},
 		];
 	}
 
