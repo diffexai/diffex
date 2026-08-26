@@ -118,6 +118,10 @@ function isInputSnapshot(artifact: EvolutionArtifact): artifact is EvolutionInpu
 	return "ingestionHighWaterCursor" in artifact && "evidenceSources" in artifact && "harness" in artifact;
 }
 
+function isCancelledJob(job: EvolutionJob): boolean {
+	return job.resolution?.reasonCode === "cancelled-by-operator";
+}
+
 function isOpenBlockingJob(job: EvolutionJob): boolean {
 	return (
 		job.resolution === null &&
@@ -482,7 +486,7 @@ export class EvolutionControlPlane implements EvolutionJobRunner {
 			if (request.trigger === "automatic") {
 				const previousTerminalAt =
 					scopeJobs
-						.filter((job) => job.trigger === "automatic" && job.terminalAt !== null)
+						.filter((job) => !isCancelledJob(job) && job.trigger === "automatic" && job.terminalAt !== null)
 						.map((job) => job.terminalAt as string)
 						.sort()
 						.at(-1) ?? null;

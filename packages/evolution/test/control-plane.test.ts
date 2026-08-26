@@ -98,6 +98,20 @@ function materialization(sequence: number): SuccessfulMaterialization {
 	};
 }
 
+function automaticMaterializations(): readonly SuccessfulMaterialization[] {
+	const padding = "x".repeat(Math.ceil((AUTOMATIC_EVOLUTION_TOKEN_THRESHOLD * 4) / 3) + 1_000);
+	return [1, 2, 3].map((sequence) => {
+		const materialized = { ...invocation(`trace-${sequence}`), tracePath: `/traces/${padding}` };
+		return {
+			materializationId: `materialization-${sequence}`,
+			ingestionCursor: sequence,
+			origin: "product-runtime",
+			contentDigest: computeEvolutionContentDigest(materialized),
+			invocation: materialized,
+		};
+	});
+}
+
 function snapshotContext(): EvolutionSnapshotContext {
 	const memory = "# Evolution memory\n";
 	const instruction = "Preserve exact provenance.\n";
@@ -453,6 +467,19 @@ describe("durable evolution control plane", () => {
 				estimatorVersion: EVOLUTION_TOKEN_ESTIMATOR_VERSION,
 				estimatedTokens: expect.any(Number),
 			},
+		});
+	});
+
+	it("does not start an automatic cooldown when its round is cancelled", async () => {
+		const fixture = await controlPlaneFixture(new RecordingExecutor(), automaticMaterializations());
+		const first = await fixture.controlPlane.createJob({ scope, trigger: "automatic" });
+		expect(first.status).toBe("created");
+		if (first.status !== "created") throw new Error("Expected an automatic evolution job");
+
+		await fixture.controlPlane.cancelJob(first.job.jobId);
+
+		await expect(fixture.controlPlane.createJob({ scope, trigger: "automatic" })).resolves.toMatchObject({
+			status: "created",
 		});
 	});
 });
