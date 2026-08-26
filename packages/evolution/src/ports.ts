@@ -222,6 +222,16 @@ export interface EvolutionJobStore {
 	list(scope?: EvolutionScope): Promise<readonly EvolutionJob[]>;
 }
 
+export interface EvolutionCancellationRequest {
+	readonly jobId: string;
+	readonly requestedAt: string;
+}
+
+export interface EvolutionCancellationStore {
+	requestCancellation(jobId: string, requestedAt: string): Promise<EvolutionCancellationRequest>;
+	loadCancellation(jobId: string): Promise<EvolutionCancellationRequest | null>;
+}
+
 export type EvolutionCursorCommitResult = "already-committed" | "committed" | "conflict";
 
 export interface EvolutionCursorStore {

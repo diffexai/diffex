@@ -203,7 +203,9 @@ function summary(job: EvolutionJob): EvolutionJobSummary {
 		updatedAt: job.updatedAt,
 		terminalAt: job.terminalAt,
 		resumable: job.resolution === null && (job.outcome === "interrupted" || job.outcome === "retryable-failed"),
-		cancellable: job.resolution === null && job.outcome === "active",
+		cancellable:
+			job.resolution === null &&
+			(job.outcome === "active" || job.outcome === "interrupted" || job.outcome === "retryable-failed"),
 	};
 }
 
@@ -481,15 +483,16 @@ export class EvolutionControlService {
 		return summary(await this.#dependencies.controlPlane.requestResume(job.jobId));
 	}
 
-	async cancelActive(): Promise<void> {
-		const active = activeJob(await this.#dependencies.jobs.list(this.#dependencies.scope));
-		if (active === null) throw new Error("No active evolution job is available");
-		await this.#dependencies.worker.stop(new Error("Evolution job cancelled by the operator"));
-		try {
-			await this.#dependencies.controlPlane.cancelJob(active.jobId);
-		} finally {
-			if (this.#started) this.#dependencies.worker.start();
+	async cancelJob(jobId: string): Promise<void> {
+		const job = await this.#dependencies.jobs.load(jobId);
+		if (
+			job === null ||
+			job.metadata.scope.repositoryId !== this.#dependencies.scope.repositoryId ||
+			job.metadata.scope.scopeId !== this.#dependencies.scope.scopeId
+		) {
+			throw new Error(`Unknown evolution job "${jobId}"`);
 		}
+		await this.#dependencies.controlPlane.cancelJob(jobId);
 	}
 
 	async rollback(): Promise<EvolutionRollbackAction> {

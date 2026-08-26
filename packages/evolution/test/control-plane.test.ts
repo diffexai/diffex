@@ -197,6 +197,7 @@ class RecordingExecutor implements EvolutionStageExecutor {
 }
 
 interface ControlPlaneFixture<TExecutor extends EvolutionStageExecutor = EvolutionStageExecutor> {
+	readonly root: string;
 	readonly clock: AdvancingClock;
 	readonly controlPlane: EvolutionControlPlane;
 	readonly events: EvolutionProgressEvent[];
@@ -232,6 +233,7 @@ async function controlPlaneFixture<TExecutor extends EvolutionStageExecutor>(
 			ids: new SequenceIds(),
 			artifacts: persistence,
 			jobs: persistence,
+			cancellations: persistence,
 			cursors: persistence,
 			leases: persistence,
 			ledger: persistence,
@@ -260,7 +262,7 @@ async function controlPlaneFixture<TExecutor extends EvolutionStageExecutor>(
 		},
 		{ leaseTtlMs: 5_000, heartbeatIntervalMs: 1_000, retryBaseDelayMs: 0, retryMaxDelayMs: 0 },
 	);
-	return { clock, controlPlane, events, executor, failureRecords, persistence };
+	return { root, clock, controlPlane, events, executor, failureRecords, persistence };
 }
 
 async function createManualJob(fixture: ControlPlaneFixture) {
@@ -280,6 +282,7 @@ describe("durable evolution control plane", () => {
 				ids: new SequenceIds(),
 				artifacts: fixture.persistence,
 				jobs: fixture.persistence,
+				cancellations: fixture.persistence,
 				cursors: fixture.persistence,
 				leases: fixture.persistence,
 				ledger: fixture.persistence,
@@ -468,6 +471,73 @@ describe("durable evolution control plane", () => {
 				estimatedTokens: expect.any(Number),
 			},
 		});
+	});
+
+	it("cooperatively cancels work owned through another persistence instance", async () => {
+		let executionStarted: (() => void) | undefined;
+		const started = new Promise<void>((resolve) => {
+			executionStarted = resolve;
+		});
+		const fixture = await controlPlaneFixture({
+			async execute(context) {
+				executionStarted?.();
+				await new Promise<void>((_resolve, reject) => {
+					const signal = context.signal;
+					if (signal?.aborted) {
+						reject(signal.reason);
+						return;
+					}
+					signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+				});
+				throw new Error("Unreachable evolution execution");
+			},
+		});
+		const created = await createManualJob(fixture);
+		const run = fixture.controlPlane.runJob(created.jobId);
+		const runRejected = expect(run).rejects.toThrow("cancelled by the operator");
+		await started;
+
+		const peerPersistence = new FileEvolutionPersistence(fixture.root);
+		let nextPeerId = 1;
+		const peer = new EvolutionControlPlane(
+			{
+				version: "1.0.0",
+				clock: fixture.clock,
+				ids: { nextId: (kind) => `peer-${kind}-${nextPeerId++}` },
+				artifacts: peerPersistence,
+				jobs: peerPersistence,
+				cancellations: peerPersistence,
+				cursors: peerPersistence,
+				leases: peerPersistence,
+				ledger: peerPersistence,
+				events: { emit() {} },
+				evidence: {
+					async highWaterCursor() {
+						return 0;
+					},
+					async listSuccessful() {
+						return [];
+					},
+				},
+				snapshots: {
+					async capture() {
+						return snapshotContext();
+					},
+				},
+				executor: new RecordingExecutor(),
+			},
+			{ leaseTtlMs: 5_000, heartbeatIntervalMs: 1_000, cancellationPollIntervalMs: 5 },
+		);
+
+		await peer.cancelJob(created.jobId);
+		await runRejected;
+		expect(await peerPersistence.loadCancellation(created.jobId)).toMatchObject({ jobId: created.jobId });
+		expect(await fixture.persistence.load(created.jobId)).toMatchObject({
+			outcome: "interrupted",
+			reasonCode: "cancelled-by-operator",
+			resolution: { reasonCode: "cancelled-by-operator" },
+		});
+		expect(fixture.failureRecords).toEqual([]);
 	});
 
 	it("does not start an automatic cooldown when its round is cancelled", async () => {

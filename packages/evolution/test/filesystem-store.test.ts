@@ -212,6 +212,19 @@ describe("filesystem evolution persistence", () => {
 		expect(leases.filter((lease) => lease === null)).toHaveLength(1);
 	});
 
+	it("shares idempotent durable cancellation requests across persistence instances", async () => {
+		const { root, store } = await storeFixture();
+		const peer = new FileEvolutionPersistence(root);
+		const requestedAt = "2026-08-20T12:00:00.000Z";
+
+		expect(await store.requestCancellation("job-1", requestedAt)).toEqual({ jobId: "job-1", requestedAt });
+		expect(await peer.loadCancellation("job-1")).toEqual({ jobId: "job-1", requestedAt });
+		expect(await peer.requestCancellation("job-1", "2026-08-20T12:01:00.000Z")).toEqual({
+			jobId: "job-1",
+			requestedAt,
+		});
+	});
+
 	it("uses compare-and-swap revisions for durable job manifests", async () => {
 		const { store } = await storeFixture();
 		const reference = await store.put(instructionSnapshot());

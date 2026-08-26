@@ -159,6 +159,7 @@ async function serviceFixture(
 			ids: new SequenceIds(),
 			artifacts: store,
 			jobs: store,
+			cancellations: store,
 			cursors: store,
 			leases: store,
 			ledger: store,
@@ -318,7 +319,7 @@ describe("evolution control service", () => {
 		if (!("evidenceSources" in snapshot)) throw new Error("Expected an input snapshot");
 		expect(snapshot.evidenceSources.map((source) => source.materializationId)).toEqual(["materialization-2"]);
 		expect(snapshot.tokenMeasurement.estimatedTokens).toBe(estimateEvolutionTokens([eligible.invocation]));
-		await fixture.service.cancelActive();
+		await fixture.service.cancelJob(started.job.jobId);
 	});
 
 	it("projects eligibility and attaches a concurrent manual trigger", async () => {
@@ -342,7 +343,7 @@ describe("evolution control service", () => {
 		expect(attached).toMatchObject({ status: "attached", job: { jobId: started.job.jobId } });
 		expect(events).toHaveLength(1);
 		unsubscribe();
-		await fixture.service.cancelActive();
+		await fixture.service.cancelJob(started.job.jobId);
 		expect(events).toHaveLength(1);
 	});
 
@@ -352,7 +353,7 @@ describe("evolution control service", () => {
 		const started = await fixture.service.startManual();
 		if (started.status !== "created") throw new Error("Expected a created job");
 
-		await fixture.service.cancelActive();
+		await fixture.service.cancelJob(started.job.jobId);
 
 		expect(await fixture.store.load(started.job.jobId)).toMatchObject({
 			outcome: "interrupted",
@@ -381,11 +382,88 @@ describe("evolution control service", () => {
 
 		const replacement = await fixture.service.startManual();
 		expect(replacement).toMatchObject({ status: "created" });
-		if (replacement.status === "created") expect(replacement.job.jobId).not.toBe(started.job.jobId);
-		await fixture.service.cancelActive();
+		if (replacement.status === "created") {
+			expect(replacement.job.jobId).not.toBe(started.job.jobId);
+			await fixture.service.cancelJob(replacement.job.jobId);
+		}
 	});
 
-	it("removes a running round after worker shutdown settles it", async () => {
+	it("cancels an explicitly resumed job before background execution", async () => {
+		const fixture = await serviceFixture();
+		const started = await fixture.service.startManual();
+		if (started.status !== "created") throw new Error("Expected a created job");
+		await fixture.controlPlane.recoverAbandonedJob(started.job.jobId);
+
+		const resumed = await fixture.service.resumeNewest();
+		expect(resumed).toMatchObject({
+			jobId: started.job.jobId,
+			outcome: "active",
+			resumable: false,
+			cancellable: true,
+		});
+
+		await fixture.service.cancelJob(started.job.jobId);
+
+		expect(await fixture.store.load(started.job.jobId)).toMatchObject({
+			outcome: "interrupted",
+			reasonCode: "cancelled-by-operator",
+			resolution: { reasonCode: "cancelled-by-operator" },
+		});
+		expect(await fixture.service.overview()).toMatchObject({ activeJob: null, newestResumableJob: null });
+	});
+
+	it("directly cancels a retryable job", async () => {
+		const fixture = await serviceFixture({
+			async execute() {
+				throw new Error("temporary evolution failure");
+			},
+		});
+		const started = await fixture.service.startManual();
+		if (started.status !== "created") throw new Error("Expected a created job");
+		await expect(fixture.controlPlane.runJob(started.job.jobId)).rejects.toThrow("temporary evolution failure");
+		expect(await fixture.service.overview()).toMatchObject({
+			newestResumableJob: {
+				jobId: started.job.jobId,
+				outcome: "retryable-failed",
+				resumable: true,
+				cancellable: true,
+			},
+		});
+
+		await fixture.service.cancelJob(started.job.jobId);
+
+		expect(await fixture.store.load(started.job.jobId)).toMatchObject({
+			outcome: "interrupted",
+			reasonCode: "cancelled-by-operator",
+			resolution: { reasonCode: "cancelled-by-operator" },
+		});
+	});
+
+	it("cancels a resumed job after it is interrupted again", async () => {
+		const fixture = await serviceFixture();
+		const started = await fixture.service.startManual();
+		if (started.status !== "created") throw new Error("Expected a created job");
+		await fixture.controlPlane.recoverAbandonedJob(started.job.jobId);
+		await fixture.service.resumeNewest();
+		await fixture.controlPlane.recoverAbandonedJob(started.job.jobId);
+
+		expect(await fixture.service.overview()).toMatchObject({
+			activeJob: null,
+			newestResumableJob: {
+				jobId: started.job.jobId,
+				outcome: "interrupted",
+				resumable: true,
+				cancellable: true,
+			},
+		});
+
+		await fixture.service.cancelJob(started.job.jobId);
+
+		expect(await fixture.service.listJobs()).toEqual([]);
+		await expect(fixture.service.resumeNewest()).rejects.toThrow("No interrupted or retryable evolution job");
+	});
+
+	it("removes a running round through durable cooperative cancellation", async () => {
 		let startedExecution: (() => void) | undefined;
 		const executionStarted = new Promise<void>((resolve) => {
 			startedExecution = resolve;
@@ -409,7 +487,7 @@ describe("evolution control service", () => {
 		fixture.service.start();
 		try {
 			await executionStarted;
-			await fixture.service.cancelActive();
+			await fixture.service.cancelJob(started.job.jobId);
 
 			expect(await fixture.store.load(started.job.jobId)).toMatchObject({
 				outcome: "interrupted",
@@ -450,8 +528,10 @@ describe("evolution control service", () => {
 
 		const second = await fixture.service.startManual();
 		expect(second).toMatchObject({ status: "created" });
-		if (second.status === "created") expect(second.job.jobId).not.toBe(first.job.jobId);
-		await fixture.service.cancelActive();
+		if (second.status === "created") {
+			expect(second.job.jobId).not.toBe(first.job.jobId);
+			await fixture.service.cancelJob(second.job.jobId);
+		}
 	});
 
 	it("reports durable latency, budget, coverage, conflict, and recovery observability", async () => {

@@ -73,7 +73,7 @@ function client(): EvolutionMenuClient {
 		proposalDetail: vi.fn().mockRejectedValue(new Error("unused")),
 		startManual: vi.fn().mockRejectedValue(new Error("unused")),
 		resumeNewest: vi.fn().mockRejectedValue(new Error("unused")),
-		cancelActive: vi.fn().mockRejectedValue(new Error("unused")),
+		cancelJob: vi.fn().mockRejectedValue(new Error("unused")),
 		rollback: vi.fn().mockRejectedValue(new Error("unused")),
 	};
 }

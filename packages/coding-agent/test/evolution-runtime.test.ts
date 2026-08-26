@@ -214,7 +214,7 @@ describe("coding-agent evolution runtime", () => {
 			sessionHarness.manifest.version,
 		);
 		expect((await store.loadCurrent()).manifest.version).toBe(globallySelected.manifest.version);
-		await runtime.control.cancelActive();
+		await runtime.control.cancelJob(started.job.jobId);
 	});
 
 	it("flushes the trace before scheduling an automatic eligibility check", async () => {

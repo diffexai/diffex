@@ -23,6 +23,7 @@ import { EvolutionExecutionError } from "./errors.ts";
 import type {
 	EvolutionArtifact,
 	EvolutionArtifactStore,
+	EvolutionCancellationStore,
 	EvolutionClock,
 	EvolutionCursorStore,
 	EvolutionEventSink,
@@ -48,6 +49,7 @@ import {
 
 const DEFAULT_LEASE_TTL_MS = 30_000;
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 10_000;
+const DEFAULT_CANCELLATION_POLL_INTERVAL_MS = 100;
 const DEFAULT_RETRY_BASE_DELAY_MS = 5_000;
 const DEFAULT_RETRY_MAX_DELAY_MS = 5 * 60_000;
 
@@ -82,6 +84,7 @@ export interface EvolutionControlPlaneDependencies {
 	readonly ids: EvolutionIdGenerator;
 	readonly artifacts: EvolutionArtifactStore;
 	readonly jobs: EvolutionJobStore;
+	readonly cancellations: EvolutionCancellationStore;
 	readonly cursors: EvolutionCursorStore;
 	readonly leases: EvolutionLeaseStore;
 	readonly ledger: EvolutionLedger;
@@ -95,6 +98,7 @@ export interface EvolutionControlPlaneDependencies {
 export interface EvolutionControlPlaneOptions {
 	readonly leaseTtlMs?: number;
 	readonly heartbeatIntervalMs?: number;
+	readonly cancellationPollIntervalMs?: number;
 	readonly retryBaseDelayMs?: number;
 	readonly retryMaxDelayMs?: number;
 }
@@ -111,6 +115,13 @@ class EvolutionCompletionPendingError extends Error {
 			options,
 		);
 		this.name = "EvolutionCompletionPendingError";
+	}
+}
+
+class EvolutionOperatorCancellationError extends Error {
+	constructor(jobId: string) {
+		super(`Evolution job "${jobId}" was cancelled by the operator`);
+		this.name = "EvolutionOperatorCancellationError";
 	}
 }
 
@@ -185,6 +196,7 @@ export class EvolutionControlPlane implements EvolutionJobRunner {
 	readonly #producer: EvolutionArtifactProducer;
 	readonly #leaseTtlMs: number;
 	readonly #heartbeatIntervalMs: number;
+	readonly #cancellationPollIntervalMs: number;
 	readonly #retryBaseDelayMs: number;
 	readonly #retryMaxDelayMs: number;
 
@@ -198,11 +210,15 @@ export class EvolutionControlPlane implements EvolutionJobRunner {
 		};
 		this.#leaseTtlMs = options.leaseTtlMs ?? DEFAULT_LEASE_TTL_MS;
 		this.#heartbeatIntervalMs = options.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS;
+		this.#cancellationPollIntervalMs = options.cancellationPollIntervalMs ?? DEFAULT_CANCELLATION_POLL_INTERVAL_MS;
 		this.#retryBaseDelayMs = options.retryBaseDelayMs ?? DEFAULT_RETRY_BASE_DELAY_MS;
 		this.#retryMaxDelayMs = options.retryMaxDelayMs ?? DEFAULT_RETRY_MAX_DELAY_MS;
 		if (this.#leaseTtlMs < 2_000) throw new Error("leaseTtlMs must be at least 2000");
 		if (this.#heartbeatIntervalMs < 1 || this.#heartbeatIntervalMs >= this.#leaseTtlMs) {
 			throw new Error("heartbeatIntervalMs must be positive and less than leaseTtlMs");
+		}
+		if (!Number.isFinite(this.#cancellationPollIntervalMs) || this.#cancellationPollIntervalMs < 1) {
+			throw new Error("cancellationPollIntervalMs must be positive");
 		}
 		if (this.#retryBaseDelayMs < 0 || this.#retryMaxDelayMs < this.#retryBaseDelayMs) {
 			throw new Error("Evolution retry delays are invalid");
@@ -234,15 +250,16 @@ export class EvolutionControlPlane implements EvolutionJobRunner {
 		initialLease: EvolutionLeaseToken,
 		signal: AbortSignal | undefined,
 		operation: (lease: () => EvolutionLeaseToken, signal: AbortSignal) => Promise<T>,
+		cancellationJobId?: string,
 	): Promise<T> {
 		let currentLease = initialLease;
-		const heartbeatController = new AbortController();
+		const monitorController = new AbortController();
 		const compromisedController = new AbortController();
 		const combined = combineSignals([signal, compromisedController.signal]);
 		const heartbeat = (async () => {
 			try {
-				while (!heartbeatController.signal.aborted) {
-					await abortableDelay(this.#heartbeatIntervalMs, heartbeatController.signal);
+				while (!monitorController.signal.aborted) {
+					await abortableDelay(this.#heartbeatIntervalMs, monitorController.signal);
 					const renewed = await this.#dependencies.leases.renew(
 						currentLease,
 						this.#dependencies.clock.now(),
@@ -260,15 +277,29 @@ export class EvolutionControlPlane implements EvolutionJobRunner {
 					currentLease = renewed;
 				}
 			} catch (error) {
-				if (!heartbeatController.signal.aborted) compromisedController.abort(error);
+				if (!monitorController.signal.aborted) compromisedController.abort(error);
+			}
+		})();
+		const cancellationMonitor = (async () => {
+			if (cancellationJobId === undefined) return;
+			try {
+				while (!monitorController.signal.aborted) {
+					if ((await this.#dependencies.cancellations.loadCancellation(cancellationJobId)) !== null) {
+						compromisedController.abort(new EvolutionOperatorCancellationError(cancellationJobId));
+						return;
+					}
+					await abortableDelay(this.#cancellationPollIntervalMs, monitorController.signal);
+				}
+			} catch (error) {
+				if (!monitorController.signal.aborted) compromisedController.abort(error);
 			}
 		})();
 		try {
 			return await operation(() => currentLease, combined.signal);
 		} finally {
-			heartbeatController.abort();
+			monitorController.abort();
 			combined.dispose();
-			await heartbeat.catch(() => {});
+			await Promise.all([heartbeat.catch(() => {}), cancellationMonitor.catch(() => {})]);
 			await this.#dependencies.leases.release(currentLease);
 		}
 	}
@@ -780,6 +811,39 @@ export class EvolutionControlPlane implements EvolutionJobRunner {
 		return failed;
 	}
 
+	async #saveCancelled(job: EvolutionJob, lease: EvolutionLeaseToken): Promise<EvolutionJob> {
+		if (isCancelledJob(job)) return job;
+		if (job.outcome === "completed") throw new Error(`Completed evolution job "${job.jobId}" cannot be cancelled`);
+		if (
+			job.resolution !== null ||
+			(job.outcome !== "active" && job.outcome !== "interrupted" && job.outcome !== "retryable-failed")
+		) {
+			throw new Error(`Evolution job "${job.jobId}" cannot be cancelled from outcome "${job.outcome}"`);
+		}
+		const resolvedAt = this.#dependencies.clock.now();
+		const cancelled = this.#withJobRevision(job, {
+			outcome: "interrupted",
+			reasonCode: "cancelled-by-operator",
+			failureMessage: "Evolution job was cancelled by the operator",
+			resolution: {
+				kind: "administratively-resolved",
+				reasonCode: "cancelled-by-operator",
+				resolvedAt,
+			},
+			terminalAt: resolvedAt,
+			retryNotBefore: null,
+		});
+		await this.#dependencies.jobs.save(cancelled, job.revision, lease);
+		await this.#syncLedger(cancelled);
+		await this.#dependencies.events.emit({
+			jobId: cancelled.jobId,
+			emittedAt: cancelled.updatedAt,
+			type: "failed",
+			stage: cancelled.stage,
+		});
+		return cancelled;
+	}
+
 	async runJob(jobId: string, signal?: AbortSignal): Promise<EvolutionJob> {
 		signal?.throwIfAborted();
 		const initial = await this.#dependencies.jobs.load(jobId);
@@ -804,133 +868,140 @@ export class EvolutionControlPlane implements EvolutionJobRunner {
 				retryable: true,
 			});
 		}
-		return this.#withHeartbeat(initialLease, signal, async (scopeLease, leaseSignal) => {
-			const loadedJob = await this.#dependencies.jobs.load(jobId);
-			if (loadedJob === null) throw new Error(`Unknown evolution job "${jobId}"`);
-			let job: EvolutionJob = loadedJob;
-			if (job.outcome === "completed") return job;
-			if (job.outcome === "interrupted" || job.outcome === "retryable-failed") {
-				const resumed = this.#withJobRevision(job, {
-					outcome: "active",
-					reasonCode: null,
-					failureMessage: null,
-					terminalAt: null,
-					retryNotBefore: null,
-					attempt: job.attempt + 1,
-				});
-				await this.#dependencies.jobs.save(resumed, job.revision, scopeLease());
-				job = resumed;
-			}
-			try {
-				const inputArtifact = await this.#dependencies.artifacts.get(job.inputSnapshot);
-				if (!isInputSnapshot(inputArtifact)) {
-					throw new EvolutionExecutionError("Job input snapshot artifact has the wrong type", {
-						reasonCode: "artifact-corrupt",
-						retryable: false,
+		return this.#withHeartbeat(
+			initialLease,
+			signal,
+			async (scopeLease, leaseSignal) => {
+				const loadedJob = await this.#dependencies.jobs.load(jobId);
+				if (loadedJob === null) throw new Error(`Unknown evolution job "${jobId}"`);
+				let job: EvolutionJob = loadedJob;
+				if (job.outcome === "completed") return job;
+				if ((await this.#dependencies.cancellations.loadCancellation(jobId)) !== null) {
+					await this.#saveCancelled(job, scopeLease());
+					throw new EvolutionOperatorCancellationError(jobId);
+				}
+				if (job.outcome === "interrupted" || job.outcome === "retryable-failed") {
+					const resumed = this.#withJobRevision(job, {
+						outcome: "active",
+						reasonCode: null,
+						failureMessage: null,
+						terminalAt: null,
+						retryNotBefore: null,
+						attempt: job.attempt + 1,
 					});
+					await this.#dependencies.jobs.save(resumed, job.revision, scopeLease());
+					job = resumed;
 				}
-				if (job.stage === "queued") {
-					const started = this.#withJobRevision(job, { stage: "snapshotting" });
-					await this.#dependencies.jobs.save(started, job.revision, scopeLease());
-					job = started;
-				}
-				const lastCheckpoint = job.checkpoints.at(-1);
-				if (lastCheckpoint?.stage === job.stage) {
-					const completionState = this.#checkpointDirective(lastCheckpoint);
-					if (completionState.directive !== "continue") {
-						return await this.#completeJob(job, lastCheckpoint, scopeLease());
-					}
-				}
-
-				while (job.stage !== "completed") {
-					leaseSignal.throwIfAborted();
-					if (job.stage === "writing" || job.stage === "activating") {
-						const writerOwnerId = this.#dependencies.ids.nextId("writer-owner");
-						const writerInitial = await this.#dependencies.leases.acquire(
-							"writer",
-							"global",
-							writerOwnerId,
-							this.#dependencies.clock.now(),
-							this.#leaseTtlMs,
-						);
-						if (writerInitial === null) {
-							throw new EvolutionExecutionError("Evolution writer is already leased", {
-								reasonCode: "writer-failed",
-								retryable: true,
-							});
-						}
-						job = await this.#withHeartbeat(writerInitial, leaseSignal, async (writerLease, writerSignal) => {
-							let current: EvolutionJob = job;
-							while (current.stage === "writing" || current.stage === "activating") {
-								current = await this.#executeStage(
-									current,
-									inputArtifact,
-									scopeLease(),
-									writerLease(),
-									writerSignal,
-								);
-							}
-							return current;
-						});
-						continue;
-					}
-					job = await this.#executeStage(job, inputArtifact, scopeLease(), null, leaseSignal);
-				}
-				return job;
-			} catch (error) {
 				try {
-					const latest = await this.#dependencies.jobs.load(job.jobId);
-					if (latest !== null) job = latest;
-					if (job.outcome === "completed" || error instanceof EvolutionCompletionPendingError) throw error;
-					await this.#markFailure(job, error, scopeLease(), signal?.aborted === true);
-				} catch (persistenceError) {
-					if (persistenceError === error) throw error;
-					throw new AggregateError(
-						[error, persistenceError],
-						`Failed evolution job "${job.jobId}" and its recovery write`,
-					);
+					const inputArtifact = await this.#dependencies.artifacts.get(job.inputSnapshot);
+					if (!isInputSnapshot(inputArtifact)) {
+						throw new EvolutionExecutionError("Job input snapshot artifact has the wrong type", {
+							reasonCode: "artifact-corrupt",
+							retryable: false,
+						});
+					}
+					if (job.stage === "queued") {
+						const started = this.#withJobRevision(job, { stage: "snapshotting" });
+						await this.#dependencies.jobs.save(started, job.revision, scopeLease());
+						job = started;
+					}
+					const lastCheckpoint = job.checkpoints.at(-1);
+					if (lastCheckpoint?.stage === job.stage) {
+						const completionState = this.#checkpointDirective(lastCheckpoint);
+						if (completionState.directive !== "continue") {
+							return await this.#completeJob(job, lastCheckpoint, scopeLease());
+						}
+					}
+
+					while (job.stage !== "completed") {
+						leaseSignal.throwIfAborted();
+						if (job.stage === "writing" || job.stage === "activating") {
+							const writerOwnerId = this.#dependencies.ids.nextId("writer-owner");
+							const writerInitial = await this.#dependencies.leases.acquire(
+								"writer",
+								"global",
+								writerOwnerId,
+								this.#dependencies.clock.now(),
+								this.#leaseTtlMs,
+							);
+							if (writerInitial === null) {
+								throw new EvolutionExecutionError("Evolution writer is already leased", {
+									reasonCode: "writer-failed",
+									retryable: true,
+								});
+							}
+							job = await this.#withHeartbeat(writerInitial, leaseSignal, async (writerLease, writerSignal) => {
+								let current: EvolutionJob = job;
+								while (current.stage === "writing" || current.stage === "activating") {
+									current = await this.#executeStage(
+										current,
+										inputArtifact,
+										scopeLease(),
+										writerLease(),
+										writerSignal,
+									);
+								}
+								return current;
+							});
+							continue;
+						}
+						job = await this.#executeStage(job, inputArtifact, scopeLease(), null, leaseSignal);
+					}
+					return job;
+				} catch (error) {
+					try {
+						const latest = await this.#dependencies.jobs.load(job.jobId);
+						if (latest !== null) job = latest;
+						if (job.outcome === "completed" || error instanceof EvolutionCompletionPendingError) throw error;
+						if (leaseSignal.reason instanceof EvolutionOperatorCancellationError) {
+							await this.#saveCancelled(job, scopeLease());
+						} else {
+							await this.#markFailure(job, error, scopeLease(), signal?.aborted === true);
+						}
+					} catch (persistenceError) {
+						if (persistenceError === error) throw error;
+						throw new AggregateError(
+							[error, persistenceError],
+							`Failed evolution job "${job.jobId}" and its recovery write`,
+						);
+					}
+					throw error;
 				}
-				throw error;
-			}
-		});
+			},
+			jobId,
+		);
 	}
 
 	async cancelJob(jobId: string): Promise<EvolutionJob> {
 		const initial = await this.#dependencies.jobs.load(jobId);
 		if (initial === null) throw new Error(`Unknown evolution job "${jobId}"`);
+		if (isCancelledJob(initial)) return initial;
 		if (initial.outcome === "completed") throw new Error(`Completed evolution job "${jobId}" cannot be cancelled`);
-		const ownerId = this.#dependencies.ids.nextId("lease-owner");
-		const initialLease = await this.#acquireScopeLease(initial.metadata.scope, ownerId);
-		if (initialLease === null) throw new Error(`Evolution scope for job "${jobId}" is already leased`);
-		return this.#withHeartbeat(initialLease, undefined, async (lease) => {
+		if (
+			initial.resolution !== null ||
+			(initial.outcome !== "active" && initial.outcome !== "interrupted" && initial.outcome !== "retryable-failed")
+		) {
+			throw new Error(`Evolution job "${jobId}" cannot be cancelled from outcome "${initial.outcome}"`);
+		}
+		await this.#dependencies.cancellations.requestCancellation(jobId, this.#dependencies.clock.now());
+		while (true) {
 			const current = await this.#dependencies.jobs.load(jobId);
 			if (current === null) throw new Error(`Unknown evolution job "${jobId}"`);
+			if (isCancelledJob(current)) return current;
 			if (current.outcome === "completed") {
 				throw new Error(`Completed evolution job "${jobId}" cannot be cancelled`);
 			}
-			const resolvedAt = this.#dependencies.clock.now();
-			const cancelled = this.#withJobRevision(current, {
-				outcome: "interrupted",
-				reasonCode: "cancelled-by-operator",
-				failureMessage: "Evolution job was cancelled by the operator",
-				resolution: {
-					kind: "administratively-resolved",
-					reasonCode: "cancelled-by-operator",
-					resolvedAt,
-				},
-				terminalAt: resolvedAt,
-				retryNotBefore: null,
-			});
-			await this.#dependencies.jobs.save(cancelled, current.revision, lease());
-			await this.#syncLedger(cancelled);
-			await this.#dependencies.events.emit({
-				jobId,
-				emittedAt: cancelled.updatedAt,
-				type: "failed",
-				stage: cancelled.stage,
-			});
-			return cancelled;
-		});
+			const ownerId = this.#dependencies.ids.nextId("lease-owner");
+			const initialLease = await this.#acquireScopeLease(current.metadata.scope, ownerId);
+			if (initialLease !== null) {
+				return this.#withHeartbeat(initialLease, undefined, async (lease) => {
+					const leased = await this.#dependencies.jobs.load(jobId);
+					if (leased === null) throw new Error(`Unknown evolution job "${jobId}"`);
+					return this.#saveCancelled(leased, lease());
+				});
+			}
+			await abortableDelay(this.#cancellationPollIntervalMs, new AbortController().signal);
+		}
 	}
 
 	async requestResume(jobId: string): Promise<EvolutionJob> {
@@ -940,6 +1011,9 @@ export class EvolutionControlPlane implements EvolutionJobRunner {
 			throw new Error(`Evolution job "${jobId}" cannot be resumed from outcome "${initial.outcome}"`);
 		}
 		if (initial.resolution !== null) throw new Error(`Resolved evolution job "${jobId}" cannot be resumed`);
+		if ((await this.#dependencies.cancellations.loadCancellation(jobId)) !== null) {
+			throw new Error(`Evolution job "${jobId}" has a pending cancellation request`);
+		}
 		const ownerId = this.#dependencies.ids.nextId("lease-owner");
 		const initialLease = await this.#acquireScopeLease(initial.metadata.scope, ownerId);
 		if (initialLease === null) throw new Error(`Evolution scope for job "${jobId}" is already leased`);
@@ -948,6 +1022,9 @@ export class EvolutionControlPlane implements EvolutionJobRunner {
 			if (current === null) throw new Error(`Unknown evolution job "${jobId}"`);
 			if (current.outcome !== "interrupted" && current.outcome !== "retryable-failed") {
 				throw new Error(`Evolution job "${jobId}" cannot be resumed from outcome "${current.outcome}"`);
+			}
+			if ((await this.#dependencies.cancellations.loadCancellation(jobId)) !== null) {
+				throw new Error(`Evolution job "${jobId}" has a pending cancellation request`);
 			}
 			const resumed = this.#withJobRevision(current, {
 				outcome: "active",

@@ -190,7 +190,7 @@ function client(currentOverview: EvolutionOverview): {
 	emit: (event: EvolutionProgressEvent) => void;
 	unsubscribed: ReturnType<typeof vi.fn>;
 	startManual: ReturnType<typeof vi.fn>;
-	cancelActive: ReturnType<typeof vi.fn>;
+	cancelJob: ReturnType<typeof vi.fn>;
 	overviewCall: ReturnType<typeof vi.fn>;
 	listHarnessVersionInfo: ReturnType<typeof vi.fn>;
 	listCurrentDirectoryHarnessVersionInfo: ReturnType<typeof vi.fn>;
@@ -204,7 +204,7 @@ function client(currentOverview: EvolutionOverview): {
 	let enabled = true;
 	const unsubscribed = vi.fn();
 	const startManual = vi.fn().mockResolvedValue({ status: "created", job: job() });
-	const cancelActive = vi.fn().mockResolvedValue(undefined);
+	const cancelJob = vi.fn().mockResolvedValue(undefined);
 	const overviewCall = vi.fn().mockResolvedValue(currentOverview);
 	const listHarnessVersionInfo = vi
 		.fn()
@@ -233,13 +233,13 @@ function client(currentOverview: EvolutionOverview): {
 			proposalDetail: proposalDetailCall,
 			startManual,
 			resumeNewest: vi.fn().mockRejectedValue(new Error("unused")),
-			cancelActive,
+			cancelJob,
 			rollback: vi.fn().mockRejectedValue(new Error("unused")),
 		},
 		emit: (event) => listener?.(event),
 		unsubscribed,
 		startManual,
-		cancelActive,
+		cancelJob,
 		overviewCall,
 		listHarnessVersionInfo,
 		listCurrentDirectoryHarnessVersionInfo,
@@ -326,6 +326,35 @@ describe("EvolutionMenuComponent", () => {
 		expect(output).toContain("Browse");
 		expect(output).toContain("Rollback [unavailable]");
 		expect(output).toContain("Cancel [unavailable]");
+	});
+
+	it("cancels a resumable job by its durable job ID", async () => {
+		const resumable = job({
+			jobId: "job-resumable",
+			outcome: "interrupted",
+			reasonCode: "shutdown",
+			terminalAt: "2026-08-20T00:02:00.000Z",
+			resumable: true,
+			cancellable: true,
+		});
+		const fixture = client(overview({ newestResumableJob: resumable }));
+		const component = new EvolutionMenuComponent(
+			fixture.client,
+			() => {},
+			() => {},
+			() => {},
+		);
+		await vi.waitFor(() => expect(stripAnsi(component.render(160).join("\n"))).toContain("Cancel"));
+
+		for (let index = 0; index < 6; index += 1) component.handleInput("\u001b[B");
+		component.handleInput("\n");
+		await vi.waitFor(() =>
+			expect(stripAnsi(component.render(160).join("\n"))).toContain(formatEvolutionJobLabel(resumable)),
+		);
+		component.handleInput("\n");
+
+		await vi.waitFor(() => expect(fixture.cancelJob).toHaveBeenCalledWith("job-resumable"));
+		component.dispose();
 	});
 
 	it("persists the self-evolution toggle and disables every other action", async () => {
@@ -631,7 +660,7 @@ describe("EvolutionMenuComponent", () => {
 				"The evolution round will be removed. Its tokens and invocations will remain available.",
 			),
 		);
-		expect(fixture.cancelActive).not.toHaveBeenCalled();
+		expect(fixture.cancelJob).not.toHaveBeenCalled();
 
 		const overviewCallsBeforeCancellation = fixture.overviewCall.mock.calls.length;
 		let resolveInterruptedOverview: ((value: EvolutionOverview) => void) | undefined;
@@ -639,7 +668,7 @@ describe("EvolutionMenuComponent", () => {
 			resolveInterruptedOverview = resolve;
 		});
 		fixture.overviewCall.mockImplementationOnce(() => interruptedOverview).mockResolvedValue(overview());
-		fixture.cancelActive.mockImplementation(async () => {
+		fixture.cancelJob.mockImplementation(async () => {
 			fixture.emit({
 				jobId: "job-active",
 				emittedAt: "2026-08-20T00:02:00.000Z",
@@ -650,7 +679,7 @@ describe("EvolutionMenuComponent", () => {
 		});
 
 		component.handleInput("\n");
-		await vi.waitFor(() => expect(fixture.cancelActive).toHaveBeenCalledOnce());
+		await vi.waitFor(() => expect(fixture.cancelJob).toHaveBeenCalledWith("job-active"));
 		await vi.waitFor(() => expect(fixture.overviewCall).toHaveBeenCalledTimes(overviewCallsBeforeCancellation + 1));
 		resolveInterruptedOverview?.(
 			overview({
@@ -719,6 +748,41 @@ describe("EvolutionMenuComponent", () => {
 
 		expect(close).toHaveBeenCalledOnce();
 		expect(fixture.unsubscribed).toHaveBeenCalledOnce();
+	});
+
+	it("recovers from a failed loading refresh when another refresh is queued", async () => {
+		const fixture = client(overview());
+		let rejectInitialOverview: ((error: Error) => void) | undefined;
+		fixture.overviewCall
+			.mockImplementationOnce(
+				() =>
+					new Promise<EvolutionOverview>((_resolve, reject) => {
+						rejectInitialOverview = reject;
+					}),
+			)
+			.mockResolvedValue(overview());
+		const status = vi.fn();
+		const render = vi.fn();
+		const component = new EvolutionMenuComponent(fixture.client, () => {}, status, render);
+		expect(stripAnsi(component.render(160).join("\n"))).toContain("Loading durable evolution state...");
+
+		fixture.emit({
+			jobId: "job-active",
+			emittedAt: "2026-08-20T00:02:00.000Z",
+			type: "failed",
+			stage: "reflecting",
+		});
+		component.handleInput("\u001b[B");
+		component.handleInput("\n");
+		expect(fixture.startManual).not.toHaveBeenCalled();
+		rejectInitialOverview?.(new Error("temporary durable state read failure"));
+
+		await vi.waitFor(() => expect(status).toHaveBeenCalledWith("temporary durable state read failure", true));
+		await vi.waitFor(() => expect(fixture.overviewCall).toHaveBeenCalledTimes(2));
+		await vi.waitFor(() => expect(stripAnsi(component.render(160).join("\n"))).toContain("Browse"));
+		expect(stripAnsi(component.render(160).join("\n"))).not.toContain("Loading durable evolution state...");
+		expect(render).toHaveBeenCalled();
+		component.dispose();
 	});
 
 	it("refreshes from progress events until disposed", async () => {

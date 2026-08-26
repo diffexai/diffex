@@ -799,6 +799,7 @@ export async function createCodingAgentEvolutionRuntime(
 		ids: { nextId: (kind) => `${kind}-${randomUUID()}` },
 		artifacts: persistence,
 		jobs: persistence,
+		cancellations: persistence,
 		cursors: persistence,
 		leases: persistence,
 		ledger: persistence,
@@ -969,8 +970,8 @@ export class EvolutionRuntimeCoordinator implements AgentSessionLifecycleObserve
 		return this.#control().resumeNewest();
 	}
 
-	cancelActive(): Promise<void> {
-		return this.#control().cancelActive();
+	cancelJob(jobId: string): Promise<void> {
+		return this.#control().cancelJob(jobId);
 	}
 
 	rollback(): Promise<EvolutionRollbackAction> {

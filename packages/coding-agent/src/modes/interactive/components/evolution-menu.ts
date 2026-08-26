@@ -41,7 +41,7 @@ export interface EvolutionMenuClient {
 	proposalDetail(jobId: string, proposalId: string): Promise<EvolutionProposalDetail>;
 	startManual(): Promise<EvolutionStartResult>;
 	resumeNewest(): Promise<EvolutionJobSummary>;
-	cancelActive(): Promise<void>;
+	cancelJob(jobId: string): Promise<void>;
 	rollback(): Promise<EvolutionRollbackAction>;
 }
 
@@ -56,7 +56,11 @@ type MenuView =
 			readonly proposalId: string;
 			readonly evidenceKind: "supporting" | "contradicting";
 	  }
-	| { readonly kind: "confirm"; readonly action: "cancel" | "resume" | "rollback" | "start" };
+	| {
+			readonly kind: "confirm";
+			readonly action: "cancel" | "resume" | "rollback" | "start";
+			readonly jobId?: string;
+	  };
 
 interface MenuEntry {
 	readonly label: string;
@@ -265,6 +269,9 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 	}
 
 	#run<T>(action: () => Promise<T>, success: string | ((result: T) => string)): void {
+		this.#loading = true;
+		this.rebuild();
+		this.#requestRender();
 		void action()
 			.then((result) => {
 				this.#onStatus(typeof success === "string" ? success : success(result), false);
@@ -278,12 +285,14 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 			});
 	}
 
-	#confirm(action: "cancel" | "resume" | "rollback" | "start"): void {
-		this.#push({ kind: "confirm", action });
+	#confirm(action: "cancel" | "resume" | "rollback" | "start", jobId?: string): void {
+		this.#push({ kind: "confirm", action, jobId });
 	}
 
 	#overviewEntries(overview: EvolutionOverview): readonly MenuEntry[] {
 		const evolutionEnabled = this.#client.getEnabled();
+		const cancellableJob =
+			[overview.activeJob, overview.newestResumableJob].find((job) => job?.cancellable === true) ?? null;
 		return [
 			{ label: "Refresh", enabled: evolutionEnabled, select: () => void this.refresh() },
 			{
@@ -316,8 +325,10 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 			},
 			{
 				label: "Cancel",
-				enabled: evolutionEnabled && overview.activeJob?.cancellable === true,
-				select: () => this.#confirm("cancel"),
+				enabled: evolutionEnabled && cancellableJob !== null,
+				select: () => {
+					if (cancellableJob !== null) this.#confirm("cancel", cancellableJob.jobId);
+				},
 			},
 			{
 				label: `Toggle [${evolutionEnabled ? "on" : "off"}]`,
@@ -339,7 +350,8 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 		];
 	}
 
-	#confirmationLines(action: "cancel" | "resume" | "rollback" | "start"): readonly string[] {
+	#confirmationLines(view: Extract<MenuView, { kind: "confirm" }>): readonly string[] {
+		const { action } = view;
 		const overview = this.#overview;
 		if (action === "start") {
 			return [
@@ -354,8 +366,11 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 			];
 		}
 		if (action === "cancel") {
+			const job = [overview?.activeJob, overview?.newestResumableJob].find(
+				(candidate) => candidate?.jobId === view.jobId,
+			);
 			return [
-				`Cancel ${overview?.activeJob ? formatEvolutionJobLabel(overview.activeJob) : "the active job"}?`,
+				`Cancel ${job ? formatEvolutionJobLabel(job) : "the selected job"}?`,
 				"The evolution round will be removed. Its tokens and invocations will remain available.",
 			];
 		}
@@ -365,7 +380,8 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 		];
 	}
 
-	#confirmEntries(action: "cancel" | "resume" | "rollback" | "start"): readonly MenuEntry[] {
+	#confirmEntries(view: Extract<MenuView, { kind: "confirm" }>): readonly MenuEntry[] {
+		const { action } = view;
 		const run = () => {
 			if (action === "start") {
 				this.#run(
@@ -380,7 +396,10 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 				);
 			}
 			if (action === "resume") this.#run(() => this.#client.resumeNewest(), "Evolution job resumed");
-			if (action === "cancel") this.#run(() => this.#client.cancelActive(), "Evolution round removed");
+			const cancellationJobId = view.jobId;
+			if (action === "cancel" && cancellationJobId !== undefined) {
+				this.#run(() => this.#client.cancelJob(cancellationJobId), "Evolution round removed");
+			}
 			if (action === "rollback") this.#run(() => this.#client.rollback(), "Harness revision rolled back");
 		};
 		return [
@@ -503,6 +522,7 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 
 	private rebuild(): void {
 		this.clear();
+		this.#entries = [];
 		this.addChild(new DynamicBorder());
 		this.addChild(new Spacer(1));
 		this.#addLine("Evolution", "accent");
@@ -543,9 +563,9 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 				this.#renderProposalEvidence(this.#proposal, view.evidenceKind);
 				this.#entries = [];
 			} else if (view.kind === "confirm") {
-				for (const line of this.#confirmationLines(view.action)) this.#addLine(line, "warning");
+				for (const line of this.#confirmationLines(view)) this.#addLine(line, "warning");
 				this.addChild(new Spacer(1));
-				this.#renderEntries(this.#confirmEntries(view.action));
+				this.#renderEntries(this.#confirmEntries(view));
 			}
 		}
 		this.addChild(new Spacer(1));

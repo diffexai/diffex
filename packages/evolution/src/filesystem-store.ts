@@ -15,6 +15,8 @@ import { EVOLUTION_SCHEMA_VERSION } from "./contracts.ts";
 import type {
 	EvolutionArtifact,
 	EvolutionArtifactStore,
+	EvolutionCancellationRequest,
+	EvolutionCancellationStore,
 	EvolutionCursorCommitResult,
 	EvolutionCursorStore,
 	EvolutionJobStore,
@@ -221,6 +223,19 @@ function parseLedgerEvent(contents: string, path: string): EvolutionLedgerEvent 
 	return parsed as unknown as EvolutionLedgerEvent;
 }
 
+function parseCancellation(contents: string, path: string, expectedJobId: string): EvolutionCancellationRequest {
+	const parsed = parseJson(contents, path);
+	if (
+		!isRecord(parsed) ||
+		parsed.jobId !== expectedJobId ||
+		typeof parsed.requestedAt !== "string" ||
+		!Number.isFinite(Date.parse(parsed.requestedAt))
+	) {
+		throw new EvolutionStorageCorruptionError(path, "cancellation request is invalid");
+	}
+	return parsed as unknown as EvolutionCancellationRequest;
+}
+
 function parseCursor(contents: string, path: string): EvolutionProcessedEvidenceCursor {
 	const parsed = parseJson(contents, path);
 	if (
@@ -270,10 +285,17 @@ export interface FileEvolutionPersistenceOptions {
 }
 
 export class FileEvolutionPersistence
-	implements EvolutionArtifactStore, EvolutionCursorStore, EvolutionJobStore, EvolutionLeaseStore, EvolutionLedger
+	implements
+		EvolutionArtifactStore,
+		EvolutionCancellationStore,
+		EvolutionCursorStore,
+		EvolutionJobStore,
+		EvolutionLeaseStore,
+		EvolutionLedger
 {
 	readonly #rootPath: string;
 	readonly #artifactPath: string;
+	readonly #cancellationPath: string;
 	readonly #cursorPath: string;
 	readonly #jobPath: string;
 	readonly #leasePath: string;
@@ -285,6 +307,7 @@ export class FileEvolutionPersistence
 	constructor(rootPath: string, options: FileEvolutionPersistenceOptions = {}) {
 		this.#rootPath = resolve(rootPath);
 		this.#artifactPath = join(this.#rootPath, "artifacts");
+		this.#cancellationPath = join(this.#rootPath, "cancellations");
 		this.#cursorPath = join(this.#rootPath, "cursors");
 		this.#jobPath = join(this.#rootPath, "jobs");
 		this.#leasePath = join(this.#rootPath, "leases");
@@ -302,6 +325,7 @@ export class FileEvolutionPersistence
 		for (const path of [
 			this.#rootPath,
 			this.#artifactPath,
+			this.#cancellationPath,
 			this.#cursorPath,
 			this.#jobPath,
 			this.#leasePath,
@@ -466,6 +490,37 @@ export class FileEvolutionPersistence
 			throw new EvolutionStorageCorruptionError(path, "artifact ID does not match its reference");
 		}
 		return artifact;
+	}
+
+	async requestCancellation(jobId: string, requestedAt: string): Promise<EvolutionCancellationRequest> {
+		assertSafeId(jobId, "job ID");
+		parseIsoTimestamp(requestedAt, "cancellation request time");
+		return this.#withStoreLock(async () => {
+			const path = join(this.#cancellationPath, `${jobId}.json`);
+			const existing = await this.#readOptional(path);
+			if (existing !== null) return parseCancellation(existing, path, jobId);
+			const request: EvolutionCancellationRequest = { jobId, requestedAt };
+			try {
+				await writeFile(path, `${serializeEvolutionValue(request)}\n`, {
+					encoding: "utf8",
+					flag: "wx",
+					mode: 0o600,
+				});
+				return request;
+			} catch (error) {
+				if (!hasErrorCode(error, "EEXIST")) throw error;
+				const raced = await this.#readOptional(path);
+				if (raced === null) throw error;
+				return parseCancellation(raced, path, jobId);
+			}
+		});
+	}
+
+	async loadCancellation(jobId: string): Promise<EvolutionCancellationRequest | null> {
+		assertSafeId(jobId, "job ID");
+		const path = join(this.#cancellationPath, `${jobId}.json`);
+		const contents = await this.#readOptional(path);
+		return contents === null ? null : parseCancellation(contents, path, jobId);
 	}
 
 	async create(job: EvolutionJob, lease: EvolutionLeaseToken): Promise<void> {

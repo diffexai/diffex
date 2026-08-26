@@ -172,6 +172,8 @@ export type {
 	CuratorInput,
 	EvolutionArtifact,
 	EvolutionArtifactStore,
+	EvolutionCancellationRequest,
+	EvolutionCancellationStore,
 	EvolutionClock,
 	EvolutionCursorCommitResult,
 	EvolutionCursorStore,
