@@ -322,7 +322,10 @@ function addContents(delta: EvolutionMemoryDelta): readonly string[] {
 	return additions(delta).map((addition) => addition.content);
 }
 
-function additionDestinationIssues(input: ProposalValidationInput, proposal: EvolutionMemoryProposal): ValidationIssue[] {
+function additionDestinationIssues(
+	input: ProposalValidationInput,
+	proposal: EvolutionMemoryProposal,
+): ValidationIssue[] {
 	const blocks = parseEvolutionMemoryBlocks(input.input.harness.memory);
 	const removedItemIds = new Set(removedMemoryItemIds(proposal.exactDelta));
 	return additions(proposal.exactDelta).flatMap((delta) => {

@@ -22,6 +22,13 @@ export class EvolutionToolDeniedError extends Error {
 	}
 }
 
+export class EvolutionWriterValidationError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = "EvolutionWriterValidationError";
+	}
+}
+
 export class EvolutionExecutionError extends Error {
 	readonly reasonCode: EvolutionFailureReasonCode;
 	readonly retryable: boolean;

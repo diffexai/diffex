@@ -24,7 +24,7 @@ import type {
 	ValidationReport,
 } from "./contracts.ts";
 import { DisabledPreReflectionStage } from "./counter.ts";
-import { EvolutionExecutionError } from "./errors.ts";
+import { EvolutionExecutionError, EvolutionWriterValidationError } from "./errors.ts";
 import { buildEvidenceCorpusDocument } from "./evidence-corpus.ts";
 import type {
 	Curator,
@@ -246,6 +246,11 @@ function stageFailure(
 	if (error instanceof EvolutionExecutionError) throw error;
 	if (error instanceof Error && error.name === "AbortError") throw error;
 	throw new EvolutionExecutionError(message, { reasonCode, retryable, cause: error });
+}
+
+function writerFailure(error: unknown, message: string): never {
+	const validationFailure = error instanceof EvolutionWriterValidationError;
+	stageFailure(error, message, validationFailure ? "validation-rejected" : "writer-failed", !validationFailure);
 }
 
 export class EvolutionPipeline implements EvolutionStageExecutor {
@@ -683,7 +688,7 @@ export class EvolutionPipeline implements EvolutionStageExecutor {
 						signal: context.signal,
 					});
 				} catch (error) {
-					stageFailure(error, `Mutation batch "${batch.batchId}" write failed`, "writer-failed", true);
+					writerFailure(error, `Mutation batch "${batch.batchId}" write failed`);
 				}
 				if (result.status === "failed") {
 					throw new EvolutionExecutionError(result.message ?? `Mutation batch "${batch.batchId}" failed`, {
@@ -751,7 +756,7 @@ export class EvolutionPipeline implements EvolutionStageExecutor {
 						signal: context.signal,
 					});
 				} catch (error) {
-					stageFailure(error, `Mutation batch "${batch.batchId}" activation failed`, "writer-failed", true);
+					writerFailure(error, `Mutation batch "${batch.batchId}" activation failed`);
 				}
 				if (result.status === "failed" || result.resultingHarnessVersion === null) {
 					throw new EvolutionExecutionError(

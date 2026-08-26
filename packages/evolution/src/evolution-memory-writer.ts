@@ -21,7 +21,7 @@ import type {
 	MutationWriteResult,
 } from "./contracts.ts";
 import { EVOLUTION_MEMORY_ITEM_SCHEMA_VERSION } from "./contracts.ts";
-import { EvolutionExecutionError } from "./errors.ts";
+import { EvolutionExecutionError, EvolutionWriterValidationError } from "./errors.ts";
 import {
 	evolutionMemoryLessonBody,
 	evolutionMemoryLessonContentMatches,
@@ -392,22 +392,34 @@ function insertionOffset(
 	delta: EvolutionMemoryAddDelta,
 	bootstrappingBlankMemory: boolean,
 ): number {
-	if (bootstrappingBlankMemory) return parsed.blocks.at(-1)?.end ?? memory.trimEnd().length;
+	if (bootstrappingBlankMemory) {
+		if (delta.destination.anchor !== null) {
+			throw new EvolutionWriterValidationError("EVOLVE.md addition anchor must match exactly one memory item");
+		}
+		return parsed.blocks.at(-1)?.end ?? memory.trimEnd().length;
+	}
 	if (delta.destination.anchor !== null) {
 		const matchingBlocks = parsed.blocks.filter((block) =>
 			evolutionMemoryLessonContentMatches(block.content, delta.destination.anchor ?? ""),
 		);
-		if (matchingBlocks.length !== 1) throw new Error("EVOLVE.md addition anchor must match exactly one memory item");
+		if (matchingBlocks.length !== 1) {
+			throw new EvolutionWriterValidationError("EVOLVE.md addition anchor must match exactly one memory item");
+		}
 		const block = matchingBlocks[0] as MarkdownMemoryBlock;
 		if (delta.destination.section !== null && block.section !== delta.destination.section) {
-			throw new Error(`EVOLVE.md addition anchor is outside section "${delta.destination.section}"`);
+			throw new EvolutionWriterValidationError(
+				`EVOLVE.md addition anchor is outside section "${delta.destination.section}"`,
+			);
 		}
 		return block.end;
 	}
 	if (delta.destination.section === null) return parsed.blocks.at(-1)?.end ?? memory.trimEnd().length;
 	const headings = parsed.headings.filter((heading) => heading.title === delta.destination.section);
-	if (headings.length !== 1)
-		throw new Error(`EVOLVE.md section "${delta.destination.section}" must exist exactly once`);
+	if (headings.length !== 1) {
+		throw new EvolutionWriterValidationError(
+			`EVOLVE.md section "${delta.destination.section}" must exist exactly once`,
+		);
+	}
 	const sectionBlocks = parsed.blocks.filter((block) => block.section === delta.destination.section);
 	return sectionBlocks.at(-1)?.end ?? (headings[0] as MarkdownHeading).end;
 }

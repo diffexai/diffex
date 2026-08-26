@@ -148,6 +148,7 @@ export {
 	EvolutionExecutionError,
 	type EvolutionToolDenialCode,
 	EvolutionToolDeniedError,
+	EvolutionWriterValidationError,
 } from "./errors.ts";
 export {
 	classifyEvolutionEvidence,

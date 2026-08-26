@@ -105,7 +105,7 @@ describe("evolution memory writer", () => {
 					target: { kind: "evolution-memory", expectedHarnessVersion: snapshot.harnessVersion },
 					payload: {
 						operation: "ADD",
-						destination: { section: "verification", anchor: "runtime-verification" },
+						destination: { section: "verification", anchor: null },
 						content: "Lesson 99: Verify the runtime. Capture the result. Fix visible regressions.",
 						intendedScope: ["verification"],
 					},
@@ -135,7 +135,7 @@ describe("evolution memory writer", () => {
 					target: { kind: "evolution-memory", expectedHarnessVersion: numberedSnapshot.harnessVersion },
 					payload: {
 						operation: "ADD",
-						destination: { section: "verification", anchor: "runtime-verification" },
+						destination: { section: "verification", anchor: null },
 						content: "First sentence. Second sentence. Third sentence. Fourth sentence.",
 						intendedScope: ["verification"],
 					},
@@ -162,7 +162,7 @@ describe("evolution memory writer", () => {
 					target: { kind: "evolution-memory", expectedHarnessVersion: snapshot.harnessVersion },
 					payload: {
 						operation: "ADD",
-						destination: { section: "verification", anchor: `${label}-lesson` },
+						destination: { section: "verification", anchor: null },
 						content: `Keep ${label} lesson content ${String(index + 1)}.`,
 						intendedScope: ["verification"],
 					},
@@ -250,7 +250,7 @@ describe("evolution memory writer", () => {
 				target: { kind: "evolution-memory", expectedHarnessVersion: snapshot.harnessVersion },
 				payload: {
 					operation: "ADD",
-					destination: { section: "verification", anchor: "runtime-verification-for-ui-scene-flows" },
+					destination: { section: "verification", anchor: null },
 					content: "- Verify UI and scene-flow changes in a real runtime.",
 					intendedScope: ["verification"],
 				},
@@ -261,7 +261,7 @@ describe("evolution memory writer", () => {
 				target: { kind: "evolution-memory", expectedHarnessVersion: snapshot.harnessVersion },
 				payload: {
 					operation: "ADD",
-					destination: { section: "capability-honesty", anchor: "durable-memory-commitments" },
+					destination: { section: "capability-honesty", anchor: null },
 					content: "- Confirm persistence before promising durable recall.",
 					intendedScope: ["capability-honesty"],
 				},
@@ -380,16 +380,19 @@ describe("evolution memory writer", () => {
 				target: { kind: "evolution-memory", expectedHarnessVersion: snapshot.harnessVersion },
 				payload: {
 					operation: "ADD",
-					destination: { section: "Missing section", anchor: null },
+					destination: { section: null, anchor: "end" },
 					content: "- This destination is stale.",
 					intendedScope: ["repository"],
 				},
 			},
 		]);
 
-		await expect(writer.write(selectedBatch, { idempotencyKey: "write-key", lease: writerLease })).rejects.toThrow(
-			'section "Missing section" must exist exactly once',
-		);
+		await expect(
+			writer.write(selectedBatch, { idempotencyKey: "write-key", lease: writerLease }),
+		).rejects.toMatchObject({
+			name: "EvolutionWriterValidationError",
+			message: "EVOLVE.md addition anchor must match exactly one memory item",
+		});
 		expect((await harnessState.loadCurrent()).state.memory).toBe(initialMemory);
 		expect((await harnessState.listVersions()).versions).toHaveLength(2);
 		expect((await writer.captureSnapshot()).harnessVersion).toBe(initial.manifest.version);

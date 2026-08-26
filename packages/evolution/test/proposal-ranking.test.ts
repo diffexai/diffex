@@ -13,6 +13,7 @@ import {
 	type EvolutionMemoryProposal,
 	EvolutionPipeline,
 	EvolutionTargetAdapterRegistry,
+	EvolutionWriterValidationError,
 	type InstructionSnapshot,
 	type Lesson,
 	type ProposalScoringInput,
@@ -602,6 +603,96 @@ describe("deterministic proposal evidence ranking", () => {
 		expect(() => new DeterministicProposalRanker({ version: "1" }, { maxSelectedProposals: 6 })).toThrow(
 			"cannot exceed 5",
 		);
+	});
+
+	it("classifies deterministic writer validation failures as non-retryable", async () => {
+		const data = fixture([
+			{ evidenceId: "support-a", lineageId: "task-a" },
+			{ evidenceId: "support-b", lineageId: "task-b" },
+		]);
+		const lessons = [lesson("lesson-1", ["support-a", "support-b"])];
+		const proposals = [proposal("proposal-a", data.input, lessons)];
+		const input = validationInput(data, lessons, proposals);
+		const ranker = new DeterministicProposalRanker({ version: "1" });
+		const { scored } = await validateAndScore(ranker, input);
+		const pipeline = new EvolutionPipeline({
+			version: "1",
+			model: {
+				maxProviderCallsPerExecution: 20,
+				execute: () => Promise.reject(new Error("Model execution is not expected")),
+			},
+			reflector: { reflect: () => Promise.reject(new Error("Reflection is not expected")) },
+			curator: { curate: () => Promise.reject(new Error("Curation is not expected")) },
+			validator: ranker,
+			scorer: ranker,
+			targets: new EvolutionTargetAdapterRegistry({
+				writers: [
+					{
+						kind: "evolution-memory",
+						write: () =>
+							Promise.reject(
+								new EvolutionWriterValidationError(
+									"EVOLVE.md addition anchor must match exactly one memory item",
+								),
+							),
+						activate: () => Promise.reject(new Error("Activation is not expected")),
+					},
+				],
+			}),
+		});
+		const job: EvolutionJob = {
+			metadata: metadata("job-1", [data.input.metadata.artifactId], { stage: "writing" }),
+			jobId: "job-1",
+			inputSnapshot: {
+				artifactId: data.input.metadata.artifactId,
+				contentDigest: data.input.metadata.contentDigest,
+			},
+			trigger: "manual",
+			evidenceRange: { afterCursor: 0, throughCursor: data.input.ingestionHighWaterCursor },
+			stage: "writing",
+			outcome: "active",
+			reasonCode: null,
+			failureMessage: null,
+			completion: null,
+			resolution: null,
+			checkpoints: [],
+			attempt: 1,
+			revision: 1,
+			createdAt,
+			updatedAt: createdAt,
+			terminalAt: null,
+			retryNotBefore: null,
+		};
+
+		await expect(
+			pipeline.execute({
+				job,
+				input: data.input,
+				priorArtifacts: scored,
+				idempotencyKey: "job-1:writing",
+				scopeLease: {
+					kind: "scope",
+					key: "diffex:repository",
+					ownerId: "worker-1",
+					fence: 1,
+					expiresAt: "2026-08-19T12:20:00.000Z",
+				},
+				writerLease: {
+					kind: "writer",
+					key: "global",
+					ownerId: "worker-1",
+					fence: 1,
+					expiresAt: "2026-08-19T12:20:00.000Z",
+				},
+			}),
+		).rejects.toMatchObject({
+			reasonCode: "validation-rejected",
+			retryable: false,
+			cause: {
+				name: "EvolutionWriterValidationError",
+				message: "EVOLVE.md addition anchor must match exactly one memory item",
+			},
+		});
 	});
 
 	it("completes validation as a no-op when accepted proposals are below threshold", async () => {
