@@ -357,7 +357,7 @@ describe("EvolutionMenuComponent", () => {
 		component.dispose();
 	});
 
-	it("persists the self-evolution toggle and disables every other action", async () => {
+	it("keeps durable refresh available when self-evolution is disabled", async () => {
 		const fixture = client(overview());
 		const component = new EvolutionMenuComponent(
 			fixture.client,
@@ -375,9 +375,17 @@ describe("EvolutionMenuComponent", () => {
 		const output = stripAnsi(component.render(180).join("\n"));
 		expect(output).toContain("Toggle [off]");
 		expect(output).toContain("Next automatic evolution: Disabled");
-		for (const action of ["Refresh", "Evolve", "View", "Resume", "Browse", "Rollback", "Cancel"]) {
+		expect(output).toContain("Refresh");
+		expect(output).not.toContain("Refresh [unavailable]");
+		for (const action of ["Evolve", "View", "Resume", "Browse", "Rollback", "Cancel"]) {
 			expect(output).toContain(`${action} [unavailable]`);
 		}
+
+		const overviewCallsBeforeRefresh = fixture.overviewCall.mock.calls.length;
+		for (let index = 0; index < 7; index += 1) component.handleInput("\u001b[A");
+		component.handleInput("\n");
+		await vi.waitFor(() => expect(fixture.overviewCall).toHaveBeenCalledTimes(overviewCallsBeforeRefresh + 1));
+		component.dispose();
 	});
 
 	it("polls durable job state without rendering removed diagnostics", async () => {

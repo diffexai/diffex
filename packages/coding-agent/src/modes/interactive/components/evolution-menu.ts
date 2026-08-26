@@ -323,7 +323,7 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 		const cancellableJob =
 			[overview.activeJob, overview.newestResumableJob].find((job) => job?.cancellable === true) ?? null;
 		return [
-			{ label: "Refresh", enabled: evolutionEnabled, select: () => void this.refresh() },
+			{ label: "Refresh", enabled: true, select: () => void this.refresh() },
 			{
 				label: "Evolve",
 				enabled: evolutionEnabled && overview.activeJob === null,
