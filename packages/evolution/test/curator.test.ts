@@ -313,6 +313,9 @@ describe("structured delta curator", () => {
 		await curator.curate(
 			curatorInput((request) => {
 				expect(findUnsupportedCodexSchemaKeywords(request.outputSchema)).toEqual([]);
+				expect(request.outputSchema).toMatchObject({
+					$defs: { destination: { properties: { anchor: { enum: [null, "M1"] } } } },
+				});
 				return Promise.resolve(response([]));
 			}),
 		);
@@ -356,7 +359,7 @@ describe("structured delta curator", () => {
 						{ kind: "evolution-memory" },
 						{
 							operation: "ADD",
-							destination: { section: "Engineering", anchor: null },
+							destination: { section: "Evolution memory", anchor: "M1" },
 							content: "Keep repository changes focused.",
 							intendedScope: ["Repository code changes"],
 						},
@@ -381,6 +384,8 @@ describe("structured delta curator", () => {
 			expect.objectContaining({ memoryRef: "M1" }),
 		]);
 		expect(capturedInputs[0]?.control).toMatchObject({
+			additionAnchorReferences: ["M1"],
+			additionAnchorRule: expect.stringContaining("Sentinels such as end are invalid"),
 			consolidateOverlappingLessons: true,
 			emitOnlyBehaviorChangingProposals: true,
 			maxEvolutionMemoryLessonSentences: 3,
@@ -411,6 +416,9 @@ describe("structured delta curator", () => {
 			target: { kind: "evolution-memory", expectedHarnessVersion: SECOND_HARNESS_VERSION },
 			action: "ADD",
 			expectedBaseDigest: input.input.harness.memoryContentDigest,
+			exactDelta: {
+				destination: { section: "Evolution memory", anchor: "- Keep focused changes." },
+			},
 			lessonIds: ["lesson-final"],
 			supportingEvidenceIds: ["support-1"],
 			contradictingEvidenceIds: ["counter-1"],
@@ -476,7 +484,7 @@ describe("structured delta curator", () => {
 										reason: "Narrow the existing rule",
 									},
 									addition: {
-										destination: { section: null, anchor: "memory-1" },
+										destination: { section: "Evolution memory", anchor: null },
 										content: "Keep repository code changes focused.",
 										intendedScope: ["Repository code changes"],
 									},
@@ -497,8 +505,44 @@ describe("structured delta curator", () => {
 			exactDelta: {
 				operation: "REPLACE",
 				removal: { memoryItemId: "memory-1", expectedContentDigest: MEMORY_ITEM_DIGEST },
-				addition: { content: "Keep repository code changes focused." },
+				addition: {
+					destination: { section: "Evolution memory", anchor: null },
+					content: "Keep repository code changes focused.",
+				},
 			},
+		});
+	});
+
+	it("rejects replacement additions anchored to the item being removed", async () => {
+		const curator = new StructuredDeltaCurator({ version: "1.2.3" }, { maxResponseAttempts: 1 });
+		const input = curatorInput(() =>
+			Promise.resolve(
+				response([
+					decision(
+						"replace-in-place",
+						proposal(
+							"REPLACE",
+							{ kind: "evolution-memory" },
+							{
+								operation: "REPLACE",
+								removal: { memoryRef: "M1", reason: "Narrow the existing rule" },
+								addition: {
+									destination: { section: null, anchor: "M1" },
+									content: "Keep repository code changes focused.",
+									intendedScope: ["Repository code changes"],
+								},
+							},
+						),
+					),
+				]),
+			),
+		);
+
+		await expect(curator.curate(input)).rejects.toMatchObject({
+			reasonCode: "curation-invalid-response",
+			cause: expect.objectContaining({
+				message: "REPLACE addition cannot anchor to the memory item being removed",
+			}),
 		});
 	});
 
@@ -674,6 +718,42 @@ describe("structured delta curator", () => {
 		expect(inputs[1]?.memory).toEqual(inputs[0]?.memory);
 		expect(JSON.stringify(inputs[1]?.control)).not.toContain("L2");
 		expect(JSON.stringify(inputs[1]?.control)).toContain("L1");
+	});
+
+	it("rejects sentinel addition anchors and reports permitted memory references", async () => {
+		let calls = 0;
+		const curator = new StructuredDeltaCurator({ version: "1.2.3" }, { maxResponseAttempts: 1 });
+		const input = curatorInput(() => {
+			calls += 1;
+			return Promise.resolve(
+				response([
+					decision(
+						"invalid-anchor",
+						proposal(
+							"ADD",
+							{ kind: "evolution-memory" },
+							{
+								operation: "ADD",
+								destination: { section: null, anchor: "end" },
+								content: "Keep changes focused.",
+								intendedScope: ["Repository code changes"],
+							},
+						),
+					),
+				]),
+			);
+		});
+
+		await expect(curator.curate(input)).rejects.toMatchObject({
+			reasonCode: "curation-invalid-response",
+			retryable: false,
+			cause: expect.objectContaining({ message: expect.stringContaining("Permitted references: M1") }),
+			diagnostics: {
+				invalidAliases: ["end"],
+				permittedAliases: ["M1"],
+			},
+		});
+		expect(calls).toBe(1);
 	});
 
 	it("retries model-authored lessons longer than three sentences", async () => {

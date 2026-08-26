@@ -4,12 +4,24 @@ const sentenceSegmenter = new Intl.Segmenter("en", { granularity: "sentence" });
 const LIST_MARKER_PATTERN = /^(?: {0,3})(?:[-+*]|\d+[.)])[ \t]+/;
 const LESSON_NUMBER_PATTERN = /^Lesson[ \t]+\d+[ \t]*:[ \t]*/i;
 
+function normalizedText(value: string): string {
+	return value.normalize("NFKC").trim().replace(/\s+/g, " ").toLocaleLowerCase("en-US");
+}
+
 function withoutListMarker(content: string): string {
 	return content.replace(LIST_MARKER_PATTERN, "");
 }
 
 export function evolutionMemoryLessonBody(content: string): string {
 	return withoutListMarker(content).replace(LESSON_NUMBER_PATTERN, "");
+}
+
+export function evolutionMemoryLessonContentMatches(left: string, right: string): boolean {
+	return (
+		left === right ||
+		normalizedText(left) === normalizedText(right) ||
+		normalizedText(evolutionMemoryLessonBody(left)) === normalizedText(evolutionMemoryLessonBody(right))
+	);
 }
 
 export function evolutionMemoryLessonNumber(content: string): number | null {

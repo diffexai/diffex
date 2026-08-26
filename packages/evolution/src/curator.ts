@@ -140,7 +140,10 @@ export function createCuratorOutputSchema(references: CuratorSchemaReferences): 
 				required: ["section", "anchor"],
 				properties: {
 					section: { type: ["string", "null"] },
-					anchor: { type: ["string", "null"] },
+					anchor: {
+						enum: [null, ...references.memoryRefs],
+						description: "Existing memory item reference to insert after, or null to append within the section.",
+					},
 				},
 			},
 			addition: {
@@ -460,7 +463,7 @@ function target(value: unknown, input: CuratorInput): EvolutionTarget {
 	throw new Error(`Unsupported target kind "${String(value.kind)}"`);
 }
 
-function addition(value: unknown, nested = false): EvolutionMemoryAddDelta {
+function addition(value: unknown, registry: CuratorToolRegistry, nested = false): EvolutionMemoryAddDelta {
 	if (!isRecord(value)) throw new Error("ADD exactDelta must be an object");
 	assertOnlyFields(
 		value,
@@ -471,13 +474,19 @@ function addition(value: unknown, nested = false): EvolutionMemoryAddDelta {
 	if (!isRecord(value.destination)) throw new Error("ADD destination must be an object");
 	assertOnlyFields(value.destination, ["section", "anchor"], "ADD destination");
 	const section = nullableString(value.destination, "section");
-	const anchor = nullableString(value.destination, "anchor");
-	if (section === null && anchor === null) throw new Error("ADD must identify a destination section or anchor");
+	const anchorReference = nullableString(value.destination, "anchor");
+	if (section === null && anchorReference === null) {
+		throw new Error("ADD must identify a destination section or anchor");
+	}
+	const anchorBinding = anchorReference === null ? null : registry.memory.resolve(anchorReference, "anchor");
+	if (section !== null && anchorBinding !== null && anchorBinding.block.section !== section) {
+		throw new Error(`ADD anchor "${anchorReference}" is outside section "${section}"`);
+	}
 	const content = requiredString(value, "content");
 	assertEvolutionMemoryLessonContent(content);
 	return {
 		operation: "ADD",
-		destination: { section, anchor },
+		destination: { section, anchor: anchorBinding?.block.content ?? null },
 		content,
 		intendedScope: stringArray(value.intendedScope, "intendedScope", false),
 	};
@@ -506,7 +515,13 @@ function replacement(value: unknown, registry: CuratorToolRegistry): EvolutionMe
 	assertOnlyFields(value, ["operation", "removal", "addition"], "REPLACE exactDelta");
 	if (value.operation !== "REPLACE") throw new Error("REPLACE exactDelta operation must be REPLACE");
 	const parsedRemoval = removal(value.removal, registry, true);
-	const parsedAddition = addition(value.addition, true);
+	const parsedAddition = addition(value.addition, registry, true);
+	if (
+		parsedAddition.destination.anchor !== null &&
+		computeEvolutionContentDigest(parsedAddition.destination.anchor) === parsedRemoval.expectedContentDigest
+	) {
+		throw new Error("REPLACE addition cannot anchor to the memory item being removed");
+	}
 	const { operation: _removeOperation, ...removalDelta } = parsedRemoval;
 	const { operation: _addOperation, ...additionDelta } = parsedAddition;
 	return { operation: "REPLACE", removal: removalDelta, addition: additionDelta };
@@ -521,7 +536,7 @@ function delta(
 		if (value !== null) throw new Error("Deferred proposals cannot include exactDelta");
 		return null;
 	}
-	if (action === "ADD") return addition(value);
+	if (action === "ADD") return addition(value, registry);
 	if (action === "REMOVE") return removal(value, registry, false);
 	return replacement(value, registry);
 }
@@ -946,6 +961,9 @@ function modelInput(input: CuratorInput, registry: CuratorToolRegistry, response
 			omitTelemetryFormatFacts: true,
 			routeUsefulTelemetryFactsToDebuggingDocumentation: true,
 			memoryOperations: ["ADD", "REMOVE", "REPLACE"],
+			additionAnchorReferences: registry.memory.references,
+			additionAnchorRule:
+				"Use an existing memoryRef to insert after that item, or null to append within the named section. Sentinels such as end are invalid.",
 			deferredTargets: ["skill", "orchestration-source"],
 			maxEvolutionMemoryLessonSentences: EVOLUTION_MEMORY_MAX_LESSON_SENTENCES,
 			omitEvolutionMemoryLessonNumber: true,

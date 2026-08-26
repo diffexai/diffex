@@ -24,6 +24,7 @@ import { EVOLUTION_MEMORY_ITEM_SCHEMA_VERSION } from "./contracts.ts";
 import { EvolutionExecutionError } from "./errors.ts";
 import {
 	evolutionMemoryLessonBody,
+	evolutionMemoryLessonContentMatches,
 	evolutionMemoryLessonNumber,
 	numberEvolutionMemoryLesson,
 } from "./evolution-memory-lessons.ts";
@@ -393,12 +394,8 @@ function insertionOffset(
 ): number {
 	if (bootstrappingBlankMemory) return parsed.blocks.at(-1)?.end ?? memory.trimEnd().length;
 	if (delta.destination.anchor !== null) {
-		const matchingBlocks = parsed.blocks.filter(
-			(block) =>
-				block.content === delta.destination.anchor ||
-				normalizedText(block.content) === normalizedText(delta.destination.anchor ?? "") ||
-				normalizedText(evolutionMemoryLessonBody(block.content)) ===
-					normalizedText(evolutionMemoryLessonBody(delta.destination.anchor ?? "")),
+		const matchingBlocks = parsed.blocks.filter((block) =>
+			evolutionMemoryLessonContentMatches(block.content, delta.destination.anchor ?? ""),
 		);
 		if (matchingBlocks.length !== 1) throw new Error("EVOLVE.md addition anchor must match exactly one memory item");
 		const block = matchingBlocks[0] as MarkdownMemoryBlock;

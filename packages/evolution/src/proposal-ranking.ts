@@ -2,6 +2,7 @@ import type { MaterializedEvidence, MaterializedInvocation } from "@earendil-wor
 import type {
 	EvidenceRankingScoreComponents,
 	EvolutionArtifactProducer,
+	EvolutionMemoryAddDelta,
 	EvolutionMemoryDelta,
 	EvolutionMemoryProposal,
 	EvolutionProposal,
@@ -12,6 +13,8 @@ import type {
 	ValidationIssue,
 	ValidationReport,
 } from "./contracts.ts";
+import { evolutionMemoryLessonContentMatches } from "./evolution-memory-lessons.ts";
+import { parseEvolutionMemoryBlocks } from "./evolution-memory-writer.ts";
 import type { ProposalScorer, ProposalScoringInput, ProposalValidationInput, ProposalValidator } from "./ports.ts";
 import { computeEvolutionContentDigest, createEvolutionArtifactMetadata } from "./provenance.ts";
 
@@ -310,9 +313,53 @@ function removedMemoryItemIds(delta: EvolutionMemoryDelta): readonly string[] {
 	return [delta.operation === "REMOVE" ? delta.memoryItemId : delta.removal.memoryItemId];
 }
 
-function addContents(delta: EvolutionMemoryDelta): readonly string[] {
+function additions(delta: EvolutionMemoryDelta): readonly EvolutionMemoryAddDelta[] {
 	if (delta.operation === "REMOVE") return [];
-	return [delta.operation === "ADD" ? delta.content : delta.addition.content];
+	return [delta.operation === "ADD" ? delta : { operation: "ADD", ...delta.addition }];
+}
+
+function addContents(delta: EvolutionMemoryDelta): readonly string[] {
+	return additions(delta).map((addition) => addition.content);
+}
+
+function additionDestinationIssues(input: ProposalValidationInput, proposal: EvolutionMemoryProposal): ValidationIssue[] {
+	const blocks = parseEvolutionMemoryBlocks(input.input.harness.memory);
+	const removedItemIds = new Set(removedMemoryItemIds(proposal.exactDelta));
+	return additions(proposal.exactDelta).flatMap((delta) => {
+		if (delta.destination.anchor === null) return [];
+		const matches = blocks.filter((block) =>
+			evolutionMemoryLessonContentMatches(block.content, delta.destination.anchor ?? ""),
+		);
+		if (matches.length !== 1) {
+			return [
+				issue(
+					proposal.proposalId,
+					"addition-anchor-invalid",
+					"ADD anchor must match exactly one frozen evolution memory item",
+				),
+			];
+		}
+		if (delta.destination.section !== null && matches[0]?.section !== delta.destination.section) {
+			return [
+				issue(
+					proposal.proposalId,
+					"addition-anchor-invalid",
+					`ADD anchor is outside section "${delta.destination.section}"`,
+				),
+			];
+		}
+		const matchedIndex = blocks.indexOf(matches[0] as (typeof blocks)[number]);
+		const matchedItem = input.input.harness.activeMemoryItems[matchedIndex];
+		return matchedItem !== undefined && removedItemIds.has(matchedItem.memoryItemId)
+			? [
+					issue(
+						proposal.proposalId,
+						"addition-anchor-invalid",
+						"REPLACE addition cannot anchor to the memory item being removed",
+					),
+				]
+			: [];
+	});
 }
 
 function isBroadScope(proposal: EvolutionMemoryProposal): boolean {
@@ -498,6 +545,7 @@ function proposalShapeIssues(
 			);
 		}
 	}
+	issues.push(...additionDestinationIssues(input, proposal));
 	for (const content of addContents(proposal.exactDelta)) {
 		if (input.input.harness.memory.includes(content)) {
 			issues.push(

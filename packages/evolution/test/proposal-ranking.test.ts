@@ -451,6 +451,36 @@ describe("deterministic proposal evidence ranking", () => {
 		});
 	});
 
+	it("rejects addition anchors that do not resolve against frozen memory", async () => {
+		const data = fixture([
+			{ evidenceId: "support-a", lineageId: "task-a" },
+			{ evidenceId: "support-b", lineageId: "task-b" },
+		]);
+		const lessons = [lesson("lesson-1", ["support-a", "support-b"])];
+		const invalidAnchor = proposal("proposal-invalid-anchor", data.input, lessons, "Distinct guidance", {
+			exactDelta: {
+				operation: "ADD",
+				destination: { section: null, anchor: "end" },
+				content: "Distinct guidance",
+				intendedScope: ["Repository work"],
+			},
+		});
+		const report = await new DeterministicProposalRanker({ version: "1" }).validate(
+			validationInput(data, lessons, [invalidAnchor]),
+		);
+
+		expect(report.proposalResults[0]).toMatchObject({
+			disposition: "rejected",
+			reasonCodes: expect.arrayContaining(["addition-anchor-invalid"]),
+			issues: expect.arrayContaining([
+				expect.objectContaining({
+					code: "addition-anchor-invalid",
+					message: "ADD anchor must match exactly one frozen evolution memory item",
+				}),
+			]),
+		});
+	});
+
 	it("selects at most five compatible eligible fingerprints without filling below threshold", async () => {
 		const data = fixture([
 			{ evidenceId: "support-a", lineageId: "task-a" },
