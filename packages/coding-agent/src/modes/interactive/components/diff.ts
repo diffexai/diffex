@@ -1,5 +1,5 @@
 import * as Diff from "diff";
-import { theme } from "../theme/theme.ts";
+import { getLanguageFromPath, highlightCode, theme } from "../theme/theme.ts";
 
 /**
  * Parse diff line to extract prefix, line number, and content.
@@ -11,11 +11,28 @@ function parseDiffLine(line: string): { prefix: string; lineNum: string; content
 	return { prefix: match[1], lineNum: match[2], content: match[3] };
 }
 
-/**
- * Replace tabs with spaces for consistent rendering.
- */
+/** Replace tabs with spaces for consistent rendering. */
 function replaceTabs(text: string): string {
 	return text.replace(/\t/g, "   ");
+}
+
+function highlightDiffContent(content: string, lang: string | undefined): string {
+	const normalized = replaceTabs(content);
+	if (!lang) return normalized;
+	return highlightCode(normalized, lang)[0] ?? normalized;
+}
+
+function renderDiffLine(
+	prefix: string,
+	lineNum: string,
+	content: string,
+	color: "toolDiffAdded" | "toolDiffRemoved" | "toolDiffContext",
+	lang: string | undefined,
+): string {
+	if (!lang) {
+		return theme.fg(color, `${prefix}${lineNum} ${replaceTabs(content)}`);
+	}
+	return `${theme.fg(color, `${prefix}${lineNum} `)}${highlightDiffContent(content, lang)}`;
 }
 
 /**
@@ -23,7 +40,11 @@ function replaceTabs(text: string): string {
  * Uses diffWords which groups whitespace with adjacent words for cleaner highlighting.
  * Strips leading whitespace from inverse to avoid highlighting indentation.
  */
-function renderIntraLineDiff(oldContent: string, newContent: string): { removedLine: string; addedLine: string } {
+function renderIntraLineDiff(
+	oldContent: string,
+	newContent: string,
+	lang: string | undefined,
+): { removedLine: string; addedLine: string } {
 	const wordDiff = Diff.diffWords(oldContent, newContent);
 
 	let removedLine = "";
@@ -42,7 +63,7 @@ function renderIntraLineDiff(oldContent: string, newContent: string): { removedL
 				isFirstRemoved = false;
 			}
 			if (value) {
-				removedLine += theme.inverse(value);
+				removedLine += theme.inverse(highlightDiffContent(value, lang));
 			}
 		} else if (part.added) {
 			let value = part.value;
@@ -54,11 +75,12 @@ function renderIntraLineDiff(oldContent: string, newContent: string): { removedL
 				isFirstAdded = false;
 			}
 			if (value) {
-				addedLine += theme.inverse(value);
+				addedLine += theme.inverse(highlightDiffContent(value, lang));
 			}
 		} else {
-			removedLine += part.value;
-			addedLine += part.value;
+			const highlighted = highlightDiffContent(part.value, lang);
+			removedLine += highlighted;
+			addedLine += highlighted;
 		}
 	}
 
@@ -66,7 +88,7 @@ function renderIntraLineDiff(oldContent: string, newContent: string): { removedL
 }
 
 export interface RenderDiffOptions {
-	/** File path (unused, kept for API compatibility) */
+	/** File path used to determine the syntax highlighting language */
 	filePath?: string;
 }
 
@@ -76,9 +98,10 @@ export interface RenderDiffOptions {
  * - Removed lines: red, with inverse on changed tokens
  * - Added lines: green, with inverse on changed tokens
  */
-export function renderDiff(diffText: string, _options: RenderDiffOptions = {}): string {
+export function renderDiff(diffText: string, options: RenderDiffOptions = {}): string {
 	const lines = diffText.split("\n");
 	const result: string[] = [];
+	const lang = options.filePath ? getLanguageFromPath(options.filePath) : undefined;
 
 	let i = 0;
 	while (i < lines.length) {
@@ -119,26 +142,32 @@ export function renderDiff(diffText: string, _options: RenderDiffOptions = {}): 
 				const { removedLine, addedLine } = renderIntraLineDiff(
 					replaceTabs(removed.content),
 					replaceTabs(added.content),
+					lang,
 				);
 
-				result.push(theme.fg("toolDiffRemoved", `-${removed.lineNum} ${removedLine}`));
-				result.push(theme.fg("toolDiffAdded", `+${added.lineNum} ${addedLine}`));
+				if (lang) {
+					result.push(`${theme.fg("toolDiffRemoved", `-${removed.lineNum} `)}${removedLine}`);
+					result.push(`${theme.fg("toolDiffAdded", `+${added.lineNum} `)}${addedLine}`);
+				} else {
+					result.push(theme.fg("toolDiffRemoved", `-${removed.lineNum} ${removedLine}`));
+					result.push(theme.fg("toolDiffAdded", `+${added.lineNum} ${addedLine}`));
+				}
 			} else {
 				// Show all removed lines first, then all added lines
 				for (const removed of removedLines) {
-					result.push(theme.fg("toolDiffRemoved", `-${removed.lineNum} ${replaceTabs(removed.content)}`));
+					result.push(renderDiffLine("-", removed.lineNum, removed.content, "toolDiffRemoved", lang));
 				}
 				for (const added of addedLines) {
-					result.push(theme.fg("toolDiffAdded", `+${added.lineNum} ${replaceTabs(added.content)}`));
+					result.push(renderDiffLine("+", added.lineNum, added.content, "toolDiffAdded", lang));
 				}
 			}
 		} else if (parsed.prefix === "+") {
 			// Standalone added line
-			result.push(theme.fg("toolDiffAdded", `+${parsed.lineNum} ${replaceTabs(parsed.content)}`));
+			result.push(renderDiffLine("+", parsed.lineNum, parsed.content, "toolDiffAdded", lang));
 			i++;
 		} else {
 			// Context line
-			result.push(theme.fg("toolDiffContext", ` ${parsed.lineNum} ${replaceTabs(parsed.content)}`));
+			result.push(renderDiffLine(" ", parsed.lineNum, parsed.content, "toolDiffContext", lang));
 			i++;
 		}
 	}

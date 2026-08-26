@@ -6,7 +6,7 @@ import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { createEditToolDefinition } from "../src/core/tools/edit.ts";
 import { computeEditsDiff, type Edit } from "../src/core/tools/edit-diff.ts";
 import { ToolExecutionComponent } from "../src/modes/interactive/components/tool-execution.ts";
-import { initTheme } from "../src/modes/interactive/theme/theme.ts";
+import { initTheme, theme } from "../src/modes/interactive/theme/theme.ts";
 
 class FakeTerminal implements Terminal {
 	columns = 80;
@@ -147,6 +147,29 @@ describe("edit tool TUI rendering", () => {
 		expect(settledRender).toContain("line 50 changed");
 		expect(settledRender).toContain("line 950 changed");
 		expect(settledRender).not.toContain("Successfully replaced");
+	});
+
+	it("syntax-highlights JavaScript edit previews like write previews", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "pi-edit-syntax-highlight-"));
+		tempDirs.push(dir);
+		const filePath = join(dir, "config.js");
+		await writeFile(filePath, "export const value = 1;\n", "utf8");
+		const edits = [{ oldText: "export const value = 1;", newText: "export const value = 2;" }];
+
+		const component = new ToolExecutionComponent(
+			"edit",
+			"tool-call-syntax-highlight",
+			{ path: filePath, edits },
+			{},
+			createEditToolDefinition(process.cwd()),
+			{ requestRender: () => {} } as unknown as TUI,
+			process.cwd(),
+		);
+		component.setArgsComplete();
+
+		const rendered = await waitForRenderedText(() => component.render(120).join("\n"), "value");
+		expect(rendered).toContain(theme.fg("syntaxKeyword", "export"));
+		expect(rendered).toContain(theme.fg("syntaxNumber", "2"));
 	});
 
 	it("reconstructs the boxed preview from a settled result without argsComplete", async () => {

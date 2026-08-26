@@ -267,8 +267,11 @@ function buildEditCallComponent(
 		return component;
 	}
 
+	const rawPath = str(args?.file_path ?? args?.path);
 	const body =
-		"error" in component.preview ? theme.fg("error", component.preview.error) : renderDiff(component.preview.diff);
+		"error" in component.preview
+			? theme.fg("error", component.preview.error)
+			: renderDiff(component.preview.diff, { filePath: rawPath ?? undefined });
 	component.addChild(new Spacer(1));
 	component.addChild(new Text(body, 0, 0));
 	return component;
