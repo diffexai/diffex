@@ -9,6 +9,7 @@ export const EVOLUTION_SCHEMA_VERSION = 1 as const;
 export const EVOLUTION_MEMORY_ITEM_SCHEMA_VERSION = 1 as const;
 export const COUNTER_OBSERVATION_SCHEMA_VERSION = 1 as const;
 export const COUNTER_REPORT_SCHEMA_VERSION = 1 as const;
+export const SKILL_CANDIDATE_REGISTRY_SCHEMA_VERSION = 1 as const;
 
 export type JsonPrimitive = boolean | number | string | null;
 export type JsonValue = JsonPrimitive | JsonObject | readonly JsonValue[];
@@ -515,6 +516,154 @@ export interface DeferredSkillCandidateFinding {
 	readonly skillability: SkillCandidate["skillability"];
 	readonly memoryRelationship: SkillCandidateMemoryRelationship;
 	readonly reason: string;
+}
+
+export type SkillCandidateState =
+	| "proposed"
+	| "evidence-qualified"
+	| "drafted"
+	| "structurally-valid"
+	| "evaluation-pending"
+	| "accepted"
+	| "quarantined"
+	| "rejected"
+	| "retired";
+
+export interface SkillCandidateRegistryWorkspace {
+	readonly repositoryId: string;
+	readonly directoryId?: string;
+	readonly evolutionScope: EvolutionScope;
+}
+
+export interface SkillCandidateGroupingProfile {
+	readonly workspace: SkillCandidateRegistryWorkspace;
+	readonly existingSkillIds: readonly string[];
+	readonly skillability: SkillabilityClassification;
+	readonly triggerTerms: readonly string[];
+	readonly proceduralIntentTerms: readonly string[];
+	readonly applicabilityTerms: readonly string[];
+}
+
+export interface SkillCandidateEvidenceContribution {
+	readonly supportingEvidenceIds: readonly string[];
+	readonly contradictingEvidenceIds: readonly string[];
+	readonly supportingTraceIds: readonly string[];
+	readonly contradictingTraceIds: readonly string[];
+	readonly supportingTaskLineageIds: readonly string[];
+	readonly contradictingTaskLineageIds: readonly string[];
+}
+
+export interface SkillCandidateProposalRevision {
+	readonly revisionId: string;
+	readonly candidateId: string;
+	readonly candidate: EvolutionArtifactReference;
+	readonly sourceEvolutionJobId: string;
+	readonly createdAt: string;
+	readonly evidence: SkillCandidateEvidenceContribution;
+}
+
+export interface SkillCandidatePriorityScoreComponents {
+	readonly independentSupport: number;
+	readonly evidenceBreadth: number;
+	readonly proceduralCompleteness: number;
+	readonly verificationCompleteness: number;
+	readonly scopeSpecificity: number;
+	readonly counterevidencePenalty: number;
+}
+
+export interface SkillCandidatePriorityScore {
+	readonly artifactKind: "skill-candidate-priority-score";
+	readonly metadata: EvolutionArtifactMetadata;
+	readonly scoreId: string;
+	readonly groupId: string;
+	readonly scorerVersion: string;
+	readonly evidencePriorityScore: number;
+	readonly scoreComponents: SkillCandidatePriorityScoreComponents;
+	readonly proposalRevisionIds: readonly string[];
+	readonly supportingTaskLineageIds: readonly string[];
+	readonly contradictingTaskLineageIds: readonly string[];
+}
+
+export interface SkillCandidateDispositionRecord {
+	readonly eventId: string;
+	readonly from: SkillCandidateState | null;
+	readonly to: SkillCandidateState;
+	readonly reasonCodes: readonly string[];
+	readonly createdAt: string;
+}
+
+export interface SkillCandidateGroup {
+	readonly groupId: string;
+	readonly profile: SkillCandidateGroupingProfile;
+	readonly proposalRevisions: readonly SkillCandidateProposalRevision[];
+	readonly state: SkillCandidateState;
+	readonly dispositionHistory: readonly SkillCandidateDispositionRecord[];
+	readonly evidence: SkillCandidateEvidenceContribution;
+	readonly priorityScore: EvolutionArtifactReference | null;
+	readonly synthesisIdempotencyKey: string;
+	readonly evaluationIdempotencyKey: string;
+}
+
+interface SkillCandidateRegistryEventBase {
+	readonly schemaVersion: typeof SKILL_CANDIDATE_REGISTRY_SCHEMA_VERSION;
+	readonly metadata: EvolutionArtifactMetadata;
+	readonly eventId: string;
+	readonly registrySequence: number;
+}
+
+export interface SkillCandidateProposalRecordedEvent extends SkillCandidateRegistryEventBase {
+	readonly type: "skill-candidate-proposal-recorded";
+	readonly groupId: string;
+	readonly profile: SkillCandidateGroupingProfile;
+	readonly proposalRevision: SkillCandidateProposalRevision;
+}
+
+export interface SkillCandidatePriorityScoredEvent extends SkillCandidateRegistryEventBase {
+	readonly type: "skill-candidate-priority-scored";
+	readonly groupId: string;
+	readonly score: EvolutionArtifactReference;
+}
+
+export interface SkillCandidateStateTransitionedEvent extends SkillCandidateRegistryEventBase {
+	readonly type: "skill-candidate-state-transitioned";
+	readonly groupId: string;
+	readonly from: SkillCandidateState | null;
+	readonly to: SkillCandidateState;
+	readonly reasonCodes: readonly string[];
+}
+
+export type SkillCandidateWorkStage = "consolidating" | "scoring" | "completed";
+
+export interface SkillCandidateWorkCheckpointedEvent extends SkillCandidateRegistryEventBase {
+	readonly type: "skill-candidate-work-checkpointed";
+	readonly workId: string;
+	readonly sourceEvolutionJobId: string;
+	readonly stage: SkillCandidateWorkStage;
+	readonly idempotencyKey: string;
+	readonly attempt: number;
+	readonly groupIds: readonly string[];
+}
+
+export interface SkillCandidateWorkFailedEvent extends SkillCandidateRegistryEventBase {
+	readonly type: "skill-candidate-work-failed";
+	readonly workId: string;
+	readonly sourceEvolutionJobId: string;
+	readonly idempotencyKey: string;
+	readonly attempt: number;
+	readonly message: string;
+	readonly retryNotBefore: string | null;
+}
+
+export type SkillCandidateRegistryEvent =
+	| SkillCandidateProposalRecordedEvent
+	| SkillCandidatePriorityScoredEvent
+	| SkillCandidateStateTransitionedEvent
+	| SkillCandidateWorkCheckpointedEvent
+	| SkillCandidateWorkFailedEvent;
+
+export interface SkillCandidateRegistrySnapshot {
+	readonly revision: number;
+	readonly events: readonly SkillCandidateRegistryEvent[];
 }
 
 export interface EvolutionMemoryTarget {

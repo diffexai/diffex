@@ -34,6 +34,10 @@ import type {
 	ReflectionNode,
 	ScoredProposal,
 	SkillCandidate,
+	SkillCandidateGroup,
+	SkillCandidatePriorityScore,
+	SkillCandidateRegistryEvent,
+	SkillCandidateRegistrySnapshot,
 	ValidationReport,
 } from "./contracts.ts";
 
@@ -52,6 +56,7 @@ export type EvolutionArtifact =
 	| ReflectionNode
 	| ScoredProposal
 	| SkillCandidate
+	| SkillCandidatePriorityScore
 	| DeferredSkillCandidateFinding
 	| ValidationReport;
 
@@ -253,6 +258,39 @@ export interface ProposalScorer {
 export interface EvolutionArtifactStore {
 	put(artifact: EvolutionArtifact): Promise<EvolutionArtifactReference>;
 	get(reference: EvolutionArtifactReference): Promise<EvolutionArtifact>;
+}
+
+export type SkillCandidateRegistryAppendResult = "committed" | "conflict";
+
+export interface SkillCandidateRegistryStore {
+	loadSkillCandidateRegistry(scope: EvolutionScope): Promise<SkillCandidateRegistrySnapshot>;
+	appendSkillCandidateRegistryEvents(
+		scope: EvolutionScope,
+		expectedRevision: number,
+		events: readonly SkillCandidateRegistryEvent[],
+	): Promise<SkillCandidateRegistryAppendResult>;
+}
+
+export interface SkillCandidateRegistryConsolidationInput {
+	readonly sourceEvolutionJobId: string;
+	readonly input: EvolutionInputSnapshot;
+	readonly candidates: readonly {
+		readonly candidate: SkillCandidate;
+		readonly reference: EvolutionArtifactReference;
+	}[];
+	readonly idempotencyKey: string;
+	readonly createdAt: string;
+	readonly signal?: AbortSignal;
+}
+
+export interface SkillCandidateRegistryConsolidationResult {
+	readonly groups: readonly SkillCandidateGroup[];
+	readonly changedGroupIds: readonly string[];
+}
+
+export interface SkillCandidateRegistry {
+	consolidate(input: SkillCandidateRegistryConsolidationInput): Promise<SkillCandidateRegistryConsolidationResult>;
+	list(scope: EvolutionScope): Promise<readonly SkillCandidateGroup[]>;
 }
 
 export interface EvolutionJobStore {
