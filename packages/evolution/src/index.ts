@@ -13,6 +13,7 @@ export {
 	type CounterSignal,
 	type CounterSignalSource,
 	type CuratorToolCallLedgerEvent,
+	type DeferredSkillCandidateFinding,
 	EVOLUTION_MEMORY_ITEM_SCHEMA_VERSION,
 	EVOLUTION_SCHEMA_VERSION,
 	type EvidenceCorpusDiagnostic,
@@ -116,6 +117,15 @@ export {
 	type ReflectorToolCallLedgerEvent,
 	type ScoredProposal,
 	type ScoredProposalDisposition,
+	type SkillabilityClassification,
+	type SkillCandidate,
+	type SkillCandidateFailureHandling,
+	type SkillCandidateMemoryRelationship,
+	type SkillCandidateOperation,
+	type SkillCandidateProcedureStep,
+	type SkillCandidateWorkspaceScope,
+	type SkillCuratorToolCallLedgerEvent,
+	type SkillMemoryRelationshipClassification,
 	type SkillTarget,
 	type ValidationIssue,
 	type ValidationReport,
@@ -217,6 +227,9 @@ export type {
 	ReflectionResult,
 	Reflector,
 	ReflectorInput,
+	SkillCurationResult,
+	SkillCurator,
+	SkillCuratorInput,
 	SuccessfulMaterialization,
 } from "./ports.ts";
 export {
@@ -250,6 +263,19 @@ export {
 	ReflectorToolRegistry,
 	type ReflectorToolRegistryOptions,
 } from "./reflector-tools.ts";
+export {
+	createSkillCuratorOutputSchema,
+	StructuredSkillCurator,
+	type StructuredSkillCuratorDependencies,
+	type StructuredSkillCuratorOptions,
+} from "./skill-curator.ts";
+export {
+	type SkillCuratorEvidenceBinding,
+	type SkillCuratorRecoverableToolDenial,
+	type SkillCuratorToolAudit,
+	SkillCuratorToolRegistry,
+	type SkillCuratorToolRegistryOptions,
+} from "./skill-curator-tools.ts";
 export {
 	EvolutionTargetAdapterRegistry,
 	type EvolutionTargetAdapterRegistryOptions,
