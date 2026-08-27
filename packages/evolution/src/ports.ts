@@ -1,6 +1,7 @@
 import type { MaterializedInvocation } from "@earendil-works/diffex-harness-trace";
 import type {
 	CounterReport,
+	DeferredSkillCandidateFinding,
 	EvidenceCorpusManifest,
 	EvidenceCoverageMap,
 	EvolutionArtifactReference,
@@ -32,6 +33,7 @@ import type {
 	MutationWriteReceipt,
 	ReflectionNode,
 	ScoredProposal,
+	SkillCandidate,
 	ValidationReport,
 } from "./contracts.ts";
 
@@ -49,6 +51,8 @@ export type EvolutionArtifact =
 	| MutationWriteReceipt
 	| ReflectionNode
 	| ScoredProposal
+	| SkillCandidate
+	| DeferredSkillCandidateFinding
 	| ValidationReport;
 
 export interface EvolutionClock {
@@ -102,7 +106,19 @@ export interface CuratorModelRequest {
 	readonly signal?: AbortSignal;
 }
 
-export type EvolutionModelRequest = CuratorModelRequest | ReflectorModelRequest;
+export interface SkillCuratorModelRequest {
+	readonly stage: "skill-curator";
+	readonly model: EvolutionModelIdentity;
+	readonly promptVersion: string;
+	readonly idempotencyKey: string;
+	readonly input: JsonObject;
+	readonly outputSchema: JsonObject;
+	readonly tools: readonly EvolutionModelTool[];
+	readonly validateOutput?: (output: JsonObject) => void;
+	readonly signal?: AbortSignal;
+}
+
+export type EvolutionModelRequest = CuratorModelRequest | ReflectorModelRequest | SkillCuratorModelRequest;
 
 export interface EvolutionModelResponse {
 	readonly output: JsonObject;
@@ -191,6 +207,26 @@ export interface CuratorInput {
 
 export interface Curator {
 	curate(input: CuratorInput): Promise<readonly EvolutionProposal[]>;
+}
+
+export interface SkillCuratorInput {
+	readonly jobId: string;
+	readonly input: EvolutionInputSnapshot;
+	readonly corpus: EvidenceCorpusManifest;
+	readonly reflection: ReflectionResult;
+	readonly selectedMemoryProposals: readonly ScoredProposal[];
+	readonly model: EvolutionModelExecutor;
+	readonly idempotencyKey: string;
+	readonly signal?: AbortSignal;
+}
+
+export interface SkillCurationResult {
+	readonly candidates: readonly SkillCandidate[];
+	readonly deferredFindings: readonly DeferredSkillCandidateFinding[];
+}
+
+export interface SkillCurator {
+	curate(input: SkillCuratorInput): Promise<SkillCurationResult>;
 }
 
 export interface ProposalValidationInput {
