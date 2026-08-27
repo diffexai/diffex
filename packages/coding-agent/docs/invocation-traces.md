@@ -46,6 +46,17 @@ Each fact has one authoritative source so a trace remains compact and materializ
 Agent and extension events remain live notification APIs.
 Their durable facts are represented by the owning session entry, session record, or telemetry span listed above rather than by copying event payloads into the trace.
 
+Prompt and queue operation spans record one event per immutable skill identity for these observable facts:
+
+- `diffex.skill.available`: the installed or evolved version was available when the request was admitted
+- `diffex.skill.listed`: the version appeared in the system prompt sent to the model
+- `diffex.skill.selected`: an automatic selector returned the version, when such a selector is used
+- `diffex.skill.explicitly_referenced`: the admitted user request contained its versioned reference
+- `diffex.skill.force_loaded`: a `/skills` reference expanded its captured content into the request
+- `diffex.skill.read`: the model-callable `read` tool successfully read content whose path and digest match the catalog version
+
+Each event includes the skill ID, version, content digest, source kind, source, scope, and, when configured, the active workspace identity and applicable skill and active harness revisions. Prompt spans carry the top-level task-lineage identifier, and queue spans admitted during a task remain nested beneath that prompt; retries, tool calls, subagents, and repeated reads therefore remain observable within the same top-level lineage. Tool results and terminal operation outcomes remain independent evidence. Traces never emit an inferred `used` event or treat listing, selection, loading, reading, or co-occurrence as proof that a skill caused an outcome.
+
 Startup and configuration failures are recorded as runtime diagnostic spans after trace creation.
 Failures that prevent trace creation remain an explicit limitation because no durable trace destination exists.
 

@@ -67,9 +67,10 @@ For project-level Claude Code skills, add to `.diffex/settings.json`:
 2. The system prompt includes available skills in XML format per the [specification](https://agentskills.io/integrate-skills).
 3. When a task matches, the agent uses `read` to load the full SKILL.md (models don't always do this; use `/skills` to reference it explicitly).
 4. Explicit references use the catalog's captured version, so a file change does not alter a request that has already been admitted. Reload resources to catalog a changed installed skill.
-5. The agent follows the instructions, using relative paths to reference scripts and assets.
+5. Invocation traces record availability, model listing, explicit references, `/skills` force-loading, and digest-matched reads as separate facts for the exact catalog version.
+6. The agent follows the instructions, using relative paths to reference scripts and assets.
 
-This is progressive disclosure: only names, descriptions, and locations are always in context; full instructions load on-demand. The TUI, system prompt, SDK, and evolution snapshots all read from the same catalog.
+This is progressive disclosure: only names, descriptions, and locations are always in context; full instructions load on-demand. The TUI, system prompt, SDK, and evolution snapshots all read from the same catalog. Trace observations do not infer that a skill was used or caused an outcome.
 
 ## Skill Commands
 
