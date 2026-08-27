@@ -369,13 +369,13 @@ function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-interface ParsedSkillFrontmatter {
+export interface HarnessSkillContentMetadata {
 	readonly name: string;
 	readonly description: string;
 	readonly disableModelInvocation: boolean;
 }
 
-function parseSkillFrontmatter(content: string, artifactPath: string): ParsedSkillFrontmatter {
+function parseSkillFrontmatter(content: string, artifactPath: string): HarnessSkillContentMetadata {
 	const match = /^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/.exec(content);
 	if (match === null) throw new Error(`Harness skill "${artifactPath}" must start with YAML frontmatter`);
 	let parsed: unknown;
@@ -425,6 +425,16 @@ function validateArtifactPath(path: string): void {
 			throw new Error(`Harness artifact path "${path}" is not portable across supported platforms`);
 		}
 	}
+}
+
+export function validateHarnessSkillContent(path: string, content: string): HarnessSkillContentMetadata {
+	if (!Check(SkillContentSchema, content)) throw new Error(`Harness skill "${path}" has invalid content`);
+	validateArtifactPath(path);
+	const frontmatter = parseSkillFrontmatter(content, path);
+	if (path !== `skills/${frontmatter.name}/SKILL.md`) {
+		throw new Error(`Harness skill "${path}" name does not match its canonical path`);
+	}
+	return frontmatter;
 }
 
 async function inspectBundleRoot(bundlePath: string): Promise<void> {
@@ -582,10 +592,7 @@ export async function loadHarnessState(bundlePath: string): Promise<HarnessVersi
 		const bytes = artifactBytes.get(artifact.path);
 		if (bytes === undefined) throw new Error(`Harness skill is missing at "${artifactPath}"`);
 		const content = decodeUtf8(bytes, artifactPath);
-		const frontmatter = parseSkillFrontmatter(content, artifact.path);
-		if (artifact.path !== `skills/${frontmatter.name}/SKILL.md`) {
-			throw new Error(`Harness skill "${artifact.path}" name does not match its canonical path`);
-		}
+		const frontmatter = validateHarnessSkillContent(artifact.path, content);
 		if (skillNames.has(frontmatter.name)) {
 			throw new Error(`Harness skill name collision for "${frontmatter.name}"`);
 		}
@@ -669,12 +676,8 @@ function prepareHarnessState(input: HarnessStateInput, bundlePath: string): Prep
 	const skillArtifacts: HarnessArtifactManifest[] = [];
 	const skillNames = new Set<string>();
 	for (const inputSkill of [...(input.skills ?? [])].sort((left, right) => compareText(left.path, right.path))) {
-		validateArtifactPath(inputSkill.path);
+		const frontmatter = validateHarnessSkillContent(inputSkill.path, inputSkill.content);
 		const contentBytes = UTF8_ENCODER.encode(inputSkill.content);
-		const frontmatter = parseSkillFrontmatter(inputSkill.content, inputSkill.path);
-		if (inputSkill.path !== `skills/${frontmatter.name}/SKILL.md`) {
-			throw new Error(`Harness skill "${inputSkill.path}" name does not match its canonical path`);
-		}
 		if (skillNames.has(frontmatter.name)) {
 			throw new Error(`Harness skill name collision for "${frontmatter.name}"`);
 		}

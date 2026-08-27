@@ -31,6 +31,7 @@ import {
 	loadHarnessState,
 	saveHarnessState,
 	serializeHarnessVersion,
+	validateHarnessSkillContent,
 } from "../src/index.ts";
 
 const temporaryRoots: string[] = [];
@@ -207,6 +208,20 @@ describe("canonical harness versions", () => {
 				artifacts: [original],
 			}),
 		).not.toBe(version);
+	});
+
+	test("validates an in-memory skill with the same canonical rules as a bundle", () => {
+		const content = skillContent("focused-review");
+
+		expect(validateHarnessSkillContent("skills/focused-review/SKILL.md", content)).toEqual({
+			name: "focused-review",
+			description: "Use focused-review for focused work.",
+			disableModelInvocation: false,
+		});
+		expect(() => validateHarnessSkillContent("skills/other/SKILL.md", content)).toThrow(/canonical path/i);
+		expect(() => validateHarnessSkillContent("skills/focused-review/SKILL.md", `\uFEFF${content}`)).toThrow(
+			/invalid content/i,
+		);
 	});
 
 	test("exports strict schemas", () => {
