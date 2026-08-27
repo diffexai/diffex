@@ -98,6 +98,7 @@ export interface CuratorModelRequest {
 	readonly input: JsonObject;
 	readonly outputSchema: JsonObject;
 	readonly tools: readonly EvolutionModelTool[];
+	readonly validateOutput?: (output: JsonObject) => void;
 	readonly signal?: AbortSignal;
 }
 

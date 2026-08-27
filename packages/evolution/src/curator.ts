@@ -59,6 +59,47 @@ export function createCuratorOutputSchema(references: CuratorSchemaReferences): 
 		minItems,
 		items: { type: "string", enum: values },
 	});
+	const proposalRequired = [
+		"target",
+		"action",
+		"exactDelta",
+		"expectedBenefit",
+		"acceptanceCriterion",
+		"risk",
+		"rollbackDescription",
+		"curatorConfidence",
+		"uncertainty",
+		"counterexamples",
+		"conflictingDecisionKeys",
+		"finding",
+	];
+	const proposalProperties = {
+		expectedBenefit: { type: "string", minLength: 1 },
+		acceptanceCriterion: { type: "string", minLength: 1 },
+		risk: { type: "string", minLength: 1 },
+		rollbackDescription: { type: "string", minLength: 1 },
+		curatorConfidence: { type: "number", minimum: 0, maximum: 1 },
+		uncertainty: { type: ["string", "null"] },
+		counterexamples: stringArray,
+		conflictingDecisionKeys: stringArray,
+	};
+	const proposalVariant = (
+		target: JsonObject,
+		action: ProposalDraft["action"],
+		exactDelta: JsonObject,
+		finding: JsonObject,
+	): JsonObject => ({
+		type: "object",
+		additionalProperties: false,
+		required: proposalRequired,
+		properties: {
+			...proposalProperties,
+			target,
+			action: { enum: [action] },
+			exactDelta,
+			finding,
+		},
+	});
 	return {
 		$defs: {
 			relevance: {
@@ -106,33 +147,29 @@ export function createCuratorOutputSchema(references: CuratorSchemaReferences): 
 					strengthening: { $ref: "#/$defs/strengthening" },
 				},
 			},
-			target: {
-				anyOf: [
-					{
-						type: "object",
-						additionalProperties: false,
-						required: ["kind"],
-						properties: { kind: { enum: ["evolution-memory"] } },
-					},
-					{
-						type: "object",
-						additionalProperties: false,
-						required: ["kind", "skillName"],
-						properties: {
-							kind: { enum: ["skill"] },
-							skillName: { type: "string", minLength: 1 },
-						},
-					},
-					{
-						type: "object",
-						additionalProperties: false,
-						required: ["kind", "sourcePath"],
-						properties: {
-							kind: { enum: ["orchestration-source"] },
-							sourcePath: { type: "string", minLength: 1 },
-						},
-					},
-				],
+			evolutionMemoryTarget: {
+				type: "object",
+				additionalProperties: false,
+				required: ["kind"],
+				properties: { kind: { enum: ["evolution-memory"] } },
+			},
+			skillTarget: {
+				type: "object",
+				additionalProperties: false,
+				required: ["kind", "skillName"],
+				properties: {
+					kind: { enum: ["skill"] },
+					skillName: { type: "string", minLength: 1 },
+				},
+			},
+			orchestrationSourceTarget: {
+				type: "object",
+				additionalProperties: false,
+				required: ["kind", "sourcePath"],
+				properties: {
+					kind: { enum: ["orchestration-source"] },
+					sourcePath: { type: "string", minLength: 1 },
+				},
 			},
 			destination: {
 				type: "object",
@@ -142,16 +179,16 @@ export function createCuratorOutputSchema(references: CuratorSchemaReferences): 
 					section: { type: ["string", "null"] },
 					anchor: {
 						enum: [null, ...references.memoryRefs],
-						description: "Existing memory item reference to insert after, or null to append within the section.",
+						description:
+							"Existing memory item reference to insert after, null to append within a named section, or null with a null section to append globally.",
 					},
 				},
 			},
 			addition: {
 				type: "object",
 				additionalProperties: false,
-				required: ["destination", "content", "intendedScope"],
+				required: ["content", "intendedScope"],
 				properties: {
-					destination: { $ref: "#/$defs/destination" },
 					content: {
 						type: "string",
 						minLength: 1,
@@ -169,77 +206,74 @@ export function createCuratorOutputSchema(references: CuratorSchemaReferences): 
 					reason: { type: "string", minLength: 1 },
 				},
 			},
-			exactDelta: {
-				anyOf: [
-					{
-						type: "object",
-						additionalProperties: false,
-						required: ["operation", "destination", "content", "intendedScope"],
-						properties: {
-							operation: { enum: ["ADD"] },
-							destination: { $ref: "#/$defs/destination" },
-							content: {
-								type: "string",
-								minLength: 1,
-								description: "Lesson prose of at most three sentences. Omit the deterministic Lesson number.",
-							},
-							intendedScope: stringArray,
-						},
-					},
-					{
-						type: "object",
-						additionalProperties: false,
-						required: ["operation", "memoryRef", "reason"],
-						properties: {
-							operation: { enum: ["REMOVE"] },
-							memoryRef: { type: "string", enum: references.memoryRefs },
-							reason: { type: "string", minLength: 1 },
-						},
-					},
-					{
-						type: "object",
-						additionalProperties: false,
-						required: ["operation", "removal", "addition"],
-						properties: {
-							operation: { enum: ["REPLACE"] },
-							removal: { $ref: "#/$defs/removal" },
-							addition: { $ref: "#/$defs/addition" },
-						},
-					},
-					{ type: "null" },
-				],
-			},
-			proposal: {
+			addDelta: {
 				type: "object",
 				additionalProperties: false,
-				required: [
-					"target",
-					"action",
-					"exactDelta",
-					"expectedBenefit",
-					"acceptanceCriterion",
-					"risk",
-					"rollbackDescription",
-					"curatorConfidence",
-					"uncertainty",
-					"counterexamples",
-					"conflictingDecisionKeys",
-					"finding",
-				],
+				required: ["operation", "destination", "content", "intendedScope"],
 				properties: {
-					target: { $ref: "#/$defs/target" },
-					action: { enum: ["ADD", "DEFER", "REMOVE", "REPLACE"] },
-					exactDelta: { $ref: "#/$defs/exactDelta" },
-					expectedBenefit: { type: "string", minLength: 1 },
-					acceptanceCriterion: { type: "string", minLength: 1 },
-					risk: { type: "string", minLength: 1 },
-					rollbackDescription: { type: "string", minLength: 1 },
-					curatorConfidence: { type: "number", minimum: 0, maximum: 1 },
-					uncertainty: { type: ["string", "null"] },
-					counterexamples: stringArray,
-					conflictingDecisionKeys: stringArray,
-					finding: { type: ["string", "null"] },
+					operation: { enum: ["ADD"] },
+					destination: { $ref: "#/$defs/destination" },
+					content: {
+						type: "string",
+						minLength: 1,
+						description: "Lesson prose of at most three sentences. Omit the deterministic Lesson number.",
+					},
+					intendedScope: stringArray,
 				},
+			},
+			removeDelta: {
+				type: "object",
+				additionalProperties: false,
+				required: ["operation", "memoryRef", "reason"],
+				properties: {
+					operation: { enum: ["REMOVE"] },
+					memoryRef: { type: "string", enum: references.memoryRefs },
+					reason: { type: "string", minLength: 1 },
+				},
+			},
+			replaceDelta: {
+				type: "object",
+				additionalProperties: false,
+				required: ["operation", "removal", "addition"],
+				properties: {
+					operation: { enum: ["REPLACE"] },
+					removal: { $ref: "#/$defs/removal" },
+					addition: { $ref: "#/$defs/addition" },
+				},
+			},
+			proposal: {
+				anyOf: [
+					proposalVariant(
+						{ $ref: "#/$defs/evolutionMemoryTarget" },
+						"ADD",
+						{ $ref: "#/$defs/addDelta" },
+						{ type: "null" },
+					),
+					proposalVariant(
+						{ $ref: "#/$defs/evolutionMemoryTarget" },
+						"REMOVE",
+						{ $ref: "#/$defs/removeDelta" },
+						{ type: "null" },
+					),
+					proposalVariant(
+						{ $ref: "#/$defs/evolutionMemoryTarget" },
+						"REPLACE",
+						{ $ref: "#/$defs/replaceDelta" },
+						{ type: "null" },
+					),
+					proposalVariant(
+						{ $ref: "#/$defs/skillTarget" },
+						"DEFER",
+						{ type: "null" },
+						{ type: "string", minLength: 1 },
+					),
+					proposalVariant(
+						{ $ref: "#/$defs/orchestrationSourceTarget" },
+						"DEFER",
+						{ type: "null" },
+						{ type: "string", minLength: 1 },
+					),
+				],
 			},
 		},
 		type: "object",
@@ -301,6 +335,74 @@ interface EvidenceContext {
 
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+interface CuratorDecisionValidationIssue {
+	readonly decisionKey: string | null;
+	readonly path: string;
+	readonly message: string;
+	readonly invalidReferences: readonly string[];
+	readonly permittedReferences: readonly string[];
+}
+
+class CuratorFieldValidationError extends Error {
+	readonly path: string;
+	readonly validationCause: unknown;
+
+	constructor(path: string, validationCause: unknown) {
+		super(validationCause instanceof Error ? validationCause.message : "Response validation failed");
+		this.name = "CuratorFieldValidationError";
+		this.path = path;
+		this.validationCause = validationCause;
+	}
+}
+
+class CuratorOutputValidationError extends Error {
+	readonly issues: readonly CuratorDecisionValidationIssue[];
+	readonly invalidReferences: readonly string[];
+	readonly permittedReferences: readonly string[];
+
+	constructor(issues: readonly CuratorDecisionValidationIssue[]) {
+		super(
+			issues
+				.map(
+					(issue) =>
+						`${issue.decisionKey === null ? "Decision" : `Decision "${issue.decisionKey}"`} at ${issue.path}: ${issue.message}`,
+				)
+				.join("\n"),
+		);
+		this.name = "CuratorOutputValidationError";
+		this.issues = issues;
+		this.invalidReferences = unique(issues.flatMap((issue) => issue.invalidReferences));
+		this.permittedReferences = unique(issues.flatMap((issue) => issue.permittedReferences));
+	}
+}
+
+function atPath<T>(path: string, parse: () => T): T {
+	try {
+		return parse();
+	} catch (error) {
+		if (error instanceof CuratorFieldValidationError) {
+			throw new CuratorFieldValidationError(`${path}.${error.path}`, error.validationCause);
+		}
+		throw new CuratorFieldValidationError(path, error);
+	}
+}
+
+function decisionValidationIssue(
+	error: unknown,
+	index: number,
+	decisionKey: string | null,
+): CuratorDecisionValidationIssue {
+	const fieldError = error instanceof CuratorFieldValidationError ? error : null;
+	const cause = fieldError?.validationCause ?? error;
+	return {
+		decisionKey,
+		path: `decisions[${String(index)}]${fieldError === null ? "" : `.${fieldError.path}`}`,
+		message: cause instanceof Error ? cause.message : "Response validation failed",
+		invalidReferences: cause instanceof EvolutionModelReferenceError ? cause.invalidReferences : [],
+		permittedReferences: cause instanceof EvolutionModelReferenceError ? cause.permittedReferences : [],
+	};
 }
 
 function unique<T>(values: readonly T[]): T[] {
@@ -463,21 +565,14 @@ function target(value: unknown, input: CuratorInput): EvolutionTarget {
 	throw new Error(`Unsupported target kind "${String(value.kind)}"`);
 }
 
-function addition(value: unknown, registry: CuratorToolRegistry, nested = false): EvolutionMemoryAddDelta {
+function addition(value: unknown, registry: CuratorToolRegistry): EvolutionMemoryAddDelta {
 	if (!isRecord(value)) throw new Error("ADD exactDelta must be an object");
-	assertOnlyFields(
-		value,
-		nested ? ["destination", "content", "intendedScope"] : ["operation", "destination", "content", "intendedScope"],
-		"ADD exactDelta",
-	);
-	if (!nested && value.operation !== "ADD") throw new Error("ADD exactDelta operation must be ADD");
+	assertOnlyFields(value, ["operation", "destination", "content", "intendedScope"], "ADD exactDelta");
+	if (value.operation !== "ADD") throw new Error("ADD exactDelta operation must be ADD");
 	if (!isRecord(value.destination)) throw new Error("ADD destination must be an object");
 	assertOnlyFields(value.destination, ["section", "anchor"], "ADD destination");
 	const section = nullableString(value.destination, "section");
 	const anchorReference = nullableString(value.destination, "anchor");
-	if (section === null && anchorReference === null) {
-		throw new Error("ADD must identify a destination section or anchor");
-	}
 	const anchorBinding = anchorReference === null ? null : registry.memory.resolve(anchorReference, "anchor");
 	if (section !== null && anchorBinding !== null && anchorBinding.block.section !== section) {
 		throw new Error(`ADD anchor "${anchorReference}" is outside section "${section}"`);
@@ -515,16 +610,19 @@ function replacement(value: unknown, registry: CuratorToolRegistry): EvolutionMe
 	assertOnlyFields(value, ["operation", "removal", "addition"], "REPLACE exactDelta");
 	if (value.operation !== "REPLACE") throw new Error("REPLACE exactDelta operation must be REPLACE");
 	const parsedRemoval = removal(value.removal, registry, true);
-	const parsedAddition = addition(value.addition, registry, true);
-	if (
-		parsedAddition.destination.anchor !== null &&
-		computeEvolutionContentDigest(parsedAddition.destination.anchor) === parsedRemoval.expectedContentDigest
-	) {
-		throw new Error("REPLACE addition cannot anchor to the memory item being removed");
-	}
+	if (!isRecord(value.addition)) throw new Error("REPLACE addition must be an object");
+	assertOnlyFields(value.addition, ["content", "intendedScope"], "REPLACE addition");
+	const content = requiredString(value.addition, "content");
+	assertEvolutionMemoryLessonContent(content);
 	const { operation: _removeOperation, ...removalDelta } = parsedRemoval;
-	const { operation: _addOperation, ...additionDelta } = parsedAddition;
-	return { operation: "REPLACE", removal: removalDelta, addition: additionDelta };
+	return {
+		operation: "REPLACE",
+		removal: removalDelta,
+		addition: {
+			content,
+			intendedScope: stringArray(value.addition.intendedScope, "intendedScope", false),
+		},
+	};
 }
 
 function delta(
@@ -568,39 +666,51 @@ function proposalDraft(
 		],
 		"proposal",
 	);
-	const parsedTarget = target(value.target, input);
-	const action = value.action;
-	if (action !== "ADD" && action !== "DEFER" && action !== "REMOVE" && action !== "REPLACE") {
-		throw new Error(`Unsupported proposal action "${String(action)}"`);
-	}
+	const parsedTarget = atPath("target", () => target(value.target, input));
+	const action = atPath("action", () => {
+		if (
+			value.action !== "ADD" &&
+			value.action !== "DEFER" &&
+			value.action !== "REMOVE" &&
+			value.action !== "REPLACE"
+		) {
+			throw new Error(`Unsupported proposal action "${String(value.action)}"`);
+		}
+		return value.action;
+	});
 	if (parsedTarget.kind === "evolution-memory" && action === "DEFER") {
 		throw new Error("Evolution memory proposals must contain an executable delta");
 	}
 	if (parsedTarget.kind !== "evolution-memory" && action !== "DEFER") {
 		throw new Error(`Target "${parsedTarget.kind}" must be deferred`);
 	}
-	const finding = value.finding;
-	if (action === "DEFER") {
-		if (typeof finding !== "string" || finding.length === 0)
-			throw new Error("Deferred proposals must include a finding");
-	} else if (finding !== null) {
-		throw new Error("Actionable proposal finding must be null");
-	}
+	const finding = atPath("finding", () => {
+		if (action === "DEFER") {
+			if (typeof value.finding !== "string" || value.finding.length === 0) {
+				throw new Error("Deferred proposals must include a finding");
+			}
+		} else if (value.finding !== null) {
+			throw new Error("Actionable proposal finding must be null");
+		}
+		return value.finding;
+	});
 	return {
 		decisionKey,
 		lessonIds,
 		relationship: parsedRelationship,
 		target: parsedTarget,
 		action,
-		exactDelta: delta(value.exactDelta, action, registry),
-		expectedBenefit: requiredString(value, "expectedBenefit"),
-		acceptanceCriterion: requiredString(value, "acceptanceCriterion"),
-		risk: requiredString(value, "risk"),
-		rollbackDescription: requiredString(value, "rollbackDescription"),
-		curatorConfidence: confidence(value.curatorConfidence),
-		uncertainty: nullableString(value, "uncertainty"),
-		counterexamples: stringArray(value.counterexamples, "counterexamples"),
-		conflictingDecisionKeys: stringArray(value.conflictingDecisionKeys, "conflictingDecisionKeys"),
+		exactDelta: atPath("exactDelta", () => delta(value.exactDelta, action, registry)),
+		expectedBenefit: atPath("expectedBenefit", () => requiredString(value, "expectedBenefit")),
+		acceptanceCriterion: atPath("acceptanceCriterion", () => requiredString(value, "acceptanceCriterion")),
+		risk: atPath("risk", () => requiredString(value, "risk")),
+		rollbackDescription: atPath("rollbackDescription", () => requiredString(value, "rollbackDescription")),
+		curatorConfidence: atPath("curatorConfidence", () => confidence(value.curatorConfidence)),
+		uncertainty: atPath("uncertainty", () => nullableString(value, "uncertainty")),
+		counterexamples: atPath("counterexamples", () => stringArray(value.counterexamples, "counterexamples")),
+		conflictingDecisionKeys: atPath("conflictingDecisionKeys", () =>
+			stringArray(value.conflictingDecisionKeys, "conflictingDecisionKeys"),
+		),
 		finding: typeof finding === "string" ? finding : null,
 	};
 }
@@ -673,85 +783,123 @@ function assertLessonEvidence(lessons: readonly Lesson[], index: ReadonlyMap<str
 }
 
 function parseDecisions(
-	response: EvolutionModelResponse,
+	output: JsonObject,
 	input: CuratorInput,
 	registry: CuratorToolRegistry,
 ): readonly ProposalDraft[] {
-	assertOnlyFields(response.output, ["decisions"], "Curator response");
-	if (!Array.isArray(response.output.decisions)) throw new Error("Curator response decisions must be an array");
+	assertOnlyFields(output, ["decisions"], "Curator response");
+	if (!Array.isArray(output.decisions)) throw new Error("Curator response decisions must be an array");
 	const seenDecisionKeys = new Set<string>();
 	const drafts: ProposalDraft[] = [];
-	for (const value of response.output.decisions) {
-		if (!isRecord(value)) throw new Error("Curator decision must be an object");
-		assertOnlyFields(
-			value,
-			["decisionKey", "lessonRefs", "relevance", "relationship", "proposal"],
-			"Curator decision",
-		);
-		const decisionKey = requiredString(value, "decisionKey");
-		if (!PROPOSAL_ID_PATTERN.test(decisionKey)) throw new Error(`Invalid decision key "${decisionKey}"`);
-		if (seenDecisionKeys.has(decisionKey)) throw new Error(`Duplicate decision key "${decisionKey}"`);
-		seenDecisionKeys.add(decisionKey);
-		if (!isRecord(value.relevance)) throw new Error("relevance must be an object");
-		assertOnlyFields(
-			value.relevance,
-			[
-				"userTaskOrFailure",
-				"causalAgentBehavior",
-				"futureBehaviorChange",
-				"verifiableExpectedResult",
-				"observerDocumentationOnly",
-				"telemetryFormatOnly",
-			],
-			"relevance",
-		);
-		for (const field of [
-			"userTaskOrFailure",
-			"causalAgentBehavior",
-			"futureBehaviorChange",
-			"verifiableExpectedResult",
-		] as const) {
-			requiredString(value.relevance, field);
-		}
-		if (value.relevance.observerDocumentationOnly !== false || value.relevance.telemetryFormatOnly !== false) {
-			throw new Error("Observer documentation and telemetry-format facts are not actionable evolution memory");
-		}
-		const selectedLessons = referenceArray(value.lessonRefs, "lessonRefs", registry.lessons, { allowEmpty: false });
-		const parsedRelationship = relationship(value.relationship, registry);
-		if (parsedRelationship.classification === "duplicate" || parsedRelationship.classification === "conflicts") {
-			if (value.proposal !== null) {
-				throw new Error(`${parsedRelationship.classification} decisions must not contain a proposal`);
+	const draftIndexes = new Map<string, number>();
+	const issues: CuratorDecisionValidationIssue[] = [];
+	for (const [index, value] of output.decisions.entries()) {
+		let decisionKey = isRecord(value) && typeof value.decisionKey === "string" ? value.decisionKey : null;
+		try {
+			if (!isRecord(value)) throw new Error("Curator decision must be an object");
+			assertOnlyFields(
+				value,
+				["decisionKey", "lessonRefs", "relevance", "relationship", "proposal"],
+				"Curator decision",
+			);
+			decisionKey = atPath("decisionKey", () => {
+				const parsed = requiredString(value, "decisionKey");
+				if (!PROPOSAL_ID_PATTERN.test(parsed)) throw new Error(`Invalid decision key "${parsed}"`);
+				if (seenDecisionKeys.has(parsed)) throw new Error(`Duplicate decision key "${parsed}"`);
+				return parsed;
+			});
+			seenDecisionKeys.add(decisionKey);
+			atPath("relevance", () => {
+				if (!isRecord(value.relevance)) throw new Error("relevance must be an object");
+				assertOnlyFields(
+					value.relevance,
+					[
+						"userTaskOrFailure",
+						"causalAgentBehavior",
+						"futureBehaviorChange",
+						"verifiableExpectedResult",
+						"observerDocumentationOnly",
+						"telemetryFormatOnly",
+					],
+					"relevance",
+				);
+				for (const field of [
+					"userTaskOrFailure",
+					"causalAgentBehavior",
+					"futureBehaviorChange",
+					"verifiableExpectedResult",
+				] as const) {
+					requiredString(value.relevance, field);
+				}
+				if (value.relevance.observerDocumentationOnly !== false || value.relevance.telemetryFormatOnly !== false) {
+					throw new Error("Observer documentation and telemetry-format facts are not actionable evolution memory");
+				}
+			});
+			const selectedLessons = atPath("lessonRefs", () =>
+				referenceArray(value.lessonRefs, "lessonRefs", registry.lessons, { allowEmpty: false }),
+			);
+			const parsedRelationship = atPath("relationship", () => relationship(value.relationship, registry));
+			if (parsedRelationship.classification === "duplicate" || parsedRelationship.classification === "conflicts") {
+				if (value.proposal !== null) {
+					throw new CuratorFieldValidationError(
+						"proposal",
+						new Error(`${parsedRelationship.classification} decisions must not contain a proposal`),
+					);
+				}
+				continue;
 			}
-			continue;
+			if (value.proposal === null) {
+				throw new CuratorFieldValidationError(
+					"proposal",
+					new Error(`${parsedRelationship.classification} decisions require a proposal`),
+				);
+			}
+			const actionableRelationship: EvolutionProposalInstructionRelationship = {
+				classification: parsedRelationship.classification,
+				relevantEntries: parsedRelationship.relevantEntries,
+				strengthening: parsedRelationship.strengthening,
+			};
+			const draft = atPath("proposal", () =>
+				proposalDraft(
+					value.proposal,
+					decisionKey as string,
+					selectedLessons.map((lesson) => lesson.lessonId),
+					actionableRelationship,
+					input,
+					registry,
+				),
+			);
+			drafts.push(draft);
+			draftIndexes.set(draft.decisionKey, index);
+		} catch (error) {
+			issues.push(decisionValidationIssue(error, index, decisionKey));
 		}
-		if (value.proposal === null) throw new Error(`${parsedRelationship.classification} decisions require a proposal`);
-		const actionableRelationship: EvolutionProposalInstructionRelationship = {
-			classification: parsedRelationship.classification,
-			relevantEntries: parsedRelationship.relevantEntries,
-			strengthening: parsedRelationship.strengthening,
-		};
-		drafts.push(
-			proposalDraft(
-				value.proposal,
-				decisionKey,
-				selectedLessons.map((lesson) => lesson.lessonId),
-				actionableRelationship,
-				input,
-				registry,
-			),
-		);
 	}
 	const emittedDecisionKeys = new Set(drafts.map((draft) => draft.decisionKey));
 	for (const draft of drafts) {
-		for (const conflictingDecisionKey of draft.conflictingDecisionKeys) {
+		for (const [conflictIndex, conflictingDecisionKey] of draft.conflictingDecisionKeys.entries()) {
 			if (conflictingDecisionKey === draft.decisionKey) {
-				throw new Error(`Decision "${draft.decisionKey}" cannot conflict with itself`);
+				issues.push({
+					decisionKey: draft.decisionKey,
+					path: `decisions[${String(draftIndexes.get(draft.decisionKey) ?? 0)}].proposal.conflictingDecisionKeys[${String(conflictIndex)}]`,
+					message: `Decision "${draft.decisionKey}" cannot conflict with itself`,
+					invalidReferences: [],
+					permittedReferences: [],
+				});
+				continue;
 			}
 			if (!emittedDecisionKeys.has(conflictingDecisionKey)) {
-				throw new Error(`Decision "${draft.decisionKey}" cites unknown conflict "${conflictingDecisionKey}"`);
+				issues.push({
+					decisionKey: draft.decisionKey,
+					path: `decisions[${String(draftIndexes.get(draft.decisionKey) ?? 0)}].proposal.conflictingDecisionKeys[${String(conflictIndex)}]`,
+					message: `Decision "${draft.decisionKey}" cites unknown conflict "${conflictingDecisionKey}"`,
+					invalidReferences: [],
+					permittedReferences: [],
+				});
 			}
 		}
 	}
+	if (issues.length > 0) throw new CuratorOutputValidationError(issues);
 	return drafts;
 }
 
@@ -963,7 +1111,7 @@ function modelInput(input: CuratorInput, registry: CuratorToolRegistry, response
 			memoryOperations: ["ADD", "REMOVE", "REPLACE"],
 			additionAnchorReferences: registry.memory.references,
 			additionAnchorRule:
-				"Use an existing memoryRef to insert after that item, or null to append within the named section. Sentinels such as end are invalid.",
+				"Use an existing memoryRef to insert after that item, null to append within a named section, or null with a null section to append globally. Sentinels such as end are invalid.",
 			deferredTargets: ["skill", "orchestration-source"],
 			maxEvolutionMemoryLessonSentences: EVOLUTION_MEMORY_MAX_LESSON_SENTENCES,
 			omitEvolutionMemoryLessonNumber: true,
@@ -1038,6 +1186,9 @@ export class StructuredDeltaCurator implements Curator {
 			lessonRefs: registry.lessons.references,
 			memoryRefs: registry.memory.references,
 		});
+		const validateOutput = (output: JsonObject): void => {
+			parseDecisions(output, input, registry);
+		};
 		let lastError: unknown = null;
 		let responseCorrection: string | null = null;
 		const invalidAliases = new Set<string>();
@@ -1054,17 +1205,21 @@ export class StructuredDeltaCurator implements Curator {
 						input: modelInput(input, registry, responseCorrection),
 						outputSchema: schema,
 						tools: registry.tools,
+						validateOutput,
 						signal: input.signal,
 					}),
 					input.signal,
 				);
 				try {
-					const drafts = parseDecisions(response, input, registry);
+					const drafts = parseDecisions(response.output, input, registry);
 					return proposalsFromDrafts(drafts, input, lessons, response, this.#dependencies.version);
 				} catch (error) {
 					lastError = error;
 					responseCorrection = error instanceof Error ? error.message : "Response validation failed";
-					if (error instanceof EvolutionModelReferenceError) {
+					if (error instanceof CuratorOutputValidationError) {
+						for (const reference of error.invalidReferences) invalidAliases.add(reference);
+						for (const reference of error.permittedReferences) permittedAliases.add(reference);
+					} else if (error instanceof EvolutionModelReferenceError) {
 						for (const reference of error.invalidReferences) invalidAliases.add(reference);
 						for (const reference of error.permittedReferences) permittedAliases.add(reference);
 					}

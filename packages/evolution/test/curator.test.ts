@@ -1,8 +1,11 @@
 import type { MaterializedEvidence, MaterializedInvocation } from "@earendil-works/diffex-harness-trace";
+import type { TSchema } from "typebox";
+import { Check } from "typebox/value";
 import { describe, expect, it } from "vitest";
 import {
 	type CuratorInput,
 	computeEvolutionContentDigest,
+	createCuratorOutputSchema,
 	createEvolutionArtifactMetadata,
 	type EvidenceCorpusManifest,
 	type EvolutionArtifactProducer,
@@ -314,12 +317,74 @@ describe("structured delta curator", () => {
 		await curator.curate(
 			curatorInput((request) => {
 				expect(findUnsupportedCodexSchemaKeywords(request.outputSchema)).toEqual([]);
+				expect(request.validateOutput).toBeTypeOf("function");
+				expect(() => request.validateOutput?.({ decisions: [] })).not.toThrow();
 				expect(request.outputSchema).toMatchObject({
 					$defs: { destination: { properties: { anchor: { enum: [null, "M1"] } } } },
 				});
 				return Promise.resolve(response([]));
 			}),
 		);
+	});
+
+	it("keeps proposal schema variants conformant with parser routes", async () => {
+		const schema = createCuratorOutputSchema({
+			instructionRefs: ["I1", "I2"],
+			lessonRefs: ["L1"],
+			memoryRefs: ["M1"],
+		}) as TSchema;
+		const addDelta = {
+			operation: "ADD",
+			destination: { section: null, anchor: null },
+			content: "Keep changes focused.",
+			intendedScope: ["Repository code changes"],
+		};
+		const removeDelta = { operation: "REMOVE", memoryRef: "M1", reason: "Remove stale guidance" };
+		const replaceDelta = {
+			operation: "REPLACE",
+			removal: { memoryRef: "M1", reason: "Narrow stale guidance" },
+			addition: { content: "Keep changes precisely focused.", intendedScope: ["Repository code changes"] },
+		};
+		const validDecisions = [
+			decision("valid-add", proposal("ADD", { kind: "evolution-memory" }, addDelta)),
+			decision("valid-remove", proposal("REMOVE", { kind: "evolution-memory" }, removeDelta)),
+			decision("valid-replace", proposal("REPLACE", { kind: "evolution-memory" }, replaceDelta)),
+			decision(
+				"valid-skill-defer",
+				proposal("DEFER", { kind: "skill", skillName: "review" }, null, { finding: "Review needs precision" }),
+			),
+			decision(
+				"valid-source-defer",
+				proposal("DEFER", { kind: "orchestration-source", sourcePath: "src/runner.ts" }, null, {
+					finding: "Runner retries need isolation",
+				}),
+			),
+		];
+		expect(Check(schema, { decisions: validDecisions })).toBe(true);
+		const curator = new StructuredDeltaCurator({ version: "1.2.3" }, { maxResponseAttempts: 1 });
+		await expect(curator.curate(curatorInput(() => Promise.resolve(response(validDecisions))))).resolves.toHaveLength(
+			5,
+		);
+
+		const invalidDecisions = [
+			decision("skill-add", proposal("ADD", { kind: "skill", skillName: "review" }, addDelta)),
+			decision(
+				"defer-with-delta",
+				proposal("DEFER", { kind: "skill", skillName: "review" }, addDelta, { finding: "Needs review" }),
+			),
+			decision("remove-with-add-delta", proposal("REMOVE", { kind: "evolution-memory" }, addDelta)),
+			decision(
+				"add-with-finding",
+				proposal("ADD", { kind: "evolution-memory" }, addDelta, { finding: "Unexpected finding" }),
+			),
+			decision("defer-without-finding", proposal("DEFER", { kind: "skill", skillName: "review" }, null)),
+		];
+		for (const invalidDecision of invalidDecisions) {
+			expect(Check(schema, { decisions: [invalidDecision] })).toBe(false);
+			await expect(
+				curator.curate(curatorInput(() => Promise.resolve(response([invalidDecision])))),
+			).rejects.toMatchObject({ reasonCode: "curation-invalid-response" });
+		}
 	});
 
 	it("emits a provenance-rich ADD from final lessons and ordered snapshots", async () => {
@@ -485,7 +550,6 @@ describe("structured delta curator", () => {
 										reason: "Narrow the existing rule",
 									},
 									addition: {
-										destination: { section: "Evolution memory", anchor: null },
 										content: "Keep repository code changes focused.",
 										intendedScope: ["Repository code changes"],
 									},
@@ -507,14 +571,13 @@ describe("structured delta curator", () => {
 				operation: "REPLACE",
 				removal: { memoryItemId: "memory-1", expectedContentDigest: MEMORY_ITEM_DIGEST },
 				addition: {
-					destination: { section: "Evolution memory", anchor: null },
 					content: "Keep repository code changes focused.",
 				},
 			},
 		});
 	});
 
-	it("rejects replacement additions anchored to the item being removed", async () => {
+	it("rejects placement fields on in-place replacements", async () => {
 		const curator = new StructuredDeltaCurator({ version: "1.2.3" }, { maxResponseAttempts: 1 });
 		const input = curatorInput(() =>
 			Promise.resolve(
@@ -542,8 +605,38 @@ describe("structured delta curator", () => {
 		await expect(curator.curate(input)).rejects.toMatchObject({
 			reasonCode: "curation-invalid-response",
 			cause: expect.objectContaining({
-				message: "REPLACE addition cannot anchor to the memory item being removed",
+				message: expect.stringContaining('REPLACE addition does not permit field "destination"'),
 			}),
+		});
+	});
+
+	it("preserves null destinations as explicit global append", async () => {
+		const curator = new StructuredDeltaCurator({ version: "1.2.3" });
+		const proposals = await curator.curate(
+			curatorInput(() =>
+				Promise.resolve(
+					response([
+						decision(
+							"global-append",
+							proposal(
+								"ADD",
+								{ kind: "evolution-memory" },
+								{
+									operation: "ADD",
+									destination: { section: null, anchor: null },
+									content: "Append flat memory without inventing a section.",
+									intendedScope: ["Repository code changes"],
+								},
+							),
+						),
+					]),
+				),
+			),
+		);
+
+		expect(proposals[0]).toMatchObject({
+			action: "ADD",
+			exactDelta: { destination: { section: null, anchor: null } },
 		});
 	});
 
@@ -719,6 +812,55 @@ describe("structured delta curator", () => {
 		expect(inputs[1]?.memory).toEqual(inputs[0]?.memory);
 		expect(JSON.stringify(inputs[1]?.control)).not.toContain("L2");
 		expect(JSON.stringify(inputs[1]?.control)).toContain("L1");
+	});
+
+	it("aggregates semantic errors with decision keys and field paths", async () => {
+		let validationError: unknown;
+		const curator = new StructuredDeltaCurator({ version: "1.2.3" });
+		const proposals = await curator.curate(
+			curatorInput((request) => {
+				const invalidOutput = response([
+					decision(
+						"wrong-section",
+						proposal(
+							"ADD",
+							{ kind: "evolution-memory" },
+							{
+								operation: "ADD",
+								destination: { section: "Wrong section", anchor: "M1" },
+								content: "Keep changes focused.",
+								intendedScope: ["Repository code changes"],
+							},
+						),
+					),
+					decision("duplicate-without-reference", null, {
+						classification: "duplicate",
+						instructionRefs: [],
+						memoryRefs: [],
+						strengthening: null,
+					}),
+				]).output;
+				try {
+					request.validateOutput?.(invalidOutput);
+				} catch (error) {
+					validationError = error;
+				}
+				return Promise.resolve(response([]));
+			}),
+		);
+
+		expect(proposals).toEqual([]);
+		expect(validationError).toMatchObject({
+			name: "CuratorOutputValidationError",
+			message: expect.stringContaining(
+				'Decision "wrong-section" at decisions[0].proposal.exactDelta: ADD anchor "M1" is outside section "Wrong section"',
+			),
+		});
+		expect(validationError).toMatchObject({
+			message: expect.stringContaining(
+				'Decision "duplicate-without-reference" at decisions[1].relationship: A duplicate relationship must cite an existing entry',
+			),
+		});
 	});
 
 	it("rejects sentinel addition anchors and reports permitted memory references", async () => {
@@ -939,7 +1081,9 @@ describe("structured delta curator", () => {
 		await expect(curator.curate(input)).rejects.toMatchObject({
 			reasonCode: "curation-invalid-response",
 			cause: expect.objectContaining({
-				message: "Observer documentation and telemetry-format facts are not actionable evolution memory",
+				message: expect.stringContaining(
+					"Observer documentation and telemetry-format facts are not actionable evolution memory",
+				),
 			}),
 		});
 	});

@@ -598,6 +598,116 @@ describe("coding-agent evolution runtime", () => {
 		expect(validations).toBe(1);
 	});
 
+	it("corrects curator semantic errors within the active transcript", async () => {
+		const harness = await createHarness();
+		harnesses.push(harness);
+		harness.setResponses([
+			fauxAssistantMessage(fauxToolCall("submit_evolution_response", { decisions: ["invalid"] }), {
+				stopReason: "toolUse",
+			}),
+			(context) => {
+				expect(context.messages).toHaveLength(3);
+				expect(context.messages[2]).toMatchObject({
+					role: "toolResult",
+					toolName: "submit_evolution_response",
+					isError: true,
+				});
+				const correctionMessage = context.messages[2];
+				const correction =
+					correctionMessage?.role === "toolResult"
+						? correctionMessage.content
+								.filter((part): part is { type: "text"; text: string } => part.type === "text")
+								.map((part) => part.text)
+								.join("\n")
+						: "";
+				expect(correction).toContain("decisions[0].proposal.exactDelta");
+				expect(correction).toContain("decisions[1].relationship");
+				return fauxAssistantMessage(fauxToolCall("submit_evolution_response", { decisions: [] }), {
+					stopReason: "toolUse",
+				});
+			},
+		]);
+		const executor = new CodingAgentEvolutionModelExecutor(harness.session, harness.session.modelRuntime, {
+			async waitUntilBackgroundAllowed() {},
+		});
+		const model = harness.getModel();
+
+		await expect(
+			executor.execute({
+				stage: "curator",
+				model: {
+					provider: model.provider,
+					model: model.id,
+					configurationDigest: `sha256:${"1".repeat(64)}`,
+				},
+				promptVersion: "curator-v1",
+				idempotencyKey: "curator-semantic-correction",
+				input: {},
+				outputSchema: {
+					type: "object",
+					additionalProperties: false,
+					required: ["decisions"],
+					properties: { decisions: { type: "array" } },
+				},
+				tools: [],
+				validateOutput(output) {
+					if (Array.isArray(output.decisions) && output.decisions.length === 0) return;
+					throw new Error(
+						'Decision "first" at decisions[0].proposal.exactDelta: invalid delta\n' +
+							'Decision "second" at decisions[1].relationship: invalid relationship',
+					);
+				},
+			}),
+		).resolves.toMatchObject({ output: { decisions: [] }, submissionMethod: "response-tool" });
+	});
+
+	it.each([
+		["reflector", "response-tool", "reflection-invalid-response"],
+		["reflector", "json-text", "reflection-invalid-response"],
+		["curator", "response-tool", "curation-invalid-response"],
+		["curator", "json-text", "curation-invalid-response"],
+	] as const)("classifies exhausted %s %s corrections", async (stage, submissionMethod, expectedReasonCode) => {
+		const harness = await createHarness();
+		harnesses.push(harness);
+		const invalidResponse =
+			submissionMethod === "response-tool"
+				? fauxAssistantMessage(fauxToolCall("submit_evolution_response", { complete: false }), {
+						stopReason: "toolUse",
+					})
+				: fauxAssistantMessage(JSON.stringify({ complete: false }));
+		harness.setResponses(Array.from({ length: 10 }, () => invalidResponse));
+		const executor = new CodingAgentEvolutionModelExecutor(harness.session, harness.session.modelRuntime, {
+			async waitUntilBackgroundAllowed() {},
+		});
+		const model = harness.getModel();
+
+		await expect(
+			executor.execute({
+				stage,
+				model: {
+					provider: model.provider,
+					model: model.id,
+					configurationDigest: `sha256:${"1".repeat(64)}`,
+				},
+				promptVersion: `${stage}-v1`,
+				idempotencyKey: `${stage}-${submissionMethod}-exhaustion`,
+				input: {},
+				outputSchema: {
+					type: "object",
+					additionalProperties: false,
+					required: ["complete"],
+					properties: { complete: { enum: [true] } },
+				},
+				tools: [],
+			}),
+		).rejects.toMatchObject({
+			name: "EvolutionExecutionError",
+			reasonCode: expectedReasonCode,
+			retryable: false,
+			diagnostics: { lastCorrection: expect.any(String) },
+		});
+	});
+
 	it("isolates transcripts between node executor invocations", async () => {
 		const harness = await createHarness();
 		harnesses.push(harness);

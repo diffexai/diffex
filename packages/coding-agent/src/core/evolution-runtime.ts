@@ -137,7 +137,7 @@ function validateEvolutionOutput(request: EvolutionModelRequest, output: JsonObj
 		const issue = [...Errors(schema, output)][0];
 		return issue?.message ?? "Response does not match the required schema";
 	}
-	if (request.stage !== "reflector" || request.validateOutput === undefined) return null;
+	if (request.validateOutput === undefined) return null;
 	try {
 		request.validateOutput(output);
 		return null;
@@ -343,7 +343,7 @@ export class CodingAgentEvolutionModelExecutor implements EvolutionModelExecutor
 		}
 		if (lastCorrection !== null) {
 			throw new EvolutionExecutionError(`Evolution model did not submit a valid response: ${lastCorrection}`, {
-				reasonCode: "reflection-invalid-response",
+				reasonCode: request.stage === "curator" ? "curation-invalid-response" : "reflection-invalid-response",
 				retryable: false,
 				diagnostics: { lastCorrection },
 			});
