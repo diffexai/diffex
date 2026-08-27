@@ -1864,17 +1864,22 @@ export class AgentSession {
 	prompt(text: string, options?: PromptOptions): Promise<void> {
 		const signal = options?.signal;
 		const preflightResult = options?.preflightResult;
+		const rejectPreflight = (error: unknown): Promise<never> => {
+			try {
+				preflightResult?.(false);
+			} catch {
+				// Synchronous rejection gates remain authoritative unless the callback cancels the prompt.
+			}
+			return Promise.reject(signal?.aborted ? signal.reason : error);
+		};
 		if (signal?.aborted) {
-			preflightResult?.(false);
-			return Promise.reject(signal.reason);
+			return rejectPreflight(signal.reason);
 		}
 		if (this._promptReservation) {
-			preflightResult?.(false);
-			return Promise.reject(new Error("Cannot submit a prompt while another prompt owns prompt preflight."));
+			return rejectPreflight(new Error("Cannot submit a prompt while another prompt owns prompt preflight."));
 		}
 		if (signal && this._isAgentRunActive) {
-			preflightResult?.(false);
-			return Promise.reject(new Error("Cannot submit a signaled prompt while an agent run is active."));
+			return rejectPreflight(new Error("Cannot submit a signaled prompt while an agent run is active."));
 		}
 
 		const reservation: PromptReservation = { signaled: signal !== undefined, agentStarted: false };
@@ -2123,7 +2128,17 @@ export class AgentSession {
 		}
 
 		preflightAccepted = true;
-		preflightResult?.(true);
+		try {
+			preflightResult?.(true);
+		} catch (error) {
+			if (signal?.aborted) {
+				rollbackPendingCompaction();
+				this._pendingNextTurnMessages = [...(consumedNextTurnMessages ?? []), ...this._pendingNextTurnMessages];
+				throw signal.reason;
+			}
+			commitPendingCompaction();
+			throw error;
+		}
 		if (signal?.aborted) {
 			rollbackPendingCompaction();
 			this._pendingNextTurnMessages = [...(consumedNextTurnMessages ?? []), ...this._pendingNextTurnMessages];

@@ -475,7 +475,14 @@ describe("AgentSession prompt characterization", () => {
 		const customReason = new Error("custom cancellation");
 		const customAbort = new AbortController();
 		customAbort.abort(customReason);
-		await expect(harness.session.prompt("custom", { signal: customAbort.signal })).rejects.toBe(customReason);
+		await expect(
+			harness.session.prompt("custom", {
+				signal: customAbort.signal,
+				preflightResult: () => {
+					throw new Error("ignored callback failure");
+				},
+			}),
+		).rejects.toBe(customReason);
 
 		expect(harness.session.messages).toEqual([]);
 		expect(harness.sessionManager.getEntries()).toEqual([]);
@@ -509,10 +516,20 @@ describe("AgentSession prompt characterization", () => {
 		await inputStarted.promise;
 
 		const secondController = new AbortController();
-		const secondOptions = firstSignaled ? undefined : { signal: secondController.signal };
-		await expect(harness.session.prompt("second", secondOptions)).rejects.toThrow(
-			"Cannot submit a prompt while another prompt owns prompt preflight.",
-		);
+		const secondReason = new Error("cancel rejected overlap");
+		const secondOptions = {
+			...(firstSignaled ? {} : { signal: secondController.signal }),
+			preflightResult: () => {
+				if (!firstSignaled) secondController.abort(secondReason);
+				throw new Error("ignored callback failure");
+			},
+		};
+		const rejection = expect(harness.session.prompt("second", secondOptions)).rejects;
+		if (firstSignaled) {
+			await rejection.toThrow("Cannot submit a prompt while another prompt owns prompt preflight.");
+		} else {
+			await rejection.toBe(secondReason);
+		}
 
 		releaseInput.resolve();
 		await firstPrompt;
@@ -538,6 +555,18 @@ describe("AgentSession prompt characterization", () => {
 		await expect(
 			harness.session.prompt("must not queue", { signal: controller.signal, streamingBehavior: "followUp" }),
 		).rejects.toThrow("Cannot submit a signaled prompt while an agent run is active.");
+		const cancelledController = new AbortController();
+		const cancelledReason = new Error("cancel rejected active overlap");
+		await expect(
+			harness.session.prompt("cancel overlap", {
+				signal: cancelledController.signal,
+				streamingBehavior: "followUp",
+				preflightResult: () => {
+					cancelledController.abort(cancelledReason);
+					throw new Error("ignored callback failure");
+				},
+			}),
+		).rejects.toBe(cancelledReason);
 
 		await harness.session.abort();
 		await activePrompt;
@@ -871,7 +900,10 @@ describe("AgentSession prompt characterization", () => {
 			signal: controller.signal,
 			preflightResult: (success) => {
 				preflightResults.push(success);
-				if (success) controller.abort(reason);
+				if (success) {
+					controller.abort(reason);
+					throw new Error("ignored callback failure");
+				}
 			},
 		});
 
@@ -892,6 +924,65 @@ describe("AgentSession prompt characterization", () => {
 		expect(harness.session.messages.filter((message) => message.role === "custom")).toEqual([
 			expect.objectContaining({ customType: "pending-context", content: "keep me" }),
 		]);
+	});
+
+	it("commits compaction bookkeeping when accepted preflight notification throws", async () => {
+		const harness = await createHarness({
+			models: [{ id: "faux-1", contextWindow: 100, maxTokens: 100 }],
+			settings: { compaction: { enabled: true, keepRecentTokens: 1, reserveTokens: 0 } },
+			extensionFactories: [
+				(pi) => {
+					pi.on("session_before_compact", (event) => ({
+						compaction: {
+							summary: "committed before notification failure",
+							firstKeptEntryId: event.preparation.firstKeptEntryId,
+							tokensBefore: event.preparation.tokensBefore,
+							details: {},
+						},
+					}));
+				},
+			],
+		});
+		harnesses.push(harness);
+		const now = Date.now();
+		const model = harness.getModel();
+		harness.sessionManager.appendMessage({ role: "user", content: "previous", timestamp: now - 1000 });
+		harness.sessionManager.appendCustomEntry("diffex.current-plan", {
+			plan: [{ step: "continue", status: "in_progress" }],
+		});
+		harness.sessionManager.appendMessage({
+			...fauxAssistantMessage("previous response", { stopReason: "length", timestamp: now - 500 }),
+			api: model.api,
+			provider: model.provider,
+			model: model.id,
+			usage: createUsage(100),
+		});
+		harness.session.agent.state.messages = harness.sessionManager.buildSessionContext().messages;
+		const callbackError = new Error("accepted callback failure");
+
+		await expect(
+			harness.session.prompt("failed notification", {
+				preflightResult: (success) => {
+					if (success) throw callbackError;
+				},
+			}),
+		).rejects.toBe(callbackError);
+		expect(harness.sessionManager.getEntries().filter((entry) => entry.type === "compaction")).toEqual([
+			expect.objectContaining({ summary: "committed before notification failure" }),
+		]);
+
+		let restoredPlan = false;
+		harness.session.setAutoCompactionEnabled(false);
+		harness.setResponses([
+			(context) => {
+				restoredPlan = context.messages.some((message) =>
+					getMessageText(message).includes("Restored unfinished update_plan checklist"),
+				);
+				return fauxAssistantMessage("done");
+			},
+		]);
+		await harness.session.prompt("continue");
+		expect(restoredPlan).toBe(true);
 	});
 
 	it("restores preflight state when failure notification aborts the prompt", async () => {
