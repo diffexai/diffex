@@ -330,6 +330,33 @@ describe("recursive reflector", () => {
 		});
 	});
 
+	it("keeps reflection target-neutral and separates distinct findings", async () => {
+		const { reflector } = await reflectorFixture();
+		const input = reflectInput({
+			async execute(request) {
+				if (request.stage !== "reflector") throw new Error("Unexpected Curator request");
+				expect(jsonObject(request.input.control, "control").lessonPolicy).toEqual({
+					targetNeutral: true,
+					distinctFindingTypes: [
+						{ findingType: "successful-strategy", lessonKinds: ["successful-strategy"] },
+						{ findingType: "failed-approach", lessonKinds: ["failed-approach", "failure-workaround"] },
+						{ findingType: "verification-gap", lessonKinds: ["missing-verification"] },
+						{ findingType: "tool-behavior", lessonKinds: ["tool-behavior"] },
+						{ findingType: "counterexample", lessonKinds: ["counterexample"] },
+					],
+					separationRule: expect.stringContaining("separate evidence-grounded lessons"),
+					excludedDecisions: ["downstream-target", "filesystem-destination", "final-skill-frontmatter"],
+				});
+				return {
+					output: { complete: true, lessons: [lessonForRequest(request.input)] },
+					model: { provider: "faux", model: "fixture" },
+				};
+			},
+		});
+
+		await expect(reflector.reflect(input)).resolves.toMatchObject({ finalLessonIds: [expect.any(String)] });
+	});
+
 	it("limits each leaf to three high-impact lessons", async () => {
 		const { persistence } = await reflectorFixture();
 		const reflector = new RecursiveReflector(

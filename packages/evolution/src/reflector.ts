@@ -1330,6 +1330,19 @@ export class RecursiveReflector implements Reflector {
 							: this.#maxLessonsPerSynthesisNode,
 				lessonSelection:
 					"Return only the highest-impact, non-overlapping lessons that would change future behavior.",
+				lessonPolicy: {
+					targetNeutral: true,
+					distinctFindingTypes: [
+						{ findingType: "successful-strategy", lessonKinds: ["successful-strategy"] },
+						{ findingType: "failed-approach", lessonKinds: ["failed-approach", "failure-workaround"] },
+						{ findingType: "verification-gap", lessonKinds: ["missing-verification"] },
+						{ findingType: "tool-behavior", lessonKinds: ["tool-behavior"] },
+						{ findingType: "counterexample", lessonKinds: ["counterexample"] },
+					],
+					separationRule:
+						"Keep supported finding types as separate evidence-grounded lessons; do not merge a success, failure, verification gap, tool behavior, or counterexample merely because they occurred in the same task.",
+					excludedDecisions: ["downstream-target", "filesystem-destination", "final-skill-frontmatter"],
+				},
 				behaviorChangingLessonsOnly: true,
 				requireUserTaskOrMeaningfulFailure: true,
 				requireCausalAgentBehavior: true,
