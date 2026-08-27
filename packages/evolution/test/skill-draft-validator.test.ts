@@ -316,7 +316,17 @@ function fixture(
 		content: options.content ?? validMarkdown,
 	};
 	const draft: SkillDraft = {
-		metadata: metadata(draftContent.draftId, draftContent.sourceCandidateIds, draftContent),
+		metadata: metadata(
+			draftContent.draftId,
+			[
+				...draftContent.sourceCandidateIds,
+				...draftContent.sourceEvidenceIds,
+				...draftContent.sourceTraceIds,
+				...draftContent.sourceSkillVersions.map((skill) => skill.skillId),
+				...draftContent.repositoryInstructionDigests,
+			].sort((left, right) => left.localeCompare(right)),
+			draftContent,
+		),
 		...draftContent,
 	};
 	const draftReference = reference(draft);
@@ -359,7 +369,9 @@ function fixture(
 		},
 		priorityScore: null,
 		draft: draftReference,
+		validation: null,
 		synthesisIdempotencyKey: "skill-synthesis-1",
+		validationIdempotencyKey: "skill-validation-1",
 		evaluationIdempotencyKey: "skill-evaluation-1",
 	};
 	const environment: SkillDraftValidationEnvironment = {

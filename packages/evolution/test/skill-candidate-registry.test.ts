@@ -16,6 +16,7 @@ import {
 	type SkillCandidateRegistrySnapshot,
 	type SkillCandidateRegistryStore,
 	type SkillDraft,
+	type SkillDraftValidationReport,
 } from "../src/index.ts";
 
 const createdAt = "2026-08-25T12:00:00.000Z";
@@ -437,6 +438,46 @@ describe("persistent skill candidate registry", () => {
 			to: "drafted",
 			reasonCodes: ["outcome-aware-draft-recorded"],
 		});
+		const validationContent = {
+			artifactKind: "skill-draft-validation" as const,
+			validationId: "skill-validation-1",
+			groupId: group.groupId,
+			draft: draftReference,
+			validatorVersion: "validator-v1",
+			assurance: "structure-provenance-scope-and-security-only" as const,
+			disposition: "accepted" as const,
+			issues: [],
+			validatedHarnessVersion: secondInput.expectedHarnessBaseVersion,
+			validatedSkillVersions: [],
+			canonicalInventory: ["skills/focused-check/SKILL.md"],
+			memoryRelationshipDigest: computeEvolutionContentDigest([]),
+		};
+		const validation: SkillDraftValidationReport = {
+			metadata: metadata(validationContent.validationId, [draft.draftId], validationContent),
+			...validationContent,
+		};
+		const validationReference = await fixture.artifacts.put(validation);
+		const validationRequest = {
+			scope,
+			groupId: group.groupId,
+			draft: draftReference,
+			validation: validationReference,
+			proposalRevisionIds: draft.proposalRevisionIds,
+			idempotencyKey: recorded.validationIdempotencyKey,
+			createdAt: "2026-08-26T12:02:00.000Z",
+		};
+		store.interruptNextMultiAppend = true;
+		await expect(fixture.registry.recordValidation(validationRequest)).rejects.toThrow(
+			"interrupted draft registry append",
+		);
+		const validated = await fixture.registry.recordValidation(validationRequest);
+
+		expect(validated).toMatchObject({ state: "structurally-valid", validation: validationReference });
+		expect(validated.dispositionHistory.at(-1)).toMatchObject({
+			from: "drafted",
+			to: "structurally-valid",
+			reasonCodes: ["deterministic-draft-validation-passed"],
+		});
 
 		const thirdInput = input([evidence("support-c", "task-c", 0)], "trace-c");
 		const thirdCandidate = candidate({
@@ -457,7 +498,7 @@ describe("persistent skill candidate registry", () => {
 		expect(revised.groups[0]).toMatchObject({ state: "evidence-qualified", draft: null });
 		expect(revised.groups[0]?.synthesisIdempotencyKey).not.toBe(recorded.synthesisIdempotencyKey);
 		expect(revised.groups[0]?.dispositionHistory.at(-1)).toMatchObject({
-			from: "drafted",
+			from: "structurally-valid",
 			to: "evidence-qualified",
 			reasonCodes: ["proposal-revision-set-changed"],
 		});

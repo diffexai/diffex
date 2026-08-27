@@ -17,6 +17,7 @@ import type {
 	SkillCandidateState,
 	SkillCandidateStateTransitionedEvent,
 	SkillDraft,
+	SkillDraftValidationReport,
 } from "./contracts.ts";
 import { SKILL_CANDIDATE_REGISTRY_SCHEMA_VERSION } from "./contracts.ts";
 import type {
@@ -26,6 +27,7 @@ import type {
 	SkillCandidateRegistryConsolidationInput,
 	SkillCandidateRegistryConsolidationResult,
 	SkillCandidateRegistryStore,
+	SkillCandidateValidationRecordingInput,
 } from "./ports.ts";
 import { computeEvolutionContentDigest, createEvolutionArtifactMetadata } from "./provenance.ts";
 
@@ -61,6 +63,8 @@ interface MutableGroup {
 	priorityScore: EvolutionArtifactReference | null;
 	draft: EvolutionArtifactReference | null;
 	readonly draftProposalRevisionIds: string[];
+	validation: EvolutionArtifactReference | null;
+	readonly validationProposalRevisionIds: string[];
 	readonly scoredProposalRevisionIds: string[];
 }
 
@@ -267,6 +271,8 @@ function materializeGroups(events: readonly SkillCandidateRegistryEvent[]): Map<
 					priorityScore: null,
 					draft: null,
 					draftProposalRevisionIds: [],
+					validation: null,
+					validationProposalRevisionIds: [],
 					scoredProposalRevisionIds: [],
 				});
 			} else if (
@@ -313,6 +319,35 @@ function materializeGroups(events: readonly SkillCandidateRegistryEvent[]): Map<
 			group.draftProposalRevisionIds.splice(0, group.draftProposalRevisionIds.length, ...event.proposalRevisionIds);
 			continue;
 		}
+		if (event.type === "skill-candidate-validation-recorded") {
+			const group = groups.get(event.groupId);
+			if (group === undefined) throw new Error(`Candidate validation references unknown group "${event.groupId}"`);
+			if (
+				!sameValues(
+					event.proposalRevisionIds,
+					group.proposalRevisions.map((revision) => revision.revisionId),
+				) ||
+				group.draft?.artifactId !== event.draft.artifactId ||
+				group.draft.contentDigest !== event.draft.contentDigest
+			) {
+				throw new Error(`Candidate validation for group "${event.groupId}" has a stale draft or revision set`);
+			}
+			if (
+				group.validation !== null &&
+				sameValues(group.validationProposalRevisionIds, event.proposalRevisionIds) &&
+				(group.validation.artifactId !== event.validation.artifactId ||
+					group.validation.contentDigest !== event.validation.contentDigest)
+			) {
+				throw new Error(`Candidate group "${event.groupId}" has conflicting validation reports`);
+			}
+			group.validation = event.validation;
+			group.validationProposalRevisionIds.splice(
+				0,
+				group.validationProposalRevisionIds.length,
+				...event.proposalRevisionIds,
+			);
+			continue;
+		}
 		if (event.type === "skill-candidate-state-transitioned") {
 			const group = groups.get(event.groupId);
 			if (group === undefined) throw new Error(`Candidate transition references unknown group "${event.groupId}"`);
@@ -353,7 +388,18 @@ function immutableGroup(group: MutableGroup): SkillCandidateGroup {
 		)
 			? group.draft
 			: null,
+		validation: sameValues(
+			group.validationProposalRevisionIds,
+			proposalRevisions.map((revision) => revision.revisionId),
+		)
+			? group.validation
+			: null,
 		synthesisIdempotencyKey: stableId("skill-synthesis", { groupId: group.groupId, revisionSetDigest }),
+		validationIdempotencyKey: stableId("skill-validation", {
+			groupId: group.groupId,
+			revisionSetDigest,
+			draft: group.draft,
+		}),
 		evaluationIdempotencyKey: stableId("skill-evaluation", { groupId: group.groupId, revisionSetDigest }),
 	};
 }
@@ -379,6 +425,30 @@ function assertDraft(
 		draft.metadata.scope.scopeId !== input.scope.scopeId
 	) {
 		throw new Error(`Skill draft for candidate group "${group.groupId}" has an invalid immutable identity`);
+	}
+}
+
+function assertValidation(
+	validation: SkillDraftValidationReport,
+	reference: EvolutionArtifactReference,
+	group: SkillCandidateGroup,
+	input: SkillCandidateValidationRecordingInput,
+): void {
+	if (
+		validation.artifactKind !== "skill-draft-validation" ||
+		validation.validationId === "" ||
+		validation.metadata.artifactId !== validation.validationId ||
+		validation.metadata.contentDigest !== computeEvolutionContentDigest(contentWithoutMetadata(validation)) ||
+		reference.artifactId !== validation.validationId ||
+		reference.contentDigest !== computeEvolutionContentDigest(validation) ||
+		validation.groupId !== group.groupId ||
+		validation.draft.artifactId !== input.draft.artifactId ||
+		validation.draft.contentDigest !== input.draft.contentDigest ||
+		input.idempotencyKey !== group.validationIdempotencyKey ||
+		validation.metadata.scope.repositoryId !== input.scope.repositoryId ||
+		validation.metadata.scope.scopeId !== input.scope.scopeId
+	) {
+		throw new Error(`Skill validation for candidate group "${group.groupId}" has an invalid immutable identity`);
 	}
 }
 
@@ -528,8 +598,10 @@ export class DeterministicSkillCandidatePriorityScorer {
 		readonly state: SkillCandidateState;
 		readonly reasonCodes: readonly string[];
 	} {
-		const hasStaleDraft = group.state === "drafted" && group.draft === null;
-		if (!hasStaleDraft && !MANAGED_QUALIFICATION_STATES.has(group.state)) {
+		const hasStaleArtifacts =
+			(group.state === "drafted" || group.state === "structurally-valid" || group.state === "rejected") &&
+			group.draft === null;
+		if (!hasStaleArtifacts && !MANAGED_QUALIFICATION_STATES.has(group.state)) {
 			return { state: group.state, reasonCodes: [] };
 		}
 		const support = group.evidence.supportingTaskLineageIds.length;
@@ -540,7 +612,7 @@ export class DeterministicSkillCandidatePriorityScorer {
 		if (support >= this.#minimumIndependentTasks) {
 			return {
 				state: "evidence-qualified",
-				reasonCodes: [hasStaleDraft ? "proposal-revision-set-changed" : "independent-recurrence-qualified"],
+				reasonCodes: [hasStaleArtifacts ? "proposal-revision-set-changed" : "independent-recurrence-qualified"],
 			};
 		}
 		return { state: "proposed", reasonCodes: ["awaiting-independent-recurrence"] };
@@ -744,6 +816,115 @@ export class PersistentSkillCandidateRegistry implements SkillCandidateRegistry 
 		throw new Error("Skill candidate registry changed too often to record a draft");
 	}
 
+	async recordValidation(input: SkillCandidateValidationRecordingInput): Promise<SkillCandidateGroup> {
+		for (let attempt = 0; attempt < this.#maxCommitAttempts; attempt += 1) {
+			const snapshot = await this.#store.loadSkillCandidateRegistry(input.scope);
+			const groups = materializeGroups(snapshot.events);
+			const mutable = groups.get(input.groupId);
+			if (mutable === undefined) throw new Error(`Unknown candidate group "${input.groupId}"`);
+			let group = immutableGroup(mutable);
+			if (
+				!sameValues(
+					input.proposalRevisionIds,
+					group.proposalRevisions.map((revision) => revision.revisionId),
+				) ||
+				group.draft?.artifactId !== input.draft.artifactId ||
+				group.draft.contentDigest !== input.draft.contentDigest
+			) {
+				throw new Error(`Candidate group "${input.groupId}" changed before validation was recorded`);
+			}
+			if (group.state !== "drafted" && group.state !== "structurally-valid" && group.state !== "rejected") {
+				throw new Error(`Candidate group "${input.groupId}" is not eligible to record validation`);
+			}
+			const artifact = await this.#artifacts.get(input.validation);
+			if (!("artifactKind" in artifact) || artifact.artifactKind !== "skill-draft-validation") {
+				throw new Error(`Candidate group "${input.groupId}" validation artifact is invalid`);
+			}
+			assertValidation(artifact, input.validation, group, input);
+			if (
+				group.validation !== null &&
+				(group.validation.artifactId !== input.validation.artifactId ||
+					group.validation.contentDigest !== input.validation.contentDigest)
+			) {
+				throw new Error(`Candidate group "${input.groupId}" already has a different validation report`);
+			}
+			const targetState = artifact.disposition === "accepted" ? "structurally-valid" : "rejected";
+			if (group.state !== "drafted" && group.state !== targetState) {
+				throw new Error(`Candidate group "${input.groupId}" validation disposition conflicts with its state`);
+			}
+			const planned: SkillCandidateRegistryEvent[] = [];
+			if (group.validation === null) {
+				const registrySequence = nextSequence(snapshot.events, planned.length);
+				const content = {
+					schemaVersion: SKILL_CANDIDATE_REGISTRY_SCHEMA_VERSION,
+					eventId: stableId("skill-candidate-event", {
+						idempotencyKey: input.idempotencyKey,
+						registrySequence,
+						type: "skill-candidate-validation-recorded",
+						groupId: input.groupId,
+					}),
+					registrySequence,
+					type: "skill-candidate-validation-recorded" as const,
+					groupId: input.groupId,
+					draft: input.draft,
+					validation: input.validation,
+					proposalRevisionIds: input.proposalRevisionIds,
+					idempotencyKey: input.idempotencyKey,
+				};
+				planned.push(
+					withEventMetadata(
+						content,
+						this.#producer,
+						[input.groupId, input.draft.artifactId, input.validation.artifactId],
+						input.scope,
+						input.createdAt,
+					),
+				);
+				mutable.validation = input.validation;
+				mutable.validationProposalRevisionIds.splice(
+					0,
+					mutable.validationProposalRevisionIds.length,
+					...input.proposalRevisionIds,
+				);
+				group = immutableGroup(mutable);
+			}
+			if (group.state === "drafted") {
+				const reasonCodes =
+					artifact.disposition === "accepted"
+						? ["deterministic-draft-validation-passed"]
+						: uniqueSorted(artifact.issues.map((validationIssue) => validationIssue.code));
+				const transition = transitionEvent(
+					input.groupId,
+					"drafted",
+					targetState,
+					reasonCodes,
+					nextSequence(snapshot.events, planned.length),
+					input.idempotencyKey,
+					this.#producer,
+					input.scope,
+					input.createdAt,
+				);
+				planned.push(transition);
+				mutable.state = targetState;
+				mutable.dispositionHistory.push({
+					eventId: transition.eventId,
+					from: transition.from,
+					to: transition.to,
+					reasonCodes: transition.reasonCodes,
+					createdAt: input.createdAt,
+				});
+			}
+			if (planned.length === 0) return immutableGroup(mutable);
+			const committed = await this.#store.appendSkillCandidateRegistryEvents(
+				input.scope,
+				snapshot.revision,
+				planned,
+			);
+			if (committed === "committed") return immutableGroup(mutable);
+		}
+		throw new Error("Skill candidate registry changed too often to record validation");
+	}
+
 	async consolidate(
 		input: SkillCandidateRegistryConsolidationInput,
 	): Promise<SkillCandidateRegistryConsolidationResult> {
@@ -784,6 +965,8 @@ export class PersistentSkillCandidateRegistry implements SkillCandidateRegistry 
 						priorityScore: null,
 						draft: null,
 						draftProposalRevisionIds: [],
+						validation: null,
+						validationProposalRevisionIds: [],
 						scoredProposalRevisionIds: [],
 					};
 					groups.set(groupId, group);

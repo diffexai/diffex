@@ -272,6 +272,7 @@ function modelInput(
 			removeTaskSpecificPathsSecretsAndTransientValues: true,
 			removeUnsupportedGeneralizations: true,
 			retainExplicitCompatibilityRequirements: true,
+			retainCandidateApplicabilityBoundariesNegativeTriggersAndVerificationContractVerbatim: true,
 			requiredContent: [
 				"Agent Skills frontmatter with a specific name and description",
 				"recognizable use conditions",

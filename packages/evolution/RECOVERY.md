@@ -26,7 +26,7 @@ Recovery never treats partial output as completed work and never feeds evolution
 | Successful rollback selection | The recorded immutable parent is still present and the evolved revision is current. | Select the parent with compare-and-swap and refresh on the next prompt boundary. | Existing in-flight prompts stay pinned to their admitted revision. |
 | Unsupported skill or orchestration target | The target registry has no enabled writer route. | Preserve the finding as deferred evidence with no executable payload. | Disabled target kinds cannot reach filesystem mutation or activation. |
 | Interrupted skill-candidate consolidation | A completed evolution job has checkpointed candidates but no completed candidate-work event. | Resume from append-only registry events with the same source-job idempotency key; repair missing scores or transitions before completion. | Candidate proposal revisions remain immutable, retries do not add recurrence, and partial registry appends cannot activate a skill. |
-| Interrupted skill synthesis | An evidence-qualified group has no draft, or a draft-record event exists without its `drafted` transition. | Resume with the revision-bound synthesis idempotency key; reuse an already recorded immutable draft and repair the missing transition before completing candidate work. | Only evidence-qualified groups invoke synthesis, and a draft remains outside the active harness with no writer or activation path. |
+| Interrupted skill synthesis or draft validation | An evidence-qualified group has no draft, a draft-record event lacks its `drafted` transition, or a validation-record event lacks its terminal transition. | Resume with the revision-bound idempotency keys; reuse recorded immutable artifacts and repair the missing transition before completing candidate work. | Only evidence-qualified groups invoke synthesis, and only deterministically accepted drafts reach `structurally-valid`; no draft has a writer or activation path. |
 
 ## Operational observability
 
@@ -37,7 +37,7 @@ These operational records remain outside materialized product-runtime evidence, 
 
 ## Verification boundaries
 
-The deterministic validator proves provenance, recurrence, immutable closure, score bounds, and structural eligibility.
+Deterministic validation proves provenance, recurrence, immutable closure, score bounds, structural eligibility, workspace and version freshness, and bounded sensitive-data checks.
 Candidate priority scoring separately orders evaluation work; it cannot skip later gates, accept a candidate, or activate a skill.
-It does not prove that natural-language evidence semantically entails a proposal.
+It does not prove semantic usefulness, that natural-language evidence entails a proposal, or the absence of all semantically unsafe guidance.
 Post-activation outcome evaluation and automatic regression rollback are intentionally outside this recovery contract.

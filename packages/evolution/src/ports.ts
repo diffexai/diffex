@@ -317,9 +317,20 @@ export interface SkillCandidateDraftRecordingInput {
 	readonly createdAt: string;
 }
 
+export interface SkillCandidateValidationRecordingInput {
+	readonly scope: EvolutionScope;
+	readonly groupId: string;
+	readonly draft: EvolutionArtifactReference;
+	readonly validation: EvolutionArtifactReference;
+	readonly proposalRevisionIds: readonly string[];
+	readonly idempotencyKey: string;
+	readonly createdAt: string;
+}
+
 export interface SkillCandidateRegistry {
 	consolidate(input: SkillCandidateRegistryConsolidationInput): Promise<SkillCandidateRegistryConsolidationResult>;
 	recordDraft(input: SkillCandidateDraftRecordingInput): Promise<SkillCandidateGroup>;
+	recordValidation(input: SkillCandidateValidationRecordingInput): Promise<SkillCandidateGroup>;
 	list(scope: EvolutionScope): Promise<readonly SkillCandidateGroup[]>;
 }
 
