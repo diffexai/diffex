@@ -136,23 +136,27 @@ function captureSpawnOrigin(parent: AgentSession, toolCallId: string): SubagentS
 		});
 	}
 
-	const matchingEntries = parent.sessionManager
-		.getEntries()
-		.filter(
-			(entry) =>
-				entry.type === "message" &&
-				entry.message.role === "assistant" &&
-				entry.message.content.some(
-					(content) => content.type === "toolCall" && content.id === toolCallId && content.name === "spawn_agent",
-				),
-		);
-	if (matchingEntries.length !== 1) {
+	const branch = parent.sessionManager.getBranch();
+	let assistantEntry: (typeof branch)[number] | undefined;
+	for (let index = branch.length - 1; index >= 0; index -= 1) {
+		const entry = branch[index];
+		if (
+			entry.type === "message" &&
+			entry.message.role === "assistant" &&
+			entry.message.content.some(
+				(content) => content.type === "toolCall" && content.id === toolCallId && content.name === "spawn_agent",
+			)
+		) {
+			assistantEntry = entry;
+			break;
+		}
+	}
+	if (!assistantEntry) {
 		throw new Error(
-			`Invariant violation: active spawn_agent call ${toolCallId} matched ${matchingEntries.length} persisted assistant entries`,
+			`Invariant violation: active spawn_agent call ${toolCallId} matched 0 persisted assistant entries`,
 		);
 	}
 
-	const assistantEntry = matchingEntries[0];
 	return Object.freeze({
 		type: "agent_tool_call",
 		toolCallId,

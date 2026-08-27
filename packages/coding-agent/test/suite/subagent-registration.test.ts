@@ -134,6 +134,35 @@ function getActiveTool(session: AgentSession, name: string): AgentTool {
 	return tool;
 }
 
+function appendAssistantToolCall(sessionManager: SessionManager, toolName: string, toolCallId: string): string {
+	return sessionManager.appendMessage(
+		fauxAssistantMessage(fauxToolCall(toolName, {}, { id: toolCallId }), { stopReason: "toolUse" }),
+	);
+}
+
+async function executeActiveSpawn(session: AgentSession, toolCallId: string, name: string): Promise<void> {
+	const internalState = session as unknown as { _isAgentRunActive: boolean };
+	internalState._isAgentRunActive = true;
+	try {
+		await getActiveTool(session, "spawn_agent").execute(toolCallId, { name, task: `${name} task` });
+	} finally {
+		internalState._isAgentRunActive = false;
+	}
+}
+
+function captureSubagentSessionManagerRequests(): SubagentSessionManagerRequest[] {
+	const requests: SubagentSessionManagerRequest[] = [];
+	const originalCreate = RootLocalEphemeralSubagentSessionManagerFactory.prototype.create;
+	vi.spyOn(RootLocalEphemeralSubagentSessionManagerFactory.prototype, "create").mockImplementation(function (
+		this: RootLocalEphemeralSubagentSessionManagerFactory,
+		request,
+	) {
+		requests.push(request);
+		return originalCreate.call(this, request);
+	});
+	return requests;
+}
+
 describe("root subagent tool registration", () => {
 	const harnesses: Harness[] = [];
 	const sessions: AgentSession[] = [];
@@ -576,23 +605,73 @@ describe("root subagent tool registration", () => {
 		}
 	});
 
+	it("binds reused tool-call identifiers to the newest selected-branch spawn", async () => {
+		const harness = await setupHarness();
+		harness.setResponses([fauxAssistantMessage("child complete")]);
+		const requests = captureSubagentSessionManagerRequests();
+		const { session } = await createRoot(harness);
+		appendAssistantToolCall(session.sessionManager, "spawn_agent", "reused-call");
+		const newestEntryId = appendAssistantToolCall(session.sessionManager, "spawn_agent", "reused-call");
+
+		await executeActiveSpawn(session, "reused-call", "worker");
+
+		expect(requests).toHaveLength(1);
+		expect(requests[0]?.origin).toMatchObject({
+			type: "agent_tool_call",
+			toolCallId: "reused-call",
+			assistantEntryId: newestEntryId,
+		});
+	});
+
+	it("ignores newer calls to other tools that reuse the spawn identifier", async () => {
+		const harness = await setupHarness();
+		harness.setResponses([fauxAssistantMessage("child complete")]);
+		const requests = captureSubagentSessionManagerRequests();
+		const { session } = await createRoot(harness);
+		const spawnEntryId = appendAssistantToolCall(session.sessionManager, "spawn_agent", "shared-call");
+		appendAssistantToolCall(session.sessionManager, "agents", "shared-call");
+
+		await executeActiveSpawn(session, "shared-call", "worker");
+
+		expect(requests).toHaveLength(1);
+		expect(requests[0]?.origin).toMatchObject({
+			type: "agent_tool_call",
+			toolCallId: "shared-call",
+			assistantEntryId: spawnEntryId,
+		});
+	});
+
+	it("ignores matching spawn calls on abandoned branches", async () => {
+		const harness = await setupHarness();
+		harness.setResponses([fauxAssistantMessage("child complete")]);
+		const requests = captureSubagentSessionManagerRequests();
+		const { session } = await createRoot(harness);
+		const branchPointId = session.sessionManager.appendCustomEntry("branch-point");
+		appendAssistantToolCall(session.sessionManager, "spawn_agent", "branched-call");
+		session.sessionManager.branch(branchPointId);
+		const selectedEntryId = appendAssistantToolCall(session.sessionManager, "spawn_agent", "branched-call");
+
+		await executeActiveSpawn(session, "branched-call", "worker");
+
+		expect(requests).toHaveLength(1);
+		expect(requests[0]?.origin).toMatchObject({
+			type: "agent_tool_call",
+			toolCallId: "branched-call",
+			assistantEntryId: selectedEntryId,
+		});
+	});
+
 	it("rejects unmatched spawn calls during an active agent run", async () => {
 		const harness = await setupHarness();
 		const { session } = await createRoot(harness);
-		const internalState = session as unknown as { _isAgentRunActive: boolean };
-		internalState._isAgentRunActive = true;
-		try {
-			await expect(
-				getActiveTool(session, "spawn_agent").execute("missing-call", {
-					name: "worker",
-					task: "task",
-				}),
-			).rejects.toThrow(
-				"Invariant violation: active spawn_agent call missing-call matched 0 persisted assistant entries",
-			);
-		} finally {
-			internalState._isAgentRunActive = false;
-		}
+		const branchPointId = session.sessionManager.appendCustomEntry("branch-point");
+		appendAssistantToolCall(session.sessionManager, "spawn_agent", "missing-call");
+		session.sessionManager.branch(branchPointId);
+		appendAssistantToolCall(session.sessionManager, "agents", "missing-call");
+
+		await expect(executeActiveSpawn(session, "missing-call", "worker")).rejects.toThrow(
+			"Invariant violation: active spawn_agent call missing-call matched 0 persisted assistant entries",
+		);
 	});
 
 	it("applies configured concurrency and captures parent state when spawning", async () => {
