@@ -435,7 +435,7 @@ describe("StructuredSkillCurator", () => {
 				expect(request.idempotencyKey).toBe("job-1:skill-curating");
 				const evidenceTool = request.tools.find((tool) => tool.name === "inspect_source_evidence");
 				const skillTool = request.tools.find((tool) => tool.name === "inspect_skills");
-				expect(await evidenceTool?.execute({ evidenceRefs: ["E1", "E2"] })).toMatchObject({
+				expect(await evidenceTool?.execute({ evidenceRefs: ["E1"], contextAfter: 1 })).toMatchObject({
 					evidence: [
 						{ evidenceRef: "E1", traceId: "trace-1" },
 						{ evidenceRef: "E2", traceId: "trace-1" },

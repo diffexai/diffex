@@ -91,7 +91,7 @@ interface ServiceFixture {
 async function serviceFixture(
 	executor: EvolutionStageExecutor = {
 		async execute(context) {
-			if (context.job.stage === "validating") {
+			if (context.job.stage === "skill-curating") {
 				return { artifacts: [], state: {}, directive: "complete-no-op" as const };
 			}
 			return { artifacts: [], state: {}, directive: "continue" as const };
@@ -553,6 +553,7 @@ describe("evolution control service", () => {
 				{ stage: "reflecting", durationMs: expect.any(Number) },
 				{ stage: "curating", durationMs: expect.any(Number) },
 				{ stage: "validating", durationMs: expect.any(Number) },
+				{ stage: "skill-curating", durationMs: expect.any(Number) },
 			],
 			estimatedEvidenceTokens: expect.any(Number),
 			providerCostUsd: null,

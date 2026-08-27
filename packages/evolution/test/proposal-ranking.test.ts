@@ -625,6 +625,7 @@ describe("deterministic proposal evidence ranking", () => {
 			},
 			reflector: { reflect: () => Promise.reject(new Error("Reflection is not expected")) },
 			curator: { curate: () => Promise.reject(new Error("Curation is not expected")) },
+			skillCurator: { curate: () => Promise.reject(new Error("Skill curation is not expected")) },
 			validator: ranker,
 			scorer: ranker,
 			targets: new EvolutionTargetAdapterRegistry({
@@ -697,7 +698,7 @@ describe("deterministic proposal evidence ranking", () => {
 		});
 	});
 
-	it("completes validation as a no-op when accepted proposals are below threshold", async () => {
+	it("runs skill curation before completing when memory proposals are below threshold", async () => {
 		const data = fixture([
 			{ evidenceId: "support-a", lineageId: "task-a" },
 			{ evidenceId: "support-b", lineageId: "task-b" },
@@ -706,6 +707,7 @@ describe("deterministic proposal evidence ranking", () => {
 		const proposals = [proposal("proposal-a", data.input, lessons)];
 		const validationInputValue = validationInput(data, lessons, proposals);
 		const ranker = new DeterministicProposalRanker({ version: "1" }, { eligibilityThreshold: 100 });
+		const selectedMemoryProposalIds: string[][] = [];
 		const pipeline = new EvolutionPipeline({
 			version: "1",
 			model: {
@@ -714,6 +716,14 @@ describe("deterministic proposal evidence ranking", () => {
 			},
 			reflector: { reflect: () => Promise.reject(new Error("Reflection is not expected")) },
 			curator: { curate: () => Promise.reject(new Error("Curation is not expected")) },
+			skillCurator: {
+				async curate(input) {
+					selectedMemoryProposalIds.push(
+						input.selectedMemoryProposals.map((scored) => scored.proposal.proposalId),
+					);
+					return { candidates: [], deferredFindings: [] };
+				},
+			},
 			validator: ranker,
 			scorer: ranker,
 			targets: new EvolutionTargetAdapterRegistry({ writers: [] }),
@@ -764,8 +774,35 @@ describe("deterministic proposal evidence ranking", () => {
 		});
 
 		expect(result).toMatchObject({
-			directive: "complete-no-op",
+			directive: "continue",
 			state: { acceptedProposalIds: ["proposal-a"], selectedProposalIds: [] },
+		});
+		const skillCurationResult = await pipeline.execute({
+			job: { ...job, stage: "skill-curating" },
+			input: data.input,
+			priorArtifacts: [
+				data.corpus,
+				data.instructions,
+				...lessons,
+				validationInputValue.reflection.coverage,
+				...proposals,
+				...result.artifacts,
+			],
+			idempotencyKey: "job-1:skill-curating",
+			scopeLease: {
+				kind: "scope",
+				key: "diffex:repository",
+				ownerId: "worker-1",
+				fence: 1,
+				expiresAt: "2026-08-19T12:20:00.000Z",
+			},
+			writerLease: null,
+		});
+
+		expect(selectedMemoryProposalIds).toEqual([[]]);
+		expect(skillCurationResult).toMatchObject({
+			directive: "complete-no-op",
+			state: { candidateIds: [], deferredFindingIds: [], selectedMemoryProposalIds: [] },
 		});
 	});
 });
