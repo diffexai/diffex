@@ -180,6 +180,7 @@ export class SubagentController {
 	#closed = false;
 	#resetting = false;
 	#parent: AgentSession | undefined;
+	#getIncompatibleParentHooks: (() => readonly string[]) | undefined;
 	#deliverEscalation: ((name: string, message: string) => Promise<void>) | undefined;
 	#resetPromise: Promise<void> | undefined;
 	#resetCleanupPromise: Promise<unknown[]> | undefined;
@@ -204,16 +205,19 @@ export class SubagentController {
 
 	createToolDefinitions(): ToolDefinition[] {
 		const definitions = [
-			createSpawnAgentTool((name, task, toolCallId) => {
-				const parent = this.#getBoundParent();
-				this.#assertReservable(name);
-				const origin = captureSpawnOrigin(parent, toolCallId);
-				const captured = this.#captureSession?.(parent, name, origin);
-				if (!captured) {
-					throw new Error("Subagent session capture is unavailable");
-				}
-				this.spawn(name, task, captured.createSession, origin, parent.agent.telemetryContext, captured);
-			}),
+			createSpawnAgentTool(
+				(name, task, toolCallId) => {
+					const parent = this.#getBoundParent();
+					this.#assertReservable(name);
+					const origin = captureSpawnOrigin(parent, toolCallId);
+					const captured = this.#captureSession?.(parent, name, origin);
+					if (!captured) {
+						throw new Error("Subagent session capture is unavailable");
+					}
+					this.spawn(name, task, captured.createSession, origin, parent.agent.telemetryContext, captured);
+				},
+				() => this.#assertParentPolicyCompatible(),
+			),
 			createAgentActionTool((request) => {
 				const parent = this.#getBoundParent();
 				return request.action === "message"
@@ -229,12 +233,17 @@ export class SubagentController {
 		return definitions.map((definition) => definition as unknown as ToolDefinition);
 	}
 
-	bindParent(session: AgentSession, deliverEscalation?: (name: string, message: string) => Promise<void>): void {
+	bindParent(
+		session: AgentSession,
+		getIncompatibleParentHooks: () => readonly string[],
+		deliverEscalation?: (name: string, message: string) => Promise<void>,
+	): void {
 		this.#assertOpen();
 		if (this.#parent) {
 			throw new Error("Subagent controller parent is already bound");
 		}
 		this.#parent = session;
+		this.#getIncompatibleParentHooks = getIncompatibleParentHooks;
 		this.#deliverEscalation = deliverEscalation;
 	}
 
@@ -318,6 +327,7 @@ export class SubagentController {
 		telemetryContext: TelemetryContext = this.#telemetryContext,
 		captured?: CapturedSubagentSession,
 	): void {
+		this.#assertParentPolicyCompatible();
 		this.#assertReservable(name);
 		if (this.#persistRoster && !captured) {
 			throw new Error("Persistent subagent admission requires captured session state");
@@ -715,6 +725,7 @@ export class SubagentController {
 			const resetCleanup = this.#resetCleanupPromise;
 			const records = this.#detachRecords(closedError);
 			this.#parent = undefined;
+			this.#getIncompatibleParentHooks = undefined;
 			this.#deliverEscalation = undefined;
 			const shutdownCleanup = this.#cleanupRecords(records);
 			this.#publish(
@@ -1540,6 +1551,14 @@ export class SubagentController {
 	#assertOpen(): void {
 		if (this.#closed) throw this.#closedError();
 		if (this.#resetting) throw this.#resetError();
+	}
+
+	#assertParentPolicyCompatible(): void {
+		const incompatibleHooks = this.#getIncompatibleParentHooks?.() ?? [];
+		if (incompatibleHooks.length === 0) return;
+		throw new Error(
+			`Cannot spawn a subagent while parent extensions register incompatible hooks: ${incompatibleHooks.join(", ")}. Remove those hooks or disable subagents for this session.`,
+		);
 	}
 
 	#assertReservable(name: string): void {

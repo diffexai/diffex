@@ -70,6 +70,8 @@ It displays the current in-memory roster without adding the command or roster to
 The enclosing parent prompt remains active after the parent attempts to finish.
 Diffex freezes the children started by that prompt, waits until all of them finish, fail, or are interrupted, and displays a deterministic notice as each child terminates.
 
+Children do not load parent extensions. To prevent them from bypassing parent execution policy, spawning fails before child creation when the parent registers any of these hooks: `resources_discover`, `input`, `context`, `before_agent_start`, `before_provider_request`, `before_provider_headers`, `session_before_compact`, `tool_call`, `tool_result`, or `message_end`. The rejection lists the incompatible hooks in that order. Remove those handlers to spawn children; observation-only hooks and existing-child message, interrupt, and status actions remain available.
+
 ### Child Escalations
 
 A running root-owned child can use its child-only `escalate_to_parent` tool to report a material blocker, risk, contradiction, or decision that could change the parent's plan.

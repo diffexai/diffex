@@ -539,6 +539,8 @@ Root sessions run at most four children concurrently by default.
 Set `subagents: { maxConcurrent: number }` to configure that limit, or `subagents: false` to disable child agents and omit all three coordination tools.
 The names `spawn_agent`, `agent_action`, `agents`, and `escalate_to_parent` are reserved and cannot be supplied through `customTools`.
 
+Child sessions intentionally do not load parent extensions. To prevent an extension policy bypass, `spawn_agent` fails closed when the root has a registered handler for any execution-mutating hook: `resources_discover`, `input`, `context`, `before_agent_start`, `before_provider_request`, `before_provider_headers`, `session_before_compact`, `tool_call`, `tool_result`, or `message_end`. The error lists every incompatible hook in that order. Remove those handlers before spawning, or set `subagents: false`; observation-only hooks and non-spawn child actions remain available.
+
 Each live root-owned child also receives the child-only `escalate_to_parent` tool; roots, standalone sessions, and restored children that have not been explicitly woken do not receive it.
 It accepts one non-empty message of at most 1,000 characters for material information that could redirect or interrupt the parent, and the child must still return a complete final response.
 Multiple calls are allowed during one live run, subject to a fixed 8,000-character aggregate limit for accepted report text not yet admitted to parent context.

@@ -160,6 +160,7 @@ function assertAgentsRequest(request: unknown): asserts request is AgentsRequest
 
 export function createSpawnAgentTool(
 	spawn: (name: string, task: string, toolCallId: string) => void,
+	assertCanSpawn: () => void = () => {},
 ): ToolDefinition<typeof spawnAgentSchema, SpawnAgentDetails> {
 	return {
 		name: "spawn_agent",
@@ -173,6 +174,7 @@ export function createSpawnAgentTool(
 		parameters: spawnAgentSchema,
 		executionMode: "parallel",
 		execute: async (toolCallId, { name, task }) => {
+			assertCanSpawn();
 			if (!SUBAGENT_NAME_PATTERN.test(name)) {
 				throw new Error(`Invalid subagent name: ${name}`);
 			}

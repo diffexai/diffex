@@ -19,6 +19,7 @@
 - Fixed assistant Markdown headings and fenced code blocks appearing with literal source delimiters in the interactive transcript.
 - Fixed extension TUI method wrappers recursing indefinitely when delegating to the original method ([#7731](https://github.com/earendil-works/pi/issues/7731)).
 - Fixed right-click not pasting clipboard text in fullscreen mode on Windows.
+- Fixed sub-agent spawning bypassing execution-mutating parent extension hooks by rejecting incompatible parent policies before child creation.
 
 ## [0.84.0] - 2026-08-06
 

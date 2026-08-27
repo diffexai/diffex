@@ -408,6 +408,18 @@ const CURRENT_PLAN_RESTORATION_CUSTOM_TYPE = "diffex.current-plan-restoration";
 const CURRENT_PLAN_RESTORATION_REMINDER =
 	"Reminder: restored context is not proof of completion. Verify current state before claiming work is done.";
 const MAX_PENDING_SUBAGENT_ESCALATION_CHARACTERS = 8_000;
+const INCOMPATIBLE_SUBAGENT_PARENT_HOOKS = [
+	"resources_discover",
+	"input",
+	"context",
+	"before_agent_start",
+	"before_provider_request",
+	"before_provider_headers",
+	"session_before_compact",
+	"tool_call",
+	"tool_result",
+	"message_end",
+] as const;
 
 // ============================================================================
 // AgentSession Class
@@ -532,7 +544,11 @@ export class AgentSession {
 			activeToolNames: this._initialActiveToolNames,
 			includeAllExtensionTools: true,
 		});
-		this._subagentController?.bindParent(this, (name, message) => this._acceptSubagentEscalation(name, message));
+		this._subagentController?.bindParent(
+			this,
+			() => INCOMPATIBLE_SUBAGENT_PARENT_HOOKS.filter((hook) => this._extensionRunner.hasHandlers(hook)),
+			(name, message) => this._acceptSubagentEscalation(name, message),
+		);
 	}
 
 	get modelRuntime(): ModelRuntime {

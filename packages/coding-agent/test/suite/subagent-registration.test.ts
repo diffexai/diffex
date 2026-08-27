@@ -15,7 +15,7 @@ import {
 	createAgentSessionFromServices,
 	createAgentSessionServices,
 } from "../../src/core/agent-session-services.ts";
-import type { ToolDefinition } from "../../src/core/extensions/types.ts";
+import type { ExtensionAPI, InlineExtension, ToolDefinition } from "../../src/core/extensions/types.ts";
 import { type CreateAgentSessionOptions, createAgentSession } from "../../src/core/sdk.ts";
 import { SessionManager } from "../../src/core/session-manager.ts";
 import { SubagentController } from "../../src/core/subagents/controller.ts";
@@ -23,10 +23,84 @@ import {
 	RootLocalEphemeralSubagentSessionManagerFactory,
 	type SubagentSessionManagerRequest,
 } from "../../src/core/subagents/session-manager-factory.ts";
+import { createTestExtensionsResult, createTestResourceLoader } from "../utilities.ts";
 import { createHarness, getMessageText, type Harness } from "./harness.ts";
 import { getLastUserText } from "./subagent-harness.ts";
 
 const COORDINATION_TOOLS = ["spawn_agent", "agent_action", "agents"];
+const INCOMPATIBLE_PARENT_HOOKS = [
+	"resources_discover",
+	"input",
+	"context",
+	"before_agent_start",
+	"before_provider_request",
+	"before_provider_headers",
+	"session_before_compact",
+	"tool_call",
+	"tool_result",
+	"message_end",
+] as const;
+type IncompatibleParentHook = (typeof INCOMPATIBLE_PARENT_HOOKS)[number];
+type ObservationParentHook = "agent_start" | "after_provider_response" | "tool_execution_start";
+
+function registerParentHook(api: ExtensionAPI, hook: IncompatibleParentHook | ObservationParentHook): void {
+	switch (hook) {
+		case "resources_discover":
+			api.on("resources_discover", () => {});
+			break;
+		case "input":
+			api.on("input", () => {});
+			break;
+		case "context":
+			api.on("context", () => {});
+			break;
+		case "before_agent_start":
+			api.on("before_agent_start", () => {});
+			break;
+		case "before_provider_request":
+			api.on("before_provider_request", () => {});
+			break;
+		case "before_provider_headers":
+			api.on("before_provider_headers", () => {});
+			break;
+		case "session_before_compact":
+			api.on("session_before_compact", () => {});
+			break;
+		case "tool_call":
+			api.on("tool_call", () => {});
+			break;
+		case "tool_result":
+			api.on("tool_result", () => {});
+			break;
+		case "message_end":
+			api.on("message_end", () => {});
+			break;
+		case "agent_start":
+			api.on("agent_start", () => {});
+			break;
+		case "after_provider_response":
+			api.on("after_provider_response", () => {});
+			break;
+		case "tool_execution_start":
+			api.on("tool_execution_start", () => {});
+			break;
+	}
+}
+
+function createParentHookExtension(
+	hooks: readonly (IncompatibleParentHook | ObservationParentHook)[],
+): InlineExtension {
+	return {
+		name: "parent-policy-test",
+		factory: (api) => {
+			for (const hook of hooks) registerParentHook(api, hook);
+		},
+	};
+}
+
+function parentPolicyError(hooks: readonly IncompatibleParentHook[]): string {
+	return `Cannot spawn a subagent while parent extensions register incompatible hooks: ${hooks.join(", ")}. Remove those hooks or disable subagents for this session.`;
+}
 
 interface Deferred<T> {
 	readonly promise: Promise<T>;
@@ -67,6 +141,7 @@ describe("root subagent tool registration", () => {
 	let rootIndex = 0;
 
 	afterEach(async () => {
+		vi.restoreAllMocks();
 		while (runtimeCleanups.length > 0) await runtimeCleanups.pop()?.();
 		while (sessions.length > 0) await sessions.pop()?.dispose();
 		while (harnesses.length > 0) await harnesses.pop()?.cleanup();
@@ -122,6 +197,27 @@ describe("root subagent tool registration", () => {
 		});
 		sessions.push(session);
 		return { session, services };
+	}
+
+	async function createPolicyRoot(
+		harness: Harness,
+		hooks: readonly (IncompatibleParentHook | ObservationParentHook)[],
+		options: { sessionManager?: SessionManager; resourceLoader?: ReturnType<typeof createTestResourceLoader> } = {},
+	): Promise<{ session: AgentSession; controller: SubagentController }> {
+		const extensionsResult = await createTestExtensionsResult([createParentHookExtension(hooks)], harness.tempDir);
+		const { session } = await createAgentSession({
+			cwd: harness.tempDir,
+			agentDir: join(harness.tempDir, "policy-agent"),
+			modelRuntime: harness.session.modelRuntime,
+			settingsManager: harness.settingsManager,
+			resourceLoader: options.resourceLoader ?? createTestResourceLoader({ extensionsResult }),
+			sessionManager: options.sessionManager ?? SessionManager.inMemory(harness.tempDir),
+			model: harness.getModel("faux-1"),
+			thinkingLevel: "high",
+		});
+		sessions.push(session);
+		const controller = (session as unknown as { _subagentController: SubagentController })._subagentController;
+		return { session, controller };
 	}
 
 	it("registers and activates all coordination tools by default", async () => {
@@ -204,8 +300,117 @@ describe("root subagent tool registration", () => {
 		await expect(
 			spawn.execute("spawn", { name: "worker", task: "task" }, undefined, undefined, {} as never),
 		).rejects.toThrow("Subagent controller parent is not bound");
-		controller.bindParent(session);
-		expect(() => controller.bindParent(session)).toThrow("Subagent controller parent is already bound");
+		controller.bindParent(session, () => []);
+		expect(() => controller.bindParent(session, () => [])).toThrow("Subagent controller parent is already bound");
+		await controller.shutdown();
+	});
+
+	it.each(INCOMPATIBLE_PARENT_HOOKS)("rejects spawn when the parent registers %s", async (hook) => {
+		const harness = await setupHarness();
+		const { session, controller } = await createPolicyRoot(harness, [hook]);
+
+		await expect(
+			getActiveTool(session, "spawn_agent").execute("spawn", { name: "worker", task: "task" }),
+		).rejects.toThrow(parentPolicyError([hook]));
+		expect(controller.snapshot().agents).toEqual([]);
+	});
+
+	it("reports incompatible hook combinations once in authoritative order", async () => {
+		const harness = await setupHarness();
+		const registered = [...INCOMPATIBLE_PARENT_HOOKS].reverse();
+		const { session } = await createPolicyRoot(harness, registered);
+
+		await expect(
+			getActiveTool(session, "spawn_agent").execute("spawn", { name: "worker", task: "task" }),
+		).rejects.toThrow(parentPolicyError(INCOMPATIBLE_PARENT_HOOKS));
+	});
+
+	it("rejects before validation, child capture, persistence, reservation, or provider work", async () => {
+		const harness = await setupHarness();
+		harness.setResponses([fauxAssistantMessage("unexpected child response")]);
+		const sessionManager = SessionManager.create(harness.tempDir, join(harness.tempDir, "policy-sessions"));
+		const createChildManager = vi.spyOn(RootLocalEphemeralSubagentSessionManagerFactory.prototype, "create");
+		const orderedHooks = ["resources_discover", "input", "tool_call", "message_end"] as const;
+		const { session, controller } = await createPolicyRoot(
+			harness,
+			["message_end", "input", "tool_call", "input", "resources_discover"],
+			{ sessionManager },
+		);
+		const entryCount = sessionManager.getEntryCount();
+		const pendingResponses = harness.getPendingResponseCount();
+
+		await expect(
+			getActiveTool(session, "spawn_agent").execute("spawn", { name: "INVALID", task: "" }),
+		).rejects.toThrow(parentPolicyError(orderedHooks));
+		expect(controller.snapshot().agents).toEqual([]);
+		expect(sessionManager.getEntryCount()).toBe(entryCount);
+		expect(createChildManager).not.toHaveBeenCalled();
+		expect(harness.getPendingResponseCount()).toBe(pendingResponses);
+
+		const createSession = vi.fn();
+		expect(() => controller.spawn("direct", "task", createSession)).toThrow(parentPolicyError(orderedHooks));
+		expect(createSession).not.toHaveBeenCalled();
+		expect(controller.snapshot().agents).toEqual([]);
+		expect(sessionManager.getEntryCount()).toBe(entryCount);
+	});
+
+	it("keeps observation hooks and non-spawn actions admissible", async () => {
+		const harness = await setupHarness();
+		harness.setResponses([fauxAssistantMessage("child complete")]);
+		const observed = await createPolicyRoot(harness, [
+			"agent_start",
+			"after_provider_response",
+			"tool_execution_start",
+		]);
+		await getActiveTool(observed.session, "spawn_agent").execute("spawn", { name: "worker", task: "task" });
+		await expect(
+			getActiveTool(observed.session, "agents").execute("wait", { timeout_ms: 1_000, until: "all" }),
+		).resolves.toMatchObject({ details: { agents: [{ name: "worker", status: "idle" }] } });
+
+		const guarded = await createPolicyRoot(harness, ["context"]);
+		guarded.controller.reserve("existing", "existing task");
+		guarded.controller.markFailed("existing", "existing failure");
+		await expect(
+			getActiveTool(guarded.session, "agent_action").execute("interrupt", {
+				target: "existing",
+				action: "interrupt",
+			}),
+		).resolves.toMatchObject({ details: { target: "existing", status: "failed" } });
+		await expect(getActiveTool(guarded.session, "agents").execute("list", { timeout_ms: 0 })).resolves.toMatchObject({
+			details: { agents: [{ name: "existing", status: "failed" }] },
+		});
+	});
+
+	it("checks the current extension runner after reload", async () => {
+		const harness = await setupHarness();
+		const initialExtensions = await createTestExtensionsResult([], harness.tempDir);
+		const reloadedExtensions = await createTestExtensionsResult(
+			[createParentHookExtension(["before_provider_headers"])],
+			harness.tempDir,
+		);
+		let currentExtensions = initialExtensions;
+		const resourceLoader = createTestResourceLoader();
+		resourceLoader.getExtensions = () => currentExtensions;
+		resourceLoader.reload = async () => {
+			currentExtensions = reloadedExtensions;
+		};
+		const { session } = await createPolicyRoot(harness, [], { resourceLoader });
+
+		await session.reload();
+		await expect(
+			getActiveTool(session, "spawn_agent").execute("spawn", { name: "worker", task: "task" }),
+		).rejects.toThrow(parentPolicyError(["before_provider_headers"]));
+	});
+
+	it("preserves unbound programmatic controller spawning", async () => {
+		const child = await setupHarness();
+		child.setResponses([fauxAssistantMessage("programmatic child complete")]);
+		const controller = new SubagentController({ maxConcurrent: 1 });
+
+		controller.spawn("worker", "task", async () => child.session);
+		await expect(controller.queryAgents({ timeoutMs: 1_000, until: "all" })).resolves.toMatchObject({
+			agents: [{ name: "worker", status: "idle", result: "programmatic child complete" }],
+		});
 		await controller.shutdown();
 	});
 
