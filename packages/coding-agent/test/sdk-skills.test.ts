@@ -6,6 +6,7 @@ import { createExtensionRuntime } from "../src/core/extensions/loader.ts";
 import type { ResourceLoader } from "../src/core/resource-loader.ts";
 import { createAgentSession } from "../src/core/sdk.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
+import { createSkill } from "../src/core/skills.ts";
 import { createSyntheticSourceInfo } from "../src/core/source-info.ts";
 
 describe("createAgentSession skills option", () => {
@@ -77,14 +78,14 @@ This is a test skill.
 	});
 
 	it("should use provided skills when resource loader supplies them", async () => {
-		const customSkill = {
+		const customSkill = createSkill({
 			name: "custom-skill",
 			description: "A custom skill",
 			filePath: "/fake/path/SKILL.md",
 			baseDir: "/fake/path",
 			sourceInfo: createSyntheticSourceInfo("/fake/path/SKILL.md", { source: "sdk" }),
-			disableModelInvocation: false,
-		};
+			content: "# Custom Skill",
+		});
 
 		const resourceLoader: ResourceLoader = {
 			getExtensions: () => ({ extensions: [], errors: [], runtime: createExtensionRuntime() }),

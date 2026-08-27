@@ -13,6 +13,7 @@ import { createModels } from "@earendil-works/diffex-ai";
 import { getModel } from "@earendil-works/diffex-ai/compat";
 import { Type } from "typebox";
 import { describe, expect, test, vi } from "vitest";
+import { createSkill } from "../../src/core/skills.ts";
 import {
 	buildCodingAgentHarnessSystemPrompt,
 	type CodingAgentHarnessTool,
@@ -322,7 +323,7 @@ describe("coding-agent Harness construction", () => {
 			systemPromptOptions: {
 				contextFiles: [{ path: "/workspace/AGENTS.md", content: "Follow project policy." }],
 				skills: [
-					{
+					createSkill({
 						name: "review",
 						description: "Review server changes",
 						filePath: "/skills/review/SKILL.md",
@@ -333,8 +334,8 @@ describe("coding-agent Harness construction", () => {
 							scope: "temporary",
 							origin: "top-level",
 						},
-						disableModelInvocation: false,
-					},
+						content: "# Review server changes",
+					}),
 				],
 			},
 		});

@@ -7,6 +7,7 @@ import { Type } from "typebox";
 import { afterEach, describe, expect, it } from "vitest";
 import type { InputEvent } from "../../src/core/extensions/index.ts";
 import type { PromptTemplate } from "../../src/core/prompt-templates.ts";
+import { createSkill } from "../../src/core/skills.ts";
 import { createSyntheticSourceInfo } from "../../src/core/source-info.ts";
 import { createTestResourceLoader } from "../utilities.ts";
 import { createHarness, getMessageText, type Harness } from "./harness.ts";
@@ -155,11 +156,10 @@ describe("AgentSession prompt characterization", () => {
 			...createTestResourceLoader(),
 			getSkills: () => ({
 				skills: [
-					{
+					createSkill({
 						name: "test",
 						description: "Test skill",
 						filePath: skillPath,
-						disableModelInvocation: false,
 						baseDir: tempDir,
 						sourceInfo: createSyntheticSourceInfo(skillPath, {
 							source: "local",
@@ -167,7 +167,8 @@ describe("AgentSession prompt characterization", () => {
 							origin: "top-level",
 							baseDir: tempDir,
 						}),
-					},
+						content: "# Test Skill\n\nUse the skill body.",
+					}),
 				],
 				diagnostics: [],
 			}),
@@ -216,22 +217,25 @@ describe("AgentSession prompt characterization", () => {
 			...createTestResourceLoader(),
 			getSkills: () => ({
 				skills: [
-					{
+					createSkill({
 						name: "selected",
 						description: "Selected skill",
 						filePath: selectedPath,
-						disableModelInvocation: true,
 						baseDir: tempDir,
 						sourceInfo: sourceInfo(selectedPath),
-					},
-					{
+						content:
+							"---\nname: selected\ndescription: Selected skill\n---\n\n# Selected\n\nOriginal instructions.",
+						disableModelInvocation: true,
+					}),
+					createSkill({
 						name: "unselected",
 						description: "Unselected skill",
 						filePath: unselectedPath,
-						disableModelInvocation: false,
 						baseDir: tempDir,
 						sourceInfo: sourceInfo(unselectedPath),
-					},
+						content:
+							"---\nname: unselected\ndescription: Unselected skill\n---\n\n# Unselected\n\nPrivate instructions.",
+					}),
 				],
 				diagnostics: [],
 			}),

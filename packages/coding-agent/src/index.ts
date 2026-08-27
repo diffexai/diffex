@@ -268,15 +268,20 @@ export {
 } from "./core/settings-manager.ts";
 // Skills
 export {
+	type CreateSkillOptions,
+	createSkill,
 	formatSkillsForPrompt,
 	type LoadSkillsFromDirOptions,
 	type LoadSkillsResult,
 	loadSkills,
 	loadSkillsFromDir,
 	type Skill,
+	type SkillCatalog,
 	type SkillFrontmatter,
 	type SkillReference,
 	type SkillReferenceGroup,
+	type SkillScope,
+	type SkillSourceKind,
 } from "./core/skills.ts";
 export { createSyntheticSourceInfo } from "./core/source-info.ts";
 export type { SubagentStatus, SubagentSummary } from "./core/subagents/types.ts";

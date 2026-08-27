@@ -7,22 +7,22 @@
 
 import {
 	createAgentSession,
+	createSkill,
 	createSyntheticSourceInfo,
 	DefaultResourceLoader,
 	getAgentDir,
 	SessionManager,
-	type Skill,
 } from "@earendil-works/diffex-coding-agent";
 
 // Or define custom skills inline
-const customSkill: Skill = {
+const customSkill = createSkill({
 	name: "my-skill",
 	description: "Custom project instructions",
 	filePath: "/virtual/SKILL.md",
 	baseDir: "/virtual",
 	sourceInfo: createSyntheticSourceInfo("/virtual/SKILL.md", { source: "sdk" }),
-	disableModelInvocation: false,
-};
+	content: "# My Skill\n\nFollow the custom project instructions.",
+});
 
 const loader = new DefaultResourceLoader({
 	cwd: process.cwd(),

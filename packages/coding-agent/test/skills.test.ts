@@ -3,6 +3,7 @@ import { join, resolve } from "path";
 import { describe, expect, it } from "vitest";
 import type { ResourceDiagnostic } from "../src/core/diagnostics.ts";
 import {
+	createSkill,
 	createSkillReferenceSnapshot,
 	formatSkillsForPrompt,
 	loadSkills,
@@ -22,14 +23,15 @@ function createTestSkill(options: {
 	disableModelInvocation?: boolean;
 	source?: string;
 }): Skill {
-	return {
+	return createSkill({
 		name: options.name,
 		description: options.description,
 		filePath: options.filePath,
 		baseDir: options.baseDir,
 		sourceInfo: createSyntheticSourceInfo(options.filePath, { source: options.source ?? "test" }),
-		disableModelInvocation: options.disableModelInvocation ?? false,
-	};
+		content: `# ${options.name}`,
+		disableModelInvocation: options.disableModelInvocation,
+	});
 }
 
 describe("skills", () => {
@@ -237,11 +239,60 @@ describe("skills", () => {
 				dir: join(fixturesDir, "valid-skill"),
 				source: "test",
 			});
-			const skill = skills[0];
-			if (!skill) throw new Error("Valid skill fixture was not loaded");
-			skill.sourceInfo = createSyntheticSourceInfo(skill.filePath, { source: "local", scope });
+			const loaded = skills[0];
+			if (!loaded) throw new Error("Valid skill fixture was not loaded");
+			const skill = createSkill({
+				name: loaded.name,
+				description: loaded.description,
+				filePath: loaded.filePath,
+				baseDir: loaded.baseDir,
+				sourceInfo: createSyntheticSourceInfo(loaded.filePath, { source: "local", scope }),
+				content: loaded.content,
+			});
 
 			expect(createSkillReferenceSnapshot(skill).group).toBe(expectedGroup);
+		});
+
+		it("keeps source identity stable while content versions change", () => {
+			const base = {
+				name: "stable-skill",
+				description: "Stable identity",
+				filePath: "/workspace/skills/stable/SKILL.md",
+				baseDir: "/workspace/skills/stable",
+				sourceInfo: createSyntheticSourceInfo("/workspace/skills/stable/SKILL.md", {
+					source: "local",
+					scope: "project",
+				}),
+			};
+			const first = createSkill({ ...base, content: "First revision" });
+			const second = createSkill({ ...base, content: "Second revision" });
+
+			expect(second.skillId).toBe(first.skillId);
+			expect(second.version).not.toBe(first.version);
+			expect(first.version).toBe(first.contentDigest);
+		});
+
+		it("creates evolved workspace references from catalog metadata", () => {
+			const skill = createSkill({
+				name: "evolved-skill",
+				description: "Evolved instructions",
+				filePath: "/harness/skills/evolved-skill/SKILL.md",
+				baseDir: "/harness/skills/evolved-skill",
+				sourceInfo: createSyntheticSourceInfo("/harness/skills/evolved-skill/SKILL.md", {
+					source: "harness",
+					scope: "project",
+				}),
+				content: "Evolved content",
+				sourceKind: "evolved",
+				harnessRevision: "sha256:harness",
+			});
+
+			expect(createSkillReferenceSnapshot(skill)).toMatchObject({
+				group: "evolved-workspace",
+				sourceKind: "evolved",
+				scope: "workspace",
+				harnessRevision: "sha256:harness",
+			});
 		});
 	});
 

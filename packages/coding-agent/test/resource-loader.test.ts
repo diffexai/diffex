@@ -8,7 +8,7 @@ import { ExtensionRunner } from "../src/core/extensions/runner.ts";
 import { DefaultResourceLoader, loadProjectContextFiles } from "../src/core/resource-loader.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
 import { SettingsManager } from "../src/core/settings-manager.ts";
-import type { Skill } from "../src/core/skills.ts";
+import { createSkill } from "../src/core/skills.ts";
 import { createSyntheticSourceInfo } from "../src/core/source-info.ts";
 
 import { createModelRegistry } from "./model-runtime-test-utils.ts";
@@ -56,7 +56,15 @@ Skill content here.`,
 			await loader.reload();
 
 			const { skills } = loader.getSkills();
-			expect(skills.some((s) => s.name === "test-skill")).toBe(true);
+			const skill = skills.find((candidate) => candidate.name === "test-skill");
+			expect(skill).toMatchObject({
+				sourceKind: "installed",
+				scope: "global",
+				version: expect.stringMatching(/^sha256:/),
+				contentDigest: expect.stringMatching(/^sha256:/),
+			});
+			expect(skill?.skillId).toMatch(/^skill:/);
+			expect(skill?.content).toContain("Skill content here.");
 		});
 
 		it("should ignore extra markdown files in auto-discovered skill dirs", async () => {
@@ -335,12 +343,17 @@ Content`,
 			await loader.reload();
 
 			const { extensions } = loader.getExtensions();
-			const { skills } = loader.getSkills();
+			const { skills, diagnostics: skillDiagnostics } = loader.getSkills();
 			const { prompts } = loader.getPrompts();
 			const { themes } = loader.getThemes();
 
 			expect(extensions.some((e) => e.path.endsWith("disabled.ts"))).toBe(false);
 			expect(skills.some((s) => s.name === "skip-skill")).toBe(false);
+			expect(skillDiagnostics).toContainEqual({
+				type: "warning",
+				message: "skill disabled by configuration",
+				path: join(skillDir, "SKILL.md"),
+			});
 			expect(prompts.some((p) => p.name === "skip")).toBe(false);
 			expect(themes.some((t) => t.sourcePath?.endsWith("skip.json"))).toBe(false);
 		});
@@ -856,14 +869,14 @@ Content`,
 
 	describe("override functions", () => {
 		it("should apply skillsOverride", async () => {
-			const injectedSkill: Skill = {
+			const injectedSkill = createSkill({
 				name: "injected",
 				description: "Injected skill",
 				filePath: "/fake/path",
 				baseDir: "/fake",
 				sourceInfo: createSyntheticSourceInfo("/fake/path", { source: "custom" }),
-				disableModelInvocation: false,
-			};
+				content: "# Injected skill",
+			});
 			const loader = new DefaultResourceLoader({
 				cwd,
 				agentDir,

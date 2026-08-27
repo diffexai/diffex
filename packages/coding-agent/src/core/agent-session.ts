@@ -1364,8 +1364,12 @@ export class AgentSession {
 				references.push({
 					skillId: snapshot.skillId,
 					version: snapshot.version,
+					contentDigest: snapshot.contentDigest,
 					name: snapshot.name,
 					description: snapshot.description,
+					sourceKind: snapshot.sourceKind,
+					scope: snapshot.scope,
+					...(snapshot.harnessRevision === undefined ? {} : { harnessRevision: snapshot.harnessRevision }),
 					reference: snapshot.reference,
 					group: snapshot.group,
 				});

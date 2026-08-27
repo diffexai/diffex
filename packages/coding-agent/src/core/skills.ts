@@ -72,18 +72,47 @@ export interface SkillFrontmatter {
 	[key: string]: unknown;
 }
 
+export type SkillSourceKind = "evolved" | "installed";
+
+export type SkillScope = "global" | "workspace";
+
 export interface Skill {
+	skillId: string;
 	name: string;
 	description: string;
 	filePath: string;
 	baseDir: string;
 	sourceInfo: SourceInfo;
+	sourceKind: SkillSourceKind;
+	scope: SkillScope;
+	content: string;
+	contentDigest: string;
+	version: string;
+	harnessRevision?: string;
 	disableModelInvocation: boolean;
 }
 
-export interface LoadSkillsResult {
+export interface SkillCatalog {
 	skills: Skill[];
 	diagnostics: ResourceDiagnostic[];
+}
+
+export type LoadSkillsResult = SkillCatalog;
+
+export interface CreateSkillOptions {
+	name: string;
+	description: string;
+	filePath: string;
+	baseDir: string;
+	sourceInfo: SourceInfo;
+	content: string;
+	sourceKind?: SkillSourceKind;
+	scope?: SkillScope;
+	skillId?: string;
+	contentDigest?: string;
+	version?: string;
+	harnessRevision?: string;
+	disableModelInvocation?: boolean;
 }
 
 export type SkillReferenceGroup = "evolved-workspace" | "installed-workspace" | "installed-global";
@@ -91,8 +120,12 @@ export type SkillReferenceGroup = "evolved-workspace" | "installed-workspace" | 
 export interface SkillReference {
 	skillId: string;
 	version: string;
+	contentDigest: string;
 	name: string;
 	description: string;
+	sourceKind: SkillSourceKind;
+	scope: SkillScope;
+	harnessRevision?: string;
 	reference: string;
 	group: SkillReferenceGroup;
 }
@@ -117,29 +150,59 @@ function escapeXmlAttribute(value: string): string {
 		.replace(/'/g, "&apos;");
 }
 
-export function createSkillReferenceSnapshot(skill: Skill): SkillReferenceSnapshot {
-	const rawContent = readFileSync(skill.filePath, "utf-8");
-	const skillId = `skill:${sha256(
-		JSON.stringify([
-			canonicalizePath(skill.filePath),
-			skill.sourceInfo.source,
-			skill.sourceInfo.scope,
-			skill.sourceInfo.origin,
-		]),
-	)}`;
-	const version = `sha256:${sha256(rawContent)}`;
-	const reference = `<skill-reference id="${skillId}" version="${version}" name="${escapeXmlAttribute(skill.name)}"/>`;
+export function createSkill(options: CreateSkillOptions): Skill {
+	const sourceKind = options.sourceKind ?? "installed";
+	const scope = options.scope ?? (options.sourceInfo.scope === "project" ? "workspace" : "global");
+	const contentDigest = options.contentDigest ?? `sha256:${sha256(options.content)}`;
+	const skillId =
+		options.skillId ??
+		`skill:${sha256(
+			JSON.stringify([
+				canonicalizePath(options.filePath),
+				options.sourceInfo.source,
+				options.sourceInfo.scope,
+				options.sourceInfo.origin,
+			]),
+		)}`;
 	return {
 		skillId,
-		version,
+		name: options.name,
+		description: options.description,
+		filePath: options.filePath,
+		baseDir: options.baseDir,
+		sourceInfo: options.sourceInfo,
+		sourceKind,
+		scope,
+		content: options.content,
+		contentDigest,
+		version: options.version ?? contentDigest,
+		...(options.harnessRevision === undefined ? {} : { harnessRevision: options.harnessRevision }),
+		disableModelInvocation: options.disableModelInvocation ?? false,
+	};
+}
+
+export function createSkillReferenceSnapshot(skill: Skill): SkillReferenceSnapshot {
+	const reference = `<skill-reference id="${skill.skillId}" version="${skill.version}" name="${escapeXmlAttribute(skill.name)}"/>`;
+	return {
+		skillId: skill.skillId,
+		version: skill.version,
+		contentDigest: skill.contentDigest,
 		name: skill.name,
 		description: skill.description,
+		sourceKind: skill.sourceKind,
+		scope: skill.scope,
+		...(skill.harnessRevision === undefined ? {} : { harnessRevision: skill.harnessRevision }),
 		reference,
-		group: skill.sourceInfo.scope === "project" ? "installed-workspace" : "installed-global",
+		group:
+			skill.sourceKind === "evolved"
+				? "evolved-workspace"
+				: skill.scope === "workspace"
+					? "installed-workspace"
+					: "installed-global",
 		location: skill.filePath,
 		baseDir: skill.baseDir,
 		sourceInfo: skill.sourceInfo,
-		content: rawContent,
+		content: skill.content,
 	};
 }
 
@@ -149,8 +212,13 @@ export function formatSkillReferenceSnapshot(snapshot: SkillReferenceSnapshot): 
 		`location="${escapeXmlAttribute(snapshot.location)}"`,
 		`id="${snapshot.skillId}"`,
 		`version="${snapshot.version}"`,
+		`digest="${snapshot.contentDigest}"`,
+		`source-kind="${snapshot.sourceKind}"`,
 		`source="${escapeXmlAttribute(snapshot.sourceInfo.source)}"`,
-		`scope="${snapshot.sourceInfo.scope}"`,
+		`scope="${snapshot.scope}"`,
+		...(snapshot.harnessRevision === undefined
+			? []
+			: [`harness-revision="${escapeXmlAttribute(snapshot.harnessRevision)}"`]),
 		`base="${escapeXmlAttribute(snapshot.baseDir)}"`,
 	].join(" ");
 	return `<skill ${attributes}>\nReferences are relative to ${snapshot.baseDir}.\n\n${snapshot.content.trim()}\n</skill>`;
@@ -378,14 +446,15 @@ function loadSkillFromFile(
 		}
 
 		return {
-			skill: {
+			skill: createSkill({
 				name,
 				description: frontmatter.description,
 				filePath,
 				baseDir: skillDir,
 				sourceInfo: createSkillSourceInfo(filePath, skillDir, source),
+				content: rawContent,
 				disableModelInvocation: frontmatter["disable-model-invocation"] === true,
-			},
+			}),
 			diagnostics,
 		};
 	} catch (error) {

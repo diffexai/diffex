@@ -6,6 +6,7 @@ import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/diffex-ai";
 import type { ExtensionAPI, ResourceLoader } from "@earendil-works/diffex-coding-agent";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it } from "vitest";
+import { createSkill } from "../../src/core/skills.ts";
 import { createSyntheticSourceInfo } from "../../src/core/source-info.ts";
 import { createTestResourceLoader } from "../utilities.ts";
 import { createHarness, getAssistantTexts, getMessageText, getUserTexts, type Harness } from "./harness.ts";
@@ -279,7 +280,7 @@ describe("AgentSession queue characterization", () => {
 			...createTestResourceLoader(),
 			getSkills: () => ({
 				skills: [
-					{
+					createSkill({
 						name: "queued-skill",
 						description: "Queue test",
 						filePath: skillPath,
@@ -290,8 +291,8 @@ describe("AgentSession queue characterization", () => {
 							origin: "top-level",
 							baseDir: tempDir,
 						}),
-						disableModelInvocation: false,
-					},
+						content: "---\nname: queued-skill\ndescription: Queue test\n---\n\nOriginal procedure.",
+					}),
 				],
 				diagnostics: [],
 			}),
