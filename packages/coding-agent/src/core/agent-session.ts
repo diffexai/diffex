@@ -57,7 +57,7 @@ import type {
 	HarnessWorkspaceIdentity,
 } from "@earendil-works/diffex-harness-state";
 import { getThemeByName, theme } from "../modes/interactive/theme/theme.ts";
-import { resolvePath } from "../utils/paths.ts";
+import { canonicalizePath, resolvePath } from "../utils/paths.ts";
 import { sleep } from "../utils/sleep.ts";
 import { normalizeToolResultImages } from "../utils/tool-result-images.ts";
 import type { AgentSessionLifecycleObserver } from "./agent-session-lifecycle.ts";
@@ -128,6 +128,7 @@ import {
 	createEvolvedSkillCatalog,
 	createSkillReferenceSnapshot,
 	formatSkillReferenceSnapshot,
+	isSkillListedInPrompt,
 	type Skill,
 	type SkillReference,
 	type SkillReferenceSnapshot,
@@ -206,10 +207,16 @@ export function parseSkillBlock(text: string): ParsedSkillBlock | null {
 interface SkillExpansion {
 	text: string;
 	references: SkillReferenceSnapshot[];
+	forceLoaded: SkillReferenceSnapshot[];
+}
+
+interface ActiveSkillTrace {
+	operationSpan: CodingAgentTelemetrySpan<"diffex.coding_agent.operation">;
+	skills: readonly SkillReferenceSnapshot[];
 }
 
 const SKILL_REFERENCE_PATTERN =
-	/<skill-reference id="(skill:[a-f0-9]{64})" version="(sha256:[a-f0-9]{64})" name="[^"]*"\/>/g;
+	/<skill-reference id="(skill:[a-f0-9]{64})" version="(sha256:[a-f0-9]{64})" name="[^"]*"( load="force")?\/>/g;
 
 /** Session-specific events that extend the core AgentEvent */
 export type AgentSessionEvent =
@@ -468,6 +475,7 @@ export class AgentSession {
 	private _pendingNextTurnMessages: CustomMessage[] = [];
 	private _pendingCurrentPlanRestoration = false;
 	private readonly _skillReferenceSnapshots = new Map<string, SkillReferenceSnapshot>();
+	private _activeSkillTrace: ActiveSkillTrace | undefined;
 
 	// Compaction state
 	private _compactionAbortController: AbortController | undefined = undefined;
@@ -718,6 +726,7 @@ export class AgentSession {
 			const normalizedContent = await normalizeToolResultImages(content, {
 				autoResizeImages: this.settingsManager.getImageAutoResize(),
 			});
+			this._recordSkillRead(toolCall.name, args, result.details, hookResult?.isError ?? isError);
 
 			if (!hookResult && normalizedContent === content) {
 				return undefined;
@@ -1472,6 +1481,84 @@ export class AgentSession {
 		return snapshot;
 	}
 
+	private _snapshotSkillCatalog(): SkillReferenceSnapshot[] {
+		return this._resourceLoader.getSkills().skills.map((skill) => this._snapshotSkill(skill));
+	}
+
+	private _skillObservationAttributes(skill: SkillReferenceSnapshot) {
+		return {
+			"diffex.skill.id": skill.skillId,
+			"diffex.skill.version": skill.version,
+			"diffex.skill.content_digest": skill.contentDigest,
+			"diffex.skill.source_kind": skill.sourceKind,
+			"diffex.skill.source": skill.sourceInfo.source,
+			"diffex.skill.scope": skill.scope,
+			...(skill.harnessRevision === undefined ? {} : { "diffex.skill.harness_revision": skill.harnessRevision }),
+			...(this._workspaceIdentity === undefined
+				? {}
+				: {
+						"diffex.workspace.repository_id": this._workspaceIdentity.repositoryId,
+						...(this._workspaceIdentity.directoryId === undefined
+							? {}
+							: { "diffex.workspace.directory_id": this._workspaceIdentity.directoryId }),
+					}),
+			...(this.activeHarnessVersion === undefined ? {} : { "diffex.harness.version": this.activeHarnessVersion }),
+		};
+	}
+
+	private _recordSkillAdmission(
+		operationSpan: CodingAgentTelemetrySpan<"diffex.coding_agent.operation">,
+		available: readonly SkillReferenceSnapshot[],
+		references: readonly SkillReferenceSnapshot[],
+		forceLoaded: readonly SkillReferenceSnapshot[],
+		systemPrompt: string,
+	): readonly SkillReferenceSnapshot[] {
+		for (const skill of available) {
+			operationSpan.addEvent("diffex.skill.available", this._skillObservationAttributes(skill));
+			if (isSkillListedInPrompt(systemPrompt, skill)) {
+				operationSpan.addEvent("diffex.skill.listed", this._skillObservationAttributes(skill));
+			}
+		}
+		this._recordSkillReferences(operationSpan, references);
+		for (const skill of references) {
+			operationSpan.addEvent("diffex.skill.explicitly_referenced", this._skillObservationAttributes(skill));
+		}
+		for (const skill of forceLoaded) {
+			operationSpan.addEvent("diffex.skill.force_loaded", this._skillObservationAttributes(skill));
+		}
+
+		const snapshots = new Map<string, SkillReferenceSnapshot>();
+		for (const skill of [...available, ...references]) {
+			snapshots.set(this._skillReferenceKey(skill.skillId, skill.version), skill);
+		}
+		return [...snapshots.values()];
+	}
+
+	private _recordSkillRead(toolName: string, args: unknown, details: unknown, isError: boolean): void {
+		const activeTrace = this._activeSkillTrace;
+		if (
+			isError ||
+			toolName !== "read" ||
+			!activeTrace ||
+			typeof args !== "object" ||
+			args === null ||
+			typeof details !== "object" ||
+			details === null
+		) {
+			return;
+		}
+		const path = "path" in args && typeof args.path === "string" ? args.path : undefined;
+		const contentDigest =
+			"contentDigest" in details && typeof details.contentDigest === "string" ? details.contentDigest : undefined;
+		if (!path || !contentDigest) return;
+		const resolvedPath = canonicalizePath(resolvePath(path, this._cwd));
+		for (const skill of activeTrace.skills) {
+			if (skill.contentDigest !== contentDigest) continue;
+			if (canonicalizePath(resolvePath(skill.location, this._cwd)) !== resolvedPath) continue;
+			activeTrace.operationSpan.addEvent("diffex.skill.read", this._skillObservationAttributes(skill));
+		}
+	}
+
 	/** Snapshot every currently available skill for explicit selection. */
 	createSkillReferences(): SkillReference[] {
 		const references: SkillReference[] = [];
@@ -1978,6 +2065,7 @@ export class AgentSession {
 		const preflightResult = options?.preflightResult;
 		const signal = options?.signal;
 		let messages: AgentMessage[] | undefined;
+		let activeSkillTrace: ActiveSkillTrace | undefined;
 		let consumedNextTurnMessages: CustomMessage[] | undefined;
 		let preflightAccepted = false;
 		let pendingCompaction: CompactionAppendTransaction | undefined;
@@ -2042,14 +2130,16 @@ export class AgentSession {
 			}
 
 			// Expand prompt templates and explicit skill references.
+			const availableSkills = this._snapshotSkillCatalog();
 			let expandedText = currentText;
 			let referencedSkills: SkillReferenceSnapshot[] = [];
+			let forceLoadedSkills: SkillReferenceSnapshot[] = [];
 			if (expandPromptTemplates) {
 				expandedText = expandPromptTemplate(expandedText, [...this.promptTemplates]);
 				const explicitReferences = this._expandSkillReferences(expandedText);
 				expandedText = explicitReferences.text;
 				referencedSkills = explicitReferences.references;
-				this._recordSkillReferences(operationSpan, referencedSkills);
+				forceLoadedSkills = explicitReferences.forceLoaded;
 			}
 
 			// If streaming, queue via steer() or followUp() based on option
@@ -2059,10 +2149,17 @@ export class AgentSession {
 						"Agent is already processing. Specify streamingBehavior ('steer' or 'followUp') to queue the message.",
 					);
 				}
+				this._recordSkillAdmission(
+					operationSpan,
+					availableSkills,
+					referencedSkills,
+					forceLoadedSkills,
+					this.agent.state.systemPrompt,
+				);
 				if (options.streamingBehavior === "followUp") {
-					await this._queueFollowUp(expandedText, currentImages, referencedSkills);
+					await this._queueFollowUp(expandedText, currentImages, referencedSkills, forceLoadedSkills, false);
 				} else {
-					await this._queueSteer(expandedText, currentImages, referencedSkills);
+					await this._queueSteer(expandedText, currentImages, referencedSkills, forceLoadedSkills, false);
 				}
 				preflightAccepted = true;
 				preflightResult?.(true);
@@ -2154,6 +2251,16 @@ export class AgentSession {
 				this._systemPromptOverride = undefined;
 				this.agent.state.systemPrompt = this._appendSubagentDelegatedMessageTrustGuidance(this._baseSystemPrompt);
 			}
+			activeSkillTrace = {
+				operationSpan,
+				skills: this._recordSkillAdmission(
+					operationSpan,
+					availableSkills,
+					referencedSkills,
+					forceLoadedSkills,
+					this.agent.state.systemPrompt,
+				),
+			};
 		} catch (error) {
 			let failure = error;
 			if (!preflightAccepted) {
@@ -2200,7 +2307,12 @@ export class AgentSession {
 		consumedNextTurnMessages = undefined;
 		releaseUnsignaledPreflight();
 		this._releaseIdleSubagentEscalationsForSelectedBranch();
-		await this._runAgentPrompt(messages);
+		this._activeSkillTrace = activeSkillTrace;
+		try {
+			await this._runAgentPrompt(messages);
+		} finally {
+			if (this._activeSkillTrace === activeSkillTrace) this._activeSkillTrace = undefined;
+		}
 	}
 
 	/**
@@ -2244,33 +2356,39 @@ export class AgentSession {
 
 	private _expandSkillReferences(text: string): SkillExpansion {
 		const references: SkillReferenceSnapshot[] = [];
+		const forceLoaded: SkillReferenceSnapshot[] = [];
 		const seen = new Set<string>();
-		const remaining = text.replace(SKILL_REFERENCE_PATTERN, (_match, skillId: string, version: string) => {
-			const key = this._skillReferenceKey(skillId, version);
-			const snapshot = this._skillReferenceSnapshots.get(key);
-			if (!snapshot) {
-				throw new Error(`Skill reference ${skillId}@${version} is not available in this session.`);
-			}
-			if (
-				snapshot.sourceKind === "evolved" &&
-				snapshot.harnessRevision !== this._harnessVersionBundle?.manifest.version
-			) {
-				throw new Error(
-					`Evolved skill reference ${skillId}@${version} is not part of the active harness revision.`,
-				);
-			}
-			if (!seen.has(key)) {
-				seen.add(key);
-				references.push(snapshot);
-			}
-			return "";
-		});
-		if (references.length === 0) return { text, references };
+		const remaining = text.replace(
+			SKILL_REFERENCE_PATTERN,
+			(_match, skillId: string, version: string, forceLoadMarker: string | undefined) => {
+				const key = this._skillReferenceKey(skillId, version);
+				const snapshot = this._skillReferenceSnapshots.get(key);
+				if (!snapshot) {
+					throw new Error(`Skill reference ${skillId}@${version} is not available in this session.`);
+				}
+				if (
+					snapshot.sourceKind === "evolved" &&
+					snapshot.harnessRevision !== this._harnessVersionBundle?.manifest.version
+				) {
+					throw new Error(
+						`Evolved skill reference ${skillId}@${version} is not part of the active harness revision.`,
+					);
+				}
+				if (!seen.has(key)) {
+					seen.add(key);
+					references.push(snapshot);
+					if (forceLoadMarker !== undefined) forceLoaded.push(snapshot);
+				}
+				return "";
+			},
+		);
+		if (references.length === 0) return { text, references, forceLoaded };
 		const userText = remaining.trim();
 		const skillBlocks = references.map(formatSkillReferenceSnapshot).join("\n\n");
 		return {
 			text: userText ? `${skillBlocks}\n\n${userText}` : skillBlocks,
 			references,
+			forceLoaded,
 		};
 	}
 
@@ -2290,7 +2408,12 @@ export class AgentSession {
 
 		// Expand prompt templates and explicit skill references.
 		const explicitReferences = this._expandSkillReferences(expandPromptTemplate(text, [...this.promptTemplates]));
-		await this._queueSteer(explicitReferences.text, images, explicitReferences.references);
+		await this._queueSteer(
+			explicitReferences.text,
+			images,
+			explicitReferences.references,
+			explicitReferences.forceLoaded,
+		);
 	}
 
 	/**
@@ -2308,7 +2431,12 @@ export class AgentSession {
 
 		// Expand prompt templates and explicit skill references.
 		const explicitReferences = this._expandSkillReferences(expandPromptTemplate(text, [...this.promptTemplates]));
-		await this._queueFollowUp(explicitReferences.text, images, explicitReferences.references);
+		await this._queueFollowUp(
+			explicitReferences.text,
+			images,
+			explicitReferences.references,
+			explicitReferences.forceLoaded,
+		);
 	}
 
 	/**
@@ -2318,9 +2446,19 @@ export class AgentSession {
 		text: string,
 		images?: ImageContent[],
 		references: readonly SkillReferenceSnapshot[] = [],
+		forceLoaded: readonly SkillReferenceSnapshot[] = [],
+		recordAdmission = true,
 	): Promise<void> {
 		await this._traceOperation("queue", (operationSpan) => {
-			this._recordSkillReferences(operationSpan, references);
+			if (recordAdmission) {
+				this._recordSkillAdmission(
+					operationSpan,
+					this._snapshotSkillCatalog(),
+					references,
+					forceLoaded,
+					this.agent.state.systemPrompt,
+				);
+			}
 			return this._enqueueSteer(text, images);
 		});
 	}
@@ -2346,9 +2484,19 @@ export class AgentSession {
 		text: string,
 		images?: ImageContent[],
 		references: readonly SkillReferenceSnapshot[] = [],
+		forceLoaded: readonly SkillReferenceSnapshot[] = [],
+		recordAdmission = true,
 	): Promise<void> {
 		await this._traceOperation("queue", (operationSpan) => {
-			this._recordSkillReferences(operationSpan, references);
+			if (recordAdmission) {
+				this._recordSkillAdmission(
+					operationSpan,
+					this._snapshotSkillCatalog(),
+					references,
+					forceLoaded,
+					this.agent.state.systemPrompt,
+				);
+			}
 			return this._enqueueFollowUp(text, images);
 		});
 	}

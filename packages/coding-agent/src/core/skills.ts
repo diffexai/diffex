@@ -234,7 +234,7 @@ export function createEvolvedSkillCatalog(
 }
 
 export function createSkillReferenceSnapshot(skill: Skill): SkillReferenceSnapshot {
-	const reference = `<skill-reference id="${skill.skillId}" version="${skill.version}" name="${escapeXmlAttribute(skill.name)}"/>`;
+	const reference = `<skill-reference id="${skill.skillId}" version="${skill.version}" name="${escapeXmlAttribute(skill.name)}" load="force"/>`;
 	return {
 		skillId: skill.skillId,
 		version: skill.version,
@@ -524,6 +524,23 @@ function loadSkillFromFile(
  * Skills with disableModelInvocation=true are excluded from the prompt
  * and can only be referenced explicitly through the skill selector.
  */
+function formatSkillPromptEntry(skill: Pick<Skill, "name" | "description" | "filePath">): string {
+	return [
+		"  <skill>",
+		`    <name>${escapeXml(skill.name)}</name>`,
+		`    <description>${escapeXml(skill.description)}</description>`,
+		`    <location>${escapeXml(skill.filePath)}</location>`,
+		"  </skill>",
+	].join("\n");
+}
+
+/** Whether the exact catalog entry is progressively disclosed in a concrete model prompt. */
+export function isSkillListedInPrompt(prompt: string, skill: SkillReferenceSnapshot): boolean {
+	return prompt.includes(
+		formatSkillPromptEntry({ name: skill.name, description: skill.description, filePath: skill.location }),
+	);
+}
+
 export function formatSkillsForPrompt(skills: Skill[]): string {
 	const visibleSkills = skills.filter((s) => !s.disableModelInvocation);
 
@@ -540,11 +557,7 @@ export function formatSkillsForPrompt(skills: Skill[]): string {
 	];
 
 	for (const skill of visibleSkills) {
-		lines.push("  <skill>");
-		lines.push(`    <name>${escapeXml(skill.name)}</name>`);
-		lines.push(`    <description>${escapeXml(skill.description)}</description>`);
-		lines.push(`    <location>${escapeXml(skill.filePath)}</location>`);
-		lines.push("  </skill>");
+		lines.push(formatSkillPromptEntry(skill));
 	}
 
 	lines.push("</available_skills>");
