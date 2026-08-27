@@ -4,8 +4,6 @@
 
 ### Added
 
-- Added versioned skill availability, listing, reference, force-load, and digest-matched read observations to invocation traces without inferring skill use or causality.
-- Added atomic harness revisions for workspace-scoped evolved skills.
 - Added `pi auth check` provider/model auth preflight with optional credential output ([#7152](https://github.com/earendil-works/pi/issues/7152)).
 
 ### Changed
@@ -15,8 +13,6 @@
 
 ### Fixed
 
-- Fixed stale evolution activation from reporting success after another harness revision was selected.
-- Fixed the footer showing an unknown harness after self-evolution switched to the new version.
 - Fixed the evolution menu remaining on its loading screen after cancellation and flickering during active-job refreshes.
 - Fixed assistant Markdown headings and fenced code blocks appearing with literal source delimiters in the interactive transcript.
 - Fixed extension TUI method wrappers recursing indefinitely when delegating to the original method ([#7731](https://github.com/earendil-works/pi/issues/7731)).
