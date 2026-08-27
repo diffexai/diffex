@@ -171,6 +171,14 @@ This routing remains configurable through the ordinary action bindings. For exam
 | `app.tree.filter.cycleForward` | `ctrl+o` | Cycle tree filter forward |
 | `app.tree.filter.cycleBackward` | `shift+ctrl+o` | Cycle tree filter backward |
 
+### Skills Selector
+
+Used inside the multi-select skill picker opened via `/skills`.
+
+| Keybinding id | Default | Description |
+|--------|---------|-------------|
+| `app.skills.toggle` | `space` | Toggle the current skill without closing the selector |
+
 ### Scoped Models Selector
 
 Used inside the scoped models selector (opened via `/scoped-models`).

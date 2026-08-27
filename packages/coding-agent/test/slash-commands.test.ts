@@ -25,6 +25,13 @@ describe("BUILTIN_SLASH_COMMANDS", () => {
 		});
 	});
 
+	it("includes the skill reference selector command", () => {
+		expect(BUILTIN_SLASH_COMMANDS).toContainEqual({
+			name: "skills",
+			description: "Reference skills in the editor",
+		});
+	});
+
 	it("includes the evolution menu command", () => {
 		expect(BUILTIN_SLASH_COMMANDS).toContainEqual({
 			name: "evolve",

@@ -57,7 +57,7 @@ import {
 	getShareViewerUrl,
 	VERSION,
 } from "../../config.ts";
-import { type AgentSession, type AgentSessionEvent, parseSkillBlock } from "../../core/agent-session.ts";
+import { type AgentSession, type AgentSessionEvent, parseSkillInvocation } from "../../core/agent-session.ts";
 import { type AgentSessionRuntime, SessionImportFileNotFoundError } from "../../core/agent-session-runtime.ts";
 import {
 	CACHE_TTL_MS,
@@ -94,6 +94,7 @@ import type { ResourceDiagnostic } from "../../core/resource-loader.ts";
 import { formatMissingSessionCwdPrompt, MissingSessionCwdError } from "../../core/session-cwd.ts";
 import { type SessionEntry, SessionManager, sessionEntryToContextMessages } from "../../core/session-manager.ts";
 import type { TuiMode } from "../../core/settings-manager.ts";
+import type { SkillReference } from "../../core/skills.ts";
 import { BUILTIN_SLASH_COMMANDS } from "../../core/slash-commands.ts";
 import type { SourceInfo } from "../../core/source-info.ts";
 import { isInstallTelemetryEnabled } from "../../core/telemetry.ts";
@@ -157,6 +158,7 @@ import { ScopedModelsSelectorComponent } from "./components/scoped-models-select
 import { SessionSelectorComponent } from "./components/session-selector.ts";
 import { SettingsSelectorComponent } from "./components/settings-selector.ts";
 import { SkillInvocationMessageComponent } from "./components/skill-invocation-message.ts";
+import { SkillSelectorComponent } from "./components/skill-selector.ts";
 import {
 	BranchSummaryStatusIndicator,
 	CompactionStatusIndicator,
@@ -2922,6 +2924,11 @@ export class InteractiveMode {
 				this.editor.setText("");
 				return;
 			}
+			if (text === "/skills") {
+				this.editor.setText("");
+				this.showSkillsSelector();
+				return;
+			}
 			if (text === "/scoped-models") {
 				this.editor.setText("");
 				await this.showModelsSelector();
@@ -3569,20 +3576,20 @@ export class InteractiveMode {
 					if (this.chatContainer.children.length > 0) {
 						this.chatContainer.addChild(new Spacer(1));
 					}
-					const skillBlock = parseSkillBlock(textContent);
-					if (skillBlock) {
-						// Render skill block (collapsible)
-						const component = new SkillInvocationMessageComponent(
-							skillBlock,
-							this.getMarkdownThemeWithSettings(),
-						);
-						component.setExpanded(this.toolOutputExpanded);
-						this.chatContainer.addChild(component);
-						// Render user message separately if present
-						if (skillBlock.userMessage) {
+					const skillInvocation = parseSkillInvocation(textContent);
+					if (skillInvocation) {
+						for (const skillBlock of skillInvocation.skills) {
+							const component = new SkillInvocationMessageComponent(
+								skillBlock,
+								this.getMarkdownThemeWithSettings(),
+							);
+							component.setExpanded(this.toolOutputExpanded);
+							this.chatContainer.addChild(component);
+						}
+						if (skillInvocation.userMessage) {
 							this.chatContainer.addChild(new Spacer(1));
 							const userComponent = new UserMessageComponent(
-								skillBlock.userMessage,
+								skillInvocation.userMessage,
 								this.getMarkdownThemeWithSettings(),
 								this.outputPad,
 								this.getMarkdownTransformers(),
@@ -4443,6 +4450,31 @@ export class InteractiveMode {
 		this.editorContainer.addChild(created.component);
 		this.ui.setFocus(created.focus);
 		this.ui.requestRender();
+	}
+
+	private showSkillsSelector(): void {
+		const references = this.session.createSkillReferences();
+		if (references.length === 0) {
+			this.showStatus("No skills available");
+			return;
+		}
+		this.showSelector((done) => {
+			const selector = new SkillSelectorComponent(
+				references,
+				(selected: SkillReference[]) => {
+					done();
+					const referenceText = selected.map((reference) => reference.reference).join("\n");
+					const editorText = this.editor.getExpandedText?.() ?? this.editor.getText();
+					this.editor.setText([referenceText, editorText].filter((value) => value.trim()).join("\n\n"));
+					this.ui.requestRender();
+				},
+				() => {
+					done();
+					this.ui.requestRender();
+				},
+			);
+			return { component: selector, focus: selector };
+		});
 	}
 
 	private showSettingsSelector(): void {

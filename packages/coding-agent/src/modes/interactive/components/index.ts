@@ -28,6 +28,7 @@ export { SessionSelectorComponent } from "./session-selector.ts";
 export { type SettingsCallbacks, type SettingsConfig, SettingsSelectorComponent } from "./settings-selector.ts";
 export { ShowImagesSelectorComponent } from "./show-images-selector.ts";
 export { SkillInvocationMessageComponent } from "./skill-invocation-message.ts";
+export { SkillSelectorComponent } from "./skill-selector.ts";
 export { SubagentsComponent } from "./subagents.ts";
 export { ThemeSelectorComponent } from "./theme-selector.ts";
 export { ThinkingSelectorComponent } from "./thinking-selector.ts";
