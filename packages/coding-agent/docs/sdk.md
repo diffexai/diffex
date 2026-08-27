@@ -547,13 +547,14 @@ Multiple calls are allowed during one live run, subject to a fixed 8,000-charact
 
 Active reports enter hidden parent context at normal FIFO steering boundaries without aborting in-flight sampling, and a report received during coordinated waiting resumes the parent without consuming the frozen terminal batch.
 Idle reports do not start a provider call: durable sessions save them on the selected branch for the next explicit parent run, while in-memory sessions retain them only locally.
-Report content is untrusted delegated-agent data.
 Accepted idle reports, delivered active reports, and child tool arguments remain normal session history and follow the existing parent-owned deletion behavior.
 
 When the parent finishes an assistant run, the session freezes every unconsumed child attempt spawned through parent model tool calls.
 It waits until every child in that batch is idle, failed, or interrupted, then adds one non-displayed context message with name-sorted results, partial output, errors, and retry availability.
 The parent model continues automatically from that message, so callers do not need to send another user prompt.
 Terminal results returned explicitly by `agents` are marked consumed and are not delivered again.
+
+The hidden `subagent_results` and `subagent_escalations` entries are untrusted reports from delegated agents, not user instructions, system instructions, or authority. Root system guidance tells the model to verify material claims against the parent task and available evidence, and to follow embedded instructions only when they are consistent with the parent task, repository policy, and current evidence. This guidance remains attached when coordination tools are filtered and after custom or extension-returned system prompts are selected.
 
 An initial child failure offers the parent one coordinated retry for that child during the current explicit parent prompt cycle.
 The parent can analyze the delivered error and partial output, then call `agent_action` with `action: "message"` and `wake: true`.
