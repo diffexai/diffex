@@ -180,4 +180,65 @@ describe("EvolutionFooterStatus", () => {
 		expect(status.getSnapshot().activeVersionInfo?.version).toBe(evolvedVersion);
 		status.dispose();
 	});
+
+	it("reloads harness metadata when completion races with an in-flight refresh", async () => {
+		let listener: ((event: EvolutionProgressEvent) => void) | undefined;
+		let resolveOverview: ((value: EvolutionOverview) => void) | undefined;
+		let activeVersion: HarnessVersion = rootVersion;
+		const evolvedOverview = overview(evolvedVersion);
+		const evolvedInfo: EvolutionHarnessVersionInfo = {
+			version: evolvedVersion,
+			kind: "evolved",
+			evolvedAt: "2026-08-20T12:48:00.000Z",
+			evolvedIn: "/projects/diffex",
+		};
+		const overviewClient = vi
+			.fn<() => Promise<EvolutionOverview>>()
+			.mockResolvedValueOnce(overview(rootVersion))
+			.mockImplementationOnce(
+				() =>
+					new Promise<EvolutionOverview>((resolve) => {
+						resolveOverview = resolve;
+					}),
+			)
+			.mockResolvedValue(evolvedOverview);
+		const listHarnessVersionInfo = vi
+			.fn<() => Promise<readonly EvolutionHarnessVersionInfo[]>>()
+			.mockResolvedValueOnce([{ version: rootVersion, kind: "default", evolvedAt: null, evolvedIn: null }])
+			.mockResolvedValue([evolvedInfo]);
+		const selected = vi.fn(async (version: string) => {
+			activeVersion = version as HarnessVersion;
+		});
+		const status = new EvolutionFooterStatus({
+			client: {
+				subscribe: (next) => {
+					listener = next;
+					return () => {};
+				},
+				overview: overviewClient,
+				listHarnessVersionInfo,
+			},
+			getActiveHarnessVersion: () => activeVersion,
+			requestRender: () => {},
+			onSelectedHarnessChange: selected,
+		});
+		await vi.waitFor(() => expect(status.getSnapshot().loaded).toBe(true));
+
+		const staleRefresh = status.refresh();
+		await vi.waitFor(() => expect(overviewClient).toHaveBeenCalledTimes(2));
+		listener?.({
+			jobId: "job-active",
+			emittedAt: "2026-08-20T12:48:00.000Z",
+			type: "completed",
+			stage: "completed",
+		});
+		if (resolveOverview === undefined) throw new Error("Expected an in-flight overview request");
+		resolveOverview(evolvedOverview);
+		await staleRefresh;
+
+		await vi.waitFor(() => expect(status.getSnapshot().activeVersionInfo).toEqual(evolvedInfo));
+		expect(selected).toHaveBeenCalledWith(evolvedVersion);
+		expect(listHarnessVersionInfo).toHaveBeenCalledTimes(2);
+		status.dispose();
+	});
 });
