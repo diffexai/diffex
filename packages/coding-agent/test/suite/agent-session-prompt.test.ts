@@ -145,51 +145,21 @@ describe("AgentSession prompt characterization", () => {
 		expect(sawImage).toBe(true);
 	});
 
-	it("expands skill commands before sending the prompt", async () => {
-		const tempDir = join(tmpdir(), `pi-skill-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-		mkdirSync(tempDir, { recursive: true });
-		tempDirs.push(tempDir);
-		const skillPath = join(tempDir, "test-skill.md");
-		writeFileSync(skillPath, "# Test Skill\n\nUse the skill body.");
-
-		const resourceLoader = {
-			...createTestResourceLoader(),
-			getSkills: () => ({
-				skills: [
-					createSkill({
-						name: "test",
-						description: "Test skill",
-						filePath: skillPath,
-						baseDir: tempDir,
-						sourceInfo: createSyntheticSourceInfo(skillPath, {
-							source: "local",
-							scope: "project",
-							origin: "top-level",
-							baseDir: tempDir,
-						}),
-						content: "# Test Skill\n\nUse the skill body.",
-					}),
-				],
-				diagnostics: [],
-			}),
-		};
-		const harness = await createHarness({ resourceLoader });
+	it("does not expand individual skill commands", async () => {
+		const harness = await createHarness();
 		harnesses.push(harness);
-		let expandedPrompt = "";
-
+		let admittedPrompt = "";
 		harness.setResponses([
 			(context) => {
 				const user = context.messages.find((message) => message.role === "user");
-				expandedPrompt = user ? getMessageText(user) : "";
+				admittedPrompt = user ? getMessageText(user) : "";
 				return fauxAssistantMessage("ok");
 			},
 		]);
 
 		await harness.session.prompt("/skill:test explain this");
 
-		expect(expandedPrompt).toContain('<skill name="test" location="');
-		expect(expandedPrompt).toContain("Use the skill body.");
-		expect(expandedPrompt).toContain("explain this");
+		expect(admittedPrompt).toBe("/skill:test explain this");
 	});
 
 	it("loads exactly the explicitly referenced skill snapshot and traces its identity", async () => {

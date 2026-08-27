@@ -11,7 +11,7 @@ const references: SkillReference[] = [
 		skillId: `skill:${"a".repeat(64)}`,
 		version: `sha256:${"1".repeat(64)}`,
 		contentDigest: `sha256:${"1".repeat(64)}`,
-		name: "workflow-Evolved",
+		name: "workflow-evolved",
 		description: "General workflow",
 		sourceKind: "evolved",
 		scope: "workspace",
@@ -51,72 +51,92 @@ describe("SkillSelectorComponent", () => {
 		setKeybindings(new KeybindingsManager());
 	});
 
-	it("filters by name or description", () => {
+	it("opens with skill source categories instead of individual skill commands", () => {
+		const selector = new SkillSelectorComponent(
+			references,
+			() => {},
+			() => {},
+		);
+		const output = stripAnsi(selector.render(120).join("\n"));
+
+		expect(output).toContain("Installed Workspace Skills");
+		expect(output).toContain("Installed Global Skills");
+		expect(output).toContain("Evolved Skills");
+		expect(output).not.toContain("Special deployment workflow");
+		expect(output).not.toContain("Review code changes");
+	});
+
+	it("opens a category and filters its skills by name or description", () => {
 		const selector = new SkillSelectorComponent(
 			references,
 			() => {},
 			() => {},
 		);
 
+		selector.handleInput("\r");
 		selector.handleInput("deployment");
 		const output = stripAnsi(selector.render(120).join("\n"));
 
 		expect(output).toContain("Installed Workspace Skills");
+		expect(output).toContain("deploy");
 		expect(output).toContain("Special deployment workflow");
-		expect(output).not.toContain("Evolved Workspace Skills");
-		expect(output).not.toContain("General workflow");
-		expect(output).not.toContain("Installed Global Skills");
 		expect(output).not.toContain("Review code changes");
 	});
 
-	it("renders source groups in source order while preserving order within each group", () => {
-		const selector = new SkillSelectorComponent(
-			[references[2], references[1], references[0]],
-			() => {},
-			() => {},
-		);
+	it("returns to the category menu before cancelling", () => {
+		const onCancel = vi.fn();
+		const selector = new SkillSelectorComponent(references, () => {}, onCancel);
 
-		const output = stripAnsi(selector.render(120).join("\n"));
-		expect(output.indexOf("Evolved Workspace Skills")).toBeLessThan(output.indexOf("Installed Workspace Skills"));
-		expect(output.indexOf("Installed Workspace Skills")).toBeLessThan(output.indexOf("Installed Global Skills"));
+		selector.handleInput("\r");
+		selector.handleInput("\u001b");
+		expect(stripAnsi(selector.render(120).join("\n"))).toContain("Choose where the skill is installed");
+		expect(onCancel).not.toHaveBeenCalled();
+
+		selector.handleInput("\u001b");
+		expect(onCancel).toHaveBeenCalledOnce();
 	});
 
-	it("keeps selections across filters and returns stable identities in selector order", () => {
+	it("keeps selections across categories and returns stable category order", () => {
 		const onSelect = vi.fn();
 		const selector = new SkillSelectorComponent(references, onSelect, () => {});
 
+		selector.handleInput("\r");
 		selector.handleInput(" ");
-		selector.handleInput("deployment");
+		selector.handleInput("\u001b");
+		selector.handleInput("\u001b[B");
+		selector.handleInput("\r");
 		selector.handleInput(" ");
 		selector.handleInput("\r");
 
-		expect(onSelect).toHaveBeenCalledWith([references[0], references[1]]);
+		expect(onSelect).toHaveBeenCalledWith([references[1], references[2]]);
 	});
 
-	it("inserts the filtered current skill when no items were toggled", () => {
+	it("inserts the current skill when no items were toggled", () => {
 		const onSelect = vi.fn();
 		const selector = new SkillSelectorComponent(references, onSelect, () => {});
 
+		selector.handleInput("\u001b[B");
+		selector.handleInput("\r");
 		selector.handleInput("review");
 		selector.handleInput("\n");
 
 		expect(onSelect).toHaveBeenCalledWith([references[2]]);
 	});
 
-	it("cancels without selecting and propagates focus to search", () => {
-		const onSelect = vi.fn();
-		const onCancel = vi.fn();
-		const selector = new SkillSelectorComponent(references, onSelect, onCancel);
+	it("propagates focus to search only inside a category", () => {
+		const selector = new SkillSelectorComponent(
+			references,
+			() => {},
+			() => {},
+		);
 
 		selector.focused = true;
+		expect(selector.getSearchInput().focused).toBe(false);
+		selector.handleInput("\r");
 		expect(selector.getSearchInput().focused).toBe(true);
-		selector.handleInput("\u001b");
-
-		expect(onCancel).toHaveBeenCalledOnce();
-		expect(onSelect).not.toHaveBeenCalled();
 	});
 
-	it("fits the selector and descriptions in a standard terminal", () => {
+	it("fits category and skill views in a standard terminal", () => {
 		const manyReferences = Array.from(
 			{ length: 12 },
 			(_, index): SkillReference => ({
@@ -126,9 +146,9 @@ describe("SkillSelectorComponent", () => {
 				name: `skill-${index}`,
 				description: `Description for skill ${index}`,
 				sourceKind: "installed",
-				scope: "global",
+				scope: "workspace",
 				reference: `<reference-${index}/>`,
-				group: "installed-global",
+				group: "installed-workspace",
 			}),
 		);
 		const selector = new SkillSelectorComponent(
@@ -137,6 +157,8 @@ describe("SkillSelectorComponent", () => {
 			() => {},
 		);
 
+		expect(selector.render(80).every((line) => visibleWidth(line) <= 80)).toBe(true);
+		selector.handleInput("\r");
 		const lines = selector.render(80);
 		expect(lines.length).toBeLessThanOrEqual(24);
 		expect(lines.every((line) => visibleWidth(line) <= 80)).toBe(true);
@@ -146,6 +168,7 @@ describe("SkillSelectorComponent", () => {
 		const onSelect = vi.fn();
 		const selector = new SkillSelectorComponent(references, onSelect, () => {});
 
+		selector.handleInput("\r");
 		selector.handleInput("missing");
 		expect(stripAnsi(selector.render(100).join("\n"))).toContain("No matching skills");
 		selector.handleInput("\r");

@@ -166,7 +166,7 @@ Standard editing keybindings for delete word, undo, etc. See [docs/keybindings.m
 
 ### Commands
 
-Type `/` in the editor to trigger commands. [Extensions](#extensions) can register custom commands, [skills](#skills) are available as `/skill:name`, and [prompt templates](#prompt-templates) expand via `/templatename`.
+Type `/` in the editor to trigger commands. [Extensions](#extensions) can register custom commands, [skills](#skills) are referenced through `/skills`, and [prompt templates](#prompt-templates) expand via `/templatename`.
 
 | Command | Description |
 |---------|-------------|
@@ -353,7 +353,7 @@ Place in `~/.diffex/agent/prompts/`, `.diffex/prompts/`, or a [Diffex package](#
 
 ### Skills
 
-On-demand capability packages following the [Agent Skills standard](https://agentskills.io). Use `/skills` to search and insert one or more versioned skill references into a task, invoke one directly via `/skill:name`, or let the agent load skills automatically.
+On-demand capability packages following the [Agent Skills standard](https://agentskills.io). Use `/skills` to choose installed workspace, installed global, or evolved skills and insert one or more versioned references into a task, or let the agent load skills automatically.
 
 ```markdown
 <!-- ~/.diffex/agent/skills/my-skill/SKILL.md -->

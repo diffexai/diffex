@@ -14,12 +14,12 @@ import { theme } from "../theme/theme.ts";
 import { DynamicBorder } from "./dynamic-border.ts";
 import { keyHint, rawKeyHint } from "./keybinding-hints.ts";
 
-const GROUP_ORDER = ["evolved-workspace", "installed-workspace", "installed-global"] as const;
+const GROUP_ORDER = ["installed-workspace", "installed-global", "evolved-workspace"] as const;
 
 const GROUP_LABELS: Record<SkillReferenceGroup, string> = {
-	"evolved-workspace": "Evolved Workspace Skills",
 	"installed-workspace": "Installed Workspace Skills",
 	"installed-global": "Installed Global Skills",
+	"evolved-workspace": "Evolved Skills",
 };
 
 function referenceKey(reference: SkillReference): string {
@@ -34,9 +34,12 @@ export class SkillSelectorComponent extends Container implements Focusable {
 	private readonly searchInput = new Input();
 	private readonly listContainer = new Container();
 	private readonly allReferences: SkillReference[];
-	private filteredReferences: SkillReference[];
+	private readonly groups: SkillReferenceGroup[];
+	private filteredReferences: SkillReference[] = [];
 	private readonly selectedKeys = new Set<string>();
+	private selectedGroupIndex = 0;
 	private selectedIndex = 0;
+	private activeGroup: SkillReferenceGroup | undefined;
 	private readonly onSelectCallback: (references: SkillReference[]) => void;
 	private readonly onCancelCallback: () => void;
 	private _focused = false;
@@ -47,7 +50,7 @@ export class SkillSelectorComponent extends Container implements Focusable {
 
 	set focused(value: boolean) {
 		this._focused = value;
-		this.searchInput.focused = value;
+		this.searchInput.focused = value && this.activeGroup !== undefined;
 	}
 
 	constructor(
@@ -57,18 +60,52 @@ export class SkillSelectorComponent extends Container implements Focusable {
 	) {
 		super();
 		this.allReferences = orderReferences(references);
-		this.filteredReferences = this.allReferences;
+		this.groups = [...GROUP_ORDER];
 		this.onSelectCallback = onSelect;
 		this.onCancelCallback = onCancel;
+		this.rebuild();
+	}
 
+	private rebuild(): void {
+		this.clear();
 		this.addChild(new DynamicBorder());
 		this.addChild(new Spacer(1));
+		if (this.activeGroup === undefined) this.buildGroupView();
+		else this.buildSkillView();
+		this.addChild(new Spacer(1));
+		this.addChild(new DynamicBorder());
+	}
+
+	private buildGroupView(): void {
+		this.searchInput.focused = false;
 		this.addChild(new TruncatedText(theme.fg("accent", theme.bold("Reference skills:")), 1, 0));
-		this.addChild(new TruncatedText(theme.fg("muted", "Selected skills will be inserted into the editor."), 1, 0));
+		this.addChild(new TruncatedText(theme.fg("muted", "Choose where the skill is installed."), 1, 0));
+		this.addChild(new Spacer(1));
+		this.addChild(this.listContainer);
+		this.updateGroupList();
+		this.addChild(new Spacer(1));
+		this.addChild(
+			new TruncatedText(
+				rawKeyHint("↑↓", "navigate") +
+					"  " +
+					keyHint("tui.select.confirm", "open") +
+					"  " +
+					keyHint("tui.select.cancel", "cancel"),
+				1,
+				0,
+			),
+		);
+	}
+
+	private buildSkillView(): void {
+		this.searchInput.focused = this._focused;
+		this.addChild(new TruncatedText(theme.fg("accent", theme.bold(GROUP_LABELS[this.activeGroup!])), 1, 0));
+		this.addChild(new TruncatedText(theme.fg("muted", "Select a skill to reference in the editor."), 1, 0));
 		this.addChild(new Spacer(1));
 		this.addChild(this.searchInput);
 		this.addChild(new Spacer(1));
 		this.addChild(this.listContainer);
+		this.updateSkillList();
 		this.addChild(new Spacer(1));
 		this.addChild(
 			new TruncatedText(
@@ -78,26 +115,56 @@ export class SkillSelectorComponent extends Container implements Focusable {
 					"  " +
 					keyHint("tui.select.confirm", "insert") +
 					"  " +
-					keyHint("tui.select.cancel", "cancel"),
+					keyHint("tui.select.cancel", "back"),
 				1,
 				0,
 			),
 		);
-		this.addChild(new Spacer(1));
-		this.addChild(new DynamicBorder());
-		this.updateList();
+	}
+
+	private updateGroupList(): void {
+		this.listContainer.clear();
+		for (let index = 0; index < this.groups.length; index += 1) {
+			const group = this.groups[index]!;
+			const focused = index === this.selectedGroupIndex;
+			const prefix = focused ? SELECTED_LIST_PREFIX : UNSELECTED_LIST_PREFIX;
+			const label = focused ? theme.fg("selectionAccent", GROUP_LABELS[group]) : GROUP_LABELS[group];
+			const references = this.allReferences.filter((reference) => reference.group === group);
+			const selectedCount = references.filter((reference) => this.selectedKeys.has(referenceKey(reference))).length;
+			const selection = selectedCount > 0 ? theme.fg("success", ` · ${selectedCount} selected`) : "";
+			this.listContainer.addChild(new TruncatedText(`${prefix}${label}${selection}`, 1, 0));
+			this.listContainer.addChild(
+				new TruncatedText(
+					theme.fg("muted", `    ${references.length} skill${references.length === 1 ? "" : "s"}`),
+					1,
+					0,
+				),
+			);
+		}
 	}
 
 	private filterReferences(query: string): void {
+		const groupReferences = this.allReferences.filter((reference) => reference.group === this.activeGroup);
 		this.filteredReferences = query
-			? fuzzyFilter(
-					this.allReferences,
-					query,
-					(reference) => `${reference.name} ${reference.description} ${GROUP_LABELS[reference.group]}`,
-				)
-			: this.allReferences;
+			? fuzzyFilter(groupReferences, query, (reference) => `${reference.name} ${reference.description}`)
+			: groupReferences;
 		this.selectedIndex = query ? 0 : Math.min(this.selectedIndex, Math.max(0, this.filteredReferences.length - 1));
-		this.updateList();
+		this.updateSkillList();
+	}
+
+	private openCurrentGroup(): void {
+		const group = this.groups[this.selectedGroupIndex];
+		if (!group) return;
+		this.activeGroup = group;
+		this.selectedIndex = 0;
+		this.searchInput.setValue("");
+		this.filteredReferences = this.allReferences.filter((reference) => reference.group === group);
+		this.rebuild();
+	}
+
+	private closeCurrentGroup(): void {
+		this.activeGroup = undefined;
+		this.rebuild();
 	}
 
 	private toggleCurrent(): void {
@@ -106,7 +173,7 @@ export class SkillSelectorComponent extends Container implements Focusable {
 		const key = referenceKey(current);
 		if (this.selectedKeys.has(key)) this.selectedKeys.delete(key);
 		else this.selectedKeys.add(key);
-		this.updateList();
+		this.updateSkillList();
 	}
 
 	private applySelection(): void {
@@ -119,7 +186,7 @@ export class SkillSelectorComponent extends Container implements Focusable {
 		if (current) this.onSelectCallback([current]);
 	}
 
-	private updateList(): void {
+	private updateSkillList(): void {
 		this.listContainer.clear();
 		const maxVisible = 5;
 		const startIndex = Math.max(
@@ -128,16 +195,9 @@ export class SkillSelectorComponent extends Container implements Focusable {
 		);
 		const endIndex = Math.min(startIndex + maxVisible, this.filteredReferences.length);
 
-		let renderedGroup: SkillReferenceGroup | undefined;
 		for (let index = startIndex; index < endIndex; index += 1) {
 			const reference = this.filteredReferences[index];
 			if (!reference) continue;
-			if (reference.group !== renderedGroup) {
-				renderedGroup = reference.group;
-				this.listContainer.addChild(
-					new TruncatedText(theme.fg("accent", theme.bold(`  ${GROUP_LABELS[reference.group]}`)), 1, 0),
-				);
-			}
 			const focused = index === this.selectedIndex;
 			const prefix = focused ? SELECTED_LIST_PREFIX : UNSELECTED_LIST_PREFIX;
 			const selected = this.selectedKeys.has(referenceKey(reference));
@@ -163,20 +223,35 @@ export class SkillSelectorComponent extends Container implements Focusable {
 
 	handleInput(keyData: string): void {
 		const keybindings = getKeybindings();
+		if (this.activeGroup === undefined) {
+			if (keybindings.matches(keyData, "tui.select.up")) {
+				this.selectedGroupIndex = Math.max(0, this.selectedGroupIndex - 1);
+				this.updateGroupList();
+			} else if (keybindings.matches(keyData, "tui.select.down")) {
+				this.selectedGroupIndex = Math.min(this.groups.length - 1, this.selectedGroupIndex + 1);
+				this.updateGroupList();
+			} else if (keybindings.matches(keyData, "tui.select.confirm")) {
+				this.openCurrentGroup();
+			} else if (keybindings.matches(keyData, "tui.select.cancel")) {
+				this.onCancelCallback();
+			}
+			return;
+		}
+
 		if (keybindings.matches(keyData, "tui.select.up")) {
 			if (this.filteredReferences.length === 0) return;
 			this.selectedIndex = Math.max(0, this.selectedIndex - 1);
-			this.updateList();
+			this.updateSkillList();
 		} else if (keybindings.matches(keyData, "tui.select.down")) {
 			if (this.filteredReferences.length === 0) return;
 			this.selectedIndex = Math.min(this.filteredReferences.length - 1, this.selectedIndex + 1);
-			this.updateList();
+			this.updateSkillList();
 		} else if (keybindings.matches(keyData, "app.skills.toggle")) {
 			this.toggleCurrent();
 		} else if (keybindings.matches(keyData, "tui.select.confirm")) {
 			this.applySelection();
 		} else if (keybindings.matches(keyData, "tui.select.cancel")) {
-			this.onCancelCallback();
+			this.closeCurrentGroup();
 		} else {
 			this.searchInput.handleInput(keyData);
 			this.filterReferences(this.searchInput.getValue());

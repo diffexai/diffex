@@ -1,4 +1,5 @@
 import type { AutocompleteProvider } from "./autocomplete.ts";
+import type { EditorTextPart } from "./components/editor.ts";
 import type { Component } from "./tui.ts";
 
 /**
@@ -18,6 +19,9 @@ export interface EditorComponent extends Component {
 
 	/** Set the text content */
 	setText(text: string): void;
+
+	/** Set text with atomic short-label tokens that expand when submitted. */
+	setTextWithTokens?(parts: readonly EditorTextPart[]): void;
 
 	/** Handle raw terminal input (key presses, paste sequences, etc.) */
 	handleInput(data: string): void;

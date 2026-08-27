@@ -37,6 +37,7 @@ interface SkillsModeFixture {
 		getExpandedText: ReturnType<typeof vi.fn>;
 		getText: ReturnType<typeof vi.fn>;
 		setText: ReturnType<typeof vi.fn>;
+		setTextWithTokens: ReturnType<typeof vi.fn>;
 	};
 	ui: { requestRender: ReturnType<typeof vi.fn> };
 	showSelector: (
@@ -62,6 +63,7 @@ function createFixture(available: SkillReference[] = references): {
 			getExpandedText: vi.fn(() => "existing draft"),
 			getText: vi.fn(() => "existing draft"),
 			setText: vi.fn(),
+			setTextWithTokens: vi.fn(),
 		},
 		ui: { requestRender: vi.fn() },
 		showSelector: (create) => {
@@ -92,11 +94,17 @@ describe("InteractiveMode skill selector", () => {
 		const { fixture, getSelector, done } = createFixture();
 		showSkillsSelector.call(fixture);
 
+		getSelector().handleInput("\u001b[B");
+		getSelector().handleInput("\r");
 		getSelector().handleInput("Special");
 		getSelector().handleInput("\r");
 
 		expect(done).toHaveBeenCalledOnce();
-		expect(fixture.editor.setText).toHaveBeenCalledWith("<second-reference/>\n\nexisting draft");
+		expect(fixture.editor.setTextWithTokens).toHaveBeenCalledWith([
+			{ value: "<second-reference/>", displayText: "duplicate" },
+			"\n\n",
+			"existing draft",
+		]);
 	});
 
 	it("cancels without changing the editor", () => {
@@ -107,6 +115,7 @@ describe("InteractiveMode skill selector", () => {
 
 		expect(done).toHaveBeenCalledOnce();
 		expect(fixture.editor.setText).not.toHaveBeenCalled();
+		expect(fixture.editor.setTextWithTokens).not.toHaveBeenCalled();
 	});
 
 	it("reports when no skills are available", () => {

@@ -1734,15 +1734,14 @@ export class AgentSession {
 				}
 			}
 
-			// Expand skill commands (/skill:name args), prompt templates, and explicit skill references.
+			// Expand prompt templates and explicit skill references.
 			let expandedText = currentText;
 			let referencedSkills: SkillReferenceSnapshot[] = [];
 			if (expandPromptTemplates) {
-				const skillCommand = this._expandSkillCommand(expandedText);
-				expandedText = expandPromptTemplate(skillCommand.text, [...this.promptTemplates]);
+				expandedText = expandPromptTemplate(expandedText, [...this.promptTemplates]);
 				const explicitReferences = this._expandSkillReferences(expandedText);
 				expandedText = explicitReferences.text;
-				referencedSkills = [...skillCommand.references, ...explicitReferences.references];
+				referencedSkills = explicitReferences.references;
 				this._recordSkillReferences(operationSpan, referencedSkills);
 			}
 
@@ -1920,38 +1919,11 @@ export class AgentSession {
 		};
 	}
 
-	/** Expand a /skill:name command using the skill version available at admission. */
-	private _expandSkillCommand(text: string): SkillExpansion {
-		if (!text.startsWith("/skill:")) return { text, references: [] };
-
-		const spaceIndex = text.indexOf(" ");
-		const skillName = spaceIndex === -1 ? text.slice(7) : text.slice(7, spaceIndex);
-		const args = spaceIndex === -1 ? "" : text.slice(spaceIndex + 1).trim();
-		const skill = this.resourceLoader.getSkills().skills.find((candidate) => candidate.name === skillName);
-		if (!skill) return { text, references: [] };
-
-		try {
-			const snapshot = this._snapshotSkill(skill);
-			const skillBlock = formatSkillReferenceSnapshot(snapshot);
-			return {
-				text: args ? `${skillBlock}\n\n${args}` : skillBlock,
-				references: [snapshot],
-			};
-		} catch (error) {
-			this._extensionRunner.emitError({
-				extensionPath: skill.filePath,
-				event: "skill_expansion",
-				error: error instanceof Error ? error.message : String(error),
-			});
-			return { text, references: [] };
-		}
-	}
-
 	/**
 	 * Queue a steering message while the agent is running.
 	 * Delivered after the current assistant turn finishes executing its tool calls,
 	 * before the next LLM call.
-	 * Expands skill commands and prompt templates. Errors on extension commands.
+	 * Expands prompt templates and explicit skill references. Errors on extension commands.
 	 * @param images Optional image attachments to include with the message
 	 * @throws Error if text is an extension command
 	 */
@@ -1961,21 +1933,15 @@ export class AgentSession {
 			this._throwIfExtensionCommand(text);
 		}
 
-		// Expand skill commands, prompt templates, and explicit skill references.
-		const skillCommand = this._expandSkillCommand(text);
-		const explicitReferences = this._expandSkillReferences(
-			expandPromptTemplate(skillCommand.text, [...this.promptTemplates]),
-		);
-		await this._queueSteer(explicitReferences.text, images, [
-			...skillCommand.references,
-			...explicitReferences.references,
-		]);
+		// Expand prompt templates and explicit skill references.
+		const explicitReferences = this._expandSkillReferences(expandPromptTemplate(text, [...this.promptTemplates]));
+		await this._queueSteer(explicitReferences.text, images, explicitReferences.references);
 	}
 
 	/**
 	 * Queue a follow-up message to be processed after the agent finishes.
 	 * Delivered only when agent has no more tool calls or steering messages.
-	 * Expands skill commands and prompt templates. Errors on extension commands.
+	 * Expands prompt templates and explicit skill references. Errors on extension commands.
 	 * @param images Optional image attachments to include with the message
 	 * @throws Error if text is an extension command
 	 */
@@ -1985,15 +1951,9 @@ export class AgentSession {
 			this._throwIfExtensionCommand(text);
 		}
 
-		// Expand skill commands, prompt templates, and explicit skill references.
-		const skillCommand = this._expandSkillCommand(text);
-		const explicitReferences = this._expandSkillReferences(
-			expandPromptTemplate(skillCommand.text, [...this.promptTemplates]),
-		);
-		await this._queueFollowUp(explicitReferences.text, images, [
-			...skillCommand.references,
-			...explicitReferences.references,
-		]);
+		// Expand prompt templates and explicit skill references.
+		const explicitReferences = this._expandSkillReferences(expandPromptTemplate(text, [...this.promptTemplates]));
+		await this._queueFollowUp(explicitReferences.text, images, explicitReferences.references);
 	}
 
 	/**
@@ -3040,14 +3000,7 @@ export class AgentSession {
 				sourceInfo: template.sourceInfo,
 			}));
 
-			const skills: SlashCommandInfo[] = this._resourceLoader.getSkills().skills.map((skill) => ({
-				name: `skill:${skill.name}`,
-				description: skill.description,
-				source: "skill",
-				sourceInfo: skill.sourceInfo,
-			}));
-
-			return [...extensionCommands, ...templates, ...skills];
+			return [...extensionCommands, ...templates];
 		};
 
 		runner.bindCore(

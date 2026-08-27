@@ -119,7 +119,6 @@ export interface Settings {
 	skills?: string[]; // Array of local skill file paths or directories
 	prompts?: string[]; // Array of local prompt template paths or directories
 	themes?: string[]; // Array of local theme file paths or directories
-	enableSkillCommands?: boolean; // default: true - register skills as /skill:name commands
 	terminal?: TerminalSettings;
 	images?: ImageSettings;
 	enabledModels?: string[]; // Model patterns for cycling (same format as --models CLI flag)
@@ -408,19 +407,14 @@ export class SettingsManager {
 			settings.skills !== null &&
 			!Array.isArray(settings.skills)
 		) {
-			const skillsSettings = settings.skills as {
-				enableSkillCommands?: boolean;
-				customDirectories?: unknown;
-			};
-			if (skillsSettings.enableSkillCommands !== undefined && settings.enableSkillCommands === undefined) {
-				settings.enableSkillCommands = skillsSettings.enableSkillCommands;
-			}
+			const skillsSettings = settings.skills as { customDirectories?: unknown };
 			if (Array.isArray(skillsSettings.customDirectories) && skillsSettings.customDirectories.length > 0) {
 				settings.skills = skillsSettings.customDirectories;
 			} else {
 				delete settings.skills;
 			}
 		}
+		delete settings.enableSkillCommands;
 
 		// Migrate retry.maxDelayMs -> retry.provider.maxRetryDelayMs
 		if (
@@ -1065,16 +1059,6 @@ export class SettingsManager {
 		this.updateProjectSettings("themes", (settings) => {
 			settings.themes = paths;
 		});
-	}
-
-	getEnableSkillCommands(): boolean {
-		return this.settings.enableSkillCommands ?? true;
-	}
-
-	setEnableSkillCommands(enabled: boolean): void {
-		this.globalSettings.enableSkillCommands = enabled;
-		this.markModified("enableSkillCommands");
-		this.save();
 	}
 
 	getThinkingBudgets(): ThinkingBudgetsSettings | undefined {

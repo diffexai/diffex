@@ -65,34 +65,17 @@ For project-level Claude Code skills, add to `.diffex/settings.json`:
 
 1. At startup, Diffex scans skill locations and builds one catalog for the session. Each entry has a stable source identity, source kind, scope, content digest, version, and the full content captured at load time.
 2. The system prompt includes available skills in XML format per the [specification](https://agentskills.io/integrate-skills).
-3. When a task matches, the agent uses `read` to load the full SKILL.md (models don't always do this; use prompting or `/skill:name` to force it).
-4. Explicit references and `/skill:name` use the catalog's captured version, so a file change does not alter a request that has already been admitted. Reload resources to catalog a changed installed skill.
+3. When a task matches, the agent uses `read` to load the full SKILL.md (models don't always do this; use `/skills` to reference it explicitly).
+4. Explicit references use the catalog's captured version, so a file change does not alter a request that has already been admitted. Reload resources to catalog a changed installed skill.
 5. The agent follows the instructions, using relative paths to reference scripts and assets.
 
-This is progressive disclosure: only names, descriptions, and locations are always in context; full instructions load on-demand. The TUI, system prompt, skill commands, SDK, RPC command listing, and evolution snapshots all read from the same catalog.
+This is progressive disclosure: only names, descriptions, and locations are always in context; full instructions load on-demand. The TUI, system prompt, SDK, and evolution snapshots all read from the same catalog.
 
 ## Skill Commands
 
-Use `/skills` in interactive mode to search all skills available to the session and select one or more. The selector separates evolved workspace skills, independently installed workspace skills, and independently installed global skills. The selected skills are inserted into the editor as versioned references, so you can add the task before submitting. Each reference loads that exact reviewed skill content for one request, including queued steering and follow-up messages. Skills not selected remain progressively disclosed by name, description, and location.
+Use `/skills` in interactive mode to choose installed workspace, installed global, or evolved skills, then search and select one or more skills within that category. Selected skills appear in the editor as purple skill-name tokens while retaining versioned references internally, so you can add the task before submitting. Each reference loads that exact reviewed skill content for one request, including queued steering and follow-up messages. Skills not selected remain progressively disclosed by name, description, and location.
 
 To install a package containing skills from an interactive terminal, run `diffex install <source>` and choose `Install globally` or `Install for this workspace`. The prompt shows both destinations and the trust implications. Workspace installation requires project trust and never falls back to global installation. Non-interactive installs retain the global default; pass `-l` to select workspace scope explicitly.
-
-Skills also register as `/skill:name` commands for direct single-skill invocation:
-
-```bash
-/skill:brave-search           # Load and execute the skill
-/skill:pdf-tools extract      # Load skill with arguments
-```
-
-Arguments after the command are appended to the skill content as `User: <args>`.
-
-Toggle skill commands via `/settings` in interactive mode or in `settings.json`:
-
-```json
-{
-  "enableSkillCommands": true
-}
-```
 
 ## Skill Structure
 
@@ -151,7 +134,7 @@ Per the [Agent Skills specification](https://agentskills.io/specification#frontm
 | `compatibility` | No | Max 500 chars. Environment requirements. |
 | `metadata` | No | Arbitrary key-value mapping. |
 | `allowed-tools` | No | Space-delimited list of pre-approved tools (experimental). |
-| `disable-model-invocation` | No | When `true`, skill is hidden from system prompt. Users must use `/skill:name`. |
+| `disable-model-invocation` | No | When `true`, skill is hidden from the system prompt. Users must reference it explicitly through `/skills`. |
 
 ### Name Rules
 

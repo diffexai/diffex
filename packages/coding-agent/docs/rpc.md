@@ -66,7 +66,7 @@ If the agent is streaming and no `streamingBehavior` is specified, the command r
 
 **Extension commands**: If the message is an extension command (e.g., `/mycommand`), it executes immediately even during streaming. Extension commands manage their own LLM interaction via `diffex.sendMessage()`.
 
-**Input expansion**: Skill commands (`/skill:name`) and prompt templates (`/template`) are expanded before sending/queueing.
+**Input expansion**: Prompt templates (`/template`) and explicit versioned skill references are expanded before sending or queueing.
 
 Response:
 ```json
@@ -83,7 +83,7 @@ The `images` field is optional. Each image uses `ImageContent` format: `{"type":
 
 #### steer
 
-Queue a steering message while the agent is running. It is delivered after the current assistant turn finishes executing its tool calls, before the next LLM call. Skill commands and prompt templates are expanded. Extension commands are not allowed (use `prompt` instead).
+Queue a steering message while the agent is running. It is delivered after the current assistant turn finishes executing its tool calls, before the next LLM call. Prompt templates and explicit skill references are expanded. Extension commands are not allowed (use `prompt` instead).
 
 ```json
 {"type": "steer", "message": "Stop and do this instead"}
@@ -105,7 +105,7 @@ See [set_steering_mode](#set_steering_mode) for controlling how steering message
 
 #### follow_up
 
-Queue a follow-up message to be processed after the agent finishes. Delivered only when agent has no more tool calls or steering messages. Skill commands and prompt templates are expanded. Extension commands are not allowed (use `prompt` instead).
+Queue a follow-up message to be processed after the agent finishes. Delivered only when agent has no more tool calls or steering messages. Prompt templates and explicit skill references are expanded. Extension commands are not allowed (use `prompt` instead).
 
 ```json
 {"type": "follow_up", "message": "After you're done, also do this"}
@@ -798,7 +798,7 @@ The current session name is available via `get_state` in the `sessionName` field
 
 #### get_commands
 
-Get available commands (extension commands, prompt templates, and skills). These can be invoked via the `prompt` command by prefixing with `/`.
+Get available extension commands and prompt templates. These can be invoked via the `prompt` command by prefixing with `/`.
 
 ```json
 {"type": "get_commands"}
@@ -813,8 +813,7 @@ Response:
   "data": {
     "commands": [
       {"name": "session-name", "description": "Set or clear session name", "source": "extension", "path": "/home/user/.diffex/agent/extensions/session.ts"},
-      {"name": "fix-tests", "description": "Fix failing tests", "source": "prompt", "location": "project", "path": "/home/user/myproject/.diffex/agent/prompts/fix-tests.md"},
-      {"name": "skill:brave-search", "description": "Web search via Brave API", "source": "skill", "location": "user", "path": "/home/user/.diffex/agent/skills/brave-search/SKILL.md"}
+      {"name": "fix-tests", "description": "Fix failing tests", "source": "prompt", "location": "project", "path": "/home/user/myproject/.diffex/agent/prompts/fix-tests.md"}
     ]
   }
 }
@@ -826,7 +825,6 @@ Each command has:
 - `source`: What kind of command:
   - `"extension"`: Registered via `diffex.registerCommand()` in an extension
   - `"prompt"`: Loaded from a prompt template `.md` file
-  - `"skill"`: Loaded from a skill directory (name is prefixed with `skill:`)
 - `location`: Where it was loaded from (optional, not present for extensions):
   - `"user"`: User-level (`~/.diffex/agent/`)
   - `"project"`: Project-level (`./.diffex/agent/`)

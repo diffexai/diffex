@@ -32,7 +32,7 @@ See [Keybindings](keybindings.md) for all shortcuts and customization.
 
 ## Slash Commands
 
-Type `/` in the editor to open command completion. Extensions can register custom commands, skills are available as `/skill:name`, and prompt templates expand via `/templatename`.
+Type `/` in the editor to open command completion. Extensions can register custom commands, skills are referenced through `/skills`, and prompt templates expand via `/templatename`.
 
 | Command | Description |
 |---------|-------------|
@@ -41,6 +41,7 @@ Type `/` in the editor to open command completion. Extensions can register custo
 | `/model` | Switch models |
 | `/scoped-models` | Enable/disable models for Ctrl+P cycling |
 | `/settings` | Thinking level, theme, message delivery, transport |
+| `/skills` | Browse installed workspace, installed global, and evolved skills |
 | `/resume` | Pick from previous sessions |
 | `/new` | Start a new session |
 | `/name <name>` | Set session display name |
