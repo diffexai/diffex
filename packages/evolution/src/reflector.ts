@@ -45,6 +45,7 @@ const DEFAULT_STAGE_DEADLINE_MS = 1_800_000;
 const LESSON_KINDS = new Set<LessonKind>([
 	"counterexample",
 	"direct-instruction",
+	"failed-approach",
 	"failure-workaround",
 	"harmful-memory",
 	"incorrect-source-of-truth",
