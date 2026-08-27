@@ -622,6 +622,7 @@ export interface SkillCandidatePriorityScoredEvent extends SkillCandidateRegistr
 	readonly type: "skill-candidate-priority-scored";
 	readonly groupId: string;
 	readonly score: EvolutionArtifactReference;
+	readonly proposalRevisionIds: readonly string[];
 }
 
 export interface SkillCandidateStateTransitionedEvent extends SkillCandidateRegistryEventBase {

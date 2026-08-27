@@ -254,9 +254,25 @@ class MemoryRegistryStore implements SkillCandidateRegistryStore {
 	}
 }
 
-function registryFixture() {
+class PartialCommitRegistryStore extends MemoryRegistryStore {
+	interrupted = false;
+
+	override async appendSkillCandidateRegistryEvents(
+		scope: EvolutionScope,
+		expectedRevision: number,
+		events: readonly SkillCandidateRegistryEvent[],
+	): Promise<SkillCandidateRegistryAppendResult> {
+		if (!this.interrupted && events.length > 1) {
+			this.interrupted = true;
+			this.events.push(events[0]!);
+			throw new Error("interrupted registry append");
+		}
+		return super.appendSkillCandidateRegistryEvents(scope, expectedRevision, events);
+	}
+}
+
+function registryFixture(store: MemoryRegistryStore = new MemoryRegistryStore()) {
 	const artifacts = new MemoryArtifactStore();
-	const store = new MemoryRegistryStore();
 	return {
 		artifacts,
 		store,
@@ -367,6 +383,39 @@ describe("persistent skill candidate registry", () => {
 				supportingTaskLineageIds: ["task-a"],
 			},
 		});
+	});
+
+	it("resumes a partially appended proposal without duplicating its immutable revision", async () => {
+		const store = new PartialCommitRegistryStore();
+		const fixture = registryFixture(store);
+		const sourceInput = input([evidence("support-a", "task-a", 0)], "trace-a");
+		const sourceCandidate = candidate({
+			candidateId: "candidate-a",
+			input: sourceInput,
+			proposedName: "focused-check",
+			supportingEvidenceIds: ["support-a"],
+			taskLineageIds: ["task-a"],
+		});
+		const request = {
+			sourceEvolutionJobId: "job-a",
+			input: sourceInput,
+			candidates: [sourceCandidate],
+			idempotencyKey: "job-a:registry",
+			createdAt,
+		};
+
+		await expect(fixture.registry.consolidate(request)).rejects.toThrow("interrupted registry append");
+		const resumed = await fixture.registry.consolidate(request);
+
+		expect(resumed.groups).toHaveLength(1);
+		expect(resumed.groups[0]?.proposalRevisions).toHaveLength(1);
+		expect(resumed.groups[0]).toMatchObject({
+			state: "proposed",
+			priorityScore: { artifactId: expect.stringMatching(/^skill-candidate-score-/) },
+		});
+		expect(store.events.map((event) => event.registrySequence)).toEqual(
+			store.events.map((_event, index) => index + 1),
+		);
 	});
 
 	it("keeps same-named procedures separate when trigger and intent are incompatible", async () => {

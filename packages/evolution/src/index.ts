@@ -295,6 +295,18 @@ export {
 	SKILL_CANDIDATE_PRIORITY_SCORER_VERSION,
 } from "./skill-candidate-registry.ts";
 export {
+	PollingSkillCandidateWorkSource,
+	type PollingSkillCandidateWorkSourceDependencies,
+	type PollingSkillCandidateWorkSourceOptions,
+	SkillCandidateBackgroundWorker,
+	type SkillCandidateBackgroundWorkerDependencies,
+	type SkillCandidateBackgroundWorkerOptions,
+	SkillCandidateRegistryWorker,
+	type SkillCandidateRegistryWorkerDependencies,
+	type SkillCandidateRegistryWorkerOptions,
+	type SkillCandidateWorkProcessor,
+} from "./skill-candidate-worker.ts";
+export {
 	createSkillCuratorOutputSchema,
 	StructuredSkillCurator,
 	type StructuredSkillCuratorDependencies,
