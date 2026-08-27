@@ -144,6 +144,8 @@ export {
 	type SkillCandidateWorkspaceScope,
 	type SkillCuratorToolCallLedgerEvent,
 	type SkillDraft,
+	type SkillDraftValidationIssue,
+	type SkillDraftValidationReport,
 	type SkillMemoryRelationshipClassification,
 	type SkillTarget,
 	type ValidationIssue,
@@ -255,6 +257,10 @@ export type {
 	SkillCurationResult,
 	SkillCurator,
 	SkillCuratorInput,
+	SkillDraftValidationEnvironment,
+	SkillDraftValidationEnvironmentSource,
+	SkillDraftValidator,
+	SkillDraftValidatorInput,
 	SkillSynthesizer,
 	SkillSynthesizerInput,
 	SuccessfulMaterialization,
@@ -324,6 +330,11 @@ export {
 	SkillCuratorToolRegistry,
 	type SkillCuratorToolRegistryOptions,
 } from "./skill-curator-tools.ts";
+export {
+	DeterministicSkillDraftValidator,
+	type DeterministicSkillDraftValidatorDependencies,
+	type DeterministicSkillDraftValidatorOptions,
+} from "./skill-draft-validator.ts";
 export {
 	StructuredSkillSynthesizer,
 	type StructuredSkillSynthesizerDependencies,
