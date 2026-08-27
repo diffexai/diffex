@@ -51,7 +51,7 @@ export class SkillSelectorComponent extends Container implements Focusable {
 
 		this.addChild(new DynamicBorder());
 		this.addChild(new Spacer(1));
-		this.addChild(new TruncatedText(theme.fg("accent", theme.bold("Reference skills: ")), 1, 0));
+		this.addChild(new TruncatedText(theme.fg("accent", theme.bold("Reference skills:")), 1, 0));
 		this.addChild(new TruncatedText(theme.fg("muted", "Selected skills will be inserted into the editor."), 1, 0));
 		this.addChild(new Spacer(1));
 		this.addChild(this.searchInput);
@@ -105,7 +105,7 @@ export class SkillSelectorComponent extends Container implements Focusable {
 
 	private updateList(): void {
 		this.listContainer.clear();
-		const maxVisible = 10;
+		const maxVisible = 5;
 		const startIndex = Math.max(
 			0,
 			Math.min(this.selectedIndex - Math.floor(maxVisible / 2), this.filteredReferences.length - maxVisible),

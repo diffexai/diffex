@@ -1,4 +1,4 @@
-import { setKeybindings } from "@earendil-works/diffex-tui";
+import { setKeybindings, visibleWidth } from "@earendil-works/diffex-tui";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { KeybindingsManager } from "../src/core/keybindings.ts";
 import type { SkillReference } from "../src/core/skills.ts";
@@ -87,6 +87,28 @@ describe("SkillSelectorComponent", () => {
 
 		expect(onCancel).toHaveBeenCalledOnce();
 		expect(onSelect).not.toHaveBeenCalled();
+	});
+
+	it("fits the selector and descriptions in a standard terminal", () => {
+		const manyReferences = Array.from(
+			{ length: 12 },
+			(_, index): SkillReference => ({
+				skillId: `skill:${String(index).padStart(64, "0")}`,
+				version: `sha256:${String(index).padStart(64, "1")}`,
+				name: `skill-${index}`,
+				description: `Description for skill ${index}`,
+				reference: `<reference-${index}/>`,
+			}),
+		);
+		const selector = new SkillSelectorComponent(
+			manyReferences,
+			() => {},
+			() => {},
+		);
+
+		const lines = selector.render(80);
+		expect(lines.length).toBeLessThanOrEqual(24);
+		expect(lines.every((line) => visibleWidth(line) <= 80)).toBe(true);
 	});
 
 	it("renders an empty search result without applying", () => {
