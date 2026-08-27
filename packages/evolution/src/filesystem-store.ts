@@ -10,8 +10,10 @@ import type {
 	EvolutionLedgerEvent,
 	EvolutionProcessedEvidenceCursor,
 	EvolutionScope,
+	SkillCandidateRegistryEvent,
+	SkillCandidateRegistrySnapshot,
 } from "./contracts.ts";
-import { EVOLUTION_SCHEMA_VERSION } from "./contracts.ts";
+import { EVOLUTION_SCHEMA_VERSION, SKILL_CANDIDATE_REGISTRY_SCHEMA_VERSION } from "./contracts.ts";
 import type {
 	EvolutionArtifact,
 	EvolutionArtifactStore,
@@ -22,6 +24,8 @@ import type {
 	EvolutionJobStore,
 	EvolutionLeaseStore,
 	EvolutionLedger,
+	SkillCandidateRegistryAppendResult,
+	SkillCandidateRegistryStore,
 } from "./ports.ts";
 import { computeEvolutionContentDigest, serializeEvolutionValue } from "./provenance.ts";
 
@@ -43,6 +47,25 @@ const JOB_STAGES = new Set([
 	"completed",
 ]);
 const ACTIVE_JOB_STAGES = new Set([...JOB_STAGES].filter((stage) => stage !== "completed"));
+const SKILL_CANDIDATE_REGISTRY_EVENT_TYPES = new Set([
+	"skill-candidate-priority-scored",
+	"skill-candidate-proposal-recorded",
+	"skill-candidate-state-transitioned",
+	"skill-candidate-work-checkpointed",
+	"skill-candidate-work-failed",
+]);
+const SKILL_CANDIDATE_STATES = new Set([
+	"proposed",
+	"evidence-qualified",
+	"drafted",
+	"structurally-valid",
+	"evaluation-pending",
+	"accepted",
+	"quarantined",
+	"rejected",
+	"retired",
+]);
+const SKILL_CANDIDATE_WORK_STAGES = new Set(["consolidating", "scoring", "completed"]);
 const JOB_OUTCOMES = new Set([
 	"active",
 	"completed",
@@ -224,6 +247,122 @@ function parseLedgerEvent(contents: string, path: string): EvolutionLedgerEvent 
 	return parsed as unknown as EvolutionLedgerEvent;
 }
 
+function isStringArray(value: unknown): value is readonly string[] {
+	return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
+
+function isArtifactReference(value: unknown): boolean {
+	return (
+		isRecord(value) &&
+		typeof value.artifactId === "string" &&
+		SAFE_ID_PATTERN.test(value.artifactId) &&
+		typeof value.contentDigest === "string" &&
+		DIGEST_PATTERN.test(value.contentDigest)
+	);
+}
+
+function isCandidateEvidenceContribution(value: unknown): boolean {
+	return (
+		isRecord(value) &&
+		isStringArray(value.supportingEvidenceIds) &&
+		isStringArray(value.contradictingEvidenceIds) &&
+		isStringArray(value.supportingTraceIds) &&
+		isStringArray(value.contradictingTraceIds) &&
+		isStringArray(value.supportingTaskLineageIds) &&
+		isStringArray(value.contradictingTaskLineageIds)
+	);
+}
+
+function isCandidateRegistryEventContent(value: Readonly<Record<string, unknown>>): boolean {
+	if (value.type === "skill-candidate-priority-scored") {
+		return (
+			typeof value.groupId === "string" &&
+			isArtifactReference(value.score) &&
+			isStringArray(value.proposalRevisionIds)
+		);
+	}
+	if (value.type === "skill-candidate-proposal-recorded") {
+		if (!isRecord(value.profile) || !isRecord(value.profile.workspace) || !isRecord(value.proposalRevision)) {
+			return false;
+		}
+		return (
+			typeof value.groupId === "string" &&
+			typeof value.profile.workspace.repositoryId === "string" &&
+			(value.profile.workspace.directoryId === undefined ||
+				typeof value.profile.workspace.directoryId === "string") &&
+			isRecord(value.profile.workspace.evolutionScope) &&
+			typeof value.profile.workspace.evolutionScope.repositoryId === "string" &&
+			typeof value.profile.workspace.evolutionScope.scopeId === "string" &&
+			isStringArray(value.profile.existingSkillIds) &&
+			typeof value.profile.skillability === "string" &&
+			isStringArray(value.profile.triggerTerms) &&
+			isStringArray(value.profile.proceduralIntentTerms) &&
+			isStringArray(value.profile.applicabilityTerms) &&
+			typeof value.proposalRevision.revisionId === "string" &&
+			typeof value.proposalRevision.candidateId === "string" &&
+			isArtifactReference(value.proposalRevision.candidate) &&
+			typeof value.proposalRevision.sourceEvolutionJobId === "string" &&
+			typeof value.proposalRevision.createdAt === "string" &&
+			isCandidateEvidenceContribution(value.proposalRevision.evidence)
+		);
+	}
+	if (value.type === "skill-candidate-state-transitioned") {
+		return (
+			typeof value.groupId === "string" &&
+			(value.from === null || (typeof value.from === "string" && SKILL_CANDIDATE_STATES.has(value.from))) &&
+			typeof value.to === "string" &&
+			SKILL_CANDIDATE_STATES.has(value.to) &&
+			isStringArray(value.reasonCodes)
+		);
+	}
+	if (value.type === "skill-candidate-work-checkpointed") {
+		return (
+			typeof value.workId === "string" &&
+			typeof value.sourceEvolutionJobId === "string" &&
+			typeof value.stage === "string" &&
+			SKILL_CANDIDATE_WORK_STAGES.has(value.stage) &&
+			typeof value.idempotencyKey === "string" &&
+			Number.isSafeInteger(value.attempt) &&
+			(value.attempt as number) > 0 &&
+			isStringArray(value.groupIds)
+		);
+	}
+	return (
+		value.type === "skill-candidate-work-failed" &&
+		typeof value.workId === "string" &&
+		typeof value.sourceEvolutionJobId === "string" &&
+		typeof value.idempotencyKey === "string" &&
+		Number.isSafeInteger(value.attempt) &&
+		(value.attempt as number) > 0 &&
+		typeof value.message === "string" &&
+		(value.retryNotBefore === null ||
+			(typeof value.retryNotBefore === "string" && Number.isFinite(Date.parse(value.retryNotBefore))))
+	);
+}
+
+function parseSkillCandidateRegistryEvent(contents: string, path: string): SkillCandidateRegistryEvent {
+	const parsed = parseJson(contents, path);
+	if (
+		!isRecord(parsed) ||
+		parsed.schemaVersion !== SKILL_CANDIDATE_REGISTRY_SCHEMA_VERSION ||
+		typeof parsed.eventId !== "string" ||
+		!SAFE_ID_PATTERN.test(parsed.eventId) ||
+		!Number.isSafeInteger(parsed.registrySequence) ||
+		(parsed.registrySequence as number) < 1 ||
+		typeof parsed.type !== "string" ||
+		!SKILL_CANDIDATE_REGISTRY_EVENT_TYPES.has(parsed.type) ||
+		!isCandidateRegistryEventContent(parsed)
+	) {
+		throw new EvolutionStorageCorruptionError(path, "skill candidate registry event is invalid");
+	}
+	assertMetadata(parsed.metadata, path, parsed.eventId);
+	const { metadata, ...content } = parsed;
+	if (!isRecord(metadata) || metadata.contentDigest !== computeEvolutionContentDigest(content)) {
+		throw new EvolutionStorageCorruptionError(path, "skill candidate registry event content digest is invalid");
+	}
+	return parsed as unknown as SkillCandidateRegistryEvent;
+}
+
 function parseCancellation(contents: string, path: string, expectedJobId: string): EvolutionCancellationRequest {
 	const parsed = parseJson(contents, path);
 	if (
@@ -292,7 +431,8 @@ export class FileEvolutionPersistence
 		EvolutionCursorStore,
 		EvolutionJobStore,
 		EvolutionLeaseStore,
-		EvolutionLedger
+		EvolutionLedger,
+		SkillCandidateRegistryStore
 {
 	readonly #rootPath: string;
 	readonly #artifactPath: string;
@@ -301,6 +441,7 @@ export class FileEvolutionPersistence
 	readonly #jobPath: string;
 	readonly #leasePath: string;
 	readonly #ledgerPath: string;
+	readonly #skillCandidateRegistryPath: string;
 	readonly #storeLockPath: string;
 	readonly #storeLockStaleMs: number;
 	readonly #storeLockUpdateMs: number;
@@ -313,6 +454,7 @@ export class FileEvolutionPersistence
 		this.#jobPath = join(this.#rootPath, "jobs");
 		this.#leasePath = join(this.#rootPath, "leases");
 		this.#ledgerPath = join(this.#rootPath, "ledger");
+		this.#skillCandidateRegistryPath = join(this.#rootPath, "skill-candidates");
 		this.#storeLockPath = join(this.#rootPath, ".store");
 		this.#storeLockStaleMs = options.storeLockStaleMs ?? STORE_LOCK_STALE_MS;
 		this.#storeLockUpdateMs = options.storeLockUpdateMs ?? STORE_LOCK_UPDATE_MS;
@@ -331,6 +473,7 @@ export class FileEvolutionPersistence
 			this.#jobPath,
 			this.#leasePath,
 			this.#ledgerPath,
+			this.#skillCandidateRegistryPath,
 		]) {
 			await mkdir(path, { recursive: true, mode: 0o700 });
 			const stats = await lstat(path);
@@ -406,6 +549,50 @@ export class FileEvolutionPersistence
 
 	#scopeFileName(scope: EvolutionScope): string {
 		return artifactDirectoryName(computeEvolutionContentDigest(scope));
+	}
+
+	#skillCandidateScopePath(scope: EvolutionScope): string {
+		return join(this.#skillCandidateRegistryPath, this.#scopeFileName(scope));
+	}
+
+	async #readSkillCandidateRegistryEvents(scope: EvolutionScope): Promise<SkillCandidateRegistryEvent[]> {
+		const scopePath = this.#skillCandidateScopePath(scope);
+		let entries: Dirent[];
+		try {
+			entries = await readdir(scopePath, { withFileTypes: true });
+		} catch (error) {
+			if (hasErrorCode(error, "ENOENT")) return [];
+			throw error;
+		}
+		const events: SkillCandidateRegistryEvent[] = [];
+		for (const entry of entries) {
+			if (!entry.isDirectory() || entry.isSymbolicLink() || entry.name.startsWith(".")) continue;
+			const path = join(scopePath, entry.name, "event.json");
+			const contents = await this.#readOptional(path);
+			if (contents === null) {
+				throw new EvolutionStorageCorruptionError(path, "skill candidate registry event is missing");
+			}
+			const event = parseSkillCandidateRegistryEvent(contents, path);
+			if (event.eventId !== entry.name) {
+				throw new EvolutionStorageCorruptionError(
+					path,
+					"skill candidate registry event ID does not match its path",
+				);
+			}
+			if (!scopeMatches(event.metadata.scope, scope)) {
+				throw new EvolutionStorageCorruptionError(path, "skill candidate registry scope does not match its path");
+			}
+			events.push(event);
+		}
+		events.sort(
+			(left, right) => left.registrySequence - right.registrySequence || left.eventId.localeCompare(right.eventId),
+		);
+		for (let index = 0; index < events.length; index += 1) {
+			if (events[index]?.registrySequence !== index + 1) {
+				throw new EvolutionStorageCorruptionError(scopePath, "skill candidate registry sequence is not contiguous");
+			}
+		}
+		return events;
 	}
 
 	#leaseFile(kind: EvolutionLeaseToken["kind"], key: string): string {
@@ -695,6 +882,72 @@ export class FileEvolutionPersistence
 				expiresAt: new Date(0).toISOString(),
 				releasedAt: new Date().toISOString(),
 			} satisfies StoredLease);
+		});
+	}
+
+	async loadSkillCandidateRegistry(scope: EvolutionScope): Promise<SkillCandidateRegistrySnapshot> {
+		await this.#ensureDirectories();
+		const events = await this.#readSkillCandidateRegistryEvents(scope);
+		return { revision: events.length, events };
+	}
+
+	async appendSkillCandidateRegistryEvents(
+		scope: EvolutionScope,
+		expectedRevision: number,
+		events: readonly SkillCandidateRegistryEvent[],
+	): Promise<SkillCandidateRegistryAppendResult> {
+		if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {
+			throw new Error("Invalid skill candidate registry revision");
+		}
+		if (events.length === 0) return "committed";
+		return this.#withStoreLock(async () => {
+			const existing = await this.#readSkillCandidateRegistryEvents(scope);
+			if (existing.length !== expectedRevision) return "conflict";
+			const scopePath = this.#skillCandidateScopePath(scope);
+			await mkdir(scopePath, { recursive: true, mode: 0o700 });
+			const stats = await lstat(scopePath);
+			if (!stats.isDirectory() || stats.isSymbolicLink()) {
+				throw new EvolutionStorageCorruptionError(scopePath, "expected a direct directory");
+			}
+			for (let index = 0; index < events.length; index += 1) {
+				const event = events[index];
+				if (event === undefined || event.registrySequence !== expectedRevision + index + 1) {
+					throw new Error("Skill candidate registry events must advance a contiguous sequence");
+				}
+				if (!scopeMatches(event.metadata.scope, scope)) {
+					throw new Error("Skill candidate registry event scope does not match the registry");
+				}
+				assertSafeId(event.eventId, "skill candidate registry event ID");
+				const destination = join(scopePath, event.eventId);
+				const eventPath = join(destination, "event.json");
+				const content = serializeEvolutionValue(event);
+				parseSkillCandidateRegistryEvent(content, eventPath);
+				const alreadyStored = await this.#readOptional(eventPath);
+				if (alreadyStored !== null) {
+					if (alreadyStored.trimEnd() !== content) {
+						throw new EvolutionStorageCorruptionError(
+							eventPath,
+							"skill candidate registry event ID was reused with different content",
+						);
+					}
+					continue;
+				}
+				let temporaryDirectory: string | null = await mkdtemp(join(scopePath, ".event.tmp-"));
+				try {
+					await writeFile(join(temporaryDirectory, "event.json"), `${content}\n`, {
+						encoding: "utf8",
+						flag: "wx",
+						mode: 0o600,
+					});
+					await rename(temporaryDirectory, destination);
+					temporaryDirectory = null;
+				} finally {
+					if (temporaryDirectory !== null) {
+						await rm(temporaryDirectory, { recursive: true, force: true });
+					}
+				}
+			}
+			return "committed";
 		});
 	}
 

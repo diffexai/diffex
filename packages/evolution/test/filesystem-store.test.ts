@@ -14,6 +14,8 @@ import {
 	FileEvolutionPersistence,
 	type InstructionSnapshot,
 	planEvolutionRetention,
+	SKILL_CANDIDATE_REGISTRY_SCHEMA_VERSION,
+	type SkillCandidateRegistryEvent,
 } from "../src/index.ts";
 
 const scope: EvolutionScope = { repositoryId: "diffex", scopeId: "repository" };
@@ -109,6 +111,32 @@ function ledgerEvent(eventId: string, inputSnapshotId: string): EvolutionLedgerE
 	};
 }
 
+function candidateWorkEvent(eventId: string, registrySequence: number): SkillCandidateRegistryEvent {
+	const content = {
+		schemaVersion: SKILL_CANDIDATE_REGISTRY_SCHEMA_VERSION,
+		eventId,
+		registrySequence,
+		type: "skill-candidate-work-checkpointed" as const,
+		workId: "candidate-work-1",
+		sourceEvolutionJobId: "job-1",
+		stage: "consolidating" as const,
+		idempotencyKey: "candidate-work-1:consolidating",
+		attempt: 1,
+		groupIds: [],
+	};
+	return {
+		metadata: createEvolutionArtifactMetadata({
+			artifactId: eventId,
+			producer,
+			sourceIds: ["job-1"],
+			scope,
+			createdAt: "2026-08-19T12:00:00.000Z",
+			content,
+		}),
+		...content,
+	};
+}
+
 async function scopeLease(store: FileEvolutionPersistence, ownerId: string): Promise<EvolutionLeaseToken> {
 	const lease = await store.acquire(
 		"scope",
@@ -172,6 +200,31 @@ describe("filesystem evolution persistence", () => {
 			"ledger event ID was reused with different content",
 		);
 		expect(await store.read("job-1")).toEqual([first]);
+	});
+
+	it("persists append-only candidate registry events with revision conflicts", async () => {
+		const { root, store } = await storeFixture();
+		const peer = new FileEvolutionPersistence(root);
+		const first = candidateWorkEvent("candidate-event-1", 1);
+
+		expect(await store.appendSkillCandidateRegistryEvents(scope, 0, [first])).toBe("committed");
+		expect(await peer.loadSkillCandidateRegistry(scope)).toEqual({ revision: 1, events: [first] });
+		expect(
+			await peer.appendSkillCandidateRegistryEvents(scope, 0, [candidateWorkEvent("candidate-event-2", 1)]),
+		).toBe("conflict");
+		await expect(
+			peer.appendSkillCandidateRegistryEvents(scope, 1, [candidateWorkEvent("candidate-event-2", 3)]),
+		).rejects.toThrow("contiguous sequence");
+	});
+
+	it("detects corrupted candidate registry history", async () => {
+		const { root, store } = await storeFixture();
+		const first = candidateWorkEvent("candidate-event-1", 1);
+		await store.appendSkillCandidateRegistryEvents(scope, 0, [first]);
+		const scopeDirectory = computeEvolutionContentDigest(scope).replace("sha256:", "sha256-");
+		await writeFile(join(root, "skill-candidates", scopeDirectory, first.eventId, "event.json"), "{}\n", "utf8");
+
+		await expect(store.loadSkillCandidateRegistry(scope)).rejects.toBeInstanceOf(EvolutionStorageCorruptionError);
 	});
 
 	it("fences stale scope owners from job and cursor mutations", async () => {

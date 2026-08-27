@@ -25,6 +25,7 @@ Recovery never treats partial output as completed work and never feeds evolution
 | Rollback selection conflict | The selected harness changed after the rollback confirmation. | Reject the rollback and refresh the available action from current harness state. | Rollback never replaces an unexpected selected revision. |
 | Successful rollback selection | The recorded immutable parent is still present and the evolved revision is current. | Select the parent with compare-and-swap and refresh on the next prompt boundary. | Existing in-flight prompts stay pinned to their admitted revision. |
 | Unsupported skill or orchestration target | The target registry has no enabled writer route. | Preserve the finding as deferred evidence with no executable payload. | Disabled target kinds cannot reach filesystem mutation or activation. |
+| Interrupted skill-candidate consolidation | A completed evolution job has checkpointed candidates but no completed candidate-work event. | Resume from append-only registry events with the same source-job idempotency key; repair missing scores or transitions before completion. | Candidate proposal revisions remain immutable, retries do not add recurrence, and partial registry appends cannot activate a skill. |
 
 ## Operational observability
 
@@ -36,5 +37,6 @@ These operational records remain outside materialized product-runtime evidence, 
 ## Verification boundaries
 
 The deterministic validator proves provenance, recurrence, immutable closure, score bounds, and structural eligibility.
+Candidate priority scoring separately orders evaluation work; it cannot skip later gates, accept a candidate, or activate a skill.
 It does not prove that natural-language evidence semantically entails a proposal.
 Post-activation outcome evaluation and automatic regression rollback are intentionally outside this recovery contract.

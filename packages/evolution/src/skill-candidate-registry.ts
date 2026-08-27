@@ -57,6 +57,7 @@ interface MutableGroup {
 	state: SkillCandidateState;
 	readonly dispositionHistory: SkillCandidateDispositionRecord[];
 	priorityScore: EvolutionArtifactReference | null;
+	readonly scoredProposalRevisionIds: string[];
 }
 
 export interface DeterministicSkillCandidatePriorityScorerDependencies {
@@ -260,6 +261,7 @@ function materializeGroups(events: readonly SkillCandidateRegistryEvent[]): Map<
 					state: "proposed",
 					dispositionHistory: [],
 					priorityScore: null,
+					scoredProposalRevisionIds: [],
 				});
 			} else if (
 				!group.proposalRevisions.some((revision) => revision.revisionId === event.proposalRevision.revisionId)
@@ -275,6 +277,11 @@ function materializeGroups(events: readonly SkillCandidateRegistryEvent[]): Map<
 			const group = groups.get(event.groupId);
 			if (group === undefined) throw new Error(`Candidate score references unknown group "${event.groupId}"`);
 			group.priorityScore = event.score;
+			group.scoredProposalRevisionIds.splice(
+				0,
+				group.scoredProposalRevisionIds.length,
+				...event.proposalRevisionIds,
+			);
 			continue;
 		}
 		if (event.type === "skill-candidate-state-transitioned") {
@@ -612,6 +619,7 @@ export class PersistentSkillCandidateRegistry implements SkillCandidateRegistry 
 						state: "proposed",
 						dispositionHistory: [],
 						priorityScore: null,
+						scoredProposalRevisionIds: [],
 					};
 					groups.set(groupId, group);
 				}
@@ -652,6 +660,19 @@ export class PersistentSkillCandidateRegistry implements SkillCandidateRegistry 
 				group.proposalRevisions.push(proposalRevision);
 				changedGroupIds.add(group.groupId);
 				existingCandidateIds.add(candidateKey);
+			}
+
+			for (const group of groups.values()) {
+				const revisionIds = group.proposalRevisions.map((revision) => revision.revisionId);
+				const qualification = this.#scorer.qualification(immutableGroup(group));
+				if (!sameValues(group.scoredProposalRevisionIds, revisionIds) || qualification.state !== group.state) {
+					changedGroupIds.add(group.groupId);
+				}
+			}
+
+			for (const groupId of [...changedGroupIds].sort((left, right) => left.localeCompare(right))) {
+				const group = groups.get(groupId);
+				if (group === undefined) throw new Error(`Candidate group "${groupId}" disappeared during consolidation`);
 				if (group.dispositionHistory.length === 0) {
 					const initial = transitionEvent(
 						group.groupId,
@@ -673,11 +694,6 @@ export class PersistentSkillCandidateRegistry implements SkillCandidateRegistry 
 						createdAt: input.createdAt,
 					});
 				}
-			}
-
-			for (const groupId of [...changedGroupIds].sort((left, right) => left.localeCompare(right))) {
-				const group = groups.get(groupId);
-				if (group === undefined) throw new Error(`Candidate group "${groupId}" disappeared during consolidation`);
 				const immutable = immutableGroup(group);
 				const score = this.#scorer.score(immutable, input.input.metadata.scope, input.createdAt);
 				const scoreReference = await this.#artifacts.put(score);
@@ -693,6 +709,7 @@ export class PersistentSkillCandidateRegistry implements SkillCandidateRegistry 
 					type: "skill-candidate-priority-scored" as const,
 					groupId,
 					score: scoreReference,
+					proposalRevisionIds: immutable.proposalRevisions.map((revision) => revision.revisionId),
 				};
 				planned.push(
 					withEventMetadata(
@@ -704,6 +721,11 @@ export class PersistentSkillCandidateRegistry implements SkillCandidateRegistry 
 					),
 				);
 				group.priorityScore = scoreReference;
+				group.scoredProposalRevisionIds.splice(
+					0,
+					group.scoredProposalRevisionIds.length,
+					...scoreContent.proposalRevisionIds,
+				);
 				const qualification = this.#scorer.qualification(immutableGroup(group));
 				if (qualification.state !== group.state) {
 					const transition = transitionEvent(
