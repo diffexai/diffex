@@ -1,3 +1,4 @@
+import type { AgentEvent } from "@earendil-works/diffex-agent-core";
 import type { AssistantMessage, Context } from "@earendil-works/diffex-ai";
 import { fauxAssistantMessage } from "@earendil-works/diffex-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -13,6 +14,10 @@ import {
 	type SubagentTestHarness,
 	waitForStatus,
 } from "./subagent-harness.ts";
+
+interface AgentSessionWithExtensionEmitHook {
+	_emitExtensionEvent: (event: AgentEvent) => Promise<void>;
+}
 
 describe("asynchronous subagent startup", () => {
 	const harnesses: SubagentTestHarness[] = [];
@@ -217,6 +222,51 @@ describe("asynchronous subagent startup", () => {
 		expect(controller.snapshot().agents).toMatchObject([{ name: "worker", status: "interrupted" }]);
 		expect(child?.messages).toEqual([]);
 		expect(harness.faux.state.callCount).toBe(0);
+	});
+
+	it("serializes shutdown cancellation during agent_start publication", async () => {
+		const { harness, controller, createSession } = await setup();
+		const childReady = deferred<void>();
+		const allowChildReturn = deferred<void>();
+		const agentStartHandling = deferred<void>();
+		const allowAgentStartHandling = deferred<void>();
+		const events: SubagentLifecycleEvent[] = [];
+		let child: AgentSession | undefined;
+		harness.setResponses([fauxAssistantMessage("must not run")]);
+		controller.subscribe((event) => events.push(event));
+		controller.spawn("worker", "task", async (signal) => {
+			child = await createSession(signal);
+			childReady.resolve();
+			await allowChildReturn.promise;
+			return child;
+		});
+		await childReady.promise;
+
+		const activeChild = child!;
+		const sessionWithHook = activeChild as unknown as AgentSessionWithExtensionEmitHook;
+		const emitExtensionEvent = sessionWithHook._emitExtensionEvent.bind(sessionWithHook);
+		sessionWithHook._emitExtensionEvent = async (event) => {
+			if (event.type === "agent_start") {
+				agentStartHandling.resolve();
+				await allowAgentStartHandling.promise;
+			}
+			await emitExtensionEvent(event);
+		};
+		const abort = vi.spyOn(activeChild, "abort");
+		const dispose = vi.spyOn(activeChild, "dispose");
+		allowChildReturn.resolve();
+		await agentStartHandling.promise;
+
+		expect(controller.snapshot().agents).toMatchObject([{ name: "worker", status: "queued" }]);
+		const shutdown = controller.shutdown();
+		expect(abort).toHaveBeenCalledOnce();
+		allowAgentStartHandling.resolve();
+		await shutdown;
+
+		expect(abort).toHaveBeenCalledOnce();
+		expect(dispose).toHaveBeenCalledOnce();
+		expect(harness.faux.state.callCount).toBe(0);
+		expect(events.map((event) => event.type)).toEqual(["subagent_reserved", "subagent_controller_disposed"]);
 	});
 
 	it("aborts and disposes an executing child once during shutdown", async () => {

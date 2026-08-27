@@ -99,6 +99,7 @@ interface SubagentRecord {
 	run?: Promise<void>;
 	createSession?: CreateSubagentSession;
 	runController?: AbortController;
+	runCancellation?: Promise<void>;
 	interruptionRequested?: boolean;
 	actionTail?: Promise<void>;
 	cleanupFailures?: unknown[];
@@ -810,11 +811,7 @@ export class SubagentController {
 	async #quiesceRecord(record: SubagentRecord): Promise<void> {
 		record.session?.clearQueue();
 		record.interruptionRequested = true;
-		if (record.status === "queued") {
-			record.runController?.abort(new Error(`Subagent interrupted: ${record.name}`));
-		} else if (record.session) {
-			await record.session.abort();
-		}
+		await this.#requestRunCancellation(record, new Error(`Subagent interrupted: ${record.name}`));
 		await record.run;
 		if (record.status === "queued" || record.status === "running") this.markInterrupted(record.name);
 	}
@@ -1318,14 +1315,10 @@ export class SubagentController {
 
 		record.interruptionRequested = true;
 		const run = record.run;
-		if (record.status === "queued") {
-			record.runController?.abort(new Error(`Subagent interrupted: ${name}`));
-		} else if (record.session) {
-			try {
-				await record.session.abort();
-			} catch {
-				// The captured run still determines the settled controller state.
-			}
+		try {
+			await this.#requestRunCancellation(record, new Error(`Subagent interrupted: ${name}`));
+		} catch {
+			// The captured run still determines the settled controller state.
 		}
 		await run;
 		if (record.status === "queued" || record.status === "running") {
@@ -1342,6 +1335,7 @@ export class SubagentController {
 		record.interruptionRequested = false;
 		const runController = new AbortController();
 		record.runController = runController;
+		record.runCancellation = undefined;
 		const run = this.#runPrompt(record, prompt, runController);
 		record.run = run;
 		void run.catch(() => {});
@@ -1483,31 +1477,50 @@ export class SubagentController {
 	#detachRecords(reason: Error): SubagentRecord[] {
 		const records = [...this.#records.values()];
 		for (const record of records) {
-			if (record.status === "queued") record.runController?.abort(reason);
+			void this.#requestRunCancellation(record, reason);
 		}
 		this.#records.clear();
 		return records;
 	}
 
+	#requestRunCancellation(record: SubagentRecord, reason: Error): Promise<void> {
+		if (record.runCancellation) return record.runCancellation;
+
+		let cancellation: Promise<void>;
+		// AgentSession marks streaming before awaiting agent_start hooks, while this record can still be queued.
+		if (record.runController && !record.session?.isStreaming) {
+			record.runController.abort(reason);
+			cancellation = Promise.resolve();
+		} else if (record.session) {
+			try {
+				cancellation = record.session.abort();
+			} catch (error) {
+				cancellation = Promise.reject(error);
+			}
+		} else {
+			record.runController?.abort(reason);
+			cancellation = Promise.resolve();
+		}
+
+		record.runCancellation = cancellation;
+		void cancellation.catch(() => {});
+		return cancellation;
+	}
+
 	async #cleanupRecords(records: SubagentRecord[]): Promise<unknown[]> {
 		const failures: unknown[] = [];
 		for (const record of records) record.leafUnsubscribe?.();
-		const abortResults = await Promise.allSettled(
-			records.flatMap((record) => {
-				const session = record.session;
-				if (!session) return [];
+		for (const record of records) {
+			const session = record.session;
+			if (session) {
 				try {
 					session.clearQueue();
 				} catch (error) {
 					failures.push(error);
 				}
-				try {
-					return [session.abort()];
-				} catch (error) {
-					return [Promise.reject(error)];
-				}
-			}),
-		);
+			}
+		}
+		const abortResults = await Promise.allSettled(records.map((record) => record.runCancellation));
 		for (const result of abortResults) {
 			if (result.status === "rejected") failures.push(result.reason);
 		}
