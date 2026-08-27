@@ -38,6 +38,7 @@ export interface ResourceLoaderReloadOptions {
 export interface ResourceLoader {
 	getExtensions(): LoadExtensionsResult;
 	getSkills(): SkillCatalog;
+	setEvolvedSkills(catalog: SkillCatalog): void;
 	getPrompts(): { prompts: PromptTemplate[]; diagnostics: ResourceDiagnostic[] };
 	getThemes(): { themes: Theme[]; diagnostics: ResourceDiagnostic[] };
 	getAgentsFiles(): { agentsFiles: Array<{ path: string; content: string }> };
@@ -225,6 +226,8 @@ export class DefaultResourceLoader implements ResourceLoader {
 	private appendSystemPromptOverride?: (base: string[]) => string[];
 
 	private extensionsResult: LoadExtensionsResult;
+	private installedSkillCatalog: SkillCatalog;
+	private evolvedSkillCatalog: SkillCatalog;
 	private skillCatalog: SkillCatalog;
 	private disabledSkillDiagnostics: ResourceDiagnostic[];
 	private prompts: PromptTemplate[];
@@ -277,6 +280,8 @@ export class DefaultResourceLoader implements ResourceLoader {
 		this.appendSystemPromptOverride = options.appendSystemPromptOverride;
 
 		this.extensionsResult = { extensions: [], errors: [], runtime: createExtensionRuntime() };
+		this.installedSkillCatalog = { skills: [], diagnostics: [] };
+		this.evolvedSkillCatalog = { skills: [], diagnostics: [] };
 		this.skillCatalog = { skills: [], diagnostics: [] };
 		this.disabledSkillDiagnostics = [];
 		this.prompts = [];
@@ -302,6 +307,14 @@ export class DefaultResourceLoader implements ResourceLoader {
 
 	getSkills(): SkillCatalog {
 		return this.skillCatalog;
+	}
+
+	setEvolvedSkills(catalog: SkillCatalog): void {
+		this.evolvedSkillCatalog = {
+			skills: [...catalog.skills],
+			diagnostics: [...catalog.diagnostics],
+		};
+		this.rebuildSkillCatalog();
 	}
 
 	getPrompts(): { prompts: PromptTemplate[]; diagnostics: ResourceDiagnostic[] } {
@@ -684,6 +697,49 @@ export class DefaultResourceLoader implements ResourceLoader {
 		});
 	}
 
+	private rebuildSkillCatalog(): void {
+		const installedNames = new Set(this.installedSkillCatalog.skills.map((skill) => skill.name));
+		const exposedNames = new Set(installedNames);
+		const evolvedSkills: SkillCatalog["skills"] = [];
+		const collisionDiagnostics: ResourceDiagnostic[] = [];
+		for (const skill of this.evolvedSkillCatalog.skills) {
+			const name = installedNames.has(skill.name) ? `${skill.name}-Evolved` : skill.name;
+			if (name !== skill.name) {
+				collisionDiagnostics.push({
+					type: "collision",
+					message: `name "${skill.name}" collision; evolved skill exposed as "${name}"`,
+					path: skill.filePath,
+					collision: {
+						resourceType: "skill",
+						name: skill.name,
+						winnerPath:
+							this.installedSkillCatalog.skills.find((installed) => installed.name === skill.name)?.filePath ??
+							"<installed>",
+						loserPath: skill.filePath,
+					},
+				});
+			}
+			if (exposedNames.has(name)) {
+				collisionDiagnostics.push({
+					type: "collision",
+					message: `name "${name}" collision prevents the evolved skill from being exposed`,
+					path: skill.filePath,
+				});
+				continue;
+			}
+			exposedNames.add(name);
+			evolvedSkills.push(name === skill.name ? skill : { ...skill, name });
+		}
+		this.skillCatalog = {
+			skills: [...evolvedSkills, ...this.installedSkillCatalog.skills],
+			diagnostics: [
+				...this.installedSkillCatalog.diagnostics,
+				...this.evolvedSkillCatalog.diagnostics,
+				...collisionDiagnostics,
+			],
+		};
+	}
+
 	private updateSkillsFromPaths(skillPaths: string[], metadataByPath?: Map<string, PathMetadata>): void {
 		let skillsResult: SkillCatalog;
 		if (this.noSkills && skillPaths.length === 0) {
@@ -701,7 +757,7 @@ export class DefaultResourceLoader implements ResourceLoader {
 			diagnostics: [...this.disabledSkillDiagnostics, ...skillsResult.diagnostics],
 		};
 		const resolvedSkills = this.skillsOverride ? this.skillsOverride(skillsResult) : skillsResult;
-		this.skillCatalog = {
+		this.installedSkillCatalog = {
 			skills: resolvedSkills.skills.map((skill) => {
 				const sourceInfo =
 					this.findSourceInfoForPath(skill.filePath, this.extensionSkillSourceInfos, metadataByPath) ??
@@ -724,6 +780,7 @@ export class DefaultResourceLoader implements ResourceLoader {
 			}),
 			diagnostics: resolvedSkills.diagnostics,
 		};
+		this.rebuildSkillCatalog();
 	}
 
 	private updatePromptsFromPaths(promptPaths: string[], metadataByPath?: Map<string, PathMetadata>): void {

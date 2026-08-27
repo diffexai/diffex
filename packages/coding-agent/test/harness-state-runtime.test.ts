@@ -106,15 +106,42 @@ describe("global harness state startup", () => {
 		expect(readFileSync(pointerPath, "utf8")).toBe(selectedPointer);
 	});
 
-	it("warns and falls back when the selected revision uses an unsupported artifact", async () => {
+	it("loads a selected revision with evolved skill artifacts", async () => {
+		const agentDir = createAgentDir();
+		const store = new HarnessStateStore(agentDir);
+		const root = await store.initialize();
+		const skill = "---\nname: future\ndescription: Use the future workflow.\n---\n\n# Future workflow\n";
+		const selected = await store.saveVersion(
+			{
+				memory: "Skill-compatible memory.\n",
+				skills: [
+					{
+						path: "skills/future/SKILL.md",
+						content: skill,
+						workspace: { repositoryId: "global", directoryId: "directory-1" },
+					},
+				],
+			},
+			root.manifest.version,
+		);
+		await store.selectVersion(selected.manifest.version);
+
+		const loaded = await loadGlobalHarnessState(agentDir);
+
+		expect(loaded.warning).toBeUndefined();
+		expect(loaded.bundle).toEqual(selected);
+		expect(loaded.bundle?.state.skills[0]?.content).toBe(skill);
+	});
+
+	it("warns and preserves the pointer for an unsupported future artifact", async () => {
 		const agentDir = createAgentDir();
 		const store = new HarnessStateStore(agentDir);
 		const root = await store.initialize();
 		const memory = "Future-compatible memory.\n";
-		const skill = "Future skill.\n";
+		const future = "Future artifact.\n";
 		const artifacts = [
 			{ kind: "evolution-memory", path: "EVOLVE.md", contentHash: contentHash(memory) },
-			{ kind: "skill", path: "skills/future/SKILL.md", contentHash: contentHash(skill) },
+			{ kind: "future-skill-asset", path: "future.txt", contentHash: contentHash(future) },
 		];
 		const version = computeHarnessVersion({
 			schemaVersion: HARNESS_VERSION_SCHEMA_VERSION,
@@ -123,7 +150,7 @@ describe("global harness state startup", () => {
 			artifacts,
 		});
 		const bundlePath = join(agentDir, "harness-state", "versions", harnessVersionDirectoryName(version));
-		mkdirSync(join(bundlePath, "skills", "future"), { recursive: true });
+		mkdirSync(bundlePath, { recursive: true });
 		writeFileSync(
 			join(bundlePath, "manifest.json"),
 			`${JSON.stringify(
@@ -139,7 +166,7 @@ describe("global harness state startup", () => {
 			)}\n`,
 		);
 		writeFileSync(join(bundlePath, "EVOLVE.md"), memory);
-		writeFileSync(join(bundlePath, "skills", "future", "SKILL.md"), skill);
+		writeFileSync(join(bundlePath, "future.txt"), future);
 		const pointerPath = join(agentDir, "harness-state", "current.json");
 		writeFileSync(pointerPath, `${JSON.stringify({ version }, null, 2)}\n`);
 		const incompatiblePointer = readFileSync(pointerPath, "utf8");
@@ -147,7 +174,7 @@ describe("global harness state startup", () => {
 		const loaded = await loadGlobalHarnessState(agentDir);
 
 		expect(loaded.bundle).toBeUndefined();
-		expect(loaded.warning).toContain('Unsupported harness artifact kind "skill"');
+		expect(loaded.warning).toContain('Unsupported harness artifact kind "future-skill-asset"');
 		expect(readFileSync(pointerPath, "utf8")).toBe(incompatiblePointer);
 	});
 });

@@ -71,6 +71,7 @@ export interface CreateAgentSessionFromServicesOptions {
 	customTools?: ToolDefinition[];
 	subagents?: CreateAgentSessionOptions["subagents"];
 	lifecycleObserver?: AgentSessionLifecycleObserver;
+	pinHarnessVersion?: boolean;
 }
 
 /**
@@ -246,6 +247,7 @@ export async function createInternalAgentSessionFromServices(
 			resourceLoader: options.services.resourceLoader,
 			harnessStateStore: options.services.harnessStateStore,
 			harnessVersionBundle: options.services.harnessVersionBundle,
+			pinHarnessVersion: options.pinHarnessVersion,
 			telemetryContext: options.services.telemetryContext,
 			sessionManager: options.sessionManager,
 			model: options.model,
