@@ -4,6 +4,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import {
 	computeHarnessVersion,
 	HARNESS_VERSION_SCHEMA_VERSION,
+	type HarnessArtifactManifest,
 	type HarnessStateStore,
 	type HarnessVersion,
 	type HarnessVersionBundle,
@@ -298,12 +299,16 @@ function resultingHarnessVersion(
 	memory: string,
 	base: HarnessVersion,
 	metadata: HarnessVersionMetadata,
+	baseArtifacts: readonly HarnessArtifactManifest[],
 ): HarnessVersion {
 	return computeHarnessVersion({
 		schemaVersion: HARNESS_VERSION_SCHEMA_VERSION,
 		base,
 		metadata,
-		artifacts: [{ kind: "evolution-memory", path: "EVOLVE.md", contentHash: memoryArtifactContentHash(memory) }],
+		artifacts: [
+			{ kind: "evolution-memory", path: "EVOLVE.md", contentHash: memoryArtifactContentHash(memory) },
+			...baseArtifacts.filter((artifact) => artifact.kind !== "evolution-memory"),
+		],
 	});
 }
 
@@ -828,7 +833,12 @@ export class EvolutionMemoryWriter implements EvolutionTargetWriter {
 			throw new Error("EVOLVE.md candidate item index is inconsistent after applying mutations");
 		}
 		const harnessMetadata: HarnessVersionMetadata = { evolutionMemory: { nextLessonNumber } };
-		const nextVersion = resultingHarnessVersion(memory, batch.expectedBaseVersion, harnessMetadata);
+		const nextVersion = resultingHarnessVersion(
+			memory,
+			batch.expectedBaseVersion,
+			harnessMetadata,
+			base.manifest.artifacts,
+		);
 		items = items.map((item) => {
 			if (addedIds.has(item.memoryItemId)) return { ...item, creationRevision: nextVersion };
 			if (removedIds.has(item.memoryItemId)) {
