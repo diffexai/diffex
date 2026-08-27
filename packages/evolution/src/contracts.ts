@@ -608,6 +608,27 @@ export interface SkillDraft {
 	readonly content: string;
 }
 
+export interface SkillDraftValidationIssue {
+	readonly code: string;
+	readonly message: string;
+}
+
+export interface SkillDraftValidationReport {
+	readonly artifactKind: "skill-draft-validation";
+	readonly metadata: EvolutionArtifactMetadata;
+	readonly validationId: string;
+	readonly groupId: string;
+	readonly draft: EvolutionArtifactReference;
+	readonly validatorVersion: string;
+	readonly assurance: "structure-provenance-scope-and-security-only";
+	readonly disposition: "accepted" | "rejected";
+	readonly issues: readonly SkillDraftValidationIssue[];
+	readonly validatedHarnessVersion: HarnessVersion;
+	readonly validatedSkillVersions: readonly string[];
+	readonly canonicalInventory: readonly string[];
+	readonly memoryRelationshipDigest: string;
+}
+
 export interface SkillCandidateDispositionRecord {
 	readonly eventId: string;
 	readonly from: SkillCandidateState | null;
