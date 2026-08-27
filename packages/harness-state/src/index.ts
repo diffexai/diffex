@@ -6,6 +6,7 @@ import { TextDecoder, TextEncoder } from "node:util";
 import lockfile from "proper-lockfile";
 import Type from "typebox";
 import { Check } from "typebox/value";
+import { parse } from "yaml";
 
 const SHA256_PATTERN = "^sha256:[0-9a-f]{64}$";
 const VERSION_DIRECTORY_PATTERN = /^sha256-([0-9a-f]{64})$/;
@@ -16,7 +17,10 @@ const STORE_DIRECTORY_NAME = "harness-state";
 const VERSIONS_DIRECTORY_NAME = "versions";
 const LOCK_NAME = ".harness-state.lock";
 const LOCK_STALE_AFTER_MS = 30_000;
-const SUPPORTED_ARTIFACT_KIND = "evolution-memory";
+const EVOLUTION_MEMORY_ARTIFACT_KIND = "evolution-memory";
+const SKILL_ARTIFACT_KIND = "skill";
+const MAX_SKILL_NAME_LENGTH = 64;
+const MAX_SKILL_DESCRIPTION_LENGTH = 1024;
 const UTF8_DECODER = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
 const UTF8_ENCODER = new TextEncoder();
 
@@ -28,14 +32,94 @@ export type HarnessVersion = string;
 const NonEmptyEvolutionMemorySchema = Type.String({
 	pattern: "^(?!\\uFEFF)(?=[\\s\\S]*\\S)(?![\\s\\S]*[\\uD800-\\uDFFF])[\\s\\S]+$",
 });
+const EvolutionMemorySchema = Type.Union([Type.Literal(""), NonEmptyEvolutionMemorySchema]);
+const SkillContentSchema = Type.String({
+	pattern: "^(?!\\uFEFF)(?![\\s\\S]*[\\uD800-\\uDFFF])[\\s\\S]+$",
+});
+export const HarnessWorkspaceIdentitySchema = Type.Readonly(
+	Type.Object(
+		{
+			repositoryId: Type.String({ minLength: 1 }),
+			directoryId: Type.Optional(Type.String({ minLength: 1 })),
+		},
+		{ additionalProperties: false },
+	),
+);
+export interface HarnessWorkspaceIdentity {
+	readonly repositoryId: string;
+	readonly directoryId?: string;
+}
+
+export const HarnessSkillInputSchema = Type.Readonly(
+	Type.Object(
+		{
+			path: Type.String({ minLength: 1 }),
+			content: SkillContentSchema,
+			workspace: HarnessWorkspaceIdentitySchema,
+		},
+		{ additionalProperties: false },
+	),
+);
+export interface HarnessSkillInput {
+	readonly path: string;
+	readonly content: string;
+	readonly workspace: HarnessWorkspaceIdentity;
+}
+
+export const HarnessSkillSchema = Type.Readonly(
+	Type.Object(
+		{
+			path: Type.String({ minLength: 1 }),
+			filePath: Type.String({ minLength: 1 }),
+			baseDir: Type.String({ minLength: 1 }),
+			name: Type.String({ minLength: 1 }),
+			description: Type.String({ minLength: 1 }),
+			content: SkillContentSchema,
+			contentHash: HarnessVersionSchema,
+			workspace: HarnessWorkspaceIdentitySchema,
+			disableModelInvocation: Type.Boolean(),
+		},
+		{ additionalProperties: false },
+	),
+);
+export interface HarnessSkill {
+	readonly path: string;
+	readonly filePath: string;
+	readonly baseDir: string;
+	readonly name: string;
+	readonly description: string;
+	readonly content: string;
+	readonly contentHash: HarnessVersion;
+	readonly workspace: HarnessWorkspaceIdentity;
+	readonly disableModelInvocation: boolean;
+}
+
 export const HarnessStateSchema = Type.Readonly(
 	Type.Object(
-		{ memory: Type.Union([Type.Literal(""), NonEmptyEvolutionMemorySchema]) },
+		{
+			memory: EvolutionMemorySchema,
+			skills: Type.Readonly(Type.Array(HarnessSkillSchema)),
+		},
 		{ additionalProperties: false },
 	),
 );
 export interface HarnessState {
 	readonly memory: string;
+	readonly skills: readonly HarnessSkill[];
+}
+
+export const HarnessStateInputSchema = Type.Readonly(
+	Type.Object(
+		{
+			memory: EvolutionMemorySchema,
+			skills: Type.Optional(Type.Readonly(Type.Array(HarnessSkillInputSchema))),
+		},
+		{ additionalProperties: false },
+	),
+);
+export interface HarnessStateInput {
+	readonly memory: string;
+	readonly skills?: readonly HarnessSkillInput[];
 }
 
 export const HarnessVersionMetadataSchema = Type.Readonly(
@@ -63,6 +147,7 @@ export const HarnessArtifactManifestSchema = Type.Readonly(
 			kind: Type.String({ minLength: 1 }),
 			path: Type.String({ minLength: 1 }),
 			contentHash: HarnessVersionSchema,
+			workspace: Type.Optional(HarnessWorkspaceIdentitySchema),
 		},
 		{ additionalProperties: false },
 	),
@@ -71,6 +156,7 @@ export interface HarnessArtifactManifest {
 	readonly kind: string;
 	readonly path: string;
 	readonly contentHash: HarnessVersion;
+	readonly workspace?: HarnessWorkspaceIdentity;
 }
 
 export const HarnessVersionManifestSchema = Type.Readonly(
@@ -175,8 +261,28 @@ function compareArtifacts(left: HarnessArtifactManifest, right: HarnessArtifactM
 	return (
 		compareText(left.kind, right.kind) ||
 		compareText(left.path, right.path) ||
-		compareText(left.contentHash, right.contentHash)
+		compareText(left.contentHash, right.contentHash) ||
+		compareText(left.workspace?.repositoryId ?? "", right.workspace?.repositoryId ?? "") ||
+		compareText(left.workspace?.directoryId ?? "", right.workspace?.directoryId ?? "")
 	);
+}
+
+function canonicalArtifact(artifact: HarnessArtifactManifest): HarnessArtifactManifest {
+	return {
+		kind: artifact.kind,
+		path: artifact.path,
+		contentHash: artifact.contentHash,
+		...(artifact.workspace === undefined
+			? {}
+			: {
+					workspace: {
+						repositoryId: artifact.workspace.repositoryId,
+						...(artifact.workspace.directoryId === undefined
+							? {}
+							: { directoryId: artifact.workspace.directoryId }),
+					},
+				}),
+	};
 }
 
 export function serializeHarnessVersion(input: HarnessVersionInput): string {
@@ -195,11 +301,7 @@ export function serializeHarnessVersion(input: HarnessVersionInput): string {
 	if (!Check(HarnessVersionMetadataSchema, input.metadata)) {
 		throw new Error("Invalid harness version metadata");
 	}
-	const artifacts = [...input.artifacts].sort(compareArtifacts).map(({ kind, path, contentHash }) => ({
-		kind,
-		path,
-		contentHash,
-	}));
+	const artifacts = [...input.artifacts].sort(compareArtifacts).map(canonicalArtifact);
 	return JSON.stringify({
 		schemaVersion: HARNESS_VERSION_SCHEMA_VERSION,
 		base: input.base,
@@ -261,6 +363,45 @@ function parseManifest(bytes: Uint8Array, manifestPath: string): HarnessVersionM
 		throw new Error(`Invalid harness version manifest at "${manifestPath}"`);
 	}
 	return parsed as HarnessVersionManifest;
+}
+
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+interface ParsedSkillFrontmatter {
+	readonly name: string;
+	readonly description: string;
+	readonly disableModelInvocation: boolean;
+}
+
+function parseSkillFrontmatter(content: string, artifactPath: string): ParsedSkillFrontmatter {
+	const match = /^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/.exec(content);
+	if (match === null) throw new Error(`Harness skill "${artifactPath}" must start with YAML frontmatter`);
+	let parsed: unknown;
+	try {
+		parsed = parse(match[1] ?? "");
+	} catch (cause) {
+		throw new Error(`Harness skill "${artifactPath}" has invalid YAML frontmatter`, { cause });
+	}
+	if (!isRecord(parsed)) throw new Error(`Harness skill "${artifactPath}" frontmatter must be a mapping`);
+	const name = parsed.name;
+	const description = parsed.description;
+	const disableModelInvocation = parsed["disable-model-invocation"];
+	if (typeof name !== "string" || name.length > MAX_SKILL_NAME_LENGTH || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name)) {
+		throw new Error(`Harness skill "${artifactPath}" has an invalid name`);
+	}
+	if (
+		typeof description !== "string" ||
+		description.trim() === "" ||
+		description.length > MAX_SKILL_DESCRIPTION_LENGTH
+	) {
+		throw new Error(`Harness skill "${artifactPath}" has an invalid description`);
+	}
+	if (disableModelInvocation !== undefined && typeof disableModelInvocation !== "boolean") {
+		throw new Error(`Harness skill "${artifactPath}" has an invalid disable-model-invocation value`);
+	}
+	return { name, description, disableModelInvocation: disableModelInvocation === true };
 }
 
 function validateArtifactPath(path: string): void {
@@ -347,19 +488,35 @@ function validateManifestInventory(manifest: HarnessVersionManifest): void {
 	}
 }
 
-function validateSupportedArtifacts(manifest: HarnessVersionManifest): void {
-	const evolutionArtifacts = manifest.artifacts.filter((artifact) => artifact.kind === SUPPORTED_ARTIFACT_KIND);
-	const unsupported = manifest.artifacts.find((artifact) => artifact.kind !== SUPPORTED_ARTIFACT_KIND);
+interface SupportedArtifactInventory {
+	readonly memory: HarnessArtifactManifest;
+	readonly skills: readonly HarnessArtifactManifest[];
+}
+
+function validateSupportedArtifacts(manifest: HarnessVersionManifest): SupportedArtifactInventory {
+	const memoryArtifacts = manifest.artifacts.filter((artifact) => artifact.kind === EVOLUTION_MEMORY_ARTIFACT_KIND);
+	const skillArtifacts = manifest.artifacts.filter((artifact) => artifact.kind === SKILL_ARTIFACT_KIND);
+	const unsupported = manifest.artifacts.find(
+		(artifact) => artifact.kind !== EVOLUTION_MEMORY_ARTIFACT_KIND && artifact.kind !== SKILL_ARTIFACT_KIND,
+	);
 	if (unsupported !== undefined) {
 		throw new Error(`Unsupported harness artifact kind "${unsupported.kind}"`);
 	}
 	if (
-		evolutionArtifacts.length !== 1 ||
-		evolutionArtifacts[0]?.path !== EVOLUTION_MEMORY_NAME ||
-		manifest.artifacts.length !== 1
+		memoryArtifacts.length !== 1 ||
+		memoryArtifacts[0]?.path !== EVOLUTION_MEMORY_NAME ||
+		memoryArtifacts[0]?.workspace !== undefined
 	) {
-		throw new Error(`Harness version must declare exactly one ${SUPPORTED_ARTIFACT_KIND} artifact at EVOLVE.md`);
+		throw new Error(
+			`Harness version must declare exactly one ${EVOLUTION_MEMORY_ARTIFACT_KIND} artifact at EVOLVE.md`,
+		);
 	}
+	for (const artifact of skillArtifacts) {
+		if (artifact.workspace === undefined || !/^skills\/[a-z0-9]+(?:-[a-z0-9]+)*\/SKILL\.md$/.test(artifact.path)) {
+			throw new Error(`Harness skill artifact "${artifact.path}" must have a canonical path and workspace identity`);
+		}
+	}
+	return { memory: memoryArtifacts[0] as HarnessArtifactManifest, skills: skillArtifacts };
 }
 
 export async function loadHarnessState(bundlePath: string): Promise<HarnessVersionBundle> {
@@ -399,6 +556,7 @@ export async function loadHarnessState(bundlePath: string): Promise<HarnessVersi
 		);
 	}
 
+	const artifactBytes = new Map<string, Uint8Array>();
 	for (const artifact of manifest.artifacts) {
 		const artifactPath = join(bundlePath, ...artifact.path.split("/"));
 		const artifactStats = await lstat(artifactPath);
@@ -409,13 +567,46 @@ export async function loadHarnessState(bundlePath: string): Promise<HarnessVersi
 		if (computeContentHash(bytes) !== artifact.contentHash) {
 			throw new Error(`Harness artifact content hash mismatch at "${artifactPath}"`);
 		}
+		artifactBytes.set(artifact.path, bytes);
 	}
 
-	validateSupportedArtifacts(manifest);
+	const supported = validateSupportedArtifacts(manifest);
 	const memoryPath = join(bundlePath, EVOLUTION_MEMORY_NAME);
-	const memory = decodeUtf8(await readFile(memoryPath), memoryPath);
-	const state = { memory };
-	if (!Check(HarnessStateSchema, state)) throw new Error(`Invalid harness evolution memory at "${memoryPath}"`);
+	const memoryBytes = artifactBytes.get(supported.memory.path);
+	if (memoryBytes === undefined) throw new Error(`Harness evolution memory is missing at "${memoryPath}"`);
+	const memory = decodeUtf8(memoryBytes, memoryPath);
+	const skills: HarnessSkill[] = [];
+	const skillNames = new Set<string>();
+	for (const artifact of supported.skills) {
+		const artifactPath = join(bundlePath, ...artifact.path.split("/"));
+		const bytes = artifactBytes.get(artifact.path);
+		if (bytes === undefined) throw new Error(`Harness skill is missing at "${artifactPath}"`);
+		const content = decodeUtf8(bytes, artifactPath);
+		const frontmatter = parseSkillFrontmatter(content, artifact.path);
+		if (artifact.path !== `skills/${frontmatter.name}/SKILL.md`) {
+			throw new Error(`Harness skill "${artifact.path}" name does not match its canonical path`);
+		}
+		if (skillNames.has(frontmatter.name)) {
+			throw new Error(`Harness skill name collision for "${frontmatter.name}"`);
+		}
+		skillNames.add(frontmatter.name);
+		skills.push({
+			path: artifact.path,
+			filePath: artifactPath,
+			baseDir: dirname(artifactPath),
+			name: frontmatter.name,
+			description: frontmatter.description,
+			content,
+			contentHash: artifact.contentHash,
+			workspace: artifact.workspace as HarnessWorkspaceIdentity,
+			disableModelInvocation: frontmatter.disableModelInvocation,
+		});
+	}
+	if (!Check(EvolutionMemorySchema, memory)) {
+		throw new Error(`Invalid harness evolution memory at "${memoryPath}"`);
+	}
+	const state = { memory, skills };
+	if (!Check(HarnessStateSchema, state)) throw new Error(`Invalid harness state at "${bundlePath}"`);
 	return { state, manifest };
 }
 
@@ -428,7 +619,7 @@ async function assertDirectoryParent(destinationPath: string): Promise<void> {
 }
 
 function bundlesMatch(left: HarnessVersionBundle, right: HarnessVersionBundle): boolean {
-	return left.manifest.version === right.manifest.version && left.state.memory === right.state.memory;
+	return left.manifest.version === right.manifest.version;
 }
 
 async function loadIdempotentDestination(
@@ -448,15 +639,69 @@ async function inspectIncompatibleBundle(bundlePath: string): Promise<{
 }> {
 	const manifestPath = join(bundlePath, MANIFEST_NAME);
 	const manifest = parseManifest(await readFile(manifestPath), manifestPath);
+	validateManifestInventory(manifest);
 	const evolutionArtifacts = manifest.artifacts.filter(
-		(artifact) => artifact.kind === SUPPORTED_ARTIFACT_KIND && artifact.path === EVOLUTION_MEMORY_NAME,
+		(artifact) => artifact.kind === EVOLUTION_MEMORY_ARTIFACT_KIND && artifact.path === EVOLUTION_MEMORY_NAME,
 	);
 	if (evolutionArtifacts.length !== 1) return { manifest, state: null };
 	const memoryPath = join(bundlePath, EVOLUTION_MEMORY_NAME);
 	const memoryBytes = await readFile(memoryPath);
 	if (computeContentHash(memoryBytes) !== evolutionArtifacts[0]?.contentHash) return { manifest, state: null };
-	const state = { memory: decodeUtf8(memoryBytes, memoryPath) };
+	const state = { memory: decodeUtf8(memoryBytes, memoryPath), skills: [] };
 	return { manifest, state: Check(HarnessStateSchema, state) ? state : null };
+}
+
+interface PreparedHarnessState {
+	readonly state: HarnessState;
+	readonly artifacts: readonly HarnessArtifactManifest[];
+	readonly files: ReadonlyMap<string, Uint8Array>;
+}
+
+function prepareHarnessState(input: HarnessStateInput, bundlePath: string): PreparedHarnessState {
+	const memoryBytes = UTF8_ENCODER.encode(input.memory);
+	const memoryArtifact: HarnessArtifactManifest = {
+		kind: EVOLUTION_MEMORY_ARTIFACT_KIND,
+		path: EVOLUTION_MEMORY_NAME,
+		contentHash: computeContentHash(memoryBytes),
+	};
+	const files = new Map<string, Uint8Array>([[EVOLUTION_MEMORY_NAME, memoryBytes]]);
+	const skills: HarnessSkill[] = [];
+	const skillArtifacts: HarnessArtifactManifest[] = [];
+	const skillNames = new Set<string>();
+	for (const inputSkill of [...(input.skills ?? [])].sort((left, right) => compareText(left.path, right.path))) {
+		validateArtifactPath(inputSkill.path);
+		const contentBytes = UTF8_ENCODER.encode(inputSkill.content);
+		const frontmatter = parseSkillFrontmatter(inputSkill.content, inputSkill.path);
+		if (inputSkill.path !== `skills/${frontmatter.name}/SKILL.md`) {
+			throw new Error(`Harness skill "${inputSkill.path}" name does not match its canonical path`);
+		}
+		if (skillNames.has(frontmatter.name)) {
+			throw new Error(`Harness skill name collision for "${frontmatter.name}"`);
+		}
+		skillNames.add(frontmatter.name);
+		const filePath = join(bundlePath, ...inputSkill.path.split("/"));
+		const contentHash = computeContentHash(contentBytes);
+		skills.push({
+			path: inputSkill.path,
+			filePath,
+			baseDir: dirname(filePath),
+			name: frontmatter.name,
+			description: frontmatter.description,
+			content: inputSkill.content,
+			contentHash,
+			workspace: inputSkill.workspace,
+			disableModelInvocation: frontmatter.disableModelInvocation,
+		});
+		skillArtifacts.push({
+			kind: SKILL_ARTIFACT_KIND,
+			path: inputSkill.path,
+			contentHash,
+			workspace: inputSkill.workspace,
+		});
+		files.set(inputSkill.path, contentBytes);
+	}
+	const artifacts = [memoryArtifact, ...skillArtifacts].sort(compareArtifacts);
+	return { state: { memory: input.memory, skills }, artifacts, files };
 }
 
 export async function saveHarnessState(
@@ -465,28 +710,28 @@ export async function saveHarnessState(
 	base: HarnessVersion | null,
 	metadata: HarnessVersionMetadata,
 ): Promise<HarnessVersionBundle> {
-	if (!Check(HarnessStateSchema, state)) throw new Error("Invalid harness state to save");
+	if (!Check(HarnessStateInputSchema, state)) throw new Error("Invalid harness state to save");
 	if (!Check(Type.Union([Type.Null(), HarnessVersionSchema]), base)) throw new Error("Invalid harness base version");
 	if (!Check(HarnessVersionMetadataSchema, metadata)) {
 		throw new Error("Invalid harness version metadata");
 	}
-	const memoryBytes = UTF8_ENCODER.encode(state.memory);
-	const artifact: HarnessArtifactManifest = {
-		kind: SUPPORTED_ARTIFACT_KIND,
-		path: EVOLUTION_MEMORY_NAME,
-		contentHash: computeContentHash(memoryBytes),
+	const absoluteDestinationPath = resolve(destinationPath);
+	const prepared = prepareHarnessState(state as HarnessStateInput, absoluteDestinationPath);
+	const versionInput = {
+		schemaVersion: HARNESS_VERSION_SCHEMA_VERSION,
+		base,
+		metadata,
+		artifacts: prepared.artifacts,
 	};
-	const versionInput = { schemaVersion: HARNESS_VERSION_SCHEMA_VERSION, base, metadata, artifacts: [artifact] };
 	const version = computeHarnessVersion(versionInput);
 	const manifest: HarnessVersionManifest = {
 		schemaVersion: HARNESS_VERSION_SCHEMA_VERSION,
 		version,
 		base,
 		metadata,
-		artifacts: [artifact],
+		artifacts: prepared.artifacts,
 	};
-	const bundle: HarnessVersionBundle = { state, manifest };
-	const absoluteDestinationPath = resolve(destinationPath);
+	const bundle: HarnessVersionBundle = { state: prepared.state, manifest };
 	await assertDirectoryParent(absoluteDestinationPath);
 	if (await pathExists(absoluteDestinationPath)) return loadIdempotentDestination(absoluteDestinationPath, bundle);
 
@@ -499,7 +744,11 @@ export async function saveHarnessState(
 			encoding: "utf8",
 			flag: "wx",
 		});
-		await writeFile(join(temporaryPath, EVOLUTION_MEMORY_NAME), memoryBytes, { flag: "wx" });
+		for (const [path, bytes] of prepared.files) {
+			const filePath = join(temporaryPath, ...path.split("/"));
+			await mkdir(dirname(filePath), { recursive: true });
+			await writeFile(filePath, bytes, { flag: "wx" });
+		}
 		try {
 			await rename(temporaryPath, absoluteDestinationPath);
 			temporaryPath = undefined;
@@ -722,29 +971,36 @@ export class HarnessStateStore {
 	}
 
 	async saveVersion(
-		state: HarnessState,
+		state: HarnessStateInput,
 		base: HarnessVersion | null,
 		metadata?: HarnessVersionMetadata,
 	): Promise<HarnessVersionBundle> {
 		await this.#ensureDirectories();
-		if (!Check(HarnessStateSchema, state)) throw new Error("Invalid harness state to save");
+		if (!Check(HarnessStateInputSchema, state)) throw new Error("Invalid harness state to save");
 		if (!Check(Type.Union([Type.Null(), HarnessVersionSchema]), base))
 			throw new Error("Invalid harness base version");
-		const artifact: HarnessArtifactManifest = {
-			kind: SUPPORTED_ARTIFACT_KIND,
-			path: EVOLUTION_MEMORY_NAME,
-			contentHash: computeContentHash(UTF8_ENCODER.encode(state.memory)),
-		};
-		const baseMetadata = base === null ? undefined : (await this.#loadVersion(base)).manifest.metadata;
-		const inheritedMetadata = metadata ?? baseMetadata;
+		const baseBundle = base === null ? undefined : await this.#loadVersion(base);
+		const inheritedMetadata = metadata ?? baseBundle?.manifest.metadata;
 		if (inheritedMetadata === undefined) throw new Error("Root harness versions require metadata");
+		const resolvedState: HarnessStateInput =
+			state.skills !== undefined || baseBundle === undefined
+				? state
+				: {
+						memory: state.memory,
+						skills: baseBundle.state.skills.map((skill) => ({
+							path: skill.path,
+							content: skill.content,
+							workspace: skill.workspace,
+						})),
+					};
+		const prepared = prepareHarnessState(resolvedState, this.#versionsPath);
 		const version = computeHarnessVersion({
 			schemaVersion: HARNESS_VERSION_SCHEMA_VERSION,
 			base,
 			metadata: inheritedMetadata,
-			artifacts: [artifact],
+			artifacts: prepared.artifacts,
 		});
-		return saveHarnessState(state, this.#versionPath(version), base, inheritedMetadata);
+		return saveHarnessState(resolvedState, this.#versionPath(version), base, inheritedMetadata);
 	}
 
 	async selectVersion(version: HarnessVersion): Promise<HarnessVersionBundle> {
@@ -780,13 +1036,13 @@ export class HarnessStateStore {
 	}
 
 	async advance(
-		state: HarnessState,
+		state: HarnessStateInput,
 		expectedBase: HarnessVersion,
 		metadata?: HarnessVersionMetadata,
 	): Promise<HarnessAdvanceResult> {
 		return this.#withLock(async () => {
 			await this.#ensureDirectories();
-			if (!Check(HarnessStateSchema, state)) throw new Error("Invalid harness state to advance");
+			if (!Check(HarnessStateInputSchema, state)) throw new Error("Invalid harness state to advance");
 			if (!Check(HarnessVersionSchema, expectedBase)) throw new Error("Invalid expected harness base version");
 			const current = await this.#loadPointer();
 			if (current.version !== expectedBase) {

@@ -548,6 +548,66 @@ describe("evolution memory writer", () => {
 		);
 	});
 
+	it("preserves evolved skill artifacts while activating a memory mutation", async () => {
+		const root = await mkdtemp(join(tmpdir(), "diffex-evolution-writer-skills-"));
+		temporaryDirectories.push(root);
+		const harnessState = new HarnessStateStore(join(root, "agent"));
+		const empty = await harnessState.initialize();
+		const skillContent =
+			"---\nname: review-workflow\ndescription: Review changes with focused checks.\n---\n\n# Review workflow\n";
+		const initial = await harnessState.advance(
+			{
+				memory: "Baseline memory.\n",
+				skills: [
+					{
+						path: "skills/review-workflow/SKILL.md",
+						content: skillContent,
+						workspace: { repositoryId: "global", directoryId: "directory-1" },
+					},
+				],
+			},
+			empty.manifest.version,
+		);
+		if (initial.status !== "advanced") throw new Error("Expected skill harness advance");
+		const writer = new EvolutionMemoryWriter({
+			version: "1.0.0",
+			harnessState,
+			statePath: join(root, "writer-state"),
+		});
+		const snapshot = await writer.captureSnapshot();
+		const selectedBatch = batch(snapshot, [
+			{
+				mutationId: "mutation-preserve-skill",
+				proposalId: "proposal-preserve-skill",
+				target: { kind: "evolution-memory", expectedHarnessVersion: snapshot.harnessVersion },
+				payload: {
+					operation: "ADD",
+					destination: { section: null, anchor: null },
+					content: "Keep skill and memory activation atomic.",
+					intendedScope: ["repository"],
+				},
+			},
+		]);
+
+		const writeResult = await writer.write(selectedBatch, {
+			idempotencyKey: "write-preserve-skill",
+			lease: writerLease,
+		});
+		const activation = await writer.activate(selectedBatch, writeResult, {
+			idempotencyKey: "activate-preserve-skill",
+			lease: writerLease,
+		});
+		const activated = await harnessState.loadCurrent();
+
+		expect(activated.manifest.version).toBe(activation.resultingHarnessVersion);
+		expect(activated.state.memory).toContain("Keep skill and memory activation atomic.");
+		expect(activated.state.skills).toHaveLength(1);
+		expect(activated.state.skills[0]?.content).toBe(skillContent);
+		expect(activated.manifest.artifacts.filter((artifact) => artifact.kind === "skill")).toEqual(
+			initial.bundle.manifest.artifacts.filter((artifact) => artifact.kind === "skill"),
+		);
+	});
+
 	it("rejects a partial batch without publishing any mutation", async () => {
 		const { harnessState, initial, initialMemory, snapshot, writer } = await fixture();
 		const selectedBatch = batch(snapshot, [

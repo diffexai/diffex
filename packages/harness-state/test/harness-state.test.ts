@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { lstat, mkdir, mkdtemp, readdir, readFile, rename, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { Check } from "typebox/value";
 import { afterEach, describe, expect, test } from "vitest";
 import {
@@ -9,7 +9,11 @@ import {
 	HARNESS_VERSION_SCHEMA_VERSION,
 	type HarnessArtifactManifest,
 	HarnessArtifactManifestSchema,
+	type HarnessSkill,
+	HarnessSkillInputSchema,
+	HarnessSkillSchema,
 	type HarnessState,
+	HarnessStateInputSchema,
 	HarnessStateSchema,
 	HarnessStateStore,
 	type HarnessVersion,
@@ -20,6 +24,8 @@ import {
 	type HarnessVersionMetadata,
 	HarnessVersionMetadataSchema,
 	HarnessVersionPointerSchema,
+	type HarnessWorkspaceIdentity,
+	HarnessWorkspaceIdentitySchema,
 	harnessVersionDirectoryName,
 	INITIAL_HARNESS_VERSION_METADATA,
 	loadHarnessState,
@@ -75,8 +81,19 @@ async function writeRawBundle(
 	await mkdir(bundlePath, { recursive: true });
 	await writeFile(join(bundlePath, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
 	for (const [path, content] of Object.entries(files)) {
-		await writeFile(join(bundlePath, path), content);
+		const filePath = join(bundlePath, path);
+		await mkdir(dirname(filePath), { recursive: true });
+		await writeFile(filePath, content);
 	}
+}
+
+const WORKSPACE: HarnessWorkspaceIdentity = {
+	repositoryId: "global",
+	directoryId: `sha256:${"1".repeat(64)}`,
+};
+
+function skillContent(name: string, description = `Use ${name} for focused work.`): string {
+	return `---\nname: ${name}\ndescription: ${description}\n---\n\n# ${name}\n`;
 }
 
 async function pathExists(path: string): Promise<boolean> {
@@ -91,12 +108,15 @@ async function pathExists(path: string): Promise<boolean> {
 
 function assertReadonlyTypes(
 	state: HarnessState,
+	skill: HarnessSkill,
 	artifact: HarnessArtifactManifest,
 	manifest: HarnessVersionManifest,
 	bundle: HarnessVersionBundle,
 ): void {
 	// @ts-expect-error HarnessState fields are readonly.
 	state.memory = "changed";
+	// @ts-expect-error HarnessSkill fields are readonly.
+	skill.name = "changed";
 	// @ts-expect-error HarnessArtifactManifest fields are readonly.
 	artifact.path = "changed";
 	// @ts-expect-error HarnessVersionManifest fields are readonly.
@@ -175,6 +195,14 @@ describe("canonical harness versions", () => {
 			computeHarnessVersion({
 				schemaVersion: HARNESS_VERSION_SCHEMA_VERSION,
 				base: null,
+				metadata: INITIAL_HARNESS_VERSION_METADATA,
+				artifacts: [{ ...original, workspace: WORKSPACE }],
+			}),
+		).not.toBe(version);
+		expect(
+			computeHarnessVersion({
+				schemaVersion: HARNESS_VERSION_SCHEMA_VERSION,
+				base: null,
 				metadata: LESSON_METADATA,
 				artifacts: [original],
 			}),
@@ -184,15 +212,25 @@ describe("canonical harness versions", () => {
 	test("exports strict schemas", () => {
 		const artifact = createArtifact("");
 		const manifest = createManifest([artifact]);
-		const bundle = { state: { memory: "" }, manifest };
+		const bundle = { state: { memory: "", skills: [] }, manifest };
 
-		expect(Check(HarnessStateSchema, { memory: "" })).toBe(true);
-		expect(Check(HarnessStateSchema, { memory: " \t\n" })).toBe(false);
-		expect(Check(HarnessStateSchema, { memory: "\uFEFFmemory" })).toBe(false);
-		expect(Check(HarnessStateSchema, { memory: "\uD800" })).toBe(false);
-		expect(Check(HarnessStateSchema, { memory: "\uDC00" })).toBe(false);
-		expect(Check(HarnessStateSchema, { memory: "\uD800\uDC00" })).toBe(true);
-		expect(Check(HarnessStateSchema, { memory: "memory", extra: true })).toBe(false);
+		expect(Check(HarnessStateInputSchema, { memory: "" })).toBe(true);
+		expect(Check(HarnessStateSchema, { memory: "", skills: [] })).toBe(true);
+		expect(Check(HarnessStateSchema, { memory: " \t\n", skills: [] })).toBe(false);
+		expect(Check(HarnessStateSchema, { memory: "\uFEFFmemory", skills: [] })).toBe(false);
+		expect(Check(HarnessStateSchema, { memory: "\uD800", skills: [] })).toBe(false);
+		expect(Check(HarnessStateSchema, { memory: "\uDC00", skills: [] })).toBe(false);
+		expect(Check(HarnessStateSchema, { memory: "\uD800\uDC00", skills: [] })).toBe(true);
+		expect(Check(HarnessStateSchema, { memory: "memory", skills: [], extra: true })).toBe(false);
+		expect(Check(HarnessWorkspaceIdentitySchema, WORKSPACE)).toBe(true);
+		expect(
+			Check(HarnessSkillInputSchema, {
+				path: "skills/example/SKILL.md",
+				content: skillContent("example"),
+				workspace: WORKSPACE,
+			}),
+		).toBe(true);
+		expect(Check(HarnessSkillSchema, { path: "skills/example/SKILL.md" })).toBe(false);
 		expect(Check(HarnessArtifactManifestSchema, artifact)).toBe(true);
 		expect(Check(HarnessArtifactManifestSchema, { ...artifact, extra: true })).toBe(false);
 		expect(Check(HarnessVersionMetadataSchema, LESSON_METADATA)).toBe(true);
@@ -223,6 +261,51 @@ describe("bundle persistence and validation", () => {
 		expect(saved.manifest.base).toBe(EXTERNAL_VERSION);
 		expect(saved.manifest.artifacts).toEqual([createArtifact(memory)]);
 		expect(saved.manifest.version).toBe(computeHarnessVersion(saved.manifest));
+		expect(await loadHarnessState(destination)).toEqual(saved);
+	});
+
+	test("persists validated workspace-scoped skills in the atomic revision", async () => {
+		const root = await createTemporaryRoot();
+		const destination = join(root, "bundle");
+		const content = skillContent("review-workflow");
+		const saved = await saveHarnessState(
+			{
+				memory: "Use the selected harness.\n",
+				skills: [
+					{
+						path: "skills/review-workflow/SKILL.md",
+						content,
+						workspace: WORKSPACE,
+					},
+				],
+			},
+			destination,
+			EXTERNAL_VERSION,
+			INITIAL_HARNESS_VERSION_METADATA,
+		);
+
+		expect(saved.state.skills).toEqual([
+			expect.objectContaining({
+				path: "skills/review-workflow/SKILL.md",
+				name: "review-workflow",
+				description: "Use review-workflow for focused work.",
+				content,
+				contentHash: hash(content),
+				workspace: WORKSPACE,
+				disableModelInvocation: false,
+			}),
+		]);
+		expect(saved.state.skills[0]?.filePath).toBe(join(destination, "skills", "review-workflow", "SKILL.md"));
+		expect(saved.manifest.artifacts).toEqual([
+			createArtifact("Use the selected harness.\n"),
+			{
+				kind: "skill",
+				path: "skills/review-workflow/SKILL.md",
+				contentHash: hash(content),
+				workspace: WORKSPACE,
+			},
+		]);
+		expect(await readFile(join(destination, "skills", "review-workflow", "SKILL.md"), "utf8")).toBe(content);
 		expect(await loadHarnessState(destination)).toEqual(saved);
 	});
 
@@ -364,6 +447,54 @@ describe("bundle persistence and validation", () => {
 		await expect(loadHarnessState(destination)).rejects.toThrow(/case-insensitive filesystem/i);
 	});
 
+	test.each([
+		["noncanonical path", "skills/example/README.md", skillContent("example"), /canonical path/i],
+		["path and name mismatch", "skills/example/SKILL.md", skillContent("different"), /name.*canonical path/i],
+		["missing frontmatter", "skills/example/SKILL.md", "# Example\n", /YAML frontmatter/i],
+		["missing description", "skills/example/SKILL.md", "---\nname: example\n---\n", /description/i],
+	] as const)("rejects a skill with %s", async (_label, path, content, expected) => {
+		const root = await createTemporaryRoot();
+		await expect(
+			saveHarnessState(
+				{ memory: "", skills: [{ path, content, workspace: WORKSPACE }] },
+				join(root, "bundle"),
+				null,
+				INITIAL_HARNESS_VERSION_METADATA,
+			),
+		).rejects.toThrow(expected);
+	});
+
+	test("rejects skill artifacts without workspace metadata", async () => {
+		const root = await createTemporaryRoot();
+		const destination = join(root, "bundle");
+		const content = skillContent("example");
+		const artifacts = [createArtifact(""), createArtifact(content, "skill", "skills/example/SKILL.md")];
+		await writeRawBundle(destination, createManifest(artifacts), {
+			"EVOLVE.md": "",
+			"skills/example/SKILL.md": content,
+		});
+
+		await expect(loadHarnessState(destination)).rejects.toThrow(/workspace identity/i);
+	});
+
+	test.each([
+		["malformed UTF-8", new Uint8Array([0xc3, 0x28]), /UTF-8/i],
+		["BOM", new Uint8Array([0xef, 0xbb, 0xbf, 0x61]), /BOM/i],
+	] as const)("rejects %s skill bytes", async (_label, bytes, expected) => {
+		const root = await createTemporaryRoot();
+		const destination = join(root, "bundle");
+		const skillArtifact = {
+			...createArtifact(bytes, "skill", "skills/example/SKILL.md"),
+			workspace: WORKSPACE,
+		};
+		await writeRawBundle(destination, createManifest([createArtifact(""), skillArtifact]), {
+			"EVOLVE.md": "",
+			"skills/example/SKILL.md": bytes,
+		});
+
+		await expect(loadHarnessState(destination)).rejects.toThrow(expected);
+	});
+
 	test("rejects duplicate paths and unsupported artifact kinds", async () => {
 		const root = await createTemporaryRoot();
 		const duplicatePath = join(root, "duplicate");
@@ -491,6 +622,37 @@ describe("HarnessStateStore", () => {
 			actualBase: second.bundle.manifest.version,
 		});
 		expect((await store.loadCurrent()).manifest.version).toBe(second.bundle.manifest.version);
+	});
+
+	test("inherits evolved skills across memory-only revisions and clears them only explicitly", async () => {
+		const agentDir = await createTemporaryRoot();
+		const store = new HarnessStateStore(agentDir);
+		const root = await store.initialize();
+		const content = skillContent("inherited-skill");
+		const withSkill = await store.advance(
+			{
+				memory: "First memory.",
+				skills: [
+					{
+						path: "skills/inherited-skill/SKILL.md",
+						content,
+						workspace: WORKSPACE,
+					},
+				],
+			},
+			root.manifest.version,
+		);
+		if (withSkill.status !== "advanced") throw new Error("Expected skill advance to succeed");
+
+		const inherited = await store.advance({ memory: "Second memory." }, withSkill.bundle.manifest.version);
+		if (inherited.status !== "advanced") throw new Error("Expected inherited advance to succeed");
+		expect(inherited.bundle.state.skills).toHaveLength(1);
+		expect(inherited.bundle.state.skills[0]?.content).toBe(content);
+		expect(inherited.bundle.manifest.artifacts.some((artifact) => artifact.kind === "skill")).toBe(true);
+
+		const cleared = await store.advance({ memory: "Third memory.", skills: [] }, inherited.bundle.manifest.version);
+		if (cleared.status !== "advanced") throw new Error("Expected cleared advance to succeed");
+		expect(cleared.bundle.state.skills).toEqual([]);
 	});
 
 	test("inherits durable harness metadata across ordinary advances", async () => {
@@ -689,7 +851,7 @@ describe("HarnessStateStore", () => {
 		const diagnostic = (await store.listVersions()).diagnostics.find((entry) => entry.version === manifest.version);
 		expect(diagnostic).toMatchObject({
 			manifest,
-			state: { memory: "preview memory" },
+			state: { memory: "preview memory", skills: [] },
 		});
 		expect(diagnostic?.message).toMatch(/unsupported harness artifact kind/i);
 	});
