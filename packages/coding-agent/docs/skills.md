@@ -63,12 +63,13 @@ For project-level Claude Code skills, add to `.diffex/settings.json`:
 
 ## How Skills Work
 
-1. At startup, Diffex scans skill locations and extracts names and descriptions
-2. The system prompt includes available skills in XML format per the [specification](https://agentskills.io/integrate-skills)
-3. When a task matches, the agent uses `read` to load the full SKILL.md (models don't always do this; use prompting or `/skill:name` to force it)
-4. The agent follows the instructions, using relative paths to reference scripts and assets
+1. At startup, Diffex scans skill locations and builds one catalog for the session. Each entry has a stable source identity, source kind, scope, content digest, version, and the full content captured at load time.
+2. The system prompt includes available skills in XML format per the [specification](https://agentskills.io/integrate-skills).
+3. When a task matches, the agent uses `read` to load the full SKILL.md (models don't always do this; use prompting or `/skill:name` to force it).
+4. Explicit references and `/skill:name` use the catalog's captured version, so a file change does not alter a request that has already been admitted. Reload resources to catalog a changed installed skill.
+5. The agent follows the instructions, using relative paths to reference scripts and assets.
 
-This is progressive disclosure: only descriptions are always in context, full instructions load on-demand.
+This is progressive disclosure: only names, descriptions, and locations are always in context; full instructions load on-demand. The TUI, system prompt, skill commands, SDK, RPC command listing, and evolution snapshots all read from the same catalog.
 
 ## Skill Commands
 

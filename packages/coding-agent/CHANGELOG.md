@@ -2,8 +2,13 @@
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- SDK-provided `Skill` objects now carry stable catalog identity, provenance, captured content, digest, and version fields. Use `createSkill()` to construct custom skills.
+
 ### Added
 
+- Added a unified skill catalog shared by interactive selection, prompts, commands, SDK and RPC consumers, and frozen evolution inputs.
 - Added `pi auth check` provider/model auth preflight with optional credential output ([#7152](https://github.com/earendil-works/pi/issues/7152)).
 
 ### Changed

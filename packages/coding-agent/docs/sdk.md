@@ -970,10 +970,27 @@ const loader = new DefaultResourceLoader({
 await loader.reload();
 
 const extensions = loader.getExtensions();
-const skills = loader.getSkills();
+const skillCatalog = loader.getSkills();
 const prompts = loader.getPrompts();
 const themes = loader.getThemes();
 const contextFiles = loader.getAgentsFiles().agentsFiles;
+```
+
+`getSkills()` returns the session's unified `SkillCatalog`. Every skill includes its stable `skillId`, `sourceKind`, `scope`, captured `content`, `contentDigest`, and `version` in addition to its model-visible name, description, and location. Catalog diagnostics retain invalid, disabled, and colliding entries that were not admitted.
+
+Use `createSkill()` for SDK-provided skills so the same identity and version rules apply:
+
+```typescript
+import { createSkill, createSyntheticSourceInfo } from "@earendil-works/diffex-coding-agent";
+
+const skill = createSkill({
+  name: "review",
+  description: "Reviews repository changes.",
+  filePath: "/virtual/review/SKILL.md",
+  baseDir: "/virtual/review",
+  sourceInfo: createSyntheticSourceInfo("/virtual/review/SKILL.md", { source: "sdk" }),
+  content: "# Review\n\nReview the requested changes.",
+});
 ```
 
 ## Return Value
