@@ -44,7 +44,8 @@ export class EvolutionFooterStatus {
 	#selectedHarnessVersion: string | null = null;
 	#selectedHarnessVersionLoaded = false;
 	#activateSelectedHarness = false;
-	#reloadVersionInfo = true;
+	#versionInfoGeneration = 0;
+	#loadedVersionInfoGeneration = -1;
 	#refreshPromise: Promise<void> | null = null;
 	#refreshAgain = false;
 	#pollTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -100,7 +101,9 @@ export class EvolutionFooterStatus {
 
 	async #refresh(): Promise<void> {
 		try {
-			const shouldLoadVersionInfo = this.#reloadVersionInfo || !this.#versionInfoLoaded;
+			const versionInfoGeneration = this.#versionInfoGeneration;
+			const shouldLoadVersionInfo =
+				versionInfoGeneration !== this.#loadedVersionInfoGeneration || !this.#versionInfoLoaded;
 			const [overview, versionInfo] = await Promise.all([
 				this.#client.overview(),
 				shouldLoadVersionInfo ? this.#client.listHarnessVersionInfo() : Promise.resolve(this.#versionInfo),
@@ -109,7 +112,7 @@ export class EvolutionFooterStatus {
 
 			this.#versionInfo = versionInfo;
 			this.#versionInfoLoaded = true;
-			this.#reloadVersionInfo = false;
+			if (shouldLoadVersionInfo) this.#loadedVersionInfoGeneration = versionInfoGeneration;
 			this.#setRunning(overview.activeJob !== null);
 
 			const selectedVersion = overview.currentHarnessVersion;
@@ -139,7 +142,7 @@ export class EvolutionFooterStatus {
 		if (event.type === "completed" || event.type === "failed") this.#setRunning(false);
 		if (event.type === "completed") {
 			this.#activateSelectedHarness = true;
-			this.#reloadVersionInfo = true;
+			this.#versionInfoGeneration += 1;
 		}
 		this.#requestRender();
 		void this.refresh();
