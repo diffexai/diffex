@@ -1423,7 +1423,7 @@ export class SubagentController {
 					assistantMessages.push(event.message);
 				}
 			});
-			await activeSession.prompt(prompt);
+			await activeSession.prompt(prompt, { signal: runController.signal });
 			if (this.#closed) return;
 
 			const terminalMessage = assistantMessages.at(-1);
@@ -1483,7 +1483,7 @@ export class SubagentController {
 	#detachRecords(reason: Error): SubagentRecord[] {
 		const records = [...this.#records.values()];
 		for (const record of records) {
-			record.runController?.abort(reason);
+			if (record.status === "queued") record.runController?.abort(reason);
 		}
 		this.#records.clear();
 		return records;

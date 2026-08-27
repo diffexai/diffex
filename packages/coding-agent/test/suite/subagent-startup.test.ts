@@ -188,6 +188,37 @@ describe("asynchronous subagent startup", () => {
 		expect(events.map((event) => event.type)).toEqual(["subagent_reserved", "subagent_controller_disposed"]);
 	});
 
+	it("interrupts an attached child during prompt preflight without starting the provider", async () => {
+		const { harness, controller, createSession } = await setup();
+		const authStarted = deferred<void>();
+		let child: AgentSession | undefined;
+		harness.setResponses([fauxAssistantMessage("must not run")]);
+		vi.spyOn(harness.session.modelRuntime, "hasConfiguredAuth").mockReturnValue(false);
+		vi.spyOn(harness.session.modelRuntime, "checkAuth").mockImplementation(async (_providerId, options) => {
+			authStarted.resolve();
+			const signal = options?.signal;
+			if (!signal) throw new Error("Expected the controller run signal during prompt preflight");
+			return new Promise<never>((_resolve, reject) => {
+				if (signal.aborted) {
+					reject(signal.reason);
+					return;
+				}
+				signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+			});
+		});
+		controller.spawn("worker", "task", async (signal) => {
+			child = await createSession(signal);
+			return child;
+		});
+		await authStarted.promise;
+
+		expect(controller.snapshot().agents).toMatchObject([{ name: "worker", status: "queued" }]);
+		await expect(controller.interrupt("worker")).resolves.toMatchObject({ status: "interrupted" });
+		expect(controller.snapshot().agents).toMatchObject([{ name: "worker", status: "interrupted" }]);
+		expect(child?.messages).toEqual([]);
+		expect(harness.faux.state.callCount).toBe(0);
+	});
+
 	it("aborts and disposes an executing child once during shutdown", async () => {
 		const { harness, controller, createSession } = await setup();
 		const response = deferred<AssistantMessage>();
