@@ -2099,13 +2099,23 @@ export class AgentSession {
 				this.agent.state.systemPrompt = this._appendSubagentDelegatedMessageTrustGuidance(this._baseSystemPrompt);
 			}
 		} catch (error) {
-			if (signal?.aborted) rollbackPendingCompaction();
-			else commitPendingCompaction();
+			let failure = error;
+			if (!preflightAccepted) {
+				try {
+					preflightResult?.(false);
+				} catch (callbackError) {
+					failure = callbackError;
+				}
+			}
+			if (signal?.aborted) {
+				rollbackPendingCompaction();
+			} else {
+				commitPendingCompaction();
+			}
 			if (signal?.aborted && consumedNextTurnMessages) {
 				this._pendingNextTurnMessages = [...consumedNextTurnMessages, ...this._pendingNextTurnMessages];
 			}
-			if (!preflightAccepted) preflightResult?.(false);
-			throw signal?.aborted ? signal.reason : error;
+			throw signal?.aborted ? signal.reason : failure;
 		}
 
 		if (!messages) {

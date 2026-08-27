@@ -809,7 +809,7 @@ describe("AgentSession prompt characterization", () => {
 		const harness = await createHarness();
 		harnesses.push(harness);
 		if (outcome === "success") harness.setResponses([fauxAssistantMessage("done")]);
-		else harness.session.agent.state.model = undefined as unknown as Model<any>;
+		else harness.session.agent.state.model = undefined as unknown as NonNullable<ReturnType<typeof harness.getModel>>;
 		const controller = new AbortController();
 		const addListener = vi.spyOn(controller.signal, "addEventListener");
 		const removeListener = vi.spyOn(controller.signal, "removeEventListener");
@@ -891,6 +891,85 @@ describe("AgentSession prompt characterization", () => {
 		await harness.session.prompt("next prompt");
 		expect(harness.session.messages.filter((message) => message.role === "custom")).toEqual([
 			expect.objectContaining({ customType: "pending-context", content: "keep me" }),
+		]);
+	});
+
+	it("restores preflight state when failure notification aborts the prompt", async () => {
+		let failBeforeStart = true;
+		const harness = await createHarness({
+			models: [{ id: "faux-1", contextWindow: 100, maxTokens: 100 }],
+			settings: { compaction: { enabled: true, keepRecentTokens: 1, reserveTokens: 0 } },
+			extensionFactories: [
+				(pi) => {
+					pi.on("session_before_compact", (event) => ({
+						compaction: {
+							summary: "completed before failed preflight",
+							firstKeptEntryId: event.preparation.firstKeptEntryId,
+							tokensBefore: event.preparation.tokensBefore,
+							details: {},
+						},
+					}));
+					pi.on("before_agent_start", () => {
+						if (!failBeforeStart) return;
+						failBeforeStart = false;
+						return {
+							message: {
+								customType: "failing-preflight-message",
+								get content(): string {
+									throw new Error("before-agent-start result failure");
+								},
+								display: false,
+							},
+						};
+					});
+				},
+			],
+		});
+		harnesses.push(harness);
+		harness.setResponses([fauxAssistantMessage("done")]);
+		const now = Date.now();
+		const model = harness.getModel();
+		harness.sessionManager.appendMessage({
+			role: "user",
+			content: [{ type: "text", text: "previous" }],
+			timestamp: now - 1000,
+		});
+		harness.sessionManager.appendMessage({
+			...fauxAssistantMessage("previous response", { stopReason: "length", timestamp: now - 500 }),
+			api: model.api,
+			provider: model.provider,
+			model: model.id,
+			usage: createUsage(100),
+		});
+		harness.session.agent.state.messages = harness.sessionManager.buildSessionContext().messages;
+		const entriesBeforePrompt = structuredClone(harness.sessionManager.getEntries());
+		await harness.session.sendCustomMessage(
+			{ customType: "pending-context", content: "keep after failure", display: false },
+			{ deliverAs: "nextTurn" },
+		);
+		const controller = new AbortController();
+		const reason = new Error("cancel during failed preflight notification");
+		const preflightResults: boolean[] = [];
+
+		const prompt = harness.session.prompt("failed preflight", {
+			signal: controller.signal,
+			preflightResult: (success) => {
+				preflightResults.push(success);
+				if (!success) controller.abort(reason);
+			},
+		});
+
+		await expect(prompt).rejects.toBe(reason);
+		expect(preflightResults).toEqual([false]);
+		expect(harness.sessionManager.getEntries()).toEqual(entriesBeforePrompt);
+		expect(harness.sessionManager.getEntries().some((entry) => entry.type === "compaction")).toBe(false);
+		expect(harness.session.messages.filter((message) => message.role === "user")).toHaveLength(1);
+		expect(harness.faux.state.callCount).toBe(0);
+
+		harness.session.setAutoCompactionEnabled(false);
+		await harness.session.prompt("next prompt");
+		expect(harness.session.messages.filter((message) => message.role === "custom")).toEqual([
+			expect.objectContaining({ customType: "pending-context", content: "keep after failure" }),
 		]);
 	});
 
