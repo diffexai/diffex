@@ -9,6 +9,7 @@ import {
 	type TraceFooterRecord,
 	type TraceRecord,
 	type TraceSessionAttachRecord,
+	type TraceSpanEventRecord,
 } from "@earendil-works/diffex-harness-trace";
 import lockfile from "proper-lockfile";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -21,7 +22,7 @@ import { SessionManager } from "../src/core/session-manager.ts";
 const cliPath = resolve(__dirname, "../src/cli.ts");
 const tsconfigPath = resolve(__dirname, "../../../tsconfig.json");
 const FAUX_EXTENSION_SOURCE = `
-import { fauxAssistantMessage, registerFauxProvider } from "@earendil-works/diffex-ai/compat";
+import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "@earendil-works/diffex-ai/compat";
 
 const faux = registerFauxProvider();
 faux.setResponses([
@@ -30,7 +31,11 @@ faux.setResponses([
 				stopReason: "error",
 				errorMessage: "intentional tracing test failure",
 			})
-		: fauxAssistantMessage("first response"),
+		: process.env.DIFFEX_TRACE_SKILL_PATH
+			? fauxAssistantMessage(fauxToolCall("read", { path: process.env.DIFFEX_TRACE_SKILL_PATH }), {
+					stopReason: "toolUse",
+				})
+			: fauxAssistantMessage("first response"),
 	fauxAssistantMessage("replacement response"),
 ]);
 
@@ -475,6 +480,60 @@ describe("CLI invocation tracing", () => {
 		const resumedRecords = await readTrace(allTracePaths[1]);
 		expect(attachments(resumedRecords)[0]).toMatchObject({ reason: "resume", path: persistedSession });
 		expect(footer(resumedRecords)?.terminationStatus).toBe("completed");
+	});
+
+	it("records immutable skill availability, listing, and read observations", async () => {
+		const directories = setup();
+		const skillDirectory = join(directories.projectDir, "traced-skill");
+		const skillPath = join(skillDirectory, "SKILL.md");
+		mkdirSync(skillDirectory);
+		writeFileSync(
+			skillPath,
+			"---\nname: traced-skill\ndescription: Trace skill observations\n---\n\n# Traced skill\n",
+		);
+
+		const result = await runCli(
+			directories,
+			[...commonArgs(directories), "--skill", skillPath, "-p", "inspect the skill"],
+			{ DIFFEX_TRACE_SKILL_PATH: skillPath },
+		);
+
+		expect(result).toMatchObject({ code: 0, signal: null, stdout: "replacement response\n", stderr: "" });
+		const records = await readTrace(onlyTracePath(directories.agentDir));
+		const operationStart = records.find(
+			(record) =>
+				record.type === "span_start" &&
+				record.name === "diffex.coding_agent.operation" &&
+				record.attributes["diffex.operation.kind"] === "prompt",
+		);
+		expect(operationStart).toMatchObject({
+			type: "span_start",
+			attributes: { "diffex.task.lineage.id": expect.any(String) },
+		});
+		if (operationStart?.type !== "span_start") throw new Error("Prompt operation span was not recorded");
+		const operationSkillEvents = records.filter(
+			(record): record is TraceSpanEventRecord =>
+				record.type === "span_event" && record.spanId === operationStart.spanId,
+		);
+		const readEvent = operationSkillEvents.find((event) => event.name === "diffex.skill.read");
+		const readSkillId = readEvent?.attributes["diffex.skill.id"];
+		expect(readSkillId).toEqual(expect.stringMatching(/^skill:[a-f0-9]{64}$/));
+		const skillEvents = operationSkillEvents.filter((event) => event.attributes["diffex.skill.id"] === readSkillId);
+		expect(skillEvents.map((event) => event.name)).toEqual([
+			"diffex.skill.available",
+			"diffex.skill.listed",
+			"diffex.skill.read",
+		]);
+		for (const event of skillEvents) {
+			expect(event.attributes).toMatchObject({
+				"diffex.skill.id": expect.stringMatching(/^skill:[a-f0-9]{64}$/),
+				"diffex.skill.version": expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
+				"diffex.skill.content_digest": expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
+				"diffex.skill.source_kind": "installed",
+				"diffex.workspace.repository_id": expect.any(String),
+			});
+		}
+		expect(JSON.stringify(records)).not.toContain("diffex.skill.used");
 	});
 
 	it("does not store invocation traces when persisted self-evolution is off", async () => {
