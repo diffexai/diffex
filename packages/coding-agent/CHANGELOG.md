@@ -17,6 +17,7 @@
 
 ### Fixed
 
+- Fixed stale evolution activation from reporting success after another harness revision was selected.
 - Fixed the footer showing an unknown harness after self-evolution switched to the new version.
 - Fixed the evolution menu remaining on its loading screen after cancellation and flickering during active-job refreshes.
 - Fixed assistant Markdown headings and fenced code blocks appearing with literal source delimiters in the interactive transcript.
