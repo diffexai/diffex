@@ -917,7 +917,20 @@ export class EvolutionMemoryWriter implements EvolutionTargetWriter {
 		) {
 			throw new Error(`Harness activation for batch "${batch.batchId}" produced an unexpected revision`);
 		}
-		await this.#harnessState.selectVersionIfCurrent(evolved.manifest.version, candidate.expectedBaseVersion);
+		const selection = await this.#harnessState.selectVersionIfCurrent(
+			evolved.manifest.version,
+			candidate.expectedBaseVersion,
+		);
+		if (selection.status === "conflict" && selection.actualCurrent !== evolved.manifest.version) {
+			throw new EvolutionExecutionError("Harness revision changed before evolution activation", {
+				reasonCode: "harness-base-conflict",
+				retryable: false,
+				diagnostics: {
+					expectedHarnessVersion: selection.expectedCurrent,
+					actualHarnessVersion: selection.actualCurrent,
+				},
+			});
+		}
 		return {
 			batchId: batch.batchId,
 			status: "activated",
