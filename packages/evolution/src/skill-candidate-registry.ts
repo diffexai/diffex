@@ -16,10 +16,12 @@ import type {
 	SkillCandidateRegistryEvent,
 	SkillCandidateState,
 	SkillCandidateStateTransitionedEvent,
+	SkillDraft,
 } from "./contracts.ts";
 import { SKILL_CANDIDATE_REGISTRY_SCHEMA_VERSION } from "./contracts.ts";
 import type {
 	EvolutionArtifactStore,
+	SkillCandidateDraftRecordingInput,
 	SkillCandidateRegistry,
 	SkillCandidateRegistryConsolidationInput,
 	SkillCandidateRegistryConsolidationResult,
@@ -57,6 +59,8 @@ interface MutableGroup {
 	state: SkillCandidateState;
 	readonly dispositionHistory: SkillCandidateDispositionRecord[];
 	priorityScore: EvolutionArtifactReference | null;
+	draft: EvolutionArtifactReference | null;
+	readonly draftProposalRevisionIds: string[];
 	readonly scoredProposalRevisionIds: string[];
 }
 
@@ -261,6 +265,8 @@ function materializeGroups(events: readonly SkillCandidateRegistryEvent[]): Map<
 					state: "proposed",
 					dispositionHistory: [],
 					priorityScore: null,
+					draft: null,
+					draftProposalRevisionIds: [],
 					scoredProposalRevisionIds: [],
 				});
 			} else if (
@@ -282,6 +288,29 @@ function materializeGroups(events: readonly SkillCandidateRegistryEvent[]): Map<
 				group.scoredProposalRevisionIds.length,
 				...event.proposalRevisionIds,
 			);
+			continue;
+		}
+		if (event.type === "skill-candidate-draft-recorded") {
+			const group = groups.get(event.groupId);
+			if (group === undefined) throw new Error(`Candidate draft references unknown group "${event.groupId}"`);
+			if (
+				!sameValues(
+					event.proposalRevisionIds,
+					group.proposalRevisions.map((revision) => revision.revisionId),
+				)
+			) {
+				throw new Error(`Candidate draft for group "${event.groupId}" has a stale revision set`);
+			}
+			if (
+				group.draft !== null &&
+				sameValues(group.draftProposalRevisionIds, event.proposalRevisionIds) &&
+				(group.draft.artifactId !== event.draft.artifactId ||
+					group.draft.contentDigest !== event.draft.contentDigest)
+			) {
+				throw new Error(`Candidate group "${event.groupId}" has conflicting drafts`);
+			}
+			group.draft = event.draft;
+			group.draftProposalRevisionIds.splice(0, group.draftProposalRevisionIds.length, ...event.proposalRevisionIds);
 			continue;
 		}
 		if (event.type === "skill-candidate-state-transitioned") {
@@ -318,9 +347,39 @@ function immutableGroup(group: MutableGroup): SkillCandidateGroup {
 		dispositionHistory: [...group.dispositionHistory],
 		evidence: mergeEvidence(proposalRevisions),
 		priorityScore: group.priorityScore,
+		draft: sameValues(
+			group.draftProposalRevisionIds,
+			proposalRevisions.map((revision) => revision.revisionId),
+		)
+			? group.draft
+			: null,
 		synthesisIdempotencyKey: stableId("skill-synthesis", { groupId: group.groupId, revisionSetDigest }),
 		evaluationIdempotencyKey: stableId("skill-evaluation", { groupId: group.groupId, revisionSetDigest }),
 	};
+}
+
+function assertDraft(
+	draft: SkillDraft,
+	reference: EvolutionArtifactReference,
+	group: SkillCandidateGroup,
+	input: SkillCandidateDraftRecordingInput,
+): void {
+	if (
+		draft.artifactKind !== "skill-draft" ||
+		draft.draftId === "" ||
+		draft.metadata.artifactId !== draft.draftId ||
+		draft.metadata.contentDigest !== computeEvolutionContentDigest(contentWithoutMetadata(draft)) ||
+		reference.artifactId !== draft.draftId ||
+		reference.contentDigest !== computeEvolutionContentDigest(draft) ||
+		draft.groupId !== group.groupId ||
+		draft.synthesisIdempotencyKey !== group.synthesisIdempotencyKey ||
+		draft.synthesisIdempotencyKey !== input.idempotencyKey ||
+		!sameValues(draft.proposalRevisionIds, input.proposalRevisionIds) ||
+		draft.metadata.scope.repositoryId !== input.scope.repositoryId ||
+		draft.metadata.scope.scopeId !== input.scope.scopeId
+	) {
+		throw new Error(`Skill draft for candidate group "${group.groupId}" has an invalid immutable identity`);
+	}
 }
 
 function assertCandidate(
@@ -469,14 +528,20 @@ export class DeterministicSkillCandidatePriorityScorer {
 		readonly state: SkillCandidateState;
 		readonly reasonCodes: readonly string[];
 	} {
-		if (!MANAGED_QUALIFICATION_STATES.has(group.state)) return { state: group.state, reasonCodes: [] };
+		const hasStaleDraft = group.state === "drafted" && group.draft === null;
+		if (!hasStaleDraft && !MANAGED_QUALIFICATION_STATES.has(group.state)) {
+			return { state: group.state, reasonCodes: [] };
+		}
 		const support = group.evidence.supportingTaskLineageIds.length;
 		const contradiction = group.evidence.contradictingTaskLineageIds.length;
 		if (contradiction > 0 && contradiction >= support) {
 			return { state: "quarantined", reasonCodes: ["counterevidence-meets-or-exceeds-support"] };
 		}
 		if (support >= this.#minimumIndependentTasks) {
-			return { state: "evidence-qualified", reasonCodes: ["independent-recurrence-qualified"] };
+			return {
+				state: "evidence-qualified",
+				reasonCodes: [hasStaleDraft ? "proposal-revision-set-changed" : "independent-recurrence-qualified"],
+			};
 		}
 		return { state: "proposed", reasonCodes: ["awaiting-independent-recurrence"] };
 	}
@@ -581,6 +646,104 @@ export class PersistentSkillCandidateRegistry implements SkillCandidateRegistry 
 			.sort((left, right) => left.groupId.localeCompare(right.groupId));
 	}
 
+	async recordDraft(input: SkillCandidateDraftRecordingInput): Promise<SkillCandidateGroup> {
+		for (let attempt = 0; attempt < this.#maxCommitAttempts; attempt += 1) {
+			const snapshot = await this.#store.loadSkillCandidateRegistry(input.scope);
+			const groups = materializeGroups(snapshot.events);
+			const mutable = groups.get(input.groupId);
+			if (mutable === undefined) throw new Error(`Unknown candidate group "${input.groupId}"`);
+			let group = immutableGroup(mutable);
+			if (
+				!sameValues(
+					input.proposalRevisionIds,
+					group.proposalRevisions.map((revision) => revision.revisionId),
+				)
+			) {
+				throw new Error(`Candidate group "${input.groupId}" changed before its draft was recorded`);
+			}
+			if (group.state !== "evidence-qualified" && group.state !== "drafted") {
+				throw new Error(`Candidate group "${input.groupId}" is not eligible to record a draft`);
+			}
+			const artifact = await this.#artifacts.get(input.draft);
+			if (!("artifactKind" in artifact) || artifact.artifactKind !== "skill-draft") {
+				throw new Error(`Candidate group "${input.groupId}" draft artifact is invalid`);
+			}
+			assertDraft(artifact, input.draft, group, input);
+			if (
+				group.draft !== null &&
+				(group.draft.artifactId !== input.draft.artifactId ||
+					group.draft.contentDigest !== input.draft.contentDigest)
+			) {
+				throw new Error(`Candidate group "${input.groupId}" already has a different draft`);
+			}
+			const planned: SkillCandidateRegistryEvent[] = [];
+			if (group.draft === null) {
+				const registrySequence = nextSequence(snapshot.events, planned.length);
+				const content = {
+					schemaVersion: SKILL_CANDIDATE_REGISTRY_SCHEMA_VERSION,
+					eventId: stableId("skill-candidate-event", {
+						idempotencyKey: input.idempotencyKey,
+						registrySequence,
+						type: "skill-candidate-draft-recorded",
+						groupId: input.groupId,
+					}),
+					registrySequence,
+					type: "skill-candidate-draft-recorded" as const,
+					groupId: input.groupId,
+					draft: input.draft,
+					proposalRevisionIds: input.proposalRevisionIds,
+					idempotencyKey: input.idempotencyKey,
+				};
+				planned.push(
+					withEventMetadata(
+						content,
+						this.#producer,
+						[input.groupId, input.draft.artifactId],
+						input.scope,
+						input.createdAt,
+					),
+				);
+				mutable.draft = input.draft;
+				mutable.draftProposalRevisionIds.splice(
+					0,
+					mutable.draftProposalRevisionIds.length,
+					...input.proposalRevisionIds,
+				);
+				group = immutableGroup(mutable);
+			}
+			if (group.state === "evidence-qualified") {
+				const transition = transitionEvent(
+					input.groupId,
+					"evidence-qualified",
+					"drafted",
+					["outcome-aware-draft-recorded"],
+					nextSequence(snapshot.events, planned.length),
+					input.idempotencyKey,
+					this.#producer,
+					input.scope,
+					input.createdAt,
+				);
+				planned.push(transition);
+				mutable.state = "drafted";
+				mutable.dispositionHistory.push({
+					eventId: transition.eventId,
+					from: transition.from,
+					to: transition.to,
+					reasonCodes: transition.reasonCodes,
+					createdAt: input.createdAt,
+				});
+			}
+			if (planned.length === 0) return immutableGroup(mutable);
+			const committed = await this.#store.appendSkillCandidateRegistryEvents(
+				input.scope,
+				snapshot.revision,
+				planned,
+			);
+			if (committed === "committed") return immutableGroup(mutable);
+		}
+		throw new Error("Skill candidate registry changed too often to record a draft");
+	}
+
 	async consolidate(
 		input: SkillCandidateRegistryConsolidationInput,
 	): Promise<SkillCandidateRegistryConsolidationResult> {
@@ -619,6 +782,8 @@ export class PersistentSkillCandidateRegistry implements SkillCandidateRegistry 
 						state: "proposed",
 						dispositionHistory: [],
 						priorityScore: null,
+						draft: null,
+						draftProposalRevisionIds: [],
 						scoredProposalRevisionIds: [],
 					};
 					groups.set(groupId, group);

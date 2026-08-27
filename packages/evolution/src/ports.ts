@@ -38,6 +38,7 @@ import type {
 	SkillCandidatePriorityScore,
 	SkillCandidateRegistryEvent,
 	SkillCandidateRegistrySnapshot,
+	SkillDraft,
 	ValidationReport,
 } from "./contracts.ts";
 
@@ -57,6 +58,7 @@ export type EvolutionArtifact =
 	| ScoredProposal
 	| SkillCandidate
 	| SkillCandidatePriorityScore
+	| SkillDraft
 	| DeferredSkillCandidateFinding
 	| ValidationReport;
 
@@ -123,7 +125,23 @@ export interface SkillCuratorModelRequest {
 	readonly signal?: AbortSignal;
 }
 
-export type EvolutionModelRequest = CuratorModelRequest | ReflectorModelRequest | SkillCuratorModelRequest;
+export interface SkillSynthesizerModelRequest {
+	readonly stage: "skill-synthesizer";
+	readonly model: EvolutionModelIdentity;
+	readonly promptVersion: string;
+	readonly idempotencyKey: string;
+	readonly input: JsonObject;
+	readonly outputSchema: JsonObject;
+	readonly tools: readonly EvolutionModelTool[];
+	readonly validateOutput?: (output: JsonObject) => void;
+	readonly signal?: AbortSignal;
+}
+
+export type EvolutionModelRequest =
+	| CuratorModelRequest
+	| ReflectorModelRequest
+	| SkillCuratorModelRequest
+	| SkillSynthesizerModelRequest;
 
 export interface EvolutionModelResponse {
 	readonly output: JsonObject;
@@ -288,9 +306,31 @@ export interface SkillCandidateRegistryConsolidationResult {
 	readonly changedGroupIds: readonly string[];
 }
 
+export interface SkillCandidateDraftRecordingInput {
+	readonly scope: EvolutionScope;
+	readonly groupId: string;
+	readonly draft: EvolutionArtifactReference;
+	readonly proposalRevisionIds: readonly string[];
+	readonly idempotencyKey: string;
+	readonly createdAt: string;
+}
+
 export interface SkillCandidateRegistry {
 	consolidate(input: SkillCandidateRegistryConsolidationInput): Promise<SkillCandidateRegistryConsolidationResult>;
+	recordDraft(input: SkillCandidateDraftRecordingInput): Promise<SkillCandidateGroup>;
 	list(scope: EvolutionScope): Promise<readonly SkillCandidateGroup[]>;
+}
+
+export interface SkillSynthesizerInput {
+	readonly group: SkillCandidateGroup;
+	readonly model: EvolutionModelExecutor;
+	readonly idempotencyKey: string;
+	readonly createdAt: string;
+	readonly signal?: AbortSignal;
+}
+
+export interface SkillSynthesizer {
+	synthesize(input: SkillSynthesizerInput): Promise<SkillDraft>;
 }
 
 export interface EvolutionJobStore {
