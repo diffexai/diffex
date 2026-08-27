@@ -23,7 +23,7 @@ export function isInstallTelemetryEnabled(
 }
 
 export const CODING_AGENT_TELEMETRY_SCHEMA = {
-	version: 2,
+	version: 3,
 	spans: {
 		"diffex.coding_agent.diagnostic": {
 			description: "One runtime diagnostic surfaced to the process user",
@@ -80,6 +80,11 @@ export const CODING_AGENT_TELEMETRY_SCHEMA = {
 					type: "string",
 					values: ["completed", "queued", "handled", "declined", "failed", "aborted"],
 					description: "Terminal operation outcome",
+				},
+				"diffex.skill.references": {
+					type: "string[]",
+					cardinality: "high",
+					description: "Exact skill id and version pairs explicitly loaded for the operation",
 				},
 			},
 			status: { default: "ok", errorWhen: "The operation fails or is aborted" },

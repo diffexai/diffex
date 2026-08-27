@@ -1,8 +1,13 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { AgentTool } from "@earendil-works/diffex-agent-core";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/diffex-ai";
-import type { ExtensionAPI } from "@earendil-works/diffex-coding-agent";
+import type { ExtensionAPI, ResourceLoader } from "@earendil-works/diffex-coding-agent";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it } from "vitest";
+import { createSyntheticSourceInfo } from "../../src/core/source-info.ts";
+import { createTestResourceLoader } from "../utilities.ts";
 import { createHarness, getAssistantTexts, getMessageText, getUserTexts, type Harness } from "./harness.ts";
 
 async function createWaitingHarness(
@@ -11,6 +16,7 @@ async function createWaitingHarness(
 		extensionFactories?: Harness["session"]["extensionRunner"] extends never
 			? never
 			: Array<(pi: ExtensionAPI) => void>;
+		resourceLoader?: ResourceLoader;
 	} = {},
 ): Promise<{
 	harness: Harness;
@@ -38,6 +44,7 @@ async function createWaitingHarness(
 	const harness = await createHarness({
 		tools: [waitTool, ...(options.tools ?? [])],
 		extensionFactories: options.extensionFactories,
+		resourceLoader: options.resourceLoader,
 	});
 
 	const waitForToolStart = new Promise<void>((resolve) => {
@@ -59,10 +66,15 @@ async function createWaitingHarness(
 
 describe("AgentSession queue characterization", () => {
 	const harnesses: Harness[] = [];
+	const tempDirs: string[] = [];
 
 	afterEach(async () => {
 		while (harnesses.length > 0) {
 			await harnesses.pop()?.cleanup();
+		}
+		while (tempDirs.length > 0) {
+			const tempDir = tempDirs.pop();
+			if (tempDir) rmSync(tempDir, { recursive: true, force: true });
 		}
 	});
 
@@ -256,6 +268,60 @@ describe("AgentSession queue characterization", () => {
 
 		expect(batchedUserMessages).toEqual(["start", "follow-up 1", "follow-up 2"]);
 		expect(getAssistantTexts(harness)).toEqual(["", "original turn complete", "batched follow-up response"]);
+	});
+
+	it("pins explicit skill content when a follow-up is admitted", async () => {
+		const tempDir = mkdtempSync(join(tmpdir(), "diffex-queued-skill-"));
+		tempDirs.push(tempDir);
+		const skillPath = join(tempDir, "SKILL.md");
+		writeFileSync(skillPath, "---\nname: queued-skill\ndescription: Queue test\n---\n\nOriginal procedure.");
+		const resourceLoader = {
+			...createTestResourceLoader(),
+			getSkills: () => ({
+				skills: [
+					{
+						name: "queued-skill",
+						description: "Queue test",
+						filePath: skillPath,
+						baseDir: tempDir,
+						sourceInfo: createSyntheticSourceInfo(skillPath, {
+							source: "local",
+							scope: "project",
+							origin: "top-level",
+							baseDir: tempDir,
+						}),
+						disableModelInvocation: false,
+					},
+				],
+				diagnostics: [],
+			}),
+		};
+		const waiting = await createWaitingHarness({ resourceLoader });
+		const { harness, waitForToolStart, promptPromise, releaseToolExecution } = waiting;
+		harnesses.push(harness);
+		const [reference] = harness.session.createSkillReferences();
+		if (!reference) throw new Error("Skill reference was not created");
+		let admittedFollowUp = "";
+		harness.setResponses([
+			fauxAssistantMessage(fauxToolCall("wait", {}), { stopReason: "toolUse" }),
+			fauxAssistantMessage("original turn complete"),
+			(context) => {
+				const users = context.messages.filter((message) => message.role === "user");
+				admittedFollowUp = getMessageText(users[users.length - 1]);
+				return fauxAssistantMessage("follow-up complete");
+			},
+		]);
+
+		await waitForToolStart;
+		await harness.session.followUp(`${reference.reference}\n\nRun the queued task.`);
+		writeFileSync(skillPath, "Changed after queue admission.");
+		releaseToolExecution();
+		await promptPromise;
+
+		expect(admittedFollowUp).toContain("Original procedure.");
+		expect(admittedFollowUp).not.toContain("Changed after queue admission.");
+		expect(admittedFollowUp).toContain(`version="${reference.version}"`);
+		expect(admittedFollowUp).toContain("Run the queued task.");
 	});
 
 	it("queues custom messages with deliverAs steer while streaming", async () => {

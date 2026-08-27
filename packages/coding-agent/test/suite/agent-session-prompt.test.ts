@@ -1,7 +1,7 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AgentTool } from "@earendil-works/diffex-agent-core";
+import { type AgentTool, InMemoryTelemetryContext } from "@earendil-works/diffex-agent-core";
 import { fauxAssistantMessage, fauxToolCall, type Model } from "@earendil-works/diffex-ai";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it } from "vitest";
@@ -189,6 +189,91 @@ describe("AgentSession prompt characterization", () => {
 		expect(expandedPrompt).toContain('<skill name="test" location="');
 		expect(expandedPrompt).toContain("Use the skill body.");
 		expect(expandedPrompt).toContain("explain this");
+	});
+
+	it("loads exactly the explicitly referenced skill snapshot and traces its identity", async () => {
+		const tempDir = join(tmpdir(), `diffex-skill-reference-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+		mkdirSync(tempDir, { recursive: true });
+		tempDirs.push(tempDir);
+		const selectedPath = join(tempDir, "selected.md");
+		const unselectedPath = join(tempDir, "unselected.md");
+		writeFileSync(
+			selectedPath,
+			"---\nname: selected\ndescription: Selected skill\n---\n\n# Selected\n\nOriginal instructions.",
+		);
+		writeFileSync(
+			unselectedPath,
+			"---\nname: unselected\ndescription: Unselected skill\n---\n\n# Unselected\n\nPrivate instructions.",
+		);
+		const sourceInfo = (filePath: string) =>
+			createSyntheticSourceInfo(filePath, {
+				source: "local",
+				scope: "project",
+				origin: "top-level",
+				baseDir: tempDir,
+			});
+		const resourceLoader = {
+			...createTestResourceLoader(),
+			getSkills: () => ({
+				skills: [
+					{
+						name: "selected",
+						description: "Selected skill",
+						filePath: selectedPath,
+						disableModelInvocation: true,
+						baseDir: tempDir,
+						sourceInfo: sourceInfo(selectedPath),
+					},
+					{
+						name: "unselected",
+						description: "Unselected skill",
+						filePath: unselectedPath,
+						disableModelInvocation: false,
+						baseDir: tempDir,
+						sourceInfo: sourceInfo(unselectedPath),
+					},
+				],
+				diagnostics: [],
+			}),
+		};
+		const telemetry = new InMemoryTelemetryContext();
+		const harness = await createHarness({ resourceLoader, telemetryContext: telemetry });
+		harnesses.push(harness);
+		const references = harness.session.createSkillReferences();
+		const selected = references.find((reference) => reference.name === "selected");
+		if (!selected) throw new Error("Selected skill reference was not created");
+		writeFileSync(selectedPath, "Changed after selection.");
+		let admittedPrompt = "";
+		let admittedSystemPrompt = "";
+
+		harness.setResponses([
+			(context) => {
+				const user = context.messages.find((message) => message.role === "user");
+				admittedPrompt = user ? getMessageText(user) : "";
+				admittedSystemPrompt = context.systemPrompt ?? "";
+				return fauxAssistantMessage("ok");
+			},
+		]);
+
+		await harness.session.prompt(`${selected.reference}\n\nUse this for the task.`);
+
+		expect(admittedPrompt).toContain(`id="${selected.skillId}"`);
+		expect(admittedPrompt).toContain(`version="${selected.version}"`);
+		expect(admittedPrompt).toContain("Original instructions.");
+		expect(admittedPrompt).not.toContain("Changed after selection.");
+		expect(admittedPrompt).not.toContain("Private instructions.");
+		expect(admittedPrompt).toContain("Use this for the task.");
+		expect(admittedSystemPrompt).not.toContain("<name>selected</name>");
+		expect(admittedSystemPrompt).toContain("<name>unselected</name>");
+		const promptOperation = telemetry
+			.getSpans()
+			.find(
+				(span) =>
+					span.name === "diffex.coding_agent.operation" && span.attributes["diffex.operation.kind"] === "prompt",
+			);
+		expect(promptOperation?.attributes["diffex.skill.references"]).toEqual([
+			`${selected.skillId}@${selected.version}`,
+		]);
 	});
 
 	it("expands prompt templates before sending the prompt", async () => {

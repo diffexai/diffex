@@ -13,7 +13,7 @@
  * Modes use this class and add their own I/O layer on top.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { basename, dirname } from "node:path";
 import {
 	type Agent,
@@ -56,7 +56,6 @@ import type {
 	HarnessVersionList,
 } from "@earendil-works/diffex-harness-state";
 import { getThemeByName, theme } from "../modes/interactive/theme/theme.ts";
-import { stripFrontmatter } from "../utils/frontmatter.ts";
 import { resolvePath } from "../utils/paths.ts";
 import { sleep } from "../utils/sleep.ts";
 import { normalizeToolResultImages } from "../utils/tool-result-images.ts";
@@ -113,12 +112,19 @@ import type { ResourceExtensionPaths, ResourceLoader } from "./resource-loader.t
 import type { BranchSummaryEntry, CompactionEntry, SessionEntry, SessionManager } from "./session-manager.ts";
 import { CURRENT_SESSION_VERSION, getLatestCompactionEntry, type SessionHeader } from "./session-manager.ts";
 import type { SettingsManager } from "./settings-manager.ts";
+import {
+	createSkillReferenceSnapshot,
+	formatSkillReferenceSnapshot,
+	type Skill,
+	type SkillReference,
+	type SkillReferenceSnapshot,
+} from "./skills.ts";
 import type { SlashCommandInfo } from "./slash-commands.ts";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.ts";
 import type { SubagentController } from "./subagents/controller.ts";
 import type { SubagentBatchResult, SubagentDeliveryBatch, SubagentSummary } from "./subagents/types.ts";
 import { type BuildSystemPromptOptions, buildSystemPrompt } from "./system-prompt.ts";
-import { startCodingAgentSpan } from "./telemetry.ts";
+import { type CodingAgentTelemetrySpan, startCodingAgentSpan } from "./telemetry.ts";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts";
 import { createAllToolDefinitions } from "./tools/index.ts";
 import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapper.ts";
@@ -136,20 +142,60 @@ export interface ParsedSkillBlock {
 	userMessage: string | undefined;
 }
 
-/**
- * Parse a skill block from message text.
- * Returns null if the text doesn't contain a skill block.
- */
-export function parseSkillBlock(text: string): ParsedSkillBlock | null {
-	const match = text.match(/^<skill name="([^"]+)" location="([^"]+)">\n([\s\S]*?)\n<\/skill>(?:\n\n([\s\S]+))?$/);
-	if (!match) return null;
+export interface ParsedSkillInvocation {
+	skills: ParsedSkillBlock[];
+	userMessage: string | undefined;
+}
+
+function unescapeXmlAttribute(value: string): string {
+	return value
+		.replace(/&quot;/g, '"')
+		.replace(/&apos;/g, "'")
+		.replace(/&gt;/g, ">")
+		.replace(/&lt;/g, "<")
+		.replace(/&amp;/g, "&");
+}
+
+export function parseSkillInvocation(text: string): ParsedSkillInvocation | null {
+	const skills: ParsedSkillBlock[] = [];
+	let remaining = text;
+	while (remaining.startsWith("<skill ")) {
+		const match = remaining.match(/^<skill ([^>\n]+)>\n([\s\S]*?)\n<\/skill>(?:\n\n|$)/);
+		if (!match) return null;
+		const attributes = new Map<string, string>();
+		for (const attribute of match[1].matchAll(/([a-z-]+)="([^"]*)"/g)) {
+			attributes.set(attribute[1], unescapeXmlAttribute(attribute[2]));
+		}
+		const name = attributes.get("name");
+		const location = attributes.get("location");
+		if (!name || !location) return null;
+		skills.push({ name, location, content: match[2], userMessage: undefined });
+		remaining = remaining.slice(match[0].length);
+	}
+	if (skills.length === 0) return null;
+	const userMessage = remaining.trim() || undefined;
 	return {
-		name: match[1],
-		location: match[2],
-		content: match[3],
-		userMessage: match[4]?.trim() || undefined,
+		skills: skills.map((skill) => ({ ...skill, userMessage })),
+		userMessage,
 	};
 }
+
+/**
+ * Parse one skill block from message text.
+ * Returns null for ordinary text and multi-skill invocations.
+ */
+export function parseSkillBlock(text: string): ParsedSkillBlock | null {
+	const invocation = parseSkillInvocation(text);
+	return invocation?.skills.length === 1 ? invocation.skills[0] : null;
+}
+
+interface SkillExpansion {
+	text: string;
+	references: SkillReferenceSnapshot[];
+}
+
+const SKILL_REFERENCE_PATTERN =
+	/<skill-reference id="(skill:[a-f0-9]{64})" version="(sha256:[a-f0-9]{64})" name="[^"]*"\/>/g;
 
 /** Session-specific events that extend the core AgentEvent */
 export type AgentSessionEvent =
@@ -360,6 +406,7 @@ export class AgentSession {
 	/** Messages queued to be included with the next user prompt as context ("asides"). */
 	private _pendingNextTurnMessages: CustomMessage[] = [];
 	private _pendingCurrentPlanRestoration = false;
+	private readonly _skillReferenceSnapshots = new Map<string, SkillReferenceSnapshot>();
 
 	// Compaction state
 	private _compactionAbortController: AbortController | undefined = undefined;
@@ -1298,6 +1345,40 @@ export class AgentSession {
 		return this._resourceLoader.getPrompts().prompts;
 	}
 
+	private _skillReferenceKey(skillId: string, version: string): string {
+		return `${skillId}\0${version}`;
+	}
+
+	private _snapshotSkill(skill: Skill): SkillReferenceSnapshot {
+		const snapshot = createSkillReferenceSnapshot(skill);
+		this._skillReferenceSnapshots.set(this._skillReferenceKey(snapshot.skillId, snapshot.version), snapshot);
+		return snapshot;
+	}
+
+	/** Snapshot every currently available skill for explicit selection. */
+	createSkillReferences(): SkillReference[] {
+		const references: SkillReference[] = [];
+		for (const skill of this._resourceLoader.getSkills().skills) {
+			try {
+				const snapshot = this._snapshotSkill(skill);
+				references.push({
+					skillId: snapshot.skillId,
+					version: snapshot.version,
+					name: snapshot.name,
+					description: snapshot.description,
+					reference: snapshot.reference,
+				});
+			} catch (error) {
+				this._extensionRunner.emitError({
+					extensionPath: skill.filePath,
+					event: "skill_reference",
+					error: error instanceof Error ? error.message : String(error),
+				});
+			}
+		}
+		return references;
+	}
+
 	private _normalizePromptSnippet(text: string | undefined): string | undefined {
 		if (!text) return undefined;
 		const oneLine = text
@@ -1370,7 +1451,9 @@ export class AgentSession {
 
 	private _traceOperation<Result>(
 		kind: "prompt" | "compaction" | "navigation" | "abort" | "queue" | "bash" | "export",
-		callback: (telemetryContext: TelemetryContext) => Result | Promise<Result>,
+		callback: (
+			telemetryContext: CodingAgentTelemetrySpan<"diffex.coding_agent.operation">,
+		) => Result | Promise<Result>,
 	): Promise<Result> {
 		const operationId = uuidv7();
 		const taskLineageId = kind === "prompt" ? operationId : undefined;
@@ -1593,10 +1676,14 @@ export class AgentSession {
 	 * @throws Error if no model selected or no API key available (when not streaming)
 	 */
 	async prompt(text: string, options?: PromptOptions): Promise<void> {
-		return this._traceOperation("prompt", () => this._prompt(text, options));
+		return this._traceOperation("prompt", (operationSpan) => this._prompt(text, options, operationSpan));
 	}
 
-	private async _prompt(text: string, options?: PromptOptions): Promise<void> {
+	private async _prompt(
+		text: string,
+		options: PromptOptions | undefined,
+		operationSpan: CodingAgentTelemetrySpan<"diffex.coding_agent.operation">,
+	): Promise<void> {
 		if (this._harnessSwitchInProgress) {
 			throw new Error("Cannot submit a prompt while a harness version switch is in progress.");
 		}
@@ -1642,11 +1729,16 @@ export class AgentSession {
 				}
 			}
 
-			// Expand skill commands (/skill:name args) and prompt templates (/template args)
+			// Expand skill commands (/skill:name args), prompt templates, and explicit skill references.
 			let expandedText = currentText;
+			let referencedSkills: SkillReferenceSnapshot[] = [];
 			if (expandPromptTemplates) {
-				expandedText = this._expandSkillCommand(expandedText);
-				expandedText = expandPromptTemplate(expandedText, [...this.promptTemplates]);
+				const skillCommand = this._expandSkillCommand(expandedText);
+				expandedText = expandPromptTemplate(skillCommand.text, [...this.promptTemplates]);
+				const explicitReferences = this._expandSkillReferences(expandedText);
+				expandedText = explicitReferences.text;
+				referencedSkills = [...skillCommand.references, ...explicitReferences.references];
+				this._recordSkillReferences(operationSpan, referencedSkills);
 			}
 
 			// If streaming, queue via steer() or followUp() based on option
@@ -1657,9 +1749,9 @@ export class AgentSession {
 					);
 				}
 				if (options.streamingBehavior === "followUp") {
-					await this._queueFollowUp(expandedText, currentImages);
+					await this._queueFollowUp(expandedText, currentImages, referencedSkills);
 				} else {
-					await this._queueSteer(expandedText, currentImages);
+					await this._queueSteer(expandedText, currentImages, referencedSkills);
 				}
 				preflightResult?.(true);
 				return;
@@ -1789,34 +1881,64 @@ export class AgentSession {
 		}
 	}
 
-	/**
-	 * Expand skill commands (/skill:name args) to their full content.
-	 * Returns the expanded text, or the original text if not a skill command or skill not found.
-	 * Emits errors via extension runner if file read fails.
-	 */
-	private _expandSkillCommand(text: string): string {
-		if (!text.startsWith("/skill:")) return text;
+	private _recordSkillReferences(
+		operationSpan: CodingAgentTelemetrySpan<"diffex.coding_agent.operation">,
+		references: readonly SkillReferenceSnapshot[],
+	): void {
+		if (references.length === 0) return;
+		operationSpan.setAttributes({
+			"diffex.skill.references": references.map((reference) => `${reference.skillId}@${reference.version}`),
+		});
+	}
+
+	private _expandSkillReferences(text: string): SkillExpansion {
+		const references: SkillReferenceSnapshot[] = [];
+		const seen = new Set<string>();
+		const remaining = text.replace(SKILL_REFERENCE_PATTERN, (_match, skillId: string, version: string) => {
+			const key = this._skillReferenceKey(skillId, version);
+			const snapshot = this._skillReferenceSnapshots.get(key);
+			if (!snapshot) {
+				throw new Error(`Skill reference ${skillId}@${version} is not available in this session.`);
+			}
+			if (!seen.has(key)) {
+				seen.add(key);
+				references.push(snapshot);
+			}
+			return "";
+		});
+		if (references.length === 0) return { text, references };
+		const userText = remaining.trim();
+		const skillBlocks = references.map(formatSkillReferenceSnapshot).join("\n\n");
+		return {
+			text: userText ? `${skillBlocks}\n\n${userText}` : skillBlocks,
+			references,
+		};
+	}
+
+	/** Expand a /skill:name command using the skill version available at admission. */
+	private _expandSkillCommand(text: string): SkillExpansion {
+		if (!text.startsWith("/skill:")) return { text, references: [] };
 
 		const spaceIndex = text.indexOf(" ");
 		const skillName = spaceIndex === -1 ? text.slice(7) : text.slice(7, spaceIndex);
 		const args = spaceIndex === -1 ? "" : text.slice(spaceIndex + 1).trim();
-
-		const skill = this.resourceLoader.getSkills().skills.find((s) => s.name === skillName);
-		if (!skill) return text; // Unknown skill, pass through
+		const skill = this.resourceLoader.getSkills().skills.find((candidate) => candidate.name === skillName);
+		if (!skill) return { text, references: [] };
 
 		try {
-			const content = readFileSync(skill.filePath, "utf-8");
-			const body = stripFrontmatter(content).trim();
-			const skillBlock = `<skill name="${skill.name}" location="${skill.filePath}">\nReferences are relative to ${skill.baseDir}.\n\n${body}\n</skill>`;
-			return args ? `${skillBlock}\n\n${args}` : skillBlock;
-		} catch (err) {
-			// Emit error like extension commands do
+			const snapshot = this._snapshotSkill(skill);
+			const skillBlock = formatSkillReferenceSnapshot(snapshot);
+			return {
+				text: args ? `${skillBlock}\n\n${args}` : skillBlock,
+				references: [snapshot],
+			};
+		} catch (error) {
 			this._extensionRunner.emitError({
 				extensionPath: skill.filePath,
 				event: "skill_expansion",
-				error: err instanceof Error ? err.message : String(err),
+				error: error instanceof Error ? error.message : String(error),
 			});
-			return text; // Return original on error
+			return { text, references: [] };
 		}
 	}
 
@@ -1834,11 +1956,15 @@ export class AgentSession {
 			this._throwIfExtensionCommand(text);
 		}
 
-		// Expand skill commands and prompt templates
-		let expandedText = this._expandSkillCommand(text);
-		expandedText = expandPromptTemplate(expandedText, [...this.promptTemplates]);
-
-		await this._queueSteer(expandedText, images);
+		// Expand skill commands, prompt templates, and explicit skill references.
+		const skillCommand = this._expandSkillCommand(text);
+		const explicitReferences = this._expandSkillReferences(
+			expandPromptTemplate(skillCommand.text, [...this.promptTemplates]),
+		);
+		await this._queueSteer(explicitReferences.text, images, [
+			...skillCommand.references,
+			...explicitReferences.references,
+		]);
 	}
 
 	/**
@@ -1854,18 +1980,29 @@ export class AgentSession {
 			this._throwIfExtensionCommand(text);
 		}
 
-		// Expand skill commands and prompt templates
-		let expandedText = this._expandSkillCommand(text);
-		expandedText = expandPromptTemplate(expandedText, [...this.promptTemplates]);
-
-		await this._queueFollowUp(expandedText, images);
+		// Expand skill commands, prompt templates, and explicit skill references.
+		const skillCommand = this._expandSkillCommand(text);
+		const explicitReferences = this._expandSkillReferences(
+			expandPromptTemplate(skillCommand.text, [...this.promptTemplates]),
+		);
+		await this._queueFollowUp(explicitReferences.text, images, [
+			...skillCommand.references,
+			...explicitReferences.references,
+		]);
 	}
 
 	/**
 	 * Internal: Queue a steering message (already expanded, no extension command check).
 	 */
-	private async _queueSteer(text: string, images?: ImageContent[]): Promise<void> {
-		await this._traceOperation("queue", () => this._enqueueSteer(text, images));
+	private async _queueSteer(
+		text: string,
+		images?: ImageContent[],
+		references: readonly SkillReferenceSnapshot[] = [],
+	): Promise<void> {
+		await this._traceOperation("queue", (operationSpan) => {
+			this._recordSkillReferences(operationSpan, references);
+			return this._enqueueSteer(text, images);
+		});
 	}
 
 	private async _enqueueSteer(text: string, images?: ImageContent[]): Promise<void> {
@@ -1885,8 +2022,15 @@ export class AgentSession {
 	/**
 	 * Internal: Queue a follow-up message (already expanded, no extension command check).
 	 */
-	private async _queueFollowUp(text: string, images?: ImageContent[]): Promise<void> {
-		await this._traceOperation("queue", () => this._enqueueFollowUp(text, images));
+	private async _queueFollowUp(
+		text: string,
+		images?: ImageContent[],
+		references: readonly SkillReferenceSnapshot[] = [],
+	): Promise<void> {
+		await this._traceOperation("queue", (operationSpan) => {
+			this._recordSkillReferences(operationSpan, references);
+			return this._enqueueFollowUp(text, images);
+		});
 	}
 
 	private async _enqueueFollowUp(text: string, images?: ImageContent[]): Promise<void> {

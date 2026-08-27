@@ -19,8 +19,10 @@ export {
 	type AgentSessionEventListener,
 	type ModelCycleResult,
 	type ParsedSkillBlock,
+	type ParsedSkillInvocation,
 	type PromptOptions,
 	parseSkillBlock,
+	parseSkillInvocation,
 	type SessionStats,
 } from "./core/agent-session.ts";
 export { readStoredCredential } from "./core/auth-storage.ts";
@@ -273,6 +275,7 @@ export {
 	loadSkillsFromDir,
 	type Skill,
 	type SkillFrontmatter,
+	type SkillReference,
 } from "./core/skills.ts";
 export { createSyntheticSourceInfo } from "./core/source-info.ts";
 export type { SubagentStatus, SubagentSummary } from "./core/subagents/types.ts";

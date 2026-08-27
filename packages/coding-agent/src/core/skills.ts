@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, statSync } from "fs";
 import ignore from "ignore";
 import { basename, dirname, join, relative, resolve, sep } from "path";
@@ -83,6 +84,72 @@ export interface Skill {
 export interface LoadSkillsResult {
 	skills: Skill[];
 	diagnostics: ResourceDiagnostic[];
+}
+
+export interface SkillReference {
+	skillId: string;
+	version: string;
+	name: string;
+	description: string;
+	reference: string;
+}
+
+export interface SkillReferenceSnapshot extends SkillReference {
+	location: string;
+	baseDir: string;
+	sourceInfo: SourceInfo;
+	content: string;
+}
+
+function sha256(value: string): string {
+	return createHash("sha256").update(value).digest("hex");
+}
+
+function escapeXmlAttribute(value: string): string {
+	return value
+		.replace(/&/g, "&amp;")
+		.replace(/</g, "&lt;")
+		.replace(/>/g, "&gt;")
+		.replace(/"/g, "&quot;")
+		.replace(/'/g, "&apos;");
+}
+
+export function createSkillReferenceSnapshot(skill: Skill): SkillReferenceSnapshot {
+	const rawContent = readFileSync(skill.filePath, "utf-8");
+	const skillId = `skill:${sha256(
+		JSON.stringify([
+			canonicalizePath(skill.filePath),
+			skill.sourceInfo.source,
+			skill.sourceInfo.scope,
+			skill.sourceInfo.origin,
+		]),
+	)}`;
+	const version = `sha256:${sha256(rawContent)}`;
+	const reference = `<skill-reference id="${skillId}" version="${version}" name="${escapeXmlAttribute(skill.name)}"/>`;
+	return {
+		skillId,
+		version,
+		name: skill.name,
+		description: skill.description,
+		reference,
+		location: skill.filePath,
+		baseDir: skill.baseDir,
+		sourceInfo: skill.sourceInfo,
+		content: rawContent,
+	};
+}
+
+export function formatSkillReferenceSnapshot(snapshot: SkillReferenceSnapshot): string {
+	const attributes = [
+		`name="${escapeXmlAttribute(snapshot.name)}"`,
+		`location="${escapeXmlAttribute(snapshot.location)}"`,
+		`id="${snapshot.skillId}"`,
+		`version="${snapshot.version}"`,
+		`source="${escapeXmlAttribute(snapshot.sourceInfo.source)}"`,
+		`scope="${snapshot.sourceInfo.scope}"`,
+		`base="${escapeXmlAttribute(snapshot.baseDir)}"`,
+	].join(" ");
+	return `<skill ${attributes}>\nReferences are relative to ${snapshot.baseDir}.\n\n${snapshot.content.trim()}\n</skill>`;
 }
 
 /**

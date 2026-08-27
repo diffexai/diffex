@@ -9,8 +9,8 @@ describe("export HTML skill block rendering", () => {
 		//   <skill name="..." location="...">\n...\n</skill>\n\nactual prompt
 		// The export renderer must detect that wrapper and render only the user-visible prompt,
 		// not the Pi-generated <skill>...</skill> XML tags.
-		expect(templateJs).toMatch(/parseSkillBlock/);
-		expect(templateJs).toMatch(/skillBlock\.userMessage/);
+		expect(templateJs).toMatch(/parseSkillInvocation/);
+		expect(templateJs).toMatch(/skillInvocation\.userMessage/);
 	});
 
 	it("renders skill invocation and user message as separate sibling blocks", () => {
@@ -24,6 +24,10 @@ describe("export HTML skill block rendering", () => {
 		// Verify the code checks hasUserContent so the user-message div is only omitted
 		// when the skill block has no user prompt and no images.
 		expect(templateJs).toMatch(/hasUserContent/);
+	});
+
+	it("renders each selected skill as a separate invocation", () => {
+		expect(templateJs).toMatch(/for \(const skillBlock of skillInvocation\.skills\)/);
 	});
 
 	it("renders skill content as markdown, not raw text", () => {
