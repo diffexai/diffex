@@ -770,7 +770,7 @@ describe("evolution memory writer", () => {
 		expect((await harnessState.loadCurrent()).state.memory).toBe(initialMemory);
 	});
 
-	it("branches from the frozen base when another harness is selected before writing", async () => {
+	it("stages from the frozen base but rejects activation after the selected revision changes", async () => {
 		const { harnessState, snapshot, writer } = await fixture();
 		const selectedBatch = batch(snapshot, [
 			{
@@ -795,14 +795,25 @@ describe("evolution memory writer", () => {
 			idempotencyKey: "write-frozen-base",
 			lease: writerLease,
 		});
-		const activation = await writer.activate(selectedBatch, writeResult, {
-			idempotencyKey: "activate-frozen-base",
-			lease: writerLease,
+		await expect(
+			writer.activate(selectedBatch, writeResult, {
+				idempotencyKey: "activate-frozen-base",
+				lease: writerLease,
+			}),
+		).rejects.toMatchObject({
+			message: "Harness revision changed before evolution activation",
+			reasonCode: "harness-base-conflict",
+			retryable: false,
+			diagnostics: {
+				expectedHarnessVersion: snapshot.harnessVersion,
+				actualHarnessVersion: competing.bundle.manifest.version,
+			},
 		});
 
 		expect(await harnessState.loadCurrent()).toEqual(competing.bundle);
-		if (activation.resultingHarnessVersion === null) throw new Error("Expected an evolved harness version");
-		const evolved = await harnessState.loadVersion(activation.resultingHarnessVersion);
+		const evolvedVersion = writeResult.output?.resultingHarnessVersion;
+		if (typeof evolvedVersion !== "string") throw new Error("Expected a staged evolved harness version");
+		const evolved = await harnessState.loadVersion(evolvedVersion);
 		expect(evolved.manifest.base).toBe(snapshot.harnessVersion);
 		expect(evolved.state.memory).toContain("Keep this evolution on its frozen harness base.");
 		expect(evolved.state.memory).not.toContain("Competing selected memory.");
