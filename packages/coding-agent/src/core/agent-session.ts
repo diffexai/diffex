@@ -1367,6 +1367,7 @@ export class AgentSession {
 					name: snapshot.name,
 					description: snapshot.description,
 					reference: snapshot.reference,
+					group: snapshot.group,
 				});
 			} catch (error) {
 				this._extensionRunner.emitError({

@@ -2,7 +2,13 @@ import { homedir } from "os";
 import { join, resolve } from "path";
 import { describe, expect, it } from "vitest";
 import type { ResourceDiagnostic } from "../src/core/diagnostics.ts";
-import { formatSkillsForPrompt, loadSkills, loadSkillsFromDir, type Skill } from "../src/core/skills.ts";
+import {
+	createSkillReferenceSnapshot,
+	formatSkillsForPrompt,
+	loadSkills,
+	loadSkillsFromDir,
+	type Skill,
+} from "../src/core/skills.ts";
 import { createSyntheticSourceInfo } from "../src/core/source-info.ts";
 
 const fixturesDir = resolve(__dirname, "fixtures/skills");
@@ -218,6 +224,24 @@ describe("skills", () => {
 
 			expect(skills).toHaveLength(1);
 			expect(skills[0].disableModelInvocation).toBe(false);
+		});
+	});
+
+	describe("skill references", () => {
+		it.each([
+			["project", "installed-workspace"],
+			["user", "installed-global"],
+			["temporary", "installed-global"],
+		] as const)("groups %s skills as %s", (scope, expectedGroup) => {
+			const { skills } = loadSkillsFromDir({
+				dir: join(fixturesDir, "valid-skill"),
+				source: "test",
+			});
+			const skill = skills[0];
+			if (!skill) throw new Error("Valid skill fixture was not loaded");
+			skill.sourceInfo = createSyntheticSourceInfo(skill.filePath, { source: "local", scope });
+
+			expect(createSkillReferenceSnapshot(skill).group).toBe(expectedGroup);
 		});
 	});
 

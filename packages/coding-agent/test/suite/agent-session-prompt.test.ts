@@ -242,6 +242,7 @@ describe("AgentSession prompt characterization", () => {
 		const references = harness.session.createSkillReferences();
 		const selected = references.find((reference) => reference.name === "selected");
 		if (!selected) throw new Error("Selected skill reference was not created");
+		expect(selected.group).toBe("installed-workspace");
 		writeFileSync(selectedPath, "Changed after selection.");
 		let admittedPrompt = "";
 		let admittedSystemPrompt = "";

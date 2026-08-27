@@ -10,16 +10,18 @@ const references: SkillReference[] = [
 	{
 		skillId: `skill:${"a".repeat(64)}`,
 		version: `sha256:${"1".repeat(64)}`,
-		name: "duplicate",
+		name: "workflow-Evolved",
 		description: "General workflow",
 		reference: "<first/>",
+		group: "evolved-workspace",
 	},
 	{
 		skillId: `skill:${"b".repeat(64)}`,
 		version: `sha256:${"2".repeat(64)}`,
-		name: "duplicate",
+		name: "deploy",
 		description: "Special deployment workflow",
 		reference: "<second/>",
+		group: "installed-workspace",
 	},
 	{
 		skillId: `skill:${"c".repeat(64)}`,
@@ -27,6 +29,7 @@ const references: SkillReference[] = [
 		name: "review",
 		description: "Review code changes",
 		reference: "<third/>",
+		group: "installed-global",
 	},
 ];
 
@@ -49,12 +52,27 @@ describe("SkillSelectorComponent", () => {
 		selector.handleInput("deployment");
 		const output = stripAnsi(selector.render(120).join("\n"));
 
+		expect(output).toContain("Installed Workspace Skills");
 		expect(output).toContain("Special deployment workflow");
+		expect(output).not.toContain("Evolved Workspace Skills");
 		expect(output).not.toContain("General workflow");
+		expect(output).not.toContain("Installed Global Skills");
 		expect(output).not.toContain("Review code changes");
 	});
 
-	it("keeps selections across filters and returns stable identities in catalog order", () => {
+	it("renders source groups in source order while preserving order within each group", () => {
+		const selector = new SkillSelectorComponent(
+			[references[2], references[1], references[0]],
+			() => {},
+			() => {},
+		);
+
+		const output = stripAnsi(selector.render(120).join("\n"));
+		expect(output.indexOf("Evolved Workspace Skills")).toBeLessThan(output.indexOf("Installed Workspace Skills"));
+		expect(output.indexOf("Installed Workspace Skills")).toBeLessThan(output.indexOf("Installed Global Skills"));
+	});
+
+	it("keeps selections across filters and returns stable identities in selector order", () => {
 		const onSelect = vi.fn();
 		const selector = new SkillSelectorComponent(references, onSelect, () => {});
 
@@ -98,6 +116,7 @@ describe("SkillSelectorComponent", () => {
 				name: `skill-${index}`,
 				description: `Description for skill ${index}`,
 				reference: `<reference-${index}/>`,
+				group: "installed-global",
 			}),
 		);
 		const selector = new SkillSelectorComponent(

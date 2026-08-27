@@ -86,12 +86,15 @@ export interface LoadSkillsResult {
 	diagnostics: ResourceDiagnostic[];
 }
 
+export type SkillReferenceGroup = "evolved-workspace" | "installed-workspace" | "installed-global";
+
 export interface SkillReference {
 	skillId: string;
 	version: string;
 	name: string;
 	description: string;
 	reference: string;
+	group: SkillReferenceGroup;
 }
 
 export interface SkillReferenceSnapshot extends SkillReference {
@@ -132,6 +135,7 @@ export function createSkillReferenceSnapshot(skill: Skill): SkillReferenceSnapsh
 		name: skill.name,
 		description: skill.description,
 		reference,
+		group: skill.sourceInfo.scope === "project" ? "installed-workspace" : "installed-global",
 		location: skill.filePath,
 		baseDir: skill.baseDir,
 		sourceInfo: skill.sourceInfo,

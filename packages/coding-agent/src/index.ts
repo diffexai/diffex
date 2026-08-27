@@ -276,6 +276,7 @@ export {
 	type Skill,
 	type SkillFrontmatter,
 	type SkillReference,
+	type SkillReferenceGroup,
 } from "./core/skills.ts";
 export { createSyntheticSourceInfo } from "./core/source-info.ts";
 export type { SubagentStatus, SubagentSummary } from "./core/subagents/types.ts";

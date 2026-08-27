@@ -13,6 +13,7 @@ const references: SkillReference[] = [
 		name: "duplicate",
 		description: "General workflow",
 		reference: "<first-reference/>",
+		group: "installed-workspace",
 	},
 	{
 		skillId: `skill:${"b".repeat(64)}`,
@@ -20,6 +21,7 @@ const references: SkillReference[] = [
 		name: "duplicate",
 		description: "Special workflow",
 		reference: "<second-reference/>",
+		group: "installed-global",
 	},
 ];
 

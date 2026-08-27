@@ -9,13 +9,25 @@ import {
 	TruncatedText,
 	UNSELECTED_LIST_PREFIX,
 } from "@earendil-works/diffex-tui";
-import type { SkillReference } from "../../../core/skills.ts";
+import type { SkillReference, SkillReferenceGroup } from "../../../core/skills.ts";
 import { theme } from "../theme/theme.ts";
 import { DynamicBorder } from "./dynamic-border.ts";
 import { keyHint, rawKeyHint } from "./keybinding-hints.ts";
 
+const GROUP_ORDER = ["evolved-workspace", "installed-workspace", "installed-global"] as const;
+
+const GROUP_LABELS: Record<SkillReferenceGroup, string> = {
+	"evolved-workspace": "Evolved Workspace Skills",
+	"installed-workspace": "Installed Workspace Skills",
+	"installed-global": "Installed Global Skills",
+};
+
 function referenceKey(reference: SkillReference): string {
 	return `${reference.skillId}\0${reference.version}`;
+}
+
+function orderReferences(references: readonly SkillReference[]): SkillReference[] {
+	return GROUP_ORDER.flatMap((group) => references.filter((reference) => reference.group === group));
 }
 
 export class SkillSelectorComponent extends Container implements Focusable {
@@ -44,7 +56,7 @@ export class SkillSelectorComponent extends Container implements Focusable {
 		onCancel: () => void,
 	) {
 		super();
-		this.allReferences = [...references];
+		this.allReferences = orderReferences(references);
 		this.filteredReferences = this.allReferences;
 		this.onSelectCallback = onSelect;
 		this.onCancelCallback = onCancel;
@@ -78,7 +90,11 @@ export class SkillSelectorComponent extends Container implements Focusable {
 
 	private filterReferences(query: string): void {
 		this.filteredReferences = query
-			? fuzzyFilter(this.allReferences, query, (reference) => `${reference.name} ${reference.description}`)
+			? fuzzyFilter(
+					this.allReferences,
+					query,
+					(reference) => `${reference.name} ${reference.description} ${GROUP_LABELS[reference.group]}`,
+				)
 			: this.allReferences;
 		this.selectedIndex = query ? 0 : Math.min(this.selectedIndex, Math.max(0, this.filteredReferences.length - 1));
 		this.updateList();
@@ -112,9 +128,16 @@ export class SkillSelectorComponent extends Container implements Focusable {
 		);
 		const endIndex = Math.min(startIndex + maxVisible, this.filteredReferences.length);
 
+		let renderedGroup: SkillReferenceGroup | undefined;
 		for (let index = startIndex; index < endIndex; index += 1) {
 			const reference = this.filteredReferences[index];
 			if (!reference) continue;
+			if (reference.group !== renderedGroup) {
+				renderedGroup = reference.group;
+				this.listContainer.addChild(
+					new TruncatedText(theme.fg("accent", theme.bold(`  ${GROUP_LABELS[reference.group]}`)), 1, 0),
+				);
+			}
 			const focused = index === this.selectedIndex;
 			const prefix = focused ? SELECTED_LIST_PREFIX : UNSELECTED_LIST_PREFIX;
 			const selected = this.selectedKeys.has(referenceKey(reference));
