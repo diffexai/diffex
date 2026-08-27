@@ -4,6 +4,7 @@
 
 ### Added
 
+- Added atomic harness revisions for workspace-scoped evolved skills.
 - Added `pi auth check` provider/model auth preflight with optional credential output ([#7152](https://github.com/earendil-works/pi/issues/7152)).
 
 ### Changed

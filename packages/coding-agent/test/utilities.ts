@@ -23,6 +23,7 @@ import { createExtensionRuntime, loadExtensionFromFactory } from "../src/core/ex
 import type { ResourceLoader } from "../src/core/resource-loader.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
 import { SettingsManager } from "../src/core/settings-manager.ts";
+import type { SkillCatalog } from "../src/core/skills.ts";
 import { createCodingTools } from "../src/index.ts";
 
 /**
@@ -217,9 +218,13 @@ export function createTestResourceLoader(options: CreateTestResourceLoaderOption
 		runtime: createExtensionRuntime(),
 	};
 
+	let skillCatalog: SkillCatalog = { skills: [], diagnostics: [] };
 	return {
 		getExtensions: () => extensionsResult,
-		getSkills: () => ({ skills: [], diagnostics: [] }),
+		getSkills: () => skillCatalog,
+		setEvolvedSkills: (catalog) => {
+			skillCatalog = catalog;
+		},
 		getPrompts: () => ({ prompts: [], diagnostics: [] }),
 		getThemes: () => ({ themes: [], diagnostics: [] }),
 		getAgentsFiles: () => ({ agentsFiles: [] }),

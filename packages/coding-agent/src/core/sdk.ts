@@ -16,7 +16,7 @@ import type { AgentSessionLifecycleObserver } from "./agent-session-lifecycle.ts
 import { formatNoModelsAvailableMessage } from "./auth-guidance.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
 import type { ExtensionRunner, LoadExtensionsResult, SessionStartEvent, ToolDefinition } from "./extensions/index.ts";
-import { loadGlobalHarnessState } from "./harness-state-runtime.ts";
+import { loadGlobalHarnessState, resolveHarnessWorkspace } from "./harness-state-runtime.ts";
 import { convertToLlm } from "./messages.ts";
 import { findInitialModel } from "./model-resolver.ts";
 import { ModelRuntime } from "./model-runtime.ts";
@@ -110,6 +110,8 @@ export interface CreateAgentSessionOptions {
 	harnessStateStore?: HarnessStateStore;
 	/** Activated harness revision from the preloaded store. */
 	harnessVersionBundle?: HarnessVersionBundle;
+	/** Keep the supplied harness revision fixed instead of following the global selection. */
+	pinHarnessVersion?: boolean;
 	/** Optional parent for passive runtime telemetry. */
 	telemetryContext?: TelemetryContext;
 	/** Optional process-owned observer for durable lifecycle boundaries. */
@@ -253,6 +255,7 @@ function createRootSubagentController(
  */
 export async function createAgentSession(options: CreateAgentSessionOptions = {}): Promise<CreateAgentSessionResult> {
 	const cwd = resolvePath(options.cwd ?? options.sessionManager?.getCwd() ?? process.cwd());
+	const workspace = await resolveHarnessWorkspace(cwd);
 	const agentDir = options.agentDir ? resolvePath(options.agentDir) : getDefaultAgentDir();
 	const loadedHarnessState = options.harnessStateStore
 		? { store: options.harnessStateStore, bundle: options.harnessVersionBundle, warning: undefined }
@@ -487,6 +490,8 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		subagentController,
 		harnessStateStore: loadedHarnessState.store,
 		harnessVersionBundle: loadedHarnessState.bundle,
+		workspaceIdentity: workspace.workspace,
+		pinHarnessVersion: options.pinHarnessVersion,
 		telemetryContext,
 		lifecycleObserver: options.lifecycleObserver,
 	});

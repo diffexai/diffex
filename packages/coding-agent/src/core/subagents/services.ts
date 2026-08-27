@@ -143,6 +143,7 @@ export async function createSubagentSession(
 		scopedModels: [],
 		customTools: [],
 		subagents: false,
+		pinHarnessVersion: true,
 	});
 
 	try {

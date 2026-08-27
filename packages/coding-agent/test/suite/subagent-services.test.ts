@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentSession } from "../../src/core/agent-session.ts";
 import { createAgentSessionFromServices, createAgentSessionServices } from "../../src/core/agent-session-services.ts";
 import type { ToolDefinition } from "../../src/core/extensions/index.ts";
+import { resolveHarnessWorkspace } from "../../src/core/harness-state-runtime.ts";
 import { SessionManager } from "../../src/core/session-manager.ts";
 import {
 	captureSubagentSessionConfig,
@@ -404,6 +405,66 @@ describe("subagent sessions", () => {
 		sessions.push(child);
 		expect(child.getAllTools()).toEqual([]);
 		expect(child.getActiveToolNames()).toEqual([]);
+	});
+
+	it("pins child memory and skills to the parent harness snapshot", async () => {
+		const { harness, fixture, root } = await setupRoot();
+		const store = root.harnessStateStore;
+		const rootVersion = root.activeHarnessVersion;
+		if (store === undefined || rootVersion === undefined) throw new Error("Expected an active harness store");
+		const workspace = await resolveHarnessWorkspace(fixture.projectDir);
+		const parentRevision = await store.saveVersion(
+			{
+				memory: "Parent-pinned memory.",
+				skills: [
+					{
+						path: "skills/child-review/SKILL.md",
+						content:
+							"---\nname: child-review\ndescription: Use the parent-pinned child workflow.\n---\n\n# Parent child review\n",
+						workspace: workspace.workspace,
+					},
+				],
+			},
+			rootVersion,
+		);
+		await root.switchHarnessVersion(parentRevision.manifest.version);
+		const captured = captureSubagentSessionConfig(root, fixture.agentDir);
+		const selected = await store.advance(
+			{
+				memory: "New globally selected memory.",
+				skills: [
+					{
+						path: "skills/new-review/SKILL.md",
+						content:
+							"---\nname: new-review\ndescription: Use only after a fresh parent request.\n---\n\n# New review\n",
+						workspace: workspace.workspace,
+					},
+				],
+			},
+			parentRevision.manifest.version,
+		);
+		if (selected.status !== "advanced") throw new Error("Expected a selected successor harness");
+		const child = await createSubagentSession(captured);
+		sessions.push(child);
+		let providerPrompt = "";
+		harness.setResponses([
+			(context) => {
+				providerPrompt = context.systemPrompt ?? "";
+				return fauxAssistantMessage("pinned");
+			},
+		]);
+
+		await child.prompt("inspect the pinned harness");
+
+		expect(child.activeHarnessVersion).toBe(parentRevision.manifest.version);
+		expect(providerPrompt).toContain("Parent-pinned memory.");
+		expect(providerPrompt).not.toContain("New globally selected memory.");
+		expect(child.createSkillReferences()).toContainEqual(
+			expect.objectContaining({
+				name: "child-review",
+				harnessRevision: parentRevision.manifest.version,
+			}),
+		);
 	});
 
 	it("keeps root and sibling transcripts independent", async () => {

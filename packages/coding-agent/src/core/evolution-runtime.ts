@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdir, readdir, readFile, realpath, rename, stat, unlink, writeFile } from "node:fs/promises";
-import { basename, join, resolve } from "node:path";
+import { mkdir, readdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { basename, join } from "node:path";
 import { promisify } from "node:util";
 import { type AssistantMessage, contentText, type Message, type Model, type Tool } from "@earendil-works/diffex-ai";
 import type { HarnessStateStore, HarnessVersion } from "@earendil-works/diffex-harness-state";
@@ -52,6 +52,7 @@ import { VERSION } from "../config.ts";
 import type { AgentSession } from "./agent-session.ts";
 import type { AgentSessionLifecycleObserver, AgentSessionOperationSettlement } from "./agent-session-lifecycle.ts";
 import { FileEvolutionFailureReporter } from "./evolution-failure-reporter.ts";
+import { resolveHarnessWorkspace } from "./harness-state-runtime.ts";
 import { INVOCATION_TRACE_LOCK_STALE_MS, type InvocationTrace } from "./invocation-trace.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
 import type { ResourceLoader } from "./resource-loader.ts";
@@ -76,13 +77,10 @@ export async function resolveEvolutionDirectoryIdentity(cwd: string): Promise<{
 	readonly directoryId: string;
 	readonly rootPath: string;
 }> {
-	const rootPath = await realpath(cwd).catch(() => resolve(cwd));
-	const directory = await stat(rootPath, { bigint: true });
-	const identity =
-		directory.ino === 0n
-			? { kind: "canonical-path-v1", rootPath }
-			: { kind: "filesystem-directory-v1", device: directory.dev.toString(), inode: directory.ino.toString() };
-	return { directoryId: computeEvolutionContentDigest(identity), rootPath };
+	const resolved = await resolveHarnessWorkspace(cwd);
+	const directoryId = resolved.workspace.directoryId;
+	if (directoryId === undefined) throw new Error("Resolved workspace is missing its directory identity");
+	return { directoryId, rootPath: resolved.rootPath };
 }
 
 async function gitRepositoryContainsRevision(rootPath: string, revision: string): Promise<boolean> {
