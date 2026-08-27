@@ -52,6 +52,7 @@ const SKILL_CANDIDATE_REGISTRY_EVENT_TYPES = new Set([
 	"skill-candidate-priority-scored",
 	"skill-candidate-proposal-recorded",
 	"skill-candidate-state-transitioned",
+	"skill-candidate-validation-recorded",
 	"skill-candidate-work-checkpointed",
 	"skill-candidate-work-failed",
 ]);
@@ -66,7 +67,7 @@ const SKILL_CANDIDATE_STATES = new Set([
 	"rejected",
 	"retired",
 ]);
-const SKILL_CANDIDATE_WORK_STAGES = new Set(["consolidating", "scoring", "synthesizing", "completed"]);
+const SKILL_CANDIDATE_WORK_STAGES = new Set(["consolidating", "scoring", "synthesizing", "validating", "completed"]);
 const JOB_OUTCOMES = new Set([
 	"active",
 	"completed",
@@ -279,6 +280,15 @@ function isCandidateRegistryEventContent(value: Readonly<Record<string, unknown>
 		return (
 			typeof value.groupId === "string" &&
 			isArtifactReference(value.draft) &&
+			isStringArray(value.proposalRevisionIds) &&
+			typeof value.idempotencyKey === "string"
+		);
+	}
+	if (value.type === "skill-candidate-validation-recorded") {
+		return (
+			typeof value.groupId === "string" &&
+			isArtifactReference(value.draft) &&
+			isArtifactReference(value.validation) &&
 			isStringArray(value.proposalRevisionIds) &&
 			typeof value.idempotencyKey === "string"
 		);

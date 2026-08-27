@@ -380,7 +380,9 @@ function fixture(state: SkillCandidateGroup["state"] = "evidence-qualified") {
 		},
 		priorityScore: null,
 		draft: null,
+		validation: null,
 		synthesisIdempotencyKey: "skill-synthesis-1",
+		validationIdempotencyKey: "skill-validation-1",
 		evaluationIdempotencyKey: "skill-evaluation-1",
 	};
 	return {
@@ -447,6 +449,7 @@ describe("StructuredSkillSynthesizer", () => {
 					generatedScriptsBinariesDependenciesAndExecutableAssetsPermitted: false,
 					useSuccessfulOutcomesForPrimaryProcedure: true,
 					useFailuresOnlyForPitfallsMitigationsRecoveryAndVerification: true,
+					retainCandidateApplicabilityBoundariesNegativeTriggersAndVerificationContractVerbatim: true,
 				},
 				sourceEvidence: [
 					{ evidenceId: "support-1", relationship: "supporting", terminationStatus: "completed" },
