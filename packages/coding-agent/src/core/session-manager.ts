@@ -82,6 +82,13 @@ export interface CompactionEntry<T = unknown> extends SessionEntryBase {
 	fromHook?: boolean;
 }
 
+/** @internal Transaction for one exact compaction entry while post-save observers run. */
+export interface CompactionAppendTransaction<T = unknown> {
+	readonly entry: CompactionEntry<T>;
+	commit(): void;
+	rollback(): void;
+}
+
 export interface BranchSummaryEntry<T = unknown> extends SessionEntryBase {
 	type: "branch_summary";
 	fromId: string;
@@ -231,6 +238,7 @@ function createSessionId(): string {
 const PERSIST_SESSION_HEADER = Symbol("persistSessionHeader");
 const PERSIST_SESSION_STATE = Symbol("persistSessionState");
 const APPEND_CUSTOM_MESSAGE_WITH_ROLLBACK = Symbol("appendCustomMessageWithRollback");
+const APPEND_COMPACTION_TRANSACTION = Symbol("appendCompactionTransaction");
 
 export function assertValidSessionId(id: string): void {
 	if (!/^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/.test(id)) {
@@ -1192,6 +1200,84 @@ export class SessionManager {
 		return entry.id;
 	}
 
+	[APPEND_COMPACTION_TRANSACTION]<T = unknown>(
+		summary: string,
+		firstKeptEntryId: string,
+		tokensBefore: number,
+		details?: T,
+		fromHook?: boolean,
+		usage?: Usage,
+	): CompactionAppendTransaction<T> {
+		const previousLeafId = this.leafId;
+		const previousFlushed = this.flushed;
+		const entry: CompactionEntry<T> = {
+			type: "compaction",
+			id: generateId(this.byId),
+			parentId: previousLeafId,
+			timestamp: new Date().toISOString(),
+			summary,
+			firstKeptEntryId,
+			tokensBefore,
+			details,
+			usage,
+			fromHook,
+		};
+		try {
+			this._appendEntry(entry);
+		} catch (error) {
+			if (this.fileEntries.at(-1) === entry) this.fileEntries.pop();
+			this.byId.delete(entry.id);
+			this.leafId = previousLeafId;
+			this.flushed = previousFlushed;
+			throw error;
+		}
+
+		let active = true;
+		return {
+			entry,
+			commit: () => {
+				active = false;
+			},
+			rollback: () => {
+				if (!active) return;
+				if (this.byId.get(entry.id) !== entry) {
+					throw new Error(`Compaction entry ${entry.id} is no longer available for rollback`);
+				}
+				const entryIndex = this.fileEntries.indexOf(entry);
+				if (entryIndex < 0) {
+					throw new Error(`Compaction entry ${entry.id} is missing from session state`);
+				}
+				if (this.fileEntries.slice(entryIndex + 1).some((candidate) => candidate.type === "compaction")) {
+					throw new Error(`Compaction entry ${entry.id} is not the latest compaction`);
+				}
+
+				const reparentedChildren: SessionEntry[] = [];
+				for (const candidate of this.fileEntries) {
+					if (candidate.type !== "session" && candidate.parentId === entry.id) {
+						candidate.parentId = previousLeafId;
+						reparentedChildren.push(candidate);
+					}
+				}
+				const rollbackLeafId = this.leafId;
+				this.fileEntries.splice(entryIndex, 1);
+				this.byId.delete(entry.id);
+				if (this.leafId === entry.id) this.leafId = previousLeafId;
+				try {
+					if (this.persist && this.sessionFile && this.flushed) this._rewriteFile();
+					this.flushed = previousFlushed;
+					active = false;
+				} catch (error) {
+					this.fileEntries.splice(entryIndex, 0, entry);
+					this.byId.set(entry.id, entry);
+					this.leafId = rollbackLeafId;
+					this.flushed = previousFlushed;
+					for (const child of reparentedChildren) child.parentId = entry.id;
+					throw error;
+				}
+			},
+		};
+	}
+
 	/** Append a custom entry (for extensions) as child of current leaf, then advance leaf. Returns entry id. */
 	appendCustomEntry(customType: string, data?: unknown): string {
 		const entry: CustomEntry = {
@@ -1889,4 +1975,24 @@ export function appendCustomMessageWithRollback<T = unknown>(
 	details?: T,
 ): string {
 	return sessionManager[APPEND_CUSTOM_MESSAGE_WITH_ROLLBACK](customType, content, display, details);
+}
+
+/** Internal exact-entry compaction transaction for post-save extension notification. */
+export function appendCompactionTransaction<T = unknown>(
+	sessionManager: SessionManager,
+	summary: string,
+	firstKeptEntryId: string,
+	tokensBefore: number,
+	details?: T,
+	fromHook?: boolean,
+	usage?: Usage,
+): CompactionAppendTransaction<T> {
+	return sessionManager[APPEND_COMPACTION_TRANSACTION](
+		summary,
+		firstKeptEntryId,
+		tokensBefore,
+		details,
+		fromHook,
+		usage,
+	);
 }

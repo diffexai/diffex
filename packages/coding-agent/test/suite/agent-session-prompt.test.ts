@@ -2,21 +2,43 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type AgentTool, InMemoryTelemetryContext } from "@earendil-works/diffex-agent-core";
-import { fauxAssistantMessage, fauxToolCall, type Model } from "@earendil-works/diffex-ai";
+import { type AssistantMessage, fauxAssistantMessage, fauxToolCall, type Model } from "@earendil-works/diffex-ai";
+import { HarnessStateStore } from "@earendil-works/diffex-harness-state";
 import { Type } from "typebox";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { InputEvent } from "../../src/core/extensions/index.ts";
 import type { PromptTemplate } from "../../src/core/prompt-templates.ts";
 import { createSkill } from "../../src/core/skills.ts";
+import { SessionManager } from "../../src/core/session-manager.ts";
 import { createSyntheticSourceInfo } from "../../src/core/source-info.ts";
 import { createTestResourceLoader } from "../utilities.ts";
 import { createHarness, getMessageText, type Harness } from "./harness.ts";
+
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+	let resolve = (): void => {};
+	const promise = new Promise<void>((resolvePromise) => {
+		resolve = resolvePromise;
+	});
+	return { promise, resolve };
+}
+
+function createUsage(totalTokens: number) {
+	return {
+		input: totalTokens,
+		output: 0,
+		cacheRead: 0,
+		cacheWrite: 0,
+		totalTokens,
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+	};
+}
 
 describe("AgentSession prompt characterization", () => {
 	const harnesses: Harness[] = [];
 	const tempDirs: string[] = [];
 
 	afterEach(async () => {
+		vi.restoreAllMocks();
 		while (harnesses.length > 0) {
 			await harnesses.pop()?.cleanup();
 		}
@@ -437,6 +459,464 @@ describe("AgentSession prompt characterization", () => {
 
 		releaseToolExecution?.();
 		await promptPromise;
+	});
+
+	it("rejects already-aborted signals before prompt state changes and preserves abort reasons", async () => {
+		const harness = await createHarness();
+		harnesses.push(harness);
+		harness.setResponses([fauxAssistantMessage("unused")]);
+
+		const defaultAbort = new AbortController();
+		defaultAbort.abort();
+		await expect(harness.session.prompt("default", { signal: defaultAbort.signal })).rejects.toMatchObject({
+			name: "AbortError",
+		});
+
+		const customReason = new Error("custom cancellation");
+		const customAbort = new AbortController();
+		customAbort.abort(customReason);
+		await expect(harness.session.prompt("custom", { signal: customAbort.signal })).rejects.toBe(customReason);
+
+		expect(harness.session.messages).toEqual([]);
+		expect(harness.sessionManager.getEntries()).toEqual([]);
+		expect(harness.faux.state.callCount).toBe(0);
+	});
+
+	it.each([
+		{ firstSignaled: false, label: "signaled prompt behind unsignaled preflight" },
+		{ firstSignaled: true, label: "unsignaled prompt behind signaled preflight" },
+	])("rejects a $label", async ({ firstSignaled }) => {
+		const inputStarted = deferred();
+		const releaseInput = deferred();
+		const harness = await createHarness({
+			extensionFactories: [
+				(pi) => {
+					pi.on("input", async () => {
+						inputStarted.resolve();
+						await releaseInput.promise;
+						return { action: "continue" };
+					});
+				},
+			],
+		});
+		harnesses.push(harness);
+		harness.setResponses([fauxAssistantMessage("first completed")]);
+		const firstController = new AbortController();
+		const firstPrompt = harness.session.prompt(
+			"first",
+			firstSignaled ? { signal: firstController.signal } : undefined,
+		);
+		await inputStarted.promise;
+
+		const secondController = new AbortController();
+		const secondOptions = firstSignaled ? undefined : { signal: secondController.signal };
+		await expect(harness.session.prompt("second", secondOptions)).rejects.toThrow(
+			"Cannot submit a prompt while another prompt owns prompt preflight.",
+		);
+
+		releaseInput.resolve();
+		await firstPrompt;
+		expect(harness.faux.state.callCount).toBe(1);
+	});
+
+	it("rejects a signaled prompt instead of queueing behind an active unsignaled run", async () => {
+		const harness = await createHarness();
+		harnesses.push(harness);
+		harness.setResponses([fauxAssistantMessage("x".repeat(20_000))]);
+		const responseStarted = new Promise<void>((resolve) => {
+			const unsubscribe = harness.session.subscribe((event) => {
+				if (event.type === "message_update") {
+					unsubscribe();
+					resolve();
+				}
+			});
+		});
+		const activePrompt = harness.session.prompt("active");
+		await responseStarted;
+
+		const controller = new AbortController();
+		await expect(
+			harness.session.prompt("must not queue", { signal: controller.signal, streamingBehavior: "followUp" }),
+		).rejects.toThrow("Cannot submit a signaled prompt while an agent run is active.");
+
+		await harness.session.abort();
+		await activePrompt;
+		expect(harness.session.getFollowUpMessages()).toEqual([]);
+	});
+
+	it("observes cancellation after an awaited extension command boundary", async () => {
+		const commandStarted = deferred();
+		const releaseCommand = deferred();
+		const harness = await createHarness({
+			extensionFactories: [
+				(pi) => {
+					pi.registerCommand("wait", {
+						description: "Wait",
+						handler: async () => {
+							commandStarted.resolve();
+							await releaseCommand.promise;
+						},
+					});
+				},
+			],
+		});
+		harnesses.push(harness);
+		const controller = new AbortController();
+		const reason = new Error("cancel command preflight");
+		const prompt = harness.session.prompt("/wait", { signal: controller.signal });
+		await commandStarted.promise;
+		controller.abort(reason);
+		releaseCommand.resolve();
+
+		await expect(prompt).rejects.toBe(reason);
+		expect(harness.session.messages).toEqual([]);
+		expect(harness.faux.state.callCount).toBe(0);
+	});
+
+	it("observes cancellation after awaited input and before-agent-start boundaries", async () => {
+		const inputStarted = deferred();
+		const releaseInput = deferred();
+		const beforeStartEntered = deferred();
+		const releaseBeforeStart = deferred();
+		const harness = await createHarness({
+			extensionFactories: [
+				(pi) => {
+					pi.on("input", async () => {
+						inputStarted.resolve();
+						await releaseInput.promise;
+						return { action: "continue" };
+					});
+					pi.on("before_agent_start", async () => {
+						beforeStartEntered.resolve();
+						await releaseBeforeStart.promise;
+						return undefined;
+					});
+				},
+			],
+		});
+		harnesses.push(harness);
+
+		const inputController = new AbortController();
+		const inputReason = new Error("cancel input");
+		const inputPrompt = harness.session.prompt("input", { signal: inputController.signal });
+		await inputStarted.promise;
+		inputController.abort(inputReason);
+		releaseInput.resolve();
+		await expect(inputPrompt).rejects.toBe(inputReason);
+
+		const beforeStartController = new AbortController();
+		const beforeStartReason = new Error("cancel before start");
+		const beforeStartPrompt = harness.session.prompt("before start", { signal: beforeStartController.signal });
+		await beforeStartEntered.promise;
+		beforeStartController.abort(beforeStartReason);
+		releaseBeforeStart.resolve();
+		await expect(beforeStartPrompt).rejects.toBe(beforeStartReason);
+
+		expect(harness.session.messages).toEqual([]);
+		expect(harness.faux.state.callCount).toBe(0);
+	});
+
+	it("observes cancellation after the awaited harness refresh boundary", async () => {
+		const agentDir = join(tmpdir(), `diffex-prompt-signal-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+		mkdirSync(agentDir, { recursive: true });
+		tempDirs.push(agentDir);
+		const store = new HarnessStateStore(agentDir);
+		const root = await store.initialize();
+		const harness = await createHarness({ harnessStateStore: store, harnessVersionBundle: root });
+		harnesses.push(harness);
+		const loadStarted = deferred();
+		const releaseLoad = deferred();
+		const loadCurrent = store.loadCurrent.bind(store);
+		vi.spyOn(store, "loadCurrent").mockImplementation(async () => {
+			loadStarted.resolve();
+			await releaseLoad.promise;
+			return loadCurrent();
+		});
+		const controller = new AbortController();
+		const reason = new Error("cancel harness refresh");
+		const prompt = harness.session.prompt("refresh", { signal: controller.signal });
+		await loadStarted.promise;
+		controller.abort(reason);
+		releaseLoad.resolve();
+
+		await expect(prompt).rejects.toBe(reason);
+		expect(harness.session.messages).toEqual([]);
+		expect(harness.faux.state.callCount).toBe(0);
+	});
+
+	it("propagates cancellation through authentication", async () => {
+		const harness = await createHarness({ withConfiguredAuth: false });
+		harnesses.push(harness);
+		const authStarted = deferred();
+		vi.spyOn(harness.session.modelRuntime, "checkAuth").mockImplementation(async (_providerId, options) => {
+			authStarted.resolve();
+			const signal = options?.signal;
+			if (!signal) throw new Error("Expected prompt signal in authentication");
+			await new Promise<void>((_resolve, reject) => {
+				signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+			});
+			return undefined;
+		});
+		const controller = new AbortController();
+		const reason = new Error("cancel authentication");
+		const prompt = harness.session.prompt("authenticate", { signal: controller.signal });
+		await authStarted.promise;
+		controller.abort(reason);
+
+		await expect(prompt).rejects.toBe(reason);
+		expect(harness.session.messages).toEqual([]);
+		expect(harness.faux.state.callCount).toBe(0);
+	});
+
+	it("cancels pre-prompt compaction before recording or starting the turn", async () => {
+		const compactionStarted = deferred();
+		const harness = await createHarness({
+			models: [{ id: "faux-1", contextWindow: 100, maxTokens: 100 }],
+			settings: { compaction: { enabled: true, keepRecentTokens: 1, reserveTokens: 0 } },
+			extensionFactories: [
+				(pi) => {
+					pi.on("session_before_compact", async (event) => {
+						compactionStarted.resolve();
+						await new Promise<void>((resolve) => {
+							if (event.signal.aborted) resolve();
+							else event.signal.addEventListener("abort", () => resolve(), { once: true });
+						});
+						return {
+							compaction: {
+								summary: "must not be recorded",
+								firstKeptEntryId: event.preparation.firstKeptEntryId,
+								tokensBefore: event.preparation.tokensBefore,
+								details: {},
+							},
+						};
+					});
+				},
+			],
+		});
+		harnesses.push(harness);
+		const now = Date.now();
+		const model = harness.getModel();
+		harness.sessionManager.appendMessage({
+			role: "user",
+			content: [{ type: "text", text: "previous" }],
+			timestamp: now - 1000,
+		});
+		const previousAssistant: AssistantMessage = {
+			...fauxAssistantMessage("previous response", { stopReason: "length", timestamp: now - 500 }),
+			api: model.api,
+			provider: model.provider,
+			model: model.id,
+			usage: createUsage(100),
+		};
+		harness.sessionManager.appendMessage(previousAssistant);
+		harness.session.agent.state.messages = harness.sessionManager.buildSessionContext().messages;
+
+		const controller = new AbortController();
+		const reason = new Error("cancel compaction");
+		const prompt = harness.session.prompt("new prompt", { signal: controller.signal });
+		await compactionStarted.promise;
+		controller.abort(reason);
+
+		await expect(prompt).rejects.toBe(reason);
+		expect(harness.sessionManager.getEntries().filter((entry) => entry.type === "compaction")).toEqual([]);
+		expect(harness.session.messages.filter((message) => message.role === "user")).toHaveLength(1);
+		expect(harness.faux.state.callCount).toBe(0);
+	});
+
+	it.each(["in-memory", "persisted"] as const)(
+		"rolls back a %s compaction when cancellation arrives during session_compact",
+		async (storage) => {
+			const sessionDir = join(
+				tmpdir(),
+				`diffex-prompt-compact-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+			);
+			mkdirSync(sessionDir, { recursive: true });
+			tempDirs.push(sessionDir);
+			const sessionManager =
+				storage === "persisted"
+					? SessionManager.create(sessionDir, sessionDir)
+					: SessionManager.inMemory(sessionDir);
+			const compactHookStarted = deferred();
+			const releaseCompactHook = deferred();
+			let hookCompleted = false;
+			const harness = await createHarness({
+				sessionManager,
+				models: [{ id: "faux-1", contextWindow: 100, maxTokens: 100 }],
+				settings: { compaction: { enabled: true, keepRecentTokens: 1, reserveTokens: 0 } },
+				extensionFactories: [
+					(pi) => {
+						pi.on("session_before_compact", (event) => ({
+							compaction: {
+								summary: "temporarily recorded",
+								firstKeptEntryId: event.preparation.firstKeptEntryId,
+								tokensBefore: event.preparation.tokensBefore,
+								details: {},
+							},
+						}));
+						pi.on("session_compact", async () => {
+							compactHookStarted.resolve();
+							await releaseCompactHook.promise;
+							hookCompleted = true;
+						});
+					},
+				],
+			});
+			harnesses.push(harness);
+			const now = Date.now();
+			const model = harness.getModel();
+			const previousUserId = sessionManager.appendMessage({
+				role: "user",
+				content: [{ type: "text", text: "previous" }],
+				timestamp: now - 1000,
+			});
+			const previousAssistantId = sessionManager.appendMessage({
+				...fauxAssistantMessage("previous response", { stopReason: "length", timestamp: now - 500 }),
+				api: model.api,
+				provider: model.provider,
+				model: model.id,
+				usage: createUsage(100),
+			});
+			harness.session.agent.state.messages = sessionManager.buildSessionContext().messages;
+			const entriesBeforePrompt = structuredClone(sessionManager.getEntries());
+
+			const controller = new AbortController();
+			const reason = new Error("cancel saved compaction");
+			const prompt = harness.session.prompt("new prompt", { signal: controller.signal });
+			await compactHookStarted.promise;
+			expect(sessionManager.getLeafEntry()).toMatchObject({ type: "compaction", summary: "temporarily recorded" });
+			controller.abort(reason);
+			releaseCompactHook.resolve();
+
+			await expect(prompt).rejects.toBe(reason);
+			expect(hookCompleted).toBe(true);
+			expect(sessionManager.getEntries()).toEqual(entriesBeforePrompt);
+			expect(sessionManager.getBranch().map((entry) => entry.id)).toEqual([previousUserId, previousAssistantId]);
+			expect(sessionManager.getLeafId()).toBe(previousAssistantId);
+			expect(harness.session.messages.filter((message) => message.role === "user")).toHaveLength(1);
+			expect(harness.faux.state.callCount).toBe(0);
+
+			if (storage === "persisted") {
+				const sessionFile = sessionManager.getSessionFile();
+				if (!sessionFile) throw new Error("Expected persisted session file");
+				const reopened = SessionManager.open(sessionFile, sessionDir);
+				expect(reopened.getEntries()).toEqual(entriesBeforePrompt);
+				expect(reopened.getEntries().some((entry) => entry.type === "compaction")).toBe(false);
+			}
+		},
+	);
+
+	it.each(["success", "preflight failure"])("removes its single abort listener after %s", async (outcome) => {
+		const harness = await createHarness();
+		harnesses.push(harness);
+		if (outcome === "success") harness.setResponses([fauxAssistantMessage("done")]);
+		else harness.session.agent.state.model = undefined as unknown as Model<any>;
+		const controller = new AbortController();
+		const addListener = vi.spyOn(controller.signal, "addEventListener");
+		const removeListener = vi.spyOn(controller.signal, "removeEventListener");
+
+		const prompt = harness.session.prompt("listener", { signal: controller.signal });
+		if (outcome === "success") await expect(prompt).resolves.toBeUndefined();
+		else await expect(prompt).rejects.toThrow("No model selected.");
+
+		expect(addListener).toHaveBeenCalledOnce();
+		expect(addListener).toHaveBeenCalledWith("abort", expect.any(Function), { once: true });
+		expect(removeListener).toHaveBeenCalledOnce();
+		expect(removeListener).toHaveBeenCalledWith("abort", addListener.mock.calls[0]?.[1]);
+	});
+
+	it("preserves pending next-turn messages when cancellation occurs at preflight acceptance", async () => {
+		const harness = await createHarness({
+			models: [{ id: "faux-1", contextWindow: 100, maxTokens: 100 }],
+			settings: { compaction: { enabled: true, keepRecentTokens: 1, reserveTokens: 0 } },
+			extensionFactories: [
+				(pi) => {
+					pi.on("session_before_compact", (event) => ({
+						compaction: {
+							summary: "completed before acceptance",
+							firstKeptEntryId: event.preparation.firstKeptEntryId,
+							tokensBefore: event.preparation.tokensBefore,
+							details: {},
+						},
+					}));
+				},
+			],
+		});
+		harnesses.push(harness);
+		harness.setResponses([fauxAssistantMessage("done")]);
+		const now = Date.now();
+		const model = harness.getModel();
+		harness.sessionManager.appendMessage({
+			role: "user",
+			content: [{ type: "text", text: "previous" }],
+			timestamp: now - 1000,
+		});
+		harness.sessionManager.appendMessage({
+			...fauxAssistantMessage("previous response", { stopReason: "length", timestamp: now - 500 }),
+			api: model.api,
+			provider: model.provider,
+			model: model.id,
+			usage: createUsage(100),
+		});
+		harness.session.agent.state.messages = harness.sessionManager.buildSessionContext().messages;
+		const entriesBeforePrompt = structuredClone(harness.sessionManager.getEntries());
+		await harness.session.sendCustomMessage(
+			{ customType: "pending-context", content: "keep me", display: false },
+			{ deliverAs: "nextTurn" },
+		);
+		const controller = new AbortController();
+		const reason = new Error("cancel at acceptance");
+		const preflightResults: boolean[] = [];
+
+		const prompt = harness.session.prompt("acceptance boundary", {
+			signal: controller.signal,
+			preflightResult: (success) => {
+				preflightResults.push(success);
+				if (success) controller.abort(reason);
+			},
+		});
+
+		await expect(prompt).rejects.toBe(reason);
+		expect(preflightResults).toEqual([true]);
+		expect(harness.sessionManager.getEntries()).toEqual(entriesBeforePrompt);
+		expect(harness.sessionManager.getEntries().some((entry) => entry.type === "compaction")).toBe(false);
+		expect(harness.eventsOfType("compaction_end")).toEqual([
+			expect.objectContaining({
+				aborted: false,
+				result: expect.objectContaining({ summary: "completed before acceptance" }),
+			}),
+		]);
+		expect(harness.faux.state.callCount).toBe(0);
+
+		harness.session.setAutoCompactionEnabled(false);
+		await harness.session.prompt("next prompt");
+		expect(harness.session.messages.filter((message) => message.role === "custom")).toEqual([
+			expect.objectContaining({ customType: "pending-context", content: "keep me" }),
+		]);
+	});
+
+	it("uses existing aborted-response settlement after agent_start", async () => {
+		const harness = await createHarness();
+		harnesses.push(harness);
+		harness.setResponses([fauxAssistantMessage("x".repeat(20_000))]);
+		const responseStarted = new Promise<void>((resolve) => {
+			const unsubscribe = harness.session.subscribe((event) => {
+				if (event.type === "message_update") {
+					unsubscribe();
+					resolve();
+				}
+			});
+		});
+		const controller = new AbortController();
+		const prompt = harness.session.prompt("start", { signal: controller.signal });
+		await responseStarted;
+		controller.abort(new Error("post-start reason must not reject prompt"));
+
+		await expect(prompt).resolves.toBeUndefined();
+		const assistant = harness.session.messages
+			.slice()
+			.reverse()
+			.find((message) => message.role === "assistant");
+		expect(assistant).toMatchObject({ role: "assistant", stopReason: "aborted" });
 	});
 
 	it("throws when prompted during manual compaction", async () => {

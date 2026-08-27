@@ -109,8 +109,14 @@ import { ModelRegistry } from "./model-registry.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.ts";
 import type { ResourceExtensionPaths, ResourceLoader } from "./resource-loader.ts";
-import type { BranchSummaryEntry, CompactionEntry, SessionEntry, SessionManager } from "./session-manager.ts";
+import type {
+	BranchSummaryEntry,
+	CompactionAppendTransaction,
+	SessionEntry,
+	SessionManager,
+} from "./session-manager.ts";
 import {
+	appendCompactionTransaction,
 	appendCustomMessageWithRollback,
 	CURRENT_SESSION_VERSION,
 	getLatestCompactionEntry,
@@ -334,6 +340,8 @@ export interface PromptOptions {
 	source?: InputSource;
 	/** Internal hook used by RPC mode to observe prompt preflight acceptance or rejection. */
 	preflightResult?: (success: boolean) => void;
+	/** Cancel prompt preflight or abort the active run after it starts. */
+	signal?: AbortSignal;
 }
 
 /** Result from cycleModel() */
@@ -389,6 +397,11 @@ interface SubagentCoordination {
 	waitStarted: boolean;
 }
 
+interface PromptReservation {
+	readonly signaled: boolean;
+	agentStarted: boolean;
+}
+
 function estimateMessagesTokens(messages: AgentMessage[]): number {
 	let tokens = 0;
 	for (const message of messages) {
@@ -437,6 +450,7 @@ export class AgentSession {
 	private _unsubscribeAgent?: () => void;
 	private _eventListeners: AgentSessionEventListener[] = [];
 	private _isAgentRunActive = false;
+	private _promptReservation: PromptReservation | undefined;
 	private _idleWaitPromise: Promise<void> | undefined;
 	private _resolveIdleWait: (() => void) | undefined;
 
@@ -568,7 +582,10 @@ export class AgentSession {
 		return this._harnessVersionBundle;
 	}
 
-	private async _getRequiredRequestAuth(model: Model<any>): Promise<{
+	private async _getRequiredRequestAuth(
+		model: Model<any>,
+		signal?: AbortSignal,
+	): Promise<{
 		model: Model<any>;
 		apiKey?: string;
 		headers?: Record<string, string>;
@@ -576,7 +593,7 @@ export class AgentSession {
 	}> {
 		let result: AuthResult | undefined;
 		try {
-			result = await this._modelRuntime.getAuth(model);
+			result = await this._modelRuntime.getAuth(model, { signal });
 		} catch (error) {
 			const cause = error instanceof Error ? error.cause : undefined;
 			if (cause instanceof Error && cause.message === "authHeader requires a resolved API key") {
@@ -605,18 +622,22 @@ export class AgentSession {
 		throw new Error(formatNoApiKeyFoundMessage(model.provider));
 	}
 
-	private async _getSummarizationRequestAuth(model: Model<any>): Promise<{
+	private async _getSummarizationRequestAuth(
+		model: Model<any>,
+		signal?: AbortSignal,
+	): Promise<{
 		model: Model<any>;
 		apiKey?: string;
 		headers?: Record<string, string>;
 		env?: Record<string, string>;
 	}> {
 		if (this.agent.streamFunction === streamSimple) {
-			return this._getRequiredRequestAuth(model);
+			return this._getRequiredRequestAuth(model, signal);
 		}
 
 		try {
-			const result = await this._modelRuntime.getAuth(model);
+			const result = await this._modelRuntime.getAuth(model, { signal });
+			signal?.throwIfAborted();
 			if (!result) return { model };
 			const requestModel = result.auth.baseUrl ? { ...model, baseUrl: result.auth.baseUrl } : model;
 			return {
@@ -626,6 +647,7 @@ export class AgentSession {
 				env: result.env,
 			};
 		} catch {
+			if (signal?.aborted) throw signal.reason;
 			return { model };
 		}
 	}
@@ -828,6 +850,9 @@ export class AgentSession {
 
 	/** Internal handler for agent events - shared by subscribe and reconnect */
 	private _handleAgentEvent = async (event: AgentEvent): Promise<void> => {
+		if (event.type === "agent_start" && this._promptReservation?.signaled) {
+			this._promptReservation.agentStarted = true;
+		}
 		if (event.type === "message_start" && this._pendingSubagentEscalationEnvelope?.message === event.message) {
 			// The exact queued object is now entering parent context. Seal it so later reports form a new envelope.
 			this._pendingSubagentEscalationEnvelope = undefined;
@@ -1836,13 +1861,58 @@ export class AgentSession {
 	 * @throws Error if streaming and no streamingBehavior specified
 	 * @throws Error if no model selected or no API key available (when not streaming)
 	 */
-	async prompt(text: string, options?: PromptOptions): Promise<void> {
-		return this._traceOperation("prompt", (operationSpan) => this._prompt(text, options, operationSpan));
+	prompt(text: string, options?: PromptOptions): Promise<void> {
+		const signal = options?.signal;
+		const preflightResult = options?.preflightResult;
+		if (signal?.aborted) {
+			preflightResult?.(false);
+			return Promise.reject(signal.reason);
+		}
+		if (this._promptReservation) {
+			preflightResult?.(false);
+			return Promise.reject(new Error("Cannot submit a prompt while another prompt owns prompt preflight."));
+		}
+		if (signal && this._isAgentRunActive) {
+			preflightResult?.(false);
+			return Promise.reject(new Error("Cannot submit a signaled prompt while an agent run is active."));
+		}
+
+		const reservation: PromptReservation = { signaled: signal !== undefined, agentStarted: false };
+		this._promptReservation = reservation;
+		const releaseUnsignaledPreflight = (): void => {
+			if (!reservation.signaled && this._promptReservation === reservation) {
+				this._promptReservation = undefined;
+			}
+		};
+		const onAbort = signal
+			? (): void => {
+					if (reservation.agentStarted) {
+						void this.abort().catch(() => {});
+					} else {
+						this.abortCompaction();
+					}
+				}
+			: undefined;
+		if (onAbort && signal) signal.addEventListener("abort", onAbort, { once: true });
+
+		const cleanup = (): void => {
+			if (onAbort && signal) signal.removeEventListener("abort", onAbort);
+			if (this._promptReservation === reservation) this._promptReservation = undefined;
+		};
+		try {
+			return this._traceOperation("prompt", (operationSpan) =>
+				this._prompt(text, options, releaseUnsignaledPreflight, operationSpan),
+			).finally(cleanup);
+		} catch (error) {
+			cleanup();
+			return Promise.reject(error);
+		}
 	}
 
 	private async _prompt(
 		text: string,
 		options: PromptOptions | undefined,
+		releaseUnsignaledPreflight: () => void,
 		operationSpan: CodingAgentTelemetrySpan<"diffex.coding_agent.operation">,
 	): Promise<void> {
 		if (this._harnessSwitchInProgress) {
@@ -1850,16 +1920,35 @@ export class AgentSession {
 		}
 		const expandPromptTemplates = options?.expandPromptTemplates ?? true;
 		const preflightResult = options?.preflightResult;
+		const signal = options?.signal;
 		let messages: AgentMessage[] | undefined;
+		let consumedNextTurnMessages: CustomMessage[] | undefined;
+		let preflightAccepted = false;
+		let pendingCompaction: CompactionAppendTransaction | undefined;
+		const commitPendingCompaction = (): void => {
+			if (!pendingCompaction) return;
+			pendingCompaction.commit();
+			pendingCompaction = undefined;
+			this._armCurrentPlanRestorationIfActive();
+		};
+		const rollbackPendingCompaction = (): void => {
+			if (!pendingCompaction) return;
+			pendingCompaction.rollback();
+			pendingCompaction = undefined;
+			this.agent.state.messages = this.sessionManager.buildSessionContext().messages;
+		};
 
 		try {
 			// Handle extension commands first (execute immediately, even during streaming)
 			// Extension commands manage their own LLM interaction via diffex.sendMessage()
 			if (expandPromptTemplates && text.startsWith("/")) {
 				const handled = await this._tryExecuteExtensionCommand(text);
+				signal?.throwIfAborted();
 				if (handled) {
 					// Extension command executed, no prompt to send
+					preflightAccepted = true;
 					preflightResult?.(true);
+					signal?.throwIfAborted();
 					return;
 				}
 			}
@@ -1880,8 +1969,11 @@ export class AgentSession {
 					options?.source ?? "interactive",
 					this.isStreaming ? options?.streamingBehavior : undefined,
 				);
+				signal?.throwIfAborted();
 				if (inputResult.action === "handled") {
+					preflightAccepted = true;
 					preflightResult?.(true);
+					signal?.throwIfAborted();
 					return;
 				}
 				if (inputResult.action === "transform") {
@@ -1913,14 +2005,13 @@ export class AgentSession {
 				} else {
 					await this._queueSteer(expandedText, currentImages, referencedSkills);
 				}
+				preflightAccepted = true;
 				preflightResult?.(true);
 				return;
 			}
 
 			await this._refreshSelectedHarnessAtPromptBoundary();
-
-			// Flush any pending bash messages before the new prompt
-			this._flushPendingBashMessages();
+			signal?.throwIfAborted();
 
 			// Validate model
 			if (!this.model) {
@@ -1929,7 +2020,8 @@ export class AgentSession {
 
 			const hasConfiguredAuth =
 				this._modelRuntime.hasConfiguredAuth(this.model.provider) ||
-				(await this._modelRuntime.checkAuth(this.model.provider)) !== undefined;
+				(await this._modelRuntime.checkAuth(this.model.provider, { signal })) !== undefined;
+			signal?.throwIfAborted();
 			if (!hasConfiguredAuth) {
 				const isOAuth = this._modelRuntime.isUsingOAuth(this.model.provider);
 				if (isOAuth) {
@@ -1946,7 +2038,10 @@ export class AgentSession {
 			// The user's new prompt is sent below, so do not call agent.continue() here.
 			const lastAssistant = this._findLastAssistantMessage();
 			if (lastAssistant) {
-				await this._checkCompaction(lastAssistant, false);
+				await this._checkCompaction(lastAssistant, false, signal, (transaction) => {
+					pendingCompaction = transaction;
+				});
+				signal?.throwIfAborted();
 			}
 
 			// Build messages array (custom message if any, then user message)
@@ -1964,7 +2059,8 @@ export class AgentSession {
 			});
 
 			// Inject any pending "nextTurn" messages as context alongside the user message
-			for (const msg of this._pendingNextTurnMessages) {
+			consumedNextTurnMessages = this._pendingNextTurnMessages;
+			for (const msg of consumedNextTurnMessages) {
 				messages.push(msg);
 			}
 			this._pendingNextTurnMessages = [];
@@ -1976,6 +2072,9 @@ export class AgentSession {
 				this._baseSystemPrompt,
 				this._baseSystemPromptOptions,
 			);
+			signal?.throwIfAborted();
+			// Flush pending bash history only after cancellable preflight has completed.
+			this._flushPendingBashMessages();
 			// Add all custom messages from extensions
 			if (result?.messages) {
 				for (const msg of result.messages) {
@@ -2000,15 +2099,30 @@ export class AgentSession {
 				this.agent.state.systemPrompt = this._appendSubagentDelegatedMessageTrustGuidance(this._baseSystemPrompt);
 			}
 		} catch (error) {
-			preflightResult?.(false);
-			throw error;
+			if (signal?.aborted) rollbackPendingCompaction();
+			else commitPendingCompaction();
+			if (signal?.aborted && consumedNextTurnMessages) {
+				this._pendingNextTurnMessages = [...consumedNextTurnMessages, ...this._pendingNextTurnMessages];
+			}
+			if (!preflightAccepted) preflightResult?.(false);
+			throw signal?.aborted ? signal.reason : error;
 		}
 
 		if (!messages) {
 			return;
 		}
 
+		preflightAccepted = true;
 		preflightResult?.(true);
+		if (signal?.aborted) {
+			rollbackPendingCompaction();
+			this._pendingNextTurnMessages = [...(consumedNextTurnMessages ?? []), ...this._pendingNextTurnMessages];
+			consumedNextTurnMessages = undefined;
+			throw signal.reason;
+		}
+		commitPendingCompaction();
+		consumedNextTurnMessages = undefined;
+		releaseUnsignaledPreflight();
 		this._releaseIdleSubagentEscalationsForSelectedBranch();
 		await this._runAgentPrompt(messages);
 	}
@@ -2812,8 +2926,11 @@ export class AgentSession {
 		fromExtension: boolean;
 		usage: Usage | undefined;
 		willRetry: boolean;
+		signal?: AbortSignal;
+		deferCommit?: (transaction: CompactionAppendTransaction) => void;
 	}): Promise<CompactionResult> {
-		this.sessionManager.appendCompaction(
+		const transaction = appendCompactionTransaction(
+			this.sessionManager,
 			options.summary,
 			options.firstKeptEntryId,
 			options.tokensBefore,
@@ -2821,25 +2938,36 @@ export class AgentSession {
 			options.fromExtension,
 			options.usage,
 		);
-		const newEntries = this.sessionManager.getEntries();
 		const sessionContext = this.sessionManager.buildSessionContext();
 		this.agent.state.messages = sessionContext.messages;
 		const estimatedTokensAfter = estimateMessagesTokens(sessionContext.messages);
 
-		// Get the saved compaction entry for the extension event
-		const savedCompactionEntry = newEntries.find((e) => e.type === "compaction" && e.summary === options.summary) as
-			| CompactionEntry
-			| undefined;
-
-		if (this._extensionRunner && savedCompactionEntry) {
-			await this._extensionRunner.emit({
-				type: "session_compact",
-				compactionEntry: savedCompactionEntry,
-				fromExtension: options.fromExtension,
-				reason: options.reason,
-				willRetry: options.willRetry,
-			});
+		if (this._extensionRunner) {
+			try {
+				await this._extensionRunner.emit({
+					type: "session_compact",
+					compactionEntry: transaction.entry,
+					fromExtension: options.fromExtension,
+					reason: options.reason,
+					willRetry: options.willRetry,
+				});
+			} catch (error) {
+				if (options.signal?.aborted) {
+					transaction.rollback();
+					this.agent.state.messages = this.sessionManager.buildSessionContext().messages;
+					throw options.signal.reason;
+				}
+				transaction.commit();
+				throw error;
+			}
 		}
+		if (options.signal?.aborted) {
+			transaction.rollback();
+			this.agent.state.messages = this.sessionManager.buildSessionContext().messages;
+			throw options.signal.reason;
+		}
+		if (options.deferCommit) options.deferCommit(transaction);
+		else transaction.commit();
 
 		const compactionResult: CompactionResult = {
 			summary: options.summary,
@@ -2849,7 +2977,7 @@ export class AgentSession {
 			usage: options.usage,
 			details: options.details,
 		};
-		this._armCurrentPlanRestorationIfActive();
+		if (!options.deferCommit) this._armCurrentPlanRestorationIfActive();
 		return compactionResult;
 	}
 
@@ -2865,7 +2993,12 @@ export class AgentSession {
 	 * @param assistantMessage The assistant message to check
 	 * @param skipAbortedCheck If false, include aborted messages (for pre-prompt check). Default: true
 	 */
-	private async _checkCompaction(assistantMessage: AssistantMessage, skipAbortedCheck = true): Promise<boolean> {
+	private async _checkCompaction(
+		assistantMessage: AssistantMessage,
+		skipAbortedCheck = true,
+		signal?: AbortSignal,
+		deferCommit?: (transaction: CompactionAppendTransaction) => void,
+	): Promise<boolean> {
 		const settings = this.settingsManager.getCompactionSettings();
 		if (!settings.enabled) return false;
 
@@ -2901,7 +3034,7 @@ export class AgentSession {
 			const willRetry = assistantMessage.stopReason !== "stop";
 
 			if (!willRetry) {
-				return await this._runAutoCompaction("overflow", false);
+				return await this._runAutoCompaction("overflow", false, signal, deferCommit);
 			}
 
 			if (this._overflowRecoveryAttempted) {
@@ -2924,7 +3057,7 @@ export class AgentSession {
 			if (messages.length > 0 && messages[messages.length - 1].role === "assistant") {
 				this.agent.state.messages = messages.slice(0, -1);
 			}
-			return await this._runAutoCompaction("overflow", willRetry);
+			return await this._runAutoCompaction("overflow", willRetry, signal, deferCommit);
 		}
 
 		// Case 2: Threshold - context is getting large
@@ -2953,7 +3086,7 @@ export class AgentSession {
 			contextTokens = directContextTokens;
 		}
 		if (shouldCompact(contextTokens, contextWindow, settings)) {
-			return await this._runAutoCompaction("threshold", false);
+			return await this._runAutoCompaction("threshold", false, signal, deferCommit);
 		}
 		return false;
 	}
@@ -2961,11 +3094,16 @@ export class AgentSession {
 	/**
 	 * Internal: Run auto-compaction with events.
 	 */
-	private _runAutoCompaction(reason: "overflow" | "threshold", willRetry: boolean): Promise<boolean> {
+	private _runAutoCompaction(
+		reason: "overflow" | "threshold",
+		willRetry: boolean,
+		signal?: AbortSignal,
+		deferCommit?: (transaction: CompactionAppendTransaction) => void,
+	): Promise<boolean> {
 		if (this._disposePromise) return Promise.resolve(false);
 		return this._runOwnedOperation(() =>
 			this._traceOperation("compaction", (telemetryContext) =>
-				this._runAutoCompactionOperation(reason, willRetry, telemetryContext),
+				this._runAutoCompactionOperation(reason, willRetry, telemetryContext, signal, deferCommit),
 			),
 		);
 	}
@@ -2974,6 +3112,8 @@ export class AgentSession {
 		reason: "overflow" | "threshold",
 		willRetry: boolean,
 		telemetryContext: TelemetryContext = this._telemetryContext,
+		signal?: AbortSignal,
+		deferCommit?: (transaction: CompactionAppendTransaction) => void,
 	): Promise<boolean> {
 		const settings = this.settingsManager.getCompactionSettings();
 		let started = false;
@@ -2983,7 +3123,13 @@ export class AgentSession {
 				return false;
 			}
 
-			const { model: requestModel, apiKey, headers, env } = await this._getSummarizationRequestAuth(this.model);
+			const {
+				model: requestModel,
+				apiKey,
+				headers,
+				env,
+			} = await this._getSummarizationRequestAuth(this.model, signal);
+			signal?.throwIfAborted();
 			if (this._disposePromise) return false;
 
 			const pathEntries = this.sessionManager.getBranch();
@@ -2993,8 +3139,8 @@ export class AgentSession {
 				return false;
 			}
 
-			this._emit({ type: "compaction_start", reason });
 			this._autoCompactionAbortController = new AbortController();
+			this._emit({ type: "compaction_start", reason });
 			started = true;
 
 			let extensionCompaction: CompactionResult | undefined;
@@ -3084,6 +3230,8 @@ export class AgentSession {
 				fromExtension,
 				usage,
 				willRetry,
+				signal,
+				deferCommit,
 			});
 			this._emit({ type: "compaction_end", reason, result, aborted: false, willRetry });
 
@@ -3105,17 +3253,22 @@ export class AgentSession {
 			return this.agent.hasQueuedMessages();
 		} catch (error) {
 			const errorMessage = error instanceof Error ? error.message : "compaction failed";
+			const aborted = signal?.aborted || this._autoCompactionAbortController?.signal.aborted || false;
 			if (started) {
 				this._emit({
 					type: "compaction_end",
 					reason,
 					result: undefined,
-					aborted: false,
+					aborted,
 					willRetry: false,
-					errorMessage:
-						reason === "overflow"
-							? `Context overflow recovery failed: ${errorMessage}`
-							: `Auto-compaction failed: ${errorMessage}`,
+					...(aborted
+						? {}
+						: {
+								errorMessage:
+									reason === "overflow"
+										? `Context overflow recovery failed: ${errorMessage}`
+										: `Auto-compaction failed: ${errorMessage}`,
+							}),
 				});
 			}
 			return false;

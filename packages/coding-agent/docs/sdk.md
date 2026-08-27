@@ -183,7 +183,7 @@ unsubscribe = session.subscribe(() => {});
 
 ### Prompting and Message Queueing
 
-`PromptOptions` controls prompt expansion, queueing behavior while streaming, and prompt preflight notifications:
+`PromptOptions` controls prompt expansion, queueing behavior while streaming, cancellation, and prompt preflight notifications:
 
 ```typescript
 interface PromptOptions {
@@ -192,6 +192,7 @@ interface PromptOptions {
   streamingBehavior?: "steer" | "followUp";
   source?: InputSource;
   preflightResult?: (success: boolean) => void;
+  signal?: AbortSignal;
 }
 ```
 
@@ -203,6 +204,8 @@ interface PromptOptions {
 It fires before `prompt()` resolves.
 `prompt()` still resolves only after the full accepted run finishes, including retries and coordinated child-agent batches.
 Failures after acceptance are reported through the normal event and message stream, not through `preflightResult(false)`.
+
+A prompt with `signal` reserves the complete prompt lifecycle synchronously, including asynchronous preflight and the active run. It rejects instead of entering active-run queueing when another prompt is in preflight or an agent run is active, and later prompts reject while its reservation is held. Cancellation before `agent_start` rejects with the exact `signal.reason`, cancels pre-prompt compaction and authentication where active, and starts no user or provider turn. Cancellation after `agent_start` uses the existing session abort behavior, so `prompt()` settles through the normal aborted-response event and persistence path rather than rejecting again with `signal.reason`. Prompts without `signal` retain the existing `streamingBehavior` queue behavior during an active run.
 
 The `prompt()` method handles prompt templates, extension commands, and message sending:
 
@@ -218,6 +221,12 @@ await session.prompt("What's in this image?", {
 // During streaming: must specify how to queue the message
 await session.prompt("Stop and do this instead", { streamingBehavior: "steer" });
 await session.prompt("After you're done, also check X", { streamingBehavior: "followUp" });
+
+// Reserve and cancel the complete prompt lifecycle
+const controller = new AbortController();
+const pending = session.prompt("Inspect the repository", { signal: controller.signal });
+controller.abort(new Error("Request cancelled"));
+await pending.catch((error) => console.error(error));
 ```
 
 **Behavior:**
