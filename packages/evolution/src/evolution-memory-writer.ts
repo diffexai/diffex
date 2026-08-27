@@ -13,6 +13,7 @@ import type {
 	EvolutionMemoryAddDelta,
 	EvolutionMemoryExactDiff,
 	EvolutionMemoryItem,
+	EvolutionMemoryReplaceDelta,
 	EvolutionMemoryWriteOutput,
 	EvolutionMutation,
 	HarnessActivationResult,
@@ -386,18 +387,7 @@ function contentWithoutMetadata(batch: MutationBatch): Omit<MutationBatch, "meta
 	return content;
 }
 
-function insertionOffset(
-	memory: string,
-	parsed: ParsedEvolutionMemory,
-	delta: EvolutionMemoryAddDelta,
-	bootstrappingBlankMemory: boolean,
-): number {
-	if (bootstrappingBlankMemory) {
-		if (delta.destination.anchor !== null) {
-			throw new EvolutionWriterValidationError("EVOLVE.md addition anchor must match exactly one memory item");
-		}
-		return parsed.blocks.at(-1)?.end ?? memory.trimEnd().length;
-	}
+function insertionOffset(memory: string, parsed: ParsedEvolutionMemory, delta: EvolutionMemoryAddDelta): number {
 	if (delta.destination.anchor !== null) {
 		const matchingBlocks = parsed.blocks.filter((block) =>
 			evolutionMemoryLessonContentMatches(block.content, delta.destination.anchor ?? ""),
@@ -701,7 +691,6 @@ export class EvolutionMemoryWriter implements EvolutionTargetWriter {
 		}
 
 		let memory = base.state.memory;
-		const bootstrappingBlankMemory = memory.trim() === "";
 		let items = [...baseCatalog.items];
 		const activeOrder = [...baseCatalog.activeOrder];
 		const existingLessonNumbers = parseEvolutionMemory(memory)
@@ -721,7 +710,15 @@ export class EvolutionMemoryWriter implements EvolutionTargetWriter {
 		let nextLessonNumber = durableNextLessonNumber;
 		const addedIds = new Set<string>();
 		const removedIds = new Set<string>();
-		const remove = (memoryItemId: string, expectedContentDigest: string): void => {
+		const removable = (
+			memoryItemId: string,
+			expectedContentDigest: string,
+		): {
+			readonly activeIndex: number;
+			readonly block: MarkdownMemoryBlock;
+			readonly item: EvolutionMemoryItem;
+			readonly lessonNumber: number;
+		} => {
 			const activeIndex = activeOrder.indexOf(memoryItemId);
 			if (activeIndex === -1) throw new Error(`Mutation removes inactive memory item "${memoryItemId}"`);
 			const parsed = parseEvolutionMemory(memory);
@@ -738,8 +735,12 @@ export class EvolutionMemoryWriter implements EvolutionTargetWriter {
 			) {
 				throw new Error(`Mutation cannot automatically remove memory item "${memoryItemId}"`);
 			}
-			memory = compactLessonNumbers(removeMemoryBlock(memory, block), removedLessonNumber);
-			activeOrder.splice(activeIndex, 1);
+			return { activeIndex, block, item, lessonNumber: removedLessonNumber };
+		};
+		const remove = (memoryItemId: string, expectedContentDigest: string): void => {
+			const target = removable(memoryItemId, expectedContentDigest);
+			memory = compactLessonNumbers(removeMemoryBlock(memory, target.block), target.lessonNumber);
+			activeOrder.splice(target.activeIndex, 1);
 			const compactedBlocks = parseEvolutionMemory(memory).blocks;
 			const activeDigests = new Map(
 				activeOrder.map((activeMemoryItemId, index) => [
@@ -754,21 +755,13 @@ export class EvolutionMemoryWriter implements EvolutionTargetWriter {
 			nextLessonNumber -= 1;
 			removedIds.add(memoryItemId);
 		};
-		const add = (mutation: EvolutionMutation, delta: EvolutionMemoryAddDelta): void => {
-			const addition = parseEvolutionMemory(delta.content);
-			if (
-				addition.headings.length > 0 ||
-				addition.blocks.length !== 1 ||
-				addition.blocks[0]?.content !== delta.content
-			) {
+		const validateAddition = (content: string): void => {
+			const addition = parseEvolutionMemory(content);
+			if (addition.headings.length > 0 || addition.blocks.length !== 1 || addition.blocks[0]?.content !== content) {
 				throw new Error("Each EVOLVE.md addition must contain exactly one non-heading memory item");
 			}
-			const numberedContent = numberEvolutionMemoryLesson(delta.content, nextLessonNumber);
-			nextLessonNumber += 1;
-			const parsed = parseEvolutionMemory(memory);
-			const offset = insertionOffset(memory, parsed, delta, bootstrappingBlankMemory);
-			const insertionIndex = parsed.blocks.filter((block) => block.end <= offset).length;
-			memory = insertMemory(memory, offset, numberedContent);
+		};
+		const createItem = (mutation: EvolutionMutation, content: string): string => {
 			const memoryItemId = `memory-item-${createHash("sha256").update(mutation.mutationId).digest("hex").slice(0, 32)}`;
 			if (items.some((item) => item.memoryItemId === memoryItemId)) {
 				throw new Error(`Mutation reuses memory item ID "${memoryItemId}"`);
@@ -776,7 +769,7 @@ export class EvolutionMemoryWriter implements EvolutionTargetWriter {
 			items.push({
 				schemaVersion: EVOLUTION_MEMORY_ITEM_SCHEMA_VERSION,
 				memoryItemId,
-				contentDigest: itemDigest(numberedContent),
+				contentDigest: itemDigest(content),
 				creationRevision: batch.expectedBaseVersion,
 				supersessionRevision: null,
 				ledger: {
@@ -785,8 +778,28 @@ export class EvolutionMemoryWriter implements EvolutionTargetWriter {
 					supersessionEventId: null,
 				},
 			});
-			activeOrder.splice(insertionIndex, 0, memoryItemId);
 			addedIds.add(memoryItemId);
+			return memoryItemId;
+		};
+		const add = (mutation: EvolutionMutation, delta: EvolutionMemoryAddDelta): void => {
+			validateAddition(delta.content);
+			const numberedContent = numberEvolutionMemoryLesson(delta.content, nextLessonNumber);
+			nextLessonNumber += 1;
+			const parsed = parseEvolutionMemory(memory);
+			const offset = insertionOffset(memory, parsed, delta);
+			const insertionIndex = parsed.blocks.filter((block) => block.end <= offset).length;
+			memory = insertMemory(memory, offset, numberedContent);
+			const memoryItemId = createItem(mutation, numberedContent);
+			activeOrder.splice(insertionIndex, 0, memoryItemId);
+		};
+		const replace = (mutation: EvolutionMutation, delta: EvolutionMemoryReplaceDelta): void => {
+			validateAddition(delta.addition.content);
+			const target = removable(delta.removal.memoryItemId, delta.removal.expectedContentDigest);
+			const numberedContent = numberEvolutionMemoryLesson(delta.addition.content, target.lessonNumber);
+			memory = `${memory.slice(0, target.block.start)}${numberedContent}${memory.slice(target.block.end)}`;
+			const memoryItemId = createItem(mutation, numberedContent);
+			activeOrder.splice(target.activeIndex, 1, memoryItemId);
+			removedIds.add(target.item.memoryItemId);
 		};
 
 		for (const mutation of batch.mutations) {
@@ -801,8 +814,7 @@ export class EvolutionMemoryWriter implements EvolutionTargetWriter {
 				remove(mutation.payload.memoryItemId, mutation.payload.expectedContentDigest);
 			}
 			if (mutation.payload.operation === "REPLACE") {
-				remove(mutation.payload.removal.memoryItemId, mutation.payload.removal.expectedContentDigest);
-				add(mutation, { operation: "ADD", ...mutation.payload.addition });
+				replace(mutation, mutation.payload);
 			}
 		}
 		const parsedCandidate = parseEvolutionMemory(memory);

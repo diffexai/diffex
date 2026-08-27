@@ -314,12 +314,12 @@ function removedMemoryItemIds(delta: EvolutionMemoryDelta): readonly string[] {
 }
 
 function additions(delta: EvolutionMemoryDelta): readonly EvolutionMemoryAddDelta[] {
-	if (delta.operation === "REMOVE") return [];
-	return [delta.operation === "ADD" ? delta : { operation: "ADD", ...delta.addition }];
+	return delta.operation === "ADD" ? [delta] : [];
 }
 
 function addContents(delta: EvolutionMemoryDelta): readonly string[] {
-	return additions(delta).map((addition) => addition.content);
+	if (delta.operation === "REMOVE") return [];
+	return [delta.operation === "ADD" ? delta.content : delta.addition.content];
 }
 
 function additionDestinationIssues(

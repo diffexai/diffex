@@ -486,6 +486,7 @@ export interface EvolutionProposalInstructionRelationship {
 
 export interface EvolutionMemoryAddDelta {
 	readonly operation: "ADD";
+	/** A section must name one existing heading. Both fields null append after the final memory item. */
 	readonly destination: {
 		readonly section: string | null;
 		readonly anchor: string | null;
@@ -504,7 +505,7 @@ export interface EvolutionMemoryRemoveDelta {
 export interface EvolutionMemoryReplaceDelta {
 	readonly operation: "REPLACE";
 	readonly removal: Omit<EvolutionMemoryRemoveDelta, "operation">;
-	readonly addition: Omit<EvolutionMemoryAddDelta, "operation">;
+	readonly addition: Pick<EvolutionMemoryAddDelta, "content" | "intendedScope">;
 }
 
 export type EvolutionMemoryDelta = EvolutionMemoryAddDelta | EvolutionMemoryRemoveDelta | EvolutionMemoryReplaceDelta;

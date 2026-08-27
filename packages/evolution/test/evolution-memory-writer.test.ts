@@ -105,7 +105,7 @@ describe("evolution memory writer", () => {
 					target: { kind: "evolution-memory", expectedHarnessVersion: snapshot.harnessVersion },
 					payload: {
 						operation: "ADD",
-						destination: { section: "verification", anchor: null },
+						destination: { section: null, anchor: null },
 						content: "Lesson 99: Verify the runtime. Capture the result. Fix visible regressions.",
 						intendedScope: ["verification"],
 					},
@@ -135,7 +135,7 @@ describe("evolution memory writer", () => {
 					target: { kind: "evolution-memory", expectedHarnessVersion: numberedSnapshot.harnessVersion },
 					payload: {
 						operation: "ADD",
-						destination: { section: "verification", anchor: null },
+						destination: { section: null, anchor: null },
 						content: "First sentence. Second sentence. Third sentence. Fourth sentence.",
 						intendedScope: ["verification"],
 					},
@@ -162,7 +162,7 @@ describe("evolution memory writer", () => {
 					target: { kind: "evolution-memory", expectedHarnessVersion: snapshot.harnessVersion },
 					payload: {
 						operation: "ADD",
-						destination: { section: "verification", anchor: null },
+						destination: { section: null, anchor: null },
 						content: `Keep ${label} lesson content ${String(index + 1)}.`,
 						intendedScope: ["verification"],
 					},
@@ -250,7 +250,7 @@ describe("evolution memory writer", () => {
 				target: { kind: "evolution-memory", expectedHarnessVersion: snapshot.harnessVersion },
 				payload: {
 					operation: "ADD",
-					destination: { section: "verification", anchor: null },
+					destination: { section: null, anchor: null },
 					content: "- Verify UI and scene-flow changes in a real runtime.",
 					intendedScope: ["verification"],
 				},
@@ -261,7 +261,7 @@ describe("evolution memory writer", () => {
 				target: { kind: "evolution-memory", expectedHarnessVersion: snapshot.harnessVersion },
 				payload: {
 					operation: "ADD",
-					destination: { section: "capability-honesty", anchor: null },
+					destination: { section: null, anchor: null },
 					content: "- Confirm persistence before promising durable recall.",
 					intendedScope: ["capability-honesty"],
 				},
@@ -301,6 +301,194 @@ describe("evolution memory writer", () => {
 				ledger: { origin: "evolution", creationEventId: "activation-event-1", supersessionEventId: null },
 			}),
 		]);
+	});
+
+	it("rejects named sections instead of discarding them during blank-memory bootstrap", async () => {
+		const { harnessState, snapshot, writer } = await emptyFixture();
+		const selectedBatch = batch(snapshot, [
+			{
+				mutationId: "mutation-global",
+				proposalId: "proposal-global",
+				target: { kind: "evolution-memory", expectedHarnessVersion: snapshot.harnessVersion },
+				payload: {
+					operation: "ADD",
+					destination: { section: null, anchor: null },
+					content: "Keep this batch atomic.",
+					intendedScope: ["repository"],
+				},
+			},
+			{
+				mutationId: "mutation-missing-section",
+				proposalId: "proposal-missing-section",
+				target: { kind: "evolution-memory", expectedHarnessVersion: snapshot.harnessVersion },
+				payload: {
+					operation: "ADD",
+					destination: { section: "verification", anchor: null },
+					content: "Do not discard this requested section.",
+					intendedScope: ["verification"],
+				},
+			},
+		]);
+
+		await expect(
+			writer.write(selectedBatch, { idempotencyKey: "write-missing-section", lease: writerLease }),
+		).rejects.toMatchObject({
+			name: "EvolutionWriterValidationError",
+			message: 'EVOLVE.md section "verification" must exist exactly once',
+		});
+		expect((await harnessState.loadCurrent()).state.memory).toBe("");
+	});
+
+	it.each([
+		["first", 0],
+		["middle", 1],
+		["final", 2],
+	] as const)("replaces the %s flat memory item in place", async (label, targetIndex) => {
+		const { harnessState, snapshot, writer } = await emptyFixture();
+		const initialBatch = batch(
+			snapshot,
+			["First", "Middle", "Final"].map(
+				(name): EvolutionMutation => ({
+					mutationId: `mutation-add-${name.toLowerCase()}`,
+					proposalId: `proposal-add-${name.toLowerCase()}`,
+					target: { kind: "evolution-memory", expectedHarnessVersion: snapshot.harnessVersion },
+					payload: {
+						operation: "ADD",
+						destination: { section: null, anchor: null },
+						content: `${name} lesson.`,
+						intendedScope: ["repository"],
+					},
+				}),
+			),
+			{ batchId: `batch-seed-${label}`, activationEventId: `activation-seed-${label}` },
+		);
+		const initialWrite = await writer.write(initialBatch, {
+			idempotencyKey: `write-seed-${label}`,
+			lease: writerLease,
+		});
+		await writer.activate(initialBatch, initialWrite, {
+			idempotencyKey: `activate-seed-${label}`,
+			lease: writerLease,
+		});
+		const seededSnapshot = await writer.captureSnapshot();
+		const target = seededSnapshot.activeMemoryItems[targetIndex];
+		if (target === undefined) throw new Error(`Expected the ${label} memory item`);
+		const replacementBatch = batch(
+			seededSnapshot,
+			[
+				{
+					mutationId: `mutation-replace-${label}`,
+					proposalId: `proposal-replace-${label}`,
+					target: { kind: "evolution-memory", expectedHarnessVersion: seededSnapshot.harnessVersion },
+					payload: {
+						operation: "REPLACE",
+						removal: {
+							memoryItemId: target.memoryItemId,
+							expectedContentDigest: target.contentDigest,
+							reason: `Replace the ${label} lesson`,
+						},
+						addition: { content: `${label} replacement.`, intendedScope: ["repository"] },
+					},
+				},
+			],
+			{ batchId: `batch-replace-${label}`, activationEventId: `activation-replace-${label}` },
+		);
+		const replacementWrite = await writer.write(replacementBatch, {
+			idempotencyKey: `write-replace-${label}`,
+			lease: writerLease,
+		});
+		await writer.activate(replacementBatch, replacementWrite, {
+			idempotencyKey: `activate-replace-${label}`,
+			lease: writerLease,
+		});
+
+		const expected = ["First lesson.", "Middle lesson.", "Final lesson."];
+		expected[targetIndex] = `${label} replacement.`;
+		expect((await harnessState.loadCurrent()).state.memory).toBe(
+			`${expected.map((content, index) => `Lesson ${String(index + 1)}: ${content}`).join("\n\n")}\n`,
+		);
+		const replacedSnapshot = await writer.captureSnapshot();
+		expect(replacedSnapshot.activeMemoryItems).toHaveLength(3);
+		expect(replacedSnapshot.activeMemoryItems[targetIndex]?.memoryItemId).not.toBe(target.memoryItemId);
+		expect((await harnessState.loadCurrent()).manifest.metadata.evolutionMemory.nextLessonNumber).toBe(4);
+	});
+
+	it("keeps a section-contained replacement in its exact location", async () => {
+		const root = await mkdtemp(join(tmpdir(), "diffex-evolution-section-replace-"));
+		temporaryDirectories.push(root);
+		const harnessState = new HarnessStateStore(join(root, "agent"));
+		const empty = await harnessState.initialize();
+		const initial = await harnessState.advance(
+			{ memory: "# Alpha\n\nAlpha baseline.\n\n# Beta\n\nBeta baseline.\n" },
+			empty.manifest.version,
+		);
+		if (initial.status !== "advanced") throw new Error("Expected section fixture harness advance");
+		const writer = new EvolutionMemoryWriter({
+			version: "1.0.0",
+			harnessState,
+			statePath: join(root, "writer-state"),
+		});
+		const snapshot = await writer.captureSnapshot();
+		const additionBatch = batch(
+			snapshot,
+			[
+				{
+					mutationId: "mutation-add-alpha",
+					proposalId: "proposal-add-alpha",
+					target: { kind: "evolution-memory", expectedHarnessVersion: snapshot.harnessVersion },
+					payload: {
+						operation: "ADD",
+						destination: { section: "Alpha", anchor: null },
+						content: "Alpha managed lesson.",
+						intendedScope: ["alpha"],
+					},
+				},
+			],
+			{ batchId: "batch-add-alpha", activationEventId: "activation-add-alpha" },
+		);
+		const additionWrite = await writer.write(additionBatch, {
+			idempotencyKey: "write-add-alpha",
+			lease: writerLease,
+		});
+		await writer.activate(additionBatch, additionWrite, {
+			idempotencyKey: "activate-add-alpha",
+			lease: writerLease,
+		});
+		const addedSnapshot = await writer.captureSnapshot();
+		const target = addedSnapshot.activeMemoryItems.find((item) => item.ledger.origin === "evolution");
+		if (target === undefined) throw new Error("Expected an Alpha evolution memory item");
+		const replacementBatch = batch(
+			addedSnapshot,
+			[
+				{
+					mutationId: "mutation-replace-alpha",
+					proposalId: "proposal-replace-alpha",
+					target: { kind: "evolution-memory", expectedHarnessVersion: addedSnapshot.harnessVersion },
+					payload: {
+						operation: "REPLACE",
+						removal: {
+							memoryItemId: target.memoryItemId,
+							expectedContentDigest: target.contentDigest,
+							reason: "Narrow the Alpha lesson",
+						},
+						addition: { content: "Alpha replacement.", intendedScope: ["alpha"] },
+					},
+				},
+			],
+			{ batchId: "batch-replace-alpha", activationEventId: "activation-replace-alpha" },
+		);
+		const replacementWrite = await writer.write(replacementBatch, {
+			idempotencyKey: "write-replace-alpha",
+			lease: writerLease,
+		});
+		await writer.activate(replacementBatch, replacementWrite, {
+			idempotencyKey: "activate-replace-alpha",
+			lease: writerLease,
+		});
+
+		expect((await harnessState.loadCurrent()).state.memory).toBe(
+			"# Alpha\n\nAlpha baseline.\n\nLesson 1: Alpha replacement.\n\n# Beta\n\nBeta baseline.\n",
+		);
 	});
 
 	it("stages selected deltas and atomically activates one harness revision", async () => {

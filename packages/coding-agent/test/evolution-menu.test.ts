@@ -587,7 +587,6 @@ describe("EvolutionMenuComponent", () => {
 						reason: "it is imprecise",
 					},
 					addition: {
-						destination: { section: "Verification", anchor: null },
 						content: "Use precise verification guidance.",
 						intendedScope: ["repository changes"],
 					},
