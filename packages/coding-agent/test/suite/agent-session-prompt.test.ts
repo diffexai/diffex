@@ -8,8 +8,8 @@ import { Type } from "typebox";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { InputEvent } from "../../src/core/extensions/index.ts";
 import type { PromptTemplate } from "../../src/core/prompt-templates.ts";
-import { createSkill } from "../../src/core/skills.ts";
 import { SessionManager } from "../../src/core/session-manager.ts";
+import { createSkill } from "../../src/core/skills.ts";
 import { createSyntheticSourceInfo } from "../../src/core/source-info.ts";
 import { createTestResourceLoader } from "../utilities.ts";
 import { createHarness, getMessageText, type Harness } from "./harness.ts";
@@ -362,7 +362,7 @@ describe("AgentSession prompt characterization", () => {
 		expect(inputEvents[0]?.streamingBehavior).toBeUndefined();
 	});
 
-	it("reports streamingBehavior to input handlers while streaming", async () => {
+	it("reports streamingBehavior while preserving concurrent unsignaled queue submissions", async () => {
 		let releaseToolExecution: (() => void) | undefined;
 		const toolRelease = new Promise<void>((resolve) => {
 			releaseToolExecution = resolve;
@@ -408,9 +408,14 @@ describe("AgentSession prompt characterization", () => {
 
 		const promptPromise = harness.session.prompt("start");
 		await sawToolStart;
-		await harness.session.prompt("queued", { streamingBehavior: "followUp" });
+		const queuedPrompts = Promise.all([
+			harness.session.prompt("queued one", { streamingBehavior: "followUp" }),
+			harness.session.prompt("queued two", { streamingBehavior: "followUp" }),
+		]);
+		await queuedPrompts;
 
-		expect(inputEvents.map((event) => event.streamingBehavior)).toEqual([undefined, "followUp"]);
+		expect(harness.session.getFollowUpMessages()).toEqual(["queued one", "queued two"]);
+		expect(inputEvents.map((event) => event.streamingBehavior)).toEqual([undefined, "followUp", "followUp"]);
 
 		releaseToolExecution?.();
 		await promptPromise;

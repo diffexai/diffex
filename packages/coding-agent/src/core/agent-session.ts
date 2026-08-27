@@ -450,7 +450,7 @@ export class AgentSession {
 	private _unsubscribeAgent?: () => void;
 	private _eventListeners: AgentSessionEventListener[] = [];
 	private _isAgentRunActive = false;
-	private _promptReservation: PromptReservation | undefined;
+	private readonly _promptReservations = new Set<PromptReservation>();
 	private _idleWaitPromise: Promise<void> | undefined;
 	private _resolveIdleWait: (() => void) | undefined;
 
@@ -850,8 +850,12 @@ export class AgentSession {
 
 	/** Internal handler for agent events - shared by subscribe and reconnect */
 	private _handleAgentEvent = async (event: AgentEvent): Promise<void> => {
-		if (event.type === "agent_start" && this._promptReservation?.signaled) {
-			this._promptReservation.agentStarted = true;
+		if (event.type === "agent_start") {
+			for (const reservation of this._promptReservations) {
+				if (!reservation.signaled) continue;
+				reservation.agentStarted = true;
+				break;
+			}
 		}
 		if (event.type === "message_start" && this._pendingSubagentEscalationEnvelope?.message === event.message) {
 			// The exact queued object is now entering parent context. Seal it so later reports form a new envelope.
@@ -1875,7 +1879,10 @@ export class AgentSession {
 		if (signal?.aborted) {
 			return rejectPreflight(signal.reason);
 		}
-		if (this._promptReservation) {
+		if ([...this._promptReservations].some((reservation) => reservation.signaled)) {
+			return rejectPreflight(new Error("Cannot submit a prompt while another prompt owns prompt preflight."));
+		}
+		if (signal && this._promptReservations.size > 0) {
 			return rejectPreflight(new Error("Cannot submit a prompt while another prompt owns prompt preflight."));
 		}
 		if (signal && this._isAgentRunActive) {
@@ -1883,11 +1890,9 @@ export class AgentSession {
 		}
 
 		const reservation: PromptReservation = { signaled: signal !== undefined, agentStarted: false };
-		this._promptReservation = reservation;
+		this._promptReservations.add(reservation);
 		const releaseUnsignaledPreflight = (): void => {
-			if (!reservation.signaled && this._promptReservation === reservation) {
-				this._promptReservation = undefined;
-			}
+			if (!reservation.signaled) this._promptReservations.delete(reservation);
 		};
 		const onAbort = signal
 			? (): void => {
@@ -1902,7 +1907,7 @@ export class AgentSession {
 
 		const cleanup = (): void => {
 			if (onAbort && signal) signal.removeEventListener("abort", onAbort);
-			if (this._promptReservation === reservation) this._promptReservation = undefined;
+			this._promptReservations.delete(reservation);
 		};
 		try {
 			return this._traceOperation("prompt", (operationSpan) =>
