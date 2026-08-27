@@ -26,6 +26,7 @@ Recovery never treats partial output as completed work and never feeds evolution
 | Successful rollback selection | The recorded immutable parent is still present and the evolved revision is current. | Select the parent with compare-and-swap and refresh on the next prompt boundary. | Existing in-flight prompts stay pinned to their admitted revision. |
 | Unsupported skill or orchestration target | The target registry has no enabled writer route. | Preserve the finding as deferred evidence with no executable payload. | Disabled target kinds cannot reach filesystem mutation or activation. |
 | Interrupted skill-candidate consolidation | A completed evolution job has checkpointed candidates but no completed candidate-work event. | Resume from append-only registry events with the same source-job idempotency key; repair missing scores or transitions before completion. | Candidate proposal revisions remain immutable, retries do not add recurrence, and partial registry appends cannot activate a skill. |
+| Interrupted skill synthesis | An evidence-qualified group has no draft, or a draft-record event exists without its `drafted` transition. | Resume with the revision-bound synthesis idempotency key; reuse an already recorded immutable draft and repair the missing transition before completing candidate work. | Only evidence-qualified groups invoke synthesis, and a draft remains outside the active harness with no writer or activation path. |
 
 ## Operational observability
 
