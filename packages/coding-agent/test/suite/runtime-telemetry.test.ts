@@ -178,7 +178,7 @@ describe("coding-agent runtime telemetry", () => {
 		const store = new HarnessStateStore(bootstrap.tempDir);
 		const version = `sha256:${"1".repeat(64)}`;
 		const bundle: HarnessVersionBundle = {
-			state: { memory: "captured memory" },
+			state: { memory: "captured memory", skills: [] },
 			manifest: {
 				schemaVersion: HARNESS_VERSION_SCHEMA_VERSION,
 				version,
