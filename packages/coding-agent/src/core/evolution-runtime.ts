@@ -12,6 +12,7 @@ import {
 	classifyEvolutionEvidence,
 	computeEvolutionContentDigest,
 	DeterministicProposalRanker,
+	DeterministicSkillDraftValidator,
 	EvolutionBackgroundWorker,
 	EvolutionControlPlane,
 	EvolutionControlService,
@@ -879,6 +880,33 @@ export async function createCodingAgentEvolutionRuntime(
 		artifacts: persistence,
 		jobs: persistence,
 	});
+	const skillValidator = new DeterministicSkillDraftValidator({
+		version: VERSION,
+		artifacts: persistence,
+		jobs: persistence,
+		environment: {
+			async capture(workspace, signal) {
+				signal?.throwIfAborted();
+				if (
+					workspace.repositoryId !== scope.repositoryId ||
+					workspace.directoryId !== currentDirectory.directoryId
+				) {
+					throw new Error("Skill validation workspace does not match the repository runtime");
+				}
+				const harnessVersion = options.session.activeHarnessVersion;
+				if (harnessVersion === undefined) throw new Error("Skill validation requires an active session harness");
+				return {
+					workspace: { repositoryId: scope.repositoryId, directoryId: currentDirectory.directoryId },
+					harnessVersion,
+					skillVersions: options.resourceLoader.getSkills().skills.map((skill) => ({
+						skillId: skill.skillId,
+						version: skill.version,
+						contentDigest: skill.contentDigest,
+					})),
+				};
+			},
+		},
+	});
 	const candidateWorker = new SkillCandidateBackgroundWorker({
 		clock,
 		source: new PollingSkillCandidateWorkSource({ clock, jobs: persistence, store: persistence }),
@@ -890,6 +918,7 @@ export async function createCodingAgentEvolutionRuntime(
 			store: persistence,
 			registry: candidateRegistry,
 			synthesizer: skillSynthesizer,
+			validator: skillValidator,
 			model,
 		}),
 		priority,

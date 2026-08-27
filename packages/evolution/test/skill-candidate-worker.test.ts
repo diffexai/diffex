@@ -21,11 +21,15 @@ import {
 	type SkillCandidateRegistrySnapshot,
 	type SkillCandidateRegistryStore,
 	SkillCandidateRegistryWorker,
+	type SkillCandidateValidationRecordingInput,
 	type SkillDraft,
+	type SkillDraftValidationReport,
+	type SkillDraftValidatorInput,
 	type SkillSynthesizerInput,
 } from "../src/index.ts";
 
 const now = "2026-08-25T12:00:00.000Z";
+const harnessVersion = `sha256:${"2".repeat(64)}`;
 const scope: EvolutionScope = { repositoryId: "diffex", scopeId: "repository" };
 const producer: EvolutionArtifactProducer = {
 	name: "fixture",
@@ -50,13 +54,13 @@ function inputSnapshot(): EvolutionInputSnapshot {
 			revision: "revision-1",
 		},
 		harness: {
-			harnessVersion: `sha256:${"2".repeat(64)}`,
+			harnessVersion,
 			baseVersion: `sha256:${"1".repeat(64)}`,
 			memory,
 			memoryContentDigest: computeEvolutionContentDigest(memory),
 			activeMemoryItems: [],
 		},
-		expectedHarnessBaseVersion: `sha256:${"2".repeat(64)}`,
+		expectedHarnessBaseVersion: harnessVersion,
 		ingestionHighWaterCursor: 0,
 		instructions: [],
 		skillCatalog: [],
@@ -175,7 +179,9 @@ function qualifiedGroup(candidateReference: EvolutionArtifactReference): SkillCa
 		},
 		priorityScore: null,
 		draft: null,
+		validation: null,
 		synthesisIdempotencyKey: "skill-synthesis-qualified",
+		validationIdempotencyKey: "skill-validation-qualified",
 		evaluationIdempotencyKey: "skill-evaluation-qualified",
 	};
 }
@@ -200,14 +206,16 @@ class MemoryJobStore implements EvolutionJobStore {
 }
 
 class MemoryArtifactStore implements EvolutionArtifactStore {
-	readonly artifacts: ReadonlyMap<string, EvolutionArtifact>;
+	readonly artifacts: Map<string, EvolutionArtifact>;
 
 	constructor(artifacts: readonly EvolutionArtifact[]) {
 		this.artifacts = new Map(artifacts.map((artifact) => [reference(artifact).contentDigest, artifact]));
 	}
 
 	async put(artifact: EvolutionArtifact): Promise<EvolutionArtifactReference> {
-		return reference(artifact);
+		const artifactReference = reference(artifact);
+		this.artifacts.set(artifactReference.contentDigest, artifact);
+		return artifactReference;
 	}
 
 	async get(artifactReference: EvolutionArtifactReference): Promise<EvolutionArtifact> {
@@ -238,6 +246,7 @@ class MemoryRegistryStore implements SkillCandidateRegistryStore {
 class FixtureRegistry implements SkillCandidateRegistry {
 	readonly requests: SkillCandidateRegistryConsolidationInput[] = [];
 	readonly draftRequests: SkillCandidateDraftRecordingInput[] = [];
+	readonly validationRequests: SkillCandidateValidationRecordingInput[] = [];
 	readonly groups: SkillCandidateGroup[] = [];
 	failuresRemaining = 0;
 
@@ -259,6 +268,13 @@ class FixtureRegistry implements SkillCandidateRegistry {
 		return { ...group, state: "drafted", draft: input.draft };
 	}
 
+	async recordValidation(input: SkillCandidateValidationRecordingInput): Promise<SkillCandidateGroup> {
+		this.validationRequests.push(input);
+		const group = this.groups.find((candidateGroup) => candidateGroup.groupId === input.groupId);
+		if (group === undefined) throw new Error("Unknown group");
+		return { ...group, state: "structurally-valid", validation: input.validation };
+	}
+
 	async list(): Promise<readonly SkillCandidateGroup[]> {
 		return this.groups;
 	}
@@ -274,6 +290,7 @@ function fixture() {
 	const store = new MemoryRegistryStore();
 	const registry = new FixtureRegistry();
 	const synthesisRequests: SkillSynthesizerInput[] = [];
+	const validationRequests: SkillDraftValidatorInput[] = [];
 	let clockTime = now;
 	const clock = { now: () => clockTime };
 	return {
@@ -282,6 +299,7 @@ function fixture() {
 		store,
 		registry,
 		synthesisRequests,
+		validationRequests,
 		clock,
 		setClock(value: string) {
 			clockTime = value;
@@ -322,6 +340,26 @@ function fixture() {
 					return { metadata: metadata(content.draftId, content.sourceCandidateIds, content), ...content };
 				},
 			},
+			validator: {
+				async validate(request): Promise<SkillDraftValidationReport> {
+					validationRequests.push(request);
+					const content = {
+						artifactKind: "skill-draft-validation" as const,
+						validationId: "validation-1",
+						groupId: request.group.groupId,
+						draft: reference(request.draft),
+						validatorVersion: "validator-v1",
+						assurance: "structure-provenance-scope-and-security-only" as const,
+						disposition: "accepted" as const,
+						issues: [],
+						validatedHarnessVersion: harnessVersion,
+						validatedSkillVersions: [],
+						canonicalInventory: ["skills/fixture-skill/SKILL.md"],
+						memoryRelationshipDigest: computeEvolutionContentDigest([]),
+					};
+					return { metadata: metadata(content.validationId, [request.draft.draftId], content), ...content };
+				},
+			},
 			model: {
 				maxProviderCallsPerExecution: 20,
 				execute: () => Promise.reject(new Error("Fixture synthesizer does not call the model")),
@@ -355,12 +393,13 @@ describe("skill candidate registry worker", () => {
 			data.store.events.flatMap((event) =>
 				event.type === "skill-candidate-work-checkpointed" ? [event.stage] : [],
 			),
-		).toEqual(["consolidating", "scoring", "synthesizing", "completed"]);
+		).toEqual(["consolidating", "scoring", "synthesizing", "validating", "completed"]);
 		expect(
 			data.store.events
 				.filter((event) => event.type === "skill-candidate-work-checkpointed")
 				.map((event) => event.idempotencyKey),
 		).toEqual([
+			expect.stringMatching(/^skill-candidate-work-stage-/),
 			expect.stringMatching(/^skill-candidate-work-stage-/),
 			expect.stringMatching(/^skill-candidate-work-stage-/),
 			expect.stringMatching(/^skill-candidate-work-stage-/),
@@ -387,6 +426,19 @@ describe("skill candidate registry worker", () => {
 				proposalRevisionIds: ["proposal-revision-1"],
 				idempotencyKey: "skill-synthesis-qualified",
 				draft: expect.objectContaining({ artifactId: "draft-1" }),
+			}),
+		]);
+		expect(data.validationRequests).toEqual([
+			expect.objectContaining({
+				group: expect.objectContaining({ groupId: "group-qualified", state: "drafted" }),
+				idempotencyKey: "skill-validation-qualified",
+			}),
+		]);
+		expect(data.registry.validationRequests).toEqual([
+			expect.objectContaining({
+				groupId: "group-qualified",
+				idempotencyKey: "skill-validation-qualified",
+				validation: expect.objectContaining({ artifactId: "validation-1" }),
 			}),
 		]);
 	});

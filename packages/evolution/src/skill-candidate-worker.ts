@@ -20,6 +20,7 @@ import type {
 	InteractivePriorityGate,
 	SkillCandidateRegistry,
 	SkillCandidateRegistryStore,
+	SkillDraftValidator,
 	SkillSynthesizer,
 } from "./ports.ts";
 import { computeEvolutionContentDigest, createEvolutionArtifactMetadata } from "./provenance.ts";
@@ -53,6 +54,7 @@ export interface SkillCandidateRegistryWorkerDependencies {
 	readonly store: SkillCandidateRegistryStore;
 	readonly registry: SkillCandidateRegistry;
 	readonly synthesizer: SkillSynthesizer;
+	readonly validator: SkillDraftValidator;
 	readonly model: EvolutionModelExecutor;
 }
 
@@ -134,6 +136,12 @@ function isInputSnapshot(artifact: EvolutionArtifact): artifact is EvolutionInpu
 
 function isSkillCandidate(artifact: EvolutionArtifact): artifact is SkillCandidate {
 	return "artifactKind" in artifact && artifact.artifactKind === "skill-candidate";
+}
+
+function isSkillDraft(
+	artifact: EvolutionArtifact,
+): artifact is Extract<EvolutionArtifact, { artifactKind: "skill-draft" }> {
+	return "artifactKind" in artifact && artifact.artifactKind === "skill-draft";
 }
 
 function retryDelay(attempt: number, baseDelayMs: number, maxDelayMs: number): number {
@@ -413,7 +421,7 @@ export class SkillCandidateRegistryWorker implements SkillCandidateWorkProcessor
 				attempt,
 				synthesisTargets.map((group) => group.groupId),
 			);
-			const draftedGroupIds: string[] = [];
+			const draftedGroups = result.groups.filter((group) => group.state === "drafted");
 			for (const group of synthesisTargets) {
 				signal?.throwIfAborted();
 				let draftReference = group.draft;
@@ -427,18 +435,53 @@ export class SkillCandidateRegistryWorker implements SkillCandidateWorkProcessor
 					});
 					draftReference = await this.#dependencies.artifacts.put(draft);
 				}
-				await this.#dependencies.registry.recordDraft({
+				draftedGroups.push(
+					await this.#dependencies.registry.recordDraft({
+						scope: job.metadata.scope,
+						groupId: group.groupId,
+						draft: draftReference,
+						proposalRevisionIds: group.proposalRevisions.map((revision) => revision.revisionId),
+						idempotencyKey: group.synthesisIdempotencyKey,
+						createdAt: this.#dependencies.clock.now(),
+					}),
+				);
+			}
+			await this.#appendCheckpoint(
+				job,
+				"validating",
+				attempt,
+				draftedGroups.map((group) => group.groupId),
+			);
+			const validatedGroupIds: string[] = [];
+			for (const group of draftedGroups) {
+				signal?.throwIfAborted();
+				if (group.draft === null) throw new Error(`Drafted candidate group "${group.groupId}" has no draft`);
+				const artifact = await this.#dependencies.artifacts.get(group.draft);
+				if (!isSkillDraft(artifact)) throw new Error(`Candidate group "${group.groupId}" draft is invalid`);
+				let validationReference = group.validation;
+				if (validationReference === null) {
+					const validation = await this.#dependencies.validator.validate({
+						group,
+						draft: artifact,
+						idempotencyKey: group.validationIdempotencyKey,
+						createdAt: this.#dependencies.clock.now(),
+						signal,
+					});
+					validationReference = await this.#dependencies.artifacts.put(validation);
+				}
+				await this.#dependencies.registry.recordValidation({
 					scope: job.metadata.scope,
 					groupId: group.groupId,
-					draft: draftReference,
+					draft: group.draft,
+					validation: validationReference,
 					proposalRevisionIds: group.proposalRevisions.map((revision) => revision.revisionId),
-					idempotencyKey: group.synthesisIdempotencyKey,
+					idempotencyKey: group.validationIdempotencyKey,
 					createdAt: this.#dependencies.clock.now(),
 				});
-				draftedGroupIds.push(group.groupId);
+				validatedGroupIds.push(group.groupId);
 			}
 			await this.#appendCheckpoint(job, "completed", attempt, [
-				...new Set([...processedGroupIds, ...draftedGroupIds]),
+				...new Set([...processedGroupIds, ...validatedGroupIds]),
 			]);
 		} catch (error) {
 			if (signal?.aborted) throw error;

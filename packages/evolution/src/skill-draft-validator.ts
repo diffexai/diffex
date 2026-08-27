@@ -35,7 +35,6 @@ const HTML_TARGET_PATTERN = /\b(?:href|src)\s*=\s*["']([^"']+)["']/giu;
 interface CandidateSource {
 	readonly candidate: SkillCandidate;
 	readonly input: EvolutionInputSnapshot;
-	readonly jobId: string;
 	readonly selectedMemoryProposalIds: readonly string[];
 	readonly resultingHarnessVersion: string | null;
 }
@@ -208,7 +207,6 @@ export class DeterministicSkillDraftValidator implements SkillDraftValidator {
 			sources.push({
 				candidate: artifact,
 				input: inputArtifact,
-				jobId: job.jobId,
 				selectedMemoryProposalIds,
 				resultingHarnessVersion: job.completion?.resultingHarnessVersion ?? null,
 			});
@@ -229,10 +227,26 @@ export class DeterministicSkillDraftValidator implements SkillDraftValidator {
 		if (!sameValues(input.draft.sourceEvidenceIds, expectedEvidenceIds)) {
 			add("evidence-closure-invalid", "The draft source evidence closure is incomplete");
 		}
-		const expectedTraceIds = uniqueSorted(
+		const declaredTraceIds = uniqueSorted(
 			candidates.flatMap((candidate) => [...candidate.supportingTraceIds, ...candidate.contradictingTraceIds]),
 		);
-		if (!sameValues(input.draft.sourceTraceIds, expectedTraceIds)) {
+		const derivedTraceIds = uniqueSorted(
+			sources.flatMap((source) => {
+				const citedEvidenceIds = new Set([
+					...source.candidate.supportingEvidenceIds,
+					...source.candidate.contradictingEvidenceIds,
+				]);
+				return source.input.evidenceSources.flatMap((evidenceSource) =>
+					evidenceSource.invocation.evidence.some((evidence) => citedEvidenceIds.has(evidence.evidenceId))
+						? (evidenceSource.invocation.traceId ?? [])
+						: [],
+				);
+			}),
+		);
+		if (!sameValues(declaredTraceIds, derivedTraceIds)) {
+			add("candidate-trace-closure-invalid", "The candidate trace closure does not match its cited evidence");
+		}
+		if (!sameValues(input.draft.sourceTraceIds, derivedTraceIds)) {
 			add("trace-closure-invalid", "The draft source trace closure is incomplete");
 		}
 		const expectedInstructionDigests = uniqueSorted(
@@ -243,15 +257,34 @@ export class DeterministicSkillDraftValidator implements SkillDraftValidator {
 		}
 		const expectedSkillVersions = uniqueSorted(
 			sources.flatMap((source) =>
-				source.candidate.existingSkillIds.flatMap((skillId) =>
-					source.input.skillCatalog
-						.filter((skill) => skill.skillId === skillId)
-						.map((skill) => skillVersionKey(skill)),
-				),
+				source.candidate.existingSkillIds.flatMap((skillId) => {
+					const matches = source.input.skillCatalog.filter((skill) => skill.skillId === skillId);
+					if (matches.length !== 1) {
+						add(
+							"source-skill-provenance-invalid",
+							`Candidate "${source.candidate.candidateId}" does not resolve skill "${skillId}" uniquely`,
+						);
+					}
+					return matches.map((skill) => skillVersionKey(skill));
+				}),
 			),
 		);
 		if (!sameValues(input.draft.sourceSkillVersions.map(skillVersionKey), expectedSkillVersions)) {
 			add("source-skill-closure-invalid", "The draft source skill version closure is incomplete");
+		}
+		const expectedMetadataSourceIds = uniqueSorted([
+			...input.draft.sourceCandidateIds,
+			...input.draft.sourceEvidenceIds,
+			...input.draft.sourceTraceIds,
+			...input.draft.sourceSkillVersions.map((skill) => skill.skillId),
+			...input.draft.repositoryInstructionDigests,
+		]);
+		if (
+			!sameValues(input.draft.metadata.sourceIds, expectedMetadataSourceIds) ||
+			input.draft.metadata.scope.repositoryId !== input.group.profile.workspace.evolutionScope.repositoryId ||
+			input.draft.metadata.scope.scopeId !== input.group.profile.workspace.evolutionScope.scopeId
+		) {
+			add("draft-provenance-invalid", "The draft metadata does not retain its complete source and scope closure");
 		}
 
 		const derivedSupportingLineages = new Set<string>();
@@ -290,10 +323,14 @@ export class DeterministicSkillDraftValidator implements SkillDraftValidator {
 			}
 			for (const lineageId of supporting) derivedSupportingLineages.add(lineageId);
 			for (const lineageId of contradicting) derivedContradictingLineages.add(lineageId);
-			if (!sameValues(source.candidate.memoryRelationship.memoryProposalIds, source.selectedMemoryProposalIds)) {
+			if (
+				source.candidate.memoryRelationship.memoryProposalIds.some(
+					(proposalId) => !source.selectedMemoryProposalIds.includes(proposalId),
+				)
+			) {
 				add(
 					"memory-relationship-stale",
-					`Candidate "${source.candidate.candidateId}" does not match its selected memory proposals`,
+					`Candidate "${source.candidate.candidateId}" cites memory guidance that was not selected`,
 				);
 			}
 		}
