@@ -49,6 +49,7 @@ import {
 	SkillCandidateRegistryWorker,
 	StructuredDeltaCurator,
 	StructuredSkillCurator,
+	StructuredSkillSynthesizer,
 	type SuccessfulMaterialization,
 	selectEvolutionEvidence,
 } from "#evolution";
@@ -351,7 +352,9 @@ export class CodingAgentEvolutionModelExecutor implements EvolutionModelExecutor
 						? "curation-invalid-response"
 						: request.stage === "skill-curator"
 							? "skill-curation-invalid-response"
-							: "reflection-invalid-response",
+							: request.stage === "skill-synthesizer"
+								? "skill-synthesis-invalid-response"
+								: "reflection-invalid-response",
 				retryable: false,
 				diagnostics: { lastCorrection },
 			});
@@ -767,6 +770,7 @@ class CodingAgentSnapshotSource implements EvolutionSnapshotSource {
 				reflector: "reflector-v2",
 				curator: "curator-v1",
 				skillCurator: "skill-curator-v1",
+				skillSynthesizer: "skill-synthesizer-v1",
 				validator: "validator-v1",
 				writer: "writer-v1",
 			},
@@ -870,6 +874,11 @@ export async function createCodingAgentEvolutionRuntime(
 		artifacts: persistence,
 		store: persistence,
 	});
+	const skillSynthesizer = new StructuredSkillSynthesizer({
+		version: VERSION,
+		artifacts: persistence,
+		jobs: persistence,
+	});
 	const candidateWorker = new SkillCandidateBackgroundWorker({
 		clock,
 		source: new PollingSkillCandidateWorkSource({ clock, jobs: persistence, store: persistence }),
@@ -880,6 +889,8 @@ export async function createCodingAgentEvolutionRuntime(
 			artifacts: persistence,
 			store: persistence,
 			registry: candidateRegistry,
+			synthesizer: skillSynthesizer,
+			model,
 		}),
 		priority,
 	});

@@ -15,6 +15,7 @@ import {
 	type SkillCandidateRegistryEvent,
 	type SkillCandidateRegistrySnapshot,
 	type SkillCandidateRegistryStore,
+	type SkillDraft,
 } from "../src/index.ts";
 
 const createdAt = "2026-08-25T12:00:00.000Z";
@@ -127,6 +128,7 @@ function input(items: readonly MaterializedEvidence[], traceId: string): Evoluti
 			reflector: "reflector-v1",
 			curator: "curator-v1",
 			skillCurator: "skill-curator-v1",
+			skillSynthesizer: "skill-synthesizer-v1",
 			validator: "validator-v1",
 			writer: "writer-v1",
 		},
@@ -254,6 +256,24 @@ class MemoryRegistryStore implements SkillCandidateRegistryStore {
 	}
 }
 
+class DraftPartialCommitRegistryStore extends MemoryRegistryStore {
+	interruptNextMultiAppend = false;
+
+	override async appendSkillCandidateRegistryEvents(
+		scope: EvolutionScope,
+		expectedRevision: number,
+		events: readonly SkillCandidateRegistryEvent[],
+	): Promise<SkillCandidateRegistryAppendResult> {
+		if (this.interruptNextMultiAppend && events.length > 1) {
+			this.interruptNextMultiAppend = false;
+			if (this.events.length !== expectedRevision) return "conflict";
+			this.events.push(events[0]!);
+			throw new Error("interrupted draft registry append");
+		}
+		return super.appendSkillCandidateRegistryEvents(scope, expectedRevision, events);
+	}
+}
+
 class PartialCommitRegistryStore extends MemoryRegistryStore {
 	interrupted = false;
 
@@ -336,6 +356,111 @@ describe("persistent skill candidate registry", () => {
 		]);
 		expect(second.groups[0]?.synthesisIdempotencyKey).toMatch(/^skill-synthesis-/);
 		expect(second.groups[0]?.evaluationIdempotencyKey).toMatch(/^skill-evaluation-/);
+	});
+
+	it("records an immutable draft and advances only an evidence-qualified group", async () => {
+		const store = new DraftPartialCommitRegistryStore();
+		const fixture = registryFixture(store);
+		const firstInput = input([evidence("support-a", "task-a", 0)], "trace-a");
+		const firstCandidate = candidate({
+			candidateId: "candidate-a",
+			input: firstInput,
+			proposedName: "focused-check",
+			supportingEvidenceIds: ["support-a"],
+			taskLineageIds: ["task-a"],
+		});
+		await fixture.registry.consolidate({
+			sourceEvolutionJobId: "job-a",
+			input: firstInput,
+			candidates: [firstCandidate],
+			idempotencyKey: "job-a:registry",
+			createdAt,
+		});
+		const secondInput = input([evidence("support-b", "task-b", 0)], "trace-b");
+		const secondCandidate = candidate({
+			candidateId: "candidate-b",
+			input: secondInput,
+			proposedName: "focused-check",
+			supportingEvidenceIds: ["support-b"],
+			taskLineageIds: ["task-b"],
+		});
+		const consolidated = await fixture.registry.consolidate({
+			sourceEvolutionJobId: "job-b",
+			input: secondInput,
+			candidates: [secondCandidate],
+			idempotencyKey: "job-b:registry",
+			createdAt: "2026-08-26T12:00:00.000Z",
+		});
+		const group = consolidated.groups[0];
+		if (group === undefined) throw new Error("Expected a candidate group");
+		const draftContent = {
+			artifactKind: "skill-draft" as const,
+			draftId: "skill-draft-1",
+			groupId: group.groupId,
+			synthesisIdempotencyKey: group.synthesisIdempotencyKey,
+			proposalRevisionIds: group.proposalRevisions.map((revision) => revision.revisionId),
+			sourceCandidateIds: ["candidate-a", "candidate-b"],
+			sourceEvidenceIds: ["support-a", "support-b"],
+			sourceTraceIds: ["trace-a", "trace-b"],
+			sourceSkillVersions: [],
+			repositoryInstructionDigests: [],
+			operation: secondCandidate.candidate.operation,
+			proposedName: secondCandidate.candidate.proposedName,
+			existingSkillIds: [],
+			workspace: secondCandidate.candidate.workspace,
+			content: "---\nname: focused-check\ndescription: Run a focused check after repository changes.\n---\n",
+		};
+		const draft: SkillDraft = {
+			metadata: metadata(draftContent.draftId, draftContent.sourceCandidateIds, draftContent),
+			...draftContent,
+		};
+		const draftReference = await fixture.artifacts.put(draft);
+		const request = {
+			scope,
+			groupId: group.groupId,
+			draft: draftReference,
+			proposalRevisionIds: draft.proposalRevisionIds,
+			idempotencyKey: group.synthesisIdempotencyKey,
+			createdAt: "2026-08-26T12:01:00.000Z",
+		};
+
+		store.interruptNextMultiAppend = true;
+		await expect(fixture.registry.recordDraft(request)).rejects.toThrow("interrupted draft registry append");
+		const recorded = await fixture.registry.recordDraft(request);
+		const retried = await fixture.registry.recordDraft(request);
+
+		expect(recorded).toMatchObject({ state: "drafted", draft: draftReference });
+		expect(retried).toMatchObject({ state: "drafted", draft: draftReference });
+		expect(fixture.store.events.filter((event) => event.type === "skill-candidate-draft-recorded")).toHaveLength(1);
+		expect(recorded.dispositionHistory.at(-1)).toMatchObject({
+			from: "evidence-qualified",
+			to: "drafted",
+			reasonCodes: ["outcome-aware-draft-recorded"],
+		});
+
+		const thirdInput = input([evidence("support-c", "task-c", 0)], "trace-c");
+		const thirdCandidate = candidate({
+			candidateId: "candidate-c",
+			input: thirdInput,
+			proposedName: "focused-check",
+			supportingEvidenceIds: ["support-c"],
+			taskLineageIds: ["task-c"],
+		});
+		const revised = await fixture.registry.consolidate({
+			sourceEvolutionJobId: "job-c",
+			input: thirdInput,
+			candidates: [thirdCandidate],
+			idempotencyKey: "job-c:registry",
+			createdAt: "2026-08-27T12:00:00.000Z",
+		});
+
+		expect(revised.groups[0]).toMatchObject({ state: "evidence-qualified", draft: null });
+		expect(revised.groups[0]?.synthesisIdempotencyKey).not.toBe(recorded.synthesisIdempotencyKey);
+		expect(revised.groups[0]?.dispositionHistory.at(-1)).toMatchObject({
+			from: "drafted",
+			to: "evidence-qualified",
+			reasonCodes: ["proposal-revision-set-changed"],
+		});
 	});
 
 	it("does not count retries or repeated lineage citations as recurrence", async () => {

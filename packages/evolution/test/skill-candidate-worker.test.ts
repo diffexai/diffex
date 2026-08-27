@@ -12,6 +12,7 @@ import {
 	type EvolutionScope,
 	PollingSkillCandidateWorkSource,
 	type SkillCandidate,
+	type SkillCandidateDraftRecordingInput,
 	type SkillCandidateGroup,
 	type SkillCandidateRegistry,
 	type SkillCandidateRegistryAppendResult,
@@ -20,6 +21,8 @@ import {
 	type SkillCandidateRegistrySnapshot,
 	type SkillCandidateRegistryStore,
 	SkillCandidateRegistryWorker,
+	type SkillDraft,
+	type SkillSynthesizerInput,
 } from "../src/index.ts";
 
 const now = "2026-08-25T12:00:00.000Z";
@@ -67,6 +70,7 @@ function inputSnapshot(): EvolutionInputSnapshot {
 			reflector: "reflector-v1",
 			curator: "curator-v1",
 			skillCurator: "skill-curator-v1",
+			skillSynthesizer: "skill-synthesizer-v1",
 			validator: "validator-v1",
 			writer: "writer-v1",
 		},
@@ -131,6 +135,51 @@ function completedJob(
 	};
 }
 
+function qualifiedGroup(candidateReference: EvolutionArtifactReference): SkillCandidateGroup {
+	return {
+		groupId: "group-qualified",
+		profile: {
+			workspace: { repositoryId: "diffex", directoryId: "directory-1", evolutionScope: scope },
+			existingSkillIds: [],
+			skillability: "verification-routine",
+			triggerTerms: ["focused", "verification"],
+			proceduralIntentTerms: ["focused", "test"],
+			applicabilityTerms: ["repository"],
+		},
+		proposalRevisions: [
+			{
+				revisionId: "proposal-revision-1",
+				candidateId: "candidate-1",
+				candidate: candidateReference,
+				sourceEvolutionJobId: "job-1",
+				createdAt: now,
+				evidence: {
+					supportingEvidenceIds: [],
+					contradictingEvidenceIds: [],
+					supportingTraceIds: [],
+					contradictingTraceIds: [],
+					supportingTaskLineageIds: ["task-a", "task-b"],
+					contradictingTaskLineageIds: [],
+				},
+			},
+		],
+		state: "evidence-qualified",
+		dispositionHistory: [],
+		evidence: {
+			supportingEvidenceIds: [],
+			contradictingEvidenceIds: [],
+			supportingTraceIds: [],
+			contradictingTraceIds: [],
+			supportingTaskLineageIds: ["task-a", "task-b"],
+			contradictingTaskLineageIds: [],
+		},
+		priorityScore: null,
+		draft: null,
+		synthesisIdempotencyKey: "skill-synthesis-qualified",
+		evaluationIdempotencyKey: "skill-evaluation-qualified",
+	};
+}
+
 class MemoryJobStore implements EvolutionJobStore {
 	readonly jobs: EvolutionJob[];
 
@@ -188,6 +237,8 @@ class MemoryRegistryStore implements SkillCandidateRegistryStore {
 
 class FixtureRegistry implements SkillCandidateRegistry {
 	readonly requests: SkillCandidateRegistryConsolidationInput[] = [];
+	readonly draftRequests: SkillCandidateDraftRecordingInput[] = [];
+	readonly groups: SkillCandidateGroup[] = [];
 	failuresRemaining = 0;
 
 	async consolidate(
@@ -198,11 +249,18 @@ class FixtureRegistry implements SkillCandidateRegistry {
 			this.failuresRemaining -= 1;
 			throw new Error("registry unavailable");
 		}
-		return { groups: [], changedGroupIds: ["group-1"] };
+		return { groups: this.groups, changedGroupIds: ["group-1"] };
+	}
+
+	async recordDraft(input: SkillCandidateDraftRecordingInput): Promise<SkillCandidateGroup> {
+		this.draftRequests.push(input);
+		const group = this.groups.find((candidateGroup) => candidateGroup.groupId === input.groupId);
+		if (group === undefined) throw new Error("Unknown group");
+		return { ...group, state: "drafted", draft: input.draft };
 	}
 
 	async list(): Promise<readonly SkillCandidateGroup[]> {
-		return [];
+		return this.groups;
 	}
 }
 
@@ -215,6 +273,7 @@ function fixture() {
 	const jobs = new MemoryJobStore([job]);
 	const store = new MemoryRegistryStore();
 	const registry = new FixtureRegistry();
+	const synthesisRequests: SkillSynthesizerInput[] = [];
 	let clockTime = now;
 	const clock = { now: () => clockTime };
 	return {
@@ -222,6 +281,7 @@ function fixture() {
 		jobs,
 		store,
 		registry,
+		synthesisRequests,
 		clock,
 		setClock(value: string) {
 			clockTime = value;
@@ -233,6 +293,39 @@ function fixture() {
 			artifacts: new MemoryArtifactStore([input, skillCandidate]),
 			store,
 			registry,
+			synthesizer: {
+				async synthesize(request): Promise<SkillDraft> {
+					synthesisRequests.push(request);
+					const content = {
+						artifactKind: "skill-draft" as const,
+						draftId: "draft-1",
+						groupId: request.group.groupId,
+						synthesisIdempotencyKey: request.idempotencyKey,
+						proposalRevisionIds: request.group.proposalRevisions.map((revision) => revision.revisionId),
+						sourceCandidateIds: ["candidate-1"],
+						sourceEvidenceIds: [],
+						sourceTraceIds: [],
+						sourceSkillVersions: [],
+						repositoryInstructionDigests: [],
+						operation: "CREATE" as const,
+						proposedName: "fixture-skill",
+						existingSkillIds: [],
+						workspace: {
+							repositoryId: "diffex",
+							directoryId: "directory-1",
+							rootPath: "/repo",
+							repositoryRevision: "revision-1",
+							evolutionScope: scope,
+						},
+						content: "---\nname: fixture-skill\ndescription: Fixture skill.\n---\n",
+					};
+					return { metadata: metadata(content.draftId, content.sourceCandidateIds, content), ...content };
+				},
+			},
+			model: {
+				maxProviderCallsPerExecution: 20,
+				execute: () => Promise.reject(new Error("Fixture synthesizer does not call the model")),
+			},
 		}),
 	};
 }
@@ -262,7 +355,7 @@ describe("skill candidate registry worker", () => {
 			data.store.events.flatMap((event) =>
 				event.type === "skill-candidate-work-checkpointed" ? [event.stage] : [],
 			),
-		).toEqual(["consolidating", "scoring", "completed"]);
+		).toEqual(["consolidating", "scoring", "synthesizing", "completed"]);
 		expect(
 			data.store.events
 				.filter((event) => event.type === "skill-candidate-work-checkpointed")
@@ -271,6 +364,30 @@ describe("skill candidate registry worker", () => {
 			expect.stringMatching(/^skill-candidate-work-stage-/),
 			expect.stringMatching(/^skill-candidate-work-stage-/),
 			expect.stringMatching(/^skill-candidate-work-stage-/),
+			expect.stringMatching(/^skill-candidate-work-stage-/),
+		]);
+	});
+
+	it("synthesizes and records drafts only for evidence-qualified groups", async () => {
+		const data = fixture();
+		const candidateReference = data.job.checkpoints[0]?.outputArtifacts[0];
+		if (candidateReference === undefined) throw new Error("Expected candidate reference");
+		data.registry.groups.push(qualifiedGroup(candidateReference));
+
+		await data.worker.process(data.job.jobId);
+
+		expect(data.synthesisRequests).toHaveLength(1);
+		expect(data.synthesisRequests[0]).toMatchObject({
+			group: { groupId: "group-qualified", state: "evidence-qualified" },
+			idempotencyKey: "skill-synthesis-qualified",
+		});
+		expect(data.registry.draftRequests).toEqual([
+			expect.objectContaining({
+				groupId: "group-qualified",
+				proposalRevisionIds: ["proposal-revision-1"],
+				idempotencyKey: "skill-synthesis-qualified",
+				draft: expect.objectContaining({ artifactId: "draft-1" }),
+			}),
 		]);
 	});
 

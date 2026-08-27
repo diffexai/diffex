@@ -145,6 +145,7 @@ export interface EvolutionPromptVersions {
 	readonly reflector: string;
 	readonly curator: string;
 	readonly skillCurator: string;
+	readonly skillSynthesizer: string;
 	readonly validator: string;
 	readonly writer: string;
 }
@@ -584,6 +585,29 @@ export interface SkillCandidatePriorityScore {
 	readonly contradictingTaskLineageIds: readonly string[];
 }
 
+export interface SkillDraft {
+	readonly artifactKind: "skill-draft";
+	readonly metadata: EvolutionArtifactMetadata;
+	readonly draftId: string;
+	readonly groupId: string;
+	readonly synthesisIdempotencyKey: string;
+	readonly proposalRevisionIds: readonly string[];
+	readonly sourceCandidateIds: readonly string[];
+	readonly sourceEvidenceIds: readonly string[];
+	readonly sourceTraceIds: readonly string[];
+	readonly sourceSkillVersions: readonly {
+		readonly skillId: string;
+		readonly version: string;
+		readonly contentDigest: string;
+	}[];
+	readonly repositoryInstructionDigests: readonly string[];
+	readonly operation: SkillCandidateOperation;
+	readonly proposedName: string;
+	readonly existingSkillIds: readonly string[];
+	readonly workspace: SkillCandidateWorkspaceScope;
+	readonly content: string;
+}
+
 export interface SkillCandidateDispositionRecord {
 	readonly eventId: string;
 	readonly from: SkillCandidateState | null;
@@ -600,6 +624,7 @@ export interface SkillCandidateGroup {
 	readonly dispositionHistory: readonly SkillCandidateDispositionRecord[];
 	readonly evidence: SkillCandidateEvidenceContribution;
 	readonly priorityScore: EvolutionArtifactReference | null;
+	readonly draft: EvolutionArtifactReference | null;
 	readonly synthesisIdempotencyKey: string;
 	readonly evaluationIdempotencyKey: string;
 }
@@ -625,6 +650,14 @@ export interface SkillCandidatePriorityScoredEvent extends SkillCandidateRegistr
 	readonly proposalRevisionIds: readonly string[];
 }
 
+export interface SkillCandidateDraftRecordedEvent extends SkillCandidateRegistryEventBase {
+	readonly type: "skill-candidate-draft-recorded";
+	readonly groupId: string;
+	readonly draft: EvolutionArtifactReference;
+	readonly proposalRevisionIds: readonly string[];
+	readonly idempotencyKey: string;
+}
+
 export interface SkillCandidateStateTransitionedEvent extends SkillCandidateRegistryEventBase {
 	readonly type: "skill-candidate-state-transitioned";
 	readonly groupId: string;
@@ -633,7 +666,7 @@ export interface SkillCandidateStateTransitionedEvent extends SkillCandidateRegi
 	readonly reasonCodes: readonly string[];
 }
 
-export type SkillCandidateWorkStage = "consolidating" | "scoring" | "completed";
+export type SkillCandidateWorkStage = "consolidating" | "scoring" | "synthesizing" | "completed";
 
 export interface SkillCandidateWorkCheckpointedEvent extends SkillCandidateRegistryEventBase {
 	readonly type: "skill-candidate-work-checkpointed";
@@ -658,6 +691,7 @@ export interface SkillCandidateWorkFailedEvent extends SkillCandidateRegistryEve
 export type SkillCandidateRegistryEvent =
 	| SkillCandidateProposalRecordedEvent
 	| SkillCandidatePriorityScoredEvent
+	| SkillCandidateDraftRecordedEvent
 	| SkillCandidateStateTransitionedEvent
 	| SkillCandidateWorkCheckpointedEvent
 	| SkillCandidateWorkFailedEvent;
@@ -943,6 +977,7 @@ export type EvolutionFailureReasonCode =
 	| "pipeline-invariant"
 	| "curation-invalid-response"
 	| "skill-curation-invalid-response"
+	| "skill-synthesis-invalid-response"
 	| "reflection-budget-exhausted"
 	| "reflection-invalid-response"
 	| "shutdown"

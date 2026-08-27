@@ -121,6 +121,7 @@ export {
 	type SkillabilityClassification,
 	type SkillCandidate,
 	type SkillCandidateDispositionRecord,
+	type SkillCandidateDraftRecordedEvent,
 	type SkillCandidateEvidenceContribution,
 	type SkillCandidateFailureHandling,
 	type SkillCandidateGroup,
@@ -142,6 +143,7 @@ export {
 	type SkillCandidateWorkStage,
 	type SkillCandidateWorkspaceScope,
 	type SkillCuratorToolCallLedgerEvent,
+	type SkillDraft,
 	type SkillMemoryRelationshipClassification,
 	type SkillTarget,
 	type ValidationIssue,
@@ -244,6 +246,7 @@ export type {
 	ReflectionResult,
 	Reflector,
 	ReflectorInput,
+	SkillCandidateDraftRecordingInput,
 	SkillCandidateRegistry,
 	SkillCandidateRegistryAppendResult,
 	SkillCandidateRegistryConsolidationInput,
@@ -252,6 +255,8 @@ export type {
 	SkillCurationResult,
 	SkillCurator,
 	SkillCuratorInput,
+	SkillSynthesizer,
+	SkillSynthesizerInput,
 	SuccessfulMaterialization,
 } from "./ports.ts";
 export {
@@ -319,6 +324,10 @@ export {
 	SkillCuratorToolRegistry,
 	type SkillCuratorToolRegistryOptions,
 } from "./skill-curator-tools.ts";
+export {
+	StructuredSkillSynthesizer,
+	type StructuredSkillSynthesizerDependencies,
+} from "./skill-synthesizer.ts";
 export {
 	EvolutionTargetAdapterRegistry,
 	type EvolutionTargetAdapterRegistryOptions,
