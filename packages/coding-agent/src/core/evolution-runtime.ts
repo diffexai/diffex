@@ -41,8 +41,12 @@ import {
 	type InteractivePriorityGate,
 	type JsonObject,
 	NON_SUBSTANTIVE_RUNTIME_TRACE_REASON,
+	PersistentSkillCandidateRegistry,
 	PollingEvolutionWorkSource,
+	PollingSkillCandidateWorkSource,
 	RecursiveReflector,
+	SkillCandidateBackgroundWorker,
+	SkillCandidateRegistryWorker,
 	StructuredDeltaCurator,
 	StructuredSkillCurator,
 	type SuccessfulMaterialization,
@@ -861,6 +865,24 @@ export async function createCodingAgentEvolutionRuntime(
 		runner,
 		priority,
 	});
+	const candidateRegistry = new PersistentSkillCandidateRegistry({
+		version: VERSION,
+		artifacts: persistence,
+		store: persistence,
+	});
+	const candidateWorker = new SkillCandidateBackgroundWorker({
+		clock,
+		source: new PollingSkillCandidateWorkSource({ clock, jobs: persistence, store: persistence }),
+		processor: new SkillCandidateRegistryWorker({
+			version: VERSION,
+			clock,
+			jobs: persistence,
+			artifacts: persistence,
+			store: persistence,
+			registry: candidateRegistry,
+		}),
+		priority,
+	});
 	const control = new EvolutionControlService({
 		scope,
 		clock,
@@ -889,11 +911,14 @@ export async function createCodingAgentEvolutionRuntime(
 				if (recovered !== null) abandonedJobIds.delete(job.jobId);
 			}
 			control.start();
+			candidateWorker.start();
 		},
 		evaluateAutomatic() {
 			void control.triggerAutomatic().catch(() => {});
 		},
-		stop: () => control.stop(),
+		async stop() {
+			await Promise.all([control.stop(), candidateWorker.stop()]);
+		},
 	};
 }
 
