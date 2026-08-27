@@ -54,6 +54,7 @@ import type {
 	HarnessVersion,
 	HarnessVersionBundle,
 	HarnessVersionList,
+	HarnessWorkspaceIdentity,
 } from "@earendil-works/diffex-harness-state";
 import { getThemeByName, theme } from "../modes/interactive/theme/theme.ts";
 import { resolvePath } from "../utils/paths.ts";
@@ -124,6 +125,7 @@ import {
 } from "./session-manager.ts";
 import type { SettingsManager } from "./settings-manager.ts";
 import {
+	createEvolvedSkillCatalog,
 	createSkillReferenceSnapshot,
 	formatSkillReferenceSnapshot,
 	type Skill,
@@ -313,6 +315,10 @@ export interface AgentSessionConfig {
 	harnessStateStore?: HarnessStateStore;
 	/** Harness revision activated for this session. */
 	harnessVersionBundle?: HarnessVersionBundle;
+	/** Stable identity used to scope evolved harness skills. */
+	workspaceIdentity?: HarnessWorkspaceIdentity;
+	/** Keep the supplied harness revision fixed instead of following the global selected pointer. */
+	pinHarnessVersion?: boolean;
 	/** Parent context for passive runtime telemetry. */
 	telemetryContext?: TelemetryContext;
 	/** Process-owned observer for durable lifecycle boundaries. */
@@ -515,10 +521,13 @@ export class AgentSession {
 	private _systemPromptOverride?: string;
 	private readonly _subagentController: SubagentController | undefined;
 	private readonly _harnessStateStore: HarnessStateStore | undefined;
+	private readonly _workspaceIdentity: HarnessWorkspaceIdentity | undefined;
+	private readonly _pinHarnessVersion: boolean;
 	private _harnessVersionBundle: HarnessVersionBundle | undefined;
 	private readonly _telemetryContext: TelemetryContext;
 	private readonly _lifecycleObserver: AgentSessionLifecycleObserver | undefined;
 	private _harnessSwitchInProgress = false;
+	private _promptAdmissionInProgress = false;
 	private _subagentCoordination: SubagentCoordination | undefined;
 	private _pendingSubagentEscalationEnvelope: PendingSubagentEscalationEnvelope | undefined;
 	private readonly _pendingIdleSubagentEscalations = new Map<string, number>();
@@ -542,7 +551,14 @@ export class AgentSession {
 		this._sessionStartEvent = config.sessionStartEvent ?? { type: "session_start", reason: "startup" };
 		this._subagentController = config.subagentController;
 		this._harnessStateStore = config.harnessStateStore;
+		this._workspaceIdentity = config.workspaceIdentity;
+		this._pinHarnessVersion = config.pinHarnessVersion ?? false;
 		this._harnessVersionBundle = config.harnessVersionBundle;
+		this._resourceLoader.setEvolvedSkills(
+			config.harnessVersionBundle === undefined || config.workspaceIdentity === undefined
+				? { skills: [], diagnostics: [] }
+				: createEvolvedSkillCatalog(config.harnessVersionBundle, config.workspaceIdentity),
+		);
 		this._telemetryContext = config.telemetryContext ?? NOOP_TELEMETRY_CONTEXT;
 		this._lifecycleObserver = config.lifecycleObserver;
 
@@ -1307,6 +1323,9 @@ export class AgentSession {
 		if (this._harnessSwitchInProgress) {
 			throw new Error("Cannot switch harness versions while another switch is in progress.");
 		}
+		if (this._promptAdmissionInProgress) {
+			throw new Error("Cannot switch harness versions while a prompt is being admitted.");
+		}
 		if (this.isStreaming) {
 			throw new Error("Cannot switch harness versions while a response is streaming.");
 		}
@@ -1342,6 +1361,11 @@ export class AgentSession {
 	): Promise<void> {
 		await this._subagentController?.reset();
 		const activatedBundle = selectBundle ? await selectBundle() : bundle;
+		this._resourceLoader.setEvolvedSkills(
+			this._workspaceIdentity === undefined
+				? { skills: [], diagnostics: [] }
+				: createEvolvedSkillCatalog(activatedBundle, this._workspaceIdentity),
+		);
 		this._harnessVersionBundle = activatedBundle;
 		this._baseSystemPrompt = this._rebuildSystemPrompt(this.getActiveToolNames());
 		this._systemPromptOverride = undefined;
@@ -1350,7 +1374,9 @@ export class AgentSession {
 	}
 
 	private async _refreshSelectedHarnessAtPromptBoundary(): Promise<void> {
-		if (!this._harnessStateStore || hasFixedHarnessSubagentSession(this.sessionManager)) return;
+		if (!this._harnessStateStore || this._pinHarnessVersion || hasFixedHarnessSubagentSession(this.sessionManager)) {
+			return;
+		}
 
 		const selected = await this._harnessStateStore.loadCurrent();
 		if (selected.manifest.version === this.activeHarnessVersion) return;
@@ -1925,6 +1951,26 @@ export class AgentSession {
 		releaseUnsignaledPreflight: () => void,
 		operationSpan: CodingAgentTelemetrySpan<"diffex.coding_agent.operation">,
 	): Promise<void> {
+		const reservesAdmission = !this.isStreaming;
+		if (reservesAdmission) {
+			if (this._promptAdmissionInProgress) {
+				throw new Error("Cannot submit a prompt while another prompt is being admitted.");
+			}
+			this._promptAdmissionInProgress = true;
+		}
+		try {
+			await this._promptAfterReservation(text, options, releaseUnsignaledPreflight, operationSpan);
+		} finally {
+			if (reservesAdmission) this._promptAdmissionInProgress = false;
+		}
+	}
+
+	private async _promptAfterReservation(
+		text: string,
+		options: PromptOptions | undefined,
+		releaseUnsignaledPreflight: () => void,
+		operationSpan: CodingAgentTelemetrySpan<"diffex.coding_agent.operation">,
+	): Promise<void> {
 		if (this._harnessSwitchInProgress) {
 			throw new Error("Cannot submit a prompt while a harness version switch is in progress.");
 		}
@@ -1968,6 +2014,9 @@ export class AgentSession {
 					"Cannot submit a prompt while compaction is in progress. Wait for compaction to finish and retry.",
 				);
 			}
+
+			if (!this.isStreaming) await this._refreshSelectedHarnessAtPromptBoundary();
+			signal?.throwIfAborted();
 
 			// Emit input event for extension interception (before skill/template expansion)
 			let currentText = text;
@@ -2019,9 +2068,6 @@ export class AgentSession {
 				preflightResult?.(true);
 				return;
 			}
-
-			await this._refreshSelectedHarnessAtPromptBoundary();
-			signal?.throwIfAborted();
 
 			// Validate model
 			if (!this.model) {
@@ -2204,6 +2250,14 @@ export class AgentSession {
 			const snapshot = this._skillReferenceSnapshots.get(key);
 			if (!snapshot) {
 				throw new Error(`Skill reference ${skillId}@${version} is not available in this session.`);
+			}
+			if (
+				snapshot.sourceKind === "evolved" &&
+				snapshot.harnessRevision !== this._harnessVersionBundle?.manifest.version
+			) {
+				throw new Error(
+					`Evolved skill reference ${skillId}@${version} is not part of the active harness revision.`,
+				);
 			}
 			if (!seen.has(key)) {
 				seen.add(key);

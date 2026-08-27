@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { HarnessVersionBundle, HarnessWorkspaceIdentity } from "@earendil-works/diffex-harness-state";
 import { existsSync, readdirSync, readFileSync, statSync } from "fs";
 import ignore from "ignore";
 import { basename, dirname, join, relative, resolve, sep } from "path";
@@ -179,6 +180,57 @@ export function createSkill(options: CreateSkillOptions): Skill {
 		...(options.harnessRevision === undefined ? {} : { harnessRevision: options.harnessRevision }),
 		disableModelInvocation: options.disableModelInvocation ?? false,
 	};
+}
+
+function workspaceIdentitiesMatch(left: HarnessWorkspaceIdentity, right: HarnessWorkspaceIdentity): boolean {
+	return left.repositoryId === right.repositoryId && left.directoryId === right.directoryId;
+}
+
+export function createEvolvedSkillCatalog(
+	bundle: HarnessVersionBundle,
+	workspace: HarnessWorkspaceIdentity,
+): SkillCatalog {
+	const skills: Skill[] = [];
+	const diagnostics: ResourceDiagnostic[] = [];
+	for (const artifact of bundle.state.skills) {
+		if (!workspaceIdentitiesMatch(artifact.workspace, workspace)) {
+			diagnostics.push({
+				type: "warning",
+				message: `evolved skill scope does not match the active workspace for harness ${bundle.manifest.version}`,
+				path: artifact.filePath,
+			});
+			continue;
+		}
+		skills.push(
+			createSkill({
+				name: artifact.name,
+				description: artifact.description,
+				filePath: artifact.filePath,
+				baseDir: artifact.baseDir,
+				sourceInfo: createSyntheticSourceInfo(artifact.filePath, {
+					source: `harness:${bundle.manifest.version}`,
+					scope: "project",
+					baseDir: artifact.baseDir,
+				}),
+				content: artifact.content,
+				sourceKind: "evolved",
+				scope: "workspace",
+				skillId: `skill:${sha256(
+					JSON.stringify([
+						"evolved",
+						artifact.workspace.repositoryId,
+						artifact.workspace.directoryId ?? null,
+						artifact.path,
+					]),
+				)}`,
+				contentDigest: artifact.contentHash,
+				version: artifact.contentHash,
+				harnessRevision: bundle.manifest.version,
+				disableModelInvocation: artifact.disableModelInvocation,
+			}),
+		);
+	}
+	return { skills, diagnostics };
 }
 
 export function createSkillReferenceSnapshot(skill: Skill): SkillReferenceSnapshot {

@@ -681,6 +681,10 @@ function prepareHarnessState(input: HarnessStateInput, bundlePath: string): Prep
 		skillNames.add(frontmatter.name);
 		const filePath = join(bundlePath, ...inputSkill.path.split("/"));
 		const contentHash = computeContentHash(contentBytes);
+		const workspace: HarnessWorkspaceIdentity = {
+			repositoryId: inputSkill.workspace.repositoryId,
+			...(inputSkill.workspace.directoryId === undefined ? {} : { directoryId: inputSkill.workspace.directoryId }),
+		};
 		skills.push({
 			path: inputSkill.path,
 			filePath,
@@ -689,14 +693,14 @@ function prepareHarnessState(input: HarnessStateInput, bundlePath: string): Prep
 			description: frontmatter.description,
 			content: inputSkill.content,
 			contentHash,
-			workspace: inputSkill.workspace,
+			workspace,
 			disableModelInvocation: frontmatter.disableModelInvocation,
 		});
 		skillArtifacts.push({
 			kind: SKILL_ARTIFACT_KIND,
 			path: inputSkill.path,
 			contentHash,
-			workspace: inputSkill.workspace,
+			workspace,
 		});
 		files.set(inputSkill.path, contentBytes);
 	}

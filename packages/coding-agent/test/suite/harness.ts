@@ -20,6 +20,7 @@ import { AgentSession, type AgentSessionEvent } from "../../src/core/agent-sessi
 import type { AgentSessionLifecycleObserver } from "../../src/core/agent-session-lifecycle.ts";
 import { AuthStorage } from "../../src/core/auth-storage.ts";
 import type { ExtensionRunner, SessionStartEvent } from "../../src/core/extensions/index.ts";
+import { resolveHarnessWorkspace } from "../../src/core/harness-state-runtime.ts";
 import { convertToLlm } from "../../src/core/messages.ts";
 import { SessionManager } from "../../src/core/session-manager.ts";
 import type { Settings } from "../../src/core/settings-manager.ts";
@@ -188,6 +189,7 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 	const resourceLoader =
 		options.resourceLoader ?? createTestResourceLoader(extensionsResult ? { extensionsResult } : undefined);
 
+	const workspace = await resolveHarnessWorkspace(tempDir);
 	const session = new AgentSession({
 		agent,
 		sessionManager,
@@ -203,6 +205,7 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 		sessionStartEvent: options.sessionStartEvent,
 		harnessStateStore: options.harnessStateStore,
 		harnessVersionBundle: options.harnessVersionBundle,
+		workspaceIdentity: workspace.workspace,
 		telemetryContext: options.telemetryContext,
 		lifecycleObserver: options.lifecycleObserver,
 	});

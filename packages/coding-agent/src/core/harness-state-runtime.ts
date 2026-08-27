@@ -1,4 +1,31 @@
-import { HarnessStateStore, type HarnessVersionBundle } from "@earendil-works/diffex-harness-state";
+import { createHash } from "node:crypto";
+import { realpath, stat } from "node:fs/promises";
+import { resolve } from "node:path";
+import {
+	HarnessStateStore,
+	type HarnessVersionBundle,
+	type HarnessWorkspaceIdentity,
+} from "@earendil-works/diffex-harness-state";
+
+export interface ResolvedHarnessWorkspace {
+	readonly workspace: HarnessWorkspaceIdentity;
+	readonly rootPath: string;
+}
+
+export async function resolveHarnessWorkspace(cwd: string): Promise<ResolvedHarnessWorkspace> {
+	const rootPath = await realpath(cwd).catch(() => resolve(cwd));
+	const directory = await stat(rootPath, { bigint: true });
+	const identity =
+		directory.ino === 0n
+			? JSON.stringify({ kind: "canonical-path-v1", rootPath })
+			: JSON.stringify({
+					device: directory.dev.toString(),
+					inode: directory.ino.toString(),
+					kind: "filesystem-directory-v1",
+				});
+	const directoryId = `sha256:${createHash("sha256").update(identity).digest("hex")}`;
+	return { workspace: { repositoryId: "global", directoryId }, rootPath };
+}
 
 export interface LoadedHarnessState {
 	store: HarnessStateStore;
