@@ -393,6 +393,7 @@ export interface ReflectionNode {
 export type LessonKind =
 	| "counterexample"
 	| "direct-instruction"
+	| "failed-approach"
 	| "failure-workaround"
 	| "harmful-memory"
 	| "incorrect-source-of-truth"
