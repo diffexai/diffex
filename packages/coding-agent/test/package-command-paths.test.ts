@@ -104,6 +104,57 @@ describe("package commands", () => {
 		rmSync(tempDir, { recursive: true, force: true });
 	});
 
+	it("asks interactive installs to choose global scope", async () => {
+		const selectInstallScope = vi.fn(async () => "global" as const);
+
+		expect(await handlePackageCommand(["install", packageDir], { selectInstallScope })).toBe(true);
+
+		expect(selectInstallScope).toHaveBeenCalledWith({ source: packageDir, cwd: realpathSync(projectDir), agentDir });
+		const settings = JSON.parse(readFileSync(join(agentDir, "settings.json"), "utf-8")) as {
+			packages?: string[];
+		};
+		expect(settings.packages).toHaveLength(1);
+		expect(existsSync(join(projectDir, ".diffex", "settings.json"))).toBe(false);
+	});
+
+	it("installs into the selected workspace without falling back globally", async () => {
+		const selectInstallScope = vi.fn(async () => "workspace" as const);
+
+		expect(
+			await handlePackageCommand(["install", packageDir, "--approve"], { selectInstallScope }),
+		).toBe(true);
+
+		expect(selectInstallScope).toHaveBeenCalledOnce();
+		const settings = JSON.parse(readFileSync(join(projectDir, ".diffex", "settings.json"), "utf-8")) as {
+			packages?: string[];
+		};
+		expect(settings.packages).toHaveLength(1);
+		expect(existsSync(join(agentDir, "settings.json"))).toBe(false);
+	});
+
+	it("cancels an interactive install without writing either scope", async () => {
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+		const selectInstallScope = vi.fn(async () => undefined);
+
+		expect(await handlePackageCommand(["install", packageDir], { selectInstallScope })).toBe(true);
+
+		expect(errorSpy.mock.calls.map(([message]) => String(message)).join("\n")).toContain("Installation cancelled.");
+		expect(existsSync(join(agentDir, "settings.json"))).toBe(false);
+		expect(existsSync(join(projectDir, ".diffex", "settings.json"))).toBe(false);
+	});
+
+	it("does not ask for scope when the workspace flag is explicit", async () => {
+		const selectInstallScope = vi.fn(async () => "global" as const);
+
+		expect(
+			await handlePackageCommand(["install", "-l", "--approve", packageDir], { selectInstallScope }),
+		).toBe(true);
+
+		expect(selectInstallScope).not.toHaveBeenCalled();
+		expect(existsSync(join(projectDir, ".diffex", "settings.json"))).toBe(true);
+		expect(existsSync(join(agentDir, "settings.json"))).toBe(false);
+	});
+
 	it("should persist global relative local package paths relative to settings.json", async () => {
 		const relativePkgDir = join(projectDir, "packages", "local-package");
 		mkdirSync(relativePkgDir, { recursive: true });

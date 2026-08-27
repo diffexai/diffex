@@ -3,6 +3,7 @@ import { Markdown, type MarkdownTheme } from "@earendil-works/diffex-tui";
 import chalk from "chalk";
 import { selectConfig } from "./cli/config-selector.ts";
 import { createProjectTrustContext } from "./cli/project-trust.ts";
+import { showStartupSelector } from "./cli/startup-ui.ts";
 import {
 	APP_NAME,
 	CONFIG_DIR_NAME,
@@ -51,12 +52,14 @@ const SELF_UPDATE_NOTE_MARKDOWN_THEME: MarkdownTheme = {
 	underline: (text) => chalk.underline(text),
 };
 
+type PackageInstallScope = "global" | "workspace";
+
 interface PackageCommandOptions {
 	command: PackageCommand;
 	source?: string;
 	updateTarget?: UpdateTarget;
 	showExtensionsSkippedNote: boolean;
-	local: boolean;
+	local: boolean | undefined;
 	force: boolean;
 	projectTrustOverride?: boolean;
 	help: boolean;
@@ -198,7 +201,7 @@ function parsePackageCommand(args: string[]): PackageCommandOptions | undefined 
 		return undefined;
 	}
 
-	let local = false;
+	let local: boolean | undefined;
 	let force = false;
 	let projectTrustOverride: boolean | undefined;
 	let help = false;
@@ -537,6 +540,11 @@ function prepareWindowsNpmSelfUpdate(): void {
 
 export interface PackageCommandRuntimeOptions {
 	extensionFactories?: InlineExtension[];
+	selectInstallScope?: (input: {
+		source: string;
+		cwd: string;
+		agentDir: string;
+	}) => Promise<PackageInstallScope | undefined>;
 }
 
 interface CommandSettingsResult {
@@ -546,6 +554,23 @@ interface CommandSettingsResult {
 
 function getCommandAppMode(): AppMode {
 	return process.stdin.isTTY && process.stdout.isTTY ? "interactive" : "print";
+}
+
+async function selectInteractiveInstallScope(input: {
+	source: string;
+	cwd: string;
+	agentDir: string;
+}): Promise<PackageInstallScope | undefined> {
+	const workspaceDir = join(input.cwd, CONFIG_DIR_NAME);
+	const settingsManager = SettingsManager.create(input.cwd, input.agentDir, { projectTrusted: false });
+	return showStartupSelector(
+		settingsManager,
+		`Install ${input.source}\n\nGlobal destination: ${join(input.agentDir, "settings.json")} and package storage under ${input.agentDir}.\nWorkspace destination: ${join(workspaceDir, "settings.json")} and package storage under ${workspaceDir}. This requires project trust and may be shared with collaborators.\n\nPackages can execute extensions and skills can instruct the model to run commands. Review the package before installing.`,
+		[
+			{ label: "Install globally", value: "global" },
+			{ label: "Install for this workspace", value: "workspace" },
+		],
+	);
 }
 
 function reportProjectTrustWarnings(warnings: readonly string[]): void {
@@ -738,7 +763,21 @@ export async function handlePackageCommand(
 
 	const cwd = process.cwd();
 	const agentDir = getAgentDir();
-	const writesProjectPackageConfig = (options.command === "install" || options.command === "remove") && options.local;
+	let local = options.local ?? false;
+	if (options.command === "install" && options.local === undefined) {
+		const selectInstallScope =
+			runtimeOptions.selectInstallScope ??
+			(getCommandAppMode() === "interactive" ? selectInteractiveInstallScope : undefined);
+		if (selectInstallScope) {
+			const scope = await selectInstallScope({ source: source!, cwd, agentDir });
+			if (scope === undefined) {
+				console.error(chalk.yellow("Installation cancelled."));
+				return true;
+			}
+			local = scope === "workspace";
+		}
+	}
+	const writesProjectPackageConfig = (options.command === "install" || options.command === "remove") && local;
 	const { settingsManager, projectTrustWarnings } = await createCommandSettingsManager({
 		cwd,
 		agentDir,
@@ -765,13 +804,23 @@ export async function handlePackageCommand(
 
 	try {
 		switch (options.command) {
-			case "install":
-				await packageManager.installAndPersist(source!, { local: options.local });
+			case "install": {
+				await packageManager.installAndPersist(source!, { local });
+				await settingsManager.flush();
+				const persistenceErrors = settingsManager.drainErrors();
+				if (persistenceErrors.length > 0) {
+					throw new Error(
+						`Could not persist the ${local ? "workspace" : "global"} installation: ${persistenceErrors
+							.map(({ error }) => error.message)
+							.join("; ")}`,
+					);
+				}
 				console.log(chalk.green(`Installed ${source}`));
 				return true;
+			}
 
 			case "remove": {
-				const removed = await packageManager.removeAndPersist(source!, { local: options.local });
+				const removed = await packageManager.removeAndPersist(source!, { local });
 				if (!removed) {
 					console.error(chalk.red(`No matching package found for ${source}`));
 					process.exitCode = 1;
