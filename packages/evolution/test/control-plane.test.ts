@@ -33,6 +33,7 @@ import {
 	type Lesson,
 	type ReflectionNode,
 	type ScoredProposal,
+	type SkillCandidate,
 	type SuccessfulMaterialization,
 	type ValidationReport,
 } from "../src/index.ts";
@@ -157,6 +158,7 @@ const EXECUTABLE_STAGES = [
 	"reflecting",
 	"curating",
 	"validating",
+	"skill-curating",
 	"writing",
 	"activating",
 ] as const satisfies readonly EvolutionJobStage[];
@@ -185,7 +187,7 @@ class RecordingExecutor implements EvolutionStageExecutor {
 			this.#crashed = true;
 			throw new Error(`simulated crash during ${context.job.stage}`);
 		}
-		if (context.job.stage === "validating" && this.#noOp) {
+		if (context.job.stage === "skill-curating" && this.#noOp) {
 			return { artifacts: [], state: { acceptedProposalIds: [] }, directive: "complete-no-op" };
 		}
 		if (context.job.stage === "activating") {
@@ -401,7 +403,7 @@ describe("durable evolution control plane", () => {
 			resultingHarnessVersion: null,
 			processedEvidenceCursor: 3,
 		});
-		expect(completed.checkpoints.map((checkpoint) => checkpoint.stage)).toEqual(EXECUTABLE_STAGES.slice(0, 5));
+		expect(completed.checkpoints.map((checkpoint) => checkpoint.stage)).toEqual(EXECUTABLE_STAGES.slice(0, 6));
 		expect(fixture.executor.calls.has("writing")).toBe(false);
 		expect(fixture.executor.calls.has("activating")).toBe(false);
 	});
@@ -655,6 +657,7 @@ describe("checkpointed evolution pipeline", () => {
 			});
 		const modelKeys: string[] = [];
 		const reflectorCounterReports: unknown[] = [];
+		const skillCuratorSelections: string[][] = [];
 		const writeKeys = new Set<string>();
 		const activationKeys = new Set<string>();
 		const target: EvolutionTargetWriter = {
@@ -815,6 +818,78 @@ describe("checkpointed evolution pipeline", () => {
 					return [proposal];
 				},
 			},
+			skillCurator: {
+				async curate(input) {
+					skillCuratorSelections.push(input.selectedMemoryProposals.map((scored) => scored.proposal.proposalId));
+					await input.model.execute({
+						stage: "skill-curator",
+						model: input.input.modelConfiguration,
+						promptVersion: "skill-curator-v1",
+						idempotencyKey: input.idempotencyKey,
+						input: {},
+						outputSchema: {},
+						tools: [],
+						signal: input.signal,
+					});
+					const candidateContent = {
+						artifactKind: "skill-candidate" as const,
+						candidateId: "skill-candidate-1",
+						operation: "CREATE" as const,
+						workspace: {
+							repositoryId: "diffex",
+							rootPath: "/repo",
+							repositoryRevision: "abc123",
+							evolutionScope: scope,
+						},
+						proposedName: "focused-verification",
+						existingSkillIds: [],
+						sourceLessonIds: ["lesson-1"],
+						sourceProceduralObservationIds: [],
+						supportingEvidenceIds: [],
+						contradictingEvidenceIds: [],
+						supportingTraceIds: [],
+						contradictingTraceIds: [],
+						taskLineageIds: [],
+						skillability: {
+							classification: "verification-routine" as const,
+							rationale: "The lesson describes a reusable verification routine.",
+						},
+						trigger: {
+							description: "A focused repository change requires verification.",
+							positiveExamples: ["A focused code change needs a targeted check."],
+							negativeExamples: ["No repository files changed."],
+						},
+						preconditions: ["A focused verification command is available."],
+						procedure: {
+							steps: [{ sequence: 1, action: "Run the focused check.", condition: null }],
+							requiredTools: ["shell"],
+							environment: ["Repository checkout"],
+						},
+						failureHandling: [
+							{
+								signal: "The focused check fails.",
+								mitigation: "Inspect its deterministic diagnostic.",
+								recovery: "Correct the issue and rerun the same check.",
+							},
+						],
+						applicabilityBoundaries: ["Focused repository changes"],
+						verificationContract: {
+							checks: ["The focused check exits successfully."],
+							completionCondition: "The focused check passes.",
+						},
+						memoryRelationship: {
+							classification: "complements" as const,
+							memoryProposalIds: ["proposal-1"],
+							rationale: "Memory keeps the constraint while the skill preserves the procedure.",
+						},
+					};
+					const candidate: SkillCandidate = {
+						metadata: metadata("skill-candidate-1", ["lesson-1", "proposal-1"], candidateContent),
+						...candidateContent,
+					};
+					return { candidates: [candidate], deferredFindings: [] };
+				},
+			},
 			validator: {
 				async validate(input) {
 					const proposalResults = input.proposals.map((proposal) => ({
@@ -874,8 +949,23 @@ describe("checkpointed evolution pipeline", () => {
 		const counterCheckpoint = completed.checkpoints.find((checkpoint) => checkpoint.stage === "counter-slot");
 		expect(counterCheckpoint).toMatchObject({ outputArtifacts: [], state: {} });
 		expect(reflectorCounterReports).toEqual([null]);
-		expect(modelKeys).toHaveLength(2);
-		expect(new Set(modelKeys).size).toBe(2);
+		expect(modelKeys).toHaveLength(3);
+		expect(new Set(modelKeys).size).toBe(3);
+		expect(skillCuratorSelections).toEqual([["proposal-1"]]);
+		const skillCheckpoint = completed.checkpoints.find((checkpoint) => checkpoint.stage === "skill-curating");
+		expect(skillCheckpoint).toMatchObject({
+			state: {
+				candidateIds: ["skill-candidate-1"],
+				deferredFindingIds: [],
+				selectedMemoryProposalIds: ["proposal-1"],
+			},
+		});
+		if (skillCheckpoint === undefined) throw new Error("Expected a skill curation checkpoint");
+		expect(await fixture.persistence.get(skillCheckpoint.outputArtifacts[0]!)).toMatchObject({
+			artifactKind: "skill-candidate",
+			candidateId: "skill-candidate-1",
+			operation: "CREATE",
+		});
 		expect(writeKeys.size).toBe(1);
 		expect(activationKeys.size).toBe(1);
 		const ledger = await fixture.persistence.read(created.jobId);

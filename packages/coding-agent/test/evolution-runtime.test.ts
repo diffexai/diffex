@@ -666,6 +666,8 @@ describe("coding-agent evolution runtime", () => {
 		["reflector", "json-text", "reflection-invalid-response"],
 		["curator", "response-tool", "curation-invalid-response"],
 		["curator", "json-text", "curation-invalid-response"],
+		["skill-curator", "response-tool", "skill-curation-invalid-response"],
+		["skill-curator", "json-text", "skill-curation-invalid-response"],
 	] as const)("classifies exhausted %s %s corrections", async (stage, submissionMethod, expectedReasonCode) => {
 		const harness = await createHarness();
 		harnesses.push(harness);
@@ -1052,6 +1054,17 @@ describe("coding-agent evolution runtime", () => {
 					stopReason: "toolUse",
 				});
 			},
+			(context) => {
+				const prompt = String(context.messages[0]?.content ?? "");
+				prompts.push(prompt);
+				expect(prompt).toContain(
+					'"objective":"classify-operational-patterns-and-produce-non-executable-skill-candidates"',
+				);
+				expect(prompt).not.toContain(traceId);
+				return fauxAssistantMessage(fauxToolCall("submit_evolution_response", { decisions: [] }), {
+					stopReason: "toolUse",
+				});
+			},
 		]);
 		const runtime = await createCodingAgentEvolutionRuntime({
 			agentDir,
@@ -1072,7 +1085,7 @@ describe("coding-agent evolution runtime", () => {
 				},
 				{ timeout: 5_000, interval: 20 },
 			);
-			expect(prompts).toHaveLength(2);
+			expect(prompts).toHaveLength(3);
 			expect(existsSync(join(agentDir, "evolution-failures", started.job.jobId))).toBe(false);
 		} finally {
 			await runtime.stop();

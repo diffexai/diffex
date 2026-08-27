@@ -12,6 +12,7 @@ import { computeEvolutionContentDigest, computeEvolutionTextDigest } from "./pro
 
 const DEFAULT_MAX_TOOL_CALLS = 8;
 const DEFAULT_MAX_REFERENCES_PER_CALL = 8;
+const MAX_TRACE_CONTEXT_ITEMS = 3;
 
 export interface SkillCuratorEvidenceBinding {
 	readonly materializationId: string;
@@ -205,6 +206,8 @@ export class SkillCuratorToolRegistry {
 							maxItems: this.#maxReferencesPerCall,
 							items: { type: "string", enum: this.evidence.references },
 						},
+						contextBefore: { type: "integer", minimum: 0, maximum: MAX_TRACE_CONTEXT_ITEMS },
+						contextAfter: { type: "integer", minimum: 0, maximum: MAX_TRACE_CONTEXT_ITEMS },
 					},
 					["evidenceRefs"],
 				),
@@ -253,12 +256,34 @@ export class SkillCuratorToolRegistry {
 
 	async #inspectSourceEvidence(input: JsonObject): Promise<JsonObject> {
 		return this.#execute("inspect_source_evidence", input, async () => {
-			this.#assertAllowedFields(input, ["evidenceRefs"]);
+			this.#assertAllowedFields(input, ["evidenceRefs", "contextBefore", "contextAfter"]);
 			const selected = this.#references(input.evidenceRefs, "evidenceRefs", this.evidence);
+			const contextBefore = this.#contextSize(input.contextBefore, "contextBefore");
+			const contextAfter = this.#contextSize(input.contextAfter, "contextAfter");
+			const contextBySource = new Map<string, SkillCuratorEvidenceBinding>();
+			for (const binding of selected) {
+				const index = binding.invocation.evidence.findIndex(
+					(evidence) => evidence.evidenceId === binding.evidence.evidenceId,
+				);
+				if (index < 0) throw new Error(`Frozen invocation is missing evidence "${binding.evidence.evidenceId}"`);
+				const start = Math.max(0, index - contextBefore);
+				const end = Math.min(binding.invocation.evidence.length, index + contextAfter + 1);
+				for (const evidence of binding.invocation.evidence.slice(start, end)) {
+					contextBySource.set(`${binding.materializationId}\0${evidence.evidenceId}`, { ...binding, evidence });
+				}
+			}
+			const context = [...contextBySource.values()].sort(
+				(left, right) => left.evidence.order.traceSequence - right.evidence.order.traceSequence,
+			);
 			return {
 				output: {
-					evidence: selected.map((binding) => ({
-						evidenceRef: this.evidence.refFor(binding),
+					evidence: context.map((binding) => ({
+						evidenceRef:
+							this.evidence.entries.find(
+								(entry) =>
+									entry.value.materializationId === binding.materializationId &&
+									entry.value.evidence.evidenceId === binding.evidence.evidenceId,
+							)?.ref ?? null,
 						materializationId: binding.materializationId,
 						traceId: binding.traceId,
 						integrity: binding.invocation.integrity,
@@ -266,10 +291,21 @@ export class SkillCuratorToolRegistry {
 						item: jsonObject(binding.evidence),
 					})),
 				},
-				evidence: selected,
+				evidence: context,
 				skills: [],
 			};
 		});
+	}
+
+	#contextSize(value: unknown, field: string): number {
+		if (value === undefined) return 0;
+		if (!Number.isSafeInteger(value) || (value as number) < 0 || (value as number) > MAX_TRACE_CONTEXT_ITEMS) {
+			throw new EvolutionToolDeniedError(
+				"invalid-range",
+				`${field} must be an integer from 0 through ${String(MAX_TRACE_CONTEXT_ITEMS)}`,
+			);
+		}
+		return value as number;
 	}
 
 	async #inspectSkills(input: JsonObject): Promise<JsonObject> {
