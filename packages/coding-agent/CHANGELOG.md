@@ -4,6 +4,7 @@
 
 ### Added
 
+- Added versioned skill availability, listing, reference, force-load, and digest-matched read observations to invocation traces without inferring skill use or causality.
 - Added atomic harness revisions for workspace-scoped evolved skills.
 - Added `pi auth check` provider/model auth preflight with optional credential output ([#7152](https://github.com/earendil-works/pi/issues/7152)).
 
