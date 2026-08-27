@@ -1,6 +1,7 @@
 import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { InMemoryTelemetryContext } from "@earendil-works/diffex-agent-core";
 import { fauxAssistantMessage } from "@earendil-works/diffex-ai";
 import { HarnessStateStore, type HarnessVersion } from "@earendil-works/diffex-harness-state";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -26,18 +27,21 @@ describe("AgentSession harness revisions", () => {
 		harness: Harness;
 		store: HarnessStateStore;
 		rootVersion: HarnessVersion;
+		telemetry: InMemoryTelemetryContext;
 	}> {
 		const agentDir = join(tmpdir(), `diffex-harness-session-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 		mkdirSync(agentDir, { recursive: true });
 		agentDirs.push(agentDir);
 		const store = new HarnessStateStore(agentDir);
 		const root = await store.initialize();
+		const telemetry = new InMemoryTelemetryContext();
 		const harness = await createHarness({
 			harnessStateStore: store,
 			harnessVersionBundle: root,
+			telemetryContext: telemetry,
 		});
 		harnesses.push(harness);
-		return { harness, store, rootVersion: root.manifest.version };
+		return { harness, store, rootVersion: root.manifest.version, telemetry };
 	}
 
 	it("applies an advanced EVOLVE revision only to requests after a live switch", async () => {
@@ -74,7 +78,7 @@ describe("AgentSession harness revisions", () => {
 	});
 
 	it("refreshes memory and evolved skills from one selected revision", async () => {
-		const { harness, store, rootVersion } = await createVersionedHarness();
+		const { harness, store, rootVersion, telemetry } = await createVersionedHarness();
 		const workspace = await resolveHarnessWorkspace(harness.tempDir);
 		const skillContent =
 			"---\nname: atomic-review\ndescription: Review the active harness atomically.\n---\n\n# Atomic review\n";
@@ -116,6 +120,25 @@ describe("AgentSession harness revisions", () => {
 				version: revision.state.skills[0]?.contentHash,
 			}),
 		]);
+		const promptOperation = telemetry
+			.getSpans()
+			.find(
+				(span) =>
+					span.name === "diffex.coding_agent.operation" && span.attributes["diffex.operation.kind"] === "prompt",
+			);
+		const availableEvent = promptOperation?.events.find(
+			(event) =>
+				event.name === "diffex.skill.available" && event.attributes["diffex.skill.source_kind"] === "evolved",
+		);
+		expect(availableEvent?.attributes).toMatchObject({
+			"diffex.skill.version": revision.state.skills[0]?.contentHash,
+			"diffex.skill.source_kind": "evolved",
+			"diffex.skill.scope": "workspace",
+			"diffex.skill.harness_revision": revision.manifest.version,
+			"diffex.harness.version": revision.manifest.version,
+			"diffex.workspace.repository_id": workspace.workspace.repositoryId,
+			"diffex.workspace.directory_id": workspace.workspace.directoryId,
+		});
 
 		await harness.session.switchHarnessVersion(rootVersion);
 		expect(harness.session.systemPrompt).not.toContain("Use the matching evolved skill revision.");
