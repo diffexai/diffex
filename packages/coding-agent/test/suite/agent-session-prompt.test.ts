@@ -226,8 +226,9 @@ describe("AgentSession prompt characterization", () => {
 				const user = context.messages.find((message) => message.role === "user");
 				admittedPrompt = user ? getMessageText(user) : "";
 				admittedSystemPrompt = context.systemPrompt ?? "";
-				return fauxAssistantMessage("ok");
+				return fauxAssistantMessage(fauxToolCall("read", { path: unselectedPath }), { stopReason: "toolUse" });
 			},
+			fauxAssistantMessage("ok"),
 		]);
 
 		await harness.session.prompt(`${selected.reference}\n\nUse this for the task.`);
@@ -249,6 +250,31 @@ describe("AgentSession prompt characterization", () => {
 		expect(promptOperation?.attributes["diffex.skill.references"]).toEqual([
 			`${selected.skillId}@${selected.version}`,
 		]);
+		const skillEvents = promptOperation?.events.filter((event) => event.name.startsWith("diffex.skill.")) ?? [];
+		expect(skillEvents.map((event) => event.name)).toEqual([
+			"diffex.skill.available",
+			"diffex.skill.available",
+			"diffex.skill.listed",
+			"diffex.skill.explicitly_referenced",
+			"diffex.skill.force_loaded",
+			"diffex.skill.read",
+		]);
+		expect(skillEvents.find((event) => event.name === "diffex.skill.listed")?.attributes).toMatchObject({
+			"diffex.skill.id": references.find((reference) => reference.name === "unselected")?.skillId,
+			"diffex.skill.source_kind": "installed",
+			"diffex.skill.scope": "workspace",
+			"diffex.workspace.repository_id": expect.any(String),
+			"diffex.workspace.directory_id": expect.any(String),
+		});
+		expect(skillEvents.find((event) => event.name === "diffex.skill.force_loaded")?.attributes).toMatchObject({
+			"diffex.skill.id": selected.skillId,
+			"diffex.skill.version": selected.version,
+			"diffex.skill.content_digest": selected.contentDigest,
+		});
+		expect(skillEvents.find((event) => event.name === "diffex.skill.read")?.attributes["diffex.skill.id"]).toBe(
+			references.find((reference) => reference.name === "unselected")?.skillId,
+		);
+		expect(skillEvents.some((event) => event.name.includes("used"))).toBe(false);
 	});
 
 	it("expands prompt templates before sending the prompt", async () => {

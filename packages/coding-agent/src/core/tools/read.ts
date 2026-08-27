@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { basename, dirname, isAbsolute, relative, resolve as resolvePath, sep } from "node:path";
 import type { AgentTool } from "@earendil-works/diffex-agent-core";
 import type { Api, ImageContent, Model, TextContent } from "@earendil-works/diffex-ai";
@@ -31,6 +32,7 @@ export const readToolSystemPromptContribution = {
 export type ReadToolInput = Static<typeof readSchema>;
 
 export interface ReadToolDetails {
+	contentDigest?: string;
 	truncation?: TruncationResult;
 }
 
@@ -270,6 +272,7 @@ export function createReadToolDefinition(
 								// Read text content.
 								const buffer = await ops.readFile(absolutePath);
 								const textContent = buffer.toString("utf-8");
+								const contentDigest = `sha256:${createHash("sha256").update(textContent).digest("hex")}`;
 								const allLines = textContent.split("\n");
 								const totalFileLines = allLines.length;
 								// Apply offset if specified. Convert from 1-indexed input to 0-indexed array access.
@@ -317,6 +320,7 @@ export function createReadToolDefinition(
 									// No truncation and no remaining user-limited content.
 									outputText = truncation.content;
 								}
+								details = { ...details, contentDigest };
 								content = [{ type: "text", text: outputText }];
 							}
 

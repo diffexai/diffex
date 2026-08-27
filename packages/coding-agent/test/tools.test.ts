@@ -76,7 +76,7 @@ describe("Coding Agent Tools", () => {
 			expect(getTextOutput(result)).toBe(content);
 			// No truncation message since file fits within limits
 			expect(getTextOutput(result)).not.toContain("Use offset=");
-			expect(result.details).toBeUndefined();
+			expect(result.details).toEqual({ contentDigest: expect.stringMatching(/^sha256:[a-f0-9]{64}$/) });
 		});
 
 		it("should handle non-existent files", async () => {
