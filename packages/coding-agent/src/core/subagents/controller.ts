@@ -1503,7 +1503,11 @@ export class SubagentController {
 		}
 
 		record.runCancellation = cancellation;
-		void cancellation.catch(() => {});
+		void cancellation.catch(() => {
+			if (record.runCancellation === cancellation) {
+				record.runCancellation = undefined;
+			}
+		});
 		return cancellation;
 	}
 

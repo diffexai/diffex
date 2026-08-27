@@ -618,15 +618,16 @@ describe("durable subagent lifecycle", () => {
 		expect(root.session.getSubagents()).toEqual([{ name: "target", status: "idle", task: "Inspect the change" }]);
 	});
 
-	it("retains the old leaf and roster when child quiescing fails", async () => {
+	it("retains the old leaf and roster when child quiescing fails and retries cancellation on shutdown", async () => {
 		const childStarted = deferred<void>();
-		const releaseChild = deferred<void>();
 		const root = await createRoot();
 		const targetId = createRosterBranch(root, []);
 		root.harness.setResponses([
-			async () => {
+			async (_context, request) => {
 				childStarted.resolve();
-				await releaseChild.promise;
+				await new Promise<void>((resolvePromise) => {
+					request?.signal?.addEventListener("abort", () => resolvePromise(), { once: true });
+				});
 				return fauxAssistantMessage("finished later");
 			},
 		]);
@@ -640,7 +641,10 @@ describe("durable subagent lifecycle", () => {
 		expect(root.sessionManager.getLeafId()).toBe(currentLeafId);
 		expect(root.session.getSubagents()[0]).toMatchObject({ name: "worker", status: "running" });
 		abort.mockRestore();
-		releaseChild.resolve();
+		const shutdownAbort = vi.spyOn(AgentSession.prototype, "abort");
+
+		await expect(root.session.dispose()).resolves.toBeUndefined();
+		expect(shutdownAbort).toHaveBeenCalledOnce();
 	});
 
 	it("does not block a successful leaf change when a quiesce status snapshot fails", async () => {
