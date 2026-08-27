@@ -16,9 +16,11 @@ import type {
 	EvolutionArtifactStore,
 	EvolutionClock,
 	EvolutionJobStore,
+	EvolutionModelExecutor,
 	InteractivePriorityGate,
 	SkillCandidateRegistry,
 	SkillCandidateRegistryStore,
+	SkillSynthesizer,
 } from "./ports.ts";
 import { computeEvolutionContentDigest, createEvolutionArtifactMetadata } from "./provenance.ts";
 
@@ -50,6 +52,8 @@ export interface SkillCandidateRegistryWorkerDependencies {
 	readonly artifacts: EvolutionArtifactStore;
 	readonly store: SkillCandidateRegistryStore;
 	readonly registry: SkillCandidateRegistry;
+	readonly synthesizer: SkillSynthesizer;
+	readonly model: EvolutionModelExecutor;
 }
 
 export interface SkillCandidateRegistryWorkerOptions {
@@ -402,7 +406,40 @@ export class SkillCandidateRegistryWorker implements SkillCandidateWorkProcessor
 				]),
 			];
 			await this.#appendCheckpoint(job, "scoring", attempt, processedGroupIds);
-			await this.#appendCheckpoint(job, "completed", attempt, processedGroupIds);
+			const synthesisTargets = result.groups.filter((group) => group.state === "evidence-qualified");
+			await this.#appendCheckpoint(
+				job,
+				"synthesizing",
+				attempt,
+				synthesisTargets.map((group) => group.groupId),
+			);
+			const draftedGroupIds: string[] = [];
+			for (const group of synthesisTargets) {
+				signal?.throwIfAborted();
+				let draftReference = group.draft;
+				if (draftReference === null) {
+					const draft = await this.#dependencies.synthesizer.synthesize({
+						group,
+						model: this.#dependencies.model,
+						idempotencyKey: group.synthesisIdempotencyKey,
+						createdAt: this.#dependencies.clock.now(),
+						signal,
+					});
+					draftReference = await this.#dependencies.artifacts.put(draft);
+				}
+				await this.#dependencies.registry.recordDraft({
+					scope: job.metadata.scope,
+					groupId: group.groupId,
+					draft: draftReference,
+					proposalRevisionIds: group.proposalRevisions.map((revision) => revision.revisionId),
+					idempotencyKey: group.synthesisIdempotencyKey,
+					createdAt: this.#dependencies.clock.now(),
+				});
+				draftedGroupIds.push(group.groupId);
+			}
+			await this.#appendCheckpoint(job, "completed", attempt, [
+				...new Set([...processedGroupIds, ...draftedGroupIds]),
+			]);
 		} catch (error) {
 			if (signal?.aborted) throw error;
 			await this.#appendFailure(job, attempt, error);

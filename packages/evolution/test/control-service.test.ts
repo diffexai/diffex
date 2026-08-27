@@ -138,6 +138,7 @@ async function serviceFixture(
 					reflector: "reflector-v1",
 					curator: "curator-v1",
 					skillCurator: "skill-curator-v1",
+					skillSynthesizer: "skill-synthesizer-v1",
 					validator: "validator-v1",
 					writer: "writer-v1",
 				},
