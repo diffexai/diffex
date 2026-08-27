@@ -150,6 +150,7 @@ function fixtureInput(evidenceCount = 6): {
 		expectedHarnessBaseVersion: HARNESS_VERSION,
 		ingestionHighWaterCursor: 1,
 		instructions: [],
+		skillCatalog: [],
 		modelConfiguration: { provider: "faux", model: "fixture", configurationDigest: MODEL_DIGEST },
 		pipelineVersion: "pipeline-v1",
 		promptVersions: {

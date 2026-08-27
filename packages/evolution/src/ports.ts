@@ -17,6 +17,8 @@ import type {
 	EvolutionProposal,
 	EvolutionRepositorySnapshot,
 	EvolutionScope,
+	EvolutionSkillContentArtifact,
+	EvolutionSkillContentSnapshot,
 	EvolutionStageCheckpoint,
 	EvolutionTriggerKind,
 	HarnessActivationReceipt,
@@ -39,6 +41,7 @@ export type EvolutionArtifact =
 	| EvidenceCorpusManifest
 	| EvolutionInputSnapshot
 	| EvolutionProposal
+	| EvolutionSkillContentArtifact
 	| HarnessActivationReceipt
 	| InstructionSnapshot
 	| Lesson
@@ -293,10 +296,13 @@ export interface EvolutionEvidenceCatalog {
 	excludedThroughCursor?(scope: EvolutionScope, afterCursor: number, throughCursor: number): Promise<number>;
 }
 
+export type EvolutionSkillSnapshotSource = Omit<EvolutionSkillContentSnapshot, "workspace">;
+
 export interface EvolutionSnapshotContext {
 	readonly repository: EvolutionRepositorySnapshot;
 	readonly harness: ImmutableHarnessSnapshot;
 	readonly instructions: readonly InstructionDocumentSnapshot[];
+	readonly skills: readonly EvolutionSkillSnapshotSource[];
 	readonly modelConfiguration: EvolutionModelIdentity;
 	readonly pipelineVersion: string;
 	readonly promptVersions: EvolutionPromptVersions;

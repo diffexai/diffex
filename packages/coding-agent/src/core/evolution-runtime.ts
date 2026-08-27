@@ -32,6 +32,7 @@ import {
 	type EvolutionProposalDetail,
 	type EvolutionRollbackAction,
 	type EvolutionScope,
+	type EvolutionSkillSnapshotSource,
 	type EvolutionSnapshotSource,
 	type EvolutionStartResult,
 	EvolutionTargetAdapterRegistry,
@@ -54,6 +55,7 @@ import { FileEvolutionFailureReporter } from "./evolution-failure-reporter.ts";
 import { INVOCATION_TRACE_LOCK_STALE_MS, type InvocationTrace } from "./invocation-trace.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
 import type { ResourceLoader } from "./resource-loader.ts";
+import type { Skill } from "./skills.ts";
 
 const execFileAsync = promisify(execFile);
 const EVOLUTION_DIRECTORY_NAME = "evolution";
@@ -664,6 +666,24 @@ export class TraceEvidenceCatalog implements EvolutionEvidenceCatalog {
 	}
 }
 
+export function createEvolutionSkillSnapshots(skills: readonly Skill[]): readonly EvolutionSkillSnapshotSource[] {
+	return skills.map((skill) => ({
+		skillId: skill.skillId,
+		name: skill.name,
+		description: skill.description,
+		sourceKind: skill.sourceKind,
+		scope: skill.scope,
+		source: skill.sourceInfo.source,
+		version: skill.version,
+		contentDigest: skill.contentDigest,
+		...(skill.harnessRevision === undefined ? {} : { harnessRevision: skill.harnessRevision }),
+		location: skill.filePath,
+		baseDir: skill.baseDir,
+		disableModelInvocation: skill.disableModelInvocation,
+		content: skill.content,
+	}));
+}
+
 class CodingAgentSnapshotSource implements EvolutionSnapshotSource {
 	readonly #cwd: string;
 	readonly #directoryId: string;
@@ -713,6 +733,7 @@ class CodingAgentSnapshotSource implements EvolutionSnapshotSource {
 			content: file.content,
 			contentDigest: computeEvolutionContentDigest(file.content),
 		}));
+		const skills = createEvolutionSkillSnapshots(this.#resourceLoader.getSkills().skills);
 		return {
 			repository: {
 				repositoryId: scope.repositoryId,
@@ -722,6 +743,7 @@ class CodingAgentSnapshotSource implements EvolutionSnapshotSource {
 			},
 			harness,
 			instructions,
+			skills,
 			modelConfiguration: {
 				provider: model.provider,
 				model: model.id,

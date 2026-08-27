@@ -159,6 +159,7 @@ function fixtureInput(): EvolutionInputSnapshot {
 				contentDigest: computeEvolutionContentDigest(secondInstruction),
 			},
 		],
+		skillCatalog: [],
 		modelConfiguration: {
 			provider: "faux",
 			model: "fixture",

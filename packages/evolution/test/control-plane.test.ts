@@ -7,6 +7,7 @@ import {
 	AUTOMATIC_EVOLUTION_COOLDOWN_MS,
 	AUTOMATIC_EVOLUTION_TOKEN_THRESHOLD,
 	computeEvolutionContentDigest,
+	computeEvolutionTextDigest,
 	createEvolutionArtifactMetadata,
 	EVOLUTION_TOKEN_ESTIMATOR_VERSION,
 	type EvolutionArtifactProducer,
@@ -19,6 +20,7 @@ import {
 	EvolutionPipeline,
 	type EvolutionProgressEvent,
 	type EvolutionScope,
+	type EvolutionSkillSnapshotSource,
 	type EvolutionSnapshotContext,
 	type EvolutionStageExecutionContext,
 	type EvolutionStageExecutionResult,
@@ -112,7 +114,7 @@ function automaticMaterializations(): readonly SuccessfulMaterialization[] {
 	});
 }
 
-function snapshotContext(): EvolutionSnapshotContext {
+function snapshotContext(skills: readonly EvolutionSkillSnapshotSource[] = []): EvolutionSnapshotContext {
 	const memory = "# Evolution memory\n";
 	const instruction = "Preserve exact provenance.\n";
 	return {
@@ -132,6 +134,7 @@ function snapshotContext(): EvolutionSnapshotContext {
 				contentDigest: computeEvolutionContentDigest(instruction),
 			},
 		],
+		skills,
 		modelConfiguration: {
 			provider: "faux",
 			model: "fixture",
@@ -214,6 +217,7 @@ async function controlPlaneFixture<TExecutor extends EvolutionStageExecutor>(
 		materialization(3),
 	],
 	highWaterCursor?: number,
+	capturedSnapshot: EvolutionSnapshotContext = snapshotContext(),
 ): Promise<ControlPlaneFixture<TExecutor>> {
 	const root = await mkdtemp(join(tmpdir(), "diffex-evolution-control-"));
 	temporaryDirectories.push(root);
@@ -255,7 +259,7 @@ async function controlPlaneFixture<TExecutor extends EvolutionStageExecutor>(
 			},
 			snapshots: {
 				async capture() {
-					return snapshotContext();
+					return capturedSnapshot;
 				},
 			},
 			executor,
@@ -471,6 +475,79 @@ describe("durable evolution control plane", () => {
 				estimatedTokens: expect.any(Number),
 			},
 		});
+	});
+
+	it("freezes skill metadata and full content as immutable referenced artifacts", async () => {
+		const content = "---\nname: review\ndescription: Review changes\n---\n\nReview carefully.";
+		const skill: EvolutionSkillSnapshotSource = {
+			skillId: `skill:${"a".repeat(64)}`,
+			name: "review",
+			description: "Review changes",
+			sourceKind: "installed",
+			scope: "workspace",
+			source: "local",
+			version: computeEvolutionTextDigest(content),
+			contentDigest: computeEvolutionTextDigest(content),
+			location: "/repo/.diffex/skills/review/SKILL.md",
+			baseDir: "/repo/.diffex/skills/review",
+			disableModelInvocation: false,
+			content,
+		};
+		const fixture = await controlPlaneFixture(
+			new RecordingExecutor(),
+			[materialization(1)],
+			undefined,
+			snapshotContext([skill]),
+		);
+
+		const created = await createManualJob(fixture);
+		const input = await fixture.persistence.get(created.inputSnapshot);
+		if (!("skillCatalog" in input)) throw new Error("Expected an evolution input snapshot");
+		expect(input.skillCatalog).toHaveLength(1);
+		expect(input.skillCatalog[0]).toMatchObject({
+			skillId: skill.skillId,
+			sourceKind: "installed",
+			scope: "workspace",
+			workspace: { repositoryId: "diffex" },
+			contentDigest: skill.contentDigest,
+		});
+		const contentArtifact = await fixture.persistence.get(input.skillCatalog[0]!.contentArtifact);
+		if (!("artifactKind" in contentArtifact) || contentArtifact.artifactKind !== "skill-content") {
+			throw new Error("Expected a frozen skill content artifact");
+		}
+		expect(contentArtifact.skill).toMatchObject({
+			skillId: skill.skillId,
+			content,
+			location: skill.location,
+			workspace: { repositoryId: "diffex" },
+		});
+	});
+
+	it("rejects skill content that does not match its frozen digest", async () => {
+		const skill: EvolutionSkillSnapshotSource = {
+			skillId: `skill:${"b".repeat(64)}`,
+			name: "review",
+			description: "Review changes",
+			sourceKind: "installed",
+			scope: "global",
+			source: "local",
+			version: `sha256:${"c".repeat(64)}`,
+			contentDigest: `sha256:${"d".repeat(64)}`,
+			location: "/skills/review/SKILL.md",
+			baseDir: "/skills/review",
+			disableModelInvocation: false,
+			content: "Review carefully.",
+		};
+		const fixture = await controlPlaneFixture(
+			new RecordingExecutor(),
+			[materialization(1)],
+			undefined,
+			snapshotContext([skill]),
+		);
+
+		await expect(fixture.controlPlane.createJob({ scope, trigger: "manual" })).rejects.toThrow(
+			'Frozen skill catalog entry is invalid for "review"',
+		);
 	});
 
 	it("cooperatively cancels work owned through another persistence instance", async () => {

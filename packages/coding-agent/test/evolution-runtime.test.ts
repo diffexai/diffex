@@ -15,12 +15,15 @@ import {
 	CodingAgentEvolutionModelExecutor,
 	type CodingAgentEvolutionRuntime,
 	createCodingAgentEvolutionRuntime,
+	createEvolutionSkillSnapshots,
 	EvolutionRuntimeCoordinator,
 	resolveEvolutionDirectoryIdentity,
 	TraceEvidenceCatalog,
 } from "../src/core/evolution-runtime.ts";
 import type { InvocationTrace } from "../src/core/invocation-trace.ts";
 import type { ModelRuntime } from "../src/core/model-runtime.ts";
+import { createSkill } from "../src/core/skills.ts";
+import { createSyntheticSourceInfo } from "../src/core/source-info.ts";
 import { createHarness, type Harness } from "./suite/harness.ts";
 
 function materializedInvocation(traceId: string, sessionPath: string): MaterializedInvocation {
@@ -93,6 +96,38 @@ describe("coding-agent evolution runtime", () => {
 
 		expect(renamed.directoryId).toBe(original.directoryId);
 		expect(renamed.rootPath).toBe(realpathSync(renamedPath));
+	});
+
+	it("captures compact skill metadata with its immutable catalog content", () => {
+		const filePath = "/workspace/.diffex/skills/review/SKILL.md";
+		const skill = createSkill({
+			name: "review",
+			description: "Review changes",
+			filePath,
+			baseDir: "/workspace/.diffex/skills/review",
+			sourceInfo: createSyntheticSourceInfo(filePath, {
+				source: "local",
+				scope: "project",
+			}),
+			content: "Review the frozen revision.",
+		});
+
+		expect(createEvolutionSkillSnapshots([skill])).toEqual([
+			{
+				skillId: skill.skillId,
+				name: "review",
+				description: "Review changes",
+				sourceKind: "installed",
+				scope: "workspace",
+				source: "local",
+				version: skill.version,
+				contentDigest: skill.contentDigest,
+				location: filePath,
+				baseDir: skill.baseDir,
+				disableModelInvocation: false,
+				content: "Review the frozen revision.",
+			},
+		]);
 	});
 
 	it("shares one global control scope across working directories", async () => {

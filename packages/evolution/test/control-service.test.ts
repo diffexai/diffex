@@ -127,6 +127,7 @@ async function serviceFixture(
 					activeMemoryItems: [],
 				},
 				instructions: [],
+				skills: [],
 				modelConfiguration: {
 					provider: "faux",
 					model: "fixture",

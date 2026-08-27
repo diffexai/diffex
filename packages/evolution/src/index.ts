@@ -68,6 +68,12 @@ export {
 	type EvolutionReferenceNormalization,
 	type EvolutionRepositorySnapshot,
 	type EvolutionScope,
+	type EvolutionSkillCatalogEntry,
+	type EvolutionSkillContentArtifact,
+	type EvolutionSkillContentSnapshot,
+	type EvolutionSkillScope,
+	type EvolutionSkillSourceKind,
+	type EvolutionSkillWorkspaceIdentity,
 	type EvolutionStageCheckpoint,
 	type EvolutionTarget,
 	type EvolutionTokenMeasurement,
@@ -193,6 +199,7 @@ export type {
 	EvolutionModelResponse,
 	EvolutionModelTool,
 	EvolutionProgressEvent,
+	EvolutionSkillSnapshotSource,
 	EvolutionSnapshotContext,
 	EvolutionSnapshotSource,
 	EvolutionStageDirective,
@@ -222,6 +229,7 @@ export {
 export {
 	type CreateEvolutionArtifactMetadataOptions,
 	computeEvolutionContentDigest,
+	computeEvolutionTextDigest,
 	createEvolutionArtifactMetadata,
 	serializeEvolutionValue,
 } from "./provenance.ts";

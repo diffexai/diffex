@@ -29,6 +29,10 @@ export function computeEvolutionContentDigest(value: unknown): string {
 	return `${CONTENT_DIGEST_PREFIX}${createHash("sha256").update(canonical).digest("hex")}`;
 }
 
+export function computeEvolutionTextDigest(value: string): string {
+	return `${CONTENT_DIGEST_PREFIX}${createHash("sha256").update(value).digest("hex")}`;
+}
+
 export function serializeEvolutionValue(value: unknown): string {
 	return JSON.stringify(canonicalize(value, "$"));
 }

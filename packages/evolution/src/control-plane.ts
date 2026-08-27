@@ -12,6 +12,9 @@ import type {
 	EvolutionJobStage,
 	EvolutionLeaseToken,
 	EvolutionScope,
+	EvolutionSkillCatalogEntry,
+	EvolutionSkillContentArtifact,
+	EvolutionSkillContentSnapshot,
 	EvolutionStageCheckpoint,
 	JobCompletedLedgerEvent,
 	JobCreatedLedgerEvent,
@@ -39,7 +42,11 @@ import type {
 	EvolutionStageDirective,
 	EvolutionStageExecutor,
 } from "./ports.ts";
-import { computeEvolutionContentDigest, createEvolutionArtifactMetadata } from "./provenance.ts";
+import {
+	computeEvolutionContentDigest,
+	computeEvolutionTextDigest,
+	createEvolutionArtifactMetadata,
+} from "./provenance.ts";
 import {
 	type AutomaticEvolutionEligibilityReason,
 	EVOLUTION_TOKEN_ESTIMATOR_VERSION,
@@ -554,6 +561,85 @@ export class EvolutionControlPlane implements EvolutionJobRunner {
 			}
 
 			const createdAt = this.#dependencies.clock.now();
+			const skillCatalog: EvolutionSkillCatalogEntry[] = [];
+			const skillArtifactIds: string[] = [];
+			const seenSkillVersions = new Set<string>();
+			for (const source of frozen.skills) {
+				const identityKey = `${source.skillId}\0${source.version}`;
+				if (
+					source.skillId.length === 0 ||
+					source.name.length === 0 ||
+					source.description.length === 0 ||
+					source.source.length === 0 ||
+					source.version.length === 0 ||
+					source.location.length === 0 ||
+					source.baseDir.length === 0 ||
+					(source.sourceKind !== "evolved" && source.sourceKind !== "installed") ||
+					(source.scope !== "global" && source.scope !== "workspace") ||
+					(source.sourceKind === "evolved" && source.scope !== "workspace") ||
+					seenSkillVersions.has(identityKey) ||
+					computeEvolutionTextDigest(source.content) !== source.contentDigest
+				) {
+					throw new EvolutionExecutionError(`Frozen skill catalog entry is invalid for "${source.name}"`, {
+						reasonCode: "snapshot-invalid",
+						retryable: false,
+					});
+				}
+				seenSkillVersions.add(identityKey);
+				const workspace =
+					source.scope === "workspace"
+						? {
+								repositoryId: frozen.repository.repositoryId,
+								...(frozen.repository.directoryId === undefined
+									? {}
+									: { directoryId: frozen.repository.directoryId }),
+							}
+						: null;
+				const skill: EvolutionSkillContentSnapshot = {
+					skillId: source.skillId,
+					name: source.name,
+					description: source.description,
+					sourceKind: source.sourceKind,
+					scope: source.scope,
+					source: source.source,
+					version: source.version,
+					contentDigest: source.contentDigest,
+					...(source.harnessRevision === undefined ? {} : { harnessRevision: source.harnessRevision }),
+					workspace,
+					location: source.location,
+					baseDir: source.baseDir,
+					disableModelInvocation: source.disableModelInvocation,
+					content: source.content,
+				};
+				const artifactId = stableId("skill-content", {
+					skillId: source.skillId,
+					version: source.version,
+					contentDigest: source.contentDigest,
+					createdAt,
+				});
+				const artifactContent = { artifactKind: "skill-content" as const, skill };
+				const artifact: EvolutionSkillContentArtifact = {
+					metadata: this.#metadata(artifactId, [], request.scope, createdAt, artifactContent),
+					...artifactContent,
+				};
+				const contentArtifact = await this.#dependencies.artifacts.put(artifact);
+				skillArtifactIds.push(artifactId);
+				skillCatalog.push({
+					skillId: skill.skillId,
+					name: skill.name,
+					description: skill.description,
+					sourceKind: skill.sourceKind,
+					scope: skill.scope,
+					source: skill.source,
+					version: skill.version,
+					contentDigest: skill.contentDigest,
+					...(skill.harnessRevision === undefined ? {} : { harnessRevision: skill.harnessRevision }),
+					workspace,
+					disableModelInvocation: skill.disableModelInvocation,
+					contentArtifact,
+				});
+			}
+
 			const snapshotId = this.#dependencies.ids.nextId("input-snapshot");
 			const snapshotContent = {
 				trigger: request.trigger,
@@ -562,6 +648,7 @@ export class EvolutionControlPlane implements EvolutionJobRunner {
 				expectedHarnessBaseVersion: frozen.harness.harnessVersion,
 				ingestionHighWaterCursor,
 				instructions: frozen.instructions,
+				skillCatalog,
 				modelConfiguration: frozen.modelConfiguration,
 				pipelineVersion: frozen.pipelineVersion,
 				promptVersions: frozen.promptVersions,
@@ -581,7 +668,7 @@ export class EvolutionControlPlane implements EvolutionJobRunner {
 			const snapshot: EvolutionInputSnapshot = {
 				metadata: this.#metadata(
 					snapshotId,
-					materializations.map((item) => item.materializationId),
+					[...materializations.map((item) => item.materializationId), ...skillArtifactIds],
 					request.scope,
 					createdAt,
 					snapshotContent,

@@ -240,6 +240,7 @@ function fixture(evidenceFixtures: readonly EvidenceFixture[]) {
 				contentDigest: computeEvolutionContentDigest(instructionContent),
 			},
 		],
+		skillCatalog: [],
 		modelConfiguration: { provider: "faux", model: "fixture", configurationDigest: MODEL_DIGEST },
 		pipelineVersion: "pipeline-v1",
 		promptVersions: {

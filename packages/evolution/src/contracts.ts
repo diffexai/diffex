@@ -147,6 +147,53 @@ export interface EvolutionPromptVersions {
 	readonly writer: string;
 }
 
+export type EvolutionSkillSourceKind = "evolved" | "installed";
+
+export type EvolutionSkillScope = "global" | "workspace";
+
+export interface EvolutionSkillWorkspaceIdentity {
+	readonly repositoryId: string;
+	readonly directoryId?: string;
+}
+
+export interface EvolutionSkillContentSnapshot {
+	readonly skillId: string;
+	readonly name: string;
+	readonly description: string;
+	readonly sourceKind: EvolutionSkillSourceKind;
+	readonly scope: EvolutionSkillScope;
+	readonly source: string;
+	readonly version: string;
+	readonly contentDigest: string;
+	readonly harnessRevision?: string;
+	readonly workspace: EvolutionSkillWorkspaceIdentity | null;
+	readonly location: string;
+	readonly baseDir: string;
+	readonly disableModelInvocation: boolean;
+	readonly content: string;
+}
+
+export interface EvolutionSkillContentArtifact {
+	readonly artifactKind: "skill-content";
+	readonly metadata: EvolutionArtifactMetadata;
+	readonly skill: EvolutionSkillContentSnapshot;
+}
+
+export interface EvolutionSkillCatalogEntry {
+	readonly skillId: string;
+	readonly name: string;
+	readonly description: string;
+	readonly sourceKind: EvolutionSkillSourceKind;
+	readonly scope: EvolutionSkillScope;
+	readonly source: string;
+	readonly version: string;
+	readonly contentDigest: string;
+	readonly harnessRevision?: string;
+	readonly workspace: EvolutionSkillWorkspaceIdentity | null;
+	readonly disableModelInvocation: boolean;
+	readonly contentArtifact: EvolutionArtifactReference;
+}
+
 export interface EvolutionInputSnapshot {
 	readonly metadata: EvolutionArtifactMetadata;
 	readonly trigger: EvolutionTriggerKind;
@@ -155,6 +202,7 @@ export interface EvolutionInputSnapshot {
 	readonly expectedHarnessBaseVersion: HarnessVersion;
 	readonly ingestionHighWaterCursor: number;
 	readonly instructions: readonly InstructionDocumentSnapshot[];
+	readonly skillCatalog: readonly EvolutionSkillCatalogEntry[];
 	readonly modelConfiguration: EvolutionModelIdentity;
 	readonly pipelineVersion: string;
 	readonly promptVersions: EvolutionPromptVersions;
