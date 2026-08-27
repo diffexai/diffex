@@ -72,7 +72,9 @@ This is progressive disclosure: only descriptions are always in context, full in
 
 ## Skill Commands
 
-Use `/skills` in interactive mode to search all skills available to the session and select one or more. The selected skills are inserted into the editor as versioned references, so you can add the task before submitting. Each reference loads that exact reviewed skill content for one request, including queued steering and follow-up messages. Skills not selected remain progressively disclosed by name, description, and location.
+Use `/skills` in interactive mode to search all skills available to the session and select one or more. The selector separates evolved workspace skills, independently installed workspace skills, and independently installed global skills. The selected skills are inserted into the editor as versioned references, so you can add the task before submitting. Each reference loads that exact reviewed skill content for one request, including queued steering and follow-up messages. Skills not selected remain progressively disclosed by name, description, and location.
+
+To install a package containing skills from an interactive terminal, run `diffex install <source>` and choose `Install globally` or `Install for this workspace`. The prompt shows both destinations and the trust implications. Workspace installation requires project trust and never falls back to global installation. Non-interactive installs retain the global default; pass `-l` to select workspace scope explicitly.
 
 Skills also register as `/skill:name` commands for direct single-skill invocation:
 

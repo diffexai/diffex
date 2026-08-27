@@ -120,9 +120,7 @@ describe("package commands", () => {
 	it("installs into the selected workspace without falling back globally", async () => {
 		const selectInstallScope = vi.fn(async () => "workspace" as const);
 
-		expect(
-			await handlePackageCommand(["install", packageDir, "--approve"], { selectInstallScope }),
-		).toBe(true);
+		expect(await handlePackageCommand(["install", packageDir, "--approve"], { selectInstallScope })).toBe(true);
 
 		expect(selectInstallScope).toHaveBeenCalledOnce();
 		const settings = JSON.parse(readFileSync(join(projectDir, ".diffex", "settings.json"), "utf-8")) as {
@@ -146,9 +144,7 @@ describe("package commands", () => {
 	it("does not ask for scope when the workspace flag is explicit", async () => {
 		const selectInstallScope = vi.fn(async () => "global" as const);
 
-		expect(
-			await handlePackageCommand(["install", "-l", "--approve", packageDir], { selectInstallScope }),
-		).toBe(true);
+		expect(await handlePackageCommand(["install", "-l", "--approve", packageDir], { selectInstallScope })).toBe(true);
 
 		expect(selectInstallScope).not.toHaveBeenCalled();
 		expect(existsSync(join(projectDir, ".diffex", "settings.json"))).toBe(true);

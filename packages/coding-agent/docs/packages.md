@@ -40,7 +40,9 @@ diffex update --extension npm:@foo/bar
 
 These commands manage Diffex packages and `diffex update` can update the Diffex CLI installation. To uninstall Diffex itself, see [Quickstart](quickstart.md#uninstall).
 
-By default, `install` and `remove` write to user settings (`~/.diffex/agent/settings.json`). Use `-l` to write to project settings (`.diffex/settings.json`) instead. Project settings can be shared with your team, and Diffex installs any missing packages automatically on startup after the project is trusted.
+In an interactive terminal, `install` asks whether to install globally or for the current workspace and shows the settings and package-storage destinations plus the security implications. Workspace installation requires project trust; cancellation, an untrusted workspace, or an unwritable destination never falls back to global installation. In non-interactive environments, `install` retains its global default. Pass `-l` to choose workspace scope explicitly without a scope prompt.
+
+`remove` writes to user settings (`~/.diffex/agent/settings.json`) by default; use `-l` for project settings (`.diffex/settings.json`). Project settings can be shared with your team, and Diffex installs any missing packages automatically on startup after the project is trusted.
 
 To try a package without installing it, use `--extension` or `-e`. This installs to a temporary directory for the current run only:
 
