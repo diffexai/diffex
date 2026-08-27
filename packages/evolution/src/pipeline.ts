@@ -38,6 +38,7 @@ import type {
 	ProposalValidator,
 	ReflectionResult,
 	Reflector,
+	SkillCurator,
 } from "./ports.ts";
 import { computeEvolutionContentDigest, createEvolutionArtifactMetadata } from "./provenance.ts";
 import type { EvolutionTargetAdapterRegistry } from "./targets.ts";
@@ -49,6 +50,7 @@ export interface EvolutionPipelineDependencies {
 	readonly model: EvolutionModelExecutor;
 	readonly reflector: Reflector;
 	readonly curator: Curator;
+	readonly skillCurator: SkillCurator;
 	readonly validator: ProposalValidator;
 	readonly scorer: ProposalScorer;
 	readonly targets: EvolutionTargetAdapterRegistry;
@@ -665,7 +667,51 @@ export class EvolutionPipeline implements EvolutionStageExecutor {
 						acceptedProposalIds,
 						selectedProposalIds,
 					},
-					directive: selectedProposalIds.length === 0 ? "complete-no-op" : "continue",
+					directive: "continue",
+				};
+			}
+			case "skill-curating": {
+				const { corpus, reflection } = this.#pipelineInputs(context);
+				if (reflection === null) {
+					throw new EvolutionExecutionError("Evidence coverage is missing from reflection output", {
+						reasonCode: "artifact-corrupt",
+						retryable: false,
+					});
+				}
+				const selectedMemoryProposals = context.priorArtifacts
+					.filter(isScoredProposal)
+					.filter((item) => item.disposition === "selected");
+				let curation: Awaited<ReturnType<SkillCurator["curate"]>>;
+				try {
+					curation = await this.#dependencies.skillCurator.curate({
+						jobId: context.job.jobId,
+						input: context.input,
+						corpus,
+						reflection,
+						selectedMemoryProposals,
+						model: this.#dependencies.model,
+						idempotencyKey: context.idempotencyKey,
+						signal: context.signal,
+					});
+				} catch (error) {
+					stageFailure(error, "Skill Curator model stage failed", "model-call-failed", true);
+				}
+				assertUniqueIds(
+					curation.candidates.map((candidate) => candidate.candidateId),
+					"skill candidate ID",
+				);
+				assertUniqueIds(
+					curation.deferredFindings.map((finding) => finding.findingId),
+					"deferred skill finding ID",
+				);
+				return {
+					artifacts: [...curation.candidates, ...curation.deferredFindings],
+					state: {
+						candidateIds: curation.candidates.map((candidate) => candidate.candidateId),
+						deferredFindingIds: curation.deferredFindings.map((finding) => finding.findingId),
+						selectedMemoryProposalIds: selectedMemoryProposals.map((scored) => scored.proposal.proposalId),
+					},
+					directive: selectedMemoryProposals.length === 0 ? "complete-no-op" : "continue",
 				};
 			}
 			case "writing": {

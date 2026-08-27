@@ -66,7 +66,8 @@ const NEXT_STAGE: Readonly<Record<ActiveEvolutionStage, EvolutionJobStage>> = {
 	"counter-slot": "reflecting",
 	reflecting: "curating",
 	curating: "validating",
-	validating: "writing",
+	validating: "skill-curating",
+	"skill-curating": "writing",
 	writing: "activating",
 	activating: "completed",
 };

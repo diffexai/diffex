@@ -769,6 +769,7 @@ export type EvolutionJobStage =
 	| "reflecting"
 	| "curating"
 	| "validating"
+	| "skill-curating"
 	| "writing"
 	| "activating"
 	| "completed";

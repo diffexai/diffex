@@ -37,6 +37,7 @@ const JOB_STAGES = new Set([
 	"reflecting",
 	"curating",
 	"validating",
+	"skill-curating",
 	"writing",
 	"activating",
 	"completed",
