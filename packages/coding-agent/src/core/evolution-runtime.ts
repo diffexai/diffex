@@ -341,7 +341,12 @@ export class CodingAgentEvolutionModelExecutor implements EvolutionModelExecutor
 		}
 		if (lastCorrection !== null) {
 			throw new EvolutionExecutionError(`Evolution model did not submit a valid response: ${lastCorrection}`, {
-				reasonCode: request.stage === "curator" ? "curation-invalid-response" : "reflection-invalid-response",
+				reasonCode:
+					request.stage === "curator"
+						? "curation-invalid-response"
+						: request.stage === "skill-curator"
+							? "skill-curation-invalid-response"
+							: "reflection-invalid-response",
 				retryable: false,
 				diagnostics: { lastCorrection },
 			});
@@ -756,6 +761,7 @@ class CodingAgentSnapshotSource implements EvolutionSnapshotSource {
 			promptVersions: {
 				reflector: "reflector-v2",
 				curator: "curator-v1",
+				skillCurator: "skill-curator-v1",
 				validator: "validator-v1",
 				writer: "writer-v1",
 			},

@@ -143,6 +143,7 @@ export interface EvolutionTokenMeasurement {
 export interface EvolutionPromptVersions {
 	readonly reflector: string;
 	readonly curator: string;
+	readonly skillCurator: string;
 	readonly validator: string;
 	readonly writer: string;
 }
@@ -420,6 +421,102 @@ export interface Lesson {
 	readonly actionableTakeaway: string;
 }
 
+export type SkillCandidateOperation = "CREATE" | "MERGE" | "RETIRE" | "UPDATE";
+
+export type SkillabilityClassification =
+	| "conditional-procedure"
+	| "ordered-workflow"
+	| "reusable-operational-guideline"
+	| "setup-tool-sequence"
+	| "troubleshooting-recovery"
+	| "verification-routine";
+
+export type SkillMemoryRelationshipClassification =
+	| "complements"
+	| "conflicts"
+	| "fallback-until-activation"
+	| "independent"
+	| "redundant"
+	| "supersedes";
+
+export interface SkillCandidateWorkspaceScope {
+	readonly repositoryId: string;
+	readonly directoryId?: string;
+	readonly rootPath: string;
+	readonly repositoryRevision: string;
+	readonly evolutionScope: EvolutionScope;
+}
+
+export interface SkillCandidateMemoryRelationship {
+	readonly classification: SkillMemoryRelationshipClassification;
+	readonly memoryProposalIds: readonly string[];
+	readonly rationale: string;
+}
+
+export interface SkillCandidateProcedureStep {
+	readonly sequence: number;
+	readonly action: string;
+	readonly condition: string | null;
+}
+
+export interface SkillCandidateFailureHandling {
+	readonly signal: string;
+	readonly mitigation: string;
+	readonly recovery: string;
+}
+
+export interface SkillCandidate {
+	readonly artifactKind: "skill-candidate";
+	readonly metadata: EvolutionArtifactMetadata;
+	readonly candidateId: string;
+	readonly operation: SkillCandidateOperation;
+	readonly workspace: SkillCandidateWorkspaceScope;
+	readonly proposedName: string;
+	readonly existingSkillIds: readonly string[];
+	readonly sourceLessonIds: readonly string[];
+	readonly sourceProceduralObservationIds: readonly string[];
+	readonly supportingEvidenceIds: readonly string[];
+	readonly contradictingEvidenceIds: readonly string[];
+	readonly supportingTraceIds: readonly string[];
+	readonly contradictingTraceIds: readonly string[];
+	readonly taskLineageIds: readonly string[];
+	readonly skillability: {
+		readonly classification: SkillabilityClassification;
+		readonly rationale: string;
+	};
+	readonly trigger: {
+		readonly description: string;
+		readonly positiveExamples: readonly string[];
+		readonly negativeExamples: readonly string[];
+	};
+	readonly preconditions: readonly string[];
+	readonly procedure: {
+		readonly steps: readonly SkillCandidateProcedureStep[];
+		readonly requiredTools: readonly string[];
+		readonly environment: readonly string[];
+	};
+	readonly failureHandling: readonly SkillCandidateFailureHandling[];
+	readonly applicabilityBoundaries: readonly string[];
+	readonly verificationContract: {
+		readonly checks: readonly string[];
+		readonly completionCondition: string;
+	};
+	readonly memoryRelationship: SkillCandidateMemoryRelationship;
+}
+
+export interface DeferredSkillCandidateFinding {
+	readonly artifactKind: "skill-candidate-finding";
+	readonly metadata: EvolutionArtifactMetadata;
+	readonly findingId: string;
+	readonly disposition: "deferred";
+	readonly workspace: SkillCandidateWorkspaceScope;
+	readonly sourceLessonIds: readonly string[];
+	readonly existingSkillIds: readonly string[];
+	readonly skillability: SkillCandidate["skillability"];
+	readonly memoryRelationship: SkillCandidateMemoryRelationship;
+	readonly reason: string;
+}
+
 export interface EvolutionMemoryTarget {
 	readonly kind: "evolution-memory";
 	readonly expectedHarnessVersion: HarnessVersion;
@@ -694,6 +791,7 @@ export type EvolutionFailureReasonCode =
 	| "model-call-failed"
 	| "pipeline-invariant"
 	| "curation-invalid-response"
+	| "skill-curation-invalid-response"
 	| "reflection-budget-exhausted"
 	| "reflection-invalid-response"
 	| "shutdown"
@@ -882,6 +980,18 @@ export interface CuratorToolCallLedgerEvent extends EvolutionLedgerEventBase {
 	readonly denialCode: string | null;
 }
 
+export interface SkillCuratorToolCallLedgerEvent extends EvolutionLedgerEventBase {
+	readonly type: "skill-curator-tool-call";
+	readonly toolCallId: string;
+	readonly toolName: "inspect_skills" | "inspect_source_evidence";
+	readonly requestDigest: string;
+	readonly requestedReferences: readonly string[];
+	readonly resolvedEvidenceIds: readonly string[];
+	readonly resolvedSkillIds: readonly string[];
+	readonly resultDigest: string | null;
+	readonly denialCode: string | null;
+}
+
 export interface ReflectorModelCallLedgerEvent extends EvolutionLedgerEventBase {
 	readonly type: "reflector-model-call";
 	readonly modelCallId: string;
@@ -922,5 +1032,6 @@ export type EvolutionLedgerEvent =
 	| ReflectionLeafRetryPendingLedgerEvent
 	| ReflectionNodeCheckpointedLedgerEvent
 	| CuratorToolCallLedgerEvent
+	| SkillCuratorToolCallLedgerEvent
 	| ReflectorModelCallLedgerEvent
 	| ReflectorToolCallLedgerEvent;

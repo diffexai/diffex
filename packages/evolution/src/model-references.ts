@@ -1,6 +1,14 @@
 import type { EvolutionReferenceNormalization, JsonObject } from "./contracts.ts";
 
-export type EvolutionModelReferenceKind = "document" | "evidence" | "instruction" | "lesson" | "memory" | "slice";
+export type EvolutionModelReferenceKind =
+	| "document"
+	| "evidence"
+	| "instruction"
+	| "lesson"
+	| "memory"
+	| "proposal"
+	| "skill"
+	| "slice";
 
 const REFERENCE_PREFIXES: Readonly<Record<EvolutionModelReferenceKind, string>> = {
 	document: "D",
@@ -8,6 +16,8 @@ const REFERENCE_PREFIXES: Readonly<Record<EvolutionModelReferenceKind, string>> 
 	instruction: "I",
 	lesson: "L",
 	memory: "M",
+	proposal: "P",
+	skill: "K",
 	slice: "S",
 };
 
