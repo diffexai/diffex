@@ -17,6 +17,7 @@ import {
 	type SkillCandidateRegistryStore,
 	type SkillDraft,
 	type SkillDraftValidationReport,
+	type SkillEvaluationReport,
 } from "../src/index.ts";
 
 const createdAt = "2026-08-25T12:00:00.000Z";
@@ -479,6 +480,91 @@ describe("persistent skill candidate registry", () => {
 			reasonCodes: ["deterministic-draft-validation-passed"],
 		});
 
+		const evaluationStart = {
+			scope,
+			groupId: group.groupId,
+			draft: draftReference,
+			validation: validationReference,
+			proposalRevisionIds: draft.proposalRevisionIds,
+			idempotencyKey: validated.evaluationIdempotencyKey,
+			createdAt: "2026-08-26T12:03:00.000Z",
+		};
+		const pending = await fixture.registry.startEvaluation(evaluationStart);
+		const pendingRetry = await fixture.registry.startEvaluation(evaluationStart);
+		expect(pending).toMatchObject({ state: "evaluation-pending", evaluation: null });
+		expect(pendingRetry).toMatchObject({ state: "evaluation-pending", evaluation: null });
+		const configurationDigest = `sha256:${"6".repeat(64)}`;
+		const evaluationContent = {
+			artifactKind: "skill-evaluation" as const,
+			schemaVersion: 1 as const,
+			evaluationId: "skill-evaluation-1",
+			groupId: group.groupId,
+			evaluationIdempotencyKey: pending.evaluationIdempotencyKey,
+			proposalRevisionIds: draft.proposalRevisionIds,
+			draft: draftReference,
+			validation: validationReference,
+			evaluatorVersion: "skill-evaluator-v1",
+			assurance: "retrieval-and-deterministic-behavior-gates" as const,
+			disposition: "accepted" as const,
+			harnessVersion: secondInput.expectedHarnessBaseVersion,
+			candidateSkill: {
+				skillId: draft.draftId,
+				name: draft.proposedName,
+				description: "Run a focused check after repository changes.",
+				source: "candidate" as const,
+				version: draft.metadata.contentDigest,
+				contentDigest: computeEvolutionContentDigest(draft.content),
+				content: draft.content,
+			},
+			neighboringSkills: [],
+			configuration: {
+				model: { provider: "faux", model: "fixture", configurationDigest },
+				runtime: { name: "node", version: "24", configurationDigest },
+				retriever: { name: "fixture", version: "1", configurationDigest },
+				executor: { name: "fixture", version: "1", configurationDigest },
+			},
+			cases: [],
+			retrievalResults: [],
+			behaviorResults: [],
+			metrics: {
+				exactRetrievalAccuracy: 1,
+				sourceReplayReproducibility: 1,
+				heldOutIntendedBaselineScore: 0,
+				heldOutIntendedFullPoolScore: 1,
+				heldOutIntendedImprovement: 1,
+				negativeRegressionCount: 0,
+				misapplicationCount: 0,
+			},
+			gates: {
+				suite: { passed: true, reasonCodes: [] },
+				retrieval: { passed: true, reasonCodes: [] },
+				behavior: { passed: true, reasonCodes: [] },
+			},
+		};
+		const evaluation: SkillEvaluationReport = {
+			metadata: metadata(
+				evaluationContent.evaluationId,
+				[draft.draftId, validation.validationId],
+				evaluationContent,
+			),
+			...evaluationContent,
+		};
+		const evaluationReference = await fixture.artifacts.put(evaluation);
+		const evaluationRequest = { ...evaluationStart, evaluation: evaluationReference };
+		store.interruptNextMultiAppend = true;
+		await expect(fixture.registry.recordEvaluation(evaluationRequest)).rejects.toThrow(
+			"interrupted draft registry append",
+		);
+		const accepted = await fixture.registry.recordEvaluation(evaluationRequest);
+		const acceptedRetry = await fixture.registry.recordEvaluation(evaluationRequest);
+		expect(accepted).toMatchObject({ state: "accepted", evaluation: evaluationReference });
+		expect(acceptedRetry).toMatchObject({ state: "accepted", evaluation: evaluationReference });
+		expect(accepted.dispositionHistory.at(-1)).toMatchObject({
+			from: "evaluation-pending",
+			to: "accepted",
+			reasonCodes: ["retrieval-and-behavior-gates-passed"],
+		});
+
 		const thirdInput = input([evidence("support-c", "task-c", 0)], "trace-c");
 		const thirdCandidate = candidate({
 			candidateId: "candidate-c",
@@ -495,10 +581,16 @@ describe("persistent skill candidate registry", () => {
 			createdAt: "2026-08-27T12:00:00.000Z",
 		});
 
-		expect(revised.groups[0]).toMatchObject({ state: "evidence-qualified", draft: null });
+		expect(revised.groups[0]).toMatchObject({
+			state: "evidence-qualified",
+			draft: null,
+			validation: null,
+			evaluation: null,
+		});
 		expect(revised.groups[0]?.synthesisIdempotencyKey).not.toBe(recorded.synthesisIdempotencyKey);
+		expect(revised.groups[0]?.evaluationIdempotencyKey).not.toBe(accepted.evaluationIdempotencyKey);
 		expect(revised.groups[0]?.dispositionHistory.at(-1)).toMatchObject({
-			from: "structurally-valid",
+			from: "accepted",
 			to: "evidence-qualified",
 			reasonCodes: ["proposal-revision-set-changed"],
 		});

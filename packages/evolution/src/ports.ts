@@ -34,6 +34,7 @@ import type {
 	ProceduralInformationLossFinding,
 	ReflectionNode,
 	ScoredProposal,
+	SkillBehaviorEvaluationOutcome,
 	SkillCandidate,
 	SkillCandidateGroup,
 	SkillCandidatePriorityScore,
@@ -41,6 +42,11 @@ import type {
 	SkillCandidateRegistrySnapshot,
 	SkillDraft,
 	SkillDraftValidationReport,
+	SkillEvaluationCase,
+	SkillEvaluationPoolSkill,
+	SkillEvaluationReport,
+	SkillEvaluationRuntimeConfiguration,
+	SkillRetrievalEvaluationResult,
 	ValidationReport,
 } from "./contracts.ts";
 
@@ -63,6 +69,7 @@ export type EvolutionArtifact =
 	| SkillCandidatePriorityScore
 	| SkillDraft
 	| SkillDraftValidationReport
+	| SkillEvaluationReport
 	| DeferredSkillCandidateFinding
 	| ValidationReport;
 
@@ -330,10 +337,33 @@ export interface SkillCandidateValidationRecordingInput {
 	readonly createdAt: string;
 }
 
+export interface SkillCandidateEvaluationStartInput {
+	readonly scope: EvolutionScope;
+	readonly groupId: string;
+	readonly draft: EvolutionArtifactReference;
+	readonly validation: EvolutionArtifactReference;
+	readonly proposalRevisionIds: readonly string[];
+	readonly idempotencyKey: string;
+	readonly createdAt: string;
+}
+
+export interface SkillCandidateEvaluationRecordingInput {
+	readonly scope: EvolutionScope;
+	readonly groupId: string;
+	readonly draft: EvolutionArtifactReference;
+	readonly validation: EvolutionArtifactReference;
+	readonly evaluation: EvolutionArtifactReference;
+	readonly proposalRevisionIds: readonly string[];
+	readonly idempotencyKey: string;
+	readonly createdAt: string;
+}
+
 export interface SkillCandidateRegistry {
 	consolidate(input: SkillCandidateRegistryConsolidationInput): Promise<SkillCandidateRegistryConsolidationResult>;
 	recordDraft(input: SkillCandidateDraftRecordingInput): Promise<SkillCandidateGroup>;
 	recordValidation(input: SkillCandidateValidationRecordingInput): Promise<SkillCandidateGroup>;
+	startEvaluation(input: SkillCandidateEvaluationStartInput): Promise<SkillCandidateGroup>;
+	recordEvaluation(input: SkillCandidateEvaluationRecordingInput): Promise<SkillCandidateGroup>;
 	list(scope: EvolutionScope): Promise<readonly SkillCandidateGroup[]>;
 }
 
@@ -379,6 +409,67 @@ export interface SkillDraftValidatorInput {
 
 export interface SkillDraftValidator {
 	validate(input: SkillDraftValidatorInput): Promise<SkillDraftValidationReport>;
+}
+
+export interface SkillEvaluationEnvironment {
+	readonly workspace: {
+		readonly repositoryId: string;
+		readonly directoryId?: string;
+	};
+	readonly harnessVersion: string;
+	readonly skills: readonly SkillEvaluationPoolSkill[];
+}
+
+export interface SkillEvaluationCaseSourceInput {
+	readonly group: SkillCandidateGroup;
+	readonly draft: SkillDraft;
+	readonly validation: SkillDraftValidationReport;
+	readonly candidates: readonly SkillCandidate[];
+	readonly environment: SkillEvaluationEnvironment;
+	readonly candidateSkill: SkillEvaluationPoolSkill;
+	readonly signal?: AbortSignal;
+}
+
+export interface SkillEvaluationCaseSource {
+	build(input: SkillEvaluationCaseSourceInput): Promise<readonly SkillEvaluationCase[]>;
+}
+
+export interface SkillEvaluationEnvironmentSource {
+	capture(
+		workspace: SkillCandidateGroup["profile"]["workspace"],
+		signal?: AbortSignal,
+	): Promise<SkillEvaluationEnvironment>;
+}
+
+export interface SkillEvaluationSelectionInput {
+	readonly evaluationIdempotencyKey: string;
+	readonly harnessVersion: string;
+	readonly testCase: SkillEvaluationCase;
+	readonly skills: readonly SkillEvaluationPoolSkill[];
+	readonly signal?: AbortSignal;
+}
+
+export interface SkillEvaluationExecutionInput extends SkillEvaluationSelectionInput {
+	readonly arm: "baseline" | "full-pool";
+}
+
+export interface SkillEvaluationExecutor {
+	readonly configuration: SkillEvaluationRuntimeConfiguration;
+	select(input: SkillEvaluationSelectionInput): Promise<SkillRetrievalEvaluationResult>;
+	execute(input: SkillEvaluationExecutionInput): Promise<SkillBehaviorEvaluationOutcome>;
+}
+
+export interface SkillEvaluatorInput {
+	readonly group: SkillCandidateGroup;
+	readonly draft: SkillDraft;
+	readonly validation: SkillDraftValidationReport;
+	readonly idempotencyKey: string;
+	readonly createdAt: string;
+	readonly signal?: AbortSignal;
+}
+
+export interface SkillEvaluator {
+	evaluate(input: SkillEvaluatorInput): Promise<SkillEvaluationReport>;
 }
 
 export interface EvolutionJobStore {

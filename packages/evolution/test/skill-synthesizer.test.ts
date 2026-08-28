@@ -381,6 +381,7 @@ function fixture(state: SkillCandidateGroup["state"] = "evidence-qualified") {
 		priorityScore: null,
 		draft: null,
 		validation: null,
+		evaluation: null,
 		synthesisIdempotencyKey: "skill-synthesis-1",
 		validationIdempotencyKey: "skill-validation-1",
 		evaluationIdempotencyKey: "skill-evaluation-1",
