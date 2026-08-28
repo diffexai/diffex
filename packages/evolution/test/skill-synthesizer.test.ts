@@ -449,7 +449,15 @@ describe("StructuredSkillSynthesizer", () => {
 					generatedScriptsBinariesDependenciesAndExecutableAssetsPermitted: false,
 					useSuccessfulOutcomesForPrimaryProcedure: true,
 					useFailuresOnlyForPitfallsMitigationsRecoveryAndVerification: true,
+					retainCandidateProceduralContractVerbatim: true,
 					retainCandidateApplicabilityBoundariesNegativeTriggersAndVerificationContractVerbatim: true,
+					proceduralInformationLossValidation: [
+						"trigger conditions and preconditions",
+						"ordered actions and decision branches",
+						"tool and environment dependencies",
+						"failure signals, mitigations, and recovery actions",
+						"verification actions and observable completion conditions",
+					],
 				},
 				sourceEvidence: [
 					{ evidenceId: "support-1", relationship: "supporting", terminationStatus: "completed" },

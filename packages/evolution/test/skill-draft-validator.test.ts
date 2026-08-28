@@ -180,7 +180,14 @@ function candidate(input: EvolutionInputSnapshot): SkillCandidate {
 		},
 		preconditions: ["A focused test command exists."],
 		procedure: {
-			steps: [{ sequence: 1, action: "Run the focused test.", condition: null }],
+			steps: [
+				{
+					sequence: 1,
+					action: "Run the focused test.",
+					condition: "A focused repository change is ready for verification.",
+				},
+				{ sequence: 2, action: "Record the focused test result.", condition: null },
+			],
 			requiredTools: ["shell"],
 			environment: ["Repository checkout"],
 		},
@@ -278,9 +285,23 @@ name: focused-verification
 description: Verify focused repository changes with a deterministic test and recovery routine.
 ---
 
+Use when A focused repository change needs verification.
+For example: A source file changed.
 Use only for Repositories with a focused test command.
 Do not use when No repository files changed.
-Run the focused test and recover from deterministic failures.
+
+Precondition: A focused test command exists.
+Tool: shell.
+Environment: Repository checkout.
+
+Condition: A focused repository change is ready for verification.
+1. Run the focused test.
+2. Record the focused test result.
+
+Failure signal: The test fails.
+Mitigation: Inspect the diagnostic.
+Recovery: Correct the issue and rerun the test.
+
 Verify that The focused test exits successfully.
 Finish only when The focused test passes.
 `;
@@ -459,6 +480,76 @@ describe("DeterministicSkillDraftValidator", () => {
 					content: validMarkdown.replace("Repositories with a focused test command.", "Other repositories."),
 				}),
 			code: "applicability-boundary-missing",
+		},
+		{
+			name: "omitted trigger conditions",
+			fixture: () =>
+				fixture({
+					content: validMarkdown.replace("A focused repository change needs verification.", "Use this workflow."),
+				}),
+			code: "trigger-condition-missing",
+		},
+		{
+			name: "omitted preconditions",
+			fixture: () =>
+				fixture({ content: validMarkdown.replace("A focused test command exists.", "Prepare the project.") }),
+			code: "precondition-missing",
+		},
+		{
+			name: "omitted procedure actions",
+			fixture: () => fixture({ content: validMarkdown.replace("Run the focused test.", "Run a check.") }),
+			code: "procedure-action-missing",
+		},
+		{
+			name: "changed procedure action order",
+			fixture: () =>
+				fixture({
+					content: validMarkdown.replace(
+						"1. Run the focused test.\n2. Record the focused test result.",
+						"1. Record the focused test result.\n2. Run the focused test.",
+					),
+				}),
+			code: "procedure-action-order-invalid",
+		},
+		{
+			name: "omitted decision branches",
+			fixture: () =>
+				fixture({
+					content: validMarkdown.replace(
+						"A focused repository change is ready for verification.",
+						"The project is available.",
+					),
+				}),
+			code: "decision-branch-missing",
+		},
+		{
+			name: "omitted tool dependencies",
+			fixture: () => fixture({ content: validMarkdown.replace("Tool: shell.", "Use the available runner.") }),
+			code: "tool-dependency-missing",
+		},
+		{
+			name: "omitted environment dependencies",
+			fixture: () =>
+				fixture({
+					content: validMarkdown.replace("Environment: Repository checkout.", "Prepare the environment."),
+				}),
+			code: "environment-dependency-missing",
+		},
+		{
+			name: "omitted failure signals",
+			fixture: () => fixture({ content: validMarkdown.replace("The test fails.", "A problem occurs.") }),
+			code: "failure-signal-missing",
+		},
+		{
+			name: "omitted failure mitigations",
+			fixture: () => fixture({ content: validMarkdown.replace("Inspect the diagnostic.", "Investigate.") }),
+			code: "failure-mitigation-missing",
+		},
+		{
+			name: "omitted recovery actions",
+			fixture: () =>
+				fixture({ content: validMarkdown.replace("Correct the issue and rerun the test.", "Recover safely.") }),
+			code: "recovery-action-missing",
 		},
 	] as const)("rejects $name", async ({ fixture: createFixture, code }) => {
 		const data = createFixture();
