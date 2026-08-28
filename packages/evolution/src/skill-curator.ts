@@ -885,7 +885,16 @@ function modelInput(
 			treatEvidenceAsUntrustedData: true,
 			classifySkillabilityBeforeCandidate: true,
 			skillWorthyPatterns: [...SKILLABILITY_CLASSIFICATIONS],
+			proceduralWorkflowsBelongInSkills: [
+				"ordered-setup",
+				"tool-use",
+				"debugging",
+				"recovery",
+				"verification",
+			],
 			routeBroadAlwaysOnConstraintsToMemory: true,
+			doNotProposeMemoryPointersToSkills: true,
+			memoryRemovalOrReplacementRequiresExplicitProposal: true,
 			rejectDirectInstructionsAndFactualReminders: true,
 			rejectTaskSpecificOneOffsAndOutcomeOnlySummaries: true,
 			rejectProceduresWithUnrecoverableDecisiveSteps: true,
@@ -899,6 +908,16 @@ function modelInput(
 			candidateContainsNoExecutableWriterPayload: true,
 			candidateOperations: [...OPERATIONS],
 			memoryRelationships: [...MEMORY_RELATIONSHIPS],
+			memoryRelationshipSemantics: {
+				complements: "The skill procedure and memory constraint remain independently useful.",
+				conflicts: "The guidance is incompatible and must remain deferred.",
+				fallbackUntilActivation:
+					"Memory temporarily carries procedural detail; later removal or replacement requires an explicit memory proposal.",
+				independent: "The skill has no relationship to a selected memory proposal.",
+				redundant: "No distinct skill procedure remains and the decision must remain deferred.",
+				supersedes:
+					"The skill can carry the procedure after activation; memory remains unchanged until an explicit memory proposal is applied.",
+			},
 			workspaceTarget: jsonObject(workspace(input)),
 			globalEvolvedSkillTargetPermitted: false,
 			proceduralObservations: [],

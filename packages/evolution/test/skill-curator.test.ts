@@ -460,7 +460,24 @@ describe("StructuredSkillCurator", () => {
 		);
 
 		expect(requestInput).toMatchObject({
-			control: { globalEvolvedSkillTargetPermitted: false, candidateContainsNoExecutableWriterPayload: true },
+			control: {
+				globalEvolvedSkillTargetPermitted: false,
+				candidateContainsNoExecutableWriterPayload: true,
+				proceduralWorkflowsBelongInSkills: [
+					"ordered-setup",
+					"tool-use",
+					"debugging",
+					"recovery",
+					"verification",
+				],
+				doNotProposeMemoryPointersToSkills: true,
+				memoryRemovalOrReplacementRequiresExplicitProposal: true,
+				memoryRelationshipSemantics: {
+					complements: expect.stringContaining("independently useful"),
+					fallbackUntilActivation: expect.stringContaining("explicit memory proposal"),
+					supersedes: expect.stringContaining("memory remains unchanged"),
+				},
+			},
 			lessons: [{ lessonRef: "L1", evidenceRefs: ["E1"], counterevidenceRefs: ["E2"] }],
 			selectedMemoryProposals: [{ memoryProposalRef: "P1", proposalId: "proposal-1" }],
 			frozenEvolutionMemory: { content: input.harness.memory },
