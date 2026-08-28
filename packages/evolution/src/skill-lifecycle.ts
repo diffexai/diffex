@@ -71,12 +71,15 @@ function skillVersionKey(skill: SkillLifecycleSkillVersion): string {
 		skill.skillId,
 		skill.version,
 		skill.contentDigest,
-		skill.harnessRevision,
 	].join("\u0000");
 }
 
 function sortSkillVersions(skills: readonly SkillLifecycleSkillVersion[]): SkillLifecycleSkillVersion[] {
-	return [...skills].sort((left, right) => skillVersionKey(left).localeCompare(skillVersionKey(right)));
+	return [...skills].sort(
+		(left, right) =>
+			skillVersionKey(left).localeCompare(skillVersionKey(right)) ||
+			left.harnessRevision.localeCompare(right.harnessRevision),
+	);
 }
 
 function assertSkillVersion(skill: SkillLifecycleSkillVersion, scope: EvolutionScope): void {
@@ -259,10 +262,15 @@ export class DeterministicSkillLifecycleObserver {
 			if (observation.status !== "final" || observation.skill.sourceKind !== "evolved") continue;
 			const action = actionFor(observation);
 			if (action === null) continue;
-			const skillVersions = sortSkillVersions([observation.skill, ...observation.relatedSkills]);
+			const skillVersions = sortSkillVersions(
+				[observation.skill, ...observation.relatedSkills].flatMap((skill) => {
+					const active = activeByKey.get(skillVersionKey(skill));
+					return active === undefined ? [] : [active];
+				}),
+			);
 			if (
-				action === "merge-duplicates" &&
-				skillVersions.some((skill) => skill.sourceKind !== "evolved" || !activeByKey.has(skillVersionKey(skill)))
+				skillVersions.length !== observation.relatedSkills.length + 1 ||
+				(action === "merge-duplicates" && skillVersions.some((skill) => skill.sourceKind !== "evolved"))
 			) {
 				continue;
 			}
@@ -277,7 +285,12 @@ export class DeterministicSkillLifecycleObserver {
 				if (first === undefined) throw new Error(`Empty skill lifecycle recommendation group "${key}"`);
 				const action = actionFor(first);
 				if (action === null) throw new Error("Skill lifecycle recommendation lost its action");
-				const skillVersions = sortSkillVersions([first.skill, ...first.relatedSkills]);
+				const skillVersions = sortSkillVersions(
+					[first.skill, ...first.relatedSkills].flatMap((skill) => {
+						const active = activeByKey.get(skillVersionKey(skill));
+						return active === undefined ? [] : [active];
+					}),
+				);
 				const observationIds = uniqueSorted(grouped.map((observation) => observation.observationId));
 				return {
 					recommendationId: `skill-lifecycle-recommendation-${computeEvolutionContentDigest({ action, skillVersions, observationIds }).slice("sha256:".length, "sha256:".length + 32)}`,
