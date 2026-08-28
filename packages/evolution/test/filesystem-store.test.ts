@@ -137,6 +137,33 @@ function candidateWorkEvent(eventId: string, registrySequence: number): SkillCan
 	};
 }
 
+function candidateEvaluationEvent(eventId: string, registrySequence: number): SkillCandidateRegistryEvent {
+	const reference = (artifactId: string) => ({ artifactId, contentDigest: `sha256:${"a".repeat(64)}` });
+	const content = {
+		schemaVersion: SKILL_CANDIDATE_REGISTRY_SCHEMA_VERSION,
+		eventId,
+		registrySequence,
+		type: "skill-candidate-evaluation-recorded" as const,
+		groupId: "group-1",
+		draft: reference("draft-1"),
+		validation: reference("validation-1"),
+		evaluation: reference("evaluation-1"),
+		proposalRevisionIds: ["proposal-revision-1"],
+		idempotencyKey: "evaluation-key-1",
+	};
+	return {
+		metadata: createEvolutionArtifactMetadata({
+			artifactId: eventId,
+			producer,
+			sourceIds: ["group-1"],
+			scope,
+			createdAt: "2026-08-19T12:00:00.000Z",
+			content,
+		}),
+		...content,
+	};
+}
+
 async function scopeLease(store: FileEvolutionPersistence, ownerId: string): Promise<EvolutionLeaseToken> {
 	const lease = await store.acquire(
 		"scope",
@@ -207,13 +234,14 @@ describe("filesystem evolution persistence", () => {
 		const peer = new FileEvolutionPersistence(root);
 		const first = candidateWorkEvent("candidate-event-1", 1);
 
-		expect(await store.appendSkillCandidateRegistryEvents(scope, 0, [first])).toBe("committed");
-		expect(await peer.loadSkillCandidateRegistry(scope)).toEqual({ revision: 1, events: [first] });
+		const evaluation = candidateEvaluationEvent("candidate-event-2", 2);
+		expect(await store.appendSkillCandidateRegistryEvents(scope, 0, [first, evaluation])).toBe("committed");
+		expect(await peer.loadSkillCandidateRegistry(scope)).toEqual({ revision: 2, events: [first, evaluation] });
 		expect(
-			await peer.appendSkillCandidateRegistryEvents(scope, 0, [candidateWorkEvent("candidate-event-2", 1)]),
+			await peer.appendSkillCandidateRegistryEvents(scope, 0, [candidateWorkEvent("candidate-event-3", 1)]),
 		).toBe("conflict");
 		await expect(
-			peer.appendSkillCandidateRegistryEvents(scope, 1, [candidateWorkEvent("candidate-event-2", 3)]),
+			peer.appendSkillCandidateRegistryEvents(scope, 2, [candidateWorkEvent("candidate-event-3", 4)]),
 		).rejects.toThrow("contiguous sequence");
 	});
 
