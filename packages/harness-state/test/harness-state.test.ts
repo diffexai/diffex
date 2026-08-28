@@ -216,9 +216,9 @@ describe("canonical harness versions", () => {
 
 		expect(skillId).toMatch(/^skill:[0-9a-f]{64}$/);
 		expect(computeHarnessSkillId(WORKSPACE, "skills/focused-review/SKILL.md")).toBe(skillId);
-		expect(
-			computeHarnessSkillId({ ...WORKSPACE, directoryId: "other" }, "skills/focused-review/SKILL.md"),
-		).not.toBe(skillId);
+		expect(computeHarnessSkillId({ ...WORKSPACE, directoryId: "other" }, "skills/focused-review/SKILL.md")).not.toBe(
+			skillId,
+		);
 		expect(() => computeHarnessSkillId(WORKSPACE, "../SKILL.md")).toThrow(/artifact path/i);
 	});
 
