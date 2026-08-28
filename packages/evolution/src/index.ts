@@ -167,6 +167,7 @@ export {
 	type SkillEvaluationRuntimeConfiguration,
 	type SkillEvaluationVerifier,
 	type SkillEvaluationVerifierKind,
+	type SkillLifecycleInvocationEvent,
 	type SkillLifecycleIssueKind,
 	type SkillLifecycleObservation,
 	type SkillLifecycleOutcomeSummary,
@@ -294,8 +295,6 @@ export type {
 	SkillCandidateRegistryConsolidationResult,
 	SkillCandidateRegistryStore,
 	SkillCandidateValidationRecordingInput,
-	SkillLifecycleObservationAppendResult,
-	SkillLifecycleObservationStore,
 	SkillCurationResult,
 	SkillCurator,
 	SkillCuratorInput,
@@ -312,6 +311,8 @@ export type {
 	SkillEvaluationSelectionInput,
 	SkillEvaluator,
 	SkillEvaluatorInput,
+	SkillLifecycleObservationAppendResult,
+	SkillLifecycleObservationStore,
 	SkillSynthesizer,
 	SkillSynthesizerInput,
 	SuccessfulMaterialization,
@@ -391,6 +392,12 @@ export {
 	type DeterministicSkillEvaluatorDependencies,
 	SKILL_EVALUATOR_VERSION,
 } from "./skill-evaluator.ts";
+export {
+	DeterministicSkillLifecycleObserver,
+	type DeterministicSkillLifecycleObserverDependencies,
+	type SkillLifecycleObservationInput,
+	type SkillLifecycleReportInput,
+} from "./skill-lifecycle.ts";
 export {
 	StructuredSkillSynthesizer,
 	type StructuredSkillSynthesizerDependencies,
