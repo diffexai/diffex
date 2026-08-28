@@ -391,6 +391,7 @@ function fixture(
 		priorityScore: null,
 		draft: draftReference,
 		validation: null,
+		evaluation: null,
 		synthesisIdempotencyKey: "skill-synthesis-1",
 		validationIdempotencyKey: "skill-validation-1",
 		evaluationIdempotencyKey: "skill-evaluation-1",

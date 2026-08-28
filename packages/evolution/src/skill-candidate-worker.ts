@@ -9,6 +9,7 @@ import type {
 	SkillCandidateWorkCheckpointedEvent,
 	SkillCandidateWorkFailedEvent,
 	SkillCandidateWorkStage,
+	SkillDraftValidationReport,
 } from "./contracts.ts";
 import { SKILL_CANDIDATE_REGISTRY_SCHEMA_VERSION } from "./contracts.ts";
 import type {
@@ -21,6 +22,7 @@ import type {
 	SkillCandidateRegistry,
 	SkillCandidateRegistryStore,
 	SkillDraftValidator,
+	SkillEvaluator,
 	SkillSynthesizer,
 } from "./ports.ts";
 import { computeEvolutionContentDigest, createEvolutionArtifactMetadata } from "./provenance.ts";
@@ -55,6 +57,7 @@ export interface SkillCandidateRegistryWorkerDependencies {
 	readonly registry: SkillCandidateRegistry;
 	readonly synthesizer: SkillSynthesizer;
 	readonly validator: SkillDraftValidator;
+	readonly evaluator?: SkillEvaluator;
 	readonly model: EvolutionModelExecutor;
 }
 
@@ -142,6 +145,10 @@ function isSkillDraft(
 	artifact: EvolutionArtifact,
 ): artifact is Extract<EvolutionArtifact, { artifactKind: "skill-draft" }> {
 	return "artifactKind" in artifact && artifact.artifactKind === "skill-draft";
+}
+
+function isSkillValidation(artifact: EvolutionArtifact): artifact is SkillDraftValidationReport {
+	return "artifactKind" in artifact && artifact.artifactKind === "skill-draft-validation";
 }
 
 function retryDelay(attempt: number, baseDelayMs: number, maxDelayMs: number): number {
@@ -452,7 +459,11 @@ export class SkillCandidateRegistryWorker implements SkillCandidateWorkProcessor
 				attempt,
 				draftedGroups.map((group) => group.groupId),
 			);
-			const validatedGroupIds: string[] = [];
+			const evaluationGroups = new Map(
+				result.groups
+					.filter((group) => group.state === "structurally-valid" || group.state === "evaluation-pending")
+					.map((group) => [group.groupId, group]),
+			);
 			for (const group of draftedGroups) {
 				signal?.throwIfAborted();
 				if (group.draft === null) throw new Error(`Drafted candidate group "${group.groupId}" has no draft`);
@@ -469,7 +480,7 @@ export class SkillCandidateRegistryWorker implements SkillCandidateWorkProcessor
 					});
 					validationReference = await this.#dependencies.artifacts.put(validation);
 				}
-				await this.#dependencies.registry.recordValidation({
+				const validated = await this.#dependencies.registry.recordValidation({
 					scope: job.metadata.scope,
 					groupId: group.groupId,
 					draft: group.draft,
@@ -478,10 +489,57 @@ export class SkillCandidateRegistryWorker implements SkillCandidateWorkProcessor
 					idempotencyKey: group.validationIdempotencyKey,
 					createdAt: this.#dependencies.clock.now(),
 				});
-				validatedGroupIds.push(group.groupId);
+				if (validated.state === "structurally-valid") evaluationGroups.set(validated.groupId, validated);
+			}
+			await this.#appendCheckpoint(job, "evaluating", attempt, [...evaluationGroups.keys()]);
+			const evaluatedGroupIds: string[] = [];
+			if (this.#dependencies.evaluator !== undefined) {
+				for (const evaluationGroup of evaluationGroups.values()) {
+					signal?.throwIfAborted();
+					if (evaluationGroup.draft === null || evaluationGroup.validation === null) {
+						throw new Error(`Candidate group "${evaluationGroup.groupId}" lacks evaluation prerequisites`);
+					}
+					const draftArtifact = await this.#dependencies.artifacts.get(evaluationGroup.draft);
+					const validationArtifact = await this.#dependencies.artifacts.get(evaluationGroup.validation);
+					if (!isSkillDraft(draftArtifact) || !isSkillValidation(validationArtifact)) {
+						throw new Error(`Candidate group "${evaluationGroup.groupId}" evaluation prerequisites are invalid`);
+					}
+					const pending = await this.#dependencies.registry.startEvaluation({
+						scope: job.metadata.scope,
+						groupId: evaluationGroup.groupId,
+						draft: evaluationGroup.draft,
+						validation: evaluationGroup.validation,
+						proposalRevisionIds: evaluationGroup.proposalRevisions.map((revision) => revision.revisionId),
+						idempotencyKey: evaluationGroup.evaluationIdempotencyKey,
+						createdAt: this.#dependencies.clock.now(),
+					});
+					let evaluationReference = pending.evaluation;
+					if (evaluationReference === null) {
+						const evaluation = await this.#dependencies.evaluator.evaluate({
+							group: pending,
+							draft: draftArtifact,
+							validation: validationArtifact,
+							idempotencyKey: pending.evaluationIdempotencyKey,
+							createdAt: this.#dependencies.clock.now(),
+							signal,
+						});
+						evaluationReference = await this.#dependencies.artifacts.put(evaluation);
+					}
+					await this.#dependencies.registry.recordEvaluation({
+						scope: job.metadata.scope,
+						groupId: pending.groupId,
+						draft: evaluationGroup.draft,
+						validation: evaluationGroup.validation,
+						evaluation: evaluationReference,
+						proposalRevisionIds: pending.proposalRevisions.map((revision) => revision.revisionId),
+						idempotencyKey: pending.evaluationIdempotencyKey,
+						createdAt: this.#dependencies.clock.now(),
+					});
+					evaluatedGroupIds.push(pending.groupId);
+				}
 			}
 			await this.#appendCheckpoint(job, "completed", attempt, [
-				...new Set([...processedGroupIds, ...validatedGroupIds]),
+				...new Set([...processedGroupIds, ...evaluationGroups.keys(), ...evaluatedGroupIds]),
 			]);
 		} catch (error) {
 			if (signal?.aborted) throw error;
