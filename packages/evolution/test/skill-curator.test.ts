@@ -463,13 +463,7 @@ describe("StructuredSkillCurator", () => {
 			control: {
 				globalEvolvedSkillTargetPermitted: false,
 				candidateContainsNoExecutableWriterPayload: true,
-				proceduralWorkflowsBelongInSkills: [
-					"ordered-setup",
-					"tool-use",
-					"debugging",
-					"recovery",
-					"verification",
-				],
+				proceduralWorkflowsBelongInSkills: ["ordered-setup", "tool-use", "debugging", "recovery", "verification"],
 				doNotProposeMemoryPointersToSkills: true,
 				memoryRemovalOrReplacementRequiresExplicitProposal: true,
 				memoryRelationshipSemantics: {
