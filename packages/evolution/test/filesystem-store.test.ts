@@ -259,6 +259,7 @@ describe("filesystem evolution persistence", () => {
 		const { store } = await storeFixture();
 		const artifactReference = await store.put(instructionSnapshot());
 		const firstLease = await scopeLease(store, "owner-1");
+		await expect(store.assertHeld(firstLease)).resolves.toBeUndefined();
 		await store.create(job(artifactReference), firstLease);
 
 		const takeoverTime = new Date(Date.parse(firstLease.expiresAt) + 1).toISOString();
@@ -271,6 +272,7 @@ describe("filesystem evolution persistence", () => {
 		);
 		if (secondLease === null) throw new Error("Expected stale lease takeover");
 		expect(secondLease.fence).toBe(firstLease.fence + 1);
+		await expect(store.assertHeld(firstLease)).rejects.toThrow("lease was lost");
 		await expect(store.commit(scope, 0, 3, "job-1", new Date().toISOString(), firstLease)).rejects.toThrow(
 			"lease was lost",
 		);
