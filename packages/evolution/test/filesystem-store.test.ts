@@ -15,7 +15,9 @@ import {
 	type InstructionSnapshot,
 	planEvolutionRetention,
 	SKILL_CANDIDATE_REGISTRY_SCHEMA_VERSION,
+	SKILL_LIFECYCLE_OBSERVATION_SCHEMA_VERSION,
 	type SkillCandidateRegistryEvent,
+	type SkillLifecycleObservation,
 } from "../src/index.ts";
 
 const scope: EvolutionScope = { repositoryId: "diffex", scopeId: "repository" };
@@ -164,6 +166,39 @@ function candidateEvaluationEvent(eventId: string, registrySequence: number): Sk
 	};
 }
 
+function skillObservation(
+	observationId: string,
+	idempotencyKey: string,
+	topLevelTaskLineageId = "task-1",
+): SkillLifecycleObservation {
+	return {
+		schemaVersion: SKILL_LIFECYCLE_OBSERVATION_SCHEMA_VERSION,
+		observationId,
+		scope,
+		skill: {
+			skillId: "skill:review",
+			version: "v1",
+			contentDigest: `sha256:${"b".repeat(64)}`,
+			sourceKind: "evolved",
+			harnessRevision: `sha256:${"c".repeat(64)}`,
+			workspace: { repositoryId: scope.repositoryId, directoryId: "workspace" },
+		},
+		relatedSkills: [],
+		invocationEvents: ["listed", "read"],
+		topLevelTaskLineageId,
+		traceIds: ["trace-1"],
+		evidenceIds: ["evidence-1"],
+		signal: "harmful",
+		signalSource: "test",
+		attributionMethod: "deterministic",
+		issueKind: "procedure-defect",
+		status: "final",
+		policyVersion: "skill-lifecycle-policy-v1",
+		timestamp: "2026-08-29T12:00:00.000Z",
+		idempotencyKey,
+	};
+}
+
 async function scopeLease(store: FileEvolutionPersistence, ownerId: string): Promise<EvolutionLeaseToken> {
 	const lease = await store.acquire(
 		"scope",
@@ -243,6 +278,30 @@ describe("filesystem evolution persistence", () => {
 		await expect(
 			peer.appendSkillCandidateRegistryEvents(scope, 2, [candidateWorkEvent("candidate-event-3", 4)]),
 		).rejects.toThrow("contiguous sequence");
+	});
+
+	it("persists skill lifecycle observations outside harness artifacts", async () => {
+		const { root, store } = await storeFixture();
+		const peer = new FileEvolutionPersistence(root);
+		const observation = skillObservation("skill-observation-1", "observation-key-1");
+
+		expect(await store.appendSkillLifecycleObservation(observation)).toBe("committed");
+		expect(await peer.appendSkillLifecycleObservation(observation)).toBe("already-recorded");
+		expect(await peer.listSkillLifecycleObservations(scope)).toEqual([observation]);
+		await expect(
+			peer.appendSkillLifecycleObservation(skillObservation("skill-observation-2", "observation-key-2")),
+		).rejects.toThrow("final skill lifecycle observation already exists");
+		await expect(peer.appendSkillLifecycleObservation({ ...observation, signal: "helpful" })).rejects.toThrow(
+			"identity was reused with different content",
+		);
+
+		const scopeDirectory = computeEvolutionContentDigest(scope).replace("sha256:", "sha256-");
+		await writeFile(
+			join(root, "skill-observations", scopeDirectory, observation.observationId, "observation.json"),
+			"{}\n",
+			"utf8",
+		);
+		await expect(peer.listSkillLifecycleObservations(scope)).rejects.toBeInstanceOf(EvolutionStorageCorruptionError);
 	});
 
 	it("detects corrupted candidate registry history", async () => {

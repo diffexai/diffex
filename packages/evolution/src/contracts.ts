@@ -120,9 +120,18 @@ export interface SkillLifecycleSkillVersion {
 	readonly skillId: string;
 	readonly version: string;
 	readonly contentDigest: string;
+	readonly sourceKind: EvolutionSkillSourceKind;
 	readonly harnessRevision: HarnessVersion;
 	readonly workspace: SkillLifecycleWorkspaceIdentity;
 }
+
+export type SkillLifecycleInvocationEvent =
+	| "available"
+	| "explicitly-referenced"
+	| "force-loaded"
+	| "listed"
+	| "read"
+	| "selected";
 
 export type SkillLifecycleIssueKind =
 	| "duplicate-guidance"
@@ -136,6 +145,7 @@ export interface SkillLifecycleObservation {
 	readonly scope: EvolutionScope;
 	readonly skill: SkillLifecycleSkillVersion;
 	readonly relatedSkills: readonly SkillLifecycleSkillVersion[];
+	readonly invocationEvents: readonly SkillLifecycleInvocationEvent[];
 	readonly topLevelTaskLineageId: string;
 	readonly traceIds: readonly string[];
 	readonly evidenceIds: readonly string[];
@@ -186,11 +196,7 @@ export interface SkillLifecycleRecommendation {
 	readonly reasonCodes: readonly string[];
 	readonly handoff: {
 		readonly kind: "skill-curator-candidate";
-		readonly requiredGates: readonly [
-			"deterministic-validation",
-			"retrieval-evaluation",
-			"behavioral-evaluation",
-		];
+		readonly requiredGates: readonly ["deterministic-validation", "retrieval-evaluation", "behavioral-evaluation"];
 	};
 }
 
