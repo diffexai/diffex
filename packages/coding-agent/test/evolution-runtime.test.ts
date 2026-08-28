@@ -1061,9 +1061,10 @@ describe("coding-agent evolution runtime", () => {
 					'"objective":"classify-operational-patterns-and-produce-non-executable-skill-candidates"',
 				);
 				expect(prompt).not.toContain(traceId);
-				return fauxAssistantMessage(fauxToolCall("submit_evolution_response", { decisions: [] }), {
-					stopReason: "toolUse",
-				});
+				return fauxAssistantMessage(
+					fauxToolCall("submit_evolution_response", { decisions: [], proceduralInformationLosses: [] }),
+					{ stopReason: "toolUse" },
+				);
 			},
 		]);
 		const runtime = await createCodingAgentEvolutionRuntime({
