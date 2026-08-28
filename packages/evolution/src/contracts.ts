@@ -10,6 +10,7 @@ export const EVOLUTION_MEMORY_ITEM_SCHEMA_VERSION = 1 as const;
 export const COUNTER_OBSERVATION_SCHEMA_VERSION = 1 as const;
 export const COUNTER_REPORT_SCHEMA_VERSION = 1 as const;
 export const SKILL_CANDIDATE_REGISTRY_SCHEMA_VERSION = 1 as const;
+export const SKILL_EVALUATION_SCHEMA_VERSION = 1 as const;
 
 export type JsonPrimitive = boolean | number | string | null;
 export type JsonValue = JsonPrimitive | JsonObject | readonly JsonValue[];
@@ -652,6 +653,121 @@ export interface SkillDraftValidationReport {
 	readonly memoryRelationshipDigest: string;
 }
 
+export type SkillEvaluationCaseKind = "hard-negative" | "intended" | "unrelated";
+
+export type SkillEvaluationCaseOrigin = "held-out" | "source-replay";
+
+export type SkillEvaluationVerifierKind = "environment" | "test" | "tool";
+
+export interface SkillEvaluationVerifier {
+	readonly kind: SkillEvaluationVerifierKind;
+	readonly name: string;
+	readonly version: string;
+	readonly configurationDigest: string;
+}
+
+export interface SkillEvaluationCase {
+	readonly caseId: string;
+	readonly taskFamily: string;
+	readonly kind: SkillEvaluationCaseKind;
+	readonly origin: SkillEvaluationCaseOrigin;
+	readonly taskLineageId: string;
+	readonly sourceTraceId: string | null;
+	readonly prompt: string;
+	readonly expectedSkillIds: readonly string[];
+	readonly confusableSkillIds: readonly string[];
+	readonly verifier: SkillEvaluationVerifier;
+}
+
+export interface SkillEvaluationComponentConfiguration {
+	readonly name: string;
+	readonly version: string;
+	readonly configurationDigest: string;
+}
+
+export interface SkillEvaluationRuntimeConfiguration {
+	readonly model: EvolutionModelIdentity;
+	readonly runtime: SkillEvaluationComponentConfiguration;
+	readonly retriever: SkillEvaluationComponentConfiguration;
+	readonly executor: SkillEvaluationComponentConfiguration;
+}
+
+export interface SkillEvaluationPoolSkill {
+	readonly skillId: string;
+	readonly name: string;
+	readonly description: string;
+	readonly source: "candidate" | "catalog";
+	readonly version: string;
+	readonly contentDigest: string;
+	readonly content: string;
+}
+
+export interface SkillRetrievalEvaluationResult {
+	readonly caseId: string;
+	readonly selectedSkillIds: readonly string[];
+	readonly scores: readonly {
+		readonly skillId: string;
+		readonly score: number;
+	}[];
+}
+
+export interface SkillBehaviorEvaluationOutcome {
+	readonly passed: boolean;
+	readonly score: number;
+	readonly appliedSkillIds: readonly string[];
+	readonly verifier: SkillEvaluationVerifier;
+	readonly details: JsonObject;
+}
+
+export interface SkillBehaviorEvaluationResult {
+	readonly caseId: string;
+	readonly baseline: SkillBehaviorEvaluationOutcome;
+	readonly fullPool: SkillBehaviorEvaluationOutcome;
+}
+
+export interface SkillEvaluationGate {
+	readonly passed: boolean;
+	readonly reasonCodes: readonly string[];
+}
+
+export interface SkillEvaluationMetrics {
+	readonly exactRetrievalAccuracy: number;
+	readonly sourceReplayReproducibility: number;
+	readonly heldOutIntendedBaselineScore: number;
+	readonly heldOutIntendedFullPoolScore: number;
+	readonly heldOutIntendedImprovement: number;
+	readonly negativeRegressionCount: number;
+	readonly misapplicationCount: number;
+}
+
+export interface SkillEvaluationReport {
+	readonly artifactKind: "skill-evaluation";
+	readonly schemaVersion: typeof SKILL_EVALUATION_SCHEMA_VERSION;
+	readonly metadata: EvolutionArtifactMetadata;
+	readonly evaluationId: string;
+	readonly groupId: string;
+	readonly evaluationIdempotencyKey: string;
+	readonly proposalRevisionIds: readonly string[];
+	readonly draft: EvolutionArtifactReference;
+	readonly validation: EvolutionArtifactReference;
+	readonly evaluatorVersion: string;
+	readonly assurance: "retrieval-and-deterministic-behavior-gates";
+	readonly disposition: "accepted" | "quarantined";
+	readonly harnessVersion: HarnessVersion;
+	readonly candidateSkill: SkillEvaluationPoolSkill;
+	readonly neighboringSkills: readonly SkillEvaluationPoolSkill[];
+	readonly configuration: SkillEvaluationRuntimeConfiguration;
+	readonly cases: readonly SkillEvaluationCase[];
+	readonly retrievalResults: readonly SkillRetrievalEvaluationResult[];
+	readonly behaviorResults: readonly SkillBehaviorEvaluationResult[];
+	readonly metrics: SkillEvaluationMetrics;
+	readonly gates: {
+		readonly suite: SkillEvaluationGate;
+		readonly retrieval: SkillEvaluationGate;
+		readonly behavior: SkillEvaluationGate;
+	};
+}
+
 export interface SkillCandidateDispositionRecord {
 	readonly eventId: string;
 	readonly from: SkillCandidateState | null;
@@ -670,6 +786,7 @@ export interface SkillCandidateGroup {
 	readonly priorityScore: EvolutionArtifactReference | null;
 	readonly draft: EvolutionArtifactReference | null;
 	readonly validation: EvolutionArtifactReference | null;
+	readonly evaluation: EvolutionArtifactReference | null;
 	readonly synthesisIdempotencyKey: string;
 	readonly validationIdempotencyKey: string;
 	readonly evaluationIdempotencyKey: string;
@@ -713,6 +830,16 @@ export interface SkillCandidateValidationRecordedEvent extends SkillCandidateReg
 	readonly idempotencyKey: string;
 }
 
+export interface SkillCandidateEvaluationRecordedEvent extends SkillCandidateRegistryEventBase {
+	readonly type: "skill-candidate-evaluation-recorded";
+	readonly groupId: string;
+	readonly draft: EvolutionArtifactReference;
+	readonly validation: EvolutionArtifactReference;
+	readonly evaluation: EvolutionArtifactReference;
+	readonly proposalRevisionIds: readonly string[];
+	readonly idempotencyKey: string;
+}
+
 export interface SkillCandidateStateTransitionedEvent extends SkillCandidateRegistryEventBase {
 	readonly type: "skill-candidate-state-transitioned";
 	readonly groupId: string;
@@ -721,7 +848,13 @@ export interface SkillCandidateStateTransitionedEvent extends SkillCandidateRegi
 	readonly reasonCodes: readonly string[];
 }
 
-export type SkillCandidateWorkStage = "consolidating" | "scoring" | "synthesizing" | "validating" | "completed";
+export type SkillCandidateWorkStage =
+	| "consolidating"
+	| "scoring"
+	| "synthesizing"
+	| "validating"
+	| "evaluating"
+	| "completed";
 
 export interface SkillCandidateWorkCheckpointedEvent extends SkillCandidateRegistryEventBase {
 	readonly type: "skill-candidate-work-checkpointed";
@@ -748,6 +881,7 @@ export type SkillCandidateRegistryEvent =
 	| SkillCandidatePriorityScoredEvent
 	| SkillCandidateDraftRecordedEvent
 	| SkillCandidateValidationRecordedEvent
+	| SkillCandidateEvaluationRecordedEvent
 	| SkillCandidateStateTransitionedEvent
 	| SkillCandidateWorkCheckpointedEvent
 	| SkillCandidateWorkFailedEvent;

@@ -13,6 +13,8 @@ import {
 	PollingSkillCandidateWorkSource,
 	type SkillCandidate,
 	type SkillCandidateDraftRecordingInput,
+	type SkillCandidateEvaluationRecordingInput,
+	type SkillCandidateEvaluationStartInput,
 	type SkillCandidateGroup,
 	type SkillCandidateRegistry,
 	type SkillCandidateRegistryAppendResult,
@@ -25,6 +27,8 @@ import {
 	type SkillDraft,
 	type SkillDraftValidationReport,
 	type SkillDraftValidatorInput,
+	type SkillEvaluationReport,
+	type SkillEvaluatorInput,
 	type SkillSynthesizerInput,
 } from "../src/index.ts";
 
@@ -180,6 +184,7 @@ function qualifiedGroup(candidateReference: EvolutionArtifactReference): SkillCa
 		priorityScore: null,
 		draft: null,
 		validation: null,
+		evaluation: null,
 		synthesisIdempotencyKey: "skill-synthesis-qualified",
 		validationIdempotencyKey: "skill-validation-qualified",
 		evaluationIdempotencyKey: "skill-evaluation-qualified",
@@ -247,6 +252,8 @@ class FixtureRegistry implements SkillCandidateRegistry {
 	readonly requests: SkillCandidateRegistryConsolidationInput[] = [];
 	readonly draftRequests: SkillCandidateDraftRecordingInput[] = [];
 	readonly validationRequests: SkillCandidateValidationRecordingInput[] = [];
+	readonly evaluationStartRequests: SkillCandidateEvaluationStartInput[] = [];
+	readonly evaluationRequests: SkillCandidateEvaluationRecordingInput[] = [];
 	readonly groups: SkillCandidateGroup[] = [];
 	failuresRemaining = 0;
 
@@ -272,7 +279,26 @@ class FixtureRegistry implements SkillCandidateRegistry {
 		this.validationRequests.push(input);
 		const group = this.groups.find((candidateGroup) => candidateGroup.groupId === input.groupId);
 		if (group === undefined) throw new Error("Unknown group");
-		return { ...group, state: "structurally-valid", validation: input.validation };
+		return { ...group, state: "structurally-valid", draft: input.draft, validation: input.validation };
+	}
+
+	async startEvaluation(input: SkillCandidateEvaluationStartInput): Promise<SkillCandidateGroup> {
+		this.evaluationStartRequests.push(input);
+		const group = this.groups.find((candidateGroup) => candidateGroup.groupId === input.groupId);
+		if (group === undefined) throw new Error("Unknown group");
+		return {
+			...group,
+			state: "evaluation-pending",
+			draft: input.draft,
+			validation: input.validation,
+		};
+	}
+
+	async recordEvaluation(input: SkillCandidateEvaluationRecordingInput): Promise<SkillCandidateGroup> {
+		this.evaluationRequests.push(input);
+		const group = this.groups.find((candidateGroup) => candidateGroup.groupId === input.groupId);
+		if (group === undefined) throw new Error("Unknown group");
+		return { ...group, state: "accepted", evaluation: input.evaluation };
 	}
 
 	async list(): Promise<readonly SkillCandidateGroup[]> {
@@ -280,7 +306,7 @@ class FixtureRegistry implements SkillCandidateRegistry {
 	}
 }
 
-function fixture() {
+function fixture(withEvaluator = false) {
 	const input = inputSnapshot();
 	const skillCandidate = candidate();
 	const inputReference = reference(input);
@@ -291,6 +317,7 @@ function fixture() {
 	const registry = new FixtureRegistry();
 	const synthesisRequests: SkillSynthesizerInput[] = [];
 	const validationRequests: SkillDraftValidatorInput[] = [];
+	const evaluationRequests: SkillEvaluatorInput[] = [];
 	let clockTime = now;
 	const clock = { now: () => clockTime };
 	return {
@@ -300,6 +327,7 @@ function fixture() {
 		registry,
 		synthesisRequests,
 		validationRequests,
+		evaluationRequests,
 		clock,
 		setClock(value: string) {
 			clockTime = value;
@@ -360,6 +388,80 @@ function fixture() {
 					return { metadata: metadata(content.validationId, [request.draft.draftId], content), ...content };
 				},
 			},
+			...(withEvaluator
+				? {
+						evaluator: {
+							async evaluate(request: SkillEvaluatorInput): Promise<SkillEvaluationReport> {
+								evaluationRequests.push(request);
+								const draftReference = reference(request.draft);
+								const validationReference = reference(request.validation);
+								const content = {
+									artifactKind: "skill-evaluation" as const,
+									schemaVersion: 1 as const,
+									evaluationId: "evaluation-1",
+									groupId: request.group.groupId,
+									evaluationIdempotencyKey: request.idempotencyKey,
+									proposalRevisionIds: request.group.proposalRevisions.map((revision) => revision.revisionId),
+									draft: draftReference,
+									validation: validationReference,
+									evaluatorVersion: "skill-evaluator-v1",
+									assurance: "retrieval-and-deterministic-behavior-gates" as const,
+									disposition: "accepted" as const,
+									harnessVersion,
+									candidateSkill: {
+										skillId: request.draft.draftId,
+										name: request.draft.proposedName,
+										description: "Fixture skill.",
+										source: "candidate" as const,
+										version: request.draft.metadata.contentDigest,
+										contentDigest: computeEvolutionContentDigest(request.draft.content),
+										content: request.draft.content,
+									},
+									neighboringSkills: [],
+									configuration: {
+										model: {
+											provider: "faux",
+											model: "fixture",
+											configurationDigest: `sha256:${"4".repeat(64)}`,
+										},
+										runtime: { name: "node", version: "24", configurationDigest: `sha256:${"5".repeat(64)}` },
+										retriever: {
+											name: "fixture",
+											version: "1",
+											configurationDigest: `sha256:${"6".repeat(64)}`,
+										},
+										executor: {
+											name: "fixture",
+											version: "1",
+											configurationDigest: `sha256:${"7".repeat(64)}`,
+										},
+									},
+									cases: [],
+									retrievalResults: [],
+									behaviorResults: [],
+									metrics: {
+										exactRetrievalAccuracy: 1,
+										sourceReplayReproducibility: 1,
+										heldOutIntendedBaselineScore: 0,
+										heldOutIntendedFullPoolScore: 1,
+										heldOutIntendedImprovement: 1,
+										negativeRegressionCount: 0,
+										misapplicationCount: 0,
+									},
+									gates: {
+										suite: { passed: true, reasonCodes: [] },
+										retrieval: { passed: true, reasonCodes: [] },
+										behavior: { passed: true, reasonCodes: [] },
+									},
+								};
+								return {
+									metadata: metadata(content.evaluationId, [request.draft.draftId], content),
+									...content,
+								};
+							},
+						},
+					}
+				: {}),
 			model: {
 				maxProviderCallsPerExecution: 20,
 				execute: () => Promise.reject(new Error("Fixture synthesizer does not call the model")),
@@ -393,12 +495,13 @@ describe("skill candidate registry worker", () => {
 			data.store.events.flatMap((event) =>
 				event.type === "skill-candidate-work-checkpointed" ? [event.stage] : [],
 			),
-		).toEqual(["consolidating", "scoring", "synthesizing", "validating", "completed"]);
+		).toEqual(["consolidating", "scoring", "synthesizing", "validating", "evaluating", "completed"]);
 		expect(
 			data.store.events
 				.filter((event) => event.type === "skill-candidate-work-checkpointed")
 				.map((event) => event.idempotencyKey),
 		).toEqual([
+			expect.stringMatching(/^skill-candidate-work-stage-/),
 			expect.stringMatching(/^skill-candidate-work-stage-/),
 			expect.stringMatching(/^skill-candidate-work-stage-/),
 			expect.stringMatching(/^skill-candidate-work-stage-/),
@@ -439,6 +542,35 @@ describe("skill candidate registry worker", () => {
 				groupId: "group-qualified",
 				idempotencyKey: "skill-validation-qualified",
 				validation: expect.objectContaining({ artifactId: "validation-1" }),
+			}),
+		]);
+	});
+
+	it("evaluates structurally valid drafts and records the gated disposition", async () => {
+		const data = fixture(true);
+		const candidateReference = data.job.checkpoints[0]?.outputArtifacts[0];
+		if (candidateReference === undefined) throw new Error("Expected candidate reference");
+		data.registry.groups.push(qualifiedGroup(candidateReference));
+
+		await data.worker.process(data.job.jobId);
+
+		expect(data.evaluationRequests).toEqual([
+			expect.objectContaining({
+				group: expect.objectContaining({ groupId: "group-qualified", state: "evaluation-pending" }),
+				idempotencyKey: "skill-evaluation-qualified",
+			}),
+		]);
+		expect(data.registry.evaluationStartRequests).toEqual([
+			expect.objectContaining({
+				groupId: "group-qualified",
+				idempotencyKey: "skill-evaluation-qualified",
+			}),
+		]);
+		expect(data.registry.evaluationRequests).toEqual([
+			expect.objectContaining({
+				groupId: "group-qualified",
+				idempotencyKey: "skill-evaluation-qualified",
+				evaluation: expect.objectContaining({ artifactId: "evaluation-1" }),
 			}),
 		]);
 	});
