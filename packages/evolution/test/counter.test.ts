@@ -5,15 +5,19 @@ import {
 	DisabledPreReflectionStage,
 	EVOLUTION_MEMORY_ITEM_SCHEMA_VERSION,
 	type EvolutionMemoryItem,
+	SKILL_LIFECYCLE_OBSERVATION_SCHEMA_VERSION,
+	SKILL_LIFECYCLE_REPORT_SCHEMA_VERSION,
 } from "../src/index.ts";
 
 const HARNESS_VERSION = `sha256:${"1".repeat(64)}`;
 
 describe("reserved counter contracts", () => {
-	it("versions memory items, observations, and reports independently", () => {
+	it("versions memory and skill lifecycle records independently", () => {
 		expect(EVOLUTION_MEMORY_ITEM_SCHEMA_VERSION).toBe(1);
 		expect(COUNTER_OBSERVATION_SCHEMA_VERSION).toBe(1);
 		expect(COUNTER_REPORT_SCHEMA_VERSION).toBe(1);
+		expect(SKILL_LIFECYCLE_OBSERVATION_SCHEMA_VERSION).toBe(1);
+		expect(SKILL_LIFECYCLE_REPORT_SCHEMA_VERSION).toBe(1);
 	});
 
 	it("keeps stable memory identity outside rendered memory", () => {

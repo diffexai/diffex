@@ -46,6 +46,8 @@ import type {
 	SkillEvaluationPoolSkill,
 	SkillEvaluationReport,
 	SkillEvaluationRuntimeConfiguration,
+	SkillLifecycleObservation,
+	SkillLifecycleReport,
 	SkillMutationBatch,
 	SkillRetrievalEvaluationResult,
 	ValidationReport,
@@ -71,6 +73,7 @@ export type EvolutionArtifact =
 	| SkillDraft
 	| SkillDraftValidationReport
 	| SkillEvaluationReport
+	| SkillLifecycleReport
 	| SkillMutationBatch
 	| DeferredSkillCandidateFinding
 	| ValidationReport;
@@ -301,6 +304,15 @@ export interface SkillCandidateRegistryStore {
 		expectedRevision: number,
 		events: readonly SkillCandidateRegistryEvent[],
 	): Promise<SkillCandidateRegistryAppendResult>;
+}
+
+export type SkillLifecycleObservationAppendResult = "already-recorded" | "committed";
+
+export interface SkillLifecycleObservationStore {
+	appendSkillLifecycleObservation(
+		observation: SkillLifecycleObservation,
+	): Promise<SkillLifecycleObservationAppendResult>;
+	listSkillLifecycleObservations(scope: EvolutionScope): Promise<readonly SkillLifecycleObservation[]>;
 }
 
 export interface SkillCandidateRegistryConsolidationInput {
