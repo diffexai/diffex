@@ -399,6 +399,7 @@ function candidateOutput(): JsonObject {
 				deferredReason: null,
 			},
 		],
+		proceduralInformationLosses: [],
 	};
 }
 
@@ -466,6 +467,7 @@ describe("StructuredSkillCurator", () => {
 			skillCatalog: [{ skillRef: "K1", skillId: "installed:workspace:existing-skill" }],
 		});
 		expect(result.deferredFindings).toEqual([]);
+		expect(result.proceduralInformationLossFindings).toEqual([]);
 		expect(result.candidates).toHaveLength(1);
 		expect(result.candidates[0]).toMatchObject({
 			artifactKind: "skill-candidate",
@@ -518,6 +520,7 @@ describe("StructuredSkillCurator", () => {
 							deferredReason: "No distinct procedural content remains for a skill.",
 						},
 					],
+					proceduralInformationLosses: [],
 				};
 				request.validateOutput?.(output);
 				return { output, model: { provider: "faux", model: "fixture" } };
@@ -534,6 +537,48 @@ describe("StructuredSkillCurator", () => {
 				memoryRelationship: { classification: "redundant", memoryProposalIds: ["proposal-1"] },
 			},
 		]);
+	});
+
+	it("persists evidence-grounded procedural information loss without emitting a candidate", async () => {
+		const storedSkill = skillArtifact();
+		const artifacts = new FixtureArtifactStore([storedSkill]);
+		const curator = new StructuredSkillCurator({ version: "1", artifacts });
+		const input = fixtureInput(storedSkill.reference);
+		const result = await curator.curate(
+			curatorInput(async (request) => {
+				const evidenceTool = request.tools.find((tool) => tool.name === "inspect_source_evidence");
+				await evidenceTool?.execute({ evidenceRefs: ["E1"], contextAfter: 1 });
+				const output: JsonObject = {
+					decisions: [],
+					proceduralInformationLosses: [
+						{
+							lossKey: "missing-recovery-order",
+							lessonRefs: ["L1"],
+							missing: ["action-order", "mitigation-or-recovery"],
+							supportingEvidenceRefs: ["E1"],
+							explanation:
+								"The evidence contains the recovery order, but the final lesson retains only the conclusion.",
+						},
+					],
+				};
+				request.validateOutput?.(output);
+				return { output, model: { provider: "faux", model: "fixture" } };
+			}, input),
+		);
+
+		expect(result.candidates).toEqual([]);
+		expect(result.proceduralInformationLossFindings).toMatchObject([
+			{
+				artifactKind: "procedural-information-loss",
+				detectedBy: "skill-curator",
+				sourceLessonIds: ["lesson-final"],
+				loss: {
+					missing: ["action-order", "mitigation-or-recovery"],
+					supportingEvidenceIds: ["support-1"],
+				},
+			},
+		]);
+		expect(result.proceduralInformationLossFindings[0]?.metadata.sourceIds).toEqual(["lesson-final", "support-1"]);
 	});
 
 	it("rejects references to skill content that was not inspected", async () => {
@@ -558,6 +603,7 @@ describe("StructuredSkillCurator", () => {
 
 	it("uses a strict Codex-compatible output schema", () => {
 		const schema = createSkillCuratorOutputSchema({
+			evidenceRefs: ["E1"],
 			lessonRefs: ["L1"],
 			memoryProposalRefs: ["P1"],
 			skillRefs: ["K1"],

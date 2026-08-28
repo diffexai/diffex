@@ -888,7 +888,11 @@ describe("checkpointed evolution pipeline", () => {
 						metadata: metadata("skill-candidate-1", ["lesson-1", "proposal-1"], candidateContent),
 						...candidateContent,
 					};
-					return { candidates: [candidate], deferredFindings: [] };
+					return {
+						candidates: [candidate],
+						deferredFindings: [],
+						proceduralInformationLossFindings: [],
+					};
 				},
 			},
 			validator: {
@@ -958,6 +962,7 @@ describe("checkpointed evolution pipeline", () => {
 			state: {
 				candidateIds: ["skill-candidate-1"],
 				deferredFindingIds: [],
+				proceduralInformationLossFindingIds: [],
 				selectedMemoryProposalIds: ["proposal-1"],
 			},
 		});

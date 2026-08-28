@@ -118,6 +118,7 @@ export class SkillCuratorToolRegistry {
 	readonly #maxToolCalls: number;
 	readonly #maxReferencesPerCall: number;
 	readonly #recoverableDenials: SkillCuratorRecoverableToolDenial[] = [];
+	readonly #inspectedEvidenceIds = new Set<string>();
 	readonly #inspectedSkillIds = new Set<string>();
 	readonly evidence: EvolutionModelReferenceCatalog<SkillCuratorEvidenceBinding>;
 	readonly skills: EvolutionModelReferenceCatalog<EvolutionSkillCatalogEntry>;
@@ -246,6 +247,10 @@ export class SkillCuratorToolRegistry {
 		return entry.ref;
 	}
 
+	wasEvidenceInspected(evidenceId: string): boolean {
+		return this.#inspectedEvidenceIds.has(evidenceId);
+	}
+
 	wasSkillInspected(skillId: string): boolean {
 		return this.#inspectedSkillIds.has(skillId);
 	}
@@ -275,6 +280,7 @@ export class SkillCuratorToolRegistry {
 			const context = [...contextBySource.values()].sort(
 				(left, right) => left.evidence.order.traceSequence - right.evidence.order.traceSequence,
 			);
+			for (const binding of selected) this.#inspectedEvidenceIds.add(binding.evidence.evidenceId);
 			return {
 				output: {
 					evidence: context.map((binding) => ({
