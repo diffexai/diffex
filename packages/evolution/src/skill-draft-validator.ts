@@ -380,6 +380,52 @@ export class DeterministicSkillDraftValidator implements SkillDraftValidator {
 				}
 			}
 			const normalizedContent = normalizedText(input.draft.content);
+			for (const trigger of [latest.candidate.trigger.description, ...latest.candidate.trigger.positiveExamples]) {
+				if (!normalizedContent.includes(normalizedText(trigger))) {
+					add("trigger-condition-missing", `The draft omits trigger condition "${trigger}"`);
+				}
+			}
+			for (const precondition of latest.candidate.preconditions) {
+				if (!normalizedContent.includes(normalizedText(precondition))) {
+					add("precondition-missing", `The draft omits precondition "${precondition}"`);
+				}
+			}
+			let previousActionIndex = -1;
+			for (const step of latest.candidate.procedure.steps) {
+				const actionIndex = normalizedContent.indexOf(normalizedText(step.action));
+				if (actionIndex === -1) {
+					add("procedure-action-missing", `The draft omits procedure action "${step.action}"`);
+				} else {
+					if (actionIndex <= previousActionIndex) {
+						add("procedure-action-order-invalid", "The draft changes the candidate procedure action order");
+					}
+					previousActionIndex = Math.max(previousActionIndex, actionIndex);
+				}
+				if (step.condition !== null && !normalizedContent.includes(normalizedText(step.condition))) {
+					add("decision-branch-missing", `The draft omits procedure condition "${step.condition}"`);
+				}
+			}
+			for (const tool of latest.candidate.procedure.requiredTools) {
+				if (!normalizedContent.includes(normalizedText(tool))) {
+					add("tool-dependency-missing", `The draft omits required tool "${tool}"`);
+				}
+			}
+			for (const requirement of latest.candidate.procedure.environment) {
+				if (!normalizedContent.includes(normalizedText(requirement))) {
+					add("environment-dependency-missing", `The draft omits environment requirement "${requirement}"`);
+				}
+			}
+			for (const handling of latest.candidate.failureHandling) {
+				if (!normalizedContent.includes(normalizedText(handling.signal))) {
+					add("failure-signal-missing", `The draft omits failure signal "${handling.signal}"`);
+				}
+				if (!normalizedContent.includes(normalizedText(handling.mitigation))) {
+					add("failure-mitigation-missing", `The draft omits failure mitigation "${handling.mitigation}"`);
+				}
+				if (!normalizedContent.includes(normalizedText(handling.recovery))) {
+					add("recovery-action-missing", `The draft omits recovery action "${handling.recovery}"`);
+				}
+			}
 			for (const boundary of latest.candidate.applicabilityBoundaries) {
 				if (!normalizedContent.includes(normalizedText(boundary))) {
 					add("applicability-boundary-missing", `The draft omits applicability boundary "${boundary}"`);
