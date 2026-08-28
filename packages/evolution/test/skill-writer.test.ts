@@ -16,6 +16,7 @@ import {
 	type EvolutionArtifactStore,
 	type EvolutionScope,
 	FileEvolutionPersistence,
+	type SkillCandidate,
 	type SkillCandidateGroup,
 	type SkillCandidateOperation,
 	type SkillCandidateRegistry,
@@ -88,6 +89,7 @@ interface WriterFixtureOptions {
 	readonly operation: SkillCandidateOperation;
 	readonly existingNames?: readonly string[];
 	readonly existingSkillIdsOverride?: readonly string[];
+	readonly memoryRelationship?: SkillCandidate["memoryRelationship"];
 	readonly retainedNames?: readonly string[];
 	readonly proposedName: string;
 }
@@ -114,6 +116,53 @@ async function writerFixture(options: WriterFixtureOptions) {
 	const existingSkillIds =
 		options.existingSkillIdsOverride ??
 		existingSkills.map((skill) => computeHarnessSkillId(skill.workspace, skill.path));
+	const memoryRelationship = options.memoryRelationship ?? {
+		classification: "independent" as const,
+		memoryProposalIds: [],
+		rationale: "The skill procedure is independent from evolution memory.",
+	};
+	const candidateBody = {
+		artifactKind: "skill-candidate" as const,
+		candidateId: "candidate-1",
+		operation: options.operation,
+		workspace: {
+			repositoryId: workspace.repositoryId,
+			directoryId: workspace.directoryId,
+			rootPath: "/repo",
+			repositoryRevision: "revision-1",
+			evolutionScope: scope,
+		},
+		proposedName: options.proposedName,
+		existingSkillIds,
+		sourceLessonIds: ["lesson-1"],
+		sourceProceduralObservationIds: [],
+		supportingEvidenceIds: ["evidence-1"],
+		contradictingEvidenceIds: [],
+		supportingTraceIds: ["trace-1"],
+		contradictingTraceIds: [],
+		taskLineageIds: ["task-1", "task-2"],
+		skillability: { classification: "ordered-workflow" as const, rationale: "The actions are ordered." },
+		trigger: {
+			description: "A fixture task needs an evolved procedure.",
+			positiveExamples: ["A fixture task is ready."],
+			negativeExamples: ["No fixture task is present."],
+		},
+		preconditions: ["The fixture is available."],
+		procedure: {
+			steps: [{ sequence: 1, action: "Apply the fixture procedure.", condition: null }],
+			requiredTools: [],
+			environment: [],
+		},
+		failureHandling: [{ signal: "The fixture fails.", mitigation: "Inspect it.", recovery: "Retry it." }],
+		applicabilityBoundaries: ["Fixture repositories only."],
+		verificationContract: { checks: ["The fixture passes."], completionCondition: "The fixture is complete." },
+		memoryRelationship,
+	};
+	const candidate: SkillCandidate = {
+		metadata: metadata(candidateBody.candidateId, candidateBody.sourceLessonIds, candidateBody),
+		...candidateBody,
+	};
+	const candidateReference = reference(candidate);
 	const draftContent = skillContent(options.proposedName, `${options.proposedName}-evolved`);
 	const draftBody = {
 		artifactKind: "skill-draft" as const,
@@ -161,7 +210,9 @@ async function writerFixture(options: WriterFixtureOptions) {
 			(skill) => `${skill.skillId}\u0000${skill.version}\u0000${skill.contentDigest}`,
 		),
 		canonicalInventory: [`skills/${options.proposedName}/SKILL.md`],
-		memoryRelationshipDigest: computeEvolutionContentDigest([]),
+		memoryRelationshipDigest: computeEvolutionContentDigest([
+			{ candidateId: candidate.candidateId, memoryRelationship: candidate.memoryRelationship },
+		]),
 	};
 	const validation: SkillDraftValidationReport = {
 		metadata: metadata(validationBody.validationId, [draft.draftId], validationBody),
@@ -232,8 +283,8 @@ async function writerFixture(options: WriterFixtureOptions) {
 		proposalRevisions: [
 			{
 				revisionId: "revision-1",
-				candidateId: "candidate-1",
-				candidate: { artifactId: "candidate-1", contentDigest: `sha256:${"5".repeat(64)}` },
+				candidateId: candidate.candidateId,
+				candidate: candidateReference,
 				sourceEvolutionJobId: "job-1",
 				createdAt: now,
 				evidence: {
@@ -272,7 +323,7 @@ async function writerFixture(options: WriterFixtureOptions) {
 		version: "writer-1",
 		workspace,
 		harnessState,
-		artifacts: new MemoryArtifactStore([draft, validation, evaluation]),
+		artifacts: new MemoryArtifactStore([candidate, draft, validation, evaluation]),
 		registry: registry(groups),
 		leases: persistence,
 		clock: { now: () => now },
@@ -314,6 +365,12 @@ describe("skill writer", () => {
 	])("stages and atomically activates an accepted $operation mutation", async (testCase) => {
 		const data = await writerFixture(testCase);
 		const batch = await data.writer.buildMutationBatch({ scope, groupId: data.group.groupId, createdAt: now });
+		expect(batch.mutations[0]?.memoryDisposition).toMatchObject({
+			classifications: ["independent"],
+			memoryProposalIds: [],
+			activationAction: "preserve",
+			futureMemoryChange: "none",
+		});
 		const writeReceipt = await data.writer.write(batch, { idempotencyKey: "write-1", lease: data.lease });
 
 		expect((await data.harnessState.loadCurrent()).manifest.version).toBe(data.base.manifest.version);
@@ -333,6 +390,61 @@ describe("skill writer", () => {
 		expect(current.state.memory).toBe(data.base.state.memory);
 		expect(current.state.skills.map((skill) => skill.name).sort()).toEqual([...testCase.expectedNames].sort());
 	});
+
+	it.each([
+		{ classification: "complements" as const, futureMemoryChange: "none" as const },
+		{
+			classification: "fallback-until-activation" as const,
+			futureMemoryChange: "explicit-proposal-required" as const,
+		},
+		{ classification: "supersedes" as const, futureMemoryChange: "explicit-proposal-required" as const },
+	])("records $classification memory handling without changing EVOLVE.md", async (testCase) => {
+		const data = await writerFixture({
+			operation: "CREATE",
+			proposedName: "created-skill",
+			memoryRelationship: {
+				classification: testCase.classification,
+				memoryProposalIds: ["memory-proposal-1"],
+				rationale: "The relationship is evidence-grounded.",
+			},
+		});
+		const batch = await data.writer.buildMutationBatch({ scope, groupId: data.group.groupId, createdAt: now });
+		expect(batch.mutations[0]?.memoryDisposition).toMatchObject({
+			classifications: [testCase.classification],
+			memoryProposalIds: ["memory-proposal-1"],
+			activationAction: "preserve",
+			futureMemoryChange: testCase.futureMemoryChange,
+		});
+
+		const writeReceipt = await data.writer.write(batch, { idempotencyKey: "write-1", lease: data.lease });
+		const activation = await data.writer.activate(batch, writeReceipt, {
+			idempotencyKey: "activate-1",
+			lease: data.lease,
+		});
+		const current = await data.harnessState.loadCurrent();
+		expect(current.manifest.version).toBe(activation.result.resultingHarnessVersion);
+		expect(current.state.memory).toBe(data.base.state.memory);
+	});
+
+	it.each(["conflicts", "redundant"] as const)(
+		"rejects %s memory guidance before building an activation batch",
+		async (classification) => {
+			const data = await writerFixture({
+				operation: "CREATE",
+				proposedName: "created-skill",
+				memoryRelationship: {
+					classification,
+					memoryProposalIds: ["memory-proposal-1"],
+					rationale: "The guidance must not activate.",
+				},
+			});
+
+			await expect(
+				data.writer.buildMutationBatch({ scope, groupId: data.group.groupId, createdAt: now }),
+			).rejects.toThrow(`contains non-activatable ${classification} memory guidance`);
+			expect(await data.harnessState.loadCurrent()).toEqual(data.base);
+		},
+	);
 
 	it("makes write and activation retries idempotent and preserves exact rollback lineage", async () => {
 		const data = await writerFixture({

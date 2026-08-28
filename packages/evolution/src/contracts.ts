@@ -1204,6 +1204,19 @@ export interface SkillMutationArtifact {
 	readonly contentDigest: string;
 }
 
+export type SkillActivationMemoryRelationshipClassification = Exclude<
+	SkillMemoryRelationshipClassification,
+	"conflicts" | "redundant"
+>;
+
+export interface SkillMutationMemoryDisposition {
+	readonly relationshipDigest: string;
+	readonly classifications: readonly SkillActivationMemoryRelationshipClassification[];
+	readonly memoryProposalIds: readonly string[];
+	readonly activationAction: "preserve";
+	readonly futureMemoryChange: "explicit-proposal-required" | "none";
+}
+
 export interface SkillMutation {
 	readonly mutationId: string;
 	readonly groupId: string;
@@ -1214,6 +1227,7 @@ export interface SkillMutation {
 	readonly draft: EvolutionArtifactReference;
 	readonly validation: EvolutionArtifactReference;
 	readonly evaluation: EvolutionArtifactReference;
+	readonly memoryDisposition: SkillMutationMemoryDisposition;
 	readonly existingSkills: readonly SkillMutationExistingArtifact[];
 	readonly skill: SkillMutationArtifact | null;
 }
