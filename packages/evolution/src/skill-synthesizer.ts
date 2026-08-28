@@ -272,7 +272,15 @@ function modelInput(
 			removeTaskSpecificPathsSecretsAndTransientValues: true,
 			removeUnsupportedGeneralizations: true,
 			retainExplicitCompatibilityRequirements: true,
+			retainCandidateProceduralContractVerbatim: true,
 			retainCandidateApplicabilityBoundariesNegativeTriggersAndVerificationContractVerbatim: true,
+			proceduralInformationLossValidation: [
+				"trigger conditions and preconditions",
+				"ordered actions and decision branches",
+				"tool and environment dependencies",
+				"failure signals, mitigations, and recovery actions",
+				"verification actions and observable completion conditions",
+			],
 			requiredContent: [
 				"Agent Skills frontmatter with a specific name and description",
 				"recognizable use conditions",
