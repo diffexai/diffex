@@ -423,6 +423,29 @@ export interface Lesson {
 	readonly actionableTakeaway: string;
 }
 
+export type ProceduralInformationLossKind =
+	| "action-order"
+	| "decision-branch"
+	| "failure-signal"
+	| "mitigation-or-recovery"
+	| "tool-or-environment-dependency"
+	| "verification-action";
+
+export interface ProceduralInformationLoss {
+	readonly missing: readonly ProceduralInformationLossKind[];
+	readonly supportingEvidenceIds: readonly string[];
+	readonly explanation: string;
+}
+
+export interface ProceduralInformationLossFinding {
+	readonly artifactKind: "procedural-information-loss";
+	readonly metadata: EvolutionArtifactMetadata;
+	readonly findingId: string;
+	readonly detectedBy: "skill-curator";
+	readonly sourceLessonIds: readonly string[];
+	readonly loss: ProceduralInformationLoss;
+}
+
 export type SkillCandidateOperation = "CREATE" | "MERGE" | "RETIRE" | "UPDATE";
 
 export type SkillabilityClassification =

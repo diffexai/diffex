@@ -704,11 +704,22 @@ export class EvolutionPipeline implements EvolutionStageExecutor {
 					curation.deferredFindings.map((finding) => finding.findingId),
 					"deferred skill finding ID",
 				);
+				assertUniqueIds(
+					curation.proceduralInformationLossFindings.map((finding) => finding.findingId),
+					"procedural information loss finding ID",
+				);
 				return {
-					artifacts: [...curation.candidates, ...curation.deferredFindings],
+					artifacts: [
+						...curation.candidates,
+						...curation.deferredFindings,
+						...curation.proceduralInformationLossFindings,
+					],
 					state: {
 						candidateIds: curation.candidates.map((candidate) => candidate.candidateId),
 						deferredFindingIds: curation.deferredFindings.map((finding) => finding.findingId),
+						proceduralInformationLossFindingIds: curation.proceduralInformationLossFindings.map(
+							(finding) => finding.findingId,
+						),
 						selectedMemoryProposalIds: selectedMemoryProposals.map((scored) => scored.proposal.proposalId),
 					},
 					directive: selectedMemoryProposals.length === 0 ? "complete-no-op" : "continue",
