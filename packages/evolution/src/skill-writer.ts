@@ -18,6 +18,8 @@ import type {
 	HarnessActivationResult,
 	MutationWriteReceipt,
 	MutationWriteResult,
+	SkillActivationMemoryRelationshipClassification,
+	SkillCandidate,
 	SkillCandidateGroup,
 	SkillDraft,
 	SkillDraftValidationReport,
@@ -25,6 +27,7 @@ import type {
 	SkillMutation,
 	SkillMutationBatch,
 	SkillMutationExactDiff,
+	SkillMutationMemoryDisposition,
 	SkillMutationWriteOutput,
 } from "./contracts.ts";
 import { EvolutionExecutionError } from "./errors.ts";
@@ -73,6 +76,7 @@ interface StoredSkillWriterActivation {
 
 interface AcceptedSkillMutationSource {
 	readonly group: SkillCandidateGroup;
+	readonly candidates: readonly SkillCandidate[];
 	readonly draft: SkillDraft;
 	readonly validation: SkillDraftValidationReport;
 	readonly evaluation: SkillEvaluationReport;
@@ -135,6 +139,10 @@ function sameWorkspace(
 	return left.repositoryId === right.repositoryId && left.directoryId === right.directoryId;
 }
 
+function isSkillCandidate(artifact: EvolutionArtifact): artifact is SkillCandidate {
+	return "artifactKind" in artifact && artifact.artifactKind === "skill-candidate";
+}
+
 function isSkillDraft(artifact: EvolutionArtifact): artifact is SkillDraft {
 	return "artifactKind" in artifact && artifact.artifactKind === "skill-draft";
 }
@@ -148,7 +156,7 @@ function isSkillEvaluation(artifact: EvolutionArtifact): artifact is SkillEvalua
 }
 
 function artifactReference(
-	artifact: SkillDraft | SkillDraftValidationReport | SkillEvaluationReport,
+	artifact: SkillCandidate | SkillDraft | SkillDraftValidationReport | SkillEvaluationReport,
 ): EvolutionArtifactReference {
 	return {
 		artifactId: artifact.metadata.artifactId,
@@ -157,7 +165,7 @@ function artifactReference(
 }
 
 function assertArtifactIdentity(
-	artifact: SkillDraft | SkillDraftValidationReport | SkillEvaluationReport,
+	artifact: SkillCandidate | SkillDraft | SkillDraftValidationReport | SkillEvaluationReport,
 	reference: EvolutionArtifactReference,
 	description: string,
 ): void {
@@ -373,17 +381,28 @@ export class SkillWriter {
 		) {
 			throw new Error(`Candidate group "${groupId}" is not accepted for skill activation`);
 		}
-		const [draftArtifact, validationArtifact, evaluationArtifact] = await Promise.all([
+		const [candidateArtifacts, draftArtifact, validationArtifact, evaluationArtifact] = await Promise.all([
+			Promise.all(group.proposalRevisions.map((revision) => this.#dependencies.artifacts.get(revision.candidate))),
 			this.#dependencies.artifacts.get(group.draft),
 			this.#dependencies.artifacts.get(group.validation),
 			this.#dependencies.artifacts.get(group.evaluation),
 		]);
 		if (
+			candidateArtifacts.length === 0 ||
+			!candidateArtifacts.every(isSkillCandidate) ||
 			!isSkillDraft(draftArtifact) ||
 			!isSkillValidation(validationArtifact) ||
 			!isSkillEvaluation(evaluationArtifact)
 		) {
 			throw new Error(`Candidate group "${groupId}" has invalid writer prerequisites`);
+		}
+		const candidates: readonly SkillCandidate[] = candidateArtifacts;
+		for (const [index, candidate] of candidates.entries()) {
+			const revision = group.proposalRevisions[index];
+			if (revision === undefined || candidate.candidateId !== revision.candidateId) {
+				throw new Error(`Candidate group "${groupId}" has invalid candidate provenance`);
+			}
+			assertArtifactIdentity(candidate, revision.candidate, "Skill candidate");
 		}
 		assertArtifactIdentity(draftArtifact, group.draft, "Skill draft");
 		assertArtifactIdentity(validationArtifact, group.validation, "Skill validation");
@@ -416,7 +435,56 @@ export class SkillWriter {
 		) {
 			throw new Error(`Candidate group "${groupId}" accepted artifacts are stale or incomplete`);
 		}
-		return { group, draft: draftArtifact, validation: validationArtifact, evaluation: evaluationArtifact };
+		return {
+			group,
+			candidates,
+			draft: draftArtifact,
+			validation: validationArtifact,
+			evaluation: evaluationArtifact,
+		};
+	}
+
+	#memoryDisposition(source: AcceptedSkillMutationSource): SkillMutationMemoryDisposition {
+		const relationships = source.candidates.map((candidate) => ({
+			candidateId: candidate.candidateId,
+			memoryRelationship: candidate.memoryRelationship,
+		}));
+		const relationshipDigest = computeEvolutionContentDigest(relationships);
+		if (source.validation.memoryRelationshipDigest !== relationshipDigest) {
+			throw new Error(`Candidate group "${source.group.groupId}" memory relationship validation is stale`);
+		}
+		const classifications = new Set<SkillActivationMemoryRelationshipClassification>();
+		const memoryProposalIds = new Set<string>();
+		let requiresExplicitProposal = false;
+		for (const candidate of source.candidates) {
+			const relationship = candidate.memoryRelationship;
+			if (relationship.classification === "conflicts" || relationship.classification === "redundant") {
+				throw new Error(
+					`Candidate group "${source.group.groupId}" contains non-activatable ${relationship.classification} memory guidance`,
+				);
+			}
+			if (
+				(relationship.classification === "independent" && relationship.memoryProposalIds.length !== 0) ||
+				(relationship.classification !== "independent" && relationship.memoryProposalIds.length === 0)
+			) {
+				throw new Error(`Candidate group "${source.group.groupId}" has an invalid memory relationship`);
+			}
+			classifications.add(relationship.classification);
+			for (const proposalId of relationship.memoryProposalIds) memoryProposalIds.add(proposalId);
+			if (
+				relationship.classification === "fallback-until-activation" ||
+				relationship.classification === "supersedes"
+			) {
+				requiresExplicitProposal = true;
+			}
+		}
+		return {
+			relationshipDigest,
+			classifications: [...classifications].sort((left, right) => left.localeCompare(right)),
+			memoryProposalIds: [...memoryProposalIds].sort((left, right) => left.localeCompare(right)),
+			activationAction: "preserve",
+			futureMemoryChange: requiresExplicitProposal ? "explicit-proposal-required" : "none",
+		};
 	}
 
 	#mutationFor(source: AcceptedSkillMutationSource, base: HarnessVersionBundle): SkillMutation {
@@ -487,6 +555,7 @@ export class SkillWriter {
 		const draftReference = artifactReference(draft);
 		const validationReference = artifactReference(validation);
 		const evaluationReference = artifactReference(evaluation);
+		const memoryDisposition = this.#memoryDisposition(source);
 		return {
 			mutationId: stableId("skill-mutation", {
 				groupId: group.groupId,
@@ -508,6 +577,7 @@ export class SkillWriter {
 			draft: draftReference,
 			validation: validationReference,
 			evaluation: evaluationReference,
+			memoryDisposition,
 			existingSkills,
 			skill:
 				draft.operation === "RETIRE"
