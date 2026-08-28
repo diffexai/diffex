@@ -12,8 +12,14 @@ import type {
 	EvolutionScope,
 	SkillCandidateRegistryEvent,
 	SkillCandidateRegistrySnapshot,
+	SkillLifecycleObservation,
+	SkillLifecycleSkillVersion,
 } from "./contracts.ts";
-import { EVOLUTION_SCHEMA_VERSION, SKILL_CANDIDATE_REGISTRY_SCHEMA_VERSION } from "./contracts.ts";
+import {
+	EVOLUTION_SCHEMA_VERSION,
+	SKILL_CANDIDATE_REGISTRY_SCHEMA_VERSION,
+	SKILL_LIFECYCLE_OBSERVATION_SCHEMA_VERSION,
+} from "./contracts.ts";
 import type {
 	EvolutionArtifact,
 	EvolutionArtifactStore,
@@ -26,6 +32,8 @@ import type {
 	EvolutionLedger,
 	SkillCandidateRegistryAppendResult,
 	SkillCandidateRegistryStore,
+	SkillLifecycleObservationAppendResult,
+	SkillLifecycleObservationStore,
 } from "./ports.ts";
 import { computeEvolutionContentDigest, serializeEvolutionValue } from "./provenance.ts";
 
@@ -75,6 +83,36 @@ const SKILL_CANDIDATE_WORK_STAGES = new Set([
 	"validating",
 	"evaluating",
 	"completed",
+]);
+const SKILL_LIFECYCLE_SIGNALS = new Set(["helpful", "harmful", "neutral", "unknown"]);
+const SKILL_LIFECYCLE_SIGNAL_SOURCES = new Set([
+	"direct-user",
+	"environment",
+	"model-self-assessment",
+	"replay",
+	"test",
+	"tool",
+]);
+const SKILL_LIFECYCLE_ATTRIBUTION_METHODS = new Set([
+	"co-occurrence",
+	"deterministic",
+	"direct",
+	"inferred",
+	"self-assessed",
+]);
+const SKILL_LIFECYCLE_INVOCATION_EVENTS = new Set([
+	"available",
+	"explicitly-referenced",
+	"force-loaded",
+	"listed",
+	"read",
+	"selected",
+]);
+const SKILL_LIFECYCLE_ISSUE_KINDS = new Set([
+	"duplicate-guidance",
+	"obsolete-guidance",
+	"procedure-defect",
+	"trigger-mismatch",
 ]);
 const JOB_OUTCOMES = new Set([
 	"active",
@@ -400,6 +438,67 @@ function parseSkillCandidateRegistryEvent(contents: string, path: string): Skill
 	return parsed as unknown as SkillCandidateRegistryEvent;
 }
 
+function isSkillLifecycleVersion(value: unknown): value is SkillLifecycleSkillVersion {
+	return (
+		isRecord(value) &&
+		typeof value.skillId === "string" &&
+		value.skillId.length > 0 &&
+		typeof value.version === "string" &&
+		value.version.length > 0 &&
+		typeof value.contentDigest === "string" &&
+		DIGEST_PATTERN.test(value.contentDigest) &&
+		(value.sourceKind === "evolved" || value.sourceKind === "installed") &&
+		typeof value.harnessRevision === "string" &&
+		DIGEST_PATTERN.test(value.harnessRevision) &&
+		isRecord(value.workspace) &&
+		typeof value.workspace.repositoryId === "string" &&
+		value.workspace.repositoryId.length > 0 &&
+		(value.workspace.directoryId === undefined || typeof value.workspace.directoryId === "string")
+	);
+}
+
+function parseSkillLifecycleObservation(contents: string, path: string): SkillLifecycleObservation {
+	const parsed = parseJson(contents, path);
+	if (
+		!isRecord(parsed) ||
+		parsed.schemaVersion !== SKILL_LIFECYCLE_OBSERVATION_SCHEMA_VERSION ||
+		typeof parsed.observationId !== "string" ||
+		!SAFE_ID_PATTERN.test(parsed.observationId) ||
+		!isRecord(parsed.scope) ||
+		typeof parsed.scope.repositoryId !== "string" ||
+		typeof parsed.scope.scopeId !== "string" ||
+		!isSkillLifecycleVersion(parsed.skill) ||
+		parsed.skill.workspace.repositoryId !== parsed.scope.repositoryId ||
+		!Array.isArray(parsed.relatedSkills) ||
+		parsed.relatedSkills.some((skill) => !isSkillLifecycleVersion(skill)) ||
+		!isStringArray(parsed.invocationEvents) ||
+		parsed.invocationEvents.length === 0 ||
+		parsed.invocationEvents.some((event) => !SKILL_LIFECYCLE_INVOCATION_EVENTS.has(event)) ||
+		typeof parsed.topLevelTaskLineageId !== "string" ||
+		parsed.topLevelTaskLineageId.length === 0 ||
+		!isStringArray(parsed.traceIds) ||
+		!isStringArray(parsed.evidenceIds) ||
+		typeof parsed.signal !== "string" ||
+		!SKILL_LIFECYCLE_SIGNALS.has(parsed.signal) ||
+		typeof parsed.signalSource !== "string" ||
+		!SKILL_LIFECYCLE_SIGNAL_SOURCES.has(parsed.signalSource) ||
+		typeof parsed.attributionMethod !== "string" ||
+		!SKILL_LIFECYCLE_ATTRIBUTION_METHODS.has(parsed.attributionMethod) ||
+		(parsed.issueKind !== null &&
+			(typeof parsed.issueKind !== "string" || !SKILL_LIFECYCLE_ISSUE_KINDS.has(parsed.issueKind))) ||
+		(parsed.status !== "candidate" && parsed.status !== "final") ||
+		typeof parsed.policyVersion !== "string" ||
+		parsed.policyVersion.length === 0 ||
+		typeof parsed.timestamp !== "string" ||
+		!Number.isFinite(Date.parse(parsed.timestamp)) ||
+		typeof parsed.idempotencyKey !== "string" ||
+		parsed.idempotencyKey.length === 0
+	) {
+		throw new EvolutionStorageCorruptionError(path, "skill lifecycle observation is invalid");
+	}
+	return parsed as unknown as SkillLifecycleObservation;
+}
+
 function parseCancellation(contents: string, path: string, expectedJobId: string): EvolutionCancellationRequest {
 	const parsed = parseJson(contents, path);
 	if (
@@ -469,7 +568,8 @@ export class FileEvolutionPersistence
 		EvolutionJobStore,
 		EvolutionLeaseStore,
 		EvolutionLedger,
-		SkillCandidateRegistryStore
+		SkillCandidateRegistryStore,
+		SkillLifecycleObservationStore
 {
 	readonly #rootPath: string;
 	readonly #artifactPath: string;
@@ -479,6 +579,7 @@ export class FileEvolutionPersistence
 	readonly #leasePath: string;
 	readonly #ledgerPath: string;
 	readonly #skillCandidateRegistryPath: string;
+	readonly #skillLifecycleObservationPath: string;
 	readonly #storeLockPath: string;
 	readonly #storeLockStaleMs: number;
 	readonly #storeLockUpdateMs: number;
@@ -492,6 +593,7 @@ export class FileEvolutionPersistence
 		this.#leasePath = join(this.#rootPath, "leases");
 		this.#ledgerPath = join(this.#rootPath, "ledger");
 		this.#skillCandidateRegistryPath = join(this.#rootPath, "skill-candidates");
+		this.#skillLifecycleObservationPath = join(this.#rootPath, "skill-observations");
 		this.#storeLockPath = join(this.#rootPath, ".store");
 		this.#storeLockStaleMs = options.storeLockStaleMs ?? STORE_LOCK_STALE_MS;
 		this.#storeLockUpdateMs = options.storeLockUpdateMs ?? STORE_LOCK_UPDATE_MS;
@@ -511,6 +613,7 @@ export class FileEvolutionPersistence
 			this.#leasePath,
 			this.#ledgerPath,
 			this.#skillCandidateRegistryPath,
+			this.#skillLifecycleObservationPath,
 		]) {
 			await mkdir(path, { recursive: true, mode: 0o700 });
 			const stats = await lstat(path);
@@ -630,6 +733,45 @@ export class FileEvolutionPersistence
 			}
 		}
 		return events;
+	}
+
+	#skillLifecycleScopePath(scope: EvolutionScope): string {
+		return join(this.#skillLifecycleObservationPath, this.#scopeFileName(scope));
+	}
+
+	async #readSkillLifecycleObservations(scope: EvolutionScope): Promise<SkillLifecycleObservation[]> {
+		const scopePath = this.#skillLifecycleScopePath(scope);
+		let entries: Dirent[];
+		try {
+			entries = await readdir(scopePath, { withFileTypes: true });
+		} catch (error) {
+			if (hasErrorCode(error, "ENOENT")) return [];
+			throw error;
+		}
+		const observations: SkillLifecycleObservation[] = [];
+		for (const entry of entries) {
+			if (!entry.isDirectory() || entry.isSymbolicLink() || entry.name.startsWith(".")) continue;
+			const path = join(scopePath, entry.name, "observation.json");
+			const contents = await this.#readOptional(path);
+			if (contents === null) {
+				throw new EvolutionStorageCorruptionError(path, "skill lifecycle observation is missing");
+			}
+			const observation = parseSkillLifecycleObservation(contents, path);
+			if (observation.observationId !== entry.name) {
+				throw new EvolutionStorageCorruptionError(path, "skill lifecycle observation ID does not match its path");
+			}
+			if (!scopeMatches(observation.scope, scope)) {
+				throw new EvolutionStorageCorruptionError(
+					path,
+					"skill lifecycle observation scope does not match its path",
+				);
+			}
+			observations.push(observation);
+		}
+		return observations.sort(
+			(left, right) =>
+				left.timestamp.localeCompare(right.timestamp) || left.observationId.localeCompare(right.observationId),
+		);
 	}
 
 	#leaseFile(kind: EvolutionLeaseToken["kind"], key: string): string {
@@ -986,6 +1128,70 @@ export class FileEvolutionPersistence
 					if (temporaryDirectory !== null) {
 						await rm(temporaryDirectory, { recursive: true, force: true });
 					}
+				}
+			}
+			return "committed";
+		});
+	}
+
+	async listSkillLifecycleObservations(scope: EvolutionScope): Promise<readonly SkillLifecycleObservation[]> {
+		await this.#ensureDirectories();
+		return this.#readSkillLifecycleObservations(scope);
+	}
+
+	async appendSkillLifecycleObservation(
+		observation: SkillLifecycleObservation,
+	): Promise<SkillLifecycleObservationAppendResult> {
+		assertSafeId(observation.observationId, "skill lifecycle observation ID");
+		const content = serializeEvolutionValue(observation);
+		parseSkillLifecycleObservation(content, observation.observationId);
+		return this.#withStoreLock(async () => {
+			const existing = await this.#readSkillLifecycleObservations(observation.scope);
+			const prior = existing.find(
+				(item) =>
+					item.observationId === observation.observationId || item.idempotencyKey === observation.idempotencyKey,
+			);
+			if (prior !== undefined) {
+				if (serializeEvolutionValue(prior) !== content) {
+					throw new Error("Skill lifecycle observation identity was reused with different content");
+				}
+				return "already-recorded";
+			}
+			if (
+				observation.status === "final" &&
+				existing.some(
+					(item) =>
+						item.status === "final" &&
+						item.skill.skillId === observation.skill.skillId &&
+						item.skill.version === observation.skill.version &&
+						item.skill.workspace.repositoryId === observation.skill.workspace.repositoryId &&
+						item.skill.workspace.directoryId === observation.skill.workspace.directoryId &&
+						item.topLevelTaskLineageId === observation.topLevelTaskLineageId,
+				)
+			) {
+				throw new Error(
+					"A final skill lifecycle observation already exists for this skill version and task lineage",
+				);
+			}
+			const scopePath = this.#skillLifecycleScopePath(observation.scope);
+			await mkdir(scopePath, { recursive: true, mode: 0o700 });
+			const stats = await lstat(scopePath);
+			if (!stats.isDirectory() || stats.isSymbolicLink()) {
+				throw new EvolutionStorageCorruptionError(scopePath, "expected a direct directory");
+			}
+			const destination = join(scopePath, observation.observationId);
+			let temporaryDirectory: string | null = await mkdtemp(join(scopePath, ".observation.tmp-"));
+			try {
+				await writeFile(join(temporaryDirectory, "observation.json"), `${content}\n`, {
+					encoding: "utf8",
+					flag: "wx",
+					mode: 0o600,
+				});
+				await rename(temporaryDirectory, destination);
+				temporaryDirectory = null;
+			} finally {
+				if (temporaryDirectory !== null) {
+					await rm(temporaryDirectory, { recursive: true, force: true });
 				}
 			}
 			return "committed";

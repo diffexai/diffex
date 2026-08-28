@@ -50,3 +50,13 @@ The observation and report contracts carry the applicable policy version without
 This reservation does not add observation persistence, aggregation, attribution, scoring, pruning, trace selection metadata, or memory mutation.
 A future implementation may provide the existing `PreReflectionStage` port, persist raw observations in a dedicated append-only store, and emit a versioned `CounterReport`.
 That implementation must preserve the frozen job input, checkpoint artifact format, and explicit `counterReport` input already consumed by Reflector.
+
+## Skill lifecycle observations
+
+Skill lifecycle outcomes use a separate append-only store under evolution state. They are never written into `SKILL.md`, `EVOLVE.md`, or a harness revision, so recording a later outcome cannot rewrite the active or historical harness.
+
+Each observation binds one exact skill ID, version, content digest, harness revision, workspace identity, and top-level task lineage. Observable invocation events remain distinct (`available`, `listed`, `selected`, `explicitly-referenced`, `read`, and `force-loaded`); none is represented as inferred skill use. Co-occurrence can record only an `unknown` outcome and cannot carry a lifecycle issue classification.
+
+Final observations are unique per workspace, exact skill version, and top-level task lineage. Direct user attribution and deterministic test, tool, replay, or environment outcomes receive more report weight than model self-assessment or inference. Candidate observations remain auditable but do not contribute to final outcome weights or recommendations.
+
+Lifecycle reports consider recommendations only for the exact evolved skill versions active in the supplied workspace snapshot. Historical and installed observations remain available for audit but cannot target the evolved-skill writer. Reports can recommend narrowing triggers, revising a procedure, merging active evolved duplicates, deactivating a harmful skill, or retiring obsolete guidance. A recommendation is not a mutation: it requires a new Skill Curator candidate and the existing deterministic validation, retrieval evaluation, and behavioral evaluation gates before the skill writer can act.
