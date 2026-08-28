@@ -5,6 +5,7 @@ import { basename, dirname, join } from "node:path";
 import { Check } from "typebox/value";
 import { afterEach, describe, expect, test } from "vitest";
 import {
+	computeHarnessSkillId,
 	computeHarnessVersion,
 	HARNESS_VERSION_SCHEMA_VERSION,
 	type HarnessArtifactManifest,
@@ -208,6 +209,17 @@ describe("canonical harness versions", () => {
 				artifacts: [original],
 			}),
 		).not.toBe(version);
+	});
+
+	test("derives stable evolved skill identities from workspace and canonical path", () => {
+		const skillId = computeHarnessSkillId(WORKSPACE, "skills/focused-review/SKILL.md");
+
+		expect(skillId).toMatch(/^skill:[0-9a-f]{64}$/);
+		expect(computeHarnessSkillId(WORKSPACE, "skills/focused-review/SKILL.md")).toBe(skillId);
+		expect(
+			computeHarnessSkillId({ ...WORKSPACE, directoryId: "other" }, "skills/focused-review/SKILL.md"),
+		).not.toBe(skillId);
+		expect(() => computeHarnessSkillId(WORKSPACE, "../SKILL.md")).toThrow(/artifact path/i);
 	});
 
 	test("validates an in-memory skill with the same canonical rules as a bundle", () => {

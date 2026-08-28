@@ -1,5 +1,9 @@
 import { createHash } from "node:crypto";
-import type { HarnessVersionBundle, HarnessWorkspaceIdentity } from "@earendil-works/diffex-harness-state";
+import {
+	computeHarnessSkillId,
+	type HarnessVersionBundle,
+	type HarnessWorkspaceIdentity,
+} from "@earendil-works/diffex-harness-state";
 import { existsSync, readdirSync, readFileSync, statSync } from "fs";
 import ignore from "ignore";
 import { basename, dirname, join, relative, resolve, sep } from "path";
@@ -215,14 +219,7 @@ export function createEvolvedSkillCatalog(
 				content: artifact.content,
 				sourceKind: "evolved",
 				scope: "workspace",
-				skillId: `skill:${sha256(
-					JSON.stringify([
-						"evolved",
-						artifact.workspace.repositoryId,
-						artifact.workspace.directoryId ?? null,
-						artifact.path,
-					]),
-				)}`,
+				skillId: computeHarnessSkillId(artifact.workspace, artifact.path),
 				contentDigest: artifact.contentHash,
 				version: artifact.contentHash,
 				harnessRevision: bundle.manifest.version,
