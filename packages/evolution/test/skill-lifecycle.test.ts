@@ -153,6 +153,7 @@ describe("deterministic skill lifecycle observer", () => {
 		const obsolete = skill("skill:obsolete", "v1");
 		const candidateOnly = skill("skill:candidate", "v1");
 		const installed = skill("skill:installed", "v1", "installed");
+		const priorHarness = { ...trigger, harnessRevision: digest("prior-harness") };
 		const oldVersion = skill("skill:trigger", "v0");
 		const cases: readonly [SkillLifecycleSkillVersion, Partial<SkillLifecycleObservationInput>][] = [
 			[trigger, { issueKind: "trigger-mismatch", idempotencyKey: "trigger" }],
@@ -161,6 +162,14 @@ describe("deterministic skill lifecycle observer", () => {
 			[obsolete, { issueKind: "obsolete-guidance", idempotencyKey: "obsolete" }],
 			[candidateOnly, { status: "candidate", idempotencyKey: "candidate" }],
 			[installed, { idempotencyKey: "installed" }],
+			[
+				priorHarness,
+				{
+					issueKind: "trigger-mismatch",
+					topLevelTaskLineageId: "task-from-prior-harness",
+					idempotencyKey: "prior-harness",
+				},
+			],
 			[oldVersion, { idempotencyKey: "old-version" }],
 		];
 		for (const [target, overrides] of cases) {
@@ -185,6 +194,9 @@ describe("deterministic skill lifecycle observer", () => {
 			].sort(),
 		);
 		expect(report.staleObservationIds).toHaveLength(1);
+		expect(
+			report.recommendations.find((recommendation) => recommendation.action === "narrow-triggers"),
+		).toMatchObject({ evidenceWeight: 8, skillVersions: [trigger] });
 		expect(report.activeSkillVersions).toEqual([
 			candidateOnly,
 			duplicate,
