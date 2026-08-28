@@ -1090,6 +1090,56 @@ export interface MutationBatch {
 	readonly mutations: readonly EvolutionMutation[];
 }
 
+export interface SkillMutationExistingArtifact {
+	readonly skillId: string;
+	readonly path: string;
+	readonly contentDigest: string;
+}
+
+export interface SkillMutationArtifact {
+	readonly path: string;
+	readonly content: string;
+	readonly contentDigest: string;
+}
+
+export interface SkillMutation {
+	readonly mutationId: string;
+	readonly groupId: string;
+	readonly operation: SkillCandidateOperation;
+	readonly proposedName: string;
+	readonly workspace: EvolutionSkillWorkspaceIdentity;
+	readonly proposalRevisionIds: readonly string[];
+	readonly draft: EvolutionArtifactReference;
+	readonly validation: EvolutionArtifactReference;
+	readonly evaluation: EvolutionArtifactReference;
+	readonly existingSkills: readonly SkillMutationExistingArtifact[];
+	readonly skill: SkillMutationArtifact | null;
+}
+
+export interface SkillMutationBatch {
+	readonly metadata: EvolutionArtifactMetadata;
+	readonly batchId: string;
+	readonly targetKind: "skill";
+	readonly expectedBaseVersion: HarnessVersion;
+	readonly workspace: EvolutionSkillWorkspaceIdentity;
+	readonly mutations: readonly SkillMutation[];
+}
+
+export type SkillMutationExactDiff = JsonObject & {
+	readonly removed: readonly JsonObject[];
+	readonly added: readonly JsonObject[];
+};
+
+export type SkillMutationWriteOutput = JsonObject & {
+	readonly candidateId: string;
+	readonly candidateDigest: string;
+	readonly batchHash: string;
+	readonly expectedBaseVersion: HarnessVersion;
+	readonly resultingHarnessVersion: HarnessVersion;
+	readonly operationIds: readonly string[];
+	readonly diff: SkillMutationExactDiff;
+};
+
 export type EvolutionMemoryExactDiff = JsonObject & {
 	readonly start: number;
 	readonly removed: string;
