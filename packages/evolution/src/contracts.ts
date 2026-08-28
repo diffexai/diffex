@@ -11,6 +11,8 @@ export const COUNTER_OBSERVATION_SCHEMA_VERSION = 1 as const;
 export const COUNTER_REPORT_SCHEMA_VERSION = 1 as const;
 export const SKILL_CANDIDATE_REGISTRY_SCHEMA_VERSION = 1 as const;
 export const SKILL_EVALUATION_SCHEMA_VERSION = 1 as const;
+export const SKILL_LIFECYCLE_OBSERVATION_SCHEMA_VERSION = 1 as const;
+export const SKILL_LIFECYCLE_REPORT_SCHEMA_VERSION = 1 as const;
 
 export type JsonPrimitive = boolean | number | string | null;
 export type JsonValue = JsonPrimitive | JsonObject | readonly JsonValue[];
@@ -107,6 +109,100 @@ export interface CounterReport {
 	readonly policyVersion: string;
 	readonly evidence: readonly CounterReportEvidence[];
 	readonly trends: readonly CounterReportTrend[];
+}
+
+export interface SkillLifecycleWorkspaceIdentity {
+	readonly repositoryId: string;
+	readonly directoryId?: string;
+}
+
+export interface SkillLifecycleSkillVersion {
+	readonly skillId: string;
+	readonly version: string;
+	readonly contentDigest: string;
+	readonly harnessRevision: HarnessVersion;
+	readonly workspace: SkillLifecycleWorkspaceIdentity;
+}
+
+export type SkillLifecycleIssueKind =
+	| "duplicate-guidance"
+	| "obsolete-guidance"
+	| "procedure-defect"
+	| "trigger-mismatch";
+
+export interface SkillLifecycleObservation {
+	readonly schemaVersion: typeof SKILL_LIFECYCLE_OBSERVATION_SCHEMA_VERSION;
+	readonly observationId: string;
+	readonly scope: EvolutionScope;
+	readonly skill: SkillLifecycleSkillVersion;
+	readonly relatedSkills: readonly SkillLifecycleSkillVersion[];
+	readonly topLevelTaskLineageId: string;
+	readonly traceIds: readonly string[];
+	readonly evidenceIds: readonly string[];
+	readonly signal: CounterSignal;
+	readonly signalSource: CounterSignalSource;
+	readonly attributionMethod: CounterAttributionMethod;
+	readonly issueKind: SkillLifecycleIssueKind | null;
+	readonly status: CounterObservationStatus;
+	readonly policyVersion: string;
+	readonly timestamp: string;
+	readonly idempotencyKey: string;
+}
+
+export interface SkillLifecycleSignalWeights {
+	readonly helpful: number;
+	readonly harmful: number;
+	readonly neutral: number;
+	readonly unknown: number;
+}
+
+export interface SkillLifecycleOutcomeSummary {
+	readonly skill: SkillLifecycleSkillVersion;
+	readonly finalObservationIds: readonly string[];
+	readonly candidateObservationIds: readonly string[];
+	readonly topLevelTaskLineageIds: readonly string[];
+	readonly traceIds: readonly string[];
+	readonly evidenceIds: readonly string[];
+	readonly weightedSignals: SkillLifecycleSignalWeights;
+}
+
+export type SkillLifecycleRecommendationAction =
+	| "deactivate-harmful"
+	| "merge-duplicates"
+	| "narrow-triggers"
+	| "retire-obsolete"
+	| "revise-procedure";
+
+export interface SkillLifecycleRecommendation {
+	readonly recommendationId: string;
+	readonly action: SkillLifecycleRecommendationAction;
+	readonly candidateOperation: Extract<SkillCandidateOperation, "MERGE" | "RETIRE" | "UPDATE">;
+	readonly skillVersions: readonly SkillLifecycleSkillVersion[];
+	readonly observationIds: readonly string[];
+	readonly topLevelTaskLineageIds: readonly string[];
+	readonly traceIds: readonly string[];
+	readonly evidenceIds: readonly string[];
+	readonly evidenceWeight: number;
+	readonly reasonCodes: readonly string[];
+	readonly handoff: {
+		readonly kind: "skill-curator-candidate";
+		readonly requiredGates: readonly [
+			"deterministic-validation",
+			"retrieval-evaluation",
+			"behavioral-evaluation",
+		];
+	};
+}
+
+export interface SkillLifecycleReport {
+	readonly artifactKind: "skill-lifecycle-report";
+	readonly schemaVersion: typeof SKILL_LIFECYCLE_REPORT_SCHEMA_VERSION;
+	readonly metadata: EvolutionArtifactMetadata;
+	readonly policyVersion: string;
+	readonly activeSkillVersions: readonly SkillLifecycleSkillVersion[];
+	readonly summaries: readonly SkillLifecycleOutcomeSummary[];
+	readonly recommendations: readonly SkillLifecycleRecommendation[];
+	readonly staleObservationIds: readonly string[];
 }
 
 export interface ImmutableHarnessSnapshot {
