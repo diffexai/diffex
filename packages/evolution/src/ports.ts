@@ -31,6 +31,7 @@ import type {
 	Lesson,
 	MutationBatch,
 	MutationWriteReceipt,
+	ProceduralInformationLossFinding,
 	ReflectionNode,
 	ScoredProposal,
 	SkillCandidate,
@@ -54,6 +55,7 @@ export type EvolutionArtifact =
 	| InstructionSnapshot
 	| Lesson
 	| MutationBatch
+	| ProceduralInformationLossFinding
 	| MutationWriteReceipt
 	| ReflectionNode
 	| ScoredProposal
@@ -248,6 +250,7 @@ export interface SkillCuratorInput {
 export interface SkillCurationResult {
 	readonly candidates: readonly SkillCandidate[];
 	readonly deferredFindings: readonly DeferredSkillCandidateFinding[];
+	readonly proceduralInformationLossFindings: readonly ProceduralInformationLossFinding[];
 }
 
 export interface SkillCurator {

@@ -722,7 +722,7 @@ describe("deterministic proposal evidence ranking", () => {
 					selectedMemoryProposalIds.push(
 						input.selectedMemoryProposals.map((scored) => scored.proposal.proposalId),
 					);
-					return { candidates: [], deferredFindings: [] };
+					return { candidates: [], deferredFindings: [], proceduralInformationLossFindings: [] };
 				},
 			},
 			validator: ranker,

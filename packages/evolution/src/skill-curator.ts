@@ -5,6 +5,9 @@ import type {
 	EvolutionSkillCatalogEntry,
 	JsonObject,
 	Lesson,
+	ProceduralInformationLoss,
+	ProceduralInformationLossFinding,
+	ProceduralInformationLossKind,
 	ScoredProposal,
 	SkillabilityClassification,
 	SkillCandidate,
@@ -48,8 +51,17 @@ const MEMORY_RELATIONSHIPS = new Set<SkillMemoryRelationshipClassification>([
 	"supersedes",
 ]);
 const OPERATIONS = new Set<SkillCandidateOperation>(["CREATE", "MERGE", "RETIRE", "UPDATE"]);
+const PROCEDURAL_INFORMATION_LOSS_KINDS = new Set<ProceduralInformationLossKind>([
+	"action-order",
+	"decision-branch",
+	"failure-signal",
+	"mitigation-or-recovery",
+	"tool-or-environment-dependency",
+	"verification-action",
+]);
 
 interface SkillCuratorSchemaReferences {
+	readonly evidenceRefs: readonly string[];
 	readonly lessonRefs: readonly string[];
 	readonly memoryProposalRefs: readonly string[];
 	readonly skillRefs: readonly string[];
@@ -80,9 +92,16 @@ interface DeferredFindingDraft {
 	readonly reason: string;
 }
 
+interface ProceduralInformationLossDraft {
+	readonly lossKey: string;
+	readonly lessonIds: readonly string[];
+	readonly loss: ProceduralInformationLoss;
+}
+
 interface ParsedSkillCuratorOutput {
 	readonly candidates: readonly CandidateDraft[];
 	readonly deferredFindings: readonly DeferredFindingDraft[];
+	readonly proceduralInformationLosses: readonly ProceduralInformationLossDraft[];
 }
 
 interface EvidenceReferences {
@@ -203,6 +222,20 @@ export function createSkillCuratorOutputSchema(references: SkillCuratorSchemaRef
 		skillability,
 		memoryRelationship: relationship,
 	};
+	const proceduralInformationLoss = schema(
+		{
+			lossKey: { type: "string", minLength: 1 },
+			lessonRefs: referenceArraySchema(references.lessonRefs, 1),
+			missing: {
+				type: "array",
+				minItems: 1,
+				items: { type: "string", enum: [...PROCEDURAL_INFORMATION_LOSS_KINDS] },
+			},
+			supportingEvidenceRefs: referenceArraySchema(references.evidenceRefs, 1),
+			explanation: { type: "string", minLength: 1 },
+		},
+		["lossKey", "lessonRefs", "missing", "supportingEvidenceRefs", "explanation"],
+	);
 	return schema(
 		{
 			decisions: {
@@ -248,8 +281,9 @@ export function createSkillCuratorOutputSchema(references: SkillCuratorSchemaRef
 					],
 				},
 			},
+			proceduralInformationLosses: { type: "array", items: proceduralInformationLoss },
 		},
-		["decisions"],
+		["decisions", "proceduralInformationLosses"],
 	);
 }
 
@@ -447,6 +481,53 @@ function existingSkills(value: unknown, registry: SkillCuratorToolRegistry): rea
 	return selected;
 }
 
+function proceduralInformationLossDraft(
+	value: unknown,
+	lessons: EvolutionModelReferenceCatalog<Lesson>,
+	registry: SkillCuratorToolRegistry,
+): ProceduralInformationLossDraft {
+	if (!isRecord(value)) throw new Error("proceduralInformationLosses entries must be objects");
+	assertOnlyFields(
+		value,
+		["lossKey", "lessonRefs", "missing", "supportingEvidenceRefs", "explanation"],
+		"proceduralInformationLoss",
+	);
+	const lossKey = requiredString(value, "lossKey");
+	if (!DECISION_KEY_PATTERN.test(lossKey)) throw new Error(`Invalid procedural information loss key "${lossKey}"`);
+	const selectedLessons = referenceArray(value.lessonRefs, "lessonRefs", lessons, { allowEmpty: false });
+	const missing = stringArray(value.missing, "missing", false);
+	for (const item of missing) {
+		if (!PROCEDURAL_INFORMATION_LOSS_KINDS.has(item as ProceduralInformationLossKind)) {
+			throw new Error(`Unsupported missing procedural information kind "${item}"`);
+		}
+	}
+	const evidence = referenceArray(value.supportingEvidenceRefs, "supportingEvidenceRefs", registry.evidence, {
+		allowEmpty: false,
+	});
+	const lessonEvidenceIds = new Set(
+		selectedLessons.flatMap((lesson) => [...lesson.evidenceIds, ...lesson.counterevidenceIds]),
+	);
+	for (const binding of evidence) {
+		if (!lessonEvidenceIds.has(binding.evidence.evidenceId)) {
+			throw new Error(
+				`Procedural information loss evidence "${binding.evidence.evidenceId}" is not cited by its lessons`,
+			);
+		}
+		if (!registry.wasEvidenceInspected(binding.evidence.evidenceId)) {
+			throw new Error(`Procedural information loss evidence "${binding.evidence.evidenceId}" must be inspected`);
+		}
+	}
+	return {
+		lossKey,
+		lessonIds: selectedLessons.map((lesson) => lesson.lessonId),
+		loss: {
+			missing: missing as readonly ProceduralInformationLossKind[],
+			supportingEvidenceIds: evidence.map((binding) => binding.evidence.evidenceId),
+			explanation: requiredString(value, "explanation"),
+		},
+	};
+}
+
 function candidateDraft(
 	decisionKey: string,
 	lessonIds: readonly string[],
@@ -522,8 +603,11 @@ function parseOutput(
 	proposals: EvolutionModelReferenceCatalog<ScoredProposal>,
 	registry: SkillCuratorToolRegistry,
 ): ParsedSkillCuratorOutput {
-	assertOnlyFields(output, ["decisions"], "Skill Curator response");
+	assertOnlyFields(output, ["decisions", "proceduralInformationLosses"], "Skill Curator response");
 	if (!Array.isArray(output.decisions)) throw new Error("Skill Curator decisions must be an array");
+	if (!Array.isArray(output.proceduralInformationLosses)) {
+		throw new Error("Skill Curator proceduralInformationLosses must be an array");
+	}
 	const seenKeys = new Set<string>();
 	const seenCandidateNames = new Set<string>();
 	const candidates: CandidateDraft[] = [];
@@ -586,7 +670,16 @@ function parseOutput(
 		seenCandidateNames.add(normalizedName);
 		candidates.push(draft);
 	}
-	return { candidates, deferredFindings };
+	const seenLossKeys = new Set<string>();
+	const proceduralInformationLosses = output.proceduralInformationLosses.map((value) => {
+		const loss = proceduralInformationLossDraft(value, lessons, registry);
+		if (seenLossKeys.has(loss.lossKey)) {
+			throw new Error(`Duplicate procedural information loss key "${loss.lossKey}"`);
+		}
+		seenLossKeys.add(loss.lossKey);
+		return loss;
+	});
+	return { candidates, deferredFindings, proceduralInformationLosses };
 }
 
 function taskLineageIds(evidence: readonly MaterializedEvidence[]): readonly string[] {
@@ -749,7 +842,33 @@ function resultsFromDrafts(
 			...content,
 		};
 	});
-	return { candidates, deferredFindings };
+	const proceduralInformationLossFindings = parsed.proceduralInformationLosses.map(
+		(draft): ProceduralInformationLossFinding => {
+			const content = {
+				artifactKind: "procedural-information-loss" as const,
+				findingId: stableId("procedural-information-loss", {
+					idempotencyKey: input.idempotencyKey,
+					lossKey: draft.lossKey,
+					draft,
+				}),
+				detectedBy: "skill-curator" as const,
+				sourceLessonIds: draft.lessonIds,
+				loss: draft.loss,
+			};
+			return {
+				metadata: createEvolutionArtifactMetadata({
+					artifactId: content.findingId,
+					producer,
+					sourceIds: unique([...content.sourceLessonIds, ...content.loss.supportingEvidenceIds]),
+					scope: input.input.metadata.scope,
+					createdAt: input.input.metadata.createdAt,
+					content,
+				}),
+				...content,
+			};
+		},
+	);
+	return { candidates, deferredFindings, proceduralInformationLossFindings };
 }
 
 function modelInput(
@@ -783,6 +902,12 @@ function modelInput(
 			workspaceTarget: jsonObject(workspace(input)),
 			globalEvolvedSkillTargetPermitted: false,
 			proceduralObservations: [],
+			reportProceduralInformationLoss: {
+				when: "A lesson preserves a conclusion but omits material procedural information that cited source evidence contains, preventing or weakening a candidate.",
+				requireSourceEvidenceInspection: true,
+				missingKinds: [...PROCEDURAL_INFORMATION_LOSS_KINDS],
+				doNotReportAbsentSourceInformation: true,
+			},
 			...(responseCorrection === null
 				? {}
 				: {
@@ -885,6 +1010,7 @@ export class StructuredSkillCurator implements SkillCurator {
 				: { maxReferencesPerCall: this.#maxReferencesPerToolCall }),
 		});
 		const outputSchema = createSkillCuratorOutputSchema({
+			evidenceRefs: registry.evidence.references,
 			lessonRefs: lessonCatalog.references,
 			memoryProposalRefs: proposalCatalog.references,
 			skillRefs: registry.skills.references,
