@@ -46,6 +46,7 @@ import type {
 	SkillEvaluationPoolSkill,
 	SkillEvaluationReport,
 	SkillEvaluationRuntimeConfiguration,
+	SkillMutationBatch,
 	SkillRetrievalEvaluationResult,
 	ValidationReport,
 } from "./contracts.ts";
@@ -70,6 +71,7 @@ export type EvolutionArtifact =
 	| SkillDraft
 	| SkillDraftValidationReport
 	| SkillEvaluationReport
+	| SkillMutationBatch
 	| DeferredSkillCandidateFinding
 	| ValidationReport;
 
@@ -504,6 +506,7 @@ export interface EvolutionCursorStore {
 }
 
 export interface EvolutionLeaseStore {
+	assertHeld(lease: EvolutionLeaseToken): Promise<void>;
 	acquire(
 		kind: EvolutionLeaseToken["kind"],
 		key: string,
