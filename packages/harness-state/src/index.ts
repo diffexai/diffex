@@ -50,10 +50,7 @@ export interface HarnessWorkspaceIdentity {
 	readonly directoryId?: string;
 }
 
-export function computeHarnessSkillId(
-	workspace: HarnessWorkspaceIdentity,
-	path: string,
-): string {
+export function computeHarnessSkillId(workspace: HarnessWorkspaceIdentity, path: string): string {
 	validateArtifactPath(path);
 	return `skill:${createHash("sha256")
 		.update(JSON.stringify(["evolved", workspace.repositoryId, workspace.directoryId ?? null, path]))

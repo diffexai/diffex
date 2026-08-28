@@ -656,6 +656,10 @@ export class FileEvolutionPersistence
 		}
 	}
 
+	assertHeld(lease: EvolutionLeaseToken): Promise<void> {
+		return this.#withStoreLock(() => this.#assertLeaseHeld(lease));
+	}
+
 	async put(artifact: EvolutionArtifact): Promise<EvolutionArtifactReference> {
 		await this.#ensureDirectories();
 		const content = serializeEvolutionValue(artifact);

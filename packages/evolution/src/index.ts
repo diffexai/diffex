@@ -166,6 +166,12 @@ export {
 	type SkillEvaluationVerifier,
 	type SkillEvaluationVerifierKind,
 	type SkillMemoryRelationshipClassification,
+	type SkillMutation,
+	type SkillMutationArtifact,
+	type SkillMutationBatch,
+	type SkillMutationExactDiff,
+	type SkillMutationExistingArtifact,
+	type SkillMutationWriteOutput,
 	type SkillRetrievalEvaluationResult,
 	type SkillTarget,
 	type ValidationIssue,
@@ -376,6 +382,12 @@ export {
 	StructuredSkillSynthesizer,
 	type StructuredSkillSynthesizerDependencies,
 } from "./skill-synthesizer.ts";
+export {
+	SkillWriter,
+	type SkillWriterBuildInput,
+	type SkillWriterContext,
+	type SkillWriterDependencies,
+} from "./skill-writer.ts";
 export {
 	EvolutionTargetAdapterRegistry,
 	type EvolutionTargetAdapterRegistryOptions,
