@@ -87,6 +87,7 @@ function jobDetail(overrides: Partial<EvolutionJobDetail> = {}): EvolutionJobDet
 			recoveryAttempts: 1,
 		},
 		...overrides,
+		skillCandidates: overrides.skillCandidates ?? [],
 	};
 }
 

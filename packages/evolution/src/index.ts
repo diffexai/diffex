@@ -211,6 +211,11 @@ export {
 	EvolutionProgressBus,
 	type EvolutionProposalDetail,
 	type EvolutionRollbackAction,
+	type EvolutionSkillActivationControl,
+	type EvolutionSkillActivationResult,
+	type EvolutionSkillCandidateDetail,
+	type EvolutionSkillCandidateExistingContent,
+	type EvolutionSkillCandidateSummary,
 	type EvolutionStageLatency,
 	type EvolutionStartResult,
 } from "./control-service.ts";

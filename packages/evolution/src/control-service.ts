@@ -1,4 +1,9 @@
-import type { HarnessSelectResult, HarnessVersion, HarnessVersionList } from "@earendil-works/diffex-harness-state";
+import {
+	computeHarnessSkillId,
+	type HarnessSelectResult,
+	type HarnessVersion,
+	type HarnessVersionList,
+} from "@earendil-works/diffex-harness-state";
 import type { MaterializedEvidence } from "@earendil-works/diffex-harness-trace";
 import type {
 	EvolutionFailureReasonCode,
@@ -12,8 +17,17 @@ import type {
 	EvolutionProposalLedgerDisposition,
 	EvolutionRepositorySnapshot,
 	EvolutionScope,
+	EvolutionSkillContentArtifact,
 	HarnessActivatedLedgerEvent,
+	HarnessActivationReceipt,
 	ScoredProposal,
+	SkillCandidate,
+	SkillCandidateGroup,
+	SkillCandidateOperation,
+	SkillCandidateState,
+	SkillDraft,
+	SkillDraftValidationReport,
+	SkillEvaluationReport,
 	ValidationReport,
 } from "./contracts.ts";
 import type { EvolutionControlPlane, EvolutionJobCreationBlockReason } from "./control-plane.ts";
@@ -27,7 +41,9 @@ import type {
 	EvolutionJobStore,
 	EvolutionLedger,
 	EvolutionProgressEvent,
+	SkillCandidateRegistry,
 } from "./ports.ts";
+import { computeEvolutionTextDigest } from "./provenance.ts";
 import {
 	AUTOMATIC_EVOLUTION_COOLDOWN_MS,
 	AUTOMATIC_EVOLUTION_MINIMUM_INVOCATIONS,
@@ -90,6 +106,46 @@ export interface EvolutionOverview {
 	readonly rollbackAction: EvolutionRollbackAction | null;
 }
 
+export interface EvolutionSkillCandidateSummary {
+	readonly candidateId: string;
+	readonly groupId: string | null;
+	readonly proposedName: string;
+	readonly operation: SkillCandidateOperation;
+	readonly state: SkillCandidateState;
+}
+
+export interface EvolutionSkillCandidateExistingContent {
+	readonly skillId: string;
+	readonly name: string;
+	readonly version: string;
+	readonly content: string;
+}
+
+export interface EvolutionSkillCandidateDetail {
+	readonly summary: EvolutionSkillCandidateSummary;
+	readonly candidate: SkillCandidate;
+	readonly sourceEvolutionJobIds: readonly string[];
+	readonly proposalRevisionIds: readonly string[];
+	readonly existingContents: readonly EvolutionSkillCandidateExistingContent[];
+	readonly draft: SkillDraft | null;
+	readonly validation: SkillDraftValidationReport | null;
+	readonly evaluation: SkillEvaluationReport | null;
+	readonly targetHarnessVersion: HarnessVersion | null;
+	readonly rollbackAvailable: boolean;
+	readonly activationAvailable: boolean;
+}
+
+export interface EvolutionSkillActivationResult {
+	readonly groupId: string;
+	readonly batchId: string;
+	readonly targetHarnessVersion: HarnessVersion;
+	readonly receipt: HarnessActivationReceipt;
+}
+
+export interface EvolutionSkillActivationControl {
+	activate(scope: EvolutionScope, groupId: string): Promise<EvolutionSkillActivationResult>;
+}
+
 export interface EvolutionJobDetail extends EvolutionJobSummary {
 	readonly evidenceHighWaterCursor: number;
 	readonly completedSlices: number;
@@ -107,6 +163,7 @@ export interface EvolutionJobDetail extends EvolutionJobSummary {
 	readonly nextPromptWillRefresh: boolean;
 	readonly proposalIds: readonly string[];
 	readonly proposals: readonly EvolutionProposal[];
+	readonly skillCandidates: readonly EvolutionSkillCandidateSummary[];
 	readonly observability: EvolutionJobObservability;
 }
 
@@ -164,6 +221,8 @@ export interface EvolutionControlServiceDependencies {
 	readonly ledger: EvolutionLedger;
 	readonly harnesses: EvolutionHarnessControl;
 	readonly progress: EvolutionProgressBus;
+	readonly skillCandidates?: SkillCandidateRegistry;
+	readonly skillActivation?: EvolutionSkillActivationControl;
 	readonly observedHarnessVersion: () => HarnessVersion | undefined;
 	readonly currentDirectory: {
 		readonly directoryId: string;
@@ -186,6 +245,26 @@ function isValidationReport(artifact: EvolutionArtifact): artifact is Validation
 
 function isCoverageMap(artifact: EvolutionArtifact): artifact is Extract<EvolutionArtifact, { entries: unknown }> {
 	return "manifestDigest" in artifact && "entries" in artifact && "finalLessonIds" in artifact;
+}
+
+function isSkillCandidate(artifact: EvolutionArtifact): artifact is SkillCandidate {
+	return "artifactKind" in artifact && artifact.artifactKind === "skill-candidate";
+}
+
+function isSkillContent(artifact: EvolutionArtifact): artifact is EvolutionSkillContentArtifact {
+	return "artifactKind" in artifact && artifact.artifactKind === "skill-content";
+}
+
+function isSkillDraft(artifact: EvolutionArtifact): artifact is SkillDraft {
+	return "artifactKind" in artifact && artifact.artifactKind === "skill-draft";
+}
+
+function isSkillValidation(artifact: EvolutionArtifact): artifact is SkillDraftValidationReport {
+	return "artifactKind" in artifact && artifact.artifactKind === "skill-draft-validation";
+}
+
+function isSkillEvaluation(artifact: EvolutionArtifact): artifact is SkillEvaluationReport {
+	return "artifactKind" in artifact && artifact.artifactKind === "skill-evaluation";
 }
 
 function stringArray(value: unknown): readonly string[] {
@@ -247,6 +326,25 @@ function harnessActivation(events: readonly EvolutionLedgerEvent[]): HarnessActi
 		if (event?.type === "harness-activated") return event;
 	}
 	return null;
+}
+
+function candidateGroup(groups: readonly SkillCandidateGroup[], candidateId: string): SkillCandidateGroup | null {
+	return (
+		groups.find((group) => group.proposalRevisions.some((revision) => revision.candidateId === candidateId)) ?? null
+	);
+}
+
+function candidateSummary(
+	candidate: SkillCandidate,
+	group: SkillCandidateGroup | null,
+): EvolutionSkillCandidateSummary {
+	return {
+		candidateId: candidate.candidateId,
+		groupId: group?.groupId ?? null,
+		proposedName: candidate.proposedName,
+		operation: candidate.operation,
+		state: group?.state ?? "proposed",
+	};
 }
 
 export class EvolutionProgressBus implements EvolutionEventSink {
@@ -529,6 +627,8 @@ export class EvolutionControlService {
 		const input = artifacts.find(isInputSnapshot);
 		if (input === undefined) throw new Error(`Evolution job "${jobId}" has no input snapshot`);
 		const scored = artifacts.filter(isScoredProposal);
+		const skillCandidates = artifacts.filter(isSkillCandidate);
+		const candidateGroups = (await this.#dependencies.skillCandidates?.list(this.#dependencies.scope)) ?? [];
 		const discoveredSlices = new Set(
 			artifacts.flatMap((artifact) => ("sliceIds" in artifact ? stringArray(artifact.sliceIds) : [])),
 		).size;
@@ -637,6 +737,9 @@ export class EvolutionControlService {
 				versions.currentVersion !== null && observed !== null && versions.currentVersion !== observed,
 			proposalIds,
 			proposals,
+			skillCandidates: skillCandidates.map((candidate) =>
+				candidateSummary(candidate, candidateGroup(candidateGroups, candidate.candidateId)),
+			),
 			observability: {
 				queueAgeMs,
 				stageLatencies,
@@ -652,6 +755,99 @@ export class EvolutionControlService {
 				recoveryAttempts: job.attempt,
 			},
 		};
+	}
+
+	async getSkillCandidate(jobId: string, candidateId: string): Promise<EvolutionSkillCandidateDetail> {
+		const job = await this.#dependencies.jobs.load(jobId);
+		if (
+			job === null ||
+			isCancelledJob(job) ||
+			job.metadata.scope.repositoryId !== this.#dependencies.scope.repositoryId ||
+			job.metadata.scope.scopeId !== this.#dependencies.scope.scopeId
+		) {
+			throw new Error(`Unknown evolution job "${jobId}"`);
+		}
+		const [artifacts, groups, versions] = await Promise.all([
+			loadArtifacts(job, this.#dependencies.artifacts),
+			this.#dependencies.skillCandidates?.list(this.#dependencies.scope) ?? Promise.resolve([]),
+			this.#dependencies.harnesses.listVersions(),
+		]);
+		const candidate = artifacts.filter(isSkillCandidate).find((item) => item.candidateId === candidateId);
+		if (candidate === undefined) throw new Error(`Unknown skill candidate "${candidateId}"`);
+		const input = artifacts.find(isInputSnapshot);
+		if (input === undefined) throw new Error(`Evolution job "${jobId}" has no input snapshot`);
+		const group = candidateGroup(groups, candidateId);
+		const loadGroupArtifact = async <T extends EvolutionArtifact>(
+			reference: { readonly artifactId: string; readonly contentDigest: string } | null | undefined,
+			guard: (artifact: EvolutionArtifact) => artifact is T,
+		): Promise<T | null> => {
+			if (reference === null || reference === undefined) return null;
+			const artifact = await this.#dependencies.artifacts.get(reference);
+			if (!guard(artifact)) throw new Error(`Skill candidate "${candidateId}" has an invalid review artifact`);
+			return artifact;
+		};
+		const [draft, validation, evaluation] = await Promise.all([
+			loadGroupArtifact(group?.draft, isSkillDraft),
+			loadGroupArtifact(group?.validation, isSkillValidation),
+			loadGroupArtifact(group?.evaluation, isSkillEvaluation),
+		]);
+		const existingContents = await Promise.all(
+			candidate.existingSkillIds.map(async (skillId) => {
+				const entry = input.skillCatalog.find((skill) => skill.skillId === skillId);
+				if (entry === undefined) throw new Error(`Skill candidate source "${skillId}" is unavailable`);
+				const artifact = await this.#dependencies.artifacts.get(entry.contentArtifact);
+				if (!isSkillContent(artifact)) throw new Error(`Skill candidate source "${skillId}" is invalid`);
+				return {
+					skillId,
+					name: entry.name,
+					version: entry.version,
+					content: artifact.skill.content,
+				};
+			}),
+		);
+		const current = versions.versions.find((bundle) => bundle.manifest.version === versions.currentVersion);
+		const draftDigest = draft === null ? null : computeEvolutionTextDigest(draft.content);
+		const active =
+			draft !== null &&
+			current !== undefined &&
+			(draft.operation === "RETIRE"
+				? candidate.existingSkillIds.every(
+						(skillId) =>
+							!current.state.skills.some(
+								(skill) => computeHarnessSkillId(skill.workspace, skill.path) === skillId,
+							),
+					)
+				: current.state.skills.some((skill) => skill.contentHash === draftDigest));
+		const rollbackAvailable =
+			active &&
+			current?.manifest.base !== null &&
+			versions.versions.some((bundle) => bundle.manifest.version === current?.manifest.base);
+		return {
+			summary: candidateSummary(candidate, group),
+			candidate,
+			sourceEvolutionJobIds: group?.proposalRevisions.map((revision) => revision.sourceEvolutionJobId) ?? [jobId],
+			proposalRevisionIds: group?.proposalRevisions.map((revision) => revision.revisionId) ?? [],
+			existingContents,
+			draft,
+			validation,
+			evaluation,
+			targetHarnessVersion: active ? (versions.currentVersion ?? null) : null,
+			rollbackAvailable,
+			activationAvailable:
+				group?.state === "accepted" && !active && this.#dependencies.skillActivation !== undefined,
+		};
+	}
+
+	async activateSkillCandidate(jobId: string, candidateId: string): Promise<EvolutionSkillActivationResult> {
+		const detail = await this.getSkillCandidate(jobId, candidateId);
+		if (
+			!detail.activationAvailable ||
+			detail.summary.groupId === null ||
+			this.#dependencies.skillActivation === undefined
+		) {
+			throw new Error(`Skill candidate "${candidateId}" is not eligible for activation`);
+		}
+		return this.#dependencies.skillActivation.activate(this.#dependencies.scope, detail.summary.groupId);
 	}
 
 	async getProposal(jobId: string, proposalId: string): Promise<EvolutionProposalDetail> {

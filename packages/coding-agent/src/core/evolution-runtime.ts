@@ -48,6 +48,7 @@ import {
 	RecursiveReflector,
 	SkillCandidateBackgroundWorker,
 	SkillCandidateRegistryWorker,
+	SkillWriter,
 	StructuredDeltaCurator,
 	StructuredSkillCurator,
 	StructuredSkillSynthesizer,
@@ -79,6 +80,7 @@ const MAX_MODEL_ROUNDS = 10;
 const PROVIDER_FIRST_BYTE_TIMEOUT_MS = 60_000;
 const PROVIDER_STREAM_IDLE_TIMEOUT_MS = 120_000;
 const PROVIDER_ABSOLUTE_TIMEOUT_MS = 300_000;
+const SKILL_ACTIVATION_LEASE_TTL_MS = 5 * 60_000;
 
 export async function resolveEvolutionDirectoryIdentity(cwd: string): Promise<{
 	readonly directoryId: string;
@@ -880,6 +882,16 @@ export async function createCodingAgentEvolutionRuntime(
 		artifacts: persistence,
 		jobs: persistence,
 	});
+	const skillWriter = new SkillWriter({
+		version: VERSION,
+		workspace: { repositoryId: scope.repositoryId, directoryId: currentDirectory.directoryId },
+		harnessState: options.harnessState,
+		artifacts: persistence,
+		registry: candidateRegistry,
+		leases: persistence,
+		clock,
+		statePath: join(storageRoot, "skill-writer"),
+	});
 	const skillValidator = new DeterministicSkillDraftValidator({
 		version: VERSION,
 		artifacts: persistence,
@@ -935,6 +947,39 @@ export async function createCodingAgentEvolutionRuntime(
 		ledger: persistence,
 		harnesses: options.harnessState,
 		progress,
+		skillCandidates: candidateRegistry,
+		skillActivation: {
+			async activate(activationScope, groupId) {
+				const lease = await persistence.acquire(
+					"writer",
+					"global",
+					`skill-activation-${randomUUID()}`,
+					clock.now(),
+					SKILL_ACTIVATION_LEASE_TTL_MS,
+				);
+				if (lease === null) throw new Error("Another harness writer is active");
+				try {
+					const batch = await skillWriter.buildMutationBatch({
+						scope: activationScope,
+						groupId,
+						createdAt: clock.now(),
+					});
+					const writeReceipt = await skillWriter.write(batch, {
+						idempotencyKey: `skill-write-${batch.batchId}`,
+						lease,
+					});
+					const receipt = await skillWriter.activate(batch, writeReceipt, {
+						idempotencyKey: `skill-activate-${batch.batchId}`,
+						lease,
+					});
+					const targetHarnessVersion = receipt.result.resultingHarnessVersion;
+					if (targetHarnessVersion === null) throw new Error("Skill activation did not select a harness revision");
+					return { groupId, batchId: batch.batchId, targetHarnessVersion, receipt };
+				} finally {
+					await persistence.release(lease);
+				}
+			},
+		},
 		observedHarnessVersion: () => options.session.activeHarnessVersion,
 		currentDirectory: {
 			...currentDirectory,
@@ -1054,6 +1099,14 @@ export class EvolutionRuntimeCoordinator implements AgentSessionLifecycleObserve
 
 	proposalDetail(jobId: string, proposalId: string): Promise<EvolutionProposalDetail> {
 		return this.#control().getProposal(jobId, proposalId);
+	}
+
+	skillCandidateDetail(jobId: string, candidateId: string) {
+		return this.#control().getSkillCandidate(jobId, candidateId);
+	}
+
+	activateSkillCandidate(jobId: string, candidateId: string) {
+		return this.#control().activateSkillCandidate(jobId, candidateId);
 	}
 
 	startManual(): Promise<EvolutionStartResult> {
