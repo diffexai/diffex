@@ -8,6 +8,7 @@ import type {
 	EvolutionOverview,
 	EvolutionProgressEvent,
 	EvolutionProposalDetail,
+	EvolutionSkillCandidateDetail,
 } from "#evolution";
 import { KeybindingsManager } from "../src/core/keybindings.ts";
 import {
@@ -17,6 +18,7 @@ import {
 	formatEvolutionJobLabel,
 	formatEvolutionProposalLabel,
 	formatEvolutionProposalOutcome,
+	formatEvolutionSkillDraftDiff,
 	formatEvolutionTimestamp,
 	sanitizeEvolutionText,
 } from "../src/modes/interactive/components/evolution-menu.ts";
@@ -175,6 +177,54 @@ function proposalDetail(): EvolutionProposalDetail {
 	};
 }
 
+function skillCandidateDetail(overrides: Partial<EvolutionSkillCandidateDetail> = {}): EvolutionSkillCandidateDetail {
+	const detail = {
+		summary: {
+			candidateId: "candidate-1",
+			groupId: "group-1",
+			proposedName: "focused-verification",
+			operation: "CREATE",
+			state: "accepted",
+		},
+		candidate: {
+			sourceLessonIds: ["lesson-1"],
+			supportingEvidenceIds: ["evidence-1"],
+			contradictingEvidenceIds: [],
+			supportingTraceIds: ["trace-1"],
+			contradictingTraceIds: [],
+			taskLineageIds: ["task-1"],
+		},
+		sourceEvolutionJobIds: ["job-active"],
+		proposalRevisionIds: ["revision-1"],
+		existingContents: [],
+		draft: {
+			operation: "CREATE",
+			content: "---\nname: focused-verification\ndescription: Verify focused changes.\n---\n\nRun checks.\n",
+		},
+		validation: { disposition: "accepted", issues: [] },
+		evaluation: {
+			disposition: "accepted",
+			gates: {
+				suite: { passed: true, reasonCodes: [] },
+				retrieval: { passed: true, reasonCodes: [] },
+				behavior: { passed: true, reasonCodes: [] },
+			},
+			metrics: {
+				exactRetrievalAccuracy: 1,
+				heldOutIntendedImprovement: 0.5,
+				negativeRegressionCount: 0,
+				misapplicationCount: 0,
+			},
+		},
+		targetHarnessVersion: null,
+		rollbackTargetHarnessVersion: null,
+		rollbackAvailable: false,
+		activationAvailable: true,
+		...overrides,
+	} as unknown as EvolutionSkillCandidateDetail;
+	return detail;
+}
+
 function evidence(evidenceId: string, text: string): EvolutionProposalDetail["supportingEvidence"][number] {
 	return {
 		evidenceId,
@@ -198,6 +248,9 @@ function client(currentOverview: EvolutionOverview): {
 	listJobs: ReturnType<typeof vi.fn>;
 	jobDetailCall: ReturnType<typeof vi.fn>;
 	proposalDetailCall: ReturnType<typeof vi.fn>;
+	skillCandidateDetailCall: ReturnType<typeof vi.fn>;
+	activateSkillCandidate: ReturnType<typeof vi.fn>;
+	rollbackSkillCandidate: ReturnType<typeof vi.fn>;
 	getEnabled: ReturnType<typeof vi.fn>;
 	setEnabled: ReturnType<typeof vi.fn>;
 } {
@@ -214,6 +267,19 @@ function client(currentOverview: EvolutionOverview): {
 	const listJobs = vi.fn().mockResolvedValue([]);
 	const jobDetailCall = vi.fn().mockRejectedValue(new Error("unused"));
 	const proposalDetailCall = vi.fn().mockRejectedValue(new Error("unused"));
+	const skillCandidateDetailCall = vi.fn().mockRejectedValue(new Error("unused"));
+	const activateSkillCandidate = vi.fn().mockResolvedValue({
+		groupId: "group-1",
+		batchId: "batch-1",
+		targetHarnessVersion: `sha256:${"d".repeat(64)}`,
+		receipt: {},
+	});
+	const rollbackSkillCandidate = vi.fn().mockResolvedValue({
+		jobId: "job-active",
+		fromHarnessVersion: `sha256:${"d".repeat(64)}`,
+		toHarnessVersion: rootVersion,
+		proposalIds: ["candidate-1"],
+	});
 	const getEnabled = vi.fn(() => enabled);
 	const setEnabled = vi.fn(async (next: boolean) => {
 		enabled = next;
@@ -232,6 +298,9 @@ function client(currentOverview: EvolutionOverview): {
 			listJobs,
 			jobDetail: jobDetailCall,
 			proposalDetail: proposalDetailCall,
+			skillCandidateDetail: skillCandidateDetailCall,
+			activateSkillCandidate,
+			rollbackSkillCandidate,
 			startManual,
 			resumeNewest: vi.fn().mockRejectedValue(new Error("unused")),
 			cancelJob,
@@ -247,6 +316,9 @@ function client(currentOverview: EvolutionOverview): {
 		listJobs,
 		jobDetailCall,
 		proposalDetailCall,
+		skillCandidateDetailCall,
+		activateSkillCandidate,
+		rollbackSkillCandidate,
 		getEnabled,
 		setEnabled,
 	};
@@ -467,6 +539,8 @@ describe("EvolutionMenuComponent", () => {
 		expect(output).toContain("Evolution token: 12,345");
 		expect(output).toContain("Last checkpoint: Today at 9:05 am");
 		expect(output).toContain("Base harness: [current] Default Diffex Agent");
+		expect(output).toContain("Target harness: pending");
+		expect(output).toContain("Rollback available: no");
 		for (const removedLabel of [
 			"Job:",
 			"Evidence high-water cursor:",
@@ -479,8 +553,6 @@ describe("EvolutionMenuComponent", () => {
 			"Provider cost:",
 			"Proposal dispositions:",
 			"Activation conflicts:",
-			"Rollback available:",
-			"Activated harness:",
 			"Next prompt will refresh:",
 			"Result:",
 			"Proposals:",
@@ -559,6 +631,102 @@ describe("EvolutionMenuComponent", () => {
 			),
 		);
 		component.dispose();
+	});
+
+	it("reviews candidate provenance, draft, validation, evaluation, and confirms activation", async () => {
+		const detail = skillCandidateDetail();
+		const fixture = client(overview());
+		fixture.listJobs.mockResolvedValue([job()]);
+		fixture.jobDetailCall.mockResolvedValue(
+			jobDetail({
+				skillCandidates: [detail.summary],
+			}),
+		);
+		fixture.skillCandidateDetailCall.mockResolvedValue(detail);
+		const status = vi.fn();
+		const component = new EvolutionMenuComponent(
+			fixture.client,
+			() => {},
+			status,
+			() => {},
+		);
+		await vi.waitFor(() => expect(stripAnsi(component.render(180).join("\n"))).toContain("Browse"));
+
+		for (let index = 0; index < 4; index += 1) component.handleInput("\u001b[B");
+		component.handleInput("\n");
+		await vi.waitFor(() =>
+			expect(stripAnsi(component.render(180).join("\n"))).toContain(formatEvolutionJobLabel(job())),
+		);
+		component.handleInput("\n");
+		await vi.waitFor(() =>
+			expect(stripAnsi(component.render(180).join("\n"))).toContain("Skill focused-verification - accepted"),
+		);
+		component.handleInput("\n");
+		await vi.waitFor(() =>
+			expect(fixture.skillCandidateDetailCall).toHaveBeenCalledWith("job-active", "candidate-1"),
+		);
+
+		let output = stripAnsi(component.render(180).join("\n"));
+		expect(output).toContain("Skill candidate: focused-verification");
+		expect(output).toContain("Target harness: pending activation");
+		expect(output).toContain("Provenance");
+		expect(output).toContain("Draft diff");
+		expect(output).toContain("Validation");
+		expect(output).toContain("Evaluation");
+		expect(output).toContain("Activate");
+
+		component.handleInput("\n");
+		await vi.waitFor(() =>
+			expect(stripAnsi(component.render(180).join("\n"))).toContain("Evolution jobs: job-active"),
+		);
+		component.handleInput("\u001b");
+		component.handleInput("\u001b[B");
+		component.handleInput("\n");
+		await vi.waitFor(() => expect(stripAnsi(component.render(180).join("\n"))).toContain("+Run checks."));
+		component.handleInput("\u001b");
+		for (let index = 0; index < 3; index += 1) component.handleInput("\u001b[B");
+		component.handleInput("\n");
+		await vi.waitFor(() =>
+			expect(stripAnsi(component.render(180).join("\n"))).toContain("Retrieval and behavior evaluation"),
+		);
+		output = stripAnsi(component.render(180).join("\n"));
+		expect(output).toContain("retrieval: passed");
+		expect(output).toContain("Negative regressions: 0");
+
+		component.handleInput("\u001b");
+		for (let index = 0; index < 4; index += 1) component.handleInput("\u001b[B");
+		component.handleInput("\n");
+		await vi.waitFor(() =>
+			expect(stripAnsi(component.render(180).join("\n"))).toContain("Activate focused-verification?"),
+		);
+		expect(fixture.activateSkillCandidate).not.toHaveBeenCalled();
+		component.handleInput("\n");
+		await vi.waitFor(() => expect(fixture.activateSkillCandidate).toHaveBeenCalledWith("job-active", "candidate-1"));
+		await vi.waitFor(() =>
+			expect(status).toHaveBeenCalledWith(expect.stringContaining("Evolved skill activated in sha256:"), false),
+		);
+		component.dispose();
+	});
+
+	it("formats create, update, and retirement draft diffs", () => {
+		expect(formatEvolutionSkillDraftDiff(skillCandidateDetail())).toContain("+Run checks.");
+		const existingContents = [{ skillId: "skill-1", name: "old", version: "v1", content: "old line\n" }];
+		expect(
+			formatEvolutionSkillDraftDiff(
+				skillCandidateDetail({
+					existingContents,
+					draft: { ...skillCandidateDetail().draft, operation: "UPDATE", content: "new line\n" },
+				} as unknown as Partial<EvolutionSkillCandidateDetail>),
+			),
+		).toEqual(expect.arrayContaining(["-old line", "+new line"]));
+		expect(
+			formatEvolutionSkillDraftDiff(
+				skillCandidateDetail({
+					existingContents,
+					draft: { ...skillCandidateDetail().draft, operation: "RETIRE" },
+				} as unknown as Partial<EvolutionSkillCandidateDetail>),
+			),
+		).toContain("-old line");
 	});
 
 	it("formats non-add proposal outcomes as readable text", () => {

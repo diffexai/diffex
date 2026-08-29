@@ -131,6 +131,7 @@ export interface EvolutionSkillCandidateDetail {
 	readonly validation: SkillDraftValidationReport | null;
 	readonly evaluation: SkillEvaluationReport | null;
 	readonly targetHarnessVersion: HarnessVersion | null;
+	readonly rollbackTargetHarnessVersion: HarnessVersion | null;
 	readonly rollbackAvailable: boolean;
 	readonly activationAvailable: boolean;
 }
@@ -817,7 +818,10 @@ export class EvolutionControlService {
 								(skill) => computeHarnessSkillId(skill.workspace, skill.path) === skillId,
 							),
 					)
-				: current.state.skills.some((skill) => skill.contentHash === draftDigest));
+				: current.state.skills.some(
+						(skill) =>
+							skill.path === `skills/${draft.proposedName}/SKILL.md` && skill.contentHash === draftDigest,
+					));
 		const rollbackAvailable =
 			active &&
 			current?.manifest.base !== null &&
@@ -832,9 +836,36 @@ export class EvolutionControlService {
 			validation,
 			evaluation,
 			targetHarnessVersion: active ? (versions.currentVersion ?? null) : null,
+			rollbackTargetHarnessVersion: active ? (current?.manifest.base ?? null) : null,
 			rollbackAvailable,
 			activationAvailable:
 				group?.state === "accepted" && !active && this.#dependencies.skillActivation !== undefined,
+		};
+	}
+
+	async rollbackSkillCandidate(jobId: string, candidateId: string): Promise<EvolutionRollbackAction> {
+		const detail = await this.getSkillCandidate(jobId, candidateId);
+		if (
+			!detail.rollbackAvailable ||
+			detail.targetHarnessVersion === null ||
+			detail.rollbackTargetHarnessVersion === null
+		) {
+			throw new Error(`Skill candidate "${candidateId}" has no rollback available`);
+		}
+		const result = await this.#dependencies.harnesses.selectVersionIfCurrent(
+			detail.rollbackTargetHarnessVersion,
+			detail.targetHarnessVersion,
+		);
+		if (result.status === "conflict") {
+			throw new Error(
+				`Harness revision changed before rollback: expected ${result.expectedCurrent}, found ${result.actualCurrent}`,
+			);
+		}
+		return {
+			jobId,
+			fromHarnessVersion: detail.targetHarnessVersion,
+			toHarnessVersion: detail.rollbackTargetHarnessVersion,
+			proposalIds: [candidateId],
 		};
 	}
 
