@@ -2,12 +2,14 @@ import { link, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { basename, dirname, join, resolve } from "node:path";
 import {
 	computeHarnessSkillId,
+	computeHarnessSkillPackageVersion,
 	type HarnessSkill,
 	type HarnessSkillInput,
 	type HarnessStateStore,
 	type HarnessVersionBundle,
 	type HarnessWorkspaceIdentity,
 	validateHarnessSkillContent,
+	validateHarnessSkillFilePath,
 } from "@earendil-works/diffex-harness-state";
 import type {
 	EvolutionArtifactProducer,
@@ -29,6 +31,7 @@ import type {
 	SkillMutationExactDiff,
 	SkillMutationMemoryDisposition,
 	SkillMutationWriteOutput,
+	SkillPackageFile,
 } from "./contracts.ts";
 import { EvolutionExecutionError } from "./errors.ts";
 import type {
@@ -198,11 +201,16 @@ function skillInput(skill: HarnessSkill): HarnessSkillInput {
 			repositoryId: skill.workspace.repositoryId,
 			...(skill.workspace.directoryId === undefined ? {} : { directoryId: skill.workspace.directoryId }),
 		},
+		files: skill.files.map((file) => ({ path: file.path, content: file.content })),
 	};
 }
 
 function sortSkillInputs(skills: readonly HarnessSkillInput[]): HarnessSkillInput[] {
 	return [...skills].sort((left, right) => left.path.localeCompare(right.path));
+}
+
+function sortPackageFiles(files: readonly SkillPackageFile[]): SkillPackageFile[] {
+	return [...files].sort((left, right) => (left.path < right.path ? -1 : left.path > right.path ? 1 : 0));
 }
 
 function serializedSkills(skills: readonly HarnessSkillInput[] | readonly HarnessSkill[]): string {
@@ -215,6 +223,9 @@ function serializedSkills(skills: readonly HarnessSkillInput[] | readonly Harnes
 					repositoryId: skill.workspace.repositoryId,
 					...(skill.workspace.directoryId === undefined ? {} : { directoryId: skill.workspace.directoryId }),
 				},
+				files: [...(skill.files ?? [])]
+					.map((file) => ({ path: file.path, content: file.content }))
+					.sort((left, right) => left.path.localeCompare(right.path)),
 			})),
 		),
 	);
@@ -534,15 +545,22 @@ export class SkillWriter {
 		}
 		const expectedPath = `skills/${draft.proposedName}/SKILL.md`;
 		validateHarnessSkillContent(expectedPath, draft.content);
-		if (!sameValues(validation.canonicalInventory, [expectedPath])) {
+		const expectedInventory = [
+			expectedPath,
+			...draft.files.map((file) => validateHarnessSkillFilePath(expectedPath, file.path)),
+		];
+		if (!sameValues(validation.canonicalInventory, expectedInventory)) {
 			throw new Error(`Candidate group "${group.groupId}" has a noncanonical validated inventory`);
 		}
 		if (
 			evaluation.candidateSkill.skillId !== draft.draftId ||
 			evaluation.candidateSkill.name !== draft.proposedName ||
-			evaluation.candidateSkill.version !== draft.metadata.contentDigest ||
+			evaluation.candidateSkill.version !==
+				computeHarnessSkillPackageVersion({ content: draft.content, files: draft.files }) ||
 			evaluation.candidateSkill.content !== draft.content ||
-			evaluation.candidateSkill.contentDigest !== computeEvolutionContentDigest(draft.content)
+			evaluation.candidateSkill.contentDigest !== computeEvolutionTextDigest(draft.content) ||
+			serializeEvolutionValue(sortPackageFiles(evaluation.candidateSkill.files ?? [])) !==
+				serializeEvolutionValue(sortPackageFiles(draft.files))
 		) {
 			throw new Error(`Candidate group "${group.groupId}" evaluation does not match its draft`);
 		}
@@ -559,7 +577,7 @@ export class SkillWriter {
 			if (
 				frozenVersions.length === 0 ||
 				frozenVersions.some(
-					(version) => version.version !== skill.contentHash || version.contentDigest !== skill.contentHash,
+					(version) => version.version !== skill.packageVersion || version.contentDigest !== skill.contentHash,
 				)
 			) {
 				throw new Error(`Existing skill "${skillId}" no longer matches its frozen digest`);
@@ -606,7 +624,12 @@ export class SkillWriter {
 					: {
 							path: expectedPath,
 							content: draft.content,
+							files: sortPackageFiles(draft.files),
 							contentDigest: computeEvolutionTextDigest(draft.content),
+							packageVersion: computeHarnessSkillPackageVersion({
+								content: draft.content,
+								files: draft.files,
+							}),
 						},
 		};
 	}
@@ -700,6 +723,7 @@ export class SkillWriter {
 				path: mutation.skill.path,
 				content: mutation.skill.content,
 				workspace: mutation.workspace,
+				files: mutation.skill.files,
 			});
 		}
 		return sortSkillInputs(after);
@@ -720,6 +744,8 @@ export class SkillWriter {
 			(skill) =>
 				skill.path === mutation.skill?.path &&
 				skill.content === mutation.skill.content &&
+				serializeEvolutionValue(skill.files.map((file) => ({ path: file.path, content: file.content }))) ===
+					serializeEvolutionValue(mutation.skill.files) &&
 				sameWorkspace(skill.workspace, mutation.workspace),
 		);
 	}
@@ -835,7 +861,16 @@ export class SkillWriter {
 				contentDigest: skill.contentDigest,
 			})),
 			added:
-				mutation.skill === null ? [] : [{ path: mutation.skill.path, contentDigest: mutation.skill.contentDigest }],
+				mutation.skill === null
+					? []
+					: [
+							{
+								path: mutation.skill.path,
+								contentDigest: mutation.skill.contentDigest,
+								packageVersion: mutation.skill.packageVersion,
+								files: mutation.skill.files.map((file) => file.path),
+							},
+						],
 		};
 		const candidateContent = {
 			schemaVersion: CANDIDATE_SCHEMA_VERSION,

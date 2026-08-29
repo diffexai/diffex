@@ -15,14 +15,17 @@ Persistent, content-addressed harness revisions for Diffex.
         |-- EVOLVE.md
         `-- skills/
             `-- <name>/
-                `-- SKILL.md
+                |-- SKILL.md
+                |-- scripts/
+                |-- references/
+                `-- assets/
 ```
 
 Revision identifiers use canonical `sha256:<digest>` strings in APIs and data. Directory names replace the colon with a dash for Windows portability.
 
 The schema-v2 manifest contains the revision, immutable parent, evolution-memory metadata, and a closed sorted artifact inventory. The revision hash covers the schema version, parent, metadata, and artifact descriptors; each artifact also records a hash over its exact bytes. Including the parent means identical content on different lineages produces different revisions.
 
-Supported artifacts are one `evolution-memory` at `EVOLVE.md` and validated workspace-scoped `skill` artifacts at canonical `skills/<name>/SKILL.md` paths. The manifest can describe future kinds for inspection, but activation rejects a bundle containing a kind the runtime cannot fully understand.
+Supported artifacts are one `evolution-memory` at `EVOLVE.md`, validated workspace-scoped `skill` entrypoints at canonical `skills/<name>/SKILL.md` paths, and zero or more `skill-file` artifacts beneath each declared skill directory. Every package file carries the entrypoint's workspace identity. The manifest can describe future kinds for inspection, but activation rejects a bundle containing a kind the runtime cannot fully understand.
 
 ## State and inheritance
 
@@ -32,7 +35,7 @@ Supported artifacts are one `evolution-memory` at `EVOLVE.md` and validated work
 - passing `skills: []` explicitly clears the skill set;
 - passing a skill list replaces the complete inherited set.
 
-Memory and skills are therefore saved, validated, selected, and rolled back as one revision. The store persists artifacts; it does not synthesize, evaluate, or decide when to activate skills. Session-level request pinning belongs to the coding-agent runtime.
+Memory and complete skill packages are therefore saved, validated, selected, and rolled back as one revision. A skill's `contentHash` identifies the exact `SKILL.md` bytes; its `packageVersion` covers the sorted relative path and byte hash of every package file. The store persists artifacts; it does not synthesize, evaluate, or decide when to activate skills. Session-level request pinning belongs to the coding-agent runtime.
 
 ## Validation
 
@@ -46,7 +49,9 @@ Loading or selecting validates the complete bundle. Validation rejects malformed
 - `serializeHarnessVersion(input)` exposes the canonical hash serialization.
 - `harnessVersionDirectoryName(version)` creates the portable directory name.
 - `computeHarnessSkillId(workspace, path)` derives stable workspace/path identity for a harness skill.
+- `computeHarnessSkillPackageVersion(input)` derives the package version from `SKILL.md` and supporting-file bytes.
 - `validateHarnessSkillContent(path, content)` validates canonical Agent Skills frontmatter and content.
+- `validateHarnessSkillFilePath(skillPath, path)` validates and resolves a portable package-relative supporting-file path.
 - `saveHarnessState(state, destinationPath, base, metadata)` writes an immutable revision bundle.
 - `loadHarnessState(bundlePath)` validates and loads one complete revision bundle.
 - `new HarnessStateStore(agentDir)` manages the global store.

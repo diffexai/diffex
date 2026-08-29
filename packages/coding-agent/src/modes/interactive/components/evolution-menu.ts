@@ -155,7 +155,13 @@ export function formatEvolutionSkillDraftDiff(detail: EvolutionSkillCandidateDet
 	const before = detail.existingContents
 		.map((skill) => `# Existing skill: ${skill.name} (${skill.version})\n${skill.content}`)
 		.join("\n\n");
-	const after = detail.draft.operation === "RETIRE" ? "" : detail.draft.content;
+	const after =
+		detail.draft.operation === "RETIRE"
+			? ""
+			: [
+					detail.draft.content,
+					...detail.draft.files.map((file) => `# Supporting file: ${file.path}\n${file.content}`),
+				].join("\n\n");
 	const changes = diffLines(before, after, { maxEditLength: 20_000 });
 	if (changes === undefined) return ["Draft diff is too large to render"];
 	return changes.flatMap((change) => {

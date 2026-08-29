@@ -221,7 +221,7 @@ export function createEvolvedSkillCatalog(
 				scope: "workspace",
 				skillId: computeHarnessSkillId(artifact.workspace, artifact.path),
 				contentDigest: artifact.contentHash,
-				version: artifact.contentHash,
+				version: artifact.packageVersion,
 				harnessRevision: bundle.manifest.version,
 				disableModelInvocation: artifact.disableModelInvocation,
 			}),

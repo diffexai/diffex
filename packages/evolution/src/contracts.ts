@@ -711,6 +711,11 @@ export interface SkillCandidatePriorityScore {
 	readonly contradictingTaskLineageIds: readonly string[];
 }
 
+export interface SkillPackageFile {
+	readonly path: string;
+	readonly content: string;
+}
+
 export interface SkillDraft {
 	readonly artifactKind: "skill-draft";
 	readonly metadata: EvolutionArtifactMetadata;
@@ -732,6 +737,7 @@ export interface SkillDraft {
 	readonly existingSkillIds: readonly string[];
 	readonly workspace: SkillCandidateWorkspaceScope;
 	readonly content: string;
+	readonly files: readonly SkillPackageFile[];
 }
 
 export interface SkillDraftValidationIssue {
@@ -802,6 +808,7 @@ export interface SkillEvaluationPoolSkill {
 	readonly version: string;
 	readonly contentDigest: string;
 	readonly content: string;
+	readonly files?: readonly SkillPackageFile[];
 }
 
 export interface SkillRetrievalEvaluationResult {
@@ -1201,7 +1208,9 @@ export interface SkillMutationExistingArtifact {
 export interface SkillMutationArtifact {
 	readonly path: string;
 	readonly content: string;
+	readonly files: readonly SkillPackageFile[];
 	readonly contentDigest: string;
+	readonly packageVersion: string;
 }
 
 export type SkillActivationMemoryRelationshipClassification = Exclude<

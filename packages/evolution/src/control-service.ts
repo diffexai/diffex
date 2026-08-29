@@ -349,20 +349,20 @@ function candidateSummary(
 	};
 }
 
-function skillCandidateIsApplied(
-	bundle: HarnessVersionBundle,
-	candidate: SkillCandidate,
-	draft: SkillDraft,
-	draftDigest: string,
-): boolean {
+function skillCandidateIsApplied(bundle: HarnessVersionBundle, candidate: SkillCandidate, draft: SkillDraft): boolean {
 	const skillIds = new Set(bundle.state.skills.map((skill) => computeHarnessSkillId(skill.workspace, skill.path)));
 	if (draft.operation === "RETIRE") {
 		return candidate.existingSkillIds.every((skillId) => !skillIds.has(skillId));
 	}
 	const target = bundle.state.skills.find(
-		(skill) => skill.path === `skills/${draft.proposedName}/SKILL.md` && skill.contentHash === draftDigest,
+		(skill) =>
+			skill.path === `skills/${draft.proposedName}/SKILL.md` &&
+			skill.contentHash === computeEvolutionTextDigest(draft.content),
 	);
-	if (target === undefined) return false;
+	if (target === undefined || target.files.length !== draft.files.length) return false;
+	const targetFiles = new Map(target.files.map((file) => [file.path, file.contentHash]));
+	if (draft.files.some((file) => targetFiles.get(file.path) !== computeEvolutionTextDigest(file.content)))
+		return false;
 	const targetId = computeHarnessSkillId(target.workspace, target.path);
 	return candidate.existingSkillIds.every((skillId) => skillId === targetId || !skillIds.has(skillId));
 }
@@ -374,9 +374,8 @@ function skillCandidateHarnessState(
 ): { readonly active: boolean; readonly rollbackTarget: HarnessVersion | null } {
 	if (versions.currentVersion === null) return { active: false, rollbackTarget: null };
 	const bundles = new Map(versions.versions.map((bundle) => [bundle.manifest.version, bundle]));
-	const draftDigest = computeEvolutionTextDigest(draft.content);
 	let current = bundles.get(versions.currentVersion);
-	if (current === undefined || !skillCandidateIsApplied(current, candidate, draft, draftDigest)) {
+	if (current === undefined || !skillCandidateIsApplied(current, candidate, draft)) {
 		return { active: false, rollbackTarget: null };
 	}
 	const visited = new Set<HarnessVersion>();
@@ -385,7 +384,7 @@ function skillCandidateHarnessState(
 		visited.add(current.manifest.version);
 		const parent = bundles.get(current.manifest.base);
 		if (parent === undefined) return { active: true, rollbackTarget: null };
-		if (!skillCandidateIsApplied(parent, candidate, draft, draftDigest)) {
+		if (!skillCandidateIsApplied(parent, candidate, draft)) {
 			return { active: true, rollbackTarget: parent.manifest.version };
 		}
 		current = parent;

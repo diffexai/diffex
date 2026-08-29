@@ -570,6 +570,7 @@ describe("evolution control service", () => {
 			operation: "CREATE",
 			proposedName: "focused-verification",
 			content: "---\nname: focused-verification\ndescription: Verify focused changes.\n---\n\nRun checks.\n",
+			files: [{ path: "scripts/check.sh", content: "#!/bin/sh\nexec npm run check\n" }],
 		} as unknown as SkillDraft;
 		const validation = {
 			artifactKind: "skill-draft-validation",
@@ -681,6 +682,10 @@ describe("evolution control service", () => {
 										path: "skills/focused-verification/SKILL.md",
 										workspace: { repositoryId: "diffex" },
 										contentHash: computeEvolutionTextDigest(draft.content),
+										files: draft.files.map((file) => ({
+											path: file.path,
+											contentHash: computeEvolutionTextDigest(file.content),
+										})),
 									},
 								],
 							},
@@ -694,6 +699,10 @@ describe("evolution control service", () => {
 										path: "skills/focused-verification/SKILL.md",
 										workspace: { repositoryId: "diffex" },
 										contentHash: computeEvolutionTextDigest(draft.content),
+										files: draft.files.map((file) => ({
+											path: file.path,
+											contentHash: computeEvolutionTextDigest(file.content),
+										})),
 									},
 								],
 							},

@@ -1,7 +1,9 @@
+import { computeHarnessSkillPackageVersion } from "@earendil-works/diffex-harness-state";
 import type { MaterializedEvidence, MaterializedInvocation } from "@earendil-works/diffex-harness-trace";
 import { describe, expect, it } from "vitest";
 import {
 	computeEvolutionContentDigest,
+	computeEvolutionTextDigest,
 	createEvolutionArtifactMetadata,
 	type EvolutionArtifact,
 	type EvolutionArtifactProducer,
@@ -411,6 +413,7 @@ describe("persistent skill candidate registry", () => {
 			existingSkillIds: [],
 			workspace: secondCandidate.candidate.workspace,
 			content: "---\nname: focused-check\ndescription: Run a focused check after repository changes.\n---\n",
+			files: [],
 		};
 		const draft: SkillDraft = {
 			metadata: metadata(draftContent.draftId, draftContent.sourceCandidateIds, draftContent),
@@ -512,9 +515,10 @@ describe("persistent skill candidate registry", () => {
 				name: draft.proposedName,
 				description: "Run a focused check after repository changes.",
 				source: "candidate" as const,
-				version: draft.metadata.contentDigest,
-				contentDigest: computeEvolutionContentDigest(draft.content),
+				version: computeHarnessSkillPackageVersion({ content: draft.content, files: draft.files }),
+				contentDigest: computeEvolutionTextDigest(draft.content),
 				content: draft.content,
+				files: draft.files,
 			},
 			neighboringSkills: [],
 			configuration: {
