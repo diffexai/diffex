@@ -32,6 +32,10 @@
           "path": "settings.md"
         },
         {
+          "title": "Harness Evolution",
+          "path": "evolution.md"
+        },
+        {
           "title": "Keybindings",
           "path": "keybindings.md"
         },
