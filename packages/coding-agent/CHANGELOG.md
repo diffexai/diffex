@@ -21,7 +21,6 @@
 - Fixed right-click not pasting clipboard text in fullscreen mode on Windows.
 - Fixed sub-agent spawning bypassing execution-mutating parent extension hooks by rejecting incompatible parent policies before child creation.
 - Fixed delegated sub-agent result and escalation guidance disappearing from custom, extension-returned, or tool-filtered root prompts.
-- Fixed `AgentSession.prompt()` cancellation gaps by adding full-lifecycle signal reservation, preflight cancellation, and listener cleanup.
 
 ## [0.84.0] - 2026-08-06
 
