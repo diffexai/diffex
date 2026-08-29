@@ -2,6 +2,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import {
 	type DiffexAccountAuthStorage,
 	type DiffexAccountSession,
+	DiffexAccountStorageError,
 	KeyringDiffexAccountAuthStorage,
 } from "../core/account-auth-storage.ts";
 import { openBrowser } from "../utils/open-browser.ts";
@@ -102,13 +103,20 @@ export async function executeAccountAuthCommand(
 	command: AccountAuthCommand,
 	dependencies: AccountAuthCommandDependencies = createDefaultDependencies(),
 ): Promise<number> {
-	switch (command.kind) {
-		case "login":
-			return login(command, dependencies);
-		case "status":
-			return status(command, dependencies);
-		case "logout":
-			return logout(command, dependencies);
+	try {
+		switch (command.kind) {
+			case "login":
+				return await login(command, dependencies);
+			case "status":
+				return await status(command, dependencies);
+			case "logout":
+				return await logout(command, dependencies);
+		}
+	} catch (error) {
+		if (error instanceof DiffexAccountStorageError) {
+			throw new AccountAuthCommandError(error.message, error);
+		}
+		throw error;
 	}
 }
 
@@ -128,7 +136,7 @@ function createDefaultDependencies(): AccountAuthCommandDependencies {
 async function login(command: AccountAuthCommand, dependencies: AccountAuthCommandDependencies): Promise<number> {
 	const started = await postJson(dependencies, command.apiOrigin, "/v1/auth/cli/start", {});
 	if (!started.response.ok) throw responseError(started, "Unable to start Diffex sign in");
-	const authorization = parseDeviceAuthorization(started.body);
+	const authorization = parseDeviceAuthorization(started.body, command.apiOrigin);
 	const browserUrl = authorization.verificationUriComplete ?? authorization.verificationUri;
 
 	dependencies.writeLine("Open this URL to sign in:");
@@ -294,12 +302,8 @@ async function postJson(
 	return { response, body: responseBody };
 }
 
-function parseDeviceAuthorization(value: unknown): DeviceAuthorization {
+function parseDeviceAuthorization(value: unknown, apiOrigin: string): DeviceAuthorization {
 	if (!isRecord(value)) throw invalidServerResponse();
-	const verificationUriComplete =
-		typeof value.verification_uri_complete === "string" && value.verification_uri_complete.length > 0
-			? validateVerificationUrl(value.verification_uri_complete)
-			: undefined;
 	if (
 		typeof value.device_code !== "string" ||
 		value.device_code.length === 0 ||
@@ -311,11 +315,22 @@ function parseDeviceAuthorization(value: unknown): DeviceAuthorization {
 	) {
 		throw invalidServerResponse();
 	}
+	const verificationUri = validateVerificationUrl(value.verification_uri, apiOrigin);
+	const verificationUriComplete =
+		typeof value.verification_uri_complete === "string" && value.verification_uri_complete.length > 0
+			? validateVerificationUrl(value.verification_uri_complete, apiOrigin)
+			: undefined;
+	if (
+		verificationUriComplete !== undefined &&
+		new URL(verificationUriComplete).origin !== new URL(verificationUri).origin
+	) {
+		throw invalidServerResponse();
+	}
 
 	return {
 		deviceCode: value.device_code,
 		userCode: value.user_code,
-		verificationUri: validateVerificationUrl(value.verification_uri),
+		verificationUri,
 		...(verificationUriComplete === undefined ? {} : { verificationUriComplete }),
 		expiresIn: Math.min(Math.floor(value.expires_in), 3_600),
 		interval: Math.max(1, Math.floor(value.interval)),
@@ -408,12 +423,7 @@ function normalizeApiOrigin(value: string): string {
 	} catch (error) {
 		throw new AccountAuthCommandError("Diffex API URL must be a valid origin", error);
 	}
-	const localHttp =
-		url.protocol === "http:" &&
-		(url.hostname === "localhost" ||
-			url.hostname === "127.0.0.1" ||
-			url.hostname === "[::1]" ||
-			url.hostname === "api.diffex.test");
+	const localHttp = url.protocol === "http:" && isLocalApiHostname(url.hostname);
 	if (
 		(url.protocol !== "https:" && !localHttp) ||
 		url.username !== "" ||
@@ -427,15 +437,29 @@ function normalizeApiOrigin(value: string): string {
 	return url.origin;
 }
 
-function validateVerificationUrl(value: string): string {
+function validateVerificationUrl(value: string, apiOrigin: string): string {
 	let url: URL;
 	try {
 		url = new URL(value);
 	} catch (error) {
 		throw invalidServerResponse(error);
 	}
-	if (url.protocol !== "https:" && url.protocol !== "http:") throw invalidServerResponse();
+	const apiUrl = new URL(apiOrigin);
+	const localHttp =
+		apiUrl.protocol === "http:" &&
+		isLocalApiHostname(apiUrl.hostname) &&
+		url.protocol === "http:" &&
+		isLocalApiHostname(url.hostname);
+	if ((url.protocol !== "https:" && !localHttp) || url.username !== "" || url.password !== "") {
+		throw invalidServerResponse();
+	}
 	return url.toString();
+}
+
+function isLocalApiHostname(hostname: string): boolean {
+	return (
+		hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]" || hostname === "api.diffex.test"
+	);
 }
 
 function parseRetryAfter(value: string | null): number | undefined {

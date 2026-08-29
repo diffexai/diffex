@@ -118,6 +118,73 @@ describe("Diffex account auth commands", () => {
 		expect(harness.fetch).toHaveBeenCalledTimes(4);
 	});
 
+	it.each([
+		{
+			name: "plaintext verification URLs from a deployed API",
+			verificationUri: "http://auth.diffex.ai/device",
+			verificationUriComplete: "http://auth.diffex.ai/device?user_code=ABCD-EFGH",
+		},
+		{
+			name: "verification URLs with embedded credentials",
+			verificationUri: "https://user:password@auth.diffex.ai/device",
+			verificationUriComplete: undefined,
+		},
+		{
+			name: "complete verification URLs on another origin",
+			verificationUri: "https://auth.diffex.ai/device",
+			verificationUriComplete: "https://attacker.example/device?user_code=ABCD-EFGH",
+		},
+	])("rejects $name before opening a browser", async ({ verificationUri, verificationUriComplete }) => {
+		const harness = dependencies({
+			responses: [
+				jsonResponse({
+					device_code: "device_secret",
+					user_code: "ABCD-EFGH",
+					verification_uri: verificationUri,
+					...(verificationUriComplete === undefined ? {} : { verification_uri_complete: verificationUriComplete }),
+					expires_in: 300,
+					interval: 1,
+				}),
+			],
+		});
+
+		await expect(executeAccountAuthCommand(command("login"), harness.dependencies)).rejects.toThrow(
+			"invalid response",
+		);
+		expect(harness.dependencies.openBrowser).not.toHaveBeenCalled();
+		expect(harness.storage.session).toBeUndefined();
+	});
+
+	it("permits local HTTP verification URLs only with a local API", async () => {
+		const harness = dependencies({
+			responses: [
+				jsonResponse({
+					device_code: "device_secret",
+					user_code: "ABCD-EFGH",
+					verification_uri: "http://api.diffex.test:4175/device",
+					verification_uri_complete: "http://api.diffex.test:4175/device?user_code=ABCD-EFGH",
+					expires_in: 300,
+					interval: 1,
+				}),
+				jsonResponse({
+					access_token: "access_secret",
+					refresh_token: "refresh_secret",
+					token_type: "Bearer",
+					expires_in: 3_600,
+				}),
+			],
+		});
+		const localCommand = {
+			...command("login"),
+			apiOrigin: "http://api.diffex.test:4175",
+			noBrowser: true,
+		};
+
+		await expect(executeAccountAuthCommand(localCommand, harness.dependencies)).resolves.toBe(0);
+		expect(harness.dependencies.openBrowser).not.toHaveBeenCalled();
+		expect(harness.storage.session?.apiOrigin).toBe("http://api.diffex.test:4175");
+	});
+
 	it("rotates an expiring refresh token before reporting signed-in status", async () => {
 		const storage = new MemoryAccountStorage({
 			version: 1,

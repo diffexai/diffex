@@ -1,5 +1,3 @@
-import { AsyncEntry } from "@napi-rs/keyring";
-
 const KEYRING_SERVICE = "ai.diffex.cli";
 
 export interface DiffexAccountSession {
@@ -24,7 +22,7 @@ export interface KeyringEntry {
 	deleteCredential(signal?: AbortSignal): Promise<boolean>;
 }
 
-export type KeyringEntryFactory = (service: string, account: string) => KeyringEntry;
+export type KeyringEntryFactory = (service: string, account: string) => KeyringEntry | Promise<KeyringEntry>;
 
 export class DiffexAccountStorageError extends Error {
 	constructor(message: string, cause?: unknown) {
@@ -36,13 +34,14 @@ export class DiffexAccountStorageError extends Error {
 export class KeyringDiffexAccountAuthStorage implements DiffexAccountAuthStorage {
 	readonly #createEntry: KeyringEntryFactory;
 
-	constructor(createEntry: KeyringEntryFactory = (service, account) => new AsyncEntry(service, account)) {
+	constructor(createEntry: KeyringEntryFactory = createNativeKeyringEntry) {
 		this.#createEntry = createEntry;
 	}
 
 	async read(apiOrigin: string, signal?: AbortSignal): Promise<DiffexAccountSession | undefined> {
 		try {
-			const stored = await this.#entry(apiOrigin).getPassword(signal);
+			const entry = await this.#entry(apiOrigin);
+			const stored = await entry.getPassword(signal);
 			return stored === undefined ? undefined : parseStoredSession(stored, apiOrigin);
 		} catch (error) {
 			if (isMissingCredentialError(error)) return undefined;
@@ -54,23 +53,39 @@ export class KeyringDiffexAccountAuthStorage implements DiffexAccountAuthStorage
 	async write(session: DiffexAccountSession, signal?: AbortSignal): Promise<void> {
 		validateSession(session, session.apiOrigin);
 		try {
-			await this.#entry(session.apiOrigin).setPassword(JSON.stringify(session), signal);
+			const entry = await this.#entry(session.apiOrigin);
+			await entry.setPassword(JSON.stringify(session), signal);
 		} catch (error) {
+			if (error instanceof DiffexAccountStorageError) throw error;
 			throw new DiffexAccountStorageError("Unable to save Diffex credentials in the OS keychain", error);
 		}
 	}
 
 	async delete(apiOrigin: string, signal?: AbortSignal): Promise<void> {
 		try {
-			await this.#entry(apiOrigin).deleteCredential(signal);
+			const entry = await this.#entry(apiOrigin);
+			await entry.deleteCredential(signal);
 		} catch (error) {
 			if (isMissingCredentialError(error)) return;
+			if (error instanceof DiffexAccountStorageError) throw error;
 			throw new DiffexAccountStorageError("Unable to remove Diffex credentials from the OS keychain", error);
 		}
 	}
 
-	#entry(apiOrigin: string): KeyringEntry {
+	async #entry(apiOrigin: string): Promise<KeyringEntry> {
 		return this.#createEntry(KEYRING_SERVICE, apiOrigin);
+	}
+}
+
+async function createNativeKeyringEntry(service: string, account: string): Promise<KeyringEntry> {
+	try {
+		const { AsyncEntry } = await import("@napi-rs/keyring");
+		return new AsyncEntry(service, account);
+	} catch (error) {
+		throw new DiffexAccountStorageError(
+			"OS keychain support is unavailable for Diffex account authentication",
+			error,
+		);
 	}
 }
 

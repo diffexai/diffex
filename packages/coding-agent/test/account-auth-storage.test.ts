@@ -35,9 +35,10 @@ function createFakeKeyring(initial?: string) {
 describe("Diffex account keyring storage", () => {
 	it("stores, reads, and deletes the complete session as one keyring credential", async () => {
 		const fake = createFakeKeyring();
-		const createEntry = vi.fn(() => fake.entry);
+		const createEntry = vi.fn(async () => fake.entry);
 		const storage = new KeyringDiffexAccountAuthStorage(createEntry);
 
+		expect(createEntry).not.toHaveBeenCalled();
 		await storage.write(session);
 		expect(JSON.parse(fake.value() ?? "{}")).toEqual(session);
 		await expect(storage.read(apiOrigin)).resolves.toEqual(session);
@@ -51,5 +52,13 @@ describe("Diffex account keyring storage", () => {
 		const storage = new KeyringDiffexAccountAuthStorage(() => fake.entry);
 
 		await expect(storage.read(apiOrigin)).rejects.toThrow("Stored Diffex credentials are invalid");
+	});
+
+	it("reports a safe error when the native keyring cannot be loaded", async () => {
+		const storage = new KeyringDiffexAccountAuthStorage(async () => {
+			throw new Error("native loader detail");
+		});
+
+		await expect(storage.read(apiOrigin)).rejects.toThrow("Unable to read Diffex credentials from the OS keychain");
 	});
 });
