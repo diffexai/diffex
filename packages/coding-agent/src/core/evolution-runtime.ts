@@ -928,6 +928,8 @@ export async function createCodingAgentEvolutionRuntime(
 			jobs: persistence,
 			artifacts: persistence,
 			store: persistence,
+			leases: persistence,
+			ownerId: `skill-candidate-worker-${randomUUID()}`,
 			registry: candidateRegistry,
 			synthesizer: skillSynthesizer,
 			validator: skillValidator,
