@@ -543,7 +543,7 @@ describe("evolution control service", () => {
 		}
 	});
 
-	it("exposes candidate provenance and gates manual activation on accepted evaluation", async () => {
+	it("exposes candidate provenance, gates activation, and rolls back through preserving descendants", async () => {
 		const inputReference = { artifactId: "input-1", contentDigest: `sha256:${"1".repeat(64)}` };
 		const candidateReference = { artifactId: "candidate-1", contentDigest: `sha256:${"2".repeat(64)}` };
 		const draftReference = { artifactId: "draft-1", contentDigest: `sha256:${"3".repeat(64)}` };
@@ -642,6 +642,7 @@ describe("evolution control service", () => {
 			[evaluationReference.artifactId, evaluation],
 		]);
 		const targetHarnessVersion = `sha256:${"b".repeat(64)}`;
+		const preservingDescendantVersion = `sha256:${"c".repeat(64)}`;
 		let selectedHarnessVersion = input.expectedHarnessBaseVersion;
 		const activate = vi.fn().mockImplementation(async () => {
 			selectedHarnessVersion = targetHarnessVersion;
@@ -675,6 +676,19 @@ describe("evolution control service", () => {
 							manifest: { version: targetHarnessVersion, base: input.expectedHarnessBaseVersion },
 							state: {
 								memory: "",
+								skills: [
+									{
+										path: "skills/focused-verification/SKILL.md",
+										workspace: { repositoryId: "diffex" },
+										contentHash: computeEvolutionTextDigest(draft.content),
+									},
+								],
+							},
+						},
+						{
+							manifest: { version: preservingDescendantVersion, base: targetHarnessVersion },
+							state: {
+								memory: "Preserve the evolved skill while changing memory.",
 								skills: [
 									{
 										path: "skills/focused-verification/SKILL.md",
@@ -729,11 +743,20 @@ describe("evolution control service", () => {
 			rollbackAvailable: true,
 			activationAvailable: false,
 		});
+		selectedHarnessVersion = preservingDescendantVersion;
+		expect(await service.getSkillCandidate(job.jobId, candidate.candidateId)).toMatchObject({
+			targetHarnessVersion: preservingDescendantVersion,
+			rollbackTargetHarnessVersion: input.expectedHarnessBaseVersion,
+			rollbackAvailable: true,
+		});
 		await expect(service.rollbackSkillCandidate(job.jobId, candidate.candidateId)).resolves.toMatchObject({
-			fromHarnessVersion: targetHarnessVersion,
+			fromHarnessVersion: preservingDescendantVersion,
 			toHarnessVersion: input.expectedHarnessBaseVersion,
 		});
-		expect(selectVersionIfCurrent).toHaveBeenCalledWith(input.expectedHarnessBaseVersion, targetHarnessVersion);
+		expect(selectVersionIfCurrent).toHaveBeenCalledWith(
+			input.expectedHarnessBaseVersion,
+			preservingDescendantVersion,
+		);
 	});
 
 	it("reports durable latency, budget, coverage, conflict, and recovery observability", async () => {

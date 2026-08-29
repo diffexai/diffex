@@ -11,7 +11,7 @@ Use `/evolve` to:
 - inspect memory proposals and their evidence;
 - inspect skill-candidate provenance, textual draft diffs, deterministic validation, and retrieval/behavior evaluation;
 - activate a skill candidate only after its persisted evaluation is accepted;
-- inspect target revisions and roll back an activated evolved skill to its immutable parent revision;
+- inspect target revisions and roll back an activated evolved skill to its pre-activation revision, even when later descendants preserved it;
 - enable or disable future tracing and evolution work.
 
 Skill activation always requires explicit confirmation. Automatic skill activation is not enabled. Candidates that have not passed every required gate remain read-only. If harness memory changes after evaluation while the evaluated skill inventory remains identical, activation automatically rebases the candidate onto the selected revision and preserves its memory. Skill-inventory changes remain conflicts because they require fresh retrieval and behavior evaluation.
@@ -50,6 +50,6 @@ Evolution state is stored beneath the effective agent directory:
 - `evolution-failures/` contains failure reports;
 - `harness-state/` contains immutable revisions and the selected pointer.
 
-Interrupted jobs and candidate work resume from durable checkpoints. Writer retries use stable idempotency keys, leases, exact base revisions, and compare-and-swap selection. Rollback selects an existing immutable parent; it does not mutate historical revisions.
+Interrupted jobs and candidate work resume from durable checkpoints. Writer retries use stable idempotency keys, leases, exact base revisions, and compare-and-swap selection. Skill rollback follows immutable ancestry to the candidate's application boundary and selects its existing pre-activation revision; it does not mutate historical revisions.
 
 Set `evolution.enabled` to `false` in global settings or use the toggle in `/evolve` to stop future tracing and background/manual evolution controls. Already-running Diffex processes monitor this global setting and stop their trace collectors and evolution workers when another process disables it. Disabling evolution does not unselect the current harness or remove already active evolved skills.
