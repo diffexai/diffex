@@ -108,6 +108,14 @@ Set `DIFFEX_SKIP_VERSION_CHECK=1` to disable the upstream compatibility release 
 }
 ```
 
+### Evolution
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `evolution.enabled` | boolean | `true` | Global-only. Enables future invocation tracing and manual/background evolution controls. Disabling it does not unselect the active harness or remove active evolved skills. |
+
+Automatic work requires more than 1,000,000 estimated unprocessed evidence tokens, at least three eligible settled invocations, and a 20-minute cooldown after the previous automatic run. Evolution model calls may consume provider quota. See [Harness Evolution](evolution.md).
+
 ### Compaction
 
 | Setting | Type | Default | Description |
@@ -233,6 +241,8 @@ When multiple sources specify a session directory, precedence is `--session-dir`
 ### Resources
 
 These settings define where to load extensions, skills, prompts, and themes from.
+
+Use **Installed skills** in `/settings` to inspect global and workspace skill paths, sources, scopes, and enabled state. Toggle entries to persist global or project overrides, then use `/reload` to apply them to the current session. Evolved skills are read-only outside `/evolve` and `/version`.
 
 Paths in `~/.diffex/agent/settings.json` resolve relative to `~/.diffex/agent`. Paths in `.diffex/settings.json` resolve relative to `.diffex`. Absolute paths and `~` are supported.
 

@@ -833,6 +833,12 @@ Each command has:
 
 **Note**: Built-in TUI commands (`/settings`, `/hotkeys`, etc.) are not included. They are handled only in interactive mode and would not execute if sent via `prompt`.
 
+## Evolution and Harness Revisions
+
+Persisted CLI RPC sessions participate in invocation tracing and background evolution when `evolution.enabled` is enabled. The selected harness revision is refreshed at prompt admission, and explicit skill references use the same versioned expansion path as other modes.
+
+`/evolve` and `/version` are interactive-only controls. RPC currently has no commands to list, select, activate, or roll back harness revisions, and `get_state` does not expose the active revision. An RPC process therefore follows the globally selected compatible harness unless its embedded session was explicitly pinned through SDK composition.
+
 ## Events
 
 Events are streamed to stdout as JSON lines during agent operation. Events do not generally include an `id` field; `bash_execution_update` includes the `id` of its originating `bash` command when one was provided.

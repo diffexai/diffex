@@ -40,8 +40,10 @@ Type `/` in the editor to open command completion. Extensions can register custo
 | [`/llama`](llama-cpp.md) | Download, load, and unload llama.cpp router models |
 | `/model` | Switch models |
 | `/scoped-models` | Enable/disable models for Ctrl+P cycling |
-| `/settings` | Thinking level, theme, message delivery, transport |
+| `/settings` | Thinking level, theme, installed skills, message delivery, transport |
 | `/skills` | Browse installed workspace, installed global, and evolved skills |
+| [`/evolve`](evolution.md) | Inspect and control harness evolution and generated skills |
+| [`/version`](evolution.md#controls) | Select the active harness revision |
 | `/resume` | Pick from previous sessions |
 | `/new` | Start a new session |
 | `/name <name>` | Set session display name |
@@ -124,6 +126,10 @@ You can submit messages while the agent is still working:
 On Windows Terminal, Alt+Enter is fullscreen by default. Remap it as described in [Terminal setup](terminal-setup.md) if you want Diffex to receive the shortcut.
 
 Configure delivery in [Settings](settings.md) with `steeringMode` and `followUpMode`.
+
+## Harness Evolution
+
+`/evolve` shows evidence eligibility, jobs, memory proposals, generated skill candidates, provenance, draft diffs, validation, evaluation, target revisions, activation, and rollback. `/version` selects a complete immutable harness revision. Memory and evolved skills change together at the next prompt boundary; in-flight and admitted queued requests remain pinned. An active evolution job continues from its frozen base if the selected revision changes. The footer shows the active harness and background activity. See [Harness Evolution](evolution.md).
 
 ## Sessions
 

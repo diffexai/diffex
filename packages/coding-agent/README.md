@@ -174,8 +174,10 @@ Type `/` in the editor to trigger commands. [Extensions](#extensions) can regist
 | [`/llama`](docs/llama-cpp.md) | Download, load, and unload llama.cpp router models |
 | `/model` | Switch models |
 | `/scoped-models` | Enable/disable models for Ctrl+P cycling |
-| `/settings` | Thinking level, theme, message delivery, transport |
+| `/settings` | Thinking level, theme, installed skills, message delivery, transport |
 | [`/skills`](docs/skills.md#skill-commands) | Search and reference one or more skills in the editor |
+| [`/evolve`](docs/evolution.md) | Inspect and control harness evolution and generated skills |
+| [`/version`](docs/evolution.md#controls) | Select the active harness revision |
 | `/resume` | Pick from previous sessions |
 | `/new` | Start a new session |
 | `/name <name>` | Set session display name |
@@ -229,6 +231,10 @@ Submit messages while the agent is working:
 On Windows Terminal, `Alt+Enter` is fullscreen by default. Remap it in [docs/terminal-setup.md](docs/terminal-setup.md) so Diffex can receive the follow-up shortcut.
 
 Configure delivery in [settings](docs/settings.md): `steeringMode` and `followUpMode` can be `"one-at-a-time"` (default, waits for response) or `"all"` (delivers all queued at once). `transport` selects provider transport preference (`"sse"`, `"websocket"`, or `"auto"`) for providers that support multiple transports.
+
+### Harness Evolution
+
+`/evolve` shows evidence eligibility, jobs, memory proposals, generated skill candidates, provenance, draft diffs, validation, evaluation, target revisions, activation, and rollback. `/version` selects a complete immutable harness revision. Memory and evolved skills change together at the next prompt boundary; in-flight and admitted queued requests remain pinned. The footer shows the active harness and background activity. See [Harness Evolution](docs/evolution.md).
 
 ---
 
