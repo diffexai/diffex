@@ -8,6 +8,11 @@
 import { createInterface } from "node:readline";
 import { type ImageContent, modelsAreEqual } from "@earendil-works/diffex-ai";
 import chalk from "chalk";
+import {
+	AccountAuthCommandError,
+	executeAccountAuthCommand,
+	parseAccountAuthCommand,
+} from "./cli/account-auth-command.ts";
 import { type Args, type Mode, parseArgs, printHelp } from "./cli/args.ts";
 import {
 	type AuthCheckResult,
@@ -155,6 +160,19 @@ function initialSessionAttachmentReason(
 async function runAuthCommand(args: string[]): Promise<boolean> {
 	if (isAuthCommandHelp(args)) {
 		printAuthCommandHelp();
+		return true;
+	}
+
+	try {
+		const accountCommand = parseAccountAuthCommand(args);
+		if (accountCommand) {
+			process.exitCode = await executeAccountAuthCommand(accountCommand);
+			return true;
+		}
+	} catch (error) {
+		const message = error instanceof AccountAuthCommandError ? error.message : "Diffex account authentication failed";
+		console.error(chalk.red(`Error: ${message}`));
+		process.exitCode = 1;
 		return true;
 	}
 

@@ -38,11 +38,16 @@ export function isAuthCommandHelp(args: string[]): boolean {
 
 export function printAuthCommandHelp(): void {
 	console.log(`Usage:
+  ${APP_NAME} auth login [--api-url <origin>] [--no-browser]
+  ${APP_NAME} auth status [--api-url <origin>] [--json]
+  ${APP_NAME} auth logout [--api-url <origin>]
   ${APP_NAME} auth print-api-key [--provider <provider>] [--model <model>]
   ${APP_NAME} auth print-bearer-token [--provider <provider>] [--model <model>] [--min-expiry <duration>]
   ${APP_NAME} auth check [--provider <provider>] [--model <model>] [--json] [--credentials] [--no-refresh]
 
-Auth commands require at least one of --provider or --model. Checks refresh expired OAuth credentials by default; --no-refresh prevents this. --credentials emits the credential, or includes it in JSON output.`);
+Diffex account commands use secure OS credential storage and default to https://api.diffex.ai. Set DIFFEX_API_URL or use --api-url to select another deployment.
+
+Provider credential commands require at least one of --provider or --model. Checks refresh expired OAuth credentials by default; --no-refresh prevents this. --credentials emits the provider credential, or includes it in JSON output.`);
 }
 
 export function parseAuthCommand(args: string[]): AuthCommand | undefined {
@@ -58,7 +63,7 @@ export function parseAuthCommand(args: string[]): AuthCommand | undefined {
 					: undefined;
 	if (!kind) {
 		throw new AuthCommandError(
-			`Unknown auth command "${args[1] ?? ""}". Use "${APP_NAME} auth print-api-key", "${APP_NAME} auth print-bearer-token", or "${APP_NAME} auth check".`,
+			`Unknown auth command "${args[1] ?? ""}". Use "${APP_NAME} auth login", "${APP_NAME} auth status", "${APP_NAME} auth logout", "${APP_NAME} auth print-api-key", "${APP_NAME} auth print-bearer-token", or "${APP_NAME} auth check".`,
 		);
 	}
 
