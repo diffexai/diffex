@@ -280,6 +280,36 @@ describe("filesystem evolution persistence", () => {
 		).rejects.toThrow("contiguous sequence");
 	});
 
+	it("fences candidate registry appends with a candidate-work lease", async () => {
+		const { store } = await storeFixture();
+		const now = new Date().toISOString();
+		const firstLease = await store.acquire("candidate-work", "candidate-work-1", "owner-1", now, 5_000);
+		if (firstLease === null) throw new Error("Expected candidate work lease");
+		expect(
+			await store.appendSkillCandidateRegistryEvents(
+				scope,
+				0,
+				[candidateWorkEvent("candidate-event-1", 1)],
+				firstLease,
+			),
+		).toBe("committed");
+
+		const takeoverTime = new Date(Date.parse(firstLease.expiresAt) + 1).toISOString();
+		const secondLease = await store.acquire("candidate-work", "candidate-work-1", "owner-2", takeoverTime, 5_000);
+		if (secondLease === null) throw new Error("Expected candidate work lease takeover");
+		await expect(
+			store.appendSkillCandidateRegistryEvents(scope, 1, [candidateWorkEvent("candidate-event-2", 2)], firstLease),
+		).rejects.toThrow("lease was lost");
+		expect(
+			await store.appendSkillCandidateRegistryEvents(
+				scope,
+				1,
+				[candidateWorkEvent("candidate-event-2", 2)],
+				secondLease,
+			),
+		).toBe("committed");
+	});
+
 	it("persists skill lifecycle observations outside harness artifacts", async () => {
 		const { root, store } = await storeFixture();
 		const peer = new FileEvolutionPersistence(root);

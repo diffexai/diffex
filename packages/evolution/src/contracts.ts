@@ -1405,7 +1405,7 @@ export interface EvolutionProcessedEvidenceCursor {
 }
 
 export interface EvolutionLeaseToken {
-	readonly kind: "scope" | "writer";
+	readonly kind: "candidate-work" | "scope" | "writer";
 	readonly key: string;
 	readonly ownerId: string;
 	readonly fence: number;
