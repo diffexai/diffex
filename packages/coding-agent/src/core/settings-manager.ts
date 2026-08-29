@@ -2,7 +2,7 @@ import type { ThinkingLevel } from "@earendil-works/diffex-agent-core";
 import type { Transport } from "@earendil-works/diffex-ai";
 import type { TuiMode as RendererTuiMode, ScrollViewScrollbar } from "@earendil-works/diffex-tui";
 import { randomUUID } from "crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, type Stats, unwatchFile, watchFile, writeFileSync } from "fs";
 import { dirname, join } from "path";
 import lockfile from "proper-lockfile";
 import { CONFIG_DIR_NAME, getAgentDir } from "../config.ts";
@@ -187,6 +187,7 @@ export interface SettingsManagerCreateOptions {
 
 export interface SettingsStorage {
 	withLock(scope: SettingsScope, fn: (current: string | undefined) => string | undefined): void;
+	watch?(scope: SettingsScope, listener: () => void, intervalMs: number): () => void;
 }
 
 export interface SettingsError {
@@ -232,8 +233,12 @@ export class FileSettingsStorage implements SettingsStorage {
 		throw (lastError as Error) ?? new Error("Failed to acquire settings lock");
 	}
 
+	private pathForScope(scope: SettingsScope): string {
+		return scope === "global" ? this.globalSettingsPath : this.projectSettingsPath;
+	}
+
 	withLock(scope: SettingsScope, fn: (current: string | undefined) => string | undefined): void {
-		const path = scope === "global" ? this.globalSettingsPath : this.projectSettingsPath;
+		const path = this.pathForScope(scope);
 		const dir = dirname(path);
 
 		let release: (() => void) | undefined;
@@ -260,6 +265,22 @@ export class FileSettingsStorage implements SettingsStorage {
 				release();
 			}
 		}
+	}
+
+	watch(scope: SettingsScope, listener: () => void, intervalMs: number): () => void {
+		const path = this.pathForScope(scope);
+		const onChange = (current: Stats, previous: Stats) => {
+			if (
+				current.mtimeMs !== previous.mtimeMs ||
+				current.ctimeMs !== previous.ctimeMs ||
+				current.size !== previous.size ||
+				current.ino !== previous.ino
+			) {
+				listener();
+			}
+		};
+		watchFile(path, { interval: intervalMs, persistent: false }, onChange);
+		return () => unwatchFile(path, onChange);
 	}
 }
 
@@ -478,6 +499,42 @@ export class SettingsManager {
 			this.recordError("project", projectLoad.error);
 		}
 		this.settings = deepMergeSettings(this.globalSettings, this.projectSettings);
+	}
+
+	/**
+	 * Reload file-backed settings after another process changes either settings file.
+	 * The returned cleanup function stops polling and suppresses any queued notification.
+	 */
+	watchExternalChanges(listener: () => void, intervalMs = 250): () => void {
+		if (!this.storage.watch) return () => {};
+		let disposed = false;
+		let reloadInFlight = false;
+		let reloadPending = false;
+
+		const scheduleReload = () => {
+			if (disposed) return;
+			if (reloadInFlight) {
+				reloadPending = true;
+				return;
+			}
+			reloadInFlight = true;
+			void this.reload().finally(() => {
+				if (!disposed) listener();
+				reloadInFlight = false;
+				if (reloadPending) {
+					reloadPending = false;
+					scheduleReload();
+				}
+			});
+		};
+		const pollingIntervalMs = Math.max(10, Math.floor(intervalMs));
+		const stopGlobalWatcher = this.storage.watch("global", scheduleReload, pollingIntervalMs);
+		const stopProjectWatcher = this.storage.watch("project", scheduleReload, pollingIntervalMs);
+		return () => {
+			disposed = true;
+			stopGlobalWatcher();
+			stopProjectWatcher();
+		};
 	}
 
 	async reload(): Promise<void> {

@@ -185,6 +185,26 @@ describe("SettingsManager", () => {
 			expect(manager.getDefaultModel()).toBe("claude-sonnet");
 		});
 
+		it("should synchronize changes written by another settings manager", async () => {
+			const firstManager = SettingsManager.create(projectDir, agentDir);
+			const secondManager = SettingsManager.create(projectDir, agentDir);
+			let notifyChange!: () => void;
+			const changed = new Promise<void>((resolveChange) => {
+				notifyChange = resolveChange;
+			});
+			const stopWatching = firstManager.watchExternalChanges(notifyChange, 20);
+
+			try {
+				secondManager.setEvolutionEnabled(false);
+				await secondManager.flush();
+				await changed;
+
+				expect(firstManager.getEvolutionEnabled()).toBe(false);
+			} finally {
+				stopWatching();
+			}
+		});
+
 		it("should keep previous settings when file is invalid", async () => {
 			const settingsPath = join(agentDir, "settings.json");
 			writeFileSync(settingsPath, JSON.stringify({ theme: "dark" }));

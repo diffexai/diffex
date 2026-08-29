@@ -728,6 +728,21 @@ export async function main(args: string[], options?: MainOptions) {
 			await startupSettingsManager.flush();
 		},
 	});
+	const synchronizeEvolutionSettings = () => {
+		void evolutionCoordinator.setEnabled(startupSettingsManager.getEvolutionEnabled()).catch((error: unknown) => {
+			reportDiagnostics([
+				{
+					type: "warning",
+					message: `Failed to synchronize evolution settings: ${error instanceof Error ? error.message : String(error)}`,
+				},
+			]);
+		});
+		reportDiagnostics(collectSettingsDiagnostics(startupSettingsManager, "settings synchronization"));
+	};
+	const stopSettingsSynchronization = startupSettingsManager.watchExternalChanges(synchronizeEvolutionSettings);
+	await startupSettingsManager.reload();
+	await evolutionCoordinator.setEnabled(startupSettingsManager.getEvolutionEnabled());
+	reportDiagnostics(collectSettingsDiagnostics(startupSettingsManager, "settings synchronization"));
 	if (invocationTraceResult.diagnostic) {
 		reportDiagnostics([invocationTraceResult.diagnostic]);
 	}
@@ -902,6 +917,7 @@ export async function main(args: string[], options?: MainOptions) {
 			invocationSessionReason: initialSessionAttachmentReason(parsed, sessionManager),
 			telemetryContext: invocationTrace.telemetryContext,
 			onDispose: async (status) => {
+				stopSettingsSynchronization();
 				try {
 					await evolutionCoordinator.stop();
 				} finally {
@@ -910,6 +926,7 @@ export async function main(args: string[], options?: MainOptions) {
 			},
 		});
 	} catch (error) {
+		stopSettingsSynchronization();
 		await invocationTrace.recordDiagnostics([
 			{ type: "error", message: error instanceof Error ? error.message : String(error) },
 		]);
