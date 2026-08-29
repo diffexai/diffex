@@ -1023,6 +1023,8 @@ export class EvolutionRuntimeCoordinator implements AgentSessionLifecycleObserve
 	readonly #listeners = new Set<(event: EvolutionProgressEvent) => void>();
 	#runtime: CodingAgentEvolutionRuntime | null = null;
 	#unsubscribe: (() => void) | null = null;
+	#enabled: boolean;
+	#toggleQueue: Promise<void> = Promise.resolve();
 
 	constructor(
 		trace: InvocationTrace,
@@ -1037,15 +1039,17 @@ export class EvolutionRuntimeCoordinator implements AgentSessionLifecycleObserve
 		this.#trace = trace;
 		this.#getEnabled = toggle.getEnabled;
 		this.#setEnabled = toggle.setEnabled;
+		this.#enabled = toggle.getEnabled();
 	}
 
 	async replace(runtime: CodingAgentEvolutionRuntime): Promise<void> {
+		await this.#toggleQueue;
 		const previous = this.#runtime;
 		this.#unsubscribe?.();
 		this.#unsubscribe = null;
 		this.#runtime = null;
 		await previous?.stop();
-		if (this.#getEnabled()) await runtime.start();
+		if (this.#enabled && this.#getEnabled()) await runtime.start();
 		this.#runtime = runtime;
 		this.#unsubscribe = runtime.control.subscribe((event) => {
 			for (const listener of this.#listeners) listener(event);
@@ -1054,21 +1058,23 @@ export class EvolutionRuntimeCoordinator implements AgentSessionLifecycleObserve
 
 	async operationSettled(settlement: AgentSessionOperationSettlement): Promise<void> {
 		await this.#trace.operationSettled(settlement);
-		if (this.#getEnabled()) this.#runtime?.evaluateAutomatic();
+		if (this.#enabled && this.#getEnabled()) this.#runtime?.evaluateAutomatic();
 	}
 
 	getEnabled(): boolean {
-		return this.#getEnabled();
+		return this.#enabled;
 	}
 
-	async setEnabled(enabled: boolean): Promise<void> {
-		if (this.#getEnabled() === enabled) return;
-		await Promise.all([
-			this.#setEnabled(enabled),
-			this.#trace.setEnabled(enabled),
-			enabled ? Promise.resolve() : this.#runtime?.stop(),
-		]);
-		if (enabled) await this.#runtime?.start();
+	setEnabled(enabled: boolean): Promise<void> {
+		const update = this.#toggleQueue.then(async () => {
+			if (this.#getEnabled() !== enabled) await this.#setEnabled(enabled);
+			if (this.#enabled === enabled) return;
+			this.#enabled = enabled;
+			await Promise.all([this.#trace.setEnabled(enabled), enabled ? Promise.resolve() : this.#runtime?.stop()]);
+			if (enabled) await this.#runtime?.start();
+		});
+		this.#toggleQueue = update.catch(() => {});
+		return update;
 	}
 
 	harnessActivated(version: HarnessVersion): Promise<void> {
@@ -1138,6 +1144,7 @@ export class EvolutionRuntimeCoordinator implements AgentSessionLifecycleObserve
 	}
 
 	async stop(): Promise<void> {
+		await this.#toggleQueue;
 		this.#unsubscribe?.();
 		this.#unsubscribe = null;
 		const runtime = this.#runtime;

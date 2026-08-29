@@ -312,6 +312,37 @@ describe("coding-agent evolution runtime", () => {
 		expect(runtime.evaluateAutomatic).not.toHaveBeenCalled();
 	});
 
+	it("applies an evolution setting that was persisted by another process", async () => {
+		let enabled = true;
+		const persistEnabled = vi.fn(async (next: boolean) => {
+			enabled = next;
+		});
+		const trace = {
+			operationSettled: vi.fn(async () => {}),
+			harnessActivated: vi.fn(async () => {}),
+			setEnabled: vi.fn(async () => {}),
+		} as unknown as InvocationTrace;
+		const runtime: CodingAgentEvolutionRuntime = {
+			control: { subscribe: () => () => {} } as unknown as EvolutionControlService,
+			start: vi.fn(async () => {}),
+			evaluateAutomatic: vi.fn(),
+			stop: vi.fn(async () => {}),
+		};
+		const coordinator = new EvolutionRuntimeCoordinator(trace, {
+			getEnabled: () => enabled,
+			setEnabled: persistEnabled,
+		});
+		await coordinator.replace(runtime);
+
+		enabled = false;
+		await coordinator.setEnabled(false);
+
+		expect(persistEnabled).not.toHaveBeenCalled();
+		expect(trace.setEnabled).toHaveBeenCalledWith(false);
+		expect(runtime.stop).toHaveBeenCalledOnce();
+		expect(coordinator.getEnabled()).toBe(false);
+	});
+
 	it("stops and restarts evolution collection within the same session", async () => {
 		let enabled = true;
 		const trace = {
