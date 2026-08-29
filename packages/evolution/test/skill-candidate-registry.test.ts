@@ -564,6 +564,9 @@ describe("persistent skill candidate registry", () => {
 			to: "accepted",
 			reasonCodes: ["retrieval-and-behavior-gates-passed"],
 		});
+		await expect(fixture.registry.recordDraft(request)).resolves.toMatchObject({ state: "accepted" });
+		await expect(fixture.registry.recordValidation(validationRequest)).resolves.toMatchObject({ state: "accepted" });
+		await expect(fixture.registry.startEvaluation(evaluationStart)).resolves.toMatchObject({ state: "accepted" });
 
 		const thirdInput = input([evidence("support-c", "task-c", 0)], "trace-c");
 		const thirdCandidate = candidate({

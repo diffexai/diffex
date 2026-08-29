@@ -250,6 +250,27 @@ class MemoryRegistryStore implements SkillCandidateRegistryStore {
 	}
 }
 
+class CompletionAcknowledgementLostStore extends MemoryRegistryStore {
+	interrupted = false;
+
+	override async appendSkillCandidateRegistryEvents(
+		scope: EvolutionScope,
+		expectedRevision: number,
+		events: readonly SkillCandidateRegistryEvent[],
+	): Promise<SkillCandidateRegistryAppendResult> {
+		if (
+			!this.interrupted &&
+			events.some((event) => event.type === "skill-candidate-work-checkpointed" && event.stage === "completed")
+		) {
+			this.interrupted = true;
+			if (this.events.length !== expectedRevision) return "conflict";
+			this.events.push(...events);
+			throw new Error("completion acknowledgement lost");
+		}
+		return super.appendSkillCandidateRegistryEvents(scope, expectedRevision, events);
+	}
+}
+
 class MemoryLeaseStore implements EvolutionLeaseStore {
 	readonly leases = new Map<string, EvolutionLeaseToken>();
 
@@ -351,14 +372,13 @@ class FixtureRegistry implements SkillCandidateRegistry {
 	}
 }
 
-function fixture(withEvaluator = false) {
+function fixture(withEvaluator = false, store: MemoryRegistryStore = new MemoryRegistryStore()) {
 	const input = inputSnapshot();
 	const skillCandidate = candidate();
 	const inputReference = reference(input);
 	const candidateReference = reference(skillCandidate);
 	const job = completedJob(inputReference, candidateReference);
 	const jobs = new MemoryJobStore([job]);
-	const store = new MemoryRegistryStore();
 	const leases = new MemoryLeaseStore();
 	const registry = new FixtureRegistry();
 	const synthesisRequests: SkillSynthesizerInput[] = [];
@@ -575,6 +595,22 @@ describe("skill candidate registry worker", () => {
 			),
 		).toHaveLength(1);
 		expect(data.store.events.some((event) => event.type === "skill-candidate-work-failed")).toBe(false);
+	});
+
+	it("does not append failure after a committed completion loses its acknowledgement", async () => {
+		const store = new CompletionAcknowledgementLostStore();
+		const data = fixture(false, store);
+
+		await expect(data.worker.process(data.job.jobId)).rejects.toThrow("completion acknowledgement lost");
+
+		expect(
+			store.events.filter(
+				(event) => event.type === "skill-candidate-work-checkpointed" && event.stage === "completed",
+			),
+		).toHaveLength(1);
+		expect(store.events.some((event) => event.type === "skill-candidate-work-failed")).toBe(false);
+		const source = new PollingSkillCandidateWorkSource({ clock: data.clock, jobs: data.jobs, store });
+		expect(await source.nextRunnableJob(now)).toBeNull();
 	});
 
 	it("synthesizes and records drafts only for evidence-qualified groups", async () => {

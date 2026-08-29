@@ -474,6 +474,7 @@ export class StructuredSkillSynthesizer implements SkillSynthesizer {
 			draftId: stableId("skill-draft", {
 				groupId: input.group.groupId,
 				synthesisIdempotencyKey: input.idempotencyKey,
+				content,
 			}),
 			groupId: input.group.groupId,
 			synthesisIdempotencyKey: input.idempotencyKey,

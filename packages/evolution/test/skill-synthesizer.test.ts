@@ -487,6 +487,29 @@ describe("StructuredSkillSynthesizer", () => {
 		});
 	});
 
+	it("binds the immutable draft ID to synthesized content", async () => {
+		const data = fixture();
+		const synthesize = (skillMarkdown: string) =>
+			data.synthesizer.synthesize({
+				group: data.group,
+				model: {
+					maxProviderCallsPerExecution: 20,
+					async execute() {
+						return { output: { skillMarkdown }, model: { provider: "faux", model: "fixture" } };
+					},
+				},
+				idempotencyKey: data.group.synthesisIdempotencyKey,
+				createdAt,
+			});
+
+		const first = await synthesize(draftMarkdown);
+		const repeated = await synthesize(draftMarkdown);
+		const changed = await synthesize(`${draftMarkdown}\nAdditional verification detail.\n`);
+
+		expect(repeated.draftId).toBe(first.draftId);
+		expect(changed.draftId).not.toBe(first.draftId);
+	});
+
 	it("classifies invalid structured output as a synthesis failure", async () => {
 		const data = fixture();
 
