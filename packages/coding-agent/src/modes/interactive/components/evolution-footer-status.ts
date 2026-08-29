@@ -6,6 +6,7 @@ const ACTIVE_POLL_INTERVAL_MS = 1_000;
 const IDLE_POLL_INTERVAL_MS = 5_000;
 
 export interface EvolutionFooterStatusClient {
+	getEnabled(): boolean;
 	subscribe(listener: (event: EvolutionProgressEvent) => void): () => void;
 	overview(): Promise<EvolutionOverview>;
 	listHarnessVersionInfo(): Promise<readonly EvolutionHarnessVersionInfo[]>;
@@ -68,7 +69,7 @@ export class EvolutionFooterStatus {
 		const activeVersion = this.#getActiveHarnessVersion();
 		return {
 			loaded: this.#versionInfoLoaded,
-			running: this.#running,
+			running: this.#client.getEnabled() && this.#running,
 			spinnerFrame: SPINNER_FRAMES[this.#spinnerFrameIndex] ?? SPINNER_FRAMES[0],
 			activeVersionInfo: this.#versionInfo.find((info) => info.version === activeVersion),
 		};
@@ -113,7 +114,7 @@ export class EvolutionFooterStatus {
 			this.#versionInfo = versionInfo;
 			this.#versionInfoLoaded = true;
 			if (shouldLoadVersionInfo) this.#loadedVersionInfoGeneration = versionInfoGeneration;
-			this.#setRunning(overview.activeJob !== null);
+			this.#setRunning(this.#client.getEnabled() && overview.activeJob !== null);
 
 			const selectedVersion = overview.currentHarnessVersion;
 			const selectionChanged =
@@ -138,7 +139,9 @@ export class EvolutionFooterStatus {
 
 	#handleProgress(event: EvolutionProgressEvent): void {
 		if (this.#disposed) return;
-		if (event.type === "started" || event.type === "checkpoint") this.#setRunning(true);
+		if (event.type === "started" || event.type === "checkpoint") {
+			this.#setRunning(this.#client.getEnabled());
+		}
 		if (event.type === "completed" || event.type === "failed") this.#setRunning(false);
 		if (event.type === "completed") {
 			this.#activateSelectedHarness = true;
@@ -159,6 +162,11 @@ export class EvolutionFooterStatus {
 		this.#stopSpinner();
 		this.#spinnerFrameIndex = 0;
 		this.#spinnerInterval = setInterval(() => {
+			if (!this.#client.getEnabled()) {
+				this.#setRunning(false);
+				this.#requestRender();
+				return;
+			}
 			this.#spinnerFrameIndex = (this.#spinnerFrameIndex + 1) % SPINNER_FRAMES.length;
 			this.#requestRender();
 		}, this.#spinnerIntervalMs);
