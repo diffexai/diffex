@@ -622,10 +622,7 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 
 	#renderSkillCandidate(detail: EvolutionSkillCandidateDetail): void {
 		this.#addLine(`Skill candidate: ${detail.summary.proposedName}`, "accent");
-		this.#addLine(`Operation: ${detail.summary.operation}`);
-		this.#addLine(`State: ${detail.summary.state}`);
 		this.#addLine(`Target harness: ${detail.targetHarnessVersion ?? "pending activation"}`);
-		this.#addLine(`Rollback available: ${detail.rollbackAvailable ? "yes" : "no"}`);
 	}
 
 	#renderSkillCandidateReview(
