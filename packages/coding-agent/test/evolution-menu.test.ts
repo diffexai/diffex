@@ -669,6 +669,9 @@ describe("EvolutionMenuComponent", () => {
 		let output = stripAnsi(component.render(180).join("\n"));
 		expect(output).toContain("Skill candidate: focused-verification");
 		expect(output).toContain("Target harness: pending activation");
+		expect(output).not.toContain("Operation:");
+		expect(output).not.toContain("State:");
+		expect(output).not.toContain("Rollback available:");
 		expect(output).toContain("Provenance");
 		expect(output).toContain("Draft diff");
 		expect(output).toContain("Validation");
