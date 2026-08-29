@@ -352,9 +352,12 @@ export class SkillCandidateRegistryWorker implements SkillCandidateWorkProcessor
 			if (
 				existing.some(
 					(event) =>
-						event.type === "skill-candidate-work-failed" &&
-						event.sourceEvolutionJobId === job.jobId &&
-						event.attempt === attempt,
+						(event.type === "skill-candidate-work-checkpointed" &&
+							event.sourceEvolutionJobId === job.jobId &&
+							event.stage === "completed") ||
+						(event.type === "skill-candidate-work-failed" &&
+							event.sourceEvolutionJobId === job.jobId &&
+							event.attempt === attempt),
 				)
 			) {
 				return null;
