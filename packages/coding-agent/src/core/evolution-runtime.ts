@@ -48,6 +48,7 @@ import {
 	RecursiveReflector,
 	SkillCandidateBackgroundWorker,
 	SkillCandidateRegistryWorker,
+	type SkillDraftValidationEnvironmentSource,
 	SkillWriter,
 	StructuredDeltaCurator,
 	StructuredSkillCurator,
@@ -64,7 +65,7 @@ import { resolveHarnessWorkspace } from "./harness-state-runtime.ts";
 import { INVOCATION_TRACE_LOCK_STALE_MS, type InvocationTrace } from "./invocation-trace.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
 import type { ResourceLoader } from "./resource-loader.ts";
-import type { Skill } from "./skills.ts";
+import { createEvolvedSkillCatalog, type Skill } from "./skills.ts";
 
 const execFileAsync = promisify(execFile);
 const EVOLUTION_DIRECTORY_NAME = "evolution";
@@ -698,6 +699,55 @@ export function createEvolutionSkillSnapshots(skills: readonly Skill[]): readonl
 	}));
 }
 
+export class SelectedHarnessSkillDraftValidationEnvironmentSource implements SkillDraftValidationEnvironmentSource {
+	readonly #workspace: { readonly repositoryId: string; readonly directoryId: string };
+	readonly #harnessState: HarnessStateStore;
+	readonly #resourceLoader: ResourceLoader;
+
+	constructor(options: {
+		workspace: { readonly repositoryId: string; readonly directoryId: string };
+		harnessState: HarnessStateStore;
+		resourceLoader: ResourceLoader;
+	}) {
+		this.#workspace = options.workspace;
+		this.#harnessState = options.harnessState;
+		this.#resourceLoader = options.resourceLoader;
+	}
+
+	async capture(workspace: Parameters<SkillDraftValidationEnvironmentSource["capture"]>[0], signal?: AbortSignal) {
+		signal?.throwIfAborted();
+		if (
+			workspace.repositoryId !== this.#workspace.repositoryId ||
+			workspace.directoryId !== this.#workspace.directoryId
+		) {
+			throw new Error("Skill validation workspace does not match the repository runtime");
+		}
+		const selected = await this.#harnessState.loadCurrent();
+		signal?.throwIfAborted();
+		const installedSkills = this.#resourceLoader
+			.getSkills()
+			.skills.filter((skill) => skill.sourceKind === "installed");
+		const evolvedSkills = createEvolvedSkillCatalog(selected, this.#workspace).skills;
+		const skillVersions = [...installedSkills, ...evolvedSkills]
+			.map((skill) => ({
+				skillId: skill.skillId,
+				version: skill.version,
+				contentDigest: skill.contentDigest,
+			}))
+			.sort(
+				(left, right) =>
+					left.skillId.localeCompare(right.skillId) ||
+					left.version.localeCompare(right.version) ||
+					left.contentDigest.localeCompare(right.contentDigest),
+			);
+		return {
+			workspace: this.#workspace,
+			harnessVersion: selected.manifest.version,
+			skillVersions,
+		};
+	}
+}
+
 class CodingAgentSnapshotSource implements EvolutionSnapshotSource {
 	readonly #cwd: string;
 	readonly #directoryId: string;
@@ -896,28 +946,11 @@ export async function createCodingAgentEvolutionRuntime(
 		version: VERSION,
 		artifacts: persistence,
 		jobs: persistence,
-		environment: {
-			async capture(workspace, signal) {
-				signal?.throwIfAborted();
-				if (
-					workspace.repositoryId !== scope.repositoryId ||
-					workspace.directoryId !== currentDirectory.directoryId
-				) {
-					throw new Error("Skill validation workspace does not match the repository runtime");
-				}
-				const harnessVersion = options.session.activeHarnessVersion;
-				if (harnessVersion === undefined) throw new Error("Skill validation requires an active session harness");
-				return {
-					workspace: { repositoryId: scope.repositoryId, directoryId: currentDirectory.directoryId },
-					harnessVersion,
-					skillVersions: options.resourceLoader.getSkills().skills.map((skill) => ({
-						skillId: skill.skillId,
-						version: skill.version,
-						contentDigest: skill.contentDigest,
-					})),
-				};
-			},
-		},
+		environment: new SelectedHarnessSkillDraftValidationEnvironmentSource({
+			workspace: { repositoryId: scope.repositoryId, directoryId: currentDirectory.directoryId },
+			harnessState: options.harnessState,
+			resourceLoader: options.resourceLoader,
+		}),
 	});
 	const candidateWorker = new SkillCandidateBackgroundWorker({
 		clock,

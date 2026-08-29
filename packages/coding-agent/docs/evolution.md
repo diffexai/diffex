@@ -20,7 +20,7 @@ Use `/version` to inspect compatible revisions for the current workspace and sel
 
 ## Request boundaries
 
-Harness selection is resolved at prompt admission. A fresh prompt observes the selected revision; in-flight work and already admitted queued messages keep their pinned memory and skill versions. If `/version` changes while an evolution job is running, the job continues from its frozen base and cannot replace the newer selection.
+Harness selection is resolved at prompt admission. A fresh prompt observes the selected revision; in-flight work and already admitted queued messages keep their pinned memory and skill versions. Background candidate validation reads the atomically selected revision directly, so it does not depend on a session reaching its next prompt boundary first. If `/version` changes while an evolution job is running, the job continues from its frozen base and cannot replace the newer selection.
 
 The footer identifies the active harness and shows background evolution activity. `/skills` lists only evolved skills from the active revision whose workspace identity matches the current workspace.
 
