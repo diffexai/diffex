@@ -14,7 +14,7 @@ Use `/evolve` to:
 - inspect target revisions and roll back an activated evolved skill to its immutable parent revision;
 - enable or disable future tracing and evolution work.
 
-Skill activation always requires explicit confirmation. Automatic skill activation is not enabled. Candidates that have not passed every required gate remain read-only.
+Skill activation always requires explicit confirmation. Automatic skill activation is not enabled. Candidates that have not passed every required gate remain read-only. If harness memory changes after evaluation while the evaluated skill inventory remains identical, activation automatically rebases the candidate onto the selected revision and preserves its memory. Skill-inventory changes remain conflicts because they require fresh retrieval and behavior evaluation.
 
 Use `/version` to inspect compatible revisions for the current workspace and select one. Selection validates the complete bundle. A revision with corrupt, unsupported, or workspace-mismatched artifacts is not activated.
 

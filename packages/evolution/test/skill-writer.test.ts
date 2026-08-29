@@ -446,6 +446,65 @@ describe("skill writer", () => {
 		},
 	);
 
+	it("rebases an accepted candidate over a compatible selected harness", async () => {
+		const data = await writerFixture({
+			operation: "CREATE",
+			retainedNames: ["retained"],
+			proposedName: "created-skill",
+		});
+		const competing = await data.harnessState.advance(
+			{ memory: "Newer harness memory.\n" },
+			data.base.manifest.version,
+		);
+		if (competing.status !== "advanced") throw new Error("Expected competing harness advance");
+
+		const batch = await data.writer.buildMutationBatch({ scope, groupId: data.group.groupId, createdAt: now });
+		expect(batch.expectedBaseVersion).toBe(competing.bundle.manifest.version);
+		const writeReceipt = await data.writer.write(batch, { idempotencyKey: "write-1", lease: data.lease });
+		const activation = await data.writer.activate(batch, writeReceipt, {
+			idempotencyKey: "activate-1",
+			lease: data.lease,
+		});
+		const current = await data.harnessState.loadCurrent();
+		expect(current.manifest.version).toBe(activation.result.resultingHarnessVersion);
+		expect(current.manifest.base).toBe(competing.bundle.manifest.version);
+		expect(current.state.memory).toBe("Newer harness memory.\n");
+		expect(current.state.skills.map((skill) => skill.name).sort()).toEqual(["created-skill", "retained"]);
+	});
+
+	it("rebases a staged candidate when compatible harness selection changes before activation", async () => {
+		const data = await writerFixture({
+			operation: "CREATE",
+			retainedNames: ["retained"],
+			proposedName: "created-skill",
+		});
+		const batch = await data.writer.buildMutationBatch({ scope, groupId: data.group.groupId, createdAt: now });
+		const writeReceipt = await data.writer.write(batch, { idempotencyKey: "write-1", lease: data.lease });
+		const competing = await data.harnessState.advance(
+			{ memory: "Concurrent harness memory.\n" },
+			data.base.manifest.version,
+		);
+		if (competing.status !== "advanced") throw new Error("Expected competing harness advance");
+
+		const activation = await data.writer.activate(batch, writeReceipt, {
+			idempotencyKey: "activate-1",
+			lease: data.lease,
+		});
+		const current = await data.harnessState.loadCurrent();
+		expect(current.manifest.version).toBe(activation.result.resultingHarnessVersion);
+		expect(current.manifest.base).toBe(competing.bundle.manifest.version);
+		expect(current.state.memory).toBe("Concurrent harness memory.\n");
+		expect(current.state.skills.map((skill) => skill.name).sort()).toEqual(["created-skill", "retained"]);
+
+		await rm(join(data.root, "writer-state", "activations", `${batch.batchId}.json`));
+		const recovered = await data.writer.activate(batch, writeReceipt, {
+			idempotencyKey: "activate-1",
+			lease: data.lease,
+		});
+		expect(recovered).toEqual(activation);
+		expect(await data.harnessState.loadCurrent()).toEqual(current);
+	});
+
 	it("makes write and activation retries idempotent and preserves exact rollback lineage", async () => {
 		const data = await writerFixture({
 			operation: "CREATE",
@@ -561,7 +620,7 @@ describe("skill writer", () => {
 		expect(await data.harnessState.loadCurrent()).toEqual(data.base);
 	});
 
-	it("rejects stale harness bases and tampered write receipts", async () => {
+	it("rejects incompatible harness bases and tampered write receipts", async () => {
 		const stale = await writerFixture({ operation: "CREATE", proposedName: "created-skill" });
 		const staleBatch = await stale.writer.buildMutationBatch({ scope, groupId: stale.group.groupId, createdAt: now });
 		const staleReceipt = await stale.writer.write(staleBatch, {
@@ -569,7 +628,16 @@ describe("skill writer", () => {
 			lease: stale.lease,
 		});
 		const competing = await stale.harnessState.advance(
-			{ memory: "Competing harness memory.\n" },
+			{
+				memory: "Competing harness memory.\n",
+				skills: [
+					{
+						path: "skills/competing-skill/SKILL.md",
+						content: skillContent("competing-skill"),
+						workspace,
+					},
+				],
+			},
 			stale.base.manifest.version,
 		);
 		if (competing.status !== "advanced") throw new Error("Expected competing harness advance");
