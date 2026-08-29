@@ -891,6 +891,7 @@ export class PersistentSkillCandidateRegistry implements SkillCandidateRegistry 
 				input.scope,
 				snapshot.revision,
 				planned,
+				input.lease,
 			);
 			if (committed === "committed") return immutableGroup(mutable);
 		}
@@ -1000,6 +1001,7 @@ export class PersistentSkillCandidateRegistry implements SkillCandidateRegistry 
 				input.scope,
 				snapshot.revision,
 				planned,
+				input.lease,
 			);
 			if (committed === "committed") return immutableGroup(mutable);
 		}
@@ -1049,9 +1051,12 @@ export class PersistentSkillCandidateRegistry implements SkillCandidateRegistry 
 				input.scope,
 				input.createdAt,
 			);
-			const committed = await this.#store.appendSkillCandidateRegistryEvents(input.scope, snapshot.revision, [
-				transition,
-			]);
+			const committed = await this.#store.appendSkillCandidateRegistryEvents(
+				input.scope,
+				snapshot.revision,
+				[transition],
+				input.lease,
+			);
 			if (committed === "committed") {
 				mutable.state = "evaluation-pending";
 				mutable.dispositionHistory.push({
@@ -1186,6 +1191,7 @@ export class PersistentSkillCandidateRegistry implements SkillCandidateRegistry 
 				input.scope,
 				snapshot.revision,
 				planned,
+				input.lease,
 			);
 			if (committed === "committed") return immutableGroup(mutable);
 		}
@@ -1380,6 +1386,7 @@ export class PersistentSkillCandidateRegistry implements SkillCandidateRegistry 
 				input.input.metadata.scope,
 				snapshot.revision,
 				planned,
+				input.lease,
 			);
 			if (committed === "conflict") continue;
 			return {

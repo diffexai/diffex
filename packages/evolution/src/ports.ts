@@ -303,6 +303,7 @@ export interface SkillCandidateRegistryStore {
 		scope: EvolutionScope,
 		expectedRevision: number,
 		events: readonly SkillCandidateRegistryEvent[],
+		lease?: EvolutionLeaseToken,
 	): Promise<SkillCandidateRegistryAppendResult>;
 }
 
@@ -317,6 +318,7 @@ export interface SkillLifecycleObservationStore {
 
 export interface SkillCandidateRegistryConsolidationInput {
 	readonly sourceEvolutionJobId: string;
+	readonly lease?: EvolutionLeaseToken;
 	readonly input: EvolutionInputSnapshot;
 	readonly candidates: readonly {
 		readonly candidate: SkillCandidate;
@@ -334,6 +336,7 @@ export interface SkillCandidateRegistryConsolidationResult {
 
 export interface SkillCandidateDraftRecordingInput {
 	readonly scope: EvolutionScope;
+	readonly lease?: EvolutionLeaseToken;
 	readonly groupId: string;
 	readonly draft: EvolutionArtifactReference;
 	readonly proposalRevisionIds: readonly string[];
@@ -343,6 +346,7 @@ export interface SkillCandidateDraftRecordingInput {
 
 export interface SkillCandidateValidationRecordingInput {
 	readonly scope: EvolutionScope;
+	readonly lease?: EvolutionLeaseToken;
 	readonly groupId: string;
 	readonly draft: EvolutionArtifactReference;
 	readonly validation: EvolutionArtifactReference;
@@ -353,6 +357,7 @@ export interface SkillCandidateValidationRecordingInput {
 
 export interface SkillCandidateEvaluationStartInput {
 	readonly scope: EvolutionScope;
+	readonly lease?: EvolutionLeaseToken;
 	readonly groupId: string;
 	readonly draft: EvolutionArtifactReference;
 	readonly validation: EvolutionArtifactReference;
@@ -363,6 +368,7 @@ export interface SkillCandidateEvaluationStartInput {
 
 export interface SkillCandidateEvaluationRecordingInput {
 	readonly scope: EvolutionScope;
+	readonly lease?: EvolutionLeaseToken;
 	readonly groupId: string;
 	readonly draft: EvolutionArtifactReference;
 	readonly validation: EvolutionArtifactReference;

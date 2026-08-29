@@ -9,6 +9,8 @@ import {
 	type EvolutionInputSnapshot,
 	type EvolutionJob,
 	type EvolutionJobStore,
+	type EvolutionLeaseStore,
+	type EvolutionLeaseToken,
 	type EvolutionScope,
 	PollingSkillCandidateWorkSource,
 	type SkillCandidate,
@@ -248,6 +250,49 @@ class MemoryRegistryStore implements SkillCandidateRegistryStore {
 	}
 }
 
+class MemoryLeaseStore implements EvolutionLeaseStore {
+	readonly leases = new Map<string, EvolutionLeaseToken>();
+
+	async assertHeld(lease: EvolutionLeaseToken): Promise<void> {
+		const current = this.leases.get(`${lease.kind}\0${lease.key}`);
+		if (current?.ownerId !== lease.ownerId || current.fence !== lease.fence) throw new Error("lease was lost");
+	}
+
+	async acquire(
+		kind: EvolutionLeaseToken["kind"],
+		key: string,
+		ownerId: string,
+		acquiredAt: string,
+		ttlMs: number,
+	): Promise<EvolutionLeaseToken | null> {
+		const leaseKey = `${kind}\0${key}`;
+		const current = this.leases.get(leaseKey);
+		if (current !== undefined && Date.parse(current.expiresAt) > Date.parse(acquiredAt)) return null;
+		const lease = {
+			kind,
+			key,
+			ownerId,
+			fence: (current?.fence ?? 0) + 1,
+			expiresAt: new Date(Date.parse(acquiredAt) + ttlMs).toISOString(),
+		};
+		this.leases.set(leaseKey, lease);
+		return lease;
+	}
+
+	async renew(lease: EvolutionLeaseToken, renewedAt: string, ttlMs: number): Promise<EvolutionLeaseToken | null> {
+		await this.assertHeld(lease);
+		const renewed = { ...lease, expiresAt: new Date(Date.parse(renewedAt) + ttlMs).toISOString() };
+		this.leases.set(`${lease.kind}\0${lease.key}`, renewed);
+		return renewed;
+	}
+
+	async release(lease: EvolutionLeaseToken): Promise<void> {
+		const leaseKey = `${lease.kind}\0${lease.key}`;
+		const current = this.leases.get(leaseKey);
+		if (current?.ownerId === lease.ownerId && current.fence === lease.fence) this.leases.delete(leaseKey);
+	}
+}
+
 class FixtureRegistry implements SkillCandidateRegistry {
 	readonly requests: SkillCandidateRegistryConsolidationInput[] = [];
 	readonly draftRequests: SkillCandidateDraftRecordingInput[] = [];
@@ -314,6 +359,7 @@ function fixture(withEvaluator = false) {
 	const job = completedJob(inputReference, candidateReference);
 	const jobs = new MemoryJobStore([job]);
 	const store = new MemoryRegistryStore();
+	const leases = new MemoryLeaseStore();
 	const registry = new FixtureRegistry();
 	const synthesisRequests: SkillSynthesizerInput[] = [];
 	const validationRequests: SkillDraftValidatorInput[] = [];
@@ -338,6 +384,8 @@ function fixture(withEvaluator = false) {
 			jobs,
 			artifacts: new MemoryArtifactStore([input, skillCandidate]),
 			store,
+			leases,
+			ownerId: "worker-1",
 			registry,
 			synthesizer: {
 				async synthesize(request): Promise<SkillDraft> {
@@ -508,6 +556,25 @@ describe("skill candidate registry worker", () => {
 			expect.stringMatching(/^skill-candidate-work-stage-/),
 			expect.stringMatching(/^skill-candidate-work-stage-/),
 		]);
+	});
+
+	it("claims candidate work before concurrent processors can synthesize it", async () => {
+		const data = fixture();
+		const candidateReference = data.job.checkpoints[0]?.outputArtifacts[0];
+		if (candidateReference === undefined) throw new Error("Expected candidate reference");
+		data.registry.groups.push(qualifiedGroup(candidateReference));
+
+		const results = await Promise.all([data.worker.process(data.job.jobId), data.worker.process(data.job.jobId)]);
+
+		expect(results).toEqual(["processed", "busy"]);
+		expect(data.registry.requests).toHaveLength(1);
+		expect(data.synthesisRequests).toHaveLength(1);
+		expect(
+			data.store.events.filter(
+				(event) => event.type === "skill-candidate-work-checkpointed" && event.stage === "completed",
+			),
+		).toHaveLength(1);
+		expect(data.store.events.some((event) => event.type === "skill-candidate-work-failed")).toBe(false);
 	});
 
 	it("synthesizes and records drafts only for evidence-qualified groups", async () => {

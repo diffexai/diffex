@@ -533,7 +533,7 @@ function parseLease(contents: string, path: string): StoredLease {
 	if (
 		!isRecord(parsed) ||
 		parsed.schemaVersion !== EVOLUTION_SCHEMA_VERSION ||
-		(parsed.kind !== "scope" && parsed.kind !== "writer") ||
+		(parsed.kind !== "candidate-work" && parsed.kind !== "scope" && parsed.kind !== "writer") ||
 		typeof parsed.key !== "string" ||
 		typeof parsed.ownerId !== "string" ||
 		!Number.isSafeInteger(parsed.fence) ||
@@ -1078,12 +1078,14 @@ export class FileEvolutionPersistence
 		scope: EvolutionScope,
 		expectedRevision: number,
 		events: readonly SkillCandidateRegistryEvent[],
+		lease?: EvolutionLeaseToken,
 	): Promise<SkillCandidateRegistryAppendResult> {
 		if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {
 			throw new Error("Invalid skill candidate registry revision");
 		}
 		if (events.length === 0) return "committed";
 		return this.#withStoreLock(async () => {
+			if (lease !== undefined) await this.#assertLeaseHeld(lease);
 			const existing = await this.#readSkillCandidateRegistryEvents(scope);
 			if (existing.length !== expectedRevision) return "conflict";
 			const scopePath = this.#skillCandidateScopePath(scope);
