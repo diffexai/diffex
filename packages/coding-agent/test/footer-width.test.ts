@@ -1,8 +1,9 @@
 import type { HarnessVersion } from "@earendil-works/diffex-harness-state";
 import { visibleWidth } from "@earendil-works/diffex-tui";
 import { beforeAll, describe, expect, it, vi } from "vitest";
-import type { EvolutionHarnessVersionInfo, EvolutionOverview, EvolutionProgressEvent } from "#evolution";
+import type { EvolutionHarnessVersionInfo, EvolutionOverview } from "#evolution";
 import type { AgentSession } from "../src/core/agent-session.ts";
+import type { EvolutionRuntimeEvent } from "../src/core/evolution-runtime.ts";
 import type { ReadonlyFooterDataProvider } from "../src/core/footer-data-provider.ts";
 import type { EvolutionFooterStatusClient } from "../src/modes/interactive/components/evolution-footer-status.ts";
 import { FooterComponent, formatCwdForFooter } from "../src/modes/interactive/components/footer.ts";
@@ -100,7 +101,7 @@ function createEvolutionClient(
 ): EvolutionFooterStatusClient {
 	return {
 		getEnabled: () => enabled,
-		subscribe: (_listener: (event: EvolutionProgressEvent) => void) => () => {},
+		subscribe: (_listener: (event: EvolutionRuntimeEvent) => void) => () => {},
 		overview: async () => currentOverview,
 		listHarnessVersionInfo: async () => versionInfo,
 	};

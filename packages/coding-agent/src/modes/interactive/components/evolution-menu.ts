@@ -14,13 +14,13 @@ import type {
 	EvolutionJobDetail,
 	EvolutionJobSummary,
 	EvolutionOverview,
-	EvolutionProgressEvent,
 	EvolutionProposalDetail,
 	EvolutionRollbackAction,
 	EvolutionSkillActivationResult,
 	EvolutionSkillCandidateDetail,
 	EvolutionStartResult,
 } from "#evolution";
+import type { EvolutionRuntimeEvent } from "../../../core/evolution-runtime.ts";
 import { theme } from "../theme/theme.ts";
 import { DynamicBorder } from "./dynamic-border.ts";
 import {
@@ -35,7 +35,7 @@ export { formatEvolutionTimestamp } from "./harness-version-display.ts";
 export interface EvolutionMenuClient {
 	getEnabled(): boolean;
 	setEnabled(enabled: boolean): Promise<void>;
-	subscribe(listener: (event: EvolutionProgressEvent) => void): () => void;
+	subscribe(listener: (event: EvolutionRuntimeEvent) => void): () => void;
 	overview(): Promise<EvolutionOverview>;
 	listHarnessVersionInfo(): Promise<readonly EvolutionHarnessVersionInfo[]>;
 	listCurrentDirectoryHarnessVersionInfo(): Promise<readonly EvolutionHarnessVersionInfo[]>;
@@ -215,7 +215,12 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 		this.#requestRender = requestRender;
 		this.#pollIntervalMs = pollIntervalMs;
 		this.#unsubscribe = client.subscribe((event) => {
-			if (event.type === "completed") this.#harnessVersionInfoLoaded = false;
+			if (event.type === "enabled-changed") {
+				this.rebuild();
+				this.#requestRender();
+			} else if (event.type === "completed") {
+				this.#harnessVersionInfoLoaded = false;
+			}
 			void this.refresh();
 		});
 		this.rebuild();
@@ -465,6 +470,7 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 
 	#confirmEntries(view: Extract<MenuView, { kind: "confirm" }>): readonly MenuEntry[] {
 		const { action } = view;
+		const evolutionEnabled = this.#client.getEnabled();
 		const run = () => {
 			if (action === "start") {
 				this.#run(
@@ -502,8 +508,8 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 		return [
 			{
 				label: `Confirm ${action}`,
-				enabled: !this.#actionPending,
-				disabledStatus: "Working",
+				enabled: evolutionEnabled && !this.#actionPending,
+				disabledStatus: this.#actionPending ? "Working" : undefined,
 				select: run,
 			},
 			{

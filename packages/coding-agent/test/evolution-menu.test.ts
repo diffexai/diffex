@@ -6,10 +6,10 @@ import type {
 	EvolutionJobSummary,
 	EvolutionMemoryProposal,
 	EvolutionOverview,
-	EvolutionProgressEvent,
 	EvolutionProposalDetail,
 	EvolutionSkillCandidateDetail,
 } from "#evolution";
+import type { EvolutionRuntimeEvent } from "../src/core/evolution-runtime.ts";
 import { KeybindingsManager } from "../src/core/keybindings.ts";
 import {
 	type EvolutionMenuClient,
@@ -238,7 +238,8 @@ function evidence(evidenceId: string, text: string): EvolutionProposalDetail["su
 
 function client(currentOverview: EvolutionOverview): {
 	client: EvolutionMenuClient;
-	emit: (event: EvolutionProgressEvent) => void;
+	emit: (event: EvolutionRuntimeEvent) => void;
+	setExternalEnabled: (enabled: boolean) => void;
 	unsubscribed: ReturnType<typeof vi.fn>;
 	startManual: ReturnType<typeof vi.fn>;
 	cancelJob: ReturnType<typeof vi.fn>;
@@ -254,7 +255,7 @@ function client(currentOverview: EvolutionOverview): {
 	getEnabled: ReturnType<typeof vi.fn>;
 	setEnabled: ReturnType<typeof vi.fn>;
 } {
-	let listener: ((event: EvolutionProgressEvent) => void) | undefined;
+	let listener: ((event: EvolutionRuntimeEvent) => void) | undefined;
 	let enabled = true;
 	const unsubscribed = vi.fn();
 	const startManual = vi.fn().mockResolvedValue({ status: "created", job: job() });
@@ -307,6 +308,9 @@ function client(currentOverview: EvolutionOverview): {
 			rollback: vi.fn().mockRejectedValue(new Error("unused")),
 		},
 		emit: (event) => listener?.(event),
+		setExternalEnabled: (next) => {
+			enabled = next;
+		},
 		unsubscribed,
 		startManual,
 		cancelJob,
@@ -451,6 +455,33 @@ describe("EvolutionMenuComponent", () => {
 		for (const action of ["Refresh", "Evolve", "View", "Resume", "Browse", "Rollback", "Cancel"]) {
 			expect(output).toContain(`${action} [unavailable]`);
 		}
+	});
+
+	it("rebuilds an idle menu when another process disables evolution", async () => {
+		const fixture = client(overview());
+		const render = vi.fn();
+		const component = new EvolutionMenuComponent(
+			fixture.client,
+			() => {},
+			() => {},
+			render,
+		);
+		await vi.waitFor(() => expect(stripAnsi(component.render(180).join("\n"))).toContain("Toggle [on]"));
+
+		component.handleInput("\u001b[B");
+		fixture.setExternalEnabled(false);
+		fixture.emit({ type: "enabled-changed", enabled: false });
+
+		const output = stripAnsi(component.render(180).join("\n"));
+		expect(output).toContain("Toggle [off]");
+		expect(output).toContain("Next automatic evolution: Disabled");
+		for (const action of ["Refresh", "Evolve", "View", "Resume", "Browse", "Rollback", "Cancel"]) {
+			expect(output).toContain(`${action} [unavailable]`);
+		}
+		expect(render).toHaveBeenCalled();
+		component.handleInput("\n");
+		expect(fixture.startManual).not.toHaveBeenCalled();
+		component.dispose();
 	});
 
 	it("polls durable job state without rendering removed diagnostics", async () => {

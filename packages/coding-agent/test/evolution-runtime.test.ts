@@ -17,6 +17,7 @@ import {
 	createCodingAgentEvolutionRuntime,
 	createEvolutionSkillSnapshots,
 	EvolutionRuntimeCoordinator,
+	type EvolutionRuntimeEvent,
 	resolveEvolutionDirectoryIdentity,
 	SelectedHarnessSkillDraftValidationEnvironmentSource,
 	TraceEvidenceCatalog,
@@ -381,6 +382,8 @@ describe("coding-agent evolution runtime", () => {
 			getEnabled: () => enabled,
 			setEnabled: persistEnabled,
 		});
+		const events: EvolutionRuntimeEvent[] = [];
+		coordinator.subscribe((event) => events.push(event));
 		await coordinator.replace(runtime);
 
 		enabled = false;
@@ -390,6 +393,41 @@ describe("coding-agent evolution runtime", () => {
 		expect(trace.setEnabled).toHaveBeenCalledWith(false);
 		expect(runtime.stop).toHaveBeenCalledOnce();
 		expect(coordinator.getEnabled()).toBe(false);
+		expect(events).toEqual([{ type: "enabled-changed", enabled: false }]);
+	});
+
+	it("rejects evolution actions as soon as the persisted setting is disabled", async () => {
+		let enabled = true;
+		const trace = {
+			operationSettled: vi.fn(async () => {}),
+			harnessActivated: vi.fn(async () => {}),
+			setEnabled: vi.fn(async () => {}),
+		} as unknown as InvocationTrace;
+		const listJobs = vi.fn().mockResolvedValue([]);
+		const startManual = vi.fn().mockResolvedValue({ status: "not-created", reason: "no-new-evidence" });
+		const runtime: CodingAgentEvolutionRuntime = {
+			control: {
+				subscribe: () => () => {},
+				listJobs,
+				startManual,
+			} as unknown as EvolutionControlService,
+			start: vi.fn(async () => {}),
+			evaluateAutomatic: vi.fn(),
+			stop: vi.fn(async () => {}),
+		};
+		const coordinator = new EvolutionRuntimeCoordinator(trace, {
+			getEnabled: () => enabled,
+			setEnabled: vi.fn(),
+		});
+		await coordinator.replace(runtime);
+
+		enabled = false;
+
+		expect(() => coordinator.listJobs()).toThrow("Self-evolution is disabled");
+		expect(() => coordinator.startManual()).toThrow("Self-evolution is disabled");
+		expect(listJobs).not.toHaveBeenCalled();
+		expect(startManual).not.toHaveBeenCalled();
+		await coordinator.stop();
 	});
 
 	it("stops and restarts evolution collection within the same session", async () => {
