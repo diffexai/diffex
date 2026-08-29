@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, 
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall, type Message } from "@earendil-works/diffex-ai";
-import { HarnessStateStore } from "@earendil-works/diffex-harness-state";
+import { computeHarnessSkillId, HarnessStateStore } from "@earendil-works/diffex-harness-state";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	type EvolutionControlService,
@@ -18,6 +18,7 @@ import {
 	createEvolutionSkillSnapshots,
 	EvolutionRuntimeCoordinator,
 	resolveEvolutionDirectoryIdentity,
+	SelectedHarnessSkillDraftValidationEnvironmentSource,
 	TraceEvidenceCatalog,
 } from "../src/core/evolution-runtime.ts";
 import type { InvocationTrace } from "../src/core/invocation-trace.ts";
@@ -250,6 +251,54 @@ describe("coding-agent evolution runtime", () => {
 		);
 		expect((await store.loadCurrent()).manifest.version).toBe(globallySelected.manifest.version);
 		await runtime.control.cancelJob(started.job.jobId);
+	});
+
+	it("validates skill drafts against the selected harness before the session refreshes", async () => {
+		const agentDir = join(
+			tmpdir(),
+			`diffex-skill-validation-harness-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+		);
+		mkdirSync(agentDir, { recursive: true });
+		temporaryDirectories.push(agentDir);
+		const store = new HarnessStateStore(agentDir);
+		const initial = await store.initialize();
+		const harness = await createHarness({ harnessStateStore: store, harnessVersionBundle: initial });
+		harnesses.push(harness);
+		const directory = await resolveEvolutionDirectoryIdentity(harness.tempDir);
+		const workspace = { repositoryId: "global", directoryId: directory.directoryId };
+		const skillPath = "skills/focused-verification/SKILL.md";
+		const selected = await store.advance(
+			{
+				memory: "Use the evolved verification guidance.\n",
+				skills: [
+					{
+						path: skillPath,
+						content:
+							"---\nname: focused-verification\ndescription: Verify focused changes.\n---\n\nRun focused checks.\n",
+						workspace,
+					},
+				],
+			},
+			initial.manifest.version,
+		);
+		if (selected.status !== "advanced") throw new Error("Expected the harness selection to advance");
+		expect(harness.session.activeHarnessVersion).toBe(initial.manifest.version);
+
+		const environment = await new SelectedHarnessSkillDraftValidationEnvironmentSource({
+			workspace,
+			harnessState: store,
+			resourceLoader: harness.session.resourceLoader,
+		}).capture({ ...workspace, evolutionScope: { repositoryId: "global", scopeId: "global" } });
+
+		expect(environment.harnessVersion).toBe(selected.bundle.manifest.version);
+		expect(environment.skillVersions).toEqual([
+			{
+				skillId: computeHarnessSkillId(workspace, skillPath),
+				version: selected.bundle.state.skills[0]?.contentHash,
+				contentDigest: selected.bundle.state.skills[0]?.contentHash,
+			},
+		]);
+		expect(harness.session.activeHarnessVersion).toBe(initial.manifest.version);
 	});
 
 	it("flushes the trace before scheduling an automatic eligibility check", async () => {
