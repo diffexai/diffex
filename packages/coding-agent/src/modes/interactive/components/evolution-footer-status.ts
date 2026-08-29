@@ -1,4 +1,5 @@
-import type { EvolutionHarnessVersionInfo, EvolutionOverview, EvolutionProgressEvent } from "#evolution";
+import type { EvolutionHarnessVersionInfo, EvolutionOverview } from "#evolution";
+import type { EvolutionRuntimeEvent } from "../../../core/evolution-runtime.ts";
 
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] as const;
 const SPINNER_INTERVAL_MS = 80;
@@ -7,7 +8,7 @@ const IDLE_POLL_INTERVAL_MS = 5_000;
 
 export interface EvolutionFooterStatusClient {
 	getEnabled(): boolean;
-	subscribe(listener: (event: EvolutionProgressEvent) => void): () => void;
+	subscribe(listener: (event: EvolutionRuntimeEvent) => void): () => void;
 	overview(): Promise<EvolutionOverview>;
 	listHarnessVersionInfo(): Promise<readonly EvolutionHarnessVersionInfo[]>;
 }
@@ -137,8 +138,14 @@ export class EvolutionFooterStatus {
 		}
 	}
 
-	#handleProgress(event: EvolutionProgressEvent): void {
+	#handleProgress(event: EvolutionRuntimeEvent): void {
 		if (this.#disposed) return;
+		if (event.type === "enabled-changed") {
+			if (!event.enabled) this.#setRunning(false);
+			this.#requestRender();
+			void this.refresh();
+			return;
+		}
 		if (event.type === "started" || event.type === "checkpoint") {
 			this.#setRunning(this.#client.getEnabled());
 		}
