@@ -54,16 +54,19 @@ function client(
 ): {
 	client: EvolutionFooterStatusClient;
 	emit: (event: EvolutionProgressEvent) => void;
+	setEnabled: (value: boolean) => void;
 	setOverview: (value: EvolutionOverview) => void;
 	setVersionInfo: (value: readonly EvolutionHarnessVersionInfo[]) => void;
 	unsubscribed: ReturnType<typeof vi.fn>;
 } {
+	let enabled = true;
 	let currentOverview = initialOverview;
 	let currentVersionInfo = initialVersionInfo;
 	let listener: ((event: EvolutionProgressEvent) => void) | undefined;
 	const unsubscribed = vi.fn();
 	return {
 		client: {
+			getEnabled: () => enabled,
 			subscribe: (next) => {
 				listener = next;
 				return unsubscribed;
@@ -72,6 +75,9 @@ function client(
 			listHarnessVersionInfo: async () => currentVersionInfo,
 		},
 		emit: (event) => listener?.(event),
+		setEnabled: (value) => {
+			enabled = value;
+		},
 		setOverview: (value) => {
 			currentOverview = value;
 		},
@@ -139,6 +145,33 @@ describe("EvolutionFooterStatus", () => {
 
 		expect(status.getSnapshot().running).toBe(true);
 		expect(status.getSnapshot().spinnerFrame).not.toBe(initialFrame);
+		expect(requestRender).toHaveBeenCalled();
+		status.dispose();
+	});
+
+	it("stops animating an active evolution job when evolution is disabled", async () => {
+		vi.useFakeTimers();
+		const fixture = client(overview(rootVersion, activeJob()), [
+			{ version: rootVersion, kind: "default", evolvedAt: null, evolvedIn: null },
+		]);
+		const requestRender = vi.fn();
+		const status = new EvolutionFooterStatus({
+			client: fixture.client,
+			getActiveHarnessVersion: () => rootVersion,
+			requestRender,
+			spinnerIntervalMs: 80,
+		});
+
+		await status.refresh();
+		vi.advanceTimersByTime(80);
+		expect(status.getSnapshot().running).toBe(true);
+		const activeFrame = status.getSnapshot().spinnerFrame;
+
+		fixture.setEnabled(false);
+		vi.advanceTimersByTime(160);
+
+		expect(status.getSnapshot().running).toBe(false);
+		expect(status.getSnapshot().spinnerFrame).toBe(activeFrame);
 		expect(requestRender).toHaveBeenCalled();
 		status.dispose();
 	});
@@ -211,6 +244,7 @@ describe("EvolutionFooterStatus", () => {
 		});
 		const status = new EvolutionFooterStatus({
 			client: {
+				getEnabled: () => true,
 				subscribe: (next) => {
 					listener = next;
 					return () => {};

@@ -96,8 +96,10 @@ function createSession(options: {
 function createEvolutionClient(
 	currentOverview: EvolutionOverview,
 	versionInfo: readonly EvolutionHarnessVersionInfo[],
+	enabled = true,
 ): EvolutionFooterStatusClient {
 	return {
+		getEnabled: () => enabled,
 		subscribe: (_listener: (event: EvolutionProgressEvent) => void) => () => {},
 		overview: async () => currentOverview,
 		listHarnessVersionInfo: async () => versionInfo,
@@ -269,6 +271,36 @@ describe("FooterComponent width handling", () => {
 		await vi.waitFor(() => {
 			const harnessLine = stripAnsi(footer.render(200)[1]);
 			expect(harnessLine).toMatch(new RegExp(`Harness ${formatEvolutionTimestamp(evolvedAt)} [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]`));
+		});
+		footer.dispose();
+	});
+
+	it("hides the evolution spinner while evolution is disabled", async () => {
+		const version = `sha256:${"b".repeat(64)}` as HarnessVersion;
+		const evolvedAt = new Date().toISOString();
+		const activeJob = {
+			jobId: "job-active",
+			trigger: "automatic",
+			stage: "reflecting",
+			outcome: "active",
+			reasonCode: null,
+			createdAt: evolvedAt,
+			updatedAt: evolvedAt,
+			terminalAt: null,
+			resumable: false,
+			cancellable: true,
+		} satisfies NonNullable<EvolutionOverview["activeJob"]>;
+		const session = createSession({ sessionName: "", activeHarnessVersion: version });
+		const footer = new FooterComponent(session, createFooterData(1), {
+			evolution: createEvolutionClient(
+				evolutionOverview(version, activeJob),
+				[{ version, kind: "evolved", evolvedAt, evolvedIn: "/projects/diffex" }],
+				false,
+			),
+		});
+
+		await vi.waitFor(() => {
+			expect(stripAnsi(footer.render(200)[1])).toBe(`Harness ${formatEvolutionTimestamp(evolvedAt)}`);
 		});
 		footer.dispose();
 	});
