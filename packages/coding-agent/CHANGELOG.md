@@ -21,7 +21,6 @@
 - Fixed right-click not pasting clipboard text in fullscreen mode on Windows.
 - Fixed sub-agent spawning bypassing execution-mutating parent extension hooks by rejecting incompatible parent policies before child creation.
 - Fixed delegated sub-agent result and escalation guidance disappearing from custom, extension-returned, or tool-filtered root prompts.
-- Fixed sub-agent spawn provenance selecting stale or abandoned tool calls when identifiers were reused.
 
 ## [0.84.0] - 2026-08-06
 
