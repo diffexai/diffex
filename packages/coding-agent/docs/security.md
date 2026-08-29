@@ -52,6 +52,14 @@ Common patterns are documented in [Containerization](containerization.md):
 
 If you bind-mount a host workspace read/write, writes from inside the container or VM can still modify host files. Use read-only mounts or copy files into and out of the sandbox when you need stronger protection from unintended writes.
 
+## Evolution Data and Generated Skills
+
+Invocation traces, evolution artifacts and failures, candidate history, lifecycle observations, writer receipts, and harness revisions persist beneath the effective agent directory. They can contain session evidence, generated instructions, skill content, paths, and runtime metadata. Evolution model calls may consume provider quota.
+
+Evolved skills are generated instructions and can direct the model to use tools or referenced assets. Structural, provenance, scope, security, retrieval, and behavioral gates reduce risk but do not prove semantic safety and are not a sandbox. Project trust does not sandbox an already selected harness revision.
+
+Review `/evolve` provenance, draft diffs, validation, and evaluation before activation. Use `/version` and rollback controls to select immutable revisions, and use OS or container isolation for unattended work. See [Harness Evolution](evolution.md).
+
 ## Reporting Security Issues
 
 To report a security issue, follow the repository [Security Policy](https://github.com/diffexai/diffex/blob/main/SECURITY.md). Do not open a public issue for security-sensitive reports.

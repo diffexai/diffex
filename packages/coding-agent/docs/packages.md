@@ -219,11 +219,13 @@ Filter what a package loads using the object form in settings:
 
 ## Enable and Disable Resources
 
-Use `diffex config` to enable or disable extensions, skills, prompt templates, and themes from installed packages and local directories. `diffex config` starts in global settings (`~/.diffex/agent/settings.json`); press Tab to switch between global and project-local modes. Use `diffex config -l` to start in project overrides (`.diffex/settings.json`) with inherited global resources dimmed.
+Use `diffex config` to enable or disable extensions, skills, prompt templates, and themes from installed packages and local directories. `diffex config` starts in global settings (`~/.diffex/agent/settings.json`); press Tab to switch between global and project-local modes. Use `diffex config -l` to start in project overrides (`.diffex/settings.json`) with inherited global resources dimmed. Interactive sessions also expose installed-skill inspection and toggles under **Installed skills** in `/settings`; use `/reload` after changing them.
 
 ## Scope and Deduplication
 
-Packages can appear in both global and project settings. If the same package appears in both, the project entry wins unless the project entry has `autoload: false`, in which case it is applied as a delta over the global entry. Identity is determined by:
+Packages can appear in both global and project settings. If the same package appears in both, the project entry wins unless the project entry has `autoload: false`, in which case it is applied as a delta over the global entry. Project-installed skills take precedence over user and package skills with the same name. An installed skill also retains the unsuffixed name when it collides with an evolved skill. See [Skills](skills.md) for complete catalog and collision rules.
+
+Identity is determined by:
 
 - npm: package name
 - git: repository URL without ref

@@ -770,6 +770,33 @@ const { session } = await createAgentSession({ resourceLoader: loader });
 
 > See [examples/sdk/04-skills.ts](../examples/sdk/04-skills.ts)
 
+### Harness Revisions and Evolved Skills
+
+`createAgentSession()` loads the selected compatible harness by default. Its memory and workspace-matching evolved skills are pinned together for each admitted request. The SDK does not start invocation tracing or evolution workers; those are composed by the CLI runtime.
+
+```typescript
+const active = session.activeHarnessVersion;
+const bundle = session.harnessVersionBundle;
+const versions = await session.listHarnessVersions();
+
+await session.switchHarnessVersion(versions.versions[0]!.manifest.version);
+const references = session.createSkillReferences();
+```
+
+Use explicit harness options when composing a custom runtime:
+
+```typescript
+const { session } = await createAgentSession({
+  harnessStateStore,
+  harnessVersionBundle,
+  pinHarnessVersion: true,
+});
+```
+
+`pinHarnessVersion: true` prevents later prompt admissions from following changes to the selected global pointer. Child sessions pin the parent's memory and evolved-skill snapshot. Custom `ResourceLoader` implementations must implement `setEvolvedSkills()`; `getSkills()` must return the unified installed/evolved catalog.
+
+See [Harness Evolution](evolution.md) and [Skills](skills.md).
+
 ### Context Files
 
 ```typescript

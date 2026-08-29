@@ -72,9 +72,15 @@ For project-level Claude Code skills, add to `.diffex/settings.json`:
 
 This is progressive disclosure: only names, descriptions, and locations are always in context; full instructions load on-demand. The TUI, system prompt, SDK, and evolution snapshots all read from the same catalog. Trace observations do not infer that a skill was used or caused an outcome.
 
+### Evolved Skills
+
+Evolved skills are immutable, workspace-scoped artifacts in a harness revision. Diffex exposes them only when the active revision and workspace identity match. Selecting another revision changes `EVOLVE.md` memory and the evolved-skill set together at the next prompt boundary; in-flight and already admitted queued requests remain pinned.
+
+An evolved reference binds its skill ID, content version, digest, workspace, and harness revision. A reference from an inactive revision is rejected. `/reload` refreshes installed skills while preserving the evolved overlay from the active harness. Use `/evolve` to inspect provenance, validation, evaluation, activation, and rollback. See [Harness Evolution](evolution.md).
+
 ## Skill Commands
 
-Use `/skills` in interactive mode to choose installed workspace, installed global, or evolved skills, then search and select one or more skills within that category. Selected skills appear in the editor as purple skill-name tokens while retaining versioned references internally, so you can add the task before submitting. Each reference loads that exact reviewed skill content for one request, including queued steering and follow-up messages. Skills not selected remain progressively disclosed by name, description, and location.
+Use `/skills` in interactive mode to choose installed workspace, installed global, or evolved skills, then search and select one or more skills within that category. Selected skills appear in the editor as purple skill-name tokens while retaining versioned references internally, so you can add the task before submitting. Each reference loads that exact captured skill content for one request, including queued steering and follow-up messages. Skills not selected remain progressively disclosed by name, description, and location.
 
 To install a package containing skills from an interactive terminal, run `diffex install <source>` and choose `Install globally` or `Install for this workspace`. The prompt shows both destinations and the trust implications. Workspace installation requires project trust and never falls back to global installation. Non-interactive installs retain the global default; pass `-l` to select workspace scope explicitly.
 
@@ -174,7 +180,7 @@ Unknown frontmatter fields are ignored.
 
 **Exception:** Skills with missing description are not loaded.
 
-Name collisions (same name from different locations) warn and keep the first skill found.
+Installed skill name precedence is project, user, then package order. Collisions warn and retain the higher-precedence installed skill. When an evolved skill has the same name, the installed skill retains the unsuffixed name and the evolved skill is exposed as `<name>-Evolved`; if that alias also collides, the evolved skill is omitted with a diagnostic.
 
 ## Example
 
