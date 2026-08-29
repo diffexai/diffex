@@ -814,9 +814,6 @@ export class PersistentSkillCandidateRegistry implements SkillCandidateRegistry 
 			) {
 				throw new Error(`Candidate group "${input.groupId}" changed before its draft was recorded`);
 			}
-			if (group.state !== "evidence-qualified" && group.state !== "drafted") {
-				throw new Error(`Candidate group "${input.groupId}" is not eligible to record a draft`);
-			}
 			const artifact = await this.#artifacts.get(input.draft);
 			if (!("artifactKind" in artifact) || artifact.artifactKind !== "skill-draft") {
 				throw new Error(`Candidate group "${input.groupId}" draft artifact is invalid`);
@@ -828,6 +825,10 @@ export class PersistentSkillCandidateRegistry implements SkillCandidateRegistry 
 					group.draft.contentDigest !== input.draft.contentDigest)
 			) {
 				throw new Error(`Candidate group "${input.groupId}" already has a different draft`);
+			}
+			if (group.state !== "evidence-qualified" && group.state !== "drafted") {
+				if (group.draft !== null) return group;
+				throw new Error(`Candidate group "${input.groupId}" is not eligible to record a draft`);
 			}
 			const planned: SkillCandidateRegistryEvent[] = [];
 			if (group.draft === null) {
@@ -915,9 +916,6 @@ export class PersistentSkillCandidateRegistry implements SkillCandidateRegistry 
 			) {
 				throw new Error(`Candidate group "${input.groupId}" changed before validation was recorded`);
 			}
-			if (group.state !== "drafted" && group.state !== "structurally-valid" && group.state !== "rejected") {
-				throw new Error(`Candidate group "${input.groupId}" is not eligible to record validation`);
-			}
 			const artifact = await this.#artifacts.get(input.validation);
 			if (!("artifactKind" in artifact) || artifact.artifactKind !== "skill-draft-validation") {
 				throw new Error(`Candidate group "${input.groupId}" validation artifact is invalid`);
@@ -929,6 +927,10 @@ export class PersistentSkillCandidateRegistry implements SkillCandidateRegistry 
 					group.validation.contentDigest !== input.validation.contentDigest)
 			) {
 				throw new Error(`Candidate group "${input.groupId}" already has a different validation report`);
+			}
+			if (group.state !== "drafted" && group.state !== "structurally-valid" && group.state !== "rejected") {
+				if (group.validation !== null) return group;
+				throw new Error(`Candidate group "${input.groupId}" is not eligible to record validation`);
 			}
 			const targetState = artifact.disposition === "accepted" ? "structurally-valid" : "rejected";
 			if (group.state !== "drafted" && group.state !== targetState) {
@@ -1027,7 +1029,12 @@ export class PersistentSkillCandidateRegistry implements SkillCandidateRegistry 
 			) {
 				throw new Error(`Candidate group "${input.groupId}" changed before evaluation started`);
 			}
-			if (group.state === "evaluation-pending") return group;
+			if (
+				group.state === "evaluation-pending" ||
+				((group.state === "accepted" || group.state === "quarantined") && group.evaluation !== null)
+			) {
+				return group;
+			}
 			if (group.state !== "structurally-valid") {
 				throw new Error(`Candidate group "${input.groupId}" is not eligible to start evaluation`);
 			}
