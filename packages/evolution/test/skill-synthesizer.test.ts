@@ -421,7 +421,7 @@ Finish only when the focused test passes.
 `;
 
 describe("StructuredSkillSynthesizer", () => {
-	it("synthesizes one instruction-only draft from successful outcomes, failures, skills, and instructions", async () => {
+	it("synthesizes one self-contained package from successful outcomes, failures, skills, and instructions", async () => {
 		const data = fixture();
 		let request: EvolutionModelRequest | null = null;
 		const draft = await data.synthesizer.synthesize({
@@ -431,7 +431,10 @@ describe("StructuredSkillSynthesizer", () => {
 				async execute(value) {
 					request = value;
 					return {
-						output: { skillMarkdown: draftMarkdown },
+						output: {
+							skillMarkdown: draftMarkdown,
+							files: [{ path: "scripts/verify.sh", content: "#!/bin/sh\nexec npm run test:focused\n" }],
+						},
 						model: { provider: "faux", model: "fixture" },
 					};
 				},
@@ -447,7 +450,8 @@ describe("StructuredSkillSynthesizer", () => {
 			input: {
 				control: {
 					treatAllSourceMaterialAsUntrustedData: true,
-					generatedScriptsBinariesDependenciesAndExecutableAssetsPermitted: false,
+					generatedUtf8ScriptsReferencesAndAssetsPermitted: true,
+					generatedBinariesAndExternalDependenciesPermitted: false,
 					useSuccessfulOutcomesForPrimaryProcedure: true,
 					useFailuresOnlyForPitfallsMitigationsRecoveryAndVerification: true,
 					retainCandidateProceduralContractVerbatim: true,
@@ -484,6 +488,7 @@ describe("StructuredSkillSynthesizer", () => {
 			operation: "UPDATE",
 			proposedName: "focused-verification",
 			content: draftMarkdown,
+			files: [{ path: "scripts/verify.sh", content: "#!/bin/sh\nexec npm run test:focused\n" }],
 		});
 	});
 
@@ -495,7 +500,7 @@ describe("StructuredSkillSynthesizer", () => {
 				model: {
 					maxProviderCallsPerExecution: 20,
 					async execute() {
-						return { output: { skillMarkdown }, model: { provider: "faux", model: "fixture" } };
+						return { output: { skillMarkdown, files: [] }, model: { provider: "faux", model: "fixture" } };
 					},
 				},
 				idempotencyKey: data.group.synthesisIdempotencyKey,

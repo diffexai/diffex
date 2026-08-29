@@ -4,11 +4,13 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
 	computeHarnessSkillId,
+	computeHarnessSkillPackageVersion,
 	HarnessStateStore,
 	type HarnessWorkspaceIdentity,
 } from "../../harness-state/src/index.ts";
 import {
 	computeEvolutionContentDigest,
+	computeEvolutionTextDigest,
 	createEvolutionArtifactMetadata,
 	type EvolutionArtifact,
 	type EvolutionArtifactProducer,
@@ -92,6 +94,7 @@ interface WriterFixtureOptions {
 	readonly memoryRelationship?: SkillCandidate["memoryRelationship"];
 	readonly retainedNames?: readonly string[];
 	readonly proposedName: string;
+	readonly files?: SkillDraft["files"];
 }
 
 async function writerFixture(options: WriterFixtureOptions) {
@@ -175,7 +178,7 @@ async function writerFixture(options: WriterFixtureOptions) {
 		sourceTraceIds: ["trace-1"],
 		sourceSkillVersions: existingSkillIds.map((skillId, index) => ({
 			skillId,
-			version: existingSkills[index]?.contentHash ?? `sha256:${"9".repeat(64)}`,
+			version: existingSkills[index]?.packageVersion ?? `sha256:${"9".repeat(64)}`,
 			contentDigest: existingSkills[index]?.contentHash ?? `sha256:${"9".repeat(64)}`,
 		})),
 		repositoryInstructionDigests: [],
@@ -190,6 +193,7 @@ async function writerFixture(options: WriterFixtureOptions) {
 			evolutionScope: scope,
 		},
 		content: draftContent,
+		files: options.files ?? [],
 	};
 	const draft: SkillDraft = {
 		metadata: metadata(draftBody.draftId, draftBody.sourceCandidateIds, draftBody),
@@ -209,7 +213,10 @@ async function writerFixture(options: WriterFixtureOptions) {
 		validatedSkillVersions: draft.sourceSkillVersions.map(
 			(skill) => `${skill.skillId}\u0000${skill.version}\u0000${skill.contentDigest}`,
 		),
-		canonicalInventory: [`skills/${options.proposedName}/SKILL.md`],
+		canonicalInventory: [
+			`skills/${options.proposedName}/SKILL.md`,
+			...draft.files.map((file) => `skills/${options.proposedName}/${file.path}`),
+		],
 		memoryRelationshipDigest: computeEvolutionContentDigest([
 			{ candidateId: candidate.candidateId, memoryRelationship: candidate.memoryRelationship },
 		]),
@@ -237,9 +244,10 @@ async function writerFixture(options: WriterFixtureOptions) {
 			name: draft.proposedName,
 			description: `Use ${draft.proposedName} for ${draft.proposedName}-evolved tasks.`,
 			source: "candidate" as const,
-			version: draft.metadata.contentDigest,
-			contentDigest: computeEvolutionContentDigest(draft.content),
+			version: computeHarnessSkillPackageVersion({ content: draft.content, files: draft.files }),
+			contentDigest: computeEvolutionTextDigest(draft.content),
 			content: draft.content,
+			files: draft.files,
 		},
 		neighboringSkills: [],
 		configuration: {
@@ -389,6 +397,23 @@ describe("skill writer", () => {
 		expect(current.manifest.base).toBe(data.base.manifest.version);
 		expect(current.state.memory).toBe(data.base.state.memory);
 		expect(current.state.skills.map((skill) => skill.name).sort()).toEqual([...testCase.expectedNames].sort());
+	});
+
+	it("persists supporting files in an activated skill package", async () => {
+		const files = [
+			{ path: "assets/config.json", content: '{"mode":"focused"}\n' },
+			{ path: "scripts/run.sh", content: "#!/bin/sh\nexec npm run test:focused\n" },
+		];
+		const data = await writerFixture({ operation: "CREATE", proposedName: "created-skill", files });
+		const batch = await data.writer.buildMutationBatch({ scope, groupId: data.group.groupId, createdAt: now });
+		const receipt = await data.writer.write(batch, { idempotencyKey: "write-1", lease: data.lease });
+		await data.writer.activate(batch, receipt, { idempotencyKey: "activate-1", lease: data.lease });
+
+		const skill = (await data.harnessState.loadCurrent()).state.skills.find(
+			(candidate) => candidate.name === "created-skill",
+		);
+		expect(skill?.files.map((file) => ({ path: file.path, content: file.content }))).toEqual(files);
+		expect(skill?.packageVersion).not.toBe(skill?.contentHash);
 	});
 
 	it.each([

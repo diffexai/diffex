@@ -1,6 +1,6 @@
 # Harness Evolution
 
-Diffex can derive workspace-scoped guidance from persisted invocation evidence and store it in immutable harness revisions. A revision can contain `EVOLVE.md` memory and evolved `skills/<name>/SKILL.md` artifacts. The selected revision changes both together.
+Diffex can derive workspace-scoped guidance from persisted invocation evidence and store it in immutable harness revisions. A revision can contain `EVOLVE.md` memory and complete evolved skill packages rooted at `skills/<name>/SKILL.md`, including referenced UTF-8 scripts, assets, and documentation. The selected revision changes both together.
 
 ## Controls
 
@@ -37,7 +37,7 @@ Evolution model calls use the configured provider and may consume provider quota
 
 ## Validation and security
 
-Source traces, tool output, files, and generated drafts are treated as untrusted data. Deterministic validation checks structure, provenance, workspace scope, immutable versions, inventory, and bounded sensitive-data rules. Retrieval and behavioral evaluation are separate gates.
+Source traces, tool output, files, and generated drafts are treated as untrusted data. Deterministic validation checks structure, provenance, workspace scope, immutable versions, the closed package inventory, portable paths, local-reference resolution, aggregate size limits, and bounded sensitive-data rules. Retrieval and behavioral evaluation are separate gates.
 
 These checks do not prove semantic safety and are not a sandbox. Review candidate provenance, draft diffs, validation issues, and evaluation results before activation. See [Security](security.md).
 

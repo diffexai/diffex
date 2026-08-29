@@ -1,4 +1,5 @@
-import { validateHarnessSkillContent } from "@earendil-works/diffex-harness-state";
+import { posix } from "node:path";
+import { validateHarnessSkillContent, validateHarnessSkillFilePath } from "@earendil-works/diffex-harness-state";
 import type {
 	EvolutionArtifactProducer,
 	EvolutionArtifactReference,
@@ -21,6 +22,8 @@ import type {
 import { computeEvolutionContentDigest, createEvolutionArtifactMetadata } from "./provenance.ts";
 
 const DEFAULT_MAX_CONTENT_BYTES = 64 * 1024;
+const DEFAULT_MAX_PACKAGE_BYTES = 256 * 1024;
+const DEFAULT_MAX_SUPPORTING_FILES = 32;
 const MINIMUM_INDEPENDENT_TASKS = 2;
 const SECRET_PATTERNS = [
 	/-----BEGIN (?:OPENSSH |RSA |EC |DSA )?PRIVATE KEY-----/,
@@ -48,6 +51,8 @@ export interface DeterministicSkillDraftValidatorDependencies {
 
 export interface DeterministicSkillDraftValidatorOptions {
 	readonly maxContentBytes?: number;
+	readonly maxPackageBytes?: number;
+	readonly maxSupportingFiles?: number;
 }
 
 function uniqueSorted(values: readonly string[]): string[] {
@@ -96,6 +101,27 @@ function localReferenceTargets(content: string): string[] {
 	);
 }
 
+function resolveLocalReference(sourcePath: string, target: string): string | null {
+	const unwrapped = target.startsWith("<") && target.endsWith(">") ? target.slice(1, -1) : target;
+	const path = unwrapped.split(/[?#]/u, 1)[0] ?? "";
+	if (path === "") return null;
+	let decoded: string;
+	try {
+		decoded = decodeURIComponent(path);
+	} catch {
+		throw new Error(`Local reference "${target}" has invalid percent encoding`);
+	}
+	if (decoded.startsWith("/") || decoded.startsWith("\\")) {
+		throw new Error(`Local reference "${target}" must be relative to the skill package`);
+	}
+	const resolved = posix.normalize(posix.join(posix.dirname(sourcePath), decoded));
+	const skillRoot = sourcePath.split("/").slice(0, 2).join("/");
+	if (!resolved.startsWith(`${skillRoot}/`)) {
+		throw new Error(`Local reference "${target}" escapes the skill package`);
+	}
+	return resolved;
+}
+
 function issue(code: string, message: string): SkillDraftValidationIssue {
 	return { code, message };
 }
@@ -126,6 +152,8 @@ export class DeterministicSkillDraftValidator implements SkillDraftValidator {
 	readonly #dependencies: DeterministicSkillDraftValidatorDependencies;
 	readonly #producer: EvolutionArtifactProducer;
 	readonly #maxContentBytes: number;
+	readonly #maxPackageBytes: number;
+	readonly #maxSupportingFiles: number;
 
 	constructor(
 		dependencies: DeterministicSkillDraftValidatorDependencies,
@@ -139,8 +167,16 @@ export class DeterministicSkillDraftValidator implements SkillDraftValidator {
 			model: null,
 		};
 		this.#maxContentBytes = options.maxContentBytes ?? DEFAULT_MAX_CONTENT_BYTES;
+		this.#maxPackageBytes = options.maxPackageBytes ?? DEFAULT_MAX_PACKAGE_BYTES;
+		this.#maxSupportingFiles = options.maxSupportingFiles ?? DEFAULT_MAX_SUPPORTING_FILES;
 		if (!Number.isSafeInteger(this.#maxContentBytes) || this.#maxContentBytes < 1) {
 			throw new Error("maxContentBytes must be a positive integer");
+		}
+		if (!Number.isSafeInteger(this.#maxPackageBytes) || this.#maxPackageBytes < 1) {
+			throw new Error("maxPackageBytes must be a positive integer");
+		}
+		if (!Number.isSafeInteger(this.#maxSupportingFiles) || this.#maxSupportingFiles < 0) {
+			throw new Error("maxSupportingFiles must be a non-negative integer");
 		}
 	}
 
@@ -452,19 +488,82 @@ export class DeterministicSkillDraftValidator implements SkillDraftValidator {
 		} catch (error) {
 			add("skill-structure-invalid", error instanceof Error ? error.message : "The skill structure is invalid");
 		}
+		const canonicalFiles = new Map<string, { readonly path: string; readonly content: string }>();
+		const portablePaths = new Set<string>();
+		if (input.draft.files.length > this.#maxSupportingFiles) {
+			add(
+				"skill-file-count-exceeded",
+				`The skill package exceeds the ${this.#maxSupportingFiles}-file supporting-file limit`,
+			);
+		}
+		for (const file of input.draft.files) {
+			let canonicalPath: string;
+			try {
+				canonicalPath = validateHarnessSkillFilePath(inventoryPath, file.path);
+			} catch (error) {
+				add(
+					"skill-file-path-invalid",
+					error instanceof Error ? error.message : `Invalid skill file "${file.path}"`,
+				);
+				continue;
+			}
+			const portablePath = canonicalPath.normalize("NFC").toLocaleLowerCase("en-US");
+			if (portablePaths.has(portablePath)) {
+				add("skill-file-path-collision", `Skill file "${file.path}" duplicates another package path`);
+				continue;
+			}
+			portablePaths.add(portablePath);
+			canonicalFiles.set(canonicalPath, file);
+			if (Buffer.byteLength(file.content, "utf8") > this.#maxContentBytes) {
+				add(
+					"skill-file-too-large",
+					`Skill file "${file.path}" exceeds the ${this.#maxContentBytes}-byte size limit`,
+				);
+			}
+			if (/^\uFEFF|[\uD800-\uDFFF]|\u0000/u.test(file.content)) {
+				add("skill-file-content-invalid", `Skill file "${file.path}" contains invalid text`);
+			}
+			if (SECRET_PATTERNS.some((pattern) => pattern.test(file.content))) {
+				add("sensitive-data-detected", `Skill file "${file.path}" violates the sensitive-data policy`);
+			}
+		}
 		if (Buffer.byteLength(input.draft.content, "utf8") > this.#maxContentBytes) {
 			add("skill-content-too-large", `The skill exceeds the ${this.#maxContentBytes}-byte size limit`);
+		}
+		const packageBytes = [input.draft.content, ...input.draft.files.map((file) => file.content)].reduce(
+			(total, content) => total + Buffer.byteLength(content, "utf8"),
+			0,
+		);
+		if (packageBytes > this.#maxPackageBytes) {
+			add("skill-package-too-large", `The skill package exceeds the ${this.#maxPackageBytes}-byte size limit`);
 		}
 		if (input.draft.content.includes("\u0000")) add("skill-content-invalid", "The skill contains a NUL byte");
 		if (SECRET_PATTERNS.some((pattern) => pattern.test(input.draft.content))) {
 			add("sensitive-data-detected", "The skill violates the sensitive-data policy");
 		}
-		const localTargets = localReferenceTargets(input.draft.content);
-		if (localTargets.length > 0) {
-			add(
-				"undeclared-reference",
-				`Instruction-only skill drafts cannot reference undeclared local files: ${localTargets.join(", ")}`,
-			);
+		const inventory = new Set([inventoryPath, ...canonicalFiles.keys()]);
+		const referenceSources = [
+			{ path: inventoryPath, content: input.draft.content },
+			...[...canonicalFiles.entries()]
+				.filter(([path]) => /\.(?:html?|md|markdown)$/iu.test(path))
+				.map(([path, file]) => ({ path, content: file.content })),
+		];
+		for (const source of referenceSources) {
+			for (const target of localReferenceTargets(source.content)) {
+				let resolved: string | null;
+				try {
+					resolved = resolveLocalReference(source.path, target);
+				} catch (error) {
+					add(
+						"local-reference-invalid",
+						error instanceof Error ? error.message : `Invalid local reference "${target}"`,
+					);
+					continue;
+				}
+				if (resolved !== null && !inventory.has(resolved)) {
+					add("undeclared-reference", `Local reference "${target}" from "${source.path}" is not in the package`);
+				}
+			}
 		}
 
 		const sortedIssues = [...issues].sort(
@@ -486,7 +585,7 @@ export class DeterministicSkillDraftValidator implements SkillDraftValidator {
 			issues: sortedIssues,
 			validatedHarnessVersion: environment.harnessVersion,
 			validatedSkillVersions: uniqueSorted(environment.skillVersions.map(skillVersionKey)),
-			canonicalInventory: [inventoryPath],
+			canonicalInventory: [inventoryPath, ...uniqueSorted([...canonicalFiles.keys()])],
 			memoryRelationshipDigest: computeEvolutionContentDigest(
 				candidates.map((candidate) => ({
 					candidateId: candidate.candidateId,

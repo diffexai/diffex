@@ -186,6 +186,7 @@ export {
 	type SkillMutationExistingArtifact,
 	type SkillMutationMemoryDisposition,
 	type SkillMutationWriteOutput,
+	type SkillPackageFile,
 	type SkillRetrievalEvaluationResult,
 	type SkillTarget,
 	type ValidationIssue,

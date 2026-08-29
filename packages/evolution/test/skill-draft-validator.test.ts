@@ -307,7 +307,11 @@ Finish only when The focused test passes.
 `;
 
 function fixture(
-	options: { readonly content?: string; readonly environment?: Partial<SkillDraftValidationEnvironment> } = {},
+	options: {
+		readonly content?: string;
+		readonly environment?: Partial<SkillDraftValidationEnvironment>;
+		readonly files?: SkillDraft["files"];
+	} = {},
 ) {
 	const input = inputSnapshot();
 	const sourceCandidate = candidate(input);
@@ -335,6 +339,7 @@ function fixture(
 		existingSkillIds: sourceCandidate.existingSkillIds,
 		workspace: sourceCandidate.workspace,
 		content: options.content ?? validMarkdown,
+		files: options.files ?? [],
 	};
 	const draft: SkillDraft = {
 		metadata: metadata(
@@ -421,8 +426,11 @@ function fixture(
 }
 
 describe("DeterministicSkillDraftValidator", () => {
-	it("accepts only a current, closed, instruction-only skill draft", async () => {
-		const data = fixture();
+	it("accepts a current, closed skill package with declared local references", async () => {
+		const data = fixture({
+			content: `${validMarkdown}\nSee [the verification script](scripts/verify.sh).\n`,
+			files: [{ path: "scripts/verify.sh", content: "#!/bin/sh\nexec npm run test:focused\n" }],
+		});
 		const report = await data.validator.validate({
 			group: data.group,
 			draft: data.draft,
@@ -438,7 +446,7 @@ describe("DeterministicSkillDraftValidator", () => {
 			disposition: "accepted",
 			issues: [],
 			validatedHarnessVersion: harnessVersion,
-			canonicalInventory: ["skills/focused-verification/SKILL.md"],
+			canonicalInventory: ["skills/focused-verification/SKILL.md", "skills/focused-verification/scripts/verify.sh"],
 		});
 	});
 
@@ -452,6 +460,16 @@ describe("DeterministicSkillDraftValidator", () => {
 			name: "undeclared local references",
 			fixture: () => fixture({ content: `${validMarkdown}\nSee [script](scripts/run.sh).\n` }),
 			code: "undeclared-reference",
+		},
+		{
+			name: "escaping local references",
+			fixture: () => fixture({ content: `${validMarkdown}\nSee [outside](../outside.sh).\n` }),
+			code: "local-reference-invalid",
+		},
+		{
+			name: "nested skill entrypoints",
+			fixture: () => fixture({ files: [{ path: "references/SKILL.md", content: "ambiguous" }] }),
+			code: "skill-file-path-invalid",
 		},
 		{
 			name: "stale harness bases",

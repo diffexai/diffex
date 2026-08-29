@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { HarnessStateStore } from "@earendil-works/diffex-harness-state";
@@ -32,6 +32,7 @@ describe("evolved skill catalogs", () => {
 		const active = await resolveHarnessWorkspace(cwd);
 		const store = new HarnessStateStore(agentDir);
 		const root = await store.initialize();
+		const reference = "# Scoped review checklist\n";
 		const bundle = await store.saveVersion(
 			{
 				memory: "Scoped memory.\n",
@@ -40,6 +41,7 @@ describe("evolved skill catalogs", () => {
 						path: "skills/scoped-review/SKILL.md",
 						content: skillContent("scoped-review", "Review changes in this workspace."),
 						workspace: active.workspace,
+						files: [{ path: "references/checklist.md", content: reference }],
 					},
 				],
 			},
@@ -53,11 +55,15 @@ describe("evolved skill catalogs", () => {
 				name: "scoped-review",
 				sourceKind: "evolved",
 				scope: "workspace",
-				version: bundle.state.skills[0]?.contentHash,
+				version: bundle.state.skills[0]?.packageVersion,
+				contentDigest: bundle.state.skills[0]?.contentHash,
 				harnessRevision: bundle.manifest.version,
 				filePath: bundle.state.skills[0]?.filePath,
 			}),
 		]);
+		const evolved = matching.skills[0];
+		if (evolved === undefined) throw new Error("Expected evolved skill");
+		expect(readFileSync(join(evolved.baseDir, "references", "checklist.md"), "utf8")).toBe(reference);
 
 		const mismatched = createEvolvedSkillCatalog(bundle, {
 			repositoryId: active.workspace.repositoryId,

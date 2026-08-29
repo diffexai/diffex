@@ -19,6 +19,7 @@ const LOCK_NAME = ".harness-state.lock";
 const LOCK_STALE_AFTER_MS = 30_000;
 const EVOLUTION_MEMORY_ARTIFACT_KIND = "evolution-memory";
 const SKILL_ARTIFACT_KIND = "skill";
+const SKILL_FILE_ARTIFACT_KIND = "skill-file";
 const MAX_SKILL_NAME_LENGTH = 64;
 const MAX_SKILL_DESCRIPTION_LENGTH = 1024;
 const UTF8_DECODER = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
@@ -35,6 +36,9 @@ const NonEmptyEvolutionMemorySchema = Type.String({
 const EvolutionMemorySchema = Type.Union([Type.Literal(""), NonEmptyEvolutionMemorySchema]);
 const SkillContentSchema = Type.String({
 	pattern: "^(?!\\uFEFF)(?![\\s\\S]*[\\uD800-\\uDFFF])[\\s\\S]+$",
+});
+const SkillFileContentSchema = Type.String({
+	pattern: "^(?!\\uFEFF)(?![\\s\\S]*[\\uD800-\\uDFFF])[\\s\\S]*$",
 });
 export const HarnessWorkspaceIdentitySchema = Type.Readonly(
 	Type.Object(
@@ -57,12 +61,27 @@ export function computeHarnessSkillId(workspace: HarnessWorkspaceIdentity, path:
 		.digest("hex")}`;
 }
 
+export const HarnessSkillFileInputSchema = Type.Readonly(
+	Type.Object(
+		{
+			path: Type.String({ minLength: 1 }),
+			content: SkillFileContentSchema,
+		},
+		{ additionalProperties: false },
+	),
+);
+export interface HarnessSkillFileInput {
+	readonly path: string;
+	readonly content: string;
+}
+
 export const HarnessSkillInputSchema = Type.Readonly(
 	Type.Object(
 		{
 			path: Type.String({ minLength: 1 }),
 			content: SkillContentSchema,
 			workspace: HarnessWorkspaceIdentitySchema,
+			files: Type.Optional(Type.Readonly(Type.Array(HarnessSkillFileInputSchema))),
 		},
 		{ additionalProperties: false },
 	),
@@ -71,6 +90,25 @@ export interface HarnessSkillInput {
 	readonly path: string;
 	readonly content: string;
 	readonly workspace: HarnessWorkspaceIdentity;
+	readonly files?: readonly HarnessSkillFileInput[];
+}
+
+export const HarnessSkillFileSchema = Type.Readonly(
+	Type.Object(
+		{
+			path: Type.String({ minLength: 1 }),
+			filePath: Type.String({ minLength: 1 }),
+			content: SkillFileContentSchema,
+			contentHash: HarnessVersionSchema,
+		},
+		{ additionalProperties: false },
+	),
+);
+export interface HarnessSkillFile {
+	readonly path: string;
+	readonly filePath: string;
+	readonly content: string;
+	readonly contentHash: HarnessVersion;
 }
 
 export const HarnessSkillSchema = Type.Readonly(
@@ -83,7 +121,9 @@ export const HarnessSkillSchema = Type.Readonly(
 			description: Type.String({ minLength: 1 }),
 			content: SkillContentSchema,
 			contentHash: HarnessVersionSchema,
+			packageVersion: HarnessVersionSchema,
 			workspace: HarnessWorkspaceIdentitySchema,
+			files: Type.Readonly(Type.Array(HarnessSkillFileSchema)),
 			disableModelInvocation: Type.Boolean(),
 		},
 		{ additionalProperties: false },
@@ -97,7 +137,9 @@ export interface HarnessSkill {
 	readonly description: string;
 	readonly content: string;
 	readonly contentHash: HarnessVersion;
+	readonly packageVersion: HarnessVersion;
 	readonly workspace: HarnessWorkspaceIdentity;
+	readonly files: readonly HarnessSkillFile[];
 	readonly disableModelInvocation: boolean;
 }
 
@@ -444,6 +486,54 @@ export function validateHarnessSkillContent(path: string, content: string): Harn
 	return frontmatter;
 }
 
+export function validateHarnessSkillFilePath(skillPath: string, path: string): string {
+	validateArtifactPath(skillPath);
+	if (!/^skills\/[a-z0-9]+(?:-[a-z0-9]+)*\/SKILL\.md$/.test(skillPath)) {
+		throw new Error(`Harness skill "${skillPath}" must have a canonical path`);
+	}
+	validateArtifactPath(path);
+	if (path.split("/").at(-1)?.toLowerCase() === "skill.md") {
+		throw new Error(`Harness skill file path "${path}" is reserved`);
+	}
+	const artifactPath = `${skillPath.slice(0, -"SKILL.md".length)}${path}`;
+	validateArtifactPath(artifactPath);
+	return artifactPath;
+}
+
+function computeSkillPackageHash(
+	contentHash: HarnessVersion,
+	files: readonly Pick<HarnessSkillFile, "contentHash" | "path">[],
+): HarnessVersion {
+	const inventory = [
+		{ path: "SKILL.md", contentHash },
+		...files
+			.map((file) => ({ path: file.path, contentHash: file.contentHash }))
+			.sort((left, right) => compareText(left.path, right.path)),
+	];
+	return computeContentHash(UTF8_ENCODER.encode(JSON.stringify(inventory)));
+}
+
+export function computeHarnessSkillPackageVersion(input: Pick<HarnessSkillInput, "content" | "files">): HarnessVersion {
+	if (!Check(SkillContentSchema, input.content)) throw new Error("Harness skill package has invalid SKILL.md content");
+	const portablePaths = new Set<string>();
+	const files = [...(input.files ?? [])].map((file): Pick<HarnessSkillFile, "contentHash" | "path"> => {
+		validateArtifactPath(file.path);
+		if (file.path.split("/").at(-1)?.toLowerCase() === "skill.md") {
+			throw new Error(`Harness skill file path "${file.path}" is reserved`);
+		}
+		if (!Check(SkillFileContentSchema, file.content)) {
+			throw new Error(`Harness skill file "${file.path}" has invalid content`);
+		}
+		const portablePath = file.path.normalize("NFC").toLowerCase();
+		if (portablePaths.has(portablePath)) {
+			throw new Error(`Harness skill file path "${file.path}" is duplicated or collides by case`);
+		}
+		portablePaths.add(portablePath);
+		return { path: file.path, contentHash: computeContentHash(UTF8_ENCODER.encode(file.content)) };
+	});
+	return computeSkillPackageHash(computeContentHash(UTF8_ENCODER.encode(input.content)), files);
+}
+
 async function inspectBundleRoot(bundlePath: string): Promise<void> {
 	const stats = await lstat(bundlePath);
 	if (!stats.isDirectory() || stats.isSymbolicLink()) {
@@ -508,13 +598,18 @@ function validateManifestInventory(manifest: HarnessVersionManifest): void {
 interface SupportedArtifactInventory {
 	readonly memory: HarnessArtifactManifest;
 	readonly skills: readonly HarnessArtifactManifest[];
+	readonly skillFiles: readonly HarnessArtifactManifest[];
 }
 
 function validateSupportedArtifacts(manifest: HarnessVersionManifest): SupportedArtifactInventory {
 	const memoryArtifacts = manifest.artifacts.filter((artifact) => artifact.kind === EVOLUTION_MEMORY_ARTIFACT_KIND);
 	const skillArtifacts = manifest.artifacts.filter((artifact) => artifact.kind === SKILL_ARTIFACT_KIND);
+	const skillFileArtifacts = manifest.artifacts.filter((artifact) => artifact.kind === SKILL_FILE_ARTIFACT_KIND);
 	const unsupported = manifest.artifacts.find(
-		(artifact) => artifact.kind !== EVOLUTION_MEMORY_ARTIFACT_KIND && artifact.kind !== SKILL_ARTIFACT_KIND,
+		(artifact) =>
+			artifact.kind !== EVOLUTION_MEMORY_ARTIFACT_KIND &&
+			artifact.kind !== SKILL_ARTIFACT_KIND &&
+			artifact.kind !== SKILL_FILE_ARTIFACT_KIND,
 	);
 	if (unsupported !== undefined) {
 		throw new Error(`Unsupported harness artifact kind "${unsupported.kind}"`);
@@ -528,12 +623,35 @@ function validateSupportedArtifacts(manifest: HarnessVersionManifest): Supported
 			`Harness version must declare exactly one ${EVOLUTION_MEMORY_ARTIFACT_KIND} artifact at EVOLVE.md`,
 		);
 	}
+	const skillsByDirectory = new Map<string, HarnessArtifactManifest>();
 	for (const artifact of skillArtifacts) {
 		if (artifact.workspace === undefined || !/^skills\/[a-z0-9]+(?:-[a-z0-9]+)*\/SKILL\.md$/.test(artifact.path)) {
 			throw new Error(`Harness skill artifact "${artifact.path}" must have a canonical path and workspace identity`);
 		}
+		skillsByDirectory.set(artifact.path.slice(0, -"SKILL.md".length), artifact);
 	}
-	return { memory: memoryArtifacts[0] as HarnessArtifactManifest, skills: skillArtifacts };
+	for (const artifact of skillFileArtifacts) {
+		const match = /^(skills\/[a-z0-9]+(?:-[a-z0-9]+)*\/)(.+)$/.exec(artifact.path);
+		const skill = match === null ? undefined : skillsByDirectory.get(match[1] as string);
+		if (
+			artifact.workspace === undefined ||
+			match === null ||
+			match[2] === "SKILL.md" ||
+			skill?.workspace === undefined ||
+			artifact.workspace.repositoryId !== skill.workspace.repositoryId ||
+			artifact.workspace.directoryId !== skill.workspace.directoryId
+		) {
+			throw new Error(
+				`Harness skill file artifact "${artifact.path}" must belong to a declared skill with matching workspace identity`,
+			);
+		}
+		validateHarnessSkillFilePath(skill.path, match[2] as string);
+	}
+	return {
+		memory: memoryArtifacts[0] as HarnessArtifactManifest,
+		skills: skillArtifacts,
+		skillFiles: skillFileArtifacts,
+	};
 }
 
 export async function loadHarnessState(bundlePath: string): Promise<HarnessVersionBundle> {
@@ -604,6 +722,21 @@ export async function loadHarnessState(bundlePath: string): Promise<HarnessVersi
 			throw new Error(`Harness skill name collision for "${frontmatter.name}"`);
 		}
 		skillNames.add(frontmatter.name);
+		const skillDirectory = artifact.path.slice(0, -"SKILL.md".length);
+		const files = supported.skillFiles
+			.filter((file) => file.path.startsWith(skillDirectory))
+			.map((file): HarnessSkillFile => {
+				const filePath = join(bundlePath, ...file.path.split("/"));
+				const fileBytes = artifactBytes.get(file.path);
+				if (fileBytes === undefined) throw new Error(`Harness skill file is missing at "${filePath}"`);
+				return {
+					path: file.path.slice(skillDirectory.length),
+					filePath,
+					content: decodeUtf8(fileBytes, filePath),
+					contentHash: file.contentHash,
+				};
+			})
+			.sort((left, right) => compareText(left.path, right.path));
 		skills.push({
 			path: artifact.path,
 			filePath: artifactPath,
@@ -612,7 +745,12 @@ export async function loadHarnessState(bundlePath: string): Promise<HarnessVersi
 			description: frontmatter.description,
 			content,
 			contentHash: artifact.contentHash,
+			packageVersion: computeHarnessSkillPackageVersion({
+				content,
+				files: files.map((file) => ({ path: file.path, content: file.content })),
+			}),
 			workspace: artifact.workspace as HarnessWorkspaceIdentity,
+			files,
 			disableModelInvocation: frontmatter.disableModelInvocation,
 		});
 	}
@@ -681,6 +819,7 @@ function prepareHarnessState(input: HarnessStateInput, bundlePath: string): Prep
 	const files = new Map<string, Uint8Array>([[EVOLUTION_MEMORY_NAME, memoryBytes]]);
 	const skills: HarnessSkill[] = [];
 	const skillArtifacts: HarnessArtifactManifest[] = [];
+	const skillFileArtifacts: HarnessArtifactManifest[] = [];
 	const skillNames = new Set<string>();
 	for (const inputSkill of [...(input.skills ?? [])].sort((left, right) => compareText(left.path, right.path))) {
 		const frontmatter = validateHarnessSkillContent(inputSkill.path, inputSkill.content);
@@ -695,6 +834,36 @@ function prepareHarnessState(input: HarnessStateInput, bundlePath: string): Prep
 			repositoryId: inputSkill.workspace.repositoryId,
 			...(inputSkill.workspace.directoryId === undefined ? {} : { directoryId: inputSkill.workspace.directoryId }),
 		};
+		const portablePaths = new Set<string>();
+		const skillFiles = [...(inputSkill.files ?? [])]
+			.sort((left, right) => compareText(left.path, right.path))
+			.map((inputFile): HarnessSkillFile => {
+				if (!Check(SkillFileContentSchema, inputFile.content)) {
+					throw new Error(`Harness skill file "${inputFile.path}" has invalid content`);
+				}
+				const artifactPath = validateHarnessSkillFilePath(inputSkill.path, inputFile.path);
+				const portablePath = artifactPath.normalize("NFC").toLowerCase();
+				if (portablePaths.has(portablePath)) {
+					throw new Error(`Harness skill file path "${inputFile.path}" is duplicated or collides by case`);
+				}
+				portablePaths.add(portablePath);
+				const bytes = UTF8_ENCODER.encode(inputFile.content);
+				const inputFilePath = join(bundlePath, ...artifactPath.split("/"));
+				const inputFileHash = computeContentHash(bytes);
+				skillFileArtifacts.push({
+					kind: SKILL_FILE_ARTIFACT_KIND,
+					path: artifactPath,
+					contentHash: inputFileHash,
+					workspace,
+				});
+				files.set(artifactPath, bytes);
+				return {
+					path: inputFile.path,
+					filePath: inputFilePath,
+					content: inputFile.content,
+					contentHash: inputFileHash,
+				};
+			});
 		skills.push({
 			path: inputSkill.path,
 			filePath,
@@ -703,7 +872,12 @@ function prepareHarnessState(input: HarnessStateInput, bundlePath: string): Prep
 			description: frontmatter.description,
 			content: inputSkill.content,
 			contentHash,
+			packageVersion: computeHarnessSkillPackageVersion({
+				content: inputSkill.content,
+				files: skillFiles.map((file) => ({ path: file.path, content: file.content })),
+			}),
 			workspace,
+			files: skillFiles,
 			disableModelInvocation: frontmatter.disableModelInvocation,
 		});
 		skillArtifacts.push({
@@ -714,7 +888,7 @@ function prepareHarnessState(input: HarnessStateInput, bundlePath: string): Prep
 		});
 		files.set(inputSkill.path, contentBytes);
 	}
-	const artifacts = [memoryArtifact, ...skillArtifacts].sort(compareArtifacts);
+	const artifacts = [memoryArtifact, ...skillArtifacts, ...skillFileArtifacts].sort(compareArtifacts);
 	return { state: { memory: input.memory, skills }, artifacts, files };
 }
 
@@ -1005,6 +1179,7 @@ export class HarnessStateStore {
 							path: skill.path,
 							content: skill.content,
 							workspace: skill.workspace,
+							files: skill.files.map((file) => ({ path: file.path, content: file.content })),
 						})),
 					};
 		const prepared = prepareHarnessState(resolvedState, this.#versionsPath);

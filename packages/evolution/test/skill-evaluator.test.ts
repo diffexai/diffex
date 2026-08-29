@@ -159,6 +159,7 @@ function fixture(
 		workspace: second.workspace,
 		content:
 			"---\nname: focused-verification\ndescription: Run focused verification for repository changes.\n---\n\nRun the focused verification procedure.\n",
+		files: [],
 	};
 	const draft: SkillDraft = {
 		metadata: metadata(draftContent.draftId, draftContent.sourceCandidateIds, draftContent),

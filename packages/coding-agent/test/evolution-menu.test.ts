@@ -200,6 +200,7 @@ function skillCandidateDetail(overrides: Partial<EvolutionSkillCandidateDetail> 
 		draft: {
 			operation: "CREATE",
 			content: "---\nname: focused-verification\ndescription: Verify focused changes.\n---\n\nRun checks.\n",
+			files: [{ path: "scripts/check.sh", content: "#!/bin/sh\nexec npm run check\n" }],
 		},
 		validation: { disposition: "accepted", issues: [] },
 		evaluation: {
@@ -743,7 +744,10 @@ describe("EvolutionMenuComponent", () => {
 	});
 
 	it("formats create, update, and retirement draft diffs", () => {
-		expect(formatEvolutionSkillDraftDiff(skillCandidateDetail())).toContain("+Run checks.");
+		const createDiff = formatEvolutionSkillDraftDiff(skillCandidateDetail());
+		expect(createDiff).toContain("+Run checks.");
+		expect(createDiff).toContain("+# Supporting file: scripts/check.sh");
+		expect(createDiff).toContain("+exec npm run check");
 		const existingContents = [{ skillId: "skill-1", name: "old", version: "v1", content: "old line\n" }];
 		expect(
 			formatEvolutionSkillDraftDiff(

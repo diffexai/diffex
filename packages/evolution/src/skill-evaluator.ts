@@ -1,4 +1,4 @@
-import { validateHarnessSkillContent } from "@earendil-works/diffex-harness-state";
+import { computeHarnessSkillPackageVersion, validateHarnessSkillContent } from "@earendil-works/diffex-harness-state";
 import type {
 	EvolutionArtifactProducer,
 	EvolutionArtifactReference,
@@ -22,7 +22,11 @@ import type {
 	SkillEvaluator,
 	SkillEvaluatorInput,
 } from "./ports.ts";
-import { computeEvolutionContentDigest, createEvolutionArtifactMetadata } from "./provenance.ts";
+import {
+	computeEvolutionContentDigest,
+	computeEvolutionTextDigest,
+	createEvolutionArtifactMetadata,
+} from "./provenance.ts";
 
 export const SKILL_EVALUATOR_VERSION = "skill-evaluator-v1";
 
@@ -78,9 +82,10 @@ function candidateSkill(input: SkillEvaluatorInput): SkillEvaluationPoolSkill {
 		name: frontmatter.name,
 		description: frontmatter.description,
 		source: "candidate",
-		version: input.draft.metadata.contentDigest,
-		contentDigest: computeEvolutionContentDigest(input.draft.content),
+		version: computeHarnessSkillPackageVersion({ content: input.draft.content, files: input.draft.files }),
+		contentDigest: computeEvolutionTextDigest(input.draft.content),
 		content: input.draft.content,
+		files: input.draft.files,
 	};
 }
 

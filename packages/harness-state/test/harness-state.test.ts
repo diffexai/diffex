@@ -11,6 +11,8 @@ import {
 	type HarnessArtifactManifest,
 	HarnessArtifactManifestSchema,
 	type HarnessSkill,
+	HarnessSkillFileInputSchema,
+	HarnessSkillFileSchema,
 	HarnessSkillInputSchema,
 	HarnessSkillSchema,
 	type HarnessState,
@@ -250,11 +252,14 @@ describe("canonical harness versions", () => {
 		expect(Check(HarnessStateSchema, { memory: "\uD800\uDC00", skills: [] })).toBe(true);
 		expect(Check(HarnessStateSchema, { memory: "memory", skills: [], extra: true })).toBe(false);
 		expect(Check(HarnessWorkspaceIdentitySchema, WORKSPACE)).toBe(true);
+		expect(Check(HarnessSkillFileInputSchema, { path: "scripts/run.sh", content: "#!/bin/sh\n" })).toBe(true);
+		expect(Check(HarnessSkillFileSchema, { path: "scripts/run.sh" })).toBe(false);
 		expect(
 			Check(HarnessSkillInputSchema, {
 				path: "skills/example/SKILL.md",
 				content: skillContent("example"),
 				workspace: WORKSPACE,
+				files: [{ path: "scripts/run.sh", content: "#!/bin/sh\n" }],
 			}),
 		).toBe(true);
 		expect(Check(HarnessSkillSchema, { path: "skills/example/SKILL.md" })).toBe(false);
@@ -291,10 +296,12 @@ describe("bundle persistence and validation", () => {
 		expect(await loadHarnessState(destination)).toEqual(saved);
 	});
 
-	test("persists validated workspace-scoped skills in the atomic revision", async () => {
+	test("persists validated workspace-scoped skill packages in the atomic revision", async () => {
 		const root = await createTemporaryRoot();
 		const destination = join(root, "bundle");
 		const content = skillContent("review-workflow");
+		const script = "#!/bin/sh\nexec npm run test:focused\n";
+		const reference = "# Review workflow reference\n";
 		const saved = await saveHarnessState(
 			{
 				memory: "Use the selected harness.\n",
@@ -303,6 +310,10 @@ describe("bundle persistence and validation", () => {
 						path: "skills/review-workflow/SKILL.md",
 						content,
 						workspace: WORKSPACE,
+						files: [
+							{ path: "references/review.md", content: reference },
+							{ path: "scripts/run.sh", content: script },
+						],
 					},
 				],
 			},
@@ -318,7 +329,16 @@ describe("bundle persistence and validation", () => {
 				description: "Use review-workflow for focused work.",
 				content,
 				contentHash: hash(content),
+				packageVersion: expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
 				workspace: WORKSPACE,
+				files: [
+					expect.objectContaining({
+						path: "references/review.md",
+						content: reference,
+						contentHash: hash(reference),
+					}),
+					expect.objectContaining({ path: "scripts/run.sh", content: script, contentHash: hash(script) }),
+				],
 				disableModelInvocation: false,
 			}),
 		]);
@@ -331,9 +351,50 @@ describe("bundle persistence and validation", () => {
 				contentHash: hash(content),
 				workspace: WORKSPACE,
 			},
+			{
+				kind: "skill-file",
+				path: "skills/review-workflow/references/review.md",
+				contentHash: hash(reference),
+				workspace: WORKSPACE,
+			},
+			{
+				kind: "skill-file",
+				path: "skills/review-workflow/scripts/run.sh",
+				contentHash: hash(script),
+				workspace: WORKSPACE,
+			},
 		]);
 		expect(await readFile(join(destination, "skills", "review-workflow", "SKILL.md"), "utf8")).toBe(content);
+		expect(await readFile(join(destination, "skills", "review-workflow", "scripts", "run.sh"), "utf8")).toBe(script);
 		expect(await loadHarnessState(destination)).toEqual(saved);
+	});
+
+	test("changes the package and harness version when only a supporting file changes", async () => {
+		const root = await createTemporaryRoot();
+		const content = skillContent("versioned-package");
+		const save = (destination: string, fileContent: string) =>
+			saveHarnessState(
+				{
+					memory: "",
+					skills: [
+						{
+							path: "skills/versioned-package/SKILL.md",
+							content,
+							workspace: WORKSPACE,
+							files: [{ path: "references/details.md", content: fileContent }],
+						},
+					],
+				},
+				destination,
+				null,
+				INITIAL_HARNESS_VERSION_METADATA,
+			);
+		const first = await save(join(root, "first"), "First reference.\n");
+		const second = await save(join(root, "second"), "Second reference.\n");
+
+		expect(second.state.skills[0]?.contentHash).toBe(first.state.skills[0]?.contentHash);
+		expect(second.state.skills[0]?.packageVersion).not.toBe(first.state.skills[0]?.packageVersion);
+		expect(second.manifest.version).not.toBe(first.manifest.version);
 	});
 
 	test("is idempotent only for the same immutable revision", async () => {
@@ -489,6 +550,61 @@ describe("bundle persistence and validation", () => {
 				INITIAL_HARNESS_VERSION_METADATA,
 			),
 		).rejects.toThrow(expected);
+	});
+
+	test("rejects escaping, colliding, and orphaned skill package files", async () => {
+		const root = await createTemporaryRoot();
+		const content = skillContent("example");
+		await expect(
+			saveHarnessState(
+				{
+					memory: "",
+					skills: [
+						{
+							path: "skills/example/SKILL.md",
+							content,
+							workspace: WORKSPACE,
+							files: [{ path: "../outside.sh", content: "unsafe" }],
+						},
+					],
+				},
+				join(root, "escaping"),
+				null,
+				INITIAL_HARNESS_VERSION_METADATA,
+			),
+		).rejects.toThrow(/artifact path/i);
+		await expect(
+			saveHarnessState(
+				{
+					memory: "",
+					skills: [
+						{
+							path: "skills/example/SKILL.md",
+							content,
+							workspace: WORKSPACE,
+							files: [
+								{ path: "scripts/run.sh", content: "first" },
+								{ path: "SCRIPTS/RUN.SH", content: "second" },
+							],
+						},
+					],
+				},
+				join(root, "colliding"),
+				null,
+				INITIAL_HARNESS_VERSION_METADATA,
+			),
+		).rejects.toThrow(/collides by case/i);
+
+		const orphanPath = join(root, "orphan");
+		const orphan = {
+			...createArtifact("orphan", "skill-file", "skills/example/scripts/run.sh"),
+			workspace: WORKSPACE,
+		};
+		await writeRawBundle(orphanPath, createManifest([createArtifact(""), orphan]), {
+			"EVOLVE.md": "",
+			"skills/example/scripts/run.sh": "orphan",
+		});
+		await expect(loadHarnessState(orphanPath)).rejects.toThrow(/belong to a declared skill/i);
 	});
 
 	test("rejects skill artifacts without workspace metadata", async () => {
@@ -664,6 +780,7 @@ describe("HarnessStateStore", () => {
 						path: "skills/inherited-skill/SKILL.md",
 						content,
 						workspace: WORKSPACE,
+						files: [{ path: "references/details.md", content: "Inherited reference.\n" }],
 					},
 				],
 			},
@@ -675,7 +792,11 @@ describe("HarnessStateStore", () => {
 		if (inherited.status !== "advanced") throw new Error("Expected inherited advance to succeed");
 		expect(inherited.bundle.state.skills).toHaveLength(1);
 		expect(inherited.bundle.state.skills[0]?.content).toBe(content);
+		expect(inherited.bundle.state.skills[0]?.files).toMatchObject([
+			{ path: "references/details.md", content: "Inherited reference.\n" },
+		]);
 		expect(inherited.bundle.manifest.artifacts.some((artifact) => artifact.kind === "skill")).toBe(true);
+		expect(inherited.bundle.manifest.artifacts.some((artifact) => artifact.kind === "skill-file")).toBe(true);
 
 		const cleared = await store.advance({ memory: "Third memory.", skills: [] }, inherited.bundle.manifest.version);
 		if (cleared.status !== "advanced") throw new Error("Expected cleared advance to succeed");

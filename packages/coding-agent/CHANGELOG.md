@@ -15,6 +15,7 @@
 
 ### Fixed
 
+- Fixed evolved skills being limited to instruction-only `SKILL.md` files by validating, versioning, persisting, reviewing, and activating complete UTF-8 skill packages.
 - Fixed skill-specific rollback leaving an evolved skill active when later harness descendants preserved it.
 - Fixed accepted skill candidates failing activation after a compatible harness memory change by safely rebasing them onto the selected revision.
 - Fixed the harness footer showing an evolution spinner while self-evolution is disabled.

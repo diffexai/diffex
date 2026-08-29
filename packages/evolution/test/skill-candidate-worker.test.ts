@@ -449,6 +449,7 @@ function fixture(withEvaluator = false, store: MemoryRegistryStore = new MemoryR
 							evolutionScope: scope,
 						},
 						content: "---\nname: fixture-skill\ndescription: Fixture skill.\n---\n",
+						files: [],
 					};
 					return { metadata: metadata(content.draftId, content.sourceCandidateIds, content), ...content };
 				},
