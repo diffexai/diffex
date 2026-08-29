@@ -921,7 +921,13 @@ export async function createCodingAgentEvolutionRuntime(
 	});
 	const candidateWorker = new SkillCandidateBackgroundWorker({
 		clock,
-		source: new PollingSkillCandidateWorkSource({ clock, jobs: persistence, store: persistence }),
+		source: new PollingSkillCandidateWorkSource({
+			clock,
+			jobs: persistence,
+			store: persistence,
+			registry: candidateRegistry,
+			evaluatorAvailable: false,
+		}),
 		processor: new SkillCandidateRegistryWorker({
 			version: VERSION,
 			clock,

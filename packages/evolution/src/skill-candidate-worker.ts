@@ -42,6 +42,8 @@ export interface PollingSkillCandidateWorkSourceDependencies {
 	readonly clock: EvolutionClock;
 	readonly jobs: EvolutionJobStore;
 	readonly store: SkillCandidateRegistryStore;
+	readonly registry: SkillCandidateRegistry;
+	readonly evaluatorAvailable: boolean;
 }
 
 export interface PollingSkillCandidateWorkSourceOptions {
@@ -213,11 +215,23 @@ export class PollingSkillCandidateWorkSource {
 		for (const job of jobs) {
 			const snapshot = await this.#dependencies.store.loadSkillCandidateRegistry(job.metadata.scope);
 			const events = workEvents(snapshot.events, job.jobId);
-			if (
-				events.some((event) => event.type === "skill-candidate-work-checkpointed" && event.stage === "completed")
-			) {
-				continue;
-			}
+			const evaluationGroupIds = new Set(
+				events.flatMap((event) =>
+					event.type === "skill-candidate-work-checkpointed" && event.stage === "evaluating" ? event.groupIds : [],
+				),
+			);
+			const awaitingEvaluation =
+				evaluationGroupIds.size > 0 &&
+				(await this.#dependencies.registry.list(job.metadata.scope)).some(
+					(group) =>
+						evaluationGroupIds.has(group.groupId) &&
+						(group.state === "structurally-valid" || group.state === "evaluation-pending"),
+				);
+			const completed = events.some(
+				(event) => event.type === "skill-candidate-work-checkpointed" && event.stage === "completed",
+			);
+			if (completed && !(this.#dependencies.evaluatorAvailable && awaitingEvaluation)) continue;
+			if (awaitingEvaluation && !this.#dependencies.evaluatorAvailable) continue;
 			const latestFailure = events
 				.filter((event): event is SkillCandidateWorkFailedEvent => event.type === "skill-candidate-work-failed")
 				.sort((left, right) => right.attempt - left.attempt)[0];
@@ -476,9 +490,11 @@ export class SkillCandidateRegistryWorker implements SkillCandidateWorkProcessor
 			(await this.#dependencies.store.loadSkillCandidateRegistry(job.metadata.scope)).events,
 			job.jobId,
 		);
-		if (history.some((event) => event.type === "skill-candidate-work-checkpointed" && event.stage === "completed")) {
-			return;
-		}
+		const completedCheckpoint = history.find(
+			(event): event is SkillCandidateWorkCheckpointedEvent =>
+				event.type === "skill-candidate-work-checkpointed" && event.stage === "completed",
+		);
+		if (completedCheckpoint !== undefined && this.#dependencies.evaluator === undefined) return;
 		const attempt = history.filter((event) => event.type === "skill-candidate-work-failed").length + 1;
 		if (attempt > this.#maxAttempts) throw new Error(`Skill candidate work for "${job.jobId}" exhausted retries`);
 
@@ -603,6 +619,7 @@ export class SkillCandidateRegistryWorker implements SkillCandidateWorkProcessor
 			}
 			await this.#appendCheckpoint(job, "evaluating", attempt, [...evaluationGroups.keys()], claim());
 			const evaluatedGroupIds: string[] = [];
+			if (this.#dependencies.evaluator === undefined && evaluationGroups.size > 0) return;
 			if (this.#dependencies.evaluator !== undefined) {
 				for (const evaluationGroup of evaluationGroups.values()) {
 					signal.throwIfAborted();
