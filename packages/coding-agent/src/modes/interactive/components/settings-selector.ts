@@ -121,6 +121,7 @@ export interface SettingsCallbacks {
 	onTuiModeChange: (mode: TuiMode) => void;
 	onFullscreenScrollbarChange: (mode: ScrollViewScrollbar) => void;
 	onWarningsChange: (warnings: WarningSettings) => void;
+	createInstalledSkillsSettings?: (done: () => void) => Component;
 	onCancel: () => void;
 }
 
@@ -590,6 +591,18 @@ export class SettingsSelectorComponent extends Container {
 				currentValue: config.treeFilterMode,
 				values: ["default", "no-tools", "user-only", "labeled-only", "all"],
 			},
+			...(callbacks.createInstalledSkillsSettings === undefined
+				? []
+				: [
+						{
+							id: "installed-skills",
+							label: "Installed skills",
+							description: "Inspect and enable or disable workspace and global installed skills",
+							currentValue: "configure",
+							submenu: (_currentValue: string, done: (selectedValue?: string) => void) =>
+								callbacks.createInstalledSkillsSettings?.(() => done()) ?? new Container(),
+						},
+					]),
 			{
 				id: "warnings",
 				label: "Warnings",

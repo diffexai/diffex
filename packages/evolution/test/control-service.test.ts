@@ -6,6 +6,7 @@ import type { MaterializedInvocation } from "@earendil-works/diffex-harness-trac
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	computeEvolutionContentDigest,
+	computeEvolutionTextDigest,
 	type EvolutionArtifactReference,
 	EvolutionBackgroundWorker,
 	EvolutionControlPlane,
@@ -567,6 +568,7 @@ describe("evolution control service", () => {
 			draftId: "draft-1",
 			groupId: "group-1",
 			operation: "CREATE",
+			proposedName: "focused-verification",
 			content: "---\nname: focused-verification\ndescription: Verify focused changes.\n---\n\nRun checks.\n",
 		} as unknown as SkillDraft;
 		const validation = {
@@ -639,11 +641,21 @@ describe("evolution control service", () => {
 			[validationReference.artifactId, validation],
 			[evaluationReference.artifactId, evaluation],
 		]);
-		const activate = vi.fn().mockResolvedValue({
-			groupId: group.groupId,
-			batchId: "batch-1",
-			targetHarnessVersion: `sha256:${"b".repeat(64)}`,
-			receipt: {},
+		const targetHarnessVersion = `sha256:${"b".repeat(64)}`;
+		let selectedHarnessVersion = input.expectedHarnessBaseVersion;
+		const activate = vi.fn().mockImplementation(async () => {
+			selectedHarnessVersion = targetHarnessVersion;
+			return {
+				groupId: group.groupId,
+				batchId: "batch-1",
+				targetHarnessVersion,
+				receipt: {},
+			};
+		});
+		const selectVersionIfCurrent = vi.fn(async (version: string, expectedCurrent: string) => {
+			expect(selectedHarnessVersion).toBe(expectedCurrent);
+			selectedHarnessVersion = version;
+			return { status: "selected" as const, version };
 		});
 		const service = new EvolutionControlService({
 			scope,
@@ -653,15 +665,29 @@ describe("evolution control service", () => {
 			},
 			harnesses: {
 				listVersions: async () => ({
-					currentVersion: input.expectedHarnessBaseVersion,
+					currentVersion: selectedHarnessVersion,
 					versions: [
 						{
 							manifest: { version: input.expectedHarnessBaseVersion, base: null },
 							state: { memory: "", skills: [] },
 						},
+						{
+							manifest: { version: targetHarnessVersion, base: input.expectedHarnessBaseVersion },
+							state: {
+								memory: "",
+								skills: [
+									{
+										path: "skills/focused-verification/SKILL.md",
+										workspace: { repositoryId: "diffex" },
+										contentHash: computeEvolutionTextDigest(draft.content),
+									},
+								],
+							},
+						},
 					],
 					diagnostics: [],
 				}),
+				selectVersionIfCurrent,
 			},
 			ledger: { read: async () => [] },
 			skillCandidates: { list: async () => [group] },
@@ -697,6 +723,17 @@ describe("evolution control service", () => {
 			batchId: "batch-1",
 		});
 		expect(activate).toHaveBeenCalledWith(scope, group.groupId);
+		expect(await service.getSkillCandidate(job.jobId, candidate.candidateId)).toMatchObject({
+			targetHarnessVersion,
+			rollbackTargetHarnessVersion: input.expectedHarnessBaseVersion,
+			rollbackAvailable: true,
+			activationAvailable: false,
+		});
+		await expect(service.rollbackSkillCandidate(job.jobId, candidate.candidateId)).resolves.toMatchObject({
+			fromHarnessVersion: targetHarnessVersion,
+			toHarnessVersion: input.expectedHarnessBaseVersion,
+		});
+		expect(selectVersionIfCurrent).toHaveBeenCalledWith(input.expectedHarnessBaseVersion, targetHarnessVersion);
 	});
 
 	it("reports durable latency, budget, coverage, conflict, and recovery observability", async () => {

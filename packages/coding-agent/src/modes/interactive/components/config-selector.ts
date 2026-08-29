@@ -454,6 +454,22 @@ class ResourceList implements Component, Focusable {
 			lines.push(theme.fg("dim", `  (${currentItemIndex}/${itemCount})`));
 		}
 
+		const selected = this.filteredItems[this.selectedIndex];
+		if (selected?.type === "item") {
+			lines.push("");
+			lines.push(truncateToWidth(theme.fg("muted", `  Path: ${selected.item.path}`), width, "..."));
+			lines.push(
+				truncateToWidth(
+					theme.fg(
+						"muted",
+						`  Source: ${selected.item.metadata.source} · scope: ${this.getItemScope(selected.item)} · ${selected.item.enabled ? "enabled" : "disabled"}`,
+					),
+					width,
+					"...",
+				),
+			);
+		}
+
 		return lines;
 	}
 

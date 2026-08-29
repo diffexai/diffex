@@ -95,7 +95,7 @@ import { DefaultPackageManager } from "../../core/package-manager.ts";
 import type { ResourceDiagnostic } from "../../core/resource-loader.ts";
 import { formatMissingSessionCwdPrompt, MissingSessionCwdError } from "../../core/session-cwd.ts";
 import { type SessionEntry, SessionManager, sessionEntryToContextMessages } from "../../core/session-manager.ts";
-import type { TuiMode } from "../../core/settings-manager.ts";
+import { SettingsManager, type TuiMode } from "../../core/settings-manager.ts";
 import type { SkillReference } from "../../core/skills.ts";
 import { BUILTIN_SLASH_COMMANDS } from "../../core/slash-commands.ts";
 import type { SourceInfo } from "../../core/source-info.ts";
@@ -125,6 +125,7 @@ import { BashExecutionComponent } from "./components/bash-execution.ts";
 import { BorderedLoader } from "./components/bordered-loader.ts";
 import { BranchSummaryMessageComponent } from "./components/branch-summary-message.ts";
 import { CompactionSummaryMessageComponent } from "./components/compaction-summary-message.ts";
+import { ConfigSelectorComponent, type ScopedResolvedPaths } from "./components/config-selector.ts";
 import { CustomEditor } from "./components/custom-editor.ts";
 import { CustomEntryComponent } from "./components/custom-entry.ts";
 import { CustomMessageComponent } from "./components/custom-message.ts";
@@ -2917,8 +2918,8 @@ export class InteractiveMode {
 
 			// Handle commands
 			if (text === "/settings") {
-				this.showSettingsSelector();
 				this.editor.setText("");
+				await this.showSettingsSelector();
 				return;
 			}
 			if (text === "/skills") {
@@ -4484,7 +4485,29 @@ export class InteractiveMode {
 		});
 	}
 
-	private showSettingsSelector(): void {
+	private async showSettingsSelector(): Promise<void> {
+		const cwd = this.sessionManager.getCwd();
+		const agentDir = this.runtimeHost.services.agentDir;
+		let installedSkillPaths: ScopedResolvedPaths;
+		try {
+			const globalSettings = SettingsManager.create(cwd, agentDir, { projectTrusted: false });
+			const global = await new DefaultPackageManager({ cwd, agentDir, settingsManager: globalSettings }).resolve();
+			const project = this.settingsManager.isProjectTrusted()
+				? await new DefaultPackageManager({ cwd, agentDir, settingsManager: this.settingsManager }).resolve()
+				: global;
+			const skillsOnly = (resolved: typeof global) => ({
+				extensions: [],
+				skills: resolved.skills,
+				prompts: [],
+				themes: [],
+			});
+			installedSkillPaths = { global: skillsOnly(global), project: skillsOnly(project) };
+		} catch (error) {
+			this.showError(
+				`Could not inspect installed skills: ${error instanceof Error ? error.message : String(error)}`,
+			);
+			return;
+		}
 		this.showSelector((done) => {
 			let selector: SettingsSelectorComponent | undefined;
 			selector = new SettingsSelectorComponent(
@@ -4677,6 +4700,25 @@ export class InteractiveMode {
 					onWarningsChange: (warnings) => {
 						this.settingsManager.setWarnings(warnings);
 					},
+					createInstalledSkillsSettings: (finish) =>
+						new ConfigSelectorComponent(
+							installedSkillPaths,
+							this.settingsManager,
+							cwd,
+							agentDir,
+							() => {
+								finish();
+								this.showStatus("Installed skill settings saved; use /reload to apply them to this session");
+							},
+							() => {
+								finish();
+								this.showStatus("Installed skill settings saved; use /reload to apply them to this session");
+							},
+							() => this.ui.requestRender(),
+							this.ui.terminal.rows,
+							"global",
+							this.settingsManager.isProjectTrusted(),
+						),
 					onCancel: () => {
 						done();
 						this.ui.requestRender();
