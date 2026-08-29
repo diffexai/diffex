@@ -2,6 +2,7 @@ import {
 	computeHarnessSkillId,
 	type HarnessSelectResult,
 	type HarnessVersion,
+	type HarnessVersionBundle,
 	type HarnessVersionList,
 } from "@earendil-works/diffex-harness-state";
 import type { MaterializedEvidence } from "@earendil-works/diffex-harness-trace";
@@ -346,6 +347,50 @@ function candidateSummary(
 		operation: candidate.operation,
 		state: group?.state ?? "proposed",
 	};
+}
+
+function skillCandidateIsApplied(
+	bundle: HarnessVersionBundle,
+	candidate: SkillCandidate,
+	draft: SkillDraft,
+	draftDigest: string,
+): boolean {
+	const skillIds = new Set(bundle.state.skills.map((skill) => computeHarnessSkillId(skill.workspace, skill.path)));
+	if (draft.operation === "RETIRE") {
+		return candidate.existingSkillIds.every((skillId) => !skillIds.has(skillId));
+	}
+	const target = bundle.state.skills.find(
+		(skill) => skill.path === `skills/${draft.proposedName}/SKILL.md` && skill.contentHash === draftDigest,
+	);
+	if (target === undefined) return false;
+	const targetId = computeHarnessSkillId(target.workspace, target.path);
+	return candidate.existingSkillIds.every((skillId) => skillId === targetId || !skillIds.has(skillId));
+}
+
+function skillCandidateHarnessState(
+	versions: HarnessVersionList,
+	candidate: SkillCandidate,
+	draft: SkillDraft,
+): { readonly active: boolean; readonly rollbackTarget: HarnessVersion | null } {
+	if (versions.currentVersion === null) return { active: false, rollbackTarget: null };
+	const bundles = new Map(versions.versions.map((bundle) => [bundle.manifest.version, bundle]));
+	const draftDigest = computeEvolutionTextDigest(draft.content);
+	let current = bundles.get(versions.currentVersion);
+	if (current === undefined || !skillCandidateIsApplied(current, candidate, draft, draftDigest)) {
+		return { active: false, rollbackTarget: null };
+	}
+	const visited = new Set<HarnessVersion>();
+	while (current.manifest.base !== null) {
+		if (visited.has(current.manifest.version)) return { active: true, rollbackTarget: null };
+		visited.add(current.manifest.version);
+		const parent = bundles.get(current.manifest.base);
+		if (parent === undefined) return { active: true, rollbackTarget: null };
+		if (!skillCandidateIsApplied(parent, candidate, draft, draftDigest)) {
+			return { active: true, rollbackTarget: parent.manifest.version };
+		}
+		current = parent;
+	}
+	return { active: true, rollbackTarget: null };
 }
 
 export class EvolutionProgressBus implements EvolutionEventSink {
@@ -806,26 +851,10 @@ export class EvolutionControlService {
 				};
 			}),
 		);
-		const current = versions.versions.find((bundle) => bundle.manifest.version === versions.currentVersion);
-		const draftDigest = draft === null ? null : computeEvolutionTextDigest(draft.content);
-		const active =
-			draft !== null &&
-			current !== undefined &&
-			(draft.operation === "RETIRE"
-				? candidate.existingSkillIds.every(
-						(skillId) =>
-							!current.state.skills.some(
-								(skill) => computeHarnessSkillId(skill.workspace, skill.path) === skillId,
-							),
-					)
-				: current.state.skills.some(
-						(skill) =>
-							skill.path === `skills/${draft.proposedName}/SKILL.md` && skill.contentHash === draftDigest,
-					));
-		const rollbackAvailable =
-			active &&
-			current?.manifest.base !== null &&
-			versions.versions.some((bundle) => bundle.manifest.version === current?.manifest.base);
+		const harnessState =
+			draft === null
+				? { active: false, rollbackTarget: null }
+				: skillCandidateHarnessState(versions, candidate, draft);
 		return {
 			summary: candidateSummary(candidate, group),
 			candidate,
@@ -835,11 +864,11 @@ export class EvolutionControlService {
 			draft,
 			validation,
 			evaluation,
-			targetHarnessVersion: active ? (versions.currentVersion ?? null) : null,
-			rollbackTargetHarnessVersion: active ? (current?.manifest.base ?? null) : null,
-			rollbackAvailable,
+			targetHarnessVersion: harnessState.active ? versions.currentVersion : null,
+			rollbackTargetHarnessVersion: harnessState.rollbackTarget,
+			rollbackAvailable: harnessState.rollbackTarget !== null,
 			activationAvailable:
-				group?.state === "accepted" && !active && this.#dependencies.skillActivation !== undefined,
+				group?.state === "accepted" && !harnessState.active && this.#dependencies.skillActivation !== undefined,
 		};
 	}
 

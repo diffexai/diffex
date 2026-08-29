@@ -450,7 +450,7 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 		if (action === "rollback-skill") {
 			return [
 				`Roll back ${this.#skillCandidate?.summary.proposedName ?? "the selected evolved skill"}?`,
-				`The selected harness will return to ${this.#skillCandidate?.rollbackTargetHarnessVersion ?? "its immutable parent"}. The next fresh prompt will observe it.`,
+				`The selected harness will return to ${this.#skillCandidate?.rollbackTargetHarnessVersion ?? "its pre-activation revision"}. The next fresh prompt will observe it.`,
 			];
 		}
 		if (action === "cancel") {
