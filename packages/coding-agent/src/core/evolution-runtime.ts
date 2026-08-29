@@ -1109,6 +1109,10 @@ export class EvolutionRuntimeCoordinator implements AgentSessionLifecycleObserve
 		return this.#control().activateSkillCandidate(jobId, candidateId);
 	}
 
+	rollbackSkillCandidate(jobId: string, candidateId: string) {
+		return this.#control().rollbackSkillCandidate(jobId, candidateId);
+	}
+
 	startManual(): Promise<EvolutionStartResult> {
 		return this.#control().startManual();
 	}

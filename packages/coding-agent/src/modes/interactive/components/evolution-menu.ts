@@ -8,6 +8,7 @@ import {
 	TruncatedText,
 	UNSELECTED_LIST_PREFIX,
 } from "@earendil-works/diffex-tui";
+import { diffLines } from "diff";
 import type {
 	EvolutionHarnessVersionInfo,
 	EvolutionJobDetail,
@@ -16,6 +17,8 @@ import type {
 	EvolutionProgressEvent,
 	EvolutionProposalDetail,
 	EvolutionRollbackAction,
+	EvolutionSkillActivationResult,
+	EvolutionSkillCandidateDetail,
 	EvolutionStartResult,
 } from "#evolution";
 import { theme } from "../theme/theme.ts";
@@ -39,6 +42,9 @@ export interface EvolutionMenuClient {
 	listJobs(): Promise<readonly EvolutionJobSummary[]>;
 	jobDetail(jobId: string): Promise<EvolutionJobDetail>;
 	proposalDetail(jobId: string, proposalId: string): Promise<EvolutionProposalDetail>;
+	skillCandidateDetail(jobId: string, candidateId: string): Promise<EvolutionSkillCandidateDetail>;
+	activateSkillCandidate(jobId: string, candidateId: string): Promise<EvolutionSkillActivationResult>;
+	rollbackSkillCandidate(jobId: string, candidateId: string): Promise<EvolutionRollbackAction>;
 	startManual(): Promise<EvolutionStartResult>;
 	resumeNewest(): Promise<EvolutionJobSummary>;
 	cancelJob(jobId: string): Promise<void>;
@@ -50,6 +56,13 @@ type MenuView =
 	| { readonly kind: "jobs" }
 	| { readonly kind: "job"; readonly jobId: string }
 	| { readonly kind: "proposal"; readonly jobId: string; readonly proposalId: string }
+	| { readonly kind: "skill-candidate"; readonly jobId: string; readonly candidateId: string }
+	| {
+			readonly kind: "skill-candidate-review";
+			readonly jobId: string;
+			readonly candidateId: string;
+			readonly section: "draft" | "evaluation" | "provenance" | "validation";
+	  }
 	| {
 			readonly kind: "proposal-evidence";
 			readonly jobId: string;
@@ -58,8 +71,9 @@ type MenuView =
 	  }
 	| {
 			readonly kind: "confirm";
-			readonly action: "cancel" | "resume" | "rollback" | "start";
+			readonly action: "activate-skill" | "cancel" | "resume" | "rollback" | "rollback-skill" | "start";
 			readonly jobId?: string;
+			readonly candidateId?: string;
 	  };
 
 interface MenuEntry {
@@ -136,6 +150,23 @@ export function formatEvolutionEvidencePreview(
 	return firstCharacters(content, 100);
 }
 
+export function formatEvolutionSkillDraftDiff(detail: EvolutionSkillCandidateDetail): readonly string[] {
+	if (detail.draft === null) return ["Draft pending"];
+	const before = detail.existingContents
+		.map((skill) => `# Existing skill: ${skill.name} (${skill.version})\n${skill.content}`)
+		.join("\n\n");
+	const after = detail.draft.operation === "RETIRE" ? "" : detail.draft.content;
+	const changes = diffLines(before, after, { maxEditLength: 20_000 });
+	if (changes === undefined) return ["Draft diff is too large to render"];
+	return changes.flatMap((change) => {
+		const prefix = change.added ? "+" : change.removed ? "-" : " ";
+		return change.value
+			.replace(/\n$/u, "")
+			.split("\n")
+			.map((line) => `${prefix}${line}`);
+	});
+}
+
 export class EvolutionMenuComponent extends Container implements Focusable {
 	readonly #client: EvolutionMenuClient;
 	readonly #onClose: () => void;
@@ -151,6 +182,7 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 	#harnessVersionInfoLoaded = false;
 	#job: EvolutionJobDetail | null = null;
 	#proposal: EvolutionProposalDetail | null = null;
+	#skillCandidate: EvolutionSkillCandidateDetail | null = null;
 	#entries: readonly MenuEntry[] = [];
 	#selectedIndex = 0;
 	#loading = true;
@@ -205,6 +237,9 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 		if (view.kind === "overview" || view.kind === "confirm") return this.#overview !== null;
 		if (view.kind === "jobs") return this.#jobsLoaded;
 		if (view.kind === "job") return this.#job?.jobId === view.jobId;
+		if (view.kind === "skill-candidate" || view.kind === "skill-candidate-review") {
+			return this.#skillCandidate?.summary.candidateId === view.candidateId;
+		}
 		return this.#proposal?.proposal.proposalId === view.proposalId;
 	}
 
@@ -267,6 +302,9 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 			if (view.kind === "proposal" || view.kind === "proposal-evidence") {
 				this.#proposal = await this.#client.proposalDetail(view.jobId, view.proposalId);
 			}
+			if (view.kind === "skill-candidate" || view.kind === "skill-candidate-review") {
+				this.#skillCandidate = await this.#client.skillCandidateDetail(view.jobId, view.candidateId);
+			}
 		} catch (error) {
 			this.#onStatus(error instanceof Error ? error.message : String(error), true);
 		} finally {
@@ -314,8 +352,12 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 		})();
 	}
 
-	#confirm(action: "cancel" | "resume" | "rollback" | "start", jobId?: string): void {
-		this.#push({ kind: "confirm", action, jobId });
+	#confirm(
+		action: "activate-skill" | "cancel" | "resume" | "rollback" | "rollback-skill" | "start",
+		jobId?: string,
+		candidateId?: string,
+	): void {
+		this.#push({ kind: "confirm", action, jobId, candidateId });
 	}
 
 	#overviewEntries(overview: EvolutionOverview): readonly MenuEntry[] {
@@ -394,6 +436,18 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 				"The durable checkpoint will become active background work.",
 			];
 		}
+		if (action === "activate-skill") {
+			return [
+				`Activate ${this.#skillCandidate?.summary.proposedName ?? "the selected skill candidate"}?`,
+				"A complete immutable harness revision will be staged and selected. The next fresh prompt will observe it.",
+			];
+		}
+		if (action === "rollback-skill") {
+			return [
+				`Roll back ${this.#skillCandidate?.summary.proposedName ?? "the selected evolved skill"}?`,
+				`The selected harness will return to ${this.#skillCandidate?.rollbackTargetHarnessVersion ?? "its immutable parent"}. The next fresh prompt will observe it.`,
+			];
+		}
 		if (action === "cancel") {
 			const job = [overview?.activeJob, overview?.newestResumableJob].find(
 				(candidate) => candidate?.jobId === view.jobId,
@@ -430,6 +484,20 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 				this.#run(() => this.#client.cancelJob(cancellationJobId), "Evolution round removed");
 			}
 			if (action === "rollback") this.#run(() => this.#client.rollback(), "Harness revision rolled back");
+			if (action === "activate-skill" && view.jobId !== undefined && view.candidateId !== undefined) {
+				const { candidateId, jobId } = view;
+				this.#run(
+					() => this.#client.activateSkillCandidate(jobId, candidateId),
+					(result) => `Evolved skill activated in ${result.targetHarnessVersion}`,
+				);
+			}
+			if (action === "rollback-skill" && view.jobId !== undefined && view.candidateId !== undefined) {
+				const { candidateId, jobId } = view;
+				this.#run(
+					() => this.#client.rollbackSkillCandidate(jobId, candidateId),
+					"Evolved skill harness rolled back",
+				);
+			}
 		};
 		return [
 			{
@@ -491,6 +559,16 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 				this.#overview?.currentHarnessVersion,
 				job.baseHarnessInfo,
 			)}`,
+			`Target harness: ${
+				job.activatedHarnessVersion === null
+					? "pending"
+					: formatHarnessVersionReference(
+							job.activatedHarnessVersion,
+							this.#harnessVersionInfo,
+							this.#overview?.currentHarnessVersion,
+						)
+			}`,
+			`Rollback available: ${job.observability.rollbackAvailable ? "yes" : "no"}`,
 		]) {
 			this.#addLine(line);
 		}
@@ -502,6 +580,99 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 		this.#addLine(`Validation: ${detail.validationDisposition ?? "pending"}`);
 		this.addChild(new Spacer(1));
 		this.#addLine(`Outcome: ${formatEvolutionProposalOutcome(detail.proposal)}`);
+	}
+
+	#skillCandidateEntries(detail: EvolutionSkillCandidateDetail, jobId: string): readonly MenuEntry[] {
+		const review = (section: Extract<MenuView, { kind: "skill-candidate-review" }>["section"]) =>
+			this.#push({ kind: "skill-candidate-review", jobId, candidateId: detail.summary.candidateId, section });
+		return [
+			{ label: "Provenance", enabled: true, select: () => review("provenance") },
+			{
+				label: "Draft diff",
+				enabled: detail.draft !== null,
+				disabledStatus: "pending",
+				select: () => review("draft"),
+			},
+			{
+				label: "Validation",
+				enabled: detail.validation !== null,
+				disabledStatus: "pending",
+				select: () => review("validation"),
+			},
+			{
+				label: "Evaluation",
+				enabled: detail.evaluation !== null,
+				disabledStatus: "pending",
+				select: () => review("evaluation"),
+			},
+			{
+				label: "Activate",
+				enabled: detail.activationAvailable,
+				disabledStatus: detail.targetHarnessVersion === null ? "unavailable" : "active",
+				select: () => this.#confirm("activate-skill", jobId, detail.summary.candidateId),
+			},
+			{
+				label: "Rollback",
+				enabled: detail.rollbackAvailable,
+				disabledStatus: "unavailable",
+				select: () => this.#confirm("rollback-skill", jobId, detail.summary.candidateId),
+			},
+		];
+	}
+
+	#renderSkillCandidate(detail: EvolutionSkillCandidateDetail): void {
+		this.#addLine(`Skill candidate: ${detail.summary.proposedName}`, "accent");
+		this.#addLine(`Operation: ${detail.summary.operation}`);
+		this.#addLine(`State: ${detail.summary.state}`);
+		this.#addLine(`Target harness: ${detail.targetHarnessVersion ?? "pending activation"}`);
+		this.#addLine(`Rollback available: ${detail.rollbackAvailable ? "yes" : "no"}`);
+	}
+
+	#renderSkillCandidateReview(
+		detail: EvolutionSkillCandidateDetail,
+		section: Extract<MenuView, { kind: "skill-candidate-review" }>["section"],
+	): void {
+		if (section === "draft") {
+			this.#addLine("Draft diff", "accent");
+			const lines = formatEvolutionSkillDraftDiff(detail);
+			for (const line of lines.slice(0, 200)) {
+				this.#addLine(line, line.startsWith("+") ? "accent" : line.startsWith("-") ? "warning" : "text");
+			}
+			if (lines.length > 200) this.#addLine(`... ${lines.length - 200} more lines`, "muted");
+			return;
+		}
+		if (section === "provenance") {
+			this.#addLine("Provenance", "accent");
+			for (const [label, values] of [
+				["Evolution jobs", detail.sourceEvolutionJobIds],
+				["Candidate revisions", detail.proposalRevisionIds],
+				["Lessons", detail.candidate.sourceLessonIds],
+				["Evidence", [...detail.candidate.supportingEvidenceIds, ...detail.candidate.contradictingEvidenceIds]],
+				["Traces", [...detail.candidate.supportingTraceIds, ...detail.candidate.contradictingTraceIds]],
+				["Task lineages", detail.candidate.taskLineageIds],
+			] as const) {
+				this.#addLine(`${label}: ${values.length === 0 ? "none" : values.join(", ")}`);
+			}
+			return;
+		}
+		if (section === "validation") {
+			this.#addLine("Deterministic validation", "accent");
+			this.#addLine(`Result: ${detail.validation?.disposition ?? "pending"}`);
+			for (const issue of detail.validation?.issues ?? [])
+				this.#addLine(`${issue.code}: ${issue.message}`, "warning");
+			return;
+		}
+		this.#addLine("Retrieval and behavior evaluation", "accent");
+		this.#addLine(`Result: ${detail.evaluation?.disposition ?? "pending"}`);
+		for (const [name, gate] of Object.entries(detail.evaluation?.gates ?? {})) {
+			this.#addLine(`${name}: ${gate.passed ? "passed" : `failed (${gate.reasonCodes.join(", ")})`}`);
+		}
+		if (detail.evaluation !== null) {
+			this.#addLine(`Exact retrieval accuracy: ${detail.evaluation.metrics.exactRetrievalAccuracy}`);
+			this.#addLine(`Held-out improvement: ${detail.evaluation.metrics.heldOutIntendedImprovement}`);
+			this.#addLine(`Negative regressions: ${detail.evaluation.metrics.negativeRegressionCount}`);
+			this.#addLine(`Misapplications: ${detail.evaluation.metrics.misapplicationCount}`);
+		}
 	}
 
 	#proposalEvidenceEntries(detail: EvolutionProposalDetail, jobId: string, proposalId: string): readonly MenuEntry[] {
@@ -586,20 +757,40 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 			} else if (view.kind === "job" && this.#job) {
 				this.#renderJob(this.#job);
 				this.addChild(new Spacer(1));
-				this.#renderEntries(
-					this.#job.proposals.map((proposal) => ({
+				this.#renderEntries([
+					...this.#job.proposals.map((proposal) => ({
 						label: formatEvolutionProposalLabel(proposal),
 						enabled: true,
-						select: () => this.#push({ kind: "proposal", jobId: view.jobId, proposalId: proposal.proposalId }),
+						select: () =>
+							this.#push({ kind: "proposal" as const, jobId: view.jobId, proposalId: proposal.proposalId }),
 					})),
-				);
-				if (this.#job.proposals.length === 0) this.#addLine("No proposals emitted", "muted");
+					...this.#job.skillCandidates.map((candidate) => ({
+						label: `Skill ${candidate.proposedName} - ${candidate.state}`,
+						enabled: true,
+						select: () =>
+							this.#push({
+								kind: "skill-candidate" as const,
+								jobId: view.jobId,
+								candidateId: candidate.candidateId,
+							}),
+					})),
+				]);
+				if (this.#job.proposals.length === 0 && this.#job.skillCandidates.length === 0) {
+					this.#addLine("No proposals or skill candidates emitted", "muted");
+				}
 			} else if (view.kind === "proposal" && this.#proposal) {
 				this.#renderProposal(this.#proposal);
 				this.addChild(new Spacer(1));
 				this.#renderEntries(this.#proposalEvidenceEntries(this.#proposal, view.jobId, view.proposalId));
 			} else if (view.kind === "proposal-evidence" && this.#proposal) {
 				this.#renderProposalEvidence(this.#proposal, view.evidenceKind);
+				this.#entries = [];
+			} else if (view.kind === "skill-candidate" && this.#skillCandidate) {
+				this.#renderSkillCandidate(this.#skillCandidate);
+				this.addChild(new Spacer(1));
+				this.#renderEntries(this.#skillCandidateEntries(this.#skillCandidate, view.jobId));
+			} else if (view.kind === "skill-candidate-review" && this.#skillCandidate) {
+				this.#renderSkillCandidateReview(this.#skillCandidate, view.section);
 				this.#entries = [];
 			} else if (view.kind === "confirm") {
 				for (const line of this.#confirmationLines(view)) this.#addLine(line, "warning");
