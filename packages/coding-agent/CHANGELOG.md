@@ -18,6 +18,7 @@
 - Fixed accepted skill candidates failing activation after a compatible harness memory change by safely rebasing them onto the selected revision.
 - Fixed the harness footer showing an evolution spinner while self-evolution is disabled.
 - Fixed evolution setting changes not reaching already-running Diffex processes, which could let stale processes continue tracing and launch automatic work.
+- Fixed an open, idle `/evolve` menu retaining enabled actions after another Diffex process disables evolution.
 - Fixed the evolution menu remaining on its loading screen after cancellation and flickering during active-job refreshes.
 - Fixed assistant Markdown headings and fenced code blocks appearing with literal source delimiters in the interactive transcript.
 - Fixed extension TUI method wrappers recursing indefinitely when delegating to the original method ([#7731](https://github.com/earendil-works/pi/issues/7731)).
