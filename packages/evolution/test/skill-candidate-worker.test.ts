@@ -318,6 +318,7 @@ class FixtureRegistry implements SkillCandidateRegistry {
 	readonly requests: SkillCandidateRegistryConsolidationInput[] = [];
 	readonly draftRequests: SkillCandidateDraftRecordingInput[] = [];
 	readonly validationRequests: SkillCandidateValidationRecordingInput[] = [];
+	readonly evaluationSkipRequests: SkillCandidateEvaluationStartInput[] = [];
 	readonly evaluationStartRequests: SkillCandidateEvaluationStartInput[] = [];
 	readonly evaluationRequests: SkillCandidateEvaluationRecordingInput[] = [];
 	readonly groups: SkillCandidateGroup[] = [];
@@ -357,6 +358,31 @@ class FixtureRegistry implements SkillCandidateRegistry {
 		};
 		this.groups[index] = validated;
 		return validated;
+	}
+
+	async skipEvaluation(input: SkillCandidateEvaluationStartInput): Promise<SkillCandidateGroup> {
+		this.evaluationSkipRequests.push(input);
+		const index = this.groups.findIndex((candidateGroup) => candidateGroup.groupId === input.groupId);
+		const group = this.groups[index];
+		if (group === undefined) throw new Error("Unknown group");
+		const accepted = {
+			...group,
+			state: "accepted" as const,
+			draft: input.draft,
+			validation: input.validation,
+			dispositionHistory: [
+				...group.dispositionHistory,
+				{
+					eventId: "evaluation-skipped",
+					from: group.state,
+					to: "accepted" as const,
+					reasonCodes: ["retrieval-and-behavior-evaluation-skipped"],
+					createdAt: input.createdAt,
+				},
+			],
+		};
+		this.groups[index] = accepted;
+		return accepted;
 	}
 
 	async startEvaluation(input: SkillCandidateEvaluationStartInput): Promise<SkillCandidateGroup> {
@@ -679,7 +705,7 @@ describe("skill candidate registry worker", () => {
 		]);
 	});
 
-	it("parks structurally valid drafts until an evaluator becomes available", async () => {
+	it("accepts structurally valid drafts when retrieval and behavior evaluation is unavailable", async () => {
 		const data = fixture();
 		const candidateReference = data.job.checkpoints[0]?.outputArtifacts[0];
 		if (candidateReference === undefined) throw new Error("Expected candidate reference");
@@ -687,28 +713,30 @@ describe("skill candidate registry worker", () => {
 
 		await data.worker.process(data.job.jobId);
 
-		expect(data.registry.groups[0]?.state).toBe("structurally-valid");
+		expect(data.registry.groups[0]).toMatchObject({
+			state: "accepted",
+			evaluation: null,
+			dispositionHistory: [expect.objectContaining({ reasonCodes: ["retrieval-and-behavior-evaluation-skipped"] })],
+		});
+		expect(data.registry.evaluationSkipRequests).toEqual([
+			expect.objectContaining({
+				groupId: "group-qualified",
+				idempotencyKey: "skill-evaluation-qualified",
+			}),
+		]);
 		expect(
 			data.store.events.some(
 				(event) => event.type === "skill-candidate-work-checkpointed" && event.stage === "completed",
 			),
-		).toBe(false);
-		const unavailableSource = new PollingSkillCandidateWorkSource({
+		).toBe(true);
+		const source = new PollingSkillCandidateWorkSource({
 			clock: data.clock,
 			jobs: data.jobs,
 			store: data.store,
 			registry: data.registry,
 			evaluatorAvailable: false,
 		});
-		const availableSource = new PollingSkillCandidateWorkSource({
-			clock: data.clock,
-			jobs: data.jobs,
-			store: data.store,
-			registry: data.registry,
-			evaluatorAvailable: true,
-		});
-		expect(await unavailableSource.nextRunnableJob(now)).toBeNull();
-		expect(await availableSource.nextRunnableJob(now)).toBe(data.job.jobId);
+		expect(await source.nextRunnableJob(now)).toBeNull();
 	});
 
 	it("reopens legacy completed work when its evaluator becomes available", async () => {

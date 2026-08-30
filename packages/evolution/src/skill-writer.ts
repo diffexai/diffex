@@ -83,7 +83,7 @@ interface AcceptedSkillMutationSource {
 	readonly candidates: readonly SkillCandidate[];
 	readonly draft: SkillDraft;
 	readonly validation: SkillDraftValidationReport;
-	readonly evaluation: SkillEvaluationReport;
+	readonly evaluation: SkillEvaluationReport | null;
 }
 
 export interface SkillWriterBuildInput {
@@ -399,12 +399,20 @@ export class SkillWriter {
 
 	async #acceptedSource(scope: EvolutionScope, groupId: string): Promise<AcceptedSkillMutationSource> {
 		const group = (await this.#dependencies.registry.list(scope)).find((candidate) => candidate.groupId === groupId);
+		const evaluationSkipTransition = group?.dispositionHistory.at(-1);
+		const evaluationSkipped =
+			group?.evaluation === null &&
+			evaluationSkipTransition?.to === "accepted" &&
+			(evaluationSkipTransition.from === "structurally-valid" ||
+				evaluationSkipTransition.from === "evaluation-pending") &&
+			evaluationSkipTransition.reasonCodes.length === 1 &&
+			evaluationSkipTransition.reasonCodes[0] === "retrieval-and-behavior-evaluation-skipped";
 		if (
 			group === undefined ||
 			group.state !== "accepted" ||
 			group.draft === null ||
 			group.validation === null ||
-			group.evaluation === null
+			(group.evaluation === null && !evaluationSkipped)
 		) {
 			throw new Error(`Candidate group "${groupId}" is not accepted for skill activation`);
 		}
@@ -412,14 +420,14 @@ export class SkillWriter {
 			Promise.all(group.proposalRevisions.map((revision) => this.#dependencies.artifacts.get(revision.candidate))),
 			this.#dependencies.artifacts.get(group.draft),
 			this.#dependencies.artifacts.get(group.validation),
-			this.#dependencies.artifacts.get(group.evaluation),
+			group.evaluation === null ? Promise.resolve(null) : this.#dependencies.artifacts.get(group.evaluation),
 		]);
 		if (
 			candidateArtifacts.length === 0 ||
 			!candidateArtifacts.every(isSkillCandidate) ||
 			!isSkillDraft(draftArtifact) ||
 			!isSkillValidation(validationArtifact) ||
-			!isSkillEvaluation(evaluationArtifact)
+			(evaluationArtifact !== null && !isSkillEvaluation(evaluationArtifact))
 		) {
 			throw new Error(`Candidate group "${groupId}" has invalid writer prerequisites`);
 		}
@@ -433,7 +441,9 @@ export class SkillWriter {
 		}
 		assertArtifactIdentity(draftArtifact, group.draft, "Skill draft");
 		assertArtifactIdentity(validationArtifact, group.validation, "Skill validation");
-		assertArtifactIdentity(evaluationArtifact, group.evaluation, "Skill evaluation");
+		if (evaluationArtifact !== null && group.evaluation !== null) {
+			assertArtifactIdentity(evaluationArtifact, group.evaluation, "Skill evaluation");
+		}
 		if (
 			group.profile.workspace.evolutionScope.repositoryId !== scope.repositoryId ||
 			group.profile.workspace.evolutionScope.scopeId !== scope.scopeId ||
@@ -441,24 +451,25 @@ export class SkillWriter {
 			draftArtifact.metadata.scope.scopeId !== scope.scopeId ||
 			validationArtifact.metadata.scope.repositoryId !== scope.repositoryId ||
 			validationArtifact.metadata.scope.scopeId !== scope.scopeId ||
-			evaluationArtifact.metadata.scope.repositoryId !== scope.repositoryId ||
-			evaluationArtifact.metadata.scope.scopeId !== scope.scopeId ||
 			draftArtifact.groupId !== group.groupId ||
 			validationArtifact.groupId !== group.groupId ||
-			evaluationArtifact.groupId !== group.groupId ||
 			!sameReference(validationArtifact.draft, group.draft) ||
-			!sameReference(evaluationArtifact.draft, group.draft) ||
-			!sameReference(evaluationArtifact.validation, group.validation) ||
 			validationArtifact.disposition !== "accepted" ||
-			evaluationArtifact.disposition !== "accepted" ||
-			!evaluationArtifact.gates.suite.passed ||
-			!evaluationArtifact.gates.retrieval.passed ||
-			!evaluationArtifact.gates.behavior.passed ||
 			!sameValues(
 				draftArtifact.proposalRevisionIds,
 				group.proposalRevisions.map((revision) => revision.revisionId),
 			) ||
-			!sameValues(evaluationArtifact.proposalRevisionIds, draftArtifact.proposalRevisionIds)
+			(evaluationArtifact !== null &&
+				(evaluationArtifact.metadata.scope.repositoryId !== scope.repositoryId ||
+					evaluationArtifact.metadata.scope.scopeId !== scope.scopeId ||
+					evaluationArtifact.groupId !== group.groupId ||
+					!sameReference(evaluationArtifact.draft, group.draft) ||
+					!sameReference(evaluationArtifact.validation, group.validation) ||
+					evaluationArtifact.disposition !== "accepted" ||
+					!evaluationArtifact.gates.suite.passed ||
+					!evaluationArtifact.gates.retrieval.passed ||
+					!evaluationArtifact.gates.behavior.passed ||
+					!sameValues(evaluationArtifact.proposalRevisionIds, draftArtifact.proposalRevisionIds)))
 		) {
 			throw new Error(`Candidate group "${groupId}" accepted artifacts are stale or incomplete`);
 		}
@@ -532,7 +543,7 @@ export class SkillWriter {
 			draft.workspace.evolutionScope.repositoryId !== group.profile.workspace.evolutionScope.repositoryId ||
 			draft.workspace.evolutionScope.scopeId !== group.profile.workspace.evolutionScope.scopeId ||
 			validation.validatedHarnessVersion !== validatedBase.manifest.version ||
-			evaluation.harnessVersion !== validatedBase.manifest.version ||
+			(evaluation !== null && evaluation.harnessVersion !== validatedBase.manifest.version) ||
 			serializedSkills(base.state.skills) !== serializedSkills(validatedBase.state.skills)
 		) {
 			throw new EvolutionExecutionError(
@@ -553,14 +564,15 @@ export class SkillWriter {
 			throw new Error(`Candidate group "${group.groupId}" has a noncanonical validated inventory`);
 		}
 		if (
-			evaluation.candidateSkill.skillId !== draft.draftId ||
-			evaluation.candidateSkill.name !== draft.proposedName ||
-			evaluation.candidateSkill.version !==
-				computeHarnessSkillPackageVersion({ content: draft.content, files: draft.files }) ||
-			evaluation.candidateSkill.content !== draft.content ||
-			evaluation.candidateSkill.contentDigest !== computeEvolutionTextDigest(draft.content) ||
-			serializeEvolutionValue(sortPackageFiles(evaluation.candidateSkill.files ?? [])) !==
-				serializeEvolutionValue(sortPackageFiles(draft.files))
+			evaluation !== null &&
+			(evaluation.candidateSkill.skillId !== draft.draftId ||
+				evaluation.candidateSkill.name !== draft.proposedName ||
+				evaluation.candidateSkill.version !==
+					computeHarnessSkillPackageVersion({ content: draft.content, files: draft.files }) ||
+				evaluation.candidateSkill.content !== draft.content ||
+				evaluation.candidateSkill.contentDigest !== computeEvolutionTextDigest(draft.content) ||
+				serializeEvolutionValue(sortPackageFiles(evaluation.candidateSkill.files ?? [])) !==
+					serializeEvolutionValue(sortPackageFiles(draft.files)))
 		) {
 			throw new Error(`Candidate group "${group.groupId}" evaluation does not match its draft`);
 		}
@@ -593,7 +605,7 @@ export class SkillWriter {
 		}
 		const draftReference = artifactReference(draft);
 		const validationReference = artifactReference(validation);
-		const evaluationReference = artifactReference(evaluation);
+		const evaluationReference = evaluation === null ? null : artifactReference(evaluation);
 		const memoryDisposition = this.#memoryDisposition(source);
 		return {
 			mutationId: stableId("skill-mutation", {
@@ -638,7 +650,10 @@ export class SkillWriter {
 		source: AcceptedSkillMutationSource,
 		base: HarnessVersionBundle,
 	): Promise<{ readonly mutation: SkillMutation; readonly validatedBase: HarnessVersionBundle }> {
-		if (source.validation.validatedHarnessVersion !== source.evaluation.harnessVersion) {
+		if (
+			source.evaluation !== null &&
+			source.validation.validatedHarnessVersion !== source.evaluation.harnessVersion
+		) {
 			throw new EvolutionExecutionError("Accepted skill candidate validation and evaluation bases differ", {
 				reasonCode: "harness-base-conflict",
 				retryable: false,
@@ -675,7 +690,7 @@ export class SkillWriter {
 					input.groupId,
 					mutation.draft.artifactId,
 					mutation.validation.artifactId,
-					mutation.evaluation.artifactId,
+					...(mutation.evaluation === null ? [] : [mutation.evaluation.artifactId]),
 				],
 				scope: input.scope,
 				createdAt: input.createdAt,

@@ -82,6 +82,7 @@ function registry(groups: readonly SkillCandidateGroup[]): SkillCandidateRegistr
 		consolidate: unsupported,
 		recordDraft: unsupported,
 		recordValidation: unsupported,
+		skipEvaluation: unsupported,
 		startEvaluation: unsupported,
 		recordEvaluation: unsupported,
 	};
@@ -95,6 +96,7 @@ interface WriterFixtureOptions {
 	readonly retainedNames?: readonly string[];
 	readonly proposedName: string;
 	readonly files?: SkillDraft["files"];
+	readonly evaluationSkipped?: boolean;
 }
 
 async function writerFixture(options: WriterFixtureOptions) {
@@ -306,7 +308,17 @@ async function writerFixture(options: WriterFixtureOptions) {
 			},
 		],
 		state: "accepted",
-		dispositionHistory: [],
+		dispositionHistory: options.evaluationSkipped
+			? [
+					{
+						eventId: "evaluation-skipped",
+						from: "structurally-valid",
+						to: "accepted",
+						reasonCodes: ["retrieval-and-behavior-evaluation-skipped"],
+						createdAt: now,
+					},
+				]
+			: [],
 		evidence: {
 			supportingEvidenceIds: ["evidence-1"],
 			contradictingEvidenceIds: [],
@@ -318,7 +330,7 @@ async function writerFixture(options: WriterFixtureOptions) {
 		priorityScore: null,
 		draft: draftReference,
 		validation: validationReference,
-		evaluation: reference(evaluation),
+		evaluation: options.evaluationSkipped ? null : reference(evaluation),
 		synthesisIdempotencyKey: draft.synthesisIdempotencyKey,
 		validationIdempotencyKey: "validation-1",
 		evaluationIdempotencyKey: evaluation.evaluationIdempotencyKey,
@@ -397,6 +409,37 @@ describe("skill writer", () => {
 		expect(current.manifest.base).toBe(data.base.manifest.version);
 		expect(current.state.memory).toBe(data.base.state.memory);
 		expect(current.state.skills.map((skill) => skill.name).sort()).toEqual([...testCase.expectedNames].sort());
+	});
+
+	it("stages and activates a deterministically validated mutation when evaluation is skipped", async () => {
+		const data = await writerFixture({
+			operation: "CREATE",
+			proposedName: "created-skill",
+			evaluationSkipped: true,
+		});
+
+		const batch = await data.writer.buildMutationBatch({ scope, groupId: data.group.groupId, createdAt: now });
+		expect(batch.mutations[0]?.evaluation).toBeNull();
+		const writeReceipt = await data.writer.write(batch, { idempotencyKey: "write-1", lease: data.lease });
+		await expect(
+			data.writer.activate(batch, writeReceipt, { idempotencyKey: "activate-1", lease: data.lease }),
+		).resolves.toMatchObject({ result: { status: "activated" } });
+		expect((await data.harnessState.loadCurrent()).state.skills).toEqual([
+			expect.objectContaining({ name: "created-skill" }),
+		]);
+	});
+
+	it("rejects unevaluated candidates without an explicit skip transition", async () => {
+		const data = await writerFixture({
+			operation: "CREATE",
+			proposedName: "created-skill",
+			evaluationSkipped: true,
+		});
+		data.groups[0] = { ...data.group, dispositionHistory: [] };
+
+		await expect(
+			data.writer.buildMutationBatch({ scope, groupId: data.group.groupId, createdAt: now }),
+		).rejects.toThrow("is not accepted for skill activation");
 	});
 
 	it("persists supporting files in an activated skill package", async () => {

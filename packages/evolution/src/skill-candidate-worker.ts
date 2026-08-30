@@ -231,7 +231,6 @@ export class PollingSkillCandidateWorkSource {
 				(event) => event.type === "skill-candidate-work-checkpointed" && event.stage === "completed",
 			);
 			if (completed && !(this.#dependencies.evaluatorAvailable && awaitingEvaluation)) continue;
-			if (awaitingEvaluation && !this.#dependencies.evaluatorAvailable) continue;
 			const latestFailure = events
 				.filter((event): event is SkillCandidateWorkFailedEvent => event.type === "skill-candidate-work-failed")
 				.sort((left, right) => right.attempt - left.attempt)[0];
@@ -619,8 +618,33 @@ export class SkillCandidateRegistryWorker implements SkillCandidateWorkProcessor
 			}
 			await this.#appendCheckpoint(job, "evaluating", attempt, [...evaluationGroups.keys()], claim());
 			const evaluatedGroupIds: string[] = [];
-			if (this.#dependencies.evaluator === undefined && evaluationGroups.size > 0) return;
-			if (this.#dependencies.evaluator !== undefined) {
+			if (this.#dependencies.evaluator === undefined) {
+				for (const evaluationGroup of evaluationGroups.values()) {
+					signal.throwIfAborted();
+					if (evaluationGroup.draft === null || evaluationGroup.validation === null) {
+						throw new Error(`Candidate group "${evaluationGroup.groupId}" lacks evaluation prerequisites`);
+					}
+					const common = {
+						scope: job.metadata.scope,
+						lease: claim(),
+						groupId: evaluationGroup.groupId,
+						draft: evaluationGroup.draft,
+						validation: evaluationGroup.validation,
+						proposalRevisionIds: evaluationGroup.proposalRevisions.map((revision) => revision.revisionId),
+						idempotencyKey: evaluationGroup.evaluationIdempotencyKey,
+						createdAt: this.#dependencies.clock.now(),
+					};
+					if (evaluationGroup.evaluation === null) {
+						await this.#dependencies.registry.skipEvaluation(common);
+					} else {
+						await this.#dependencies.registry.recordEvaluation({
+							...common,
+							evaluation: evaluationGroup.evaluation,
+						});
+					}
+					evaluatedGroupIds.push(evaluationGroup.groupId);
+				}
+			} else {
 				for (const evaluationGroup of evaluationGroups.values()) {
 					signal.throwIfAborted();
 					if (evaluationGroup.draft === null || evaluationGroup.validation === null) {

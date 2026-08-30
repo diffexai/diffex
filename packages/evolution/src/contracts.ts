@@ -1235,7 +1235,7 @@ export interface SkillMutation {
 	readonly proposalRevisionIds: readonly string[];
 	readonly draft: EvolutionArtifactReference;
 	readonly validation: EvolutionArtifactReference;
-	readonly evaluation: EvolutionArtifactReference;
+	readonly evaluation: EvolutionArtifactReference | null;
 	readonly memoryDisposition: SkillMutationMemoryDisposition;
 	readonly existingSkills: readonly SkillMutationExistingArtifact[];
 	readonly skill: SkillMutationArtifact | null;

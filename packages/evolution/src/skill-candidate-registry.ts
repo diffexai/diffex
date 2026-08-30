@@ -1079,6 +1079,79 @@ export class PersistentSkillCandidateRegistry implements SkillCandidateRegistry 
 		throw new Error("Skill candidate registry changed too often to start evaluation");
 	}
 
+	async skipEvaluation(input: SkillCandidateEvaluationStartInput): Promise<SkillCandidateGroup> {
+		for (let attempt = 0; attempt < this.#maxCommitAttempts; attempt += 1) {
+			const snapshot = await this.#store.loadSkillCandidateRegistry(input.scope);
+			const mutable = materializeGroups(snapshot.events).get(input.groupId);
+			if (mutable === undefined) throw new Error(`Unknown candidate group "${input.groupId}"`);
+			const group = immutableGroup(mutable);
+			if (
+				!sameValues(
+					input.proposalRevisionIds,
+					group.proposalRevisions.map((revision) => revision.revisionId),
+				) ||
+				group.draft?.artifactId !== input.draft.artifactId ||
+				group.draft.contentDigest !== input.draft.contentDigest ||
+				group.validation?.artifactId !== input.validation.artifactId ||
+				group.validation.contentDigest !== input.validation.contentDigest ||
+				input.idempotencyKey !== group.evaluationIdempotencyKey
+			) {
+				throw new Error(`Candidate group "${input.groupId}" changed before evaluation was skipped`);
+			}
+			if (
+				group.state === "accepted" &&
+				group.evaluation === null &&
+				group.dispositionHistory.at(-1)?.reasonCodes.includes("retrieval-and-behavior-evaluation-skipped")
+			) {
+				return group;
+			}
+			if (
+				(group.state !== "structurally-valid" && group.state !== "evaluation-pending") ||
+				group.evaluation !== null
+			) {
+				throw new Error(`Candidate group "${input.groupId}" is not eligible to skip evaluation`);
+			}
+			const validation = await this.#artifacts.get(input.validation);
+			if (
+				!("artifactKind" in validation) ||
+				validation.artifactKind !== "skill-draft-validation" ||
+				validation.disposition !== "accepted" ||
+				computeEvolutionContentDigest(validation) !== input.validation.contentDigest
+			) {
+				throw new Error(`Candidate group "${input.groupId}" does not have accepted validation`);
+			}
+			const transition = transitionEvent(
+				input.groupId,
+				group.state,
+				"accepted",
+				["retrieval-and-behavior-evaluation-skipped"],
+				nextSequence(snapshot.events, 0),
+				input.idempotencyKey,
+				this.#producer,
+				input.scope,
+				input.createdAt,
+			);
+			const committed = await this.#store.appendSkillCandidateRegistryEvents(
+				input.scope,
+				snapshot.revision,
+				[transition],
+				input.lease,
+			);
+			if (committed === "committed") {
+				mutable.state = "accepted";
+				mutable.dispositionHistory.push({
+					eventId: transition.eventId,
+					from: transition.from,
+					to: transition.to,
+					reasonCodes: transition.reasonCodes,
+					createdAt: input.createdAt,
+				});
+				return immutableGroup(mutable);
+			}
+		}
+		throw new Error("Skill candidate registry changed too often to skip evaluation");
+	}
+
 	async recordEvaluation(input: SkillCandidateEvaluationRecordingInput): Promise<SkillCandidateGroup> {
 		for (let attempt = 0; attempt < this.#maxCommitAttempts; attempt += 1) {
 			const snapshot = await this.#store.loadSkillCandidateRegistry(input.scope);
