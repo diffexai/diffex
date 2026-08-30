@@ -150,6 +150,14 @@ function candidate(options: {
 	readonly taskLineageIds: readonly string[];
 	readonly trigger?: string;
 	readonly action?: string;
+	readonly additionalPositiveExamples?: readonly string[];
+	readonly additionalPreconditions?: readonly string[];
+	readonly additionalSteps?: readonly string[];
+	readonly additionalTools?: readonly string[];
+	readonly additionalEnvironment?: readonly string[];
+	readonly additionalFailures?: SkillCandidate["failureHandling"];
+	readonly additionalBoundaries?: readonly string[];
+	readonly additionalChecks?: readonly string[];
 }): { readonly candidate: SkillCandidate; readonly reference: EvolutionArtifactReference } {
 	const supportingEvidenceIds = options.supportingEvidenceIds ?? [];
 	const contradictingEvidenceIds = options.contradictingEvidenceIds ?? [];
@@ -204,10 +212,13 @@ function candidate(options: {
 		},
 		trigger: {
 			description: options.trigger ?? "A repository change requires focused verification.",
-			positiveExamples: ["A focused code change needs a deterministic check."],
+			positiveExamples: [
+				"A focused code change needs a deterministic check.",
+				...(options.additionalPositiveExamples ?? []),
+			],
 			negativeExamples: ["No repository files changed."],
 		},
-		preconditions: ["A focused verification command is available."],
+		preconditions: ["A focused verification command is available.", ...(options.additionalPreconditions ?? [])],
 		procedure: {
 			steps: [
 				{
@@ -215,9 +226,14 @@ function candidate(options: {
 					action: options.action ?? "Run the focused verification command and inspect its result.",
 					condition: null,
 				},
+				...(options.additionalSteps ?? []).map((action, index) => ({
+					sequence: index + 2,
+					action,
+					condition: null,
+				})),
 			],
-			requiredTools: ["shell"],
-			environment: ["Repository checkout"],
+			requiredTools: ["shell", ...(options.additionalTools ?? [])],
+			environment: ["Repository checkout", ...(options.additionalEnvironment ?? [])],
 		},
 		failureHandling: [
 			{
@@ -225,10 +241,14 @@ function candidate(options: {
 				mitigation: "Inspect the deterministic diagnostic.",
 				recovery: "Correct the issue and rerun the focused command.",
 			},
+			...(options.additionalFailures ?? []),
 		],
-		applicabilityBoundaries: ["Repositories with deterministic verification"],
+		applicabilityBoundaries: [
+			"Repositories with deterministic verification",
+			...(options.additionalBoundaries ?? []),
+		],
 		verificationContract: {
-			checks: ["The focused verification command exits successfully."],
+			checks: ["The focused verification command exits successfully.", ...(options.additionalChecks ?? [])],
 			completionCondition: "The focused verification command passes.",
 		},
 		memoryRelationship: {
@@ -336,6 +356,177 @@ function registryFixture(store: MemoryRegistryStore = new MemoryRegistryStore())
 }
 
 describe("persistent skill candidate registry", () => {
+	it("builds one canonical capsule from the latest contract and unique historical additions", async () => {
+		const fixture = registryFixture();
+		const firstInput = input([evidence("support-a", "task-a", 0)], "trace-a");
+		const firstCandidate = candidate({
+			candidateId: "candidate-a",
+			input: firstInput,
+			proposedName: "focused-check",
+			supportingEvidenceIds: ["support-a"],
+			taskLineageIds: ["task-a"],
+			additionalPositiveExamples: ["A legacy package needs its focused verifier."],
+			additionalPreconditions: ["The legacy verifier is installed."],
+			additionalSteps: ["Archive the legacy verifier output for inspection."],
+			additionalTools: ["legacy-verifier"],
+			additionalEnvironment: ["Legacy package workspace"],
+			additionalFailures: [
+				{
+					signal: "The legacy verifier cannot start.",
+					mitigation: "Inspect the legacy verifier installation.",
+					recovery: "Install the verifier and rerun it.",
+				},
+			],
+			additionalBoundaries: ["Legacy packages only"],
+			additionalChecks: ["The archived verifier output is readable."],
+		});
+		const first = await fixture.registry.consolidate({
+			sourceEvolutionJobId: "job-a",
+			input: firstInput,
+			candidates: [firstCandidate],
+			idempotencyKey: "job-a:registry",
+			createdAt,
+		});
+
+		const secondInput = input([evidence("support-b", "task-b", 0)], "trace-b");
+		const secondCandidate = candidate({
+			candidateId: "candidate-b",
+			input: secondInput,
+			proposedName: "focused-check",
+			supportingEvidenceIds: ["support-b"],
+			taskLineageIds: ["task-b"],
+		});
+		await fixture.registry.consolidate({
+			sourceEvolutionJobId: "job-b",
+			input: secondInput,
+			candidates: [secondCandidate],
+			idempotencyKey: "job-b:registry",
+			createdAt: "2026-08-26T12:00:00.000Z",
+		});
+
+		const thirdInput = input([evidence("support-c", "task-c", 0)], "trace-c");
+		const thirdCandidate = candidate({
+			candidateId: "candidate-c",
+			input: thirdInput,
+			proposedName: "focused-check-v2",
+			supportingEvidenceIds: ["support-c"],
+			taskLineageIds: ["task-c"],
+		});
+		const third = await fixture.registry.consolidate({
+			sourceEvolutionJobId: "job-c",
+			input: thirdInput,
+			candidates: [thirdCandidate],
+			idempotencyKey: "job-c:registry",
+			createdAt: "2026-08-27T12:00:00.000Z",
+		});
+		const group = third.groups[0];
+		if (group === undefined) throw new Error("Expected a canonical candidate group");
+		const artifact = await fixture.artifacts.get(group.canonicalCapsule);
+		if (!("artifactKind" in artifact) || artifact.artifactKind !== "skill-candidate-group-capsule") {
+			throw new Error("Expected a canonical group capsule artifact");
+		}
+
+		expect(artifact.contract.proposedName).toBe("focused-check-v2");
+		expect(artifact.baseProposalRevisionId).toBe(group.proposalRevisions.at(-1)?.revisionId);
+		expect(artifact.proposalRevisionIds).toEqual(group.proposalRevisions.map((revision) => revision.revisionId));
+		expect(artifact.sourceDigests).toEqual(
+			group.proposalRevisions.map((revision) => revision.candidate.contentDigest),
+		);
+		expect(artifact.historicalAdditions).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					field: "procedure.steps",
+					value: expect.objectContaining({ action: "Archive the legacy verifier output for inspection." }),
+					supportCount: 1,
+					revisionSpans: [{ startIndex: 0, endIndex: 0 }],
+				}),
+				expect.objectContaining({ field: "procedure.requiredTools", value: "legacy-verifier" }),
+				expect.objectContaining({ field: "failureHandling" }),
+				expect.objectContaining({ field: "verificationContract.checks" }),
+			]),
+		);
+		const defaultStepDigest = computeEvolutionContentDigest({
+			sequence: 1,
+			action: "Run the focused verification command and inspect its result.",
+			condition: null,
+		});
+		expect(artifact.support).toContainEqual({
+			field: "procedure.steps",
+			valueDigest: defaultStepDigest,
+			supportCount: 3,
+			revisionSpans: [{ startIndex: 0, endIndex: 2 }],
+		});
+		expect(artifact.conflicts).toContainEqual(
+			expect.objectContaining({
+				field: "proposedName",
+				alternatives: [
+					expect.objectContaining({
+						value: "focused-check",
+						supportCount: 2,
+						revisionSpans: [{ startIndex: 0, endIndex: 1 }],
+					}),
+				],
+			}),
+		);
+		expect(group.canonicalCapsule).not.toEqual(first.groups[0]?.canonicalCapsule);
+		expect(
+			fixture.store.events.filter((event) => event.type === "skill-candidate-group-capsule-recorded"),
+		).toHaveLength(3);
+
+		const retried = await fixture.registry.consolidate({
+			sourceEvolutionJobId: "job-c",
+			input: thirdInput,
+			candidates: [thirdCandidate],
+			idempotencyKey: "job-c:registry",
+			createdAt: "2026-08-27T12:00:00.000Z",
+		});
+		expect(retried.changedGroupIds).toEqual([]);
+		expect(retried.groups[0]?.canonicalCapsule).toEqual(group.canonicalCapsule);
+	});
+
+	it("compacts hundreds of repeated revisions without repeating procedural prose", async () => {
+		const fixture = registryFixture();
+		const sourceInput = input([evidence("support-a", "task-a", 0)], "trace-a");
+		const candidates = Array.from({ length: 200 }, (_value, index) =>
+			candidate({
+				candidateId: `candidate-${index.toString().padStart(3, "0")}`,
+				input: sourceInput,
+				proposedName: "focused-check",
+				supportingEvidenceIds: ["support-a"],
+				taskLineageIds: ["task-a"],
+			}),
+		);
+		const result = await fixture.registry.consolidate({
+			sourceEvolutionJobId: "job-repeated",
+			input: sourceInput,
+			candidates,
+			idempotencyKey: "job-repeated:registry",
+			createdAt,
+		});
+		const group = result.groups[0];
+		if (group === undefined) throw new Error("Expected a repeated candidate group");
+		const artifact = await fixture.artifacts.get(group.canonicalCapsule);
+		if (!("artifactKind" in artifact) || artifact.artifactKind !== "skill-candidate-group-capsule") {
+			throw new Error("Expected a canonical group capsule artifact");
+		}
+		const serialized = JSON.stringify(artifact);
+		const repeatedProcedure = "Run the focused verification command and inspect its result.";
+		const candidateBytes = candidates.reduce((total, item) => total + JSON.stringify(item.candidate).length, 0);
+
+		expect(artifact.proposalRevisionIds).toHaveLength(200);
+		expect(artifact.sourceDigests).toHaveLength(200);
+		expect(artifact.historicalAdditions).toEqual([]);
+		expect(artifact.conflicts).toEqual([]);
+		expect(serialized.split(repeatedProcedure)).toHaveLength(2);
+		expect(serialized.length).toBeLessThan(candidateBytes / 4);
+		expect(artifact.support.find((support) => support.field === "procedure.steps")).toEqual(
+			expect.objectContaining({
+				supportCount: 200,
+				revisionSpans: [{ startIndex: 0, endIndex: 199 }],
+			}),
+		);
+	});
+
 	it("requalifies an exhausted synthesis only after the proposal revision set changes", async () => {
 		const fixture = registryFixture();
 		const firstInput = input([evidence("support-a", "task-a", 0)], "trace-a");

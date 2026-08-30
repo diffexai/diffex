@@ -163,6 +163,10 @@ function transientSynthesisError(message = "temporary provider failure"): Evolut
 function qualifiedGroup(candidateReference: EvolutionArtifactReference): SkillCandidateGroup {
 	return {
 		groupId: "group-qualified",
+		canonicalCapsule: {
+			artifactId: "skill-candidate-group-capsule-qualified",
+			contentDigest: `sha256:${"9".repeat(64)}`,
+		},
 		profile: {
 			workspace: { repositoryId: "diffex", directoryId: "directory-1", evolutionScope: scope },
 			existingSkillIds: [],

@@ -390,6 +390,10 @@ function fixture(state: SkillCandidateGroup["state"] = "evidence-qualified") {
 	];
 	const group: SkillCandidateGroup = {
 		groupId: "group-1",
+		canonicalCapsule: {
+			artifactId: "skill-candidate-group-capsule-1",
+			contentDigest: `sha256:${"9".repeat(64)}`,
+		},
 		profile: {
 			workspace: { repositoryId: "diffex", directoryId: "directory-1", evolutionScope: scope },
 			existingSkillIds: ["installed:workspace:focused-verification"],

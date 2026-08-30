@@ -725,6 +725,90 @@ export interface SkillCandidateProposalRevision {
 	readonly evidence: SkillCandidateEvidenceContribution;
 }
 
+export interface SkillCandidateGroupContract {
+	readonly operation: SkillCandidateOperation;
+	readonly proposedName: string;
+	readonly workspace: SkillCandidateWorkspaceScope;
+	readonly existingSkillIds: readonly string[];
+	readonly skillability: SkillCandidate["skillability"];
+	readonly trigger: SkillCandidate["trigger"];
+	readonly preconditions: readonly string[];
+	readonly procedure: SkillCandidate["procedure"];
+	readonly failureHandling: readonly SkillCandidateFailureHandling[];
+	readonly applicabilityBoundaries: readonly string[];
+	readonly verificationContract: SkillCandidate["verificationContract"];
+	readonly memoryRelationship: SkillCandidateMemoryRelationship;
+}
+
+export type SkillCandidateGroupAdditionField =
+	| "applicabilityBoundaries"
+	| "failureHandling"
+	| "preconditions"
+	| "procedure.environment"
+	| "procedure.requiredTools"
+	| "procedure.steps"
+	| "trigger.negativeExamples"
+	| "trigger.positiveExamples"
+	| "verificationContract.checks";
+
+export type SkillCandidateGroupAdditionValue = string | SkillCandidateFailureHandling | SkillCandidateProcedureStep;
+
+export interface SkillCandidateGroupRevisionSpan {
+	readonly startIndex: number;
+	readonly endIndex: number;
+}
+
+export interface SkillCandidateGroupHistoricalAddition {
+	readonly field: SkillCandidateGroupAdditionField;
+	readonly value: SkillCandidateGroupAdditionValue;
+	readonly valueDigest: string;
+	readonly supportCount: number;
+	readonly revisionSpans: readonly SkillCandidateGroupRevisionSpan[];
+}
+
+export interface SkillCandidateGroupValueSupport {
+	readonly field: SkillCandidateMaterialField;
+	readonly valueDigest: string;
+	readonly supportCount: number;
+	readonly revisionSpans: readonly SkillCandidateGroupRevisionSpan[];
+}
+
+export interface SkillCandidateGroupConflictAlternative {
+	readonly value: string | SkillCandidate["skillability"] | SkillCandidateMemoryRelationship;
+	readonly valueDigest: string;
+	readonly supportCount: number;
+	readonly revisionSpans: readonly SkillCandidateGroupRevisionSpan[];
+}
+
+export interface SkillCandidateGroupConflict {
+	readonly field:
+		| "memoryRelationship"
+		| "operation"
+		| "proposedName"
+		| "skillability"
+		| "trigger.description"
+		| "verificationContract.completionCondition";
+	readonly baseValueDigest: string;
+	readonly alternatives: readonly SkillCandidateGroupConflictAlternative[];
+	readonly omittedAlternativeCount: number;
+	readonly omittedAlternativesDigest: string | null;
+}
+
+export interface SkillCandidateGroupCapsule {
+	readonly artifactKind: "skill-candidate-group-capsule";
+	readonly metadata: EvolutionArtifactMetadata;
+	readonly capsuleId: string;
+	readonly groupId: string;
+	readonly baseProposalRevisionId: string;
+	readonly proposalRevisionIds: readonly string[];
+	readonly sourceDigests: readonly string[];
+	readonly contract: SkillCandidateGroupContract;
+	readonly historicalAdditions: readonly SkillCandidateGroupHistoricalAddition[];
+	readonly support: readonly SkillCandidateGroupValueSupport[];
+	readonly conflicts: readonly SkillCandidateGroupConflict[];
+	readonly evidence: SkillCandidateEvidenceContribution;
+}
+
 export interface SkillCandidatePriorityScoreComponents {
 	readonly independentSupport: number;
 	readonly evidenceBreadth: number;
@@ -925,6 +1009,7 @@ export interface SkillCandidateGroup {
 	readonly groupId: string;
 	readonly profile: SkillCandidateGroupingProfile;
 	readonly proposalRevisions: readonly SkillCandidateProposalRevision[];
+	readonly canonicalCapsule: EvolutionArtifactReference;
 	readonly state: SkillCandidateState;
 	readonly dispositionHistory: readonly SkillCandidateDispositionRecord[];
 	readonly evidence: SkillCandidateEvidenceContribution;
@@ -949,6 +1034,13 @@ export interface SkillCandidateProposalRecordedEvent extends SkillCandidateRegis
 	readonly groupId: string;
 	readonly profile: SkillCandidateGroupingProfile;
 	readonly proposalRevision: SkillCandidateProposalRevision;
+}
+
+export interface SkillCandidateGroupCapsuleRecordedEvent extends SkillCandidateRegistryEventBase {
+	readonly type: "skill-candidate-group-capsule-recorded";
+	readonly groupId: string;
+	readonly capsule: EvolutionArtifactReference;
+	readonly proposalRevisionIds: readonly string[];
 }
 
 export interface SkillCandidatePriorityScoredEvent extends SkillCandidateRegistryEventBase {
@@ -1048,6 +1140,7 @@ export interface SkillCandidateWorkFailedEvent extends SkillCandidateRegistryEve
 
 export type SkillCandidateRegistryEvent =
 	| SkillCandidateProposalRecordedEvent
+	| SkillCandidateGroupCapsuleRecordedEvent
 	| SkillCandidatePriorityScoredEvent
 	| SkillCandidateDraftRecordedEvent
 	| SkillCandidateValidationRecordedEvent

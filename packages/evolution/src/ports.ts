@@ -37,6 +37,7 @@ import type {
 	SkillBehaviorEvaluationOutcome,
 	SkillCandidate,
 	SkillCandidateGroup,
+	SkillCandidateGroupCapsule,
 	SkillCandidatePriorityScore,
 	SkillCandidateRegistryEvent,
 	SkillCandidateRegistrySnapshot,
@@ -69,6 +70,7 @@ export type EvolutionArtifact =
 	| ReflectionNode
 	| ScoredProposal
 	| SkillCandidate
+	| SkillCandidateGroupCapsule
 	| SkillCandidatePriorityScore
 	| SkillDraft
 	| SkillDraftValidationReport
