@@ -661,6 +661,57 @@ describe("EvolutionMenuComponent", () => {
 		component.dispose();
 	});
 
+	it("continues polling candidate work after the analysis job completes", async () => {
+		const waitingGeneration = {
+			status: "waiting" as const,
+			stage: null,
+			updatedAt: null,
+			attempt: 0,
+			retryNotBefore: null,
+			failureMessage: null,
+		};
+		const completedGeneration = {
+			status: "completed" as const,
+			stage: "completed" as const,
+			updatedAt: "2026-08-20T12:35:00.000Z",
+			attempt: 1,
+			retryNotBefore: null,
+			failureMessage: null,
+		};
+		const summary = job({
+			stage: "completed",
+			outcome: "completed",
+			analysisStatus: "completed",
+			candidateGeneration: waitingGeneration,
+			terminalAt: "2026-08-20T12:34:00.000Z",
+		});
+		const fixture = client(overview());
+		fixture.listJobs.mockResolvedValue([summary]);
+		fixture.jobDetailCall
+			.mockResolvedValueOnce(jobDetail({ ...summary, candidateGeneration: waitingGeneration }))
+			.mockResolvedValue(jobDetail({ ...summary, candidateGeneration: completedGeneration }));
+		const component = new EvolutionMenuComponent(
+			fixture.client,
+			() => {},
+			() => {},
+			() => {},
+			5,
+		);
+		await vi.waitFor(() => expect(stripAnsi(component.render(180).join("\n"))).toContain("Browse"));
+
+		for (let index = 0; index < 4; index += 1) component.handleInput("\u001b[B");
+		component.handleInput("\n");
+		await vi.waitFor(() =>
+			expect(stripAnsi(component.render(180).join("\n"))).toContain(formatEvolutionJobLabel(summary)),
+		);
+		component.handleInput("\n");
+		await vi.waitFor(() => expect(fixture.jobDetailCall.mock.calls.length).toBeGreaterThanOrEqual(2));
+		await vi.waitFor(() =>
+			expect(stripAnsi(component.render(180).join("\n"))).toContain("Candidate generation: completed"),
+		);
+		component.dispose();
+	});
+
 	it("renders a readable proposal outcome without internal mutation diagnostics", async () => {
 		const detail = proposalDetail();
 		const fixture = client(overview());
