@@ -12,6 +12,7 @@ import type {
 	SkillabilityClassification,
 	SkillCandidate,
 	SkillCandidateFailureHandling,
+	SkillCandidateMaterialField,
 	SkillCandidateMemoryRelationship,
 	SkillCandidateOperation,
 	SkillCandidateProcedureStep,
@@ -31,8 +32,29 @@ import type {
 } from "./ports.ts";
 import { computeEvolutionContentDigest, createEvolutionArtifactMetadata } from "./provenance.ts";
 import { type SkillCuratorToolAudit, SkillCuratorToolRegistry } from "./skill-curator-tools.ts";
+import { EVOLUTION_TOKEN_ESTIMATOR_VERSION, measureEvolutionValue } from "./token-estimator.ts";
 
 const DEFAULT_MAX_RESPONSE_ATTEMPTS = 2;
+export const SKILL_CANDIDATE_CAPSULE_MAX_SERIALIZED_BYTES = 64 * 1024;
+export const SKILL_CANDIDATE_CAPSULE_MAX_ESTIMATED_TOKENS = 16 * 1024;
+const MATERIAL_FIELDS = [
+	"operation",
+	"proposedName",
+	"existingSkillIds",
+	"skillability",
+	"trigger.description",
+	"trigger.positiveExamples",
+	"trigger.negativeExamples",
+	"preconditions",
+	"procedure.steps",
+	"procedure.requiredTools",
+	"procedure.environment",
+	"failureHandling",
+	"applicabilityBoundaries",
+	"verificationContract.checks",
+	"verificationContract.completionCondition",
+	"memoryRelationship",
+] as const satisfies readonly SkillCandidateMaterialField[];
 const DECISION_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const SKILLABILITY_CLASSIFICATIONS = new Set<SkillabilityClassification>([
 	"conditional-procedure",
@@ -738,6 +760,36 @@ function workspace(input: SkillCuratorInput): SkillCandidateWorkspaceScope {
 	};
 }
 
+function boundedCandidateCapsule(
+	content: Omit<SkillCandidate, "capsuleSize" | "metadata">,
+): Omit<SkillCandidate, "metadata"> {
+	let capsuleSize: SkillCandidate["capsuleSize"] = {
+		serialization: EVOLUTION_TOKEN_ESTIMATOR_VERSION,
+		serializedBytes: 0,
+		estimatedTokens: 0,
+		maxSerializedBytes: SKILL_CANDIDATE_CAPSULE_MAX_SERIALIZED_BYTES,
+		maxEstimatedTokens: SKILL_CANDIDATE_CAPSULE_MAX_ESTIMATED_TOKENS,
+	};
+	for (;;) {
+		const measured = measureEvolutionValue({ ...content, capsuleSize });
+		if (
+			measured.serializedBytes === capsuleSize.serializedBytes &&
+			measured.estimatedTokens === capsuleSize.estimatedTokens
+		) {
+			if (
+				measured.serializedBytes > SKILL_CANDIDATE_CAPSULE_MAX_SERIALIZED_BYTES ||
+				measured.estimatedTokens > SKILL_CANDIDATE_CAPSULE_MAX_ESTIMATED_TOKENS
+			) {
+				throw new Error(
+					`Skill candidate capsule "${content.proposedName}" exceeds its ${String(SKILL_CANDIDATE_CAPSULE_MAX_SERIALIZED_BYTES)}-byte/${String(SKILL_CANDIDATE_CAPSULE_MAX_ESTIMATED_TOKENS)}-token ceiling`,
+				);
+			}
+			return { ...content, capsuleSize };
+		}
+		capsuleSize = { ...capsuleSize, ...measured };
+	}
+}
+
 function resultsFromDrafts(
 	parsed: ParsedSkillCuratorOutput,
 	input: SkillCuratorInput,
@@ -766,7 +818,7 @@ function resultsFromDrafts(
 	const candidates = parsed.candidates.map((draft): SkillCandidate => {
 		const sourceLessons = selectedLessons(draft.lessonIds);
 		const references = evidenceReferences(input, sourceLessons);
-		const content = {
+		const content = boundedCandidateCapsule({
 			artifactKind: "skill-candidate" as const,
 			candidateId: stableId("skill-candidate", {
 				idempotencyKey: input.idempotencyKey,
@@ -778,7 +830,12 @@ function resultsFromDrafts(
 			proposedName: draft.proposedName,
 			existingSkillIds: draft.existingSkillIds,
 			sourceLessonIds: draft.lessonIds,
-			sourceProceduralObservationIds: [],
+			provenanceBindings: sourceLessons.map((lesson) => ({
+				sourceLessonId: lesson.lessonId,
+				supportingEvidenceIds: unique(lesson.evidenceIds),
+				contradictingEvidenceIds: unique(lesson.counterevidenceIds),
+				materialFields: MATERIAL_FIELDS,
+			})),
 			...references,
 			skillability: draft.skillability,
 			trigger: draft.trigger,
@@ -791,7 +848,7 @@ function resultsFromDrafts(
 			]),
 			verificationContract: draft.verificationContract,
 			memoryRelationship: draft.memoryRelationship,
-		};
+		});
 		return {
 			metadata: createEvolutionArtifactMetadata({
 				artifactId: content.candidateId,
@@ -914,7 +971,12 @@ function modelInput(
 			},
 			workspaceTarget: jsonObject(workspace(input)),
 			globalEvolvedSkillTargetPermitted: false,
-			proceduralObservations: [],
+			candidateCapsuleLimits: {
+				serialization: EVOLUTION_TOKEN_ESTIMATOR_VERSION,
+				maxSerializedBytes: SKILL_CANDIDATE_CAPSULE_MAX_SERIALIZED_BYTES,
+				maxEstimatedTokens: SKILL_CANDIDATE_CAPSULE_MAX_ESTIMATED_TOKENS,
+				preserveWholeStructuredFields: true,
+			},
 			reportProceduralInformationLoss: {
 				when: "A lesson preserves a conclusion but omits material procedural information that cited source evidence contains, preventing or weakening a candidate.",
 				requireSourceEvidenceInspection: true,

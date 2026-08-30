@@ -682,7 +682,6 @@ describe("evolution control service", () => {
 			proposedName: "focused-verification",
 			existingSkillIds: [],
 			sourceLessonIds: ["lesson-1"],
-			sourceProceduralObservationIds: [],
 			supportingEvidenceIds: ["evidence-1"],
 			contradictingEvidenceIds: [],
 			supportingTraceIds: ["trace-1"],

@@ -129,6 +129,7 @@ export {
 	type SkillBehaviorEvaluationOutcome,
 	type SkillBehaviorEvaluationResult,
 	type SkillCandidate,
+	type SkillCandidateCapsuleSize,
 	type SkillCandidateDispositionRecord,
 	type SkillCandidateDraftRecordedEvent,
 	type SkillCandidateEvaluationRecordedEvent,
@@ -137,6 +138,7 @@ export {
 	type SkillCandidateGroup,
 	type SkillCandidateGroupFailureDiagnostic,
 	type SkillCandidateGroupingProfile,
+	type SkillCandidateMaterialField,
 	type SkillCandidateMemoryRelationship,
 	type SkillCandidateOperation,
 	type SkillCandidatePriorityScore,
@@ -145,6 +147,7 @@ export {
 	type SkillCandidateProcedureStep,
 	type SkillCandidateProposalRecordedEvent,
 	type SkillCandidateProposalRevision,
+	type SkillCandidateProvenanceBinding,
 	type SkillCandidateRegistryEvent,
 	type SkillCandidateRegistrySnapshot,
 	type SkillCandidateState,
@@ -386,6 +389,8 @@ export {
 } from "./skill-candidate-worker.ts";
 export {
 	createSkillCuratorOutputSchema,
+	SKILL_CANDIDATE_CAPSULE_MAX_ESTIMATED_TOKENS,
+	SKILL_CANDIDATE_CAPSULE_MAX_SERIALIZED_BYTES,
 	StructuredSkillCurator,
 	type StructuredSkillCuratorDependencies,
 	type StructuredSkillCuratorOptions,
@@ -437,8 +442,10 @@ export {
 	type AutomaticEvolutionEligibilityInput,
 	type AutomaticEvolutionEligibilityReason,
 	EVOLUTION_TOKEN_ESTIMATOR_VERSION,
+	type EvolutionValueSize,
 	estimateEvolutionTokens,
 	evaluateAutomaticEvolutionEligibility,
+	measureEvolutionValue,
 } from "./token-estimator.ts";
 export {
 	EvolutionBackgroundWorker,
