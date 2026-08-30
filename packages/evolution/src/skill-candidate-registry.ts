@@ -120,6 +120,10 @@ function sameValues(left: readonly string[], right: readonly string[]): boolean 
 	);
 }
 
+function sameOrderedValues(left: readonly string[], right: readonly string[]): boolean {
+	return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
 function terms(values: readonly string[]): string[] {
 	const result = new Set<string>();
 	for (const value of values) {
@@ -702,7 +706,10 @@ function materializeGroups(events: readonly SkillCandidateRegistryEvent[]): Map<
 function immutableGroup(group: MutableGroup): SkillCandidateGroup {
 	const proposalRevisions = orderedRevisions(group.proposalRevisions);
 	const proposalRevisionIds = proposalRevisions.map((revision) => revision.revisionId);
-	if (group.canonicalCapsule === null || !sameValues(group.canonicalCapsuleProposalRevisionIds, proposalRevisionIds)) {
+	if (
+		group.canonicalCapsule === null ||
+		!sameOrderedValues(group.canonicalCapsuleProposalRevisionIds, proposalRevisionIds)
+	) {
 		throw new Error(`Candidate group "${group.groupId}" does not have a current canonical capsule`);
 	}
 	return {
@@ -1775,7 +1782,7 @@ export class PersistentSkillCandidateRegistry implements SkillCandidateRegistry 
 			for (const group of groups.values()) {
 				const revisions = orderedRevisions(group.proposalRevisions);
 				const revisionIds = revisions.map((revision) => revision.revisionId);
-				if (!sameValues(group.canonicalCapsuleProposalRevisionIds, revisionIds)) {
+				if (!sameOrderedValues(group.canonicalCapsuleProposalRevisionIds, revisionIds)) {
 					const sources: RevisionCandidate[] = [];
 					for (const revision of revisions) {
 						const artifact = await this.#artifacts.get(revision.candidate);
