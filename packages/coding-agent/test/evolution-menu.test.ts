@@ -743,6 +743,39 @@ describe("EvolutionMenuComponent", () => {
 		component.dispose();
 	});
 
+	it("labels skipped skill evaluation without blocking explicit activation", async () => {
+		const detail = skillCandidateDetail({ evaluation: null });
+		const fixture = client(overview());
+		fixture.listJobs.mockResolvedValue([job()]);
+		fixture.jobDetailCall.mockResolvedValue(jobDetail({ skillCandidates: [detail.summary] }));
+		fixture.skillCandidateDetailCall.mockResolvedValue(detail);
+		const component = new EvolutionMenuComponent(
+			fixture.client,
+			() => {},
+			() => {},
+			() => {},
+		);
+		await vi.waitFor(() => expect(stripAnsi(component.render(180).join("\n"))).toContain("Browse"));
+
+		for (let index = 0; index < 4; index += 1) component.handleInput("\u001b[B");
+		component.handleInput("\n");
+		await vi.waitFor(() =>
+			expect(stripAnsi(component.render(180).join("\n"))).toContain(formatEvolutionJobLabel(job())),
+		);
+		component.handleInput("\n");
+		await vi.waitFor(() =>
+			expect(stripAnsi(component.render(180).join("\n"))).toContain("Skill focused-verification - accepted"),
+		);
+		component.handleInput("\n");
+		await vi.waitFor(() => expect(fixture.skillCandidateDetailCall).toHaveBeenCalledOnce());
+
+		const output = stripAnsi(component.render(180).join("\n"));
+		expect(output).toContain("Evaluation [skipped]");
+		expect(output).toContain("Activate");
+		expect(output).not.toContain("Activate [unavailable]");
+		component.dispose();
+	});
+
 	it("formats create, update, and retirement draft diffs", () => {
 		const createDiff = formatEvolutionSkillDraftDiff(skillCandidateDetail());
 		expect(createDiff).toContain("+Run checks.");
