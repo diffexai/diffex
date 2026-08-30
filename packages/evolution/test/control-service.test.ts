@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { HarnessStateStore, type HarnessVersion, type HarnessVersionList } from "@earendil-works/diffex-harness-state";
-import type { MaterializedInvocation } from "@earendil-works/diffex-harness-trace";
+import type { MaterializedEvidence, MaterializedInvocation } from "@earendil-works/diffex-harness-trace";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	computeEvolutionContentDigest,
@@ -668,7 +668,7 @@ describe("evolution control service", () => {
 		});
 	});
 
-	it("exposes candidate provenance, gates activation, and rolls back through preserving descendants", async () => {
+	it("exposes candidate evidence, gates activation, and rolls back through preserving descendants", async () => {
 		const inputReference = { artifactId: "input-1", contentDigest: `sha256:${"1".repeat(64)}` };
 		const candidateReference = { artifactId: "candidate-1", contentDigest: `sha256:${"2".repeat(64)}` };
 		const draftReference = { artifactId: "draft-1", contentDigest: `sha256:${"3".repeat(64)}` };
@@ -737,9 +737,26 @@ describe("evolution control service", () => {
 			validation: validationReference,
 			evaluation: evaluationReference,
 		} as unknown as SkillCandidateGroup;
+		const supportingEvidence = {
+			evidenceId: "evidence-1",
+			kind: "session_item",
+			itemType: "message",
+			order: { traceSequence: 1, timestamp: null, causalIdentifiers: [], ambiguity: [] },
+			traceSources: [],
+			payload: { message: { content: [{ type: "text", text: "The focused verification passed." }] } },
+		} as MaterializedEvidence;
 		const input = {
 			ingestionHighWaterCursor: 1,
-			evidenceSources: [],
+			evidenceSources: [
+				{
+					sourceId: "source-1",
+					materializationId: "materialization-1",
+					ingestionCursor: 1,
+					origin: "product-runtime",
+					contentDigest: computeEvolutionContentDigest("source-1"),
+					invocation: { ...invocation(1), evidence: [supportingEvidence] },
+				},
+			],
 			harness: { baseVersion: null },
 			expectedHarnessBaseVersion: `sha256:${"a".repeat(64)}`,
 			skillCatalog: [],
@@ -876,6 +893,8 @@ describe("evolution control service", () => {
 			},
 			sourceEvolutionJobIds: [job.jobId],
 			proposalRevisionIds: ["revision-1"],
+			supportingEvidence: [supportingEvidence],
+			contradictingEvidence: [],
 			draft: { draftId: "draft-1" },
 			validation: { disposition: "accepted" },
 			evaluation: { disposition: "accepted" },

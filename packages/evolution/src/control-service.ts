@@ -154,6 +154,8 @@ export interface EvolutionSkillCandidateExistingContent {
 export interface EvolutionSkillCandidateDetail {
 	readonly summary: EvolutionSkillCandidateSummary;
 	readonly candidate: SkillCandidate;
+	readonly supportingEvidence: readonly MaterializedEvidence[];
+	readonly contradictingEvidence: readonly MaterializedEvidence[];
 	readonly sourceEvolutionJobIds: readonly string[];
 	readonly proposalRevisionIds: readonly string[];
 	readonly existingContents: readonly EvolutionSkillCandidateExistingContent[];
@@ -297,6 +299,19 @@ function isSkillValidation(artifact: EvolutionArtifact): artifact is SkillDraftV
 
 function isSkillEvaluation(artifact: EvolutionArtifact): artifact is SkillEvaluationReport {
 	return "artifactKind" in artifact && artifact.artifactKind === "skill-evaluation";
+}
+
+function resolveEvidence(input: EvolutionInputSnapshot, evidenceIds: readonly string[]): MaterializedEvidence[] {
+	const evidence = new Map(
+		input.evidenceSources.flatMap((source) =>
+			source.invocation.evidence.map((item) => [item.evidenceId, item] as const),
+		),
+	);
+	return evidenceIds.map((evidenceId) => {
+		const item = evidence.get(evidenceId);
+		if (item === undefined) throw new Error(`Evolution evidence "${evidenceId}" is unavailable`);
+		return item;
+	});
 }
 
 function stringArray(value: unknown): readonly string[] {
@@ -1007,6 +1022,8 @@ export class EvolutionControlService {
 		return {
 			summary: candidateSummary(candidate, group),
 			candidate,
+			supportingEvidence: resolveEvidence(input, candidate.supportingEvidenceIds),
+			contradictingEvidence: resolveEvidence(input, candidate.contradictingEvidenceIds),
 			sourceEvolutionJobIds: group?.proposalRevisions.map((revision) => revision.sourceEvolutionJobId) ?? [jobId],
 			proposalRevisionIds: group?.proposalRevisions.map((revision) => revision.revisionId) ?? [],
 			existingContents,
@@ -1076,23 +1093,12 @@ export class EvolutionControlService {
 		if (proposal === undefined) throw new Error(`Unknown evolution proposal "${proposalId}"`);
 		const input = artifacts.find(isInputSnapshot);
 		if (input === undefined) throw new Error(`Evolution job "${jobId}" has no input snapshot`);
-		const evidence = new Map(
-			input.evidenceSources.flatMap((source) =>
-				source.invocation.evidence.map((item) => [item.evidenceId, item] as const),
-			),
-		);
-		const resolveEvidence = (evidenceIds: readonly string[]): MaterializedEvidence[] =>
-			evidenceIds.map((evidenceId) => {
-				const item = evidence.get(evidenceId);
-				if (item === undefined) throw new Error(`Evolution evidence "${evidenceId}" is unavailable`);
-				return item;
-			});
 		const validation = artifacts.find(isValidationReport);
 		const activation = harnessActivation(events);
 		return {
 			proposal,
-			supportingEvidence: resolveEvidence(proposal.supportingEvidenceIds),
-			contradictingEvidence: resolveEvidence(proposal.contradictingEvidenceIds),
+			supportingEvidence: resolveEvidence(input, proposal.supportingEvidenceIds),
+			contradictingEvidence: resolveEvidence(input, proposal.contradictingEvidenceIds),
 			score,
 			validationDisposition:
 				validation?.proposalResults.find((result) => result.proposalId === proposalId)?.disposition ?? null,

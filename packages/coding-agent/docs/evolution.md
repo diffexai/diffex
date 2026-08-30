@@ -10,7 +10,7 @@ Use `/evolve` to:
 - start, resume, cancel, or browse evolution work;
 - inspect memory proposals and their evidence;
 - distinguish analysis completion from waiting, retrying, completed, partially failed, or failed candidate generation;
-- inspect each skill candidate's registry state, latest transition time and reason, provenance, textual draft diff, deterministic validation, and retrieval/behavior evaluation when available;
+- inspect each skill candidate's registry state, latest transition time and reason, readable supporting and contradicting evidence, textual draft diff, deterministic validation, and retrieval/behavior evaluation when available;
 - activate a skill candidate after deterministic validation succeeds and any available persisted evaluation is accepted;
 - inspect target revisions and roll back an activated evolved skill to its pre-activation revision, even when later descendants preserved it;
 - enable or disable future tracing and evolution work.
@@ -40,7 +40,7 @@ Evolution model calls use the configured provider and may consume provider quota
 
 Source traces, tool output, files, and generated drafts are treated as untrusted data. Deterministic validation checks structure, provenance, workspace scope, immutable versions, the closed package inventory, portable paths, local-reference resolution, aggregate size limits, and bounded sensitive-data rules. Retrieval and behavioral evaluation remain separate capabilities but are temporarily skipped when the runtime has no evaluator.
 
-These checks do not prove semantic safety and are not a sandbox. When evaluation is skipped, Diffex has not verified retrieval quality, behavior improvement, misapplication, or regressions. Review candidate provenance, draft diffs, validation issues, and any available evaluation results before activation. See [Security](security.md).
+These checks do not prove semantic safety and are not a sandbox. When evaluation is skipped, Diffex has not verified retrieval quality, behavior improvement, misapplication, or regressions. Review candidate supporting and contradicting evidence, draft diffs, validation issues, and any available evaluation results before activation. See [Security](security.md).
 
 ## Storage and recovery
 
