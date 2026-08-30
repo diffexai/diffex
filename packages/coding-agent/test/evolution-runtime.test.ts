@@ -2,13 +2,23 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, 
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall, type Message } from "@earendil-works/diffex-ai";
-import { computeHarnessSkillId, HarnessStateStore } from "@earendil-works/diffex-harness-state";
+import {
+	computeHarnessSkillId,
+	computeHarnessSkillPackageVersion,
+	HarnessStateStore,
+} from "@earendil-works/diffex-harness-state";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+	computeEvolutionContentDigest,
+	computeEvolutionTextDigest,
+	createEvolutionArtifactMetadata,
+	type EvolutionArtifactProducer,
 	type EvolutionControlService,
 	type EvolutionModelRequest,
 	type EvolutionScope,
 	EvolutionToolDeniedError,
+	type SkillEvaluationReport,
+	type SkillEvaluatorInput,
 } from "#evolution";
 import { encodeTraceRecord, type MaterializedInvocation, type TraceRecord } from "#harness-trace";
 import {
@@ -27,6 +37,83 @@ import type { ModelRuntime } from "../src/core/model-runtime.ts";
 import { createSkill } from "../src/core/skills.ts";
 import { createSyntheticSourceInfo } from "../src/core/source-info.ts";
 import { createHarness, type Harness } from "./suite/harness.ts";
+
+const skillEvaluatorProducer: EvolutionArtifactProducer = {
+	name: "coding-agent-evolution-runtime-test",
+	version: "1",
+	promptVersion: null,
+	model: null,
+};
+
+function acceptedSkillEvaluation(input: SkillEvaluatorInput): SkillEvaluationReport {
+	const draft = {
+		artifactId: input.draft.draftId,
+		contentDigest: computeEvolutionContentDigest(input.draft),
+	};
+	const validation = {
+		artifactId: input.validation.validationId,
+		contentDigest: computeEvolutionContentDigest(input.validation),
+	};
+	const content = {
+		artifactKind: "skill-evaluation" as const,
+		schemaVersion: 1 as const,
+		evaluationId: `evaluation-${input.group.groupId}`,
+		groupId: input.group.groupId,
+		evaluationIdempotencyKey: input.idempotencyKey,
+		proposalRevisionIds: input.group.proposalRevisions.map((revision) => revision.revisionId),
+		draft,
+		validation,
+		evaluatorVersion: "runtime-test-evaluator-v1",
+		assurance: "retrieval-and-deterministic-behavior-gates" as const,
+		disposition: "accepted" as const,
+		harnessVersion: input.validation.validatedHarnessVersion,
+		candidateSkill: {
+			skillId: input.draft.draftId,
+			name: input.draft.proposedName,
+			description: "Run focused verification after repository changes.",
+			source: "candidate" as const,
+			version: computeHarnessSkillPackageVersion({ content: input.draft.content, files: input.draft.files }),
+			contentDigest: computeEvolutionTextDigest(input.draft.content),
+			content: input.draft.content,
+			files: input.draft.files,
+		},
+		neighboringSkills: [],
+		configuration: {
+			model: { provider: "faux", model: "fixture", configurationDigest: `sha256:${"1".repeat(64)}` },
+			runtime: { name: "node", version: "24", configurationDigest: `sha256:${"2".repeat(64)}` },
+			retriever: { name: "fixture", version: "1", configurationDigest: `sha256:${"3".repeat(64)}` },
+			executor: { name: "fixture", version: "1", configurationDigest: `sha256:${"4".repeat(64)}` },
+		},
+		cases: [],
+		retrievalResults: [],
+		behaviorResults: [],
+		metrics: {
+			exactRetrievalAccuracy: 1,
+			sourceReplayReproducibility: 1,
+			heldOutIntendedBaselineScore: 0,
+			heldOutIntendedFullPoolScore: 1,
+			heldOutIntendedImprovement: 1,
+			negativeRegressionCount: 0,
+			misapplicationCount: 0,
+		},
+		gates: {
+			suite: { passed: true, reasonCodes: [] },
+			retrieval: { passed: true, reasonCodes: [] },
+			behavior: { passed: true, reasonCodes: [] },
+		},
+	};
+	return {
+		metadata: createEvolutionArtifactMetadata({
+			artifactId: content.evaluationId,
+			producer: skillEvaluatorProducer,
+			sourceIds: [input.draft.draftId, input.validation.validationId],
+			scope: input.draft.metadata.scope,
+			createdAt: input.createdAt,
+			content,
+		}),
+		...content,
+	};
+}
 
 function materializedInvocation(traceId: string, sessionPath: string): MaterializedInvocation {
 	return {
@@ -295,7 +382,7 @@ describe("coding-agent evolution runtime", () => {
 		expect(environment.skillVersions).toEqual([
 			{
 				skillId: computeHarnessSkillId(workspace, skillPath),
-				version: selected.bundle.state.skills[0]?.contentHash,
+				version: selected.bundle.state.skills[0]?.packageVersion,
 				contentDigest: selected.bundle.state.skills[0]?.contentHash,
 			},
 		]);
@@ -1075,6 +1162,250 @@ describe("coding-agent evolution runtime", () => {
 			output: { complete: true, lessons: [] },
 			submissionMethod: "response-tool",
 		});
+	});
+
+	it("evaluates and activates evidence-derived skills once across concurrent runtimes before prompt refresh", async () => {
+		const agentDir = join(
+			tmpdir(),
+			`diffex-skill-evolution-flow-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+		);
+		const traceDirectory = join(agentDir, "traces");
+		mkdirSync(traceDirectory, { recursive: true });
+		temporaryDirectories.push(agentDir);
+		const traceId = "trace-skill-evolution-flow";
+		const records: readonly TraceRecord[] = [
+			{
+				type: "trace_header",
+				sequence: 1,
+				timestamp: "2026-08-20T12:00:00.000Z",
+				schemaVersion: 1,
+				traceId,
+				producer: {
+					diffexVersion: "0.2.0",
+					sourceRevision: "fixture-revision",
+					runtime: { kind: "node", version: "24.0.0" },
+					telemetrySchemaVersions: {},
+					metadata: {},
+				},
+			},
+			{
+				type: "span_start",
+				sequence: 2,
+				timestamp: "2026-08-20T12:00:01.000Z",
+				spanId: 1,
+				parentSpanId: null,
+				name: "diffex.coding_agent.operation",
+				attributes: {
+					"diffex.operation.kind": "prompt",
+					"diffex.task.lineage.id": "task-focused-a",
+					outcome: "focused verification failed without a repeatable recovery",
+				},
+			},
+			{
+				type: "span_end",
+				sequence: 3,
+				timestamp: "2026-08-20T12:00:02.000Z",
+				spanId: 1,
+				attributes: {},
+				status: { status: "error", error: { name: "Error", message: "focused verification failed" } },
+			},
+			{
+				type: "span_start",
+				sequence: 4,
+				timestamp: "2026-08-20T12:00:03.000Z",
+				spanId: 2,
+				parentSpanId: null,
+				name: "diffex.coding_agent.operation",
+				attributes: {
+					"diffex.operation.kind": "prompt",
+					"diffex.task.lineage.id": "task-focused-b",
+					outcome: "focused verification failed again without a repeatable recovery",
+				},
+			},
+			{
+				type: "span_end",
+				sequence: 5,
+				timestamp: "2026-08-20T12:00:04.000Z",
+				spanId: 2,
+				attributes: {},
+				status: { status: "error", error: { name: "Error", message: "focused verification failed again" } },
+			},
+			{
+				type: "trace_footer",
+				sequence: 6,
+				timestamp: "2026-08-20T12:00:05.000Z",
+				terminationStatus: "completed",
+				health: { droppedRecords: 0, writerErrors: 0, writerDisabled: false, closed: true },
+			},
+		];
+		writeFileSync(join(traceDirectory, `${traceId}.jsonl`), records.map(encodeTraceRecord).join(""));
+		const store = new HarnessStateStore(agentDir);
+		const root = await store.initialize();
+		const harness = await createHarness({ harnessStateStore: store, harnessVersionBundle: root });
+		harnesses.push(harness);
+		harness.setResponses([
+			fauxAssistantMessage(
+				fauxToolCall("submit_evolution_response", {
+					complete: true,
+					lessons: [
+						{
+							kind: "failure-workaround",
+							summary: "Recover repeatably from focused verification failures",
+							preconditions: ["A focused verification command exists."],
+							observedOutcome: "Two independent tasks lacked a repeatable focused-verification recovery.",
+							supportingEvidenceRefs: ["1", "2"],
+							counterevidenceRefs: [],
+							applicabilityBoundaries: ["Repository changes with a focused verification command."],
+							uncertainty: null,
+							actionableTakeaway: "Run the focused verification command and require a passing result.",
+						},
+					],
+				}),
+				{ stopReason: "toolUse" },
+			),
+			fauxAssistantMessage(fauxToolCall("submit_evolution_response", { decisions: [] }), {
+				stopReason: "toolUse",
+			}),
+			fauxAssistantMessage(
+				fauxToolCall("submit_evolution_response", {
+					decisions: [
+						{
+							decisionKey: "focused-verification",
+							lessonRefs: ["L1"],
+							existingSkillRefs: [],
+							skillability: {
+								classification: "verification-routine",
+								rationale: "The evidence describes a repeatable verification procedure.",
+							},
+							memoryRelationship: {
+								classification: "independent",
+								memoryProposalRefs: [],
+								rationale: "The procedure is on-demand rather than always-on guidance.",
+							},
+							disposition: "candidate",
+							candidate: {
+								operation: "CREATE",
+								proposedName: "focused-verification",
+								triggerDescription: "A repository change requires focused verification.",
+								positiveTriggers: ["A focused source change is ready for verification."],
+								negativeTriggers: ["No repository files changed."],
+								preconditions: ["A focused verification command exists."],
+								procedureSteps: [{ action: "Run the focused verification command.", condition: null }],
+								requiredTools: ["shell"],
+								environment: ["Repository checkout"],
+								failureHandling: [
+									{
+										signal: "The focused verification command fails.",
+										mitigation: "Inspect the first actionable diagnostic.",
+										recovery: "Correct the issue and rerun focused verification.",
+									},
+								],
+								applicabilityBoundaries: ["Repositories with a focused verification command."],
+								verificationChecks: ["The focused verification command exits successfully."],
+								completionCondition: "Focused verification passes without suppressed failures.",
+							},
+							deferredReason: null,
+						},
+					],
+					proceduralInformationLosses: [],
+				}),
+				{ stopReason: "toolUse" },
+			),
+			fauxAssistantMessage(
+				fauxToolCall("submit_evolution_response", {
+					skillMarkdown:
+						"---\nname: focused-verification\ndescription: A repository change requires focused verification. Use when a focused source change is ready for verification.\n---\n\n# Focused verification\n\n## Preconditions\n\nA focused verification command exists. Work from a Repository checkout with the shell tool.\n\n## Procedure\n\nRun the focused verification command.\n\n## Failure handling\n\nThe focused verification command fails. Inspect the first actionable diagnostic. Correct the issue and rerun focused verification.\n\n## Boundaries\n\nRepository changes with a focused verification command. Use only for Repositories with a focused verification command. Do not use when No repository files changed.\n\n## Verification\n\nThe focused verification command exits successfully. Focused verification passes without suppressed failures.\n",
+					files: [],
+				}),
+				{ stopReason: "toolUse" },
+			),
+		]);
+		const evaluationRequests: SkillEvaluatorInput[] = [];
+		const skillEvaluator = {
+			async evaluate(input: SkillEvaluatorInput): Promise<SkillEvaluationReport> {
+				evaluationRequests.push(input);
+				return acceptedSkillEvaluation(input);
+			},
+		};
+		const runtimeOptions = {
+			agentDir,
+			cwd: harness.tempDir,
+			session: harness.session,
+			harnessState: store,
+			modelRuntime: harness.session.modelRuntime,
+			resourceLoader: harness.session.resourceLoader,
+			skillEvaluator,
+		};
+		const runtime = await createCodingAgentEvolutionRuntime(runtimeOptions);
+		const peerRuntime = await createCodingAgentEvolutionRuntime(runtimeOptions);
+		await Promise.all([runtime.start(), peerRuntime.start()]);
+
+		try {
+			const started = await runtime.control.startManual();
+			if (started.status !== "created") throw new Error(`Expected an evolution job: ${JSON.stringify(started)}`);
+			let candidateId = "";
+			await vi.waitFor(
+				async () => {
+					const detail = await runtime.control.getJob(started.job.jobId);
+					if (detail.outcome === "retryable-failed" || detail.outcome === "terminal-failed") {
+						throw new Error(`Evolution job failed: ${detail.errorMessage}`);
+					}
+					expect(detail.outcome).toBe("completed");
+					const summary = detail.skillCandidates[0];
+					if (summary?.state === "rejected") {
+						const rejected = await runtime.control.getSkillCandidate(started.job.jobId, summary.candidateId);
+						throw new Error(`Skill validation failed: ${JSON.stringify(rejected.validation?.issues)}`);
+					}
+					expect(detail.skillCandidates).toEqual([
+						expect.objectContaining({ proposedName: "focused-verification", state: "accepted" }),
+					]);
+					candidateId = summary?.candidateId ?? "";
+					expect(candidateId).not.toBe("");
+				},
+				{ timeout: 8_000, interval: 20 },
+			);
+			expect(evaluationRequests).toHaveLength(1);
+			const candidate = await runtime.control.getSkillCandidate(started.job.jobId, candidateId);
+			expect(candidate).toMatchObject({
+				summary: { state: "accepted" },
+				validation: { disposition: "accepted", validatedHarnessVersion: root.manifest.version },
+				evaluation: { disposition: "accepted", harnessVersion: root.manifest.version },
+				activationAvailable: true,
+			});
+
+			const activation = await runtime.control.activateSkillCandidate(started.job.jobId, candidateId);
+			expect((await store.loadCurrent()).manifest.version).toBe(activation.targetHarnessVersion);
+			expect(harness.session.activeHarnessVersion).toBe(root.manifest.version);
+			expect(await peerRuntime.control.overview()).toMatchObject({
+				currentHarnessVersion: activation.targetHarnessVersion,
+				observedHarnessVersion: root.manifest.version,
+				nextPromptWillRefresh: true,
+			});
+
+			let exposedPrompt = "";
+			harness.appendResponses([
+				(context) => {
+					exposedPrompt = context.systemPrompt ?? "";
+					return fauxAssistantMessage("observed evolved skill");
+				},
+			]);
+			await harness.session.prompt("Use focused verification for this change.");
+
+			expect(harness.session.activeHarnessVersion).toBe(activation.targetHarnessVersion);
+			expect(exposedPrompt).toContain("<name>focused-verification</name>");
+			expect(exposedPrompt).toContain(
+				"A repository change requires focused verification. Use when a focused source change is ready for verification.",
+			);
+			expect(harness.session.createSkillReferences()).toEqual([
+				expect.objectContaining({
+					name: "focused-verification",
+					sourceKind: "evolved",
+					harnessRevision: activation.targetHarnessVersion,
+				}),
+			]);
+		} finally {
+			await Promise.all([peerRuntime.stop(), runtime.stop()]);
+		}
 	});
 
 	it("normalizes a missing evidence prefix through the faux-provider evolution flow", async () => {
