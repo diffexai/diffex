@@ -10,6 +10,7 @@ import type {
 	SkillCandidateWorkCheckpointedEvent,
 	SkillCandidateWorkFailedEvent,
 	SkillCandidateWorkStage,
+	SkillDraft,
 	SkillDraftValidationReport,
 } from "./contracts.ts";
 import { SKILL_CANDIDATE_REGISTRY_SCHEMA_VERSION } from "./contracts.ts";
@@ -551,17 +552,25 @@ export class SkillCandidateRegistryWorker implements SkillCandidateWorkProcessor
 				claim(),
 			);
 			const draftedGroups = result.groups.filter((group) => group.state === "drafted");
+			const synthesisFailures: { readonly groupId: string; readonly error: unknown }[] = [];
 			for (const group of synthesisTargets) {
 				signal.throwIfAborted();
 				let draftReference = group.draft;
 				if (draftReference === null) {
-					const draft = await this.#dependencies.synthesizer.synthesize({
-						group,
-						model: this.#dependencies.model,
-						idempotencyKey: group.synthesisIdempotencyKey,
-						createdAt: this.#dependencies.clock.now(),
-						signal,
-					});
+					let draft: SkillDraft;
+					try {
+						draft = await this.#dependencies.synthesizer.synthesize({
+							group,
+							model: this.#dependencies.model,
+							idempotencyKey: group.synthesisIdempotencyKey,
+							createdAt: this.#dependencies.clock.now(),
+							signal,
+						});
+					} catch (error) {
+						signal.throwIfAborted();
+						synthesisFailures.push({ groupId: group.groupId, error });
+						continue;
+					}
 					draftReference = await this.#dependencies.artifacts.put(draft);
 				}
 				draftedGroups.push(
@@ -690,6 +699,12 @@ export class SkillCandidateRegistryWorker implements SkillCandidateWorkProcessor
 					});
 					evaluatedGroupIds.push(pending.groupId);
 				}
+			}
+			if (synthesisFailures.length > 0) {
+				throw new AggregateError(
+					synthesisFailures.map((failure) => failure.error),
+					`Skill synthesis failed for candidate groups: ${synthesisFailures.map((failure) => failure.groupId).join(", ")}`,
+				);
 			}
 			await this.#appendCheckpoint(
 				job,
