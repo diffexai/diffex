@@ -939,6 +939,25 @@ describe("EvolutionMenuComponent", () => {
 			evolutionSkillCandidateStageStatus(rejected, "evaluation"),
 		]).toEqual(["completed", "failed", "not applicable"]);
 
+		const quarantined = detailWithState("quarantined", {
+			evaluation: { ...base.evaluation, disposition: "quarantined" } as EvolutionSkillCandidateDetail["evaluation"],
+		});
+		expect([
+			evolutionSkillCandidateStageStatus(quarantined, "draft"),
+			evolutionSkillCandidateStageStatus(quarantined, "validation"),
+			evolutionSkillCandidateStageStatus(quarantined, "evaluation"),
+		]).toEqual(["completed", "completed", "failed"]);
+
+		const skipped = detailWithState("accepted", {
+			evaluation: null,
+			summary: { ...base.summary, latestReasonCodes: ["retrieval-and-behavior-evaluation-skipped"] },
+		});
+		expect([
+			evolutionSkillCandidateStageStatus(skipped, "draft"),
+			evolutionSkillCandidateStageStatus(skipped, "validation"),
+			evolutionSkillCandidateStageStatus(skipped, "evaluation"),
+		]).toEqual(["completed", "completed", "skipped"]);
+
 		expect(explainEvolutionCandidateReason("counterevidence-meets-or-exceeds-support")).toBe(
 			"Counterevidence matches or exceeds the supporting evidence.",
 		);

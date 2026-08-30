@@ -1,3 +1,6 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
 	computeEvolutionContentDigest,
@@ -6,6 +9,8 @@ import {
 	type EvolutionArtifactProducer,
 	type EvolutionArtifactReference,
 	type EvolutionArtifactStore,
+	EvolutionControlService,
+	type EvolutionControlServiceDependencies,
 	EvolutionExecutionError,
 	type EvolutionInputSnapshot,
 	type EvolutionJob,
@@ -13,6 +18,7 @@ import {
 	type EvolutionLeaseStore,
 	type EvolutionLeaseToken,
 	type EvolutionScope,
+	FileEvolutionPersistence,
 	PollingSkillCandidateWorkSource,
 	type SkillCandidate,
 	type SkillCandidateDraftRecordingInput,
@@ -235,7 +241,11 @@ class MemoryArtifactStore implements EvolutionArtifactStore {
 }
 
 class MemoryRegistryStore implements SkillCandidateRegistryStore {
-	readonly events: SkillCandidateRegistryEvent[] = [];
+	readonly events: SkillCandidateRegistryEvent[];
+
+	constructor(events: readonly SkillCandidateRegistryEvent[] = []) {
+		this.events = [...events];
+	}
 
 	async loadSkillCandidateRegistry(): Promise<SkillCandidateRegistrySnapshot> {
 		return { revision: this.events.length, events: [...this.events] };
@@ -826,16 +836,32 @@ describe("skill candidate registry worker", () => {
 		).toBe(true);
 	});
 
-	it("makes exhausted synthesis failures terminal until the proposal revision set changes", async () => {
+	it("durably exposes exhausted synthesis without blocking a later candidate in the same batch", async () => {
 		const data = fixture(true);
 		const candidateReference = data.job.checkpoints[0]?.outputArtifacts[0];
 		if (candidateReference === undefined) throw new Error("Expected candidate reference");
-		data.registry.groups.push(qualifiedGroup(candidateReference));
-		data.synthesisFailures.set("group-qualified", new Error("synthesis failed"));
+		const group = qualifiedGroup(candidateReference);
+		data.registry.groups.push(
+			{
+				...group,
+				groupId: "group-failing",
+				synthesisIdempotencyKey: "skill-synthesis-failing",
+				validationIdempotencyKey: "skill-validation-failing",
+				evaluationIdempotencyKey: "skill-evaluation-failing",
+			},
+			{
+				...group,
+				groupId: "group-succeeding",
+				synthesisIdempotencyKey: "skill-synthesis-succeeding",
+				validationIdempotencyKey: "skill-validation-succeeding",
+				evaluationIdempotencyKey: "skill-evaluation-succeeding",
+			},
+		);
+		data.synthesisFailures.set("group-failing", new Error("synthesis failed"));
 
 		for (let attempt = 1; attempt <= 3; attempt += 1) {
 			await expect(data.worker.process(data.job.jobId)).rejects.toThrow(
-				"Skill synthesis failed for candidate groups: group-qualified",
+				"Skill synthesis failed for candidate groups: group-failing",
 			);
 			expect(
 				data.store.events.find(
@@ -844,31 +870,67 @@ describe("skill candidate registry worker", () => {
 			).toMatchObject({ retryNotBefore: attempt === 3 ? null : expect.any(String) });
 		}
 
-		expect(data.synthesisRequests).toHaveLength(3);
-		expect(data.registry.groups[0]).toMatchObject({
-			state: "synthesis-failed",
-			dispositionHistory: [
+		expect(data.synthesisRequests.map((request) => request.group.groupId)).toEqual([
+			"group-failing",
+			"group-succeeding",
+			"group-failing",
+			"group-failing",
+		]);
+		expect(data.registry.groups).toEqual([
+			expect.objectContaining({
+				groupId: "group-failing",
+				state: "synthesis-failed",
+				dispositionHistory: [
+					expect.objectContaining({
+						from: "evidence-qualified",
+						to: "synthesis-failed",
+						reasonCodes: ["skill-synthesis-attempts-exhausted"],
+					}),
+				],
+			}),
+			expect.objectContaining({ groupId: "group-succeeding", state: "accepted" }),
+		]);
+
+		const persistenceRoot = await mkdtemp(join(tmpdir(), "diffex-mixed-candidate-outcomes-"));
+		try {
+			const durableStore = new FileEvolutionPersistence(persistenceRoot);
+			expect(await durableStore.appendSkillCandidateRegistryEvents(scope, 0, data.store.events)).toBe("committed");
+			const reloadedStore = new FileEvolutionPersistence(persistenceRoot);
+			const source = new PollingSkillCandidateWorkSource({
+				clock: data.clock,
+				jobs: data.jobs,
+				store: reloadedStore,
+				registry: data.registry,
+				evaluatorAvailable: true,
+			});
+			expect(await source.nextRunnableJob(now)).toBeNull();
+			const control = new EvolutionControlService({
+				scope,
+				jobs: data.jobs,
+				skillCandidates: data.registry,
+				skillCandidateRegistryStore: reloadedStore,
+			} as unknown as EvolutionControlServiceDependencies);
+			expect(await control.listJobs()).toEqual([
 				expect.objectContaining({
-					from: "evidence-qualified",
-					to: "synthesis-failed",
-					reasonCodes: ["skill-synthesis-attempts-exhausted"],
+					candidateGeneration: {
+						status: "partial-failure",
+						stage: "synthesizing",
+						updatedAt: expect.any(String),
+						attempt: 3,
+						retryNotBefore: null,
+						failureMessage: "Skill synthesis failed for candidate groups: group-failing",
+					},
 				}),
-			],
-		});
-		const source = new PollingSkillCandidateWorkSource({
-			clock: data.clock,
-			jobs: data.jobs,
-			store: data.store,
-			registry: data.registry,
-			evaluatorAvailable: true,
-		});
-		expect(await source.nextRunnableJob(now)).toBeNull();
+			]);
+		} finally {
+			await rm(persistenceRoot, { recursive: true, force: true });
+		}
 
 		const nextJob = { ...data.job, jobId: "job-2" };
 		data.jobs.jobs.push(nextJob);
 		await data.worker.process(nextJob.jobId);
 
-		expect(data.synthesisRequests).toHaveLength(3);
+		expect(data.synthesisRequests).toHaveLength(4);
 		expect(
 			data.store.events.some(
 				(event) =>
