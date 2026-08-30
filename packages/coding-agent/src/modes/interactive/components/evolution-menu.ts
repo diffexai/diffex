@@ -614,7 +614,7 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 			{
 				label: "Evaluation",
 				enabled: detail.evaluation !== null,
-				disabledStatus: "pending",
+				disabledStatus: detail.summary.state === "accepted" ? "skipped" : "pending",
 				select: () => review("evaluation"),
 			},
 			{

@@ -9,12 +9,12 @@ Use `/evolve` to:
 - inspect evidence eligibility and running or completed jobs;
 - start, resume, cancel, or browse evolution work;
 - inspect memory proposals and their evidence;
-- inspect skill-candidate provenance, textual draft diffs, deterministic validation, and retrieval/behavior evaluation;
-- activate a skill candidate only after its persisted evaluation is accepted;
+- inspect skill-candidate provenance, textual draft diffs, deterministic validation, and retrieval/behavior evaluation when available;
+- activate a skill candidate after deterministic validation succeeds and any available persisted evaluation is accepted;
 - inspect target revisions and roll back an activated evolved skill to its pre-activation revision, even when later descendants preserved it;
 - enable or disable future tracing and evolution work.
 
-Skill activation always requires explicit confirmation. Automatic skill activation is not enabled. Candidates that have not passed every required gate remain read-only. If harness memory changes after evaluation while the evaluated skill inventory remains identical, activation automatically rebases the candidate onto the selected revision and preserves its memory. Skill-inventory changes remain conflicts because they require fresh retrieval and behavior evaluation.
+Skill activation always requires explicit confirmation. Automatic skill activation is not enabled. Retrieval and behavior evaluation is temporarily skipped when no evaluator is configured; the candidate history and UI record that no evaluation ran. In that case, deterministic structure, provenance, scope, security, and inventory validation still must pass before activation becomes available. If harness memory changes after validation while the validated skill inventory remains identical, activation automatically rebases the candidate onto the selected revision and preserves its memory. Skill-inventory changes remain conflicts because they require fresh validation.
 
 Use `/version` to inspect compatible revisions for the current workspace and select one. Selection validates the complete bundle. A revision with corrupt, unsupported, or workspace-mismatched artifacts is not activated.
 
@@ -37,9 +37,9 @@ Evolution model calls use the configured provider and may consume provider quota
 
 ## Validation and security
 
-Source traces, tool output, files, and generated drafts are treated as untrusted data. Deterministic validation checks structure, provenance, workspace scope, immutable versions, the closed package inventory, portable paths, local-reference resolution, aggregate size limits, and bounded sensitive-data rules. Retrieval and behavioral evaluation are separate gates.
+Source traces, tool output, files, and generated drafts are treated as untrusted data. Deterministic validation checks structure, provenance, workspace scope, immutable versions, the closed package inventory, portable paths, local-reference resolution, aggregate size limits, and bounded sensitive-data rules. Retrieval and behavioral evaluation remain separate capabilities but are temporarily skipped when the runtime has no evaluator.
 
-These checks do not prove semantic safety and are not a sandbox. Review candidate provenance, draft diffs, validation issues, and evaluation results before activation. See [Security](security.md).
+These checks do not prove semantic safety and are not a sandbox. When evaluation is skipped, Diffex has not verified retrieval quality, behavior improvement, misapplication, or regressions. Review candidate provenance, draft diffs, validation issues, and any available evaluation results before activation. See [Security](security.md).
 
 ## Storage and recovery
 

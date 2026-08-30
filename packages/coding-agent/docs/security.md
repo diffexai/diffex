@@ -56,9 +56,9 @@ If you bind-mount a host workspace read/write, writes from inside the container 
 
 Invocation traces, evolution artifacts and failures, candidate history, lifecycle observations, writer receipts, and harness revisions persist beneath the effective agent directory. They can contain session evidence, generated instructions, skill content, paths, and runtime metadata. Evolution model calls may consume provider quota.
 
-Evolved skills are generated instructions and can direct the model to use tools or referenced assets. Structural, provenance, scope, security, retrieval, and behavioral gates reduce risk but do not prove semantic safety and are not a sandbox. Project trust does not sandbox an already selected harness revision.
+Evolved skills are generated instructions and can direct the model to use tools or referenced assets. Structural, provenance, scope, and security validation reduce risk but do not prove semantic safety and are not a sandbox. Retrieval and behavioral evaluation is temporarily skipped when no evaluator is configured, so those candidates have not been checked for retrieval quality, behavior improvement, misapplication, or regressions. Project trust does not sandbox an already selected harness revision.
 
-Review `/evolve` provenance, draft diffs, validation, and evaluation before activation. Use `/version` and rollback controls to select immutable revisions, and use OS or container isolation for unattended work. See [Harness Evolution](evolution.md).
+Review `/evolve` provenance, draft diffs, validation, whether evaluation ran or was skipped, and the complete generated package before activation. Use `/version` and rollback controls to select immutable revisions, and use OS or container isolation for unattended work. See [Harness Evolution](evolution.md).
 
 ## Reporting Security Issues
 
