@@ -14,6 +14,8 @@ import { KeybindingsManager } from "../src/core/keybindings.ts";
 import {
 	type EvolutionMenuClient,
 	EvolutionMenuComponent,
+	evolutionSkillCandidateStageStatus,
+	explainEvolutionCandidateReason,
 	formatEvolutionEvidencePreview,
 	formatEvolutionJobLabel,
 	formatEvolutionProposalLabel,
@@ -34,6 +36,15 @@ function job(overrides: Partial<EvolutionJobSummary> = {}): EvolutionJobSummary 
 		stage: "reflecting",
 		outcome: "active",
 		reasonCode: null,
+		analysisStatus: "processing",
+		candidateGeneration: {
+			status: "not-applicable",
+			stage: null,
+			updatedAt: null,
+			attempt: 0,
+			retryNotBefore: null,
+			failureMessage: null,
+		},
 		createdAt: "2026-08-20T00:00:00.000Z",
 		updatedAt: "2026-08-20T00:01:00.000Z",
 		terminalAt: null,
@@ -185,6 +196,8 @@ function skillCandidateDetail(overrides: Partial<EvolutionSkillCandidateDetail> 
 			proposedName: "focused-verification",
 			operation: "CREATE",
 			state: "accepted",
+			latestTransitionAt: "2026-08-20T00:00:02.000Z",
+			latestReasonCodes: ["retrieval-and-behavior-gates-passed"],
 		},
 		candidate: {
 			sourceLessonIds: ["lesson-1"],
@@ -502,6 +515,7 @@ describe("EvolutionMenuComponent", () => {
 		const failedDetail = jobDetail({
 			outcome: "terminal-failed",
 			reasonCode: "reflection-invalid-response",
+			analysisStatus: "failed",
 			terminalAt: terminalAt.toISOString(),
 			emittedProposals: 0,
 			eligibleProposals: 0,
@@ -528,9 +542,10 @@ describe("EvolutionMenuComponent", () => {
 		await vi.waitFor(() => expect(fixture.jobDetailCall.mock.calls.length).toBeGreaterThanOrEqual(2));
 
 		const output = stripAnsi(component.render(180).join("\n"));
-		expect(output).toContain("Finished: Today at 1:25 pm");
+		expect(output).toContain("Analysis finished: Today at 1:25 pm");
+		expect(output).toContain("Result: analysis failed");
+		expect(output).toContain("Analysis: failed");
 		for (const removedLabel of [
-			"Result:",
 			"Proposals:",
 			"Reflector budget:",
 			"Coverage:",
@@ -566,12 +581,14 @@ describe("EvolutionMenuComponent", () => {
 
 		const output = stripAnsi(component.render(180).join("\n"));
 		expect(output).toContain("Trigger: manual");
-		expect(output).toContain("Stage: reflecting (active)");
-		expect(output).toContain("Finished: never");
+		expect(output).toContain("Result: analysis processing");
+		expect(output).toContain("Analysis: processing");
+		expect(output).toContain("Candidate generation: not applicable");
+		expect(output).toContain("Analysis finished: never");
 		expect(output).toContain("Evolution token: 12,345");
 		expect(output).toContain("Last checkpoint: Today at 9:05 am");
 		expect(output).toContain("Base harness: [current] Default Diffex Agent");
-		expect(output).toContain("Target harness: pending");
+		expect(output).toContain("Target harness: not activated");
 		expect(output).toContain("Rollback available: no");
 		for (const removedLabel of [
 			"Job:",
@@ -586,7 +603,6 @@ describe("EvolutionMenuComponent", () => {
 			"Proposal dispositions:",
 			"Activation conflicts:",
 			"Next prompt will refresh:",
-			"Result:",
 			"Proposals:",
 			"Reflector budget:",
 			"Coverage:",
@@ -595,6 +611,54 @@ describe("EvolutionMenuComponent", () => {
 		]) {
 			expect(output).not.toContain(removedLabel);
 		}
+	});
+
+	it("shows terminal asynchronous candidate failure after analysis completed", async () => {
+		const candidateGeneration = {
+			status: "partial-failure" as const,
+			stage: "synthesizing" as const,
+			updatedAt: "2026-08-20T12:35:00.000Z",
+			attempt: 3,
+			retryNotBefore: null,
+			failureMessage: "Skill synthesis failed for candidate group group-1",
+		};
+		const summary = job({
+			stage: "completed",
+			outcome: "completed",
+			analysisStatus: "completed",
+			candidateGeneration,
+			terminalAt: "2026-08-20T12:34:00.000Z",
+		});
+		const fixture = client(overview());
+		fixture.listJobs.mockResolvedValue([summary]);
+		fixture.jobDetailCall.mockResolvedValue(
+			jobDetail({
+				...summary,
+				candidateGeneration,
+			}),
+		);
+		const component = new EvolutionMenuComponent(
+			fixture.client,
+			() => {},
+			() => {},
+			() => {},
+		);
+		await vi.waitFor(() => expect(stripAnsi(component.render(180).join("\n"))).toContain("Browse"));
+
+		for (let index = 0; index < 4; index += 1) component.handleInput("\u001b[B");
+		component.handleInput("\n");
+		await vi.waitFor(() =>
+			expect(stripAnsi(component.render(180).join("\n"))).toContain(formatEvolutionJobLabel(summary)),
+		);
+		component.handleInput("\n");
+		await vi.waitFor(() => expect(fixture.jobDetailCall).toHaveBeenCalledWith("job-active"));
+
+		const output = stripAnsi(component.render(180).join("\n"));
+		expect(output).toContain("Result: partial failure");
+		expect(output).toContain("Analysis: completed");
+		expect(output).toContain("Candidate generation: partial failure, synthesizing, attempt 3");
+		expect(output).toContain("Candidate error: Skill synthesis failed for candidate group group-1");
+		component.dispose();
 	});
 
 	it("renders a readable proposal outcome without internal mutation diagnostics", async () => {
@@ -700,14 +764,17 @@ describe("EvolutionMenuComponent", () => {
 
 		let output = stripAnsi(component.render(180).join("\n"));
 		expect(output).toContain("Skill candidate: focused-verification");
-		expect(output).toContain("Target harness: pending activation");
+		expect(output).toContain("State: accepted");
+		expect(output).toContain("State changed:");
+		expect(output).toContain("Reason: Retrieval and behavior evaluation passed.");
+		expect(output).toContain("Reason code: retrieval-and-behavior-gates-passed");
+		expect(output).toContain("Target harness: not activated");
 		expect(output).not.toContain("Operation:");
-		expect(output).not.toContain("State:");
 		expect(output).not.toContain("Rollback available:");
 		expect(output).toContain("Provenance");
-		expect(output).toContain("Draft diff");
-		expect(output).toContain("Validation");
-		expect(output).toContain("Evaluation");
+		expect(output).toContain("Draft diff [completed]");
+		expect(output).toContain("Validation [completed]");
+		expect(output).toContain("Evaluation [completed]");
 		expect(output).toContain("Activate");
 
 		component.handleInput("\n");
@@ -744,7 +811,14 @@ describe("EvolutionMenuComponent", () => {
 	});
 
 	it("labels skipped skill evaluation without blocking explicit activation", async () => {
-		const detail = skillCandidateDetail({ evaluation: null });
+		const baseDetail = skillCandidateDetail();
+		const detail = skillCandidateDetail({
+			evaluation: null,
+			summary: {
+				...baseDetail.summary,
+				latestReasonCodes: ["retrieval-and-behavior-evaluation-skipped"],
+			},
+		});
 		const fixture = client(overview());
 		fixture.listJobs.mockResolvedValue([job()]);
 		fixture.jobDetailCall.mockResolvedValue(jobDetail({ skillCandidates: [detail.summary] }));
@@ -774,6 +848,50 @@ describe("EvolutionMenuComponent", () => {
 		expect(output).toContain("Activate");
 		expect(output).not.toContain("Activate [unavailable]");
 		component.dispose();
+	});
+
+	it("distinguishes blocked, failed, skipped, completed, and inapplicable candidate stages", () => {
+		const base = skillCandidateDetail();
+		const detailWithState = (
+			state: EvolutionSkillCandidateDetail["summary"]["state"],
+			overrides: Partial<EvolutionSkillCandidateDetail> = {},
+		) =>
+			skillCandidateDetail({
+				...overrides,
+				summary: { ...base.summary, state, ...(overrides.summary ?? {}) },
+			});
+		const proposed = detailWithState("proposed", { draft: null, validation: null, evaluation: null });
+		expect([
+			evolutionSkillCandidateStageStatus(proposed, "draft"),
+			evolutionSkillCandidateStageStatus(proposed, "validation"),
+			evolutionSkillCandidateStageStatus(proposed, "evaluation"),
+		]).toEqual(["blocked", "blocked", "blocked"]);
+
+		const synthesisFailed = detailWithState("synthesis-failed", {
+			draft: null,
+			validation: null,
+			evaluation: null,
+		});
+		expect([
+			evolutionSkillCandidateStageStatus(synthesisFailed, "draft"),
+			evolutionSkillCandidateStageStatus(synthesisFailed, "validation"),
+			evolutionSkillCandidateStageStatus(synthesisFailed, "evaluation"),
+		]).toEqual(["failed", "skipped", "not applicable"]);
+
+		const rejected = detailWithState("rejected", {
+			validation: { ...base.validation, disposition: "rejected" } as EvolutionSkillCandidateDetail["validation"],
+			evaluation: null,
+		});
+		expect([
+			evolutionSkillCandidateStageStatus(rejected, "draft"),
+			evolutionSkillCandidateStageStatus(rejected, "validation"),
+			evolutionSkillCandidateStageStatus(rejected, "evaluation"),
+		]).toEqual(["completed", "failed", "not applicable"]);
+
+		expect(explainEvolutionCandidateReason("counterevidence-meets-or-exceeds-support")).toBe(
+			"Counterevidence matches or exceeds the supporting evidence.",
+		);
+		expect(explainEvolutionCandidateReason("custom-raw-code")).toBe("custom raw code.");
 	});
 
 	it("formats create, update, and retirement draft diffs", () => {
@@ -841,10 +959,23 @@ describe("EvolutionMenuComponent", () => {
 		expect(formatEvolutionTimestamp(new Date(2026, 6, 28, 21, 30).toISOString(), now)).toBe("7/28 at 9:30 pm");
 		expect(
 			formatEvolutionJobLabel(
-				job({ trigger: "automatic", stage: "completed", createdAt: new Date(2026, 7, 20, 9, 5).toISOString() }),
+				job({
+					trigger: "automatic",
+					stage: "completed",
+					analysisStatus: "completed",
+					candidateGeneration: {
+						status: "completed",
+						stage: "completed",
+						updatedAt: new Date(2026, 7, 20, 9, 6).toISOString(),
+						attempt: 1,
+						retryNotBefore: null,
+						failureMessage: null,
+					},
+					createdAt: new Date(2026, 7, 20, 9, 5).toISOString(),
+				}),
 				now,
 			),
-		).toBe("Today at 9:05 am - auto - completed");
+		).toBe("Today at 9:05 am - auto - full success");
 	});
 
 	it("limits semantic proposal and evidence labels by Unicode characters", () => {
