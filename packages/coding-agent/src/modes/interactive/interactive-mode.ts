@@ -104,11 +104,11 @@ import type { TruncationResult } from "../../core/tools/truncate.ts";
 import { hasTrustRequiringProjectResources, ProjectTrustStore } from "../../core/trust-manager.ts";
 import { getUsageCostBreakdown } from "../../core/usage-totals.ts";
 import {
+	formatStartupChangelogPreviewLines,
 	getChangelogPath,
-	getNewEntries,
-	getStartupChangelogPreviewLines,
 	normalizeChangelogLinks,
 	parseChangelog,
+	selectStartupChangelogEntries,
 } from "../../utils/changelog.ts";
 import { copyToClipboard, readClipboardText } from "../../utils/clipboard.ts";
 import { extensionForImageMimeType, readClipboardImage } from "../../utils/clipboard-image.ts";
@@ -1188,7 +1188,11 @@ export class InteractiveMode {
 	}
 
 	private getStartupWhatsNewLines(): string[] {
-		const previewLines = getStartupChangelogPreviewLines(getChangelogPath());
+		if (!this.changelogMarkdown) {
+			return [];
+		}
+
+		const previewLines = formatStartupChangelogPreviewLines(this.changelogMarkdown);
 		if (previewLines.length === 0) {
 			return [];
 		}
@@ -1215,22 +1219,16 @@ export class InteractiveMode {
 		const lastVersion = this.settingsManager.getLastChangelogVersion();
 		const changelogPath = getChangelogPath();
 		const entries = parseChangelog(changelogPath);
+		const selection = selectStartupChangelogEntries(entries, lastVersion);
 
-		if (!lastVersion) {
-			// Fresh install - record the version, send telemetry, don't show changelog
-			this.settingsManager.setLastChangelogVersion(VERSION);
+		if (selection.checkpointVersion && selection.checkpointVersion !== lastVersion) {
+			this.settingsManager.setLastChangelogVersion(selection.checkpointVersion);
 			this.reportInstallTelemetry(VERSION);
-			return undefined;
 		}
 
-		const newEntries = getNewEntries(entries, lastVersion);
-		if (newEntries.length > 0) {
-			this.settingsManager.setLastChangelogVersion(VERSION);
-			this.reportInstallTelemetry(VERSION);
-			return newEntries.map((e) => normalizeChangelogLinks(e.content, e)).join("\n\n");
-		}
-
-		return undefined;
+		return selection.entries.length > 0
+			? selection.entries.map((entry) => normalizeChangelogLinks(entry.content, entry)).join("\n\n")
+			: undefined;
 	}
 
 	private reportInstallTelemetry(version: string): void {

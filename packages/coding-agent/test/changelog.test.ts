@@ -3,6 +3,7 @@ import {
 	type ChangelogEntry,
 	formatStartupChangelogPreviewLines,
 	normalizeChangelogLinks,
+	selectStartupChangelogEntries,
 } from "../src/utils/changelog.ts";
 
 const entry: ChangelogEntry = {
@@ -78,5 +79,42 @@ describe("formatStartupChangelogPreviewLines", () => {
 			"- Added Session export for saved transcri...",
 			"- Fixed startup notices wrapping in narro...",
 		]);
+	});
+});
+
+describe("selectStartupChangelogEntries", () => {
+	const changelogEntries: ChangelogEntry[] = [
+		{ major: 0, minor: 3, patch: 0, content: "## [0.3.0]\n\n- Current Diffex release" },
+		{ major: 0, minor: 84, patch: 0, content: "## [0.84.0]\n\n- Inherited release" },
+		{ major: 0, minor: 83, patch: 0, content: "## [0.83.0]\n\n- Older inherited release" },
+	];
+
+	test("uses changelog order when package versions have been reset", () => {
+		expect(selectStartupChangelogEntries(changelogEntries, "0.84.0")).toEqual({
+			checkpointVersion: "0.3.0",
+			entries: [changelogEntries[0]],
+		});
+	});
+
+	test("acknowledges fresh installs and legacy markers without replaying history", () => {
+		expect(selectStartupChangelogEntries(changelogEntries, undefined)).toEqual({
+			checkpointVersion: "0.3.0",
+			entries: [],
+		});
+		expect(selectStartupChangelogEntries(changelogEntries, "0.2.0")).toEqual({
+			checkpointVersion: "0.3.0",
+			entries: [],
+		});
+	});
+
+	test("returns no startup entries after the current checkpoint is seen", () => {
+		expect(selectStartupChangelogEntries(changelogEntries, "v0.3.0")).toEqual({
+			checkpointVersion: "0.3.0",
+			entries: [],
+		});
+		expect(selectStartupChangelogEntries([], "0.3.0")).toEqual({
+			checkpointVersion: undefined,
+			entries: [],
+		});
 	});
 });

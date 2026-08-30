@@ -26,8 +26,42 @@ export interface StartupChangelogPreviewOptions {
 	maxWidth?: number;
 }
 
+export interface StartupChangelogSelection {
+	checkpointVersion?: string;
+	entries: ChangelogEntry[];
+}
+
 function entryVersion(entry: ChangelogEntry): string {
 	return `${entry.major}.${entry.minor}.${entry.patch}`;
+}
+
+/**
+ * Select changelog entries that appear before the last acknowledged entry.
+ *
+ * Startup tracking follows document order instead of semver so repositories
+ * can reset their package version without replaying inherited release notes.
+ * Unknown markers are treated as a migration baseline rather than as a reason
+ * to display the complete changelog.
+ */
+export function selectStartupChangelogEntries(
+	entries: ChangelogEntry[],
+	lastVersion: string | undefined,
+): StartupChangelogSelection {
+	const checkpointVersion = entries[0] ? entryVersion(entries[0]) : undefined;
+	if (!checkpointVersion || !lastVersion) {
+		return { checkpointVersion, entries: [] };
+	}
+
+	const normalizedLastVersion = lastVersion.trim().replace(/^v/i, "");
+	const lastSeenIndex = entries.findIndex((entry) => entryVersion(entry) === normalizedLastVersion);
+	if (lastSeenIndex <= 0) {
+		return { checkpointVersion, entries: [] };
+	}
+
+	return {
+		checkpointVersion,
+		entries: entries.slice(0, lastSeenIndex),
+	};
 }
 
 function normalizeTag(version: string | ChangelogEntry): string {
