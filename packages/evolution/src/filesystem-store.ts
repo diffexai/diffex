@@ -58,6 +58,7 @@ const ACTIVE_JOB_STAGES = new Set([...JOB_STAGES].filter((stage) => stage !== "c
 const SKILL_CANDIDATE_REGISTRY_EVENT_TYPES = new Set([
 	"skill-candidate-draft-recorded",
 	"skill-candidate-evaluation-recorded",
+	"skill-candidate-group-capsule-recorded",
 	"skill-candidate-priority-scored",
 	"skill-candidate-proposal-recorded",
 	"skill-candidate-state-transitioned",
@@ -352,6 +353,13 @@ function isCandidateEvidenceContribution(value: unknown): boolean {
 }
 
 function isCandidateRegistryEventContent(value: Readonly<Record<string, unknown>>): boolean {
+	if (value.type === "skill-candidate-group-capsule-recorded") {
+		return (
+			typeof value.groupId === "string" &&
+			isArtifactReference(value.capsule) &&
+			isStringArray(value.proposalRevisionIds)
+		);
+	}
 	if (value.type === "skill-candidate-draft-recorded") {
 		return (
 			typeof value.groupId === "string" &&

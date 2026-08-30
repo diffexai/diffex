@@ -314,6 +314,10 @@ async function writerFixture(options: WriterFixtureOptions) {
 	};
 	const group: SkillCandidateGroup = {
 		groupId: draft.groupId,
+		canonicalCapsule: {
+			artifactId: "skill-candidate-group-capsule-1",
+			contentDigest: `sha256:${"9".repeat(64)}`,
+		},
 		profile: {
 			workspace: { repositoryId: workspace.repositoryId, directoryId: workspace.directoryId, evolutionScope: scope },
 			existingSkillIds,

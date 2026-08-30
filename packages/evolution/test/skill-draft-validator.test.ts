@@ -389,6 +389,10 @@ function fixture(
 	const draftReference = reference(draft);
 	const group: SkillCandidateGroup = {
 		groupId: "group-1",
+		canonicalCapsule: {
+			artifactId: "skill-candidate-group-capsule-1",
+			contentDigest: `sha256:${"9".repeat(64)}`,
+		},
 		profile: {
 			workspace: { repositoryId: "diffex", directoryId: "directory-1", evolutionScope: scope },
 			existingSkillIds: sourceCandidate.existingSkillIds,
