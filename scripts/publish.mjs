@@ -3,17 +3,25 @@
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import {
+	assertBootstrapPackageStates,
+	BOOTSTRAP_DIST_TAG,
+	createPublishArgs,
+	createTrustedPublisherCommands,
+	parsePublishArgs,
+} from "./npm-publish-plan.mjs";
 import { getPublicWorkspacePackages } from "./release-packages.mjs";
 
 const packages = getPublicWorkspacePackages();
 
-const dryRun = process.argv.includes("--dry-run");
-const unknownArgs = process.argv.slice(2).filter((arg) => arg !== "--dry-run");
-
-if (unknownArgs.length > 0) {
-	console.error(`Usage: node scripts/publish.mjs [--dry-run]`);
+let options;
+try {
+	options = parsePublishArgs(process.argv.slice(2));
+} catch (error) {
+	console.error(error instanceof Error ? error.message : String(error));
 	process.exit(1);
 }
+const { bootstrap, dryRun } = options;
 
 function commandForPlatform(command) {
 	return process.platform === "win32" ? `${command}.cmd` : command;
@@ -65,6 +73,24 @@ function isPublished(name, version) {
 	throw new Error(output ? `Failed to query ${name}@${version}\n${output}` : `Failed to query ${name}@${version}`);
 }
 
+function isRegistered(name) {
+	const result = spawnSync(commandForPlatform("npm"), ["view", name, "version", "--json"], {
+		encoding: "utf8",
+		stdio: ["inherit", "pipe", "pipe"],
+	});
+
+	if (result.status === 0 && result.stdout.trim()) {
+		return true;
+	}
+
+	const output = [result.stdout, result.stderr].filter(Boolean).join("\n");
+	if (result.status !== 0 && (output.includes("E404") || output.includes("404 Not Found"))) {
+		return false;
+	}
+
+	throw new Error(output ? `Failed to query ${name}\n${output}` : `Failed to query ${name}`);
+}
+
 const packageVersions = new Map(packages.map((pkg) => [pkg.name, pkg.version]));
 
 const versions = [...new Set(packageVersions.values())];
@@ -72,17 +98,32 @@ if (versions.length !== 1) {
 	throw new Error(`Publish packages are not lockstep versioned: ${versions.join(", ")}`);
 }
 
-console.log(`Publishing Diffex packages at ${versions[0]}${dryRun ? " (dry run)" : ""}\n`);
+const mode = [bootstrap ? "bootstrap" : null, dryRun ? "dry run" : null].filter(Boolean).join(", ");
+console.log(`Publishing Diffex packages at ${versions[0]}${mode ? ` (${mode})` : ""}\n`);
+
+if (bootstrap) {
+	console.log(
+		`Bootstrap mode registers new packages under the non-default '${BOOTSTRAP_DIST_TAG}' tag without local provenance.`,
+	);
+	console.log("It skips packages already published at this exact version and rejects established packages at other versions.\n");
+}
 
 const packageStates = packages.map((pkg) => ({
 	...pkg,
-	published: false,
+	published: isPublished(pkg.name, packageVersions.get(pkg.name)),
+	registered: false,
 	version: packageVersions.get(pkg.name),
 }));
 
+if (bootstrap) {
+	for (const pkg of packageStates) {
+		pkg.registered = pkg.published || isRegistered(pkg.name);
+	}
+	assertBootstrapPackageStates(packageStates);
+}
+
 for (const pkg of packageStates) {
 	assertBuildOutputExists(pkg.directory);
-	pkg.published = isPublished(pkg.name, pkg.version);
 
 	if (pkg.published) {
 		console.log(`${pkg.name}@${pkg.version} is already published; validating package contents only.`);
@@ -94,6 +135,13 @@ for (const pkg of packageStates) {
 }
 
 if (dryRun) {
+	if (bootstrap) {
+		console.log("After bootstrap publication, configure trusted publishing with:\n");
+		for (const command of createTrustedPublisherCommands(packages.map((pkg) => pkg.name))) {
+			console.log(`  ${command}`);
+		}
+		console.log();
+	}
 	process.exit(0);
 }
 
@@ -105,6 +153,14 @@ for (const pkg of packageStates) {
 		continue;
 	}
 
-	run("npm", ["publish", "--access", "public", "--provenance", "--ignore-scripts"], { cwd: pkg.directory });
+	run("npm", createPublishArgs({ bootstrap }), { cwd: pkg.directory });
 	console.log();
+}
+
+if (bootstrap) {
+	console.log("Bootstrap publication is complete. Configure trusted publishing with:\n");
+	for (const command of createTrustedPublisherCommands(packages.map((pkg) => pkg.name))) {
+		console.log(`  ${command}`);
+	}
+	console.log("\nThen verify each relationship with npm trust list <package> before running the normal release flow.");
 }

@@ -537,7 +537,7 @@ describe("AgentSession compaction characterization", () => {
 
 		await sessionInternals._checkCompaction(errorAssistant);
 
-		expect(runAutoCompactionSpy).toHaveBeenCalledWith("threshold", false);
+		expect(runAutoCompactionSpy).toHaveBeenCalledWith("threshold", false, undefined, undefined);
 	});
 
 	it("does not trigger threshold compaction for error messages when no prior usage exists", async () => {

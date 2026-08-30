@@ -17,6 +17,11 @@
 	},
 	"engines": { "node": ">=22.19.0" },
 	"license": "Apache-2.0",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/diffexai/diffex.git",
+		"directory": "packages/coding-agent-server"
+	},
 	"dependencies": {
 		"@earendil-works/diffex-coding-agent": "^0.2.0",
 		"@earendil-works/diffex-protocol": "^0.2.0",

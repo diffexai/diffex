@@ -78,7 +78,7 @@ function assertPackagesAreRegisteredWithNpm() {
 	}
 
 	if (unregisteredPackages.length > 0) {
-		throw new Error(`The following public workspace packages are not registered on npm:\n${unregisteredPackages.map((packageName) => `  ${packageName}`).join("\n")}\nRegister them before running a release.`);
+		throw new Error(`The following public workspace packages are not registered on npm:\n${unregisteredPackages.map((packageName) => `  ${packageName}`).join("\n")}\nFollow the first-publication process in RELEASING.md before running a release.`);
 	}
 
 	console.log("  All public workspace packages are registered on npm\n");
