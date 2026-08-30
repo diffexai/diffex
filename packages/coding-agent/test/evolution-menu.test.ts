@@ -558,10 +558,10 @@ describe("EvolutionMenuComponent", () => {
 		await vi.waitFor(() => expect(fixture.jobDetailCall.mock.calls.length).toBeGreaterThanOrEqual(2));
 
 		const output = stripAnsi(component.render(180).join("\n"));
-		expect(output).toContain("Analysis finished: Today at 1:25 pm");
 		expect(output).toContain("Result: analysis failed");
 		expect(output).toContain("Analysis: failed");
 		for (const removedLabel of [
+			"Analysis finished:",
 			"Proposals:",
 			"Reflector budget:",
 			"Coverage:",
@@ -599,14 +599,15 @@ describe("EvolutionMenuComponent", () => {
 		expect(output).toContain("Trigger: manual");
 		expect(output).toContain("Result: analysis processing");
 		expect(output).toContain("Analysis: processing");
-		expect(output).toContain("Candidate generation: not applicable");
-		expect(output).toContain("Analysis finished: never");
 		expect(output).toContain("Evolution token: 12,345");
 		expect(output).toContain("Last checkpoint: Today at 9:05 am");
 		expect(output).toContain("Base harness: [current] Default Diffex Agent");
-		expect(output).toContain("Target harness: not activated");
-		expect(output).toContain("Rollback available: no");
 		for (const removedLabel of [
+			"Candidate generation:",
+			"Candidate updated:",
+			"Analysis finished:",
+			"Target harness:",
+			"Rollback available:",
 			"Job:",
 			"Evidence high-water cursor:",
 			"Slices:",
@@ -672,7 +673,7 @@ describe("EvolutionMenuComponent", () => {
 		const output = stripAnsi(component.render(180).join("\n"));
 		expect(output).toContain("Result: partial failure");
 		expect(output).toContain("Analysis: completed");
-		expect(output).toContain("Candidate generation: partial failure, synthesizing, attempt 3");
+		expect(output).not.toContain("Candidate generation:");
 		expect(output).toContain("Candidate error: Skill synthesis failed for candidate group group-1");
 		component.dispose();
 	});
@@ -722,9 +723,8 @@ describe("EvolutionMenuComponent", () => {
 		);
 		component.handleInput("\n");
 		await vi.waitFor(() => expect(fixture.jobDetailCall.mock.calls.length).toBeGreaterThanOrEqual(2));
-		await vi.waitFor(() =>
-			expect(stripAnsi(component.render(180).join("\n"))).toContain("Candidate generation: completed"),
-		);
+		await vi.waitFor(() => expect(stripAnsi(component.render(180).join("\n"))).toContain("Result: full success"));
+		expect(stripAnsi(component.render(180).join("\n"))).not.toContain("Candidate generation:");
 		component.dispose();
 	});
 

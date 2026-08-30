@@ -670,19 +670,10 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 	}
 
 	#renderJob(job: EvolutionJobDetail): void {
-		const candidateStage =
-			job.candidateGeneration.stage === null || job.candidateGeneration.stage === "completed"
-				? ""
-				: `, ${job.candidateGeneration.stage}`;
-		const candidateAttempt =
-			job.candidateGeneration.attempt === 0 ? "" : `, attempt ${job.candidateGeneration.attempt}`;
 		for (const line of [
 			`Trigger: ${job.trigger}`,
 			`Result: ${formatEvolutionJobResult(job)}`,
 			`Analysis: ${job.analysisStatus}`,
-			`Candidate generation: ${job.candidateGeneration.status.replaceAll("-", " ")}${candidateStage}${candidateAttempt}`,
-			`Analysis finished: ${formatEvolutionTimestamp(job.terminalAt)}`,
-			`Candidate updated: ${formatEvolutionTimestamp(job.candidateGeneration.updatedAt)}`,
 			...(job.candidateGeneration.retryNotBefore === null
 				? []
 				: [`Candidate retry: ${formatEvolutionTimestamp(job.candidateGeneration.retryNotBefore)}`]),
@@ -697,16 +688,6 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 				this.#overview?.currentHarnessVersion,
 				job.baseHarnessInfo,
 			)}`,
-			`Target harness: ${
-				job.activatedHarnessVersion === null
-					? "not activated"
-					: formatHarnessVersionReference(
-							job.activatedHarnessVersion,
-							this.#harnessVersionInfo,
-							this.#overview?.currentHarnessVersion,
-						)
-			}`,
-			`Rollback available: ${job.observability.rollbackAvailable ? "yes" : "no"}`,
 		]) {
 			this.#addLine(line);
 		}
