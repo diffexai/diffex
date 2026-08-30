@@ -552,7 +552,12 @@ export class SkillCandidateRegistryWorker implements SkillCandidateWorkProcessor
 				claim(),
 			);
 			const draftedGroups = result.groups.filter((group) => group.state === "drafted");
-			const synthesisFailures: { readonly groupId: string; readonly error: unknown }[] = [];
+			const synthesisFailures: {
+				readonly groupId: string;
+				readonly proposalRevisionIds: readonly string[];
+				readonly idempotencyKey: string;
+				readonly error: unknown;
+			}[] = [];
 			for (const group of synthesisTargets) {
 				signal.throwIfAborted();
 				let draftReference = group.draft;
@@ -568,7 +573,12 @@ export class SkillCandidateRegistryWorker implements SkillCandidateWorkProcessor
 						});
 					} catch (error) {
 						signal.throwIfAborted();
-						synthesisFailures.push({ groupId: group.groupId, error });
+						synthesisFailures.push({
+							groupId: group.groupId,
+							proposalRevisionIds: group.proposalRevisions.map((revision) => revision.revisionId),
+							idempotencyKey: group.synthesisIdempotencyKey,
+							error,
+						});
 						continue;
 					}
 					draftReference = await this.#dependencies.artifacts.put(draft);
@@ -584,6 +594,14 @@ export class SkillCandidateRegistryWorker implements SkillCandidateWorkProcessor
 						createdAt: this.#dependencies.clock.now(),
 					}),
 				);
+			}
+			if (synthesisFailures.length > 0 && attempt >= this.#maxAttempts) {
+				await this.#dependencies.registry.recordSynthesisFailures({
+					scope: job.metadata.scope,
+					lease: claim(),
+					failures: synthesisFailures.map(({ error: _error, ...failure }) => failure),
+					createdAt: this.#dependencies.clock.now(),
+				});
 			}
 			await this.#appendCheckpoint(
 				job,

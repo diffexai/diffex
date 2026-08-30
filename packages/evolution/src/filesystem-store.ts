@@ -68,6 +68,7 @@ const SKILL_CANDIDATE_REGISTRY_EVENT_TYPES = new Set([
 const SKILL_CANDIDATE_STATES = new Set([
 	"proposed",
 	"evidence-qualified",
+	"synthesis-failed",
 	"drafted",
 	"structurally-valid",
 	"evaluation-pending",
