@@ -648,6 +648,7 @@ export interface DeferredSkillCandidateFinding {
 export type SkillCandidateState =
 	| "proposed"
 	| "evidence-qualified"
+	| "synthesis-failed"
 	| "drafted"
 	| "structurally-valid"
 	| "evaluation-pending"

@@ -334,6 +334,17 @@ export interface SkillCandidateRegistryConsolidationResult {
 	readonly changedGroupIds: readonly string[];
 }
 
+export interface SkillCandidateSynthesisFailureRecordingInput {
+	readonly scope: EvolutionScope;
+	readonly lease?: EvolutionLeaseToken;
+	readonly failures: readonly {
+		readonly groupId: string;
+		readonly proposalRevisionIds: readonly string[];
+		readonly idempotencyKey: string;
+	}[];
+	readonly createdAt: string;
+}
+
 export interface SkillCandidateDraftRecordingInput {
 	readonly scope: EvolutionScope;
 	readonly lease?: EvolutionLeaseToken;
@@ -380,6 +391,9 @@ export interface SkillCandidateEvaluationRecordingInput {
 
 export interface SkillCandidateRegistry {
 	consolidate(input: SkillCandidateRegistryConsolidationInput): Promise<SkillCandidateRegistryConsolidationResult>;
+	recordSynthesisFailures(
+		input: SkillCandidateSynthesisFailureRecordingInput,
+	): Promise<readonly SkillCandidateGroup[]>;
 	recordDraft(input: SkillCandidateDraftRecordingInput): Promise<SkillCandidateGroup>;
 	recordValidation(input: SkillCandidateValidationRecordingInput): Promise<SkillCandidateGroup>;
 	skipEvaluation(input: SkillCandidateEvaluationStartInput): Promise<SkillCandidateGroup>;

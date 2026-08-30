@@ -80,6 +80,7 @@ function registry(groups: readonly SkillCandidateGroup[]): SkillCandidateRegistr
 	return {
 		list: async () => groups,
 		consolidate: unsupported,
+		recordSynthesisFailures: unsupported,
 		recordDraft: unsupported,
 		recordValidation: unsupported,
 		skipEvaluation: unsupported,

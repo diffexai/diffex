@@ -305,7 +305,7 @@ function registryFixture(store: MemoryRegistryStore = new MemoryRegistryStore())
 }
 
 describe("persistent skill candidate registry", () => {
-	it("consolidates compatible cross-round proposals independently of their names", async () => {
+	it("requalifies an exhausted synthesis only after the proposal revision set changes", async () => {
 		const fixture = registryFixture();
 		const firstInput = input([evidence("support-a", "task-a", 0)], "trace-a");
 		const firstCandidate = candidate({
@@ -360,6 +360,85 @@ describe("persistent skill candidate registry", () => {
 		]);
 		expect(second.groups[0]?.synthesisIdempotencyKey).toMatch(/^skill-synthesis-/);
 		expect(second.groups[0]?.evaluationIdempotencyKey).toMatch(/^skill-evaluation-/);
+		const group = second.groups[0];
+		if (group === undefined) throw new Error("Expected a qualified candidate group");
+
+		const [failed] = await fixture.registry.recordSynthesisFailures({
+			scope,
+			failures: [
+				{
+					groupId: group.groupId,
+					proposalRevisionIds: group.proposalRevisions.map((revision) => revision.revisionId),
+					idempotencyKey: group.synthesisIdempotencyKey,
+				},
+			],
+			createdAt: "2026-08-26T12:01:00.000Z",
+		});
+		expect(failed).toMatchObject({
+			state: "synthesis-failed",
+			dispositionHistory: [
+				expect.objectContaining({ to: "proposed" }),
+				expect.objectContaining({ to: "evidence-qualified" }),
+				expect.objectContaining({
+					from: "evidence-qualified",
+					to: "synthesis-failed",
+					reasonCodes: ["skill-synthesis-attempts-exhausted"],
+				}),
+			],
+		});
+		expect(
+			await fixture.registry.recordSynthesisFailures({
+				scope,
+				failures: [
+					{
+						groupId: group.groupId,
+						proposalRevisionIds: group.proposalRevisions.map((revision) => revision.revisionId),
+						idempotencyKey: group.synthesisIdempotencyKey,
+					},
+				],
+				createdAt: "2026-08-26T12:01:00.000Z",
+			}),
+		).toEqual([failed]);
+
+		const unchanged = await fixture.registry.consolidate({
+			sourceEvolutionJobId: "job-b",
+			input: secondInput,
+			candidates: [secondCandidate],
+			idempotencyKey: "job-b:registry",
+			createdAt: "2026-08-26T12:00:00.000Z",
+		});
+		expect(unchanged.changedGroupIds).toEqual([]);
+		expect(unchanged.groups[0]?.state).toBe("synthesis-failed");
+
+		const thirdInput = input([evidence("support-c", "task-c", 0)], "trace-c");
+		const thirdCandidate = candidate({
+			candidateId: "candidate-c",
+			input: thirdInput,
+			proposedName: "focused-check-revised",
+			supportingEvidenceIds: ["support-c"],
+			taskLineageIds: ["task-c"],
+		});
+		const revised = await fixture.registry.consolidate({
+			sourceEvolutionJobId: "job-c",
+			input: thirdInput,
+			candidates: [thirdCandidate],
+			idempotencyKey: "job-c:registry",
+			createdAt: "2026-08-27T12:00:00.000Z",
+		});
+		expect(revised.groups[0]).toMatchObject({
+			state: "evidence-qualified",
+			dispositionHistory: [
+				expect.objectContaining({ to: "proposed" }),
+				expect.objectContaining({ to: "evidence-qualified" }),
+				expect.objectContaining({ to: "synthesis-failed" }),
+				expect.objectContaining({
+					from: "synthesis-failed",
+					to: "evidence-qualified",
+					reasonCodes: ["proposal-revision-set-changed"],
+				}),
+			],
+		});
+		expect(revised.groups[0]?.synthesisIdempotencyKey).not.toBe(group.synthesisIdempotencyKey);
 	});
 
 	it("records an immutable draft and advances only an evidence-qualified group", async () => {

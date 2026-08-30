@@ -30,6 +30,7 @@ import type {
 	SkillCandidateRegistryConsolidationInput,
 	SkillCandidateRegistryConsolidationResult,
 	SkillCandidateRegistryStore,
+	SkillCandidateSynthesisFailureRecordingInput,
 	SkillCandidateValidationRecordingInput,
 } from "./ports.ts";
 import { computeEvolutionContentDigest, createEvolutionArtifactMetadata } from "./provenance.ts";
@@ -63,6 +64,7 @@ interface MutableGroup {
 	readonly proposalRevisions: SkillCandidateProposalRevision[];
 	state: SkillCandidateState;
 	readonly dispositionHistory: SkillCandidateDispositionRecord[];
+	readonly synthesisFailedProposalRevisionIds: string[];
 	priorityScore: EvolutionArtifactReference | null;
 	draft: EvolutionArtifactReference | null;
 	readonly draftProposalRevisionIds: string[];
@@ -273,6 +275,7 @@ function materializeGroups(events: readonly SkillCandidateRegistryEvent[]): Map<
 					proposalRevisions: [event.proposalRevision],
 					state: "proposed",
 					dispositionHistory: [],
+					synthesisFailedProposalRevisionIds: [],
 					priorityScore: null,
 					draft: null,
 					draftProposalRevisionIds: [],
@@ -393,6 +396,13 @@ function materializeGroups(events: readonly SkillCandidateRegistryEvent[]): Map<
 				throw new Error(`Candidate group "${event.groupId}" disposition history is not contiguous`);
 			}
 			group.state = event.to;
+			if (event.to === "synthesis-failed") {
+				group.synthesisFailedProposalRevisionIds.splice(
+					0,
+					group.synthesisFailedProposalRevisionIds.length,
+					...group.proposalRevisions.map((revision) => revision.revisionId),
+				);
+			}
 			group.dispositionHistory.push({
 				eventId: event.eventId,
 				from: event.from,
@@ -797,6 +807,97 @@ export class PersistentSkillCandidateRegistry implements SkillCandidateRegistry 
 		return [...materializeGroups(snapshot.events).values()]
 			.map(immutableGroup)
 			.sort((left, right) => left.groupId.localeCompare(right.groupId));
+	}
+
+	#qualification(group: MutableGroup): {
+		readonly state: SkillCandidateState;
+		readonly reasonCodes: readonly string[];
+	} {
+		const immutable = immutableGroup(group);
+		if (group.state !== "synthesis-failed") return this.#scorer.qualification(immutable);
+		if (
+			sameValues(
+				group.synthesisFailedProposalRevisionIds,
+				group.proposalRevisions.map((revision) => revision.revisionId),
+			)
+		) {
+			return { state: group.state, reasonCodes: [] };
+		}
+		const qualification = this.#scorer.qualification({ ...immutable, state: "proposed" });
+		return qualification.state === "evidence-qualified"
+			? { state: qualification.state, reasonCodes: ["proposal-revision-set-changed"] }
+			: qualification;
+	}
+
+	async recordSynthesisFailures(
+		input: SkillCandidateSynthesisFailureRecordingInput,
+	): Promise<readonly SkillCandidateGroup[]> {
+		const failures = [...input.failures].sort((left, right) => left.groupId.localeCompare(right.groupId));
+		if (new Set(failures.map((failure) => failure.groupId)).size !== failures.length) {
+			throw new Error("Skill synthesis failures must identify unique candidate groups");
+		}
+		for (let attempt = 0; attempt < this.#maxCommitAttempts; attempt += 1) {
+			const snapshot = await this.#store.loadSkillCandidateRegistry(input.scope);
+			const groups = materializeGroups(snapshot.events);
+			const planned: SkillCandidateRegistryEvent[] = [];
+			const recorded: SkillCandidateGroup[] = [];
+			for (const failure of failures) {
+				const mutable = groups.get(failure.groupId);
+				if (mutable === undefined) throw new Error(`Unknown candidate group "${failure.groupId}"`);
+				const group = immutableGroup(mutable);
+				if (
+					!sameValues(
+						failure.proposalRevisionIds,
+						group.proposalRevisions.map((revision) => revision.revisionId),
+					) ||
+					failure.idempotencyKey !== group.synthesisIdempotencyKey
+				) {
+					throw new Error(`Candidate group "${failure.groupId}" changed before synthesis failure was recorded`);
+				}
+				if (group.state === "synthesis-failed") {
+					recorded.push(group);
+					continue;
+				}
+				if (group.state !== "evidence-qualified") {
+					throw new Error(`Candidate group "${failure.groupId}" is not eligible to fail synthesis`);
+				}
+				const transition = transitionEvent(
+					failure.groupId,
+					"evidence-qualified",
+					"synthesis-failed",
+					["skill-synthesis-attempts-exhausted"],
+					nextSequence(snapshot.events, planned.length),
+					failure.idempotencyKey,
+					this.#producer,
+					input.scope,
+					input.createdAt,
+				);
+				planned.push(transition);
+				mutable.state = "synthesis-failed";
+				mutable.synthesisFailedProposalRevisionIds.splice(
+					0,
+					mutable.synthesisFailedProposalRevisionIds.length,
+					...failure.proposalRevisionIds,
+				);
+				mutable.dispositionHistory.push({
+					eventId: transition.eventId,
+					from: transition.from,
+					to: transition.to,
+					reasonCodes: transition.reasonCodes,
+					createdAt: input.createdAt,
+				});
+				recorded.push(immutableGroup(mutable));
+			}
+			if (planned.length === 0) return recorded;
+			const committed = await this.#store.appendSkillCandidateRegistryEvents(
+				input.scope,
+				snapshot.revision,
+				planned,
+				input.lease,
+			);
+			if (committed === "committed") return recorded;
+		}
+		throw new Error("Skill candidate registry changed too often to record synthesis failures");
 	}
 
 	async recordDraft(input: SkillCandidateDraftRecordingInput): Promise<SkillCandidateGroup> {
@@ -1315,6 +1416,7 @@ export class PersistentSkillCandidateRegistry implements SkillCandidateRegistry 
 						proposalRevisions: [],
 						state: "proposed",
 						dispositionHistory: [],
+						synthesisFailedProposalRevisionIds: [],
 						priorityScore: null,
 						draft: null,
 						draftProposalRevisionIds: [],
@@ -1367,7 +1469,7 @@ export class PersistentSkillCandidateRegistry implements SkillCandidateRegistry 
 
 			for (const group of groups.values()) {
 				const revisionIds = group.proposalRevisions.map((revision) => revision.revisionId);
-				const qualification = this.#scorer.qualification(immutableGroup(group));
+				const qualification = this.#qualification(group);
 				if (!sameValues(group.scoredProposalRevisionIds, revisionIds) || qualification.state !== group.state) {
 					changedGroupIds.add(group.groupId);
 				}
@@ -1429,7 +1531,7 @@ export class PersistentSkillCandidateRegistry implements SkillCandidateRegistry 
 					group.scoredProposalRevisionIds.length,
 					...scoreContent.proposalRevisionIds,
 				);
-				const qualification = this.#scorer.qualification(immutableGroup(group));
+				const qualification = this.#qualification(group);
 				if (qualification.state !== group.state) {
 					const transition = transitionEvent(
 						groupId,

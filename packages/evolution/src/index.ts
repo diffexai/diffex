@@ -302,6 +302,7 @@ export type {
 	SkillCandidateRegistryConsolidationInput,
 	SkillCandidateRegistryConsolidationResult,
 	SkillCandidateRegistryStore,
+	SkillCandidateSynthesisFailureRecordingInput,
 	SkillCandidateValidationRecordingInput,
 	SkillCurationResult,
 	SkillCurator,
