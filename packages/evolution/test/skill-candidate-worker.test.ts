@@ -425,6 +425,7 @@ function fixture(withEvaluator = false, store: MemoryRegistryStore = new MemoryR
 	const leases = new MemoryLeaseStore();
 	const registry = new FixtureRegistry();
 	const synthesisRequests: SkillSynthesizerInput[] = [];
+	const synthesisFailures = new Set<string>();
 	const validationRequests: SkillDraftValidatorInput[] = [];
 	const evaluationRequests: SkillEvaluatorInput[] = [];
 	let clockTime = now;
@@ -435,6 +436,7 @@ function fixture(withEvaluator = false, store: MemoryRegistryStore = new MemoryR
 		store,
 		registry,
 		synthesisRequests,
+		synthesisFailures,
 		validationRequests,
 		evaluationRequests,
 		clock,
@@ -453,6 +455,7 @@ function fixture(withEvaluator = false, store: MemoryRegistryStore = new MemoryR
 			synthesizer: {
 				async synthesize(request): Promise<SkillDraft> {
 					synthesisRequests.push(request);
+					if (synthesisFailures.has(request.group.groupId)) throw new Error("synthesis failed");
 					const content = {
 						artifactKind: "skill-draft" as const,
 						draftId: "draft-1",
@@ -703,6 +706,70 @@ describe("skill candidate registry worker", () => {
 				validation: expect.objectContaining({ artifactId: "validation-1" }),
 			}),
 		]);
+	});
+
+	it("continues processing later candidates when one synthesis fails", async () => {
+		const data = fixture(true);
+		const candidateReference = data.job.checkpoints[0]?.outputArtifacts[0];
+		if (candidateReference === undefined) throw new Error("Expected candidate reference");
+		const group = qualifiedGroup(candidateReference);
+		data.registry.groups.push(
+			{
+				...group,
+				groupId: "group-failing",
+				synthesisIdempotencyKey: "skill-synthesis-failing",
+				validationIdempotencyKey: "skill-validation-failing",
+				evaluationIdempotencyKey: "skill-evaluation-failing",
+			},
+			{
+				...group,
+				groupId: "group-succeeding",
+				synthesisIdempotencyKey: "skill-synthesis-succeeding",
+				validationIdempotencyKey: "skill-validation-succeeding",
+				evaluationIdempotencyKey: "skill-evaluation-succeeding",
+			},
+		);
+		data.synthesisFailures.add("group-failing");
+
+		await expect(data.worker.process(data.job.jobId)).rejects.toThrow(
+			"Skill synthesis failed for candidate groups: group-failing",
+		);
+
+		expect(data.synthesisRequests.map((request) => request.group.groupId)).toEqual([
+			"group-failing",
+			"group-succeeding",
+		]);
+		expect(data.validationRequests.map((request) => request.group.groupId)).toEqual(["group-succeeding"]);
+		expect(data.evaluationRequests.map((request) => request.group.groupId)).toEqual(["group-succeeding"]);
+		expect(data.registry.groups.find((candidateGroup) => candidateGroup.groupId === "group-failing")?.state).toBe(
+			"evidence-qualified",
+		);
+		expect(data.registry.groups.find((candidateGroup) => candidateGroup.groupId === "group-succeeding")?.state).toBe(
+			"accepted",
+		);
+		expect(data.store.events.find((event) => event.type === "skill-candidate-work-failed")).toMatchObject({
+			message: "Skill synthesis failed for candidate groups: group-failing",
+		});
+		expect(
+			data.store.events.some(
+				(event) => event.type === "skill-candidate-work-checkpointed" && event.stage === "completed",
+			),
+		).toBe(false);
+
+		data.synthesisFailures.clear();
+		await data.worker.process(data.job.jobId);
+
+		expect(data.synthesisRequests.map((request) => request.group.groupId)).toEqual([
+			"group-failing",
+			"group-succeeding",
+			"group-failing",
+		]);
+		expect(data.registry.groups.map((candidateGroup) => candidateGroup.state)).toEqual(["accepted", "accepted"]);
+		expect(
+			data.store.events.some(
+				(event) => event.type === "skill-candidate-work-checkpointed" && event.stage === "completed",
+			),
+		).toBe(true);
 	});
 
 	it("accepts structurally valid drafts when retrieval and behavior evaluation is unavailable", async () => {
