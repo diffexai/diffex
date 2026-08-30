@@ -1010,6 +1010,7 @@ export async function createCodingAgentEvolutionRuntime(
 		harnesses: options.harnessState,
 		progress,
 		skillCandidates: candidateRegistry,
+		skillCandidateRegistryStore: persistence,
 		skillActivation: {
 			async activate(activationScope, groupId) {
 				const lease = await persistence.acquire(

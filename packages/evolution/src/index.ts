@@ -204,6 +204,9 @@ export {
 	type EvolutionJobCreationResult,
 } from "./control-plane.ts";
 export {
+	type EvolutionAnalysisStatus,
+	type EvolutionCandidateGenerationStatus,
+	type EvolutionCandidateGenerationSummary,
 	EvolutionControlService,
 	type EvolutionControlServiceDependencies,
 	type EvolutionHarnessControl,

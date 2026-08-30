@@ -9,7 +9,8 @@ Use `/evolve` to:
 - inspect evidence eligibility and running or completed jobs;
 - start, resume, cancel, or browse evolution work;
 - inspect memory proposals and their evidence;
-- inspect skill-candidate provenance, textual draft diffs, deterministic validation, and retrieval/behavior evaluation when available;
+- distinguish analysis completion from waiting, retrying, completed, partially failed, or failed candidate generation;
+- inspect each skill candidate's registry state, latest transition time and reason, provenance, textual draft diff, deterministic validation, and retrieval/behavior evaluation when available;
 - activate a skill candidate after deterministic validation succeeds and any available persisted evaluation is accepted;
 - inspect target revisions and roll back an activated evolved skill to its pre-activation revision, even when later descendants preserved it;
 - enable or disable future tracing and evolution work.

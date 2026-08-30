@@ -25,7 +25,11 @@ import type {
 	SkillCandidate,
 	SkillCandidateGroup,
 	SkillCandidateOperation,
+	SkillCandidateRegistryEvent,
 	SkillCandidateState,
+	SkillCandidateWorkCheckpointedEvent,
+	SkillCandidateWorkFailedEvent,
+	SkillCandidateWorkStage,
 	SkillDraft,
 	SkillDraftValidationReport,
 	SkillEvaluationReport,
@@ -43,6 +47,7 @@ import type {
 	EvolutionLedger,
 	EvolutionProgressEvent,
 	SkillCandidateRegistry,
+	SkillCandidateRegistryStore,
 } from "./ports.ts";
 import { computeEvolutionTextDigest } from "./provenance.ts";
 import {
@@ -59,12 +64,34 @@ export interface EvolutionHarnessControl {
 	selectVersionIfCurrent(version: HarnessVersion, expectedCurrent: HarnessVersion): Promise<HarnessSelectResult>;
 }
 
+export type EvolutionAnalysisStatus = "waiting" | "processing" | "completed" | "failed";
+
+export type EvolutionCandidateGenerationStatus =
+	| "waiting"
+	| "processing"
+	| "retrying"
+	| "completed"
+	| "partial-failure"
+	| "failed"
+	| "not-applicable";
+
+export interface EvolutionCandidateGenerationSummary {
+	readonly status: EvolutionCandidateGenerationStatus;
+	readonly stage: SkillCandidateWorkStage | null;
+	readonly updatedAt: string | null;
+	readonly attempt: number;
+	readonly retryNotBefore: string | null;
+	readonly failureMessage: string | null;
+}
+
 export interface EvolutionJobSummary {
 	readonly jobId: string;
 	readonly trigger: EvolutionJob["trigger"];
 	readonly stage: EvolutionJobStage;
 	readonly outcome: EvolutionJobOutcome;
 	readonly reasonCode: EvolutionFailureReasonCode | null;
+	readonly analysisStatus: EvolutionAnalysisStatus;
+	readonly candidateGeneration: EvolutionCandidateGenerationSummary;
 	readonly createdAt: string;
 	readonly updatedAt: string;
 	readonly terminalAt: string | null;
@@ -113,6 +140,8 @@ export interface EvolutionSkillCandidateSummary {
 	readonly proposedName: string;
 	readonly operation: SkillCandidateOperation;
 	readonly state: SkillCandidateState;
+	readonly latestTransitionAt: string;
+	readonly latestReasonCodes: readonly string[];
 }
 
 export interface EvolutionSkillCandidateExistingContent {
@@ -224,6 +253,7 @@ export interface EvolutionControlServiceDependencies {
 	readonly harnesses: EvolutionHarnessControl;
 	readonly progress: EvolutionProgressBus;
 	readonly skillCandidates?: SkillCandidateRegistry;
+	readonly skillCandidateRegistryStore?: SkillCandidateRegistryStore;
 	readonly skillActivation?: EvolutionSkillActivationControl;
 	readonly observedHarnessVersion: () => HarnessVersion | undefined;
 	readonly currentDirectory: {
@@ -273,13 +303,100 @@ function stringArray(value: unknown): readonly string[] {
 	return Array.isArray(value) && value.every((entry) => typeof entry === "string") ? value : [];
 }
 
-function summary(job: EvolutionJob): EvolutionJobSummary {
+function analysisStatus(job: EvolutionJob): EvolutionAnalysisStatus {
+	if (job.outcome === "active") return job.stage === "queued" ? "waiting" : "processing";
+	return job.outcome === "completed" ? "completed" : "failed";
+}
+
+function candidateGenerationSummary(
+	job: EvolutionJob,
+	groups: readonly SkillCandidateGroup[],
+	events: readonly SkillCandidateRegistryEvent[],
+): EvolutionCandidateGenerationSummary {
+	const candidateIds = stringArray(
+		job.checkpoints.find((checkpoint) => checkpoint.stage === "skill-curating")?.state.candidateIds,
+	);
+	if (job.outcome !== "completed" || candidateIds.length === 0) {
+		return {
+			status: "not-applicable",
+			stage: null,
+			updatedAt: null,
+			attempt: 0,
+			retryNotBefore: null,
+			failureMessage: null,
+		};
+	}
+	const workEvents = events
+		.filter(
+			(event): event is SkillCandidateWorkCheckpointedEvent | SkillCandidateWorkFailedEvent =>
+				(event.type === "skill-candidate-work-checkpointed" || event.type === "skill-candidate-work-failed") &&
+				event.sourceEvolutionJobId === job.jobId,
+		)
+		.sort((left, right) => left.registrySequence - right.registrySequence);
+	const latest = workEvents.at(-1);
+	if (latest === undefined) {
+		return {
+			status: "waiting",
+			stage: null,
+			updatedAt: null,
+			attempt: 0,
+			retryNotBefore: null,
+			failureMessage: null,
+		};
+	}
+	if (latest.type === "skill-candidate-work-checkpointed") {
+		return {
+			status: latest.stage === "completed" ? "completed" : "processing",
+			stage: latest.stage,
+			updatedAt: latest.metadata.createdAt,
+			attempt: latest.attempt,
+			retryNotBefore: null,
+			failureMessage: null,
+		};
+	}
+	if (latest.retryNotBefore !== null) {
+		return {
+			status: "retrying",
+			stage: latest.stage ?? null,
+			updatedAt: latest.metadata.createdAt,
+			attempt: latest.attempt,
+			retryNotBefore: latest.retryNotBefore,
+			failureMessage: latest.message,
+		};
+	}
+	const relatedGroups = groups.filter((group) =>
+		group.proposalRevisions.some((revision) => revision.sourceEvolutionJobId === job.jobId),
+	);
+	const failedGroupIds = new Set([
+		...relatedGroups.filter((group) => group.state === "synthesis-failed").map((group) => group.groupId),
+		...(latest.diagnostics ?? []).flatMap((diagnostic) => diagnostic.groupId ?? []),
+	]);
+	return {
+		status:
+			failedGroupIds.size > 0 && relatedGroups.some((group) => !failedGroupIds.has(group.groupId))
+				? "partial-failure"
+				: "failed",
+		stage: latest.stage ?? null,
+		updatedAt: latest.metadata.createdAt,
+		attempt: latest.attempt,
+		retryNotBefore: null,
+		failureMessage: latest.message,
+	};
+}
+
+function summary(
+	job: EvolutionJob,
+	groups: readonly SkillCandidateGroup[] = [],
+	events: readonly SkillCandidateRegistryEvent[] = [],
+): EvolutionJobSummary {
 	return {
 		jobId: job.jobId,
 		trigger: job.trigger,
 		stage: job.stage,
 		outcome: job.outcome,
 		reasonCode: job.reasonCode,
+		analysisStatus: analysisStatus(job),
+		candidateGeneration: candidateGenerationSummary(job, groups, events),
 		createdAt: job.createdAt,
 		updatedAt: job.updatedAt,
 		terminalAt: job.terminalAt,
@@ -340,12 +457,15 @@ function candidateSummary(
 	candidate: SkillCandidate,
 	group: SkillCandidateGroup | null,
 ): EvolutionSkillCandidateSummary {
+	const latestTransition = group?.dispositionHistory.at(-1);
 	return {
 		candidateId: candidate.candidateId,
 		groupId: group?.groupId ?? null,
 		proposedName: candidate.proposedName,
 		operation: candidate.operation,
 		state: group?.state ?? "proposed",
+		latestTransitionAt: latestTransition?.createdAt ?? candidate.metadata.createdAt,
+		latestReasonCodes: latestTransition?.reasonCodes ?? [],
 	};
 }
 
@@ -411,6 +531,30 @@ export class EvolutionControlService {
 
 	constructor(dependencies: EvolutionControlServiceDependencies) {
 		this.#dependencies = dependencies;
+	}
+
+	async #candidateState(): Promise<{
+		readonly groups: readonly SkillCandidateGroup[];
+		readonly events: readonly SkillCandidateRegistryEvent[];
+	}> {
+		const [groups, snapshot] = await Promise.all([
+			this.#dependencies.skillCandidates?.list(this.#dependencies.scope) ?? Promise.resolve([]),
+			this.#dependencies.skillCandidateRegistryStore?.loadSkillCandidateRegistry(this.#dependencies.scope) ??
+				Promise.resolve({ revision: 0, events: [] }),
+		]);
+		return { groups, events: snapshot.events };
+	}
+
+	async #summaries(jobs: readonly EvolutionJob[]): Promise<readonly EvolutionJobSummary[]> {
+		const candidateState = await this.#candidateState();
+		return jobs.map((job) => summary(job, candidateState.groups, candidateState.events));
+	}
+
+	async #summary(job: EvolutionJob): Promise<EvolutionJobSummary> {
+		const summaries = await this.#summaries([job]);
+		const result = summaries[0];
+		if (result === undefined) throw new Error(`Evolution job "${job.jobId}" summary is unavailable`);
+		return result;
 	}
 
 	start(): void {
@@ -494,6 +638,11 @@ export class EvolutionControlService {
 						previousAutomaticTerminalAt: lastAutomaticRunAt,
 					});
 		const observedHarnessVersion = this.#dependencies.observedHarnessVersion() ?? null;
+		const projectedJobs = await this.#summaries([
+			...(active === null ? [] : [active]),
+			...(resumable === null ? [] : [resumable]),
+		]);
+		const projectedById = new Map(projectedJobs.map((job) => [job.jobId, job]));
 		return {
 			scope: this.#dependencies.scope,
 			processedEvidenceCursor: cursor.sequence,
@@ -505,8 +654,8 @@ export class EvolutionControlService {
 			lastEvolutionAt,
 			cooldownRemainingMs,
 			automaticEligibility: eligibility,
-			activeJob: active === null ? null : summary(active),
-			newestResumableJob: resumable === null ? null : summary(resumable),
+			activeJob: active === null ? null : (projectedById.get(active.jobId) ?? null),
+			newestResumableJob: resumable === null ? null : (projectedById.get(resumable.jobId) ?? null),
 			currentHarnessVersion: versions.currentVersion,
 			observedHarnessVersion,
 			nextPromptWillRefresh:
@@ -518,10 +667,10 @@ export class EvolutionControlService {
 	}
 
 	async listJobs(): Promise<readonly EvolutionJobSummary[]> {
-		return (await this.#dependencies.jobs.list(this.#dependencies.scope))
+		const jobs = (await this.#dependencies.jobs.list(this.#dependencies.scope))
 			.filter((job) => !isCancelledJob(job))
-			.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || right.jobId.localeCompare(left.jobId))
-			.map(summary);
+			.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || right.jobId.localeCompare(left.jobId));
+		return this.#summaries(jobs);
 	}
 
 	async #repositoryMatchesCurrentDirectory(repository: EvolutionRepositorySnapshot): Promise<boolean> {
@@ -593,11 +742,11 @@ export class EvolutionControlService {
 	async #start(trigger: "automatic" | "manual"): Promise<EvolutionStartResult> {
 		for (let contentionAttempt = 0; contentionAttempt < 20; contentionAttempt += 1) {
 			const result = await this.#dependencies.controlPlane.createJob({ scope: this.#dependencies.scope, trigger });
-			if (result.status === "created") return { status: "created", job: summary(result.job) };
+			if (result.status === "created") return { status: "created", job: await this.#summary(result.job) };
 			if (result.reason === "blocking-job" && result.blockingJobId !== undefined) {
 				const blocking = await this.#dependencies.jobs.load(result.blockingJobId);
 				if (blocking !== null) {
-					const blockingSummary = summary(blocking);
+					const blockingSummary = await this.#summary(blocking);
 					if (blockingSummary.cancellable || blockingSummary.resumable) {
 						return { status: "attached", job: blockingSummary };
 					}
@@ -606,7 +755,7 @@ export class EvolutionControlService {
 			}
 			if (result.reason !== "scope-busy") return { status: "not-created", reason: result.reason };
 			const active = activeJob(await this.#dependencies.jobs.list(this.#dependencies.scope));
-			if (active !== null) return { status: "attached", job: summary(active) };
+			if (active !== null) return { status: "attached", job: await this.#summary(active) };
 			await new Promise((resolveDelay) => setTimeout(resolveDelay, 10));
 		}
 		return { status: "not-created", reason: "scope-busy" };
@@ -623,7 +772,7 @@ export class EvolutionControlService {
 	async resumeNewest(): Promise<EvolutionJobSummary> {
 		const job = resumableJob(await this.#dependencies.jobs.list(this.#dependencies.scope));
 		if (job === null) throw new Error("No interrupted or retryable evolution job is available");
-		return summary(await this.#dependencies.controlPlane.requestResume(job.jobId));
+		return this.#summary(await this.#dependencies.controlPlane.requestResume(job.jobId));
 	}
 
 	async cancelJob(jobId: string): Promise<void> {
@@ -664,16 +813,17 @@ export class EvolutionControlService {
 		) {
 			throw new Error(`Unknown evolution job "${jobId}"`);
 		}
-		const [artifacts, events, versions] = await Promise.all([
+		const [artifacts, events, versions, candidateState] = await Promise.all([
 			loadArtifacts(job, this.#dependencies.artifacts),
 			this.#dependencies.ledger.read(jobId),
 			this.#dependencies.harnesses.listVersions(),
+			this.#candidateState(),
 		]);
 		const input = artifacts.find(isInputSnapshot);
 		if (input === undefined) throw new Error(`Evolution job "${jobId}" has no input snapshot`);
 		const scored = artifacts.filter(isScoredProposal);
 		const skillCandidates = artifacts.filter(isSkillCandidate);
-		const candidateGroups = (await this.#dependencies.skillCandidates?.list(this.#dependencies.scope)) ?? [];
+		const candidateGroups = candidateState.groups;
 		const discoveredSlices = new Set(
 			artifacts.flatMap((artifact) => ("sliceIds" in artifact ? stringArray(artifact.sliceIds) : [])),
 		).size;
@@ -757,7 +907,7 @@ export class EvolutionControlService {
 			versions.currentVersion === activation.resultingHarnessVersion &&
 			validVersions.has(activation.rollbackParentHarnessVersion);
 		return {
-			...summary(job),
+			...summary(job, candidateGroups, candidateState.events),
 			evidenceHighWaterCursor: input.ingestionHighWaterCursor,
 			completedSlices,
 			discoveredSlices,

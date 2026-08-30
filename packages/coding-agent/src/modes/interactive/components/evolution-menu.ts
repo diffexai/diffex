@@ -79,6 +79,7 @@ type MenuView =
 interface MenuEntry {
 	readonly label: string;
 	readonly enabled: boolean;
+	readonly status?: string;
 	readonly disabledStatus?: string;
 	readonly select: () => void;
 }
@@ -106,9 +107,21 @@ function firstCharacters(value: string, maximum: number): string {
 	return [...sanitizeEvolutionText(value).replace(/\s+/gu, " ").trim()].slice(0, maximum).join("");
 }
 
+export function formatEvolutionJobResult(job: EvolutionJobSummary): string {
+	if (job.analysisStatus === "waiting") return "analysis waiting";
+	if (job.analysisStatus === "processing") return "analysis processing";
+	if (job.analysisStatus === "failed") return "analysis failed";
+	if (job.candidateGeneration.status === "not-applicable" || job.candidateGeneration.status === "completed") {
+		return "full success";
+	}
+	if (job.candidateGeneration.status === "partial-failure") return "partial failure";
+	if (job.candidateGeneration.status === "failed") return "candidate generation failed";
+	return `analysis completed; candidate generation ${job.candidateGeneration.status}`;
+}
+
 export function formatEvolutionJobLabel(job: EvolutionJobSummary, now = new Date()): string {
 	const trigger = job.trigger === "automatic" ? "auto" : "manual";
-	return `${formatEvolutionTimestamp(job.createdAt, now)} - ${trigger} - ${job.stage}`;
+	return `${formatEvolutionTimestamp(job.createdAt, now)} - ${trigger} - ${formatEvolutionJobResult(job)}`;
 }
 
 export function formatEvolutionProposalLabel(proposal: EvolutionProposalDetail["proposal"]): string {
@@ -150,8 +163,65 @@ export function formatEvolutionEvidencePreview(
 	return firstCharacters(content, 100);
 }
 
+export type EvolutionSkillCandidateStage = "draft" | "evaluation" | "validation";
+export type EvolutionSkillCandidateStageStatus =
+	| "waiting"
+	| "blocked"
+	| "failed"
+	| "skipped"
+	| "completed"
+	| "not applicable";
+
+export function evolutionSkillCandidateStageStatus(
+	detail: EvolutionSkillCandidateDetail,
+	stage: EvolutionSkillCandidateStage,
+): EvolutionSkillCandidateStageStatus {
+	const { state } = detail.summary;
+	if (stage === "draft") {
+		if (detail.draft !== null) return "completed";
+		if (state === "synthesis-failed") return "failed";
+		if (state === "proposed" || state === "quarantined") return "blocked";
+		if (state === "rejected" || state === "retired") return "not applicable";
+		return "waiting";
+	}
+	if (stage === "validation") {
+		if (detail.validation !== null) return detail.validation.disposition === "accepted" ? "completed" : "failed";
+		if (state === "synthesis-failed") return "skipped";
+		if (state === "proposed" || state === "quarantined") return "blocked";
+		if (state === "rejected" || state === "retired") return "not applicable";
+		return "waiting";
+	}
+	if (detail.evaluation !== null) return detail.evaluation.disposition === "accepted" ? "completed" : "failed";
+	if (state === "accepted" && detail.summary.latestReasonCodes.includes("retrieval-and-behavior-evaluation-skipped")) {
+		return "skipped";
+	}
+	if (state === "proposed") return "blocked";
+	if (state === "quarantined" || state === "rejected" || state === "synthesis-failed" || state === "retired") {
+		return "not applicable";
+	}
+	return "waiting";
+}
+
+export function explainEvolutionCandidateReason(reasonCode: string): string {
+	const explanations: Readonly<Record<string, string>> = {
+		"awaiting-independent-recurrence": "Waiting for support from another independent task.",
+		"candidate-recorded": "The candidate was recorded for lifecycle review.",
+		"counterevidence-meets-or-exceeds-support": "Counterevidence matches or exceeds the supporting evidence.",
+		"deterministic-draft-validation-passed": "Deterministic draft validation passed.",
+		"evaluation-gates-not-passed": "Retrieval or behavior evaluation did not pass.",
+		"independent-recurrence-qualified": "Independent recurring evidence qualified the candidate.",
+		"outcome-aware-draft-recorded": "A candidate draft was generated and recorded.",
+		"proposal-revision-set-changed": "New proposal evidence requires candidate regeneration.",
+		"retrieval-and-behavior-evaluation-skipped": "Retrieval and behavior evaluation was unavailable and skipped.",
+		"retrieval-and-behavior-evaluation-started": "Retrieval and behavior evaluation started.",
+		"retrieval-and-behavior-gates-passed": "Retrieval and behavior evaluation passed.",
+		"skill-synthesis-attempts-exhausted": "Skill generation failed after all retry attempts.",
+	};
+	return explanations[reasonCode] ?? `${reasonCode.replaceAll("-", " ")}.`;
+}
+
 export function formatEvolutionSkillDraftDiff(detail: EvolutionSkillCandidateDetail): readonly string[] {
-	if (detail.draft === null) return ["Draft pending"];
+	if (detail.draft === null) return ["Draft not available"];
 	const before = detail.existingContents
 		.map((skill) => `# Existing skill: ${skill.name} (${skill.version})\n${skill.content}`)
 		.join("\n\n");
@@ -559,10 +629,25 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 	}
 
 	#renderJob(job: EvolutionJobDetail): void {
+		const candidateStage =
+			job.candidateGeneration.stage === null || job.candidateGeneration.stage === "completed"
+				? ""
+				: `, ${job.candidateGeneration.stage}`;
+		const candidateAttempt =
+			job.candidateGeneration.attempt === 0 ? "" : `, attempt ${job.candidateGeneration.attempt}`;
 		for (const line of [
 			`Trigger: ${job.trigger}`,
-			`Stage: ${job.stage} (${job.outcome})`,
-			`Finished: ${formatEvolutionTimestamp(job.terminalAt)}`,
+			`Result: ${formatEvolutionJobResult(job)}`,
+			`Analysis: ${job.analysisStatus}`,
+			`Candidate generation: ${job.candidateGeneration.status.replaceAll("-", " ")}${candidateStage}${candidateAttempt}`,
+			`Analysis finished: ${formatEvolutionTimestamp(job.terminalAt)}`,
+			`Candidate updated: ${formatEvolutionTimestamp(job.candidateGeneration.updatedAt)}`,
+			...(job.candidateGeneration.retryNotBefore === null
+				? []
+				: [`Candidate retry: ${formatEvolutionTimestamp(job.candidateGeneration.retryNotBefore)}`]),
+			...(job.candidateGeneration.failureMessage === null
+				? []
+				: [`Candidate error: ${job.candidateGeneration.failureMessage}`]),
 			`Evolution token: ${job.observability.estimatedEvidenceTokens.toLocaleString()}`,
 			`Last checkpoint: ${formatEvolutionTimestamp(job.lastCheckpointAt)}`,
 			`Base harness: ${formatHarnessVersionReference(
@@ -573,7 +658,7 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 			)}`,
 			`Target harness: ${
 				job.activatedHarnessVersion === null
-					? "pending"
+					? "not activated"
 					: formatHarnessVersionReference(
 							job.activatedHarnessVersion,
 							this.#harnessVersionInfo,
@@ -589,7 +674,7 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 	#renderProposal(detail: EvolutionProposalDetail): void {
 		this.#addLine(formatEvolutionProposalLabel(detail.proposal));
 		this.addChild(new Spacer(1));
-		this.#addLine(`Validation: ${detail.validationDisposition ?? "pending"}`);
+		this.#addLine(`Validation: ${detail.validationDisposition ?? "not attempted"}`);
 		this.addChild(new Spacer(1));
 		this.#addLine(`Outcome: ${formatEvolutionProposalOutcome(detail.proposal)}`);
 	}
@@ -602,25 +687,30 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 			{
 				label: "Draft diff",
 				enabled: detail.draft !== null,
-				disabledStatus: "pending",
+				status: evolutionSkillCandidateStageStatus(detail, "draft"),
 				select: () => review("draft"),
 			},
 			{
 				label: "Validation",
 				enabled: detail.validation !== null,
-				disabledStatus: "pending",
+				status: evolutionSkillCandidateStageStatus(detail, "validation"),
 				select: () => review("validation"),
 			},
 			{
 				label: "Evaluation",
 				enabled: detail.evaluation !== null,
-				disabledStatus: detail.summary.state === "accepted" ? "skipped" : "pending",
+				status: evolutionSkillCandidateStageStatus(detail, "evaluation"),
 				select: () => review("evaluation"),
 			},
 			{
 				label: "Activate",
 				enabled: detail.activationAvailable,
-				disabledStatus: detail.targetHarnessVersion === null ? "unavailable" : "active",
+				disabledStatus:
+					detail.targetHarnessVersion !== null
+						? "active"
+						: detail.summary.state === "accepted"
+							? "unavailable"
+							: "blocked",
 				select: () => this.#confirm("activate-skill", jobId, detail.summary.candidateId),
 			},
 			{
@@ -634,7 +724,17 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 
 	#renderSkillCandidate(detail: EvolutionSkillCandidateDetail): void {
 		this.#addLine(`Skill candidate: ${detail.summary.proposedName}`, "accent");
-		this.#addLine(`Target harness: ${detail.targetHarnessVersion ?? "pending activation"}`);
+		this.#addLine(`State: ${detail.summary.state}`);
+		this.#addLine(`State changed: ${formatEvolutionTimestamp(detail.summary.latestTransitionAt)}`);
+		for (const reasonCode of detail.summary.latestReasonCodes) {
+			this.#addLine(`Reason: ${explainEvolutionCandidateReason(reasonCode)}`);
+			this.#addLine(`Reason code: ${reasonCode}`, "muted");
+		}
+		this.#addLine(
+			`Target harness: ${
+				detail.targetHarnessVersion ?? (detail.summary.state === "accepted" ? "not activated" : "not applicable")
+			}`,
+		);
 	}
 
 	#renderSkillCandidateReview(
@@ -666,13 +766,15 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 		}
 		if (section === "validation") {
 			this.#addLine("Deterministic validation", "accent");
-			this.#addLine(`Result: ${detail.validation?.disposition ?? "pending"}`);
+			this.#addLine(`Result: ${detail.validation?.disposition ?? "not attempted"}`);
 			for (const issue of detail.validation?.issues ?? [])
 				this.#addLine(`${issue.code}: ${issue.message}`, "warning");
 			return;
 		}
 		this.#addLine("Retrieval and behavior evaluation", "accent");
-		this.#addLine(`Result: ${detail.evaluation?.disposition ?? "pending"}`);
+		this.#addLine(
+			`Result: ${detail.evaluation?.disposition ?? evolutionSkillCandidateStageStatus(detail, "evaluation")}`,
+		);
 		for (const [name, gate] of Object.entries(detail.evaluation?.gates ?? {})) {
 			this.#addLine(`${name}: ${gate.passed ? "passed" : `failed (${gate.reasonCodes.join(", ")})`}`);
 		}
@@ -731,8 +833,10 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 		entries.forEach((entry, index) => {
 			const selected = index === this.#selectedIndex;
 			const prefix = selected ? SELECTED_LIST_PREFIX : UNSELECTED_LIST_PREFIX;
-			const disabled = entry.enabled ? "" : ` [${entry.disabledStatus ?? "unavailable"}]`;
-			const line = `${prefix}${entry.label}${disabled}`;
+			const status = entry.status === undefined ? "" : ` [${entry.status}]`;
+			const disabled =
+				entry.enabled || entry.status !== undefined ? "" : ` [${entry.disabledStatus ?? "unavailable"}]`;
+			const line = `${prefix}${entry.label}${status}${disabled}`;
 			this.addChild(
 				new TruncatedText(theme.fg(entry.enabled ? (selected ? "selectionAccent" : "text") : "muted", line), 1, 0),
 			);
