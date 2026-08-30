@@ -49,6 +49,7 @@ import {
 	SkillCandidateBackgroundWorker,
 	SkillCandidateRegistryWorker,
 	type SkillDraftValidationEnvironmentSource,
+	type SkillEvaluator,
 	SkillWriter,
 	StructuredDeltaCurator,
 	StructuredSkillCurator,
@@ -852,6 +853,8 @@ export interface CreateCodingAgentEvolutionRuntimeOptions {
 	readonly harnessState: HarnessStateStore;
 	readonly modelRuntime: ModelRuntime;
 	readonly resourceLoader: ResourceLoader;
+	/** Optional retrieval and behavior evaluation capability for synthesized skill candidates. */
+	readonly skillEvaluator?: SkillEvaluator;
 }
 
 export async function createCodingAgentEvolutionRuntime(
@@ -966,7 +969,7 @@ export async function createCodingAgentEvolutionRuntime(
 			jobs: persistence,
 			store: persistence,
 			registry: candidateRegistry,
-			evaluatorAvailable: false,
+			evaluatorAvailable: options.skillEvaluator !== undefined,
 		}),
 		processor: new SkillCandidateRegistryWorker({
 			version: VERSION,
@@ -979,6 +982,7 @@ export async function createCodingAgentEvolutionRuntime(
 			registry: candidateRegistry,
 			synthesizer: skillSynthesizer,
 			validator: skillValidator,
+			evaluator: options.skillEvaluator,
 			model,
 		}),
 		priority,
