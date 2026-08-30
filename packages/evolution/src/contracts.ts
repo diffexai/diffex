@@ -976,6 +976,25 @@ export interface SkillCandidateWorkCheckpointedEvent extends SkillCandidateRegis
 	readonly groupIds: readonly string[];
 }
 
+export interface SkillCandidateWorkErrorCause {
+	readonly name: string;
+	readonly message: string;
+}
+
+export interface SkillCandidateWorkErrorDiagnostic {
+	readonly name: string;
+	readonly message: string;
+	readonly reasonCode: EvolutionFailureReasonCode | null;
+	readonly retryable: boolean | null;
+	readonly diagnostics: JsonValue | null;
+	readonly cause: SkillCandidateWorkErrorCause | null;
+}
+
+export interface SkillCandidateGroupFailureDiagnostic {
+	readonly groupId: string | null;
+	readonly error: SkillCandidateWorkErrorDiagnostic;
+}
+
 export interface SkillCandidateWorkFailedEvent extends SkillCandidateRegistryEventBase {
 	readonly type: "skill-candidate-work-failed";
 	readonly workId: string;
@@ -984,6 +1003,10 @@ export interface SkillCandidateWorkFailedEvent extends SkillCandidateRegistryEve
 	readonly attempt: number;
 	readonly message: string;
 	readonly retryNotBefore: string | null;
+	/** Absent only on records written before structured candidate-work failure diagnostics were introduced. */
+	readonly stage?: SkillCandidateWorkStage;
+	/** Absent only on records written before structured candidate-work failure diagnostics were introduced. */
+	readonly diagnostics?: readonly SkillCandidateGroupFailureDiagnostic[];
 }
 
 export type SkillCandidateRegistryEvent =

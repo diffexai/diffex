@@ -6,6 +6,7 @@ import {
 	type EvolutionArtifactProducer,
 	type EvolutionArtifactReference,
 	type EvolutionArtifactStore,
+	EvolutionExecutionError,
 	type EvolutionInputSnapshot,
 	type EvolutionJob,
 	type EvolutionJobStore,
@@ -453,7 +454,7 @@ function fixture(withEvaluator = false, store: MemoryRegistryStore = new MemoryR
 	const leases = new MemoryLeaseStore();
 	const registry = new FixtureRegistry();
 	const synthesisRequests: SkillSynthesizerInput[] = [];
-	const synthesisFailures = new Set<string>();
+	const synthesisFailures = new Map<string, unknown>();
 	const validationRequests: SkillDraftValidatorInput[] = [];
 	const evaluationRequests: SkillEvaluatorInput[] = [];
 	let clockTime = now;
@@ -483,7 +484,8 @@ function fixture(withEvaluator = false, store: MemoryRegistryStore = new MemoryR
 			synthesizer: {
 				async synthesize(request): Promise<SkillDraft> {
 					synthesisRequests.push(request);
-					if (synthesisFailures.has(request.group.groupId)) throw new Error("synthesis failed");
+					const synthesisFailure = synthesisFailures.get(request.group.groupId);
+					if (synthesisFailure !== undefined) throw synthesisFailure;
 					const content = {
 						artifactKind: "skill-draft" as const,
 						draftId: "draft-1",
@@ -757,7 +759,17 @@ describe("skill candidate registry worker", () => {
 				evaluationIdempotencyKey: "skill-evaluation-succeeding",
 			},
 		);
-		data.synthesisFailures.add("group-failing");
+		const providerError = new Error("Provider rejected the structured response");
+		providerError.name = "ProviderError";
+		data.synthesisFailures.set(
+			"group-failing",
+			new EvolutionExecutionError("Skill synthesizer failed to produce a draft", {
+				reasonCode: "skill-synthesis-invalid-response",
+				retryable: false,
+				cause: providerError,
+				diagnostics: { lastCorrection: "files must be an array" },
+			}),
+		);
 
 		await expect(data.worker.process(data.job.jobId)).rejects.toThrow(
 			"Skill synthesis failed for candidate groups: group-failing",
@@ -777,6 +789,20 @@ describe("skill candidate registry worker", () => {
 		);
 		expect(data.store.events.find((event) => event.type === "skill-candidate-work-failed")).toMatchObject({
 			message: "Skill synthesis failed for candidate groups: group-failing",
+			stage: "synthesizing",
+			diagnostics: [
+				{
+					groupId: "group-failing",
+					error: {
+						name: "EvolutionExecutionError",
+						message: "Skill synthesizer failed to produce a draft",
+						reasonCode: "skill-synthesis-invalid-response",
+						retryable: false,
+						diagnostics: { lastCorrection: "files must be an array" },
+						cause: { name: "ProviderError", message: "Provider rejected the structured response" },
+					},
+				},
+			],
 		});
 		expect(
 			data.store.events.some(
@@ -805,7 +831,7 @@ describe("skill candidate registry worker", () => {
 		const candidateReference = data.job.checkpoints[0]?.outputArtifacts[0];
 		if (candidateReference === undefined) throw new Error("Expected candidate reference");
 		data.registry.groups.push(qualifiedGroup(candidateReference));
-		data.synthesisFailures.add("group-qualified");
+		data.synthesisFailures.set("group-qualified", new Error("synthesis failed"));
 
 		for (let attempt = 1; attempt <= 3; attempt += 1) {
 			await expect(data.worker.process(data.job.jobId)).rejects.toThrow(

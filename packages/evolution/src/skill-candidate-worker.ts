@@ -6,14 +6,17 @@ import type {
 	EvolutionLeaseToken,
 	EvolutionScope,
 	SkillCandidate,
+	SkillCandidateGroupFailureDiagnostic,
 	SkillCandidateRegistryEvent,
 	SkillCandidateWorkCheckpointedEvent,
+	SkillCandidateWorkErrorDiagnostic,
 	SkillCandidateWorkFailedEvent,
 	SkillCandidateWorkStage,
 	SkillDraft,
 	SkillDraftValidationReport,
 } from "./contracts.ts";
 import { SKILL_CANDIDATE_REGISTRY_SCHEMA_VERSION } from "./contracts.ts";
+import { EvolutionExecutionError } from "./errors.ts";
 import type {
 	EvolutionArtifact,
 	EvolutionArtifactStore,
@@ -190,6 +193,43 @@ function retryDelay(attempt: number, baseDelayMs: number, maxDelayMs: number): n
 	return Math.min(maxDelayMs, baseDelayMs * 2 ** Math.max(0, attempt - 1));
 }
 
+function errorDiagnostic(error: unknown): SkillCandidateWorkErrorDiagnostic {
+	const executionError = error instanceof EvolutionExecutionError ? error : null;
+	const cause = error instanceof Error ? error.cause : undefined;
+	return {
+		name: error instanceof Error ? error.name : "Error",
+		message: error instanceof Error ? error.message : String(error),
+		reasonCode: executionError?.reasonCode ?? null,
+		retryable: executionError?.retryable ?? null,
+		diagnostics: executionError?.diagnostics ?? null,
+		cause:
+			cause instanceof Error
+				? { name: cause.name, message: cause.message }
+				: cause === undefined
+					? null
+					: { name: "Error", message: String(cause) },
+	};
+}
+
+class SkillCandidateWorkStageError extends AggregateError {
+	readonly stage: SkillCandidateWorkStage;
+	readonly failures: readonly { readonly groupId: string; readonly error: unknown }[];
+
+	constructor(
+		stage: SkillCandidateWorkStage,
+		failures: readonly { readonly groupId: string; readonly error: unknown }[],
+		message: string,
+	) {
+		super(
+			failures.map((failure) => failure.error),
+			message,
+		);
+		this.name = "SkillCandidateWorkStageError";
+		this.stage = stage;
+		this.failures = failures;
+	}
+}
+
 export class PollingSkillCandidateWorkSource {
 	readonly #dependencies: PollingSkillCandidateWorkSourceDependencies;
 	readonly #pollIntervalMs: number;
@@ -357,7 +397,14 @@ export class SkillCandidateRegistryWorker implements SkillCandidateWorkProcessor
 		});
 	}
 
-	async #appendFailure(job: EvolutionJob, attempt: number, error: unknown, lease: EvolutionLeaseToken): Promise<void> {
+	async #appendFailure(
+		job: EvolutionJob,
+		attempt: number,
+		stage: SkillCandidateWorkStage,
+		diagnostics: readonly SkillCandidateGroupFailureDiagnostic[],
+		error: unknown,
+		lease: EvolutionLeaseToken,
+	): Promise<void> {
 		const idempotencyKey = stableId("skill-candidate-work-failure", {
 			sourceEvolutionJobId: job.jobId,
 			attempt,
@@ -393,9 +440,12 @@ export class SkillCandidateRegistryWorker implements SkillCandidateWorkProcessor
 						: new Date(
 								Date.parse(now) + retryDelay(attempt, this.#retryBaseDelayMs, this.#retryMaxDelayMs),
 							).toISOString(),
+				stage,
+				diagnostics,
 			};
+			const groupIds = diagnostics.flatMap((diagnostic) => diagnostic.groupId ?? []);
 			return {
-				metadata: this.#metadata(content.eventId, [job.jobId], job.metadata.scope, now, content),
+				metadata: this.#metadata(content.eventId, [job.jobId, ...groupIds], job.metadata.scope, now, content),
 				...content,
 			};
 		});
@@ -498,8 +548,10 @@ export class SkillCandidateRegistryWorker implements SkillCandidateWorkProcessor
 		const attempt = history.filter((event) => event.type === "skill-candidate-work-failed").length + 1;
 		if (attempt > this.#maxAttempts) throw new Error(`Skill candidate work for "${job.jobId}" exhausted retries`);
 
+		let activeStage: SkillCandidateWorkStage = "consolidating";
+		let activeGroupId: string | null = null;
 		try {
-			await this.#appendCheckpoint(job, "consolidating", attempt, [], claim());
+			await this.#appendCheckpoint(job, activeStage, attempt, [], claim());
 			const inputArtifact = await this.#dependencies.artifacts.get(job.inputSnapshot);
 			if (!isInputSnapshot(inputArtifact)) throw new Error("Evolution job input snapshot artifact is invalid");
 			const artifacts = await Promise.all(
@@ -542,11 +594,13 @@ export class SkillCandidateRegistryWorker implements SkillCandidateWorkProcessor
 					),
 				]),
 			];
-			await this.#appendCheckpoint(job, "scoring", attempt, processedGroupIds, claim());
+			activeStage = "scoring";
+			await this.#appendCheckpoint(job, activeStage, attempt, processedGroupIds, claim());
 			const synthesisTargets = result.groups.filter((group) => group.state === "evidence-qualified");
+			activeStage = "synthesizing";
 			await this.#appendCheckpoint(
 				job,
-				"synthesizing",
+				activeStage,
 				attempt,
 				synthesisTargets.map((group) => group.groupId),
 				claim(),
@@ -559,6 +613,7 @@ export class SkillCandidateRegistryWorker implements SkillCandidateWorkProcessor
 				readonly error: unknown;
 			}[] = [];
 			for (const group of synthesisTargets) {
+				activeGroupId = group.groupId;
 				signal.throwIfAborted();
 				let draftReference = group.draft;
 				if (draftReference === null) {
@@ -595,6 +650,7 @@ export class SkillCandidateRegistryWorker implements SkillCandidateWorkProcessor
 					}),
 				);
 			}
+			activeGroupId = null;
 			if (synthesisFailures.length > 0 && attempt >= this.#maxAttempts) {
 				await this.#dependencies.registry.recordSynthesisFailures({
 					scope: job.metadata.scope,
@@ -603,9 +659,10 @@ export class SkillCandidateRegistryWorker implements SkillCandidateWorkProcessor
 					createdAt: this.#dependencies.clock.now(),
 				});
 			}
+			activeStage = "validating";
 			await this.#appendCheckpoint(
 				job,
-				"validating",
+				activeStage,
 				attempt,
 				draftedGroups.map((group) => group.groupId),
 				claim(),
@@ -616,6 +673,7 @@ export class SkillCandidateRegistryWorker implements SkillCandidateWorkProcessor
 					.map((group) => [group.groupId, group]),
 			);
 			for (const group of draftedGroups) {
+				activeGroupId = group.groupId;
 				signal.throwIfAborted();
 				if (group.draft === null) throw new Error(`Drafted candidate group "${group.groupId}" has no draft`);
 				const artifact = await this.#dependencies.artifacts.get(group.draft);
@@ -643,10 +701,13 @@ export class SkillCandidateRegistryWorker implements SkillCandidateWorkProcessor
 				});
 				if (validated.state === "structurally-valid") evaluationGroups.set(validated.groupId, validated);
 			}
-			await this.#appendCheckpoint(job, "evaluating", attempt, [...evaluationGroups.keys()], claim());
+			activeStage = "evaluating";
+			activeGroupId = null;
+			await this.#appendCheckpoint(job, activeStage, attempt, [...evaluationGroups.keys()], claim());
 			const evaluatedGroupIds: string[] = [];
 			if (this.#dependencies.evaluator === undefined) {
 				for (const evaluationGroup of evaluationGroups.values()) {
+					activeGroupId = evaluationGroup.groupId;
 					signal.throwIfAborted();
 					if (evaluationGroup.draft === null || evaluationGroup.validation === null) {
 						throw new Error(`Candidate group "${evaluationGroup.groupId}" lacks evaluation prerequisites`);
@@ -673,6 +734,7 @@ export class SkillCandidateRegistryWorker implements SkillCandidateWorkProcessor
 				}
 			} else {
 				for (const evaluationGroup of evaluationGroups.values()) {
+					activeGroupId = evaluationGroup.groupId;
 					signal.throwIfAborted();
 					if (evaluationGroup.draft === null || evaluationGroup.validation === null) {
 						throw new Error(`Candidate group "${evaluationGroup.groupId}" lacks evaluation prerequisites`);
@@ -718,22 +780,33 @@ export class SkillCandidateRegistryWorker implements SkillCandidateWorkProcessor
 					evaluatedGroupIds.push(pending.groupId);
 				}
 			}
+			activeGroupId = null;
 			if (synthesisFailures.length > 0) {
-				throw new AggregateError(
-					synthesisFailures.map((failure) => failure.error),
+				throw new SkillCandidateWorkStageError(
+					"synthesizing",
+					synthesisFailures,
 					`Skill synthesis failed for candidate groups: ${synthesisFailures.map((failure) => failure.groupId).join(", ")}`,
 				);
 			}
+			activeStage = "completed";
 			await this.#appendCheckpoint(
 				job,
-				"completed",
+				activeStage,
 				attempt,
 				[...new Set([...processedGroupIds, ...evaluationGroups.keys(), ...evaluatedGroupIds])],
 				claim(),
 			);
 		} catch (error) {
 			if (signal.aborted) throw error;
-			await this.#appendFailure(job, attempt, error, claim());
+			const stage = error instanceof SkillCandidateWorkStageError ? error.stage : activeStage;
+			const diagnostics: readonly SkillCandidateGroupFailureDiagnostic[] =
+				error instanceof SkillCandidateWorkStageError
+					? error.failures.map((failure) => ({
+							groupId: failure.groupId,
+							error: errorDiagnostic(failure.error),
+						}))
+					: [{ groupId: activeGroupId, error: errorDiagnostic(error) }];
+			await this.#appendFailure(job, attempt, stage, diagnostics, error, claim());
 			throw error;
 		}
 	}

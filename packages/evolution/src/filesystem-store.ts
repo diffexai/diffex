@@ -300,6 +300,34 @@ function isStringArray(value: unknown): value is readonly string[] {
 	return Array.isArray(value) && value.every((item) => typeof item === "string");
 }
 
+function isJsonValue(value: unknown): boolean {
+	if (value === null || typeof value === "string" || typeof value === "boolean") return true;
+	if (typeof value === "number") return Number.isFinite(value);
+	if (Array.isArray(value)) return value.every(isJsonValue);
+	return isRecord(value) && Object.values(value).every(isJsonValue);
+}
+
+function isCandidateWorkErrorDiagnostic(value: unknown): boolean {
+	return (
+		isRecord(value) &&
+		typeof value.name === "string" &&
+		typeof value.message === "string" &&
+		(value.reasonCode === null || typeof value.reasonCode === "string") &&
+		(value.retryable === null || typeof value.retryable === "boolean") &&
+		isJsonValue(value.diagnostics) &&
+		(value.cause === null ||
+			(isRecord(value.cause) && typeof value.cause.name === "string" && typeof value.cause.message === "string"))
+	);
+}
+
+function isCandidateGroupFailureDiagnostic(value: unknown): boolean {
+	return (
+		isRecord(value) &&
+		(value.groupId === null || typeof value.groupId === "string") &&
+		isCandidateWorkErrorDiagnostic(value.error)
+	);
+}
+
 function isArtifactReference(value: unknown): boolean {
 	return (
 		isRecord(value) &&
@@ -403,16 +431,29 @@ function isCandidateRegistryEventContent(value: Readonly<Record<string, unknown>
 			isStringArray(value.groupIds)
 		);
 	}
+	if (
+		value.type !== "skill-candidate-work-failed" ||
+		typeof value.workId !== "string" ||
+		typeof value.sourceEvolutionJobId !== "string" ||
+		typeof value.idempotencyKey !== "string" ||
+		!Number.isSafeInteger(value.attempt) ||
+		(value.attempt as number) < 1 ||
+		typeof value.message !== "string" ||
+		(value.retryNotBefore !== null &&
+			(typeof value.retryNotBefore !== "string" || !Number.isFinite(Date.parse(value.retryNotBefore))))
+	) {
+		return false;
+	}
+	const hasStage = value.stage !== undefined;
+	const hasDiagnostics = value.diagnostics !== undefined;
+	if (hasStage !== hasDiagnostics) return false;
+	if (!hasStage) return true;
 	return (
-		value.type === "skill-candidate-work-failed" &&
-		typeof value.workId === "string" &&
-		typeof value.sourceEvolutionJobId === "string" &&
-		typeof value.idempotencyKey === "string" &&
-		Number.isSafeInteger(value.attempt) &&
-		(value.attempt as number) > 0 &&
-		typeof value.message === "string" &&
-		(value.retryNotBefore === null ||
-			(typeof value.retryNotBefore === "string" && Number.isFinite(Date.parse(value.retryNotBefore))))
+		typeof value.stage === "string" &&
+		SKILL_CANDIDATE_WORK_STAGES.has(value.stage) &&
+		Array.isArray(value.diagnostics) &&
+		value.diagnostics.length > 0 &&
+		value.diagnostics.every(isCandidateGroupFailureDiagnostic)
 	);
 }
 
