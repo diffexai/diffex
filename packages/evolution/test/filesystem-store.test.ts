@@ -204,6 +204,32 @@ function candidateStateEvent(eventId: string, registrySequence: number): SkillCa
 	};
 }
 
+function candidateCapsuleEvent(eventId: string, registrySequence: number): SkillCandidateRegistryEvent {
+	const content = {
+		schemaVersion: SKILL_CANDIDATE_REGISTRY_SCHEMA_VERSION,
+		eventId,
+		registrySequence,
+		type: "skill-candidate-group-capsule-recorded" as const,
+		groupId: "group-1",
+		capsule: {
+			artifactId: "skill-candidate-group-capsule-1",
+			contentDigest: `sha256:${"a".repeat(64)}`,
+		},
+		proposalRevisionIds: ["proposal-revision-1"],
+	};
+	return {
+		metadata: createEvolutionArtifactMetadata({
+			artifactId: eventId,
+			producer,
+			sourceIds: ["group-1", content.capsule.artifactId],
+			scope,
+			createdAt: "2026-08-19T12:00:00.000Z",
+			content,
+		}),
+		...content,
+	};
+}
+
 function candidateEvaluationEvent(eventId: string, registrySequence: number): SkillCandidateRegistryEvent {
 	const reference = (artifactId: string) => ({ artifactId, contentDigest: `sha256:${"a".repeat(64)}` });
 	const content = {
@@ -334,21 +360,28 @@ describe("filesystem evolution persistence", () => {
 		const peer = new FileEvolutionPersistence(root);
 		const first = candidateWorkEvent("candidate-event-1", 1);
 
-		const evaluation = candidateEvaluationEvent("candidate-event-2", 2);
-		const synthesisFailed = candidateStateEvent("candidate-event-3", 3);
-		const workFailure = candidateWorkFailureEvent("candidate-event-4", 4);
+		const capsule = candidateCapsuleEvent("candidate-event-2", 2);
+		const evaluation = candidateEvaluationEvent("candidate-event-3", 3);
+		const synthesisFailed = candidateStateEvent("candidate-event-4", 4);
+		const workFailure = candidateWorkFailureEvent("candidate-event-5", 5);
 		expect(
-			await store.appendSkillCandidateRegistryEvents(scope, 0, [first, evaluation, synthesisFailed, workFailure]),
+			await store.appendSkillCandidateRegistryEvents(scope, 0, [
+				first,
+				capsule,
+				evaluation,
+				synthesisFailed,
+				workFailure,
+			]),
 		).toBe("committed");
 		expect(await peer.loadSkillCandidateRegistry(scope)).toEqual({
-			revision: 4,
-			events: [first, evaluation, synthesisFailed, workFailure],
+			revision: 5,
+			events: [first, capsule, evaluation, synthesisFailed, workFailure],
 		});
 		expect(
-			await peer.appendSkillCandidateRegistryEvents(scope, 0, [candidateWorkEvent("candidate-event-5", 1)]),
+			await peer.appendSkillCandidateRegistryEvents(scope, 0, [candidateWorkEvent("candidate-event-6", 1)]),
 		).toBe("conflict");
 		await expect(
-			peer.appendSkillCandidateRegistryEvents(scope, 4, [candidateWorkEvent("candidate-event-5", 6)]),
+			peer.appendSkillCandidateRegistryEvents(scope, 5, [candidateWorkEvent("candidate-event-6", 7)]),
 		).rejects.toThrow("contiguous sequence");
 	});
 
