@@ -972,15 +972,16 @@ export async function createCodingAgentEvolutionRuntime(
 			resourceLoader: options.resourceLoader,
 		}),
 	});
+	const candidateSource = new PollingSkillCandidateWorkSource({
+		clock,
+		jobs: persistence,
+		store: persistence,
+		registry: candidateRegistry,
+		evaluatorAvailable: options.skillEvaluator !== undefined,
+	});
 	const candidateWorker = new SkillCandidateBackgroundWorker({
 		clock,
-		source: new PollingSkillCandidateWorkSource({
-			clock,
-			jobs: persistence,
-			store: persistence,
-			registry: candidateRegistry,
-			evaluatorAvailable: options.skillEvaluator !== undefined,
-		}),
+		source: candidateSource,
 		processor: new SkillCandidateRegistryWorker({
 			version: VERSION,
 			clock,
@@ -1052,6 +1053,7 @@ export async function createCodingAgentEvolutionRuntime(
 	return {
 		control,
 		async start() {
+			await candidateSource.reconcileLegacyWork();
 			const abandoned = (await persistence.list(scope)).filter((job) => job.outcome === "active");
 			for (const job of abandoned) {
 				abandonedJobIds.add(job.jobId);
