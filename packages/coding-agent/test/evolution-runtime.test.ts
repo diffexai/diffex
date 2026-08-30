@@ -1347,6 +1347,25 @@ describe("coding-agent evolution runtime", () => {
 					harnessRevision: activation.targetHarnessVersion,
 				}),
 			]);
+
+			await expect(runtime.control.getSkillCandidate(started.job.jobId, candidateId)).resolves.toMatchObject({
+				targetHarnessVersion: activation.targetHarnessVersion,
+				rollbackTargetHarnessVersion: root.manifest.version,
+				rollbackAvailable: true,
+				activationAvailable: false,
+			});
+			await expect(runtime.control.rollbackSkillCandidate(started.job.jobId, candidateId)).resolves.toMatchObject({
+				fromHarnessVersion: activation.targetHarnessVersion,
+				toHarnessVersion: root.manifest.version,
+			});
+			expect((await store.loadCurrent()).manifest.version).toBe(root.manifest.version);
+			await expect(runtime.control.getSkillCandidate(started.job.jobId, candidateId)).resolves.toMatchObject({
+				summary: { state: "accepted" },
+				targetHarnessVersion: null,
+				rollbackTargetHarnessVersion: null,
+				rollbackAvailable: false,
+				activationAvailable: true,
+			});
 		} finally {
 			await Promise.all([peerRuntime.stop(), runtime.stop()]);
 		}
