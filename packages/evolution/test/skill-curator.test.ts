@@ -19,8 +19,11 @@ import {
 	type EvolutionSkillContentArtifact,
 	type JsonObject,
 	type Lesson,
+	measureEvolutionValue,
 	type ReflectionResult,
 	type ScoredProposal,
+	SKILL_CANDIDATE_CAPSULE_MAX_ESTIMATED_TOKENS,
+	SKILL_CANDIDATE_CAPSULE_MAX_SERIALIZED_BYTES,
 	type SkillCuratorInput,
 	StructuredSkillCurator,
 } from "../src/index.ts";
@@ -354,7 +357,7 @@ function selectedMemoryProposal(input: EvolutionInputSnapshot): ScoredProposal {
 	};
 }
 
-function candidateOutput(): JsonObject {
+function candidateOutput(positiveTrigger = "A focused test command exits nonzero after a code change."): JsonObject {
 	return {
 		decisions: [
 			{
@@ -375,7 +378,7 @@ function candidateOutput(): JsonObject {
 					operation: "UPDATE",
 					proposedName: "verification-recovery",
 					triggerDescription: "A repository verification command fails or produces an ambiguous result.",
-					positiveTriggers: ["A focused test command exits nonzero after a code change."],
+					positiveTriggers: [positiveTrigger],
 					negativeTriggers: ["The task only asks for an explanation and changes no files."],
 					preconditions: ["A deterministic verification command is available."],
 					procedureSteps: [
@@ -463,6 +466,12 @@ describe("StructuredSkillCurator", () => {
 			control: {
 				globalEvolvedSkillTargetPermitted: false,
 				candidateContainsNoExecutableWriterPayload: true,
+				candidateCapsuleLimits: {
+					serialization: "canonical-json-utf8-v1",
+					maxSerializedBytes: SKILL_CANDIDATE_CAPSULE_MAX_SERIALIZED_BYTES,
+					maxEstimatedTokens: SKILL_CANDIDATE_CAPSULE_MAX_ESTIMATED_TOKENS,
+					preserveWholeStructuredFields: true,
+				},
 				proceduralWorkflowsBelongInSkills: ["ordered-setup", "tool-use", "debugging", "recovery", "verification"],
 				doNotProposeMemoryPointersToSkills: true,
 				memoryRemovalOrReplacementRequiresExplicitProposal: true,
@@ -492,7 +501,31 @@ describe("StructuredSkillCurator", () => {
 			},
 			existingSkillIds: ["installed:workspace:existing-skill"],
 			sourceLessonIds: ["lesson-final"],
-			sourceProceduralObservationIds: [],
+			provenanceBindings: [
+				{
+					sourceLessonId: "lesson-final",
+					supportingEvidenceIds: ["support-1"],
+					contradictingEvidenceIds: ["failure-1"],
+					materialFields: [
+						"operation",
+						"proposedName",
+						"existingSkillIds",
+						"skillability",
+						"trigger.description",
+						"trigger.positiveExamples",
+						"trigger.negativeExamples",
+						"preconditions",
+						"procedure.steps",
+						"procedure.requiredTools",
+						"procedure.environment",
+						"failureHandling",
+						"applicabilityBoundaries",
+						"verificationContract.checks",
+						"verificationContract.completionCondition",
+						"memoryRelationship",
+					],
+				},
+			],
 			supportingEvidenceIds: ["support-1"],
 			contradictingEvidenceIds: ["failure-1"],
 			supportingTraceIds: ["trace-1"],
@@ -500,8 +533,47 @@ describe("StructuredSkillCurator", () => {
 			taskLineageIds: ["task-lineage-1"],
 			memoryRelationship: { classification: "complements", memoryProposalIds: ["proposal-1"] },
 		});
-		expect(JSON.stringify(result.candidates[0])).not.toContain("exactDelta");
+		const candidate = result.candidates[0];
+		expect(candidate).toBeDefined();
+		if (candidate === undefined) throw new Error("Expected a candidate");
+		const { metadata: _metadata, ...capsule } = candidate;
+		expect(measureEvolutionValue(capsule)).toEqual({
+			serializedBytes: candidate.capsuleSize.serializedBytes,
+			estimatedTokens: candidate.capsuleSize.estimatedTokens,
+		});
+		expect(candidate.capsuleSize.serializedBytes).toBeLessThanOrEqual(SKILL_CANDIDATE_CAPSULE_MAX_SERIALIZED_BYTES);
+		expect(candidate.capsuleSize.estimatedTokens).toBeLessThanOrEqual(SKILL_CANDIDATE_CAPSULE_MAX_ESTIMATED_TOKENS);
+		expect(JSON.stringify(candidate)).not.toContain("exactDelta");
+		expect(JSON.stringify(candidate)).not.toContain("sourceProceduralObservationIds");
 		expect(ledger.map((event) => event.type)).toEqual(["skill-curator-tool-call", "skill-curator-tool-call"]);
+	});
+
+	it("rejects a candidate whose canonical capsule exceeds the fixed ceiling", async () => {
+		const storedSkill = skillArtifact();
+		const artifacts = new FixtureArtifactStore([storedSkill]);
+		const curator = new StructuredSkillCurator({ version: "1", artifacts }, { maxResponseAttempts: 1 });
+		const input = fixtureInput(storedSkill.reference);
+
+		await expect(
+			curator.curate(
+				curatorInput(async (request) => {
+					await request.tools
+						.find((tool) => tool.name === "inspect_source_evidence")
+						?.execute({ evidenceRefs: ["E1"], contextAfter: 1 });
+					await request.tools.find((tool) => tool.name === "inspect_skills")?.execute({ skillRefs: ["K1"] });
+					return {
+						output: candidateOutput("x".repeat(SKILL_CANDIDATE_CAPSULE_MAX_SERIALIZED_BYTES)),
+						model: { provider: "faux", model: "fixture" },
+					};
+				}, input),
+			),
+		).rejects.toMatchObject({
+			name: "EvolutionExecutionError",
+			reasonCode: "skill-curation-invalid-response",
+			diagnostics: {
+				attemptDetails: [{ validationError: expect.stringContaining("exceeds its") }],
+			},
+		});
 	});
 
 	it("preserves redundant guidance as a deferred finding", async () => {

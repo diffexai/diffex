@@ -593,6 +593,40 @@ export interface SkillCandidateFailureHandling {
 	readonly recovery: string;
 }
 
+export type SkillCandidateMaterialField =
+	| "applicabilityBoundaries"
+	| "existingSkillIds"
+	| "failureHandling"
+	| "memoryRelationship"
+	| "operation"
+	| "preconditions"
+	| "procedure.environment"
+	| "procedure.requiredTools"
+	| "procedure.steps"
+	| "proposedName"
+	| "skillability"
+	| "trigger.description"
+	| "trigger.negativeExamples"
+	| "trigger.positiveExamples"
+	| "verificationContract.checks"
+	| "verificationContract.completionCondition";
+
+export interface SkillCandidateProvenanceBinding {
+	readonly sourceLessonId: string;
+	readonly supportingEvidenceIds: readonly string[];
+	readonly contradictingEvidenceIds: readonly string[];
+	readonly materialFields: readonly SkillCandidateMaterialField[];
+}
+
+export interface SkillCandidateCapsuleSize {
+	/** Canonical size of the complete SkillCandidate payload, excluding artifact metadata. */
+	readonly serialization: "canonical-json-utf8-v1";
+	readonly serializedBytes: number;
+	readonly estimatedTokens: number;
+	readonly maxSerializedBytes: number;
+	readonly maxEstimatedTokens: number;
+}
+
 export interface SkillCandidate {
 	readonly artifactKind: "skill-candidate";
 	readonly metadata: EvolutionArtifactMetadata;
@@ -602,7 +636,7 @@ export interface SkillCandidate {
 	readonly proposedName: string;
 	readonly existingSkillIds: readonly string[];
 	readonly sourceLessonIds: readonly string[];
-	readonly sourceProceduralObservationIds: readonly string[];
+	readonly provenanceBindings: readonly SkillCandidateProvenanceBinding[];
 	readonly supportingEvidenceIds: readonly string[];
 	readonly contradictingEvidenceIds: readonly string[];
 	readonly supportingTraceIds: readonly string[];
@@ -630,6 +664,7 @@ export interface SkillCandidate {
 		readonly completionCondition: string;
 	};
 	readonly memoryRelationship: SkillCandidateMemoryRelationship;
+	readonly capsuleSize: SkillCandidateCapsuleSize;
 }
 
 export interface DeferredSkillCandidateFinding {
