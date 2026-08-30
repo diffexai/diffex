@@ -527,6 +527,38 @@ describe("persistent skill candidate registry", () => {
 		);
 	});
 
+	it("bounds material conflict alternatives while retaining an overflow digest", async () => {
+		const fixture = registryFixture();
+		const sourceInput = input([evidence("support-a", "task-a", 0)], "trace-a");
+		const candidates = Array.from({ length: 12 }, (_value, index) =>
+			candidate({
+				candidateId: `candidate-conflict-${index.toString().padStart(2, "0")}`,
+				input: sourceInput,
+				proposedName: `focused-check-${index.toString().padStart(2, "0")}`,
+				supportingEvidenceIds: ["support-a"],
+				taskLineageIds: ["task-a"],
+			}),
+		);
+		const result = await fixture.registry.consolidate({
+			sourceEvolutionJobId: "job-conflicts",
+			input: sourceInput,
+			candidates,
+			idempotencyKey: "job-conflicts:registry",
+			createdAt,
+		});
+		const group = result.groups[0];
+		if (group === undefined) throw new Error("Expected a conflicting candidate group");
+		const artifact = await fixture.artifacts.get(group.canonicalCapsule);
+		if (!("artifactKind" in artifact) || artifact.artifactKind !== "skill-candidate-group-capsule") {
+			throw new Error("Expected a canonical group capsule artifact");
+		}
+		const conflict = artifact.conflicts.find((item) => item.field === "proposedName");
+
+		expect(conflict?.alternatives).toHaveLength(8);
+		expect(conflict?.omittedAlternativeCount).toBe(3);
+		expect(conflict?.omittedAlternativesDigest).toMatch(/^sha256:[0-9a-f]{64}$/);
+	});
+
 	it("requalifies an exhausted synthesis only after the proposal revision set changes", async () => {
 		const fixture = registryFixture();
 		const firstInput = input([evidence("support-a", "task-a", 0)], "trace-a");
