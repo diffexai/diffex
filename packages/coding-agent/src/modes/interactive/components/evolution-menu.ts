@@ -384,7 +384,10 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 				this.#proposal = await this.#client.proposalDetail(view.jobId, view.proposalId);
 			}
 			if (view.kind === "skill-candidate" || view.kind === "skill-candidate-review") {
-				this.#skillCandidate = await this.#client.skillCandidateDetail(view.jobId, view.candidateId);
+				[this.#job, this.#skillCandidate] = await Promise.all([
+					this.#client.jobDetail(view.jobId),
+					this.#client.skillCandidateDetail(view.jobId, view.candidateId),
+				]);
 			}
 		} catch (error) {
 			this.#onStatus(error instanceof Error ? error.message : String(error), true);
@@ -399,7 +402,22 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 	#schedulePoll(): void {
 		if (this.#pollTimeout !== null) clearTimeout(this.#pollTimeout);
 		this.#pollTimeout = null;
-		if (this.#disposed || this.#overview === null || this.#overview.activeJob === null) return;
+		const nonterminalCandidateStatuses = new Set(["waiting", "processing", "retrying"]);
+		const view = this.#view();
+		const viewingJob =
+			view.kind === "job" || view.kind === "skill-candidate" || view.kind === "skill-candidate-review";
+		const viewedJobHasCandidateWork =
+			viewingJob && this.#job !== null && nonterminalCandidateStatuses.has(this.#job.candidateGeneration.status);
+		const listedJobHasCandidateWork =
+			view.kind === "jobs" &&
+			this.#jobs.some((job) => nonterminalCandidateStatuses.has(job.candidateGeneration.status));
+		if (
+			this.#disposed ||
+			this.#overview === null ||
+			(this.#overview.activeJob === null && !viewedJobHasCandidateWork && !listedJobHasCandidateWork)
+		) {
+			return;
+		}
 		this.#pollTimeout = setTimeout(() => {
 			this.#pollTimeout = null;
 			void this.refresh();
