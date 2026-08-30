@@ -20,6 +20,7 @@ import {
 	formatEvolutionJobLabel,
 	formatEvolutionProposalLabel,
 	formatEvolutionProposalOutcome,
+	formatEvolutionSkillCandidateOutcome,
 	formatEvolutionSkillDraftDiff,
 	formatEvolutionTimestamp,
 	sanitizeEvolutionText,
@@ -202,11 +203,26 @@ function skillCandidateDetail(overrides: Partial<EvolutionSkillCandidateDetail> 
 		candidate: {
 			sourceLessonIds: ["lesson-1"],
 			supportingEvidenceIds: ["evidence-1"],
-			contradictingEvidenceIds: [],
+			contradictingEvidenceIds: ["evidence-2"],
 			supportingTraceIds: ["trace-1"],
-			contradictingTraceIds: [],
+			contradictingTraceIds: ["trace-2"],
 			taskLineageIds: ["task-1"],
+			trigger: {
+				description: "A focused change needs outcome-based verification.",
+				positiveExamples: [],
+				negativeExamples: [],
+			},
+			procedure: {
+				steps: [
+					{ sequence: 1, action: "Run the focused check.", condition: null },
+					{ sequence: 2, action: "Inspect the observed result.", condition: "the check fails" },
+				],
+				requiredTools: [],
+				environment: [],
+			},
 		},
+		supportingEvidence: [evidence("evidence-1", "The focused browser verification passed after the change.")],
+		contradictingEvidence: [evidence("evidence-2", "A static check passed without exercising the changed path.")],
 		sourceEvolutionJobIds: ["job-active"],
 		proposalRevisionIds: ["revision-1"],
 		existingContents: [],
@@ -814,15 +830,21 @@ describe("EvolutionMenuComponent", () => {
 		);
 
 		let output = stripAnsi(component.render(180).join("\n"));
-		expect(output).toContain("Skill candidate: focused-verification");
+		expect(output).toContain("Skill candidate focused-verification");
 		expect(output).toContain("State: accepted");
 		expect(output).toContain("State changed:");
 		expect(output).toContain("Reason: Retrieval and behavior evaluation passed.");
-		expect(output).toContain("Reason code: retrieval-and-behavior-gates-passed");
-		expect(output).toContain("Target harness: not activated");
+		expect(output).toContain("Use when: A focused change needs outcome-based verification.");
+		expect(output).toContain("Outcome: Run the focused check. Inspect the observed result. (the check fails)");
+		expect(output).not.toContain("Reason code:");
+		expect(output).not.toContain("Target harness:");
 		expect(output).not.toContain("Operation:");
 		expect(output).not.toContain("Rollback available:");
-		expect(output).toContain("Provenance");
+		expect(output).not.toContain("Provenance");
+		expect(output).not.toContain("job-active");
+		expect(output).not.toContain("evidence-1");
+		expect(output).toContain("Supporting evidence (1)");
+		expect(output).toContain("Contradicting evidence (1)");
 		expect(output).toContain("Draft diff [completed]");
 		expect(output).toContain("Validation [completed]");
 		expect(output).toContain("Evaluation [completed]");
@@ -830,14 +852,24 @@ describe("EvolutionMenuComponent", () => {
 
 		component.handleInput("\n");
 		await vi.waitFor(() =>
-			expect(stripAnsi(component.render(180).join("\n"))).toContain("Evolution jobs: job-active"),
+			expect(stripAnsi(component.render(180).join("\n"))).toContain(
+				"1. The focused browser verification passed after the change.",
+			),
 		);
 		component.handleInput("\u001b");
 		component.handleInput("\u001b[B");
 		component.handleInput("\n");
+		await vi.waitFor(() =>
+			expect(stripAnsi(component.render(180).join("\n"))).toContain(
+				"1. A static check passed without exercising the changed path.",
+			),
+		);
+		component.handleInput("\u001b");
+		for (let index = 0; index < 2; index += 1) component.handleInput("\u001b[B");
+		component.handleInput("\n");
 		await vi.waitFor(() => expect(stripAnsi(component.render(180).join("\n"))).toContain("+Run checks."));
 		component.handleInput("\u001b");
-		for (let index = 0; index < 3; index += 1) component.handleInput("\u001b[B");
+		for (let index = 0; index < 4; index += 1) component.handleInput("\u001b[B");
 		component.handleInput("\n");
 		await vi.waitFor(() =>
 			expect(stripAnsi(component.render(180).join("\n"))).toContain("Retrieval and behavior evaluation"),
@@ -847,7 +879,7 @@ describe("EvolutionMenuComponent", () => {
 		expect(output).toContain("Negative regressions: 0");
 
 		component.handleInput("\u001b");
-		for (let index = 0; index < 4; index += 1) component.handleInput("\u001b[B");
+		for (let index = 0; index < 5; index += 1) component.handleInput("\u001b[B");
 		component.handleInput("\n");
 		await vi.waitFor(() =>
 			expect(stripAnsi(component.render(180).join("\n"))).toContain("Activate focused-verification?"),
@@ -964,7 +996,10 @@ describe("EvolutionMenuComponent", () => {
 		expect(explainEvolutionCandidateReason("custom-raw-code")).toBe("custom raw code.");
 	});
 
-	it("formats create, update, and retirement draft diffs", () => {
+	it("formats a readable candidate outcome and create, update, and retirement draft diffs", () => {
+		expect(formatEvolutionSkillCandidateOutcome(skillCandidateDetail())).toBe(
+			"Run the focused check. Inspect the observed result. (the check fails)",
+		);
 		const createDiff = formatEvolutionSkillDraftDiff(skillCandidateDetail());
 		expect(createDiff).toContain("+Run checks.");
 		expect(createDiff).toContain("+# Supporting file: scripts/check.sh");

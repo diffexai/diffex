@@ -61,7 +61,13 @@ type MenuView =
 			readonly kind: "skill-candidate-review";
 			readonly jobId: string;
 			readonly candidateId: string;
-			readonly section: "draft" | "evaluation" | "provenance" | "validation";
+			readonly section: "draft" | "evaluation" | "validation";
+	  }
+	| {
+			readonly kind: "skill-candidate-evidence";
+			readonly jobId: string;
+			readonly candidateId: string;
+			readonly evidenceKind: "supporting" | "contradicting";
 	  }
 	| {
 			readonly kind: "proposal-evidence";
@@ -220,6 +226,12 @@ export function explainEvolutionCandidateReason(reasonCode: string): string {
 	return explanations[reasonCode] ?? `${reasonCode.replaceAll("-", " ")}.`;
 }
 
+export function formatEvolutionSkillCandidateOutcome(detail: EvolutionSkillCandidateDetail): string {
+	return detail.candidate.procedure.steps
+		.map((step) => (step.condition === null ? step.action : `${step.action} (${step.condition})`))
+		.join(" ");
+}
+
 export function formatEvolutionSkillDraftDiff(detail: EvolutionSkillCandidateDetail): readonly string[] {
 	if (detail.draft === null) return ["Draft not available"];
 	const before = detail.existingContents
@@ -318,7 +330,11 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 		if (view.kind === "overview" || view.kind === "confirm") return this.#overview !== null;
 		if (view.kind === "jobs") return this.#jobsLoaded;
 		if (view.kind === "job") return this.#job?.jobId === view.jobId;
-		if (view.kind === "skill-candidate" || view.kind === "skill-candidate-review") {
+		if (
+			view.kind === "skill-candidate" ||
+			view.kind === "skill-candidate-review" ||
+			view.kind === "skill-candidate-evidence"
+		) {
 			return this.#skillCandidate?.summary.candidateId === view.candidateId;
 		}
 		return this.#proposal?.proposal.proposalId === view.proposalId;
@@ -383,7 +399,11 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 			if (view.kind === "proposal" || view.kind === "proposal-evidence") {
 				this.#proposal = await this.#client.proposalDetail(view.jobId, view.proposalId);
 			}
-			if (view.kind === "skill-candidate" || view.kind === "skill-candidate-review") {
+			if (
+				view.kind === "skill-candidate" ||
+				view.kind === "skill-candidate-review" ||
+				view.kind === "skill-candidate-evidence"
+			) {
 				[this.#job, this.#skillCandidate] = await Promise.all([
 					this.#client.jobDetail(view.jobId),
 					this.#client.skillCandidateDetail(view.jobId, view.candidateId),
@@ -405,7 +425,10 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 		const nonterminalCandidateStatuses = new Set(["waiting", "processing", "retrying"]);
 		const view = this.#view();
 		const viewingJob =
-			view.kind === "job" || view.kind === "skill-candidate" || view.kind === "skill-candidate-review";
+			view.kind === "job" ||
+			view.kind === "skill-candidate" ||
+			view.kind === "skill-candidate-review" ||
+			view.kind === "skill-candidate-evidence";
 		const viewedJobHasCandidateWork =
 			viewingJob && this.#job !== null && nonterminalCandidateStatuses.has(this.#job.candidateGeneration.status);
 		const listedJobHasCandidateWork =
@@ -700,8 +723,24 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 	#skillCandidateEntries(detail: EvolutionSkillCandidateDetail, jobId: string): readonly MenuEntry[] {
 		const review = (section: Extract<MenuView, { kind: "skill-candidate-review" }>["section"]) =>
 			this.#push({ kind: "skill-candidate-review", jobId, candidateId: detail.summary.candidateId, section });
+		const evidence = (evidenceKind: Extract<MenuView, { kind: "skill-candidate-evidence" }>["evidenceKind"]) =>
+			this.#push({
+				kind: "skill-candidate-evidence",
+				jobId,
+				candidateId: detail.summary.candidateId,
+				evidenceKind,
+			});
 		return [
-			{ label: "Provenance", enabled: true, select: () => review("provenance") },
+			{
+				label: `Supporting evidence (${detail.supportingEvidence.length})`,
+				enabled: true,
+				select: () => evidence("supporting"),
+			},
+			{
+				label: `Contradicting evidence (${detail.contradictingEvidence.length})`,
+				enabled: true,
+				select: () => evidence("contradicting"),
+			},
 			{
 				label: "Draft diff",
 				enabled: detail.draft !== null,
@@ -741,18 +780,19 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 	}
 
 	#renderSkillCandidate(detail: EvolutionSkillCandidateDetail): void {
-		this.#addLine(`Skill candidate: ${detail.summary.proposedName}`, "accent");
+		this.#addLine(`Skill candidate ${detail.summary.proposedName}`, "accent");
+		this.addChild(new Spacer(1));
 		this.#addLine(`State: ${detail.summary.state}`);
 		this.#addLine(`State changed: ${formatEvolutionTimestamp(detail.summary.latestTransitionAt)}`);
 		for (const reasonCode of detail.summary.latestReasonCodes) {
 			this.#addLine(`Reason: ${explainEvolutionCandidateReason(reasonCode)}`);
-			this.#addLine(`Reason code: ${reasonCode}`, "muted");
 		}
-		this.#addLine(
-			`Target harness: ${
-				detail.targetHarnessVersion ?? (detail.summary.state === "accepted" ? "not activated" : "not applicable")
-			}`,
-		);
+		this.addChild(new Spacer(1));
+		this.#addLine(`Use when: ${detail.candidate.trigger.description}`);
+		this.#addLine(`Outcome: ${formatEvolutionSkillCandidateOutcome(detail)}`);
+		if (detail.targetHarnessVersion !== null) {
+			this.#addLine(`Active harness: ${detail.targetHarnessVersion}`);
+		}
 	}
 
 	#renderSkillCandidateReview(
@@ -766,20 +806,6 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 				this.#addLine(line, line.startsWith("+") ? "accent" : line.startsWith("-") ? "warning" : "text");
 			}
 			if (lines.length > 200) this.#addLine(`... ${lines.length - 200} more lines`, "muted");
-			return;
-		}
-		if (section === "provenance") {
-			this.#addLine("Provenance", "accent");
-			for (const [label, values] of [
-				["Evolution jobs", detail.sourceEvolutionJobIds],
-				["Candidate revisions", detail.proposalRevisionIds],
-				["Lessons", detail.candidate.sourceLessonIds],
-				["Evidence", [...detail.candidate.supportingEvidenceIds, ...detail.candidate.contradictingEvidenceIds]],
-				["Traces", [...detail.candidate.supportingTraceIds, ...detail.candidate.contradictingTraceIds]],
-				["Task lineages", detail.candidate.taskLineageIds],
-			] as const) {
-				this.#addLine(`${label}: ${values.length === 0 ? "none" : values.join(", ")}`);
-			}
 			return;
 		}
 		if (section === "validation") {
@@ -831,10 +857,7 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 		];
 	}
 
-	#renderProposalEvidence(detail: EvolutionProposalDetail, evidenceKind: "supporting" | "contradicting"): void {
-		const supporting = evidenceKind === "supporting";
-		const label = supporting ? "Supporting evidence" : "Contradicting evidence";
-		const evidence = supporting ? detail.supportingEvidence : detail.contradictingEvidence;
+	#renderEvidence(label: string, evidence: EvolutionProposalDetail["supportingEvidence"]): void {
 		this.#addLine(`${label} (${evidence.length})`, "accent");
 		if (evidence.length === 0) {
 			this.#addLine(`No ${label.toLowerCase()}`, "muted");
@@ -843,6 +866,25 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 		for (const [index, item] of evidence.entries()) {
 			this.#addLine(`${index + 1}. ${formatEvolutionEvidencePreview(item)}`);
 		}
+	}
+
+	#renderProposalEvidence(detail: EvolutionProposalDetail, evidenceKind: "supporting" | "contradicting"): void {
+		const supporting = evidenceKind === "supporting";
+		this.#renderEvidence(
+			supporting ? "Supporting evidence" : "Contradicting evidence",
+			supporting ? detail.supportingEvidence : detail.contradictingEvidence,
+		);
+	}
+
+	#renderSkillCandidateEvidence(
+		detail: EvolutionSkillCandidateDetail,
+		evidenceKind: "supporting" | "contradicting",
+	): void {
+		const supporting = evidenceKind === "supporting";
+		this.#renderEvidence(
+			supporting ? "Supporting evidence" : "Contradicting evidence",
+			supporting ? detail.supportingEvidence : detail.contradictingEvidence,
+		);
 	}
 
 	#renderEntries(entries: readonly MenuEntry[]): void {
@@ -922,6 +964,9 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 				this.#renderEntries(this.#skillCandidateEntries(this.#skillCandidate, view.jobId));
 			} else if (view.kind === "skill-candidate-review" && this.#skillCandidate) {
 				this.#renderSkillCandidateReview(this.#skillCandidate, view.section);
+				this.#entries = [];
+			} else if (view.kind === "skill-candidate-evidence" && this.#skillCandidate) {
+				this.#renderSkillCandidateEvidence(this.#skillCandidate, view.evidenceKind);
 				this.#entries = [];
 			} else if (view.kind === "confirm") {
 				for (const line of this.#confirmationLines(view)) this.#addLine(line, "warning");

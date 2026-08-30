@@ -25,6 +25,7 @@
 - Fixed exhausted skill synthesis being retried by unrelated later evolution jobs instead of remaining terminal until new evidence revises the candidate.
 - Fixed persisted skill candidate failures discarding the affected candidate group, work stage, provider or schema error, stop reason, and structured diagnostics.
 - Fixed completed evolution analysis hiding asynchronous candidate-generation progress or failure, candidate lifecycle states and reasons, and distinct stage outcomes.
+- Fixed skill candidate review leading with unreadable provenance IDs instead of an `EVOLVE.md`-style summary and materialized supporting and contradicting evidence.
 - Fixed the evolution menu remaining on its loading screen after cancellation and flickering during active-job refreshes.
 - Fixed assistant Markdown headings and fenced code blocks appearing with literal source delimiters in the interactive transcript.
 - Fixed extension TUI method wrappers recursing indefinitely when delegating to the original method ([#7731](https://github.com/earendil-works/pi/issues/7731)).

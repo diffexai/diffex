@@ -234,7 +234,7 @@ Configure delivery in [settings](docs/settings.md): `steeringMode` and `followUp
 
 ### Harness Evolution
 
-`/evolve` shows evidence eligibility, jobs, memory proposals, generated skill candidates, provenance, draft diffs, validation, evaluation, target revisions, activation, and rollback. `/version` selects a complete immutable harness revision. Memory and evolved skills change together at the next prompt boundary; in-flight and admitted queued requests remain pinned. The footer shows the active harness and background activity. See [Harness Evolution](docs/evolution.md).
+`/evolve` shows evidence eligibility, jobs, memory proposals, generated skill candidates, readable supporting and contradicting evidence, draft diffs, validation, evaluation, target revisions, activation, and rollback. `/version` selects a complete immutable harness revision. Memory and evolved skills change together at the next prompt boundary; in-flight and admitted queued requests remain pinned. The footer shows the active harness and background activity. See [Harness Evolution](docs/evolution.md).
 
 ---
 
