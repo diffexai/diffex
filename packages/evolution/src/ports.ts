@@ -382,6 +382,7 @@ export interface SkillCandidateRegistry {
 	consolidate(input: SkillCandidateRegistryConsolidationInput): Promise<SkillCandidateRegistryConsolidationResult>;
 	recordDraft(input: SkillCandidateDraftRecordingInput): Promise<SkillCandidateGroup>;
 	recordValidation(input: SkillCandidateValidationRecordingInput): Promise<SkillCandidateGroup>;
+	skipEvaluation(input: SkillCandidateEvaluationStartInput): Promise<SkillCandidateGroup>;
 	startEvaluation(input: SkillCandidateEvaluationStartInput): Promise<SkillCandidateGroup>;
 	recordEvaluation(input: SkillCandidateEvaluationRecordingInput): Promise<SkillCandidateGroup>;
 	list(scope: EvolutionScope): Promise<readonly SkillCandidateGroup[]>;

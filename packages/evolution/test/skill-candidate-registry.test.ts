@@ -492,10 +492,46 @@ describe("persistent skill candidate registry", () => {
 			idempotencyKey: validated.evaluationIdempotencyKey,
 			createdAt: "2026-08-26T12:03:00.000Z",
 		};
+		const skipStore = new MemoryRegistryStore();
+		skipStore.events.push(...fixture.store.events);
+		const skipRegistry = new PersistentSkillCandidateRegistry({
+			version: "1",
+			artifacts: fixture.artifacts,
+			store: skipStore,
+		});
+		const skipped = await skipRegistry.skipEvaluation(evaluationStart);
+		const skippedRetry = await skipRegistry.skipEvaluation(evaluationStart);
+		expect(skipped).toMatchObject({ state: "accepted", evaluation: null });
+		expect(skippedRetry).toMatchObject({ state: "accepted", evaluation: null });
+		expect(skipped.dispositionHistory.at(-1)).toMatchObject({
+			from: "structurally-valid",
+			to: "accepted",
+			reasonCodes: ["retrieval-and-behavior-evaluation-skipped"],
+		});
+
 		const pending = await fixture.registry.startEvaluation(evaluationStart);
 		const pendingRetry = await fixture.registry.startEvaluation(evaluationStart);
 		expect(pending).toMatchObject({ state: "evaluation-pending", evaluation: null });
 		expect(pendingRetry).toMatchObject({ state: "evaluation-pending", evaluation: null });
+		const pendingSkipStore = new MemoryRegistryStore();
+		pendingSkipStore.events.push(...fixture.store.events);
+		const pendingSkipRegistry = new PersistentSkillCandidateRegistry({
+			version: "1",
+			artifacts: fixture.artifacts,
+			store: pendingSkipStore,
+		});
+		expect(await pendingSkipRegistry.skipEvaluation(evaluationStart)).toMatchObject({
+			state: "accepted",
+			evaluation: null,
+			dispositionHistory: [
+				...pending.dispositionHistory,
+				expect.objectContaining({
+					from: "evaluation-pending",
+					to: "accepted",
+					reasonCodes: ["retrieval-and-behavior-evaluation-skipped"],
+				}),
+			],
+		});
 		const configurationDigest = `sha256:${"6".repeat(64)}`;
 		const evaluationContent = {
 			artifactKind: "skill-evaluation" as const,
