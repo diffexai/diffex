@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added a reusable classifier for transient provider and transport error messages.
+
 ## [0.84.0] - 2026-08-06
 
 ### Breaking Changes

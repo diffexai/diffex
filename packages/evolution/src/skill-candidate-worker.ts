@@ -283,14 +283,38 @@ function errorDiagnostic(error: unknown): SkillCandidateWorkErrorDiagnostic {
 	};
 }
 
+function synthesisAttemptCount(
+	events: readonly SkillCandidateRegistryEvent[],
+	synthesisIdempotencyKey: string,
+): number {
+	return events.reduce(
+		(count, event) =>
+			event.type === "skill-candidate-work-failed" &&
+			event.stage === "synthesizing" &&
+			event.diagnostics?.some((diagnostic) => diagnostic.synthesisIdempotencyKey === synthesisIdempotencyKey)
+				? count + 1
+				: count,
+		0,
+	);
+}
+
+interface SkillCandidateWorkStageFailure {
+	readonly groupId: string;
+	readonly synthesisIdempotencyKey?: string;
+	readonly error: unknown;
+}
+
 class SkillCandidateWorkStageError extends AggregateError {
 	readonly stage: SkillCandidateWorkStage;
-	readonly failures: readonly { readonly groupId: string; readonly error: unknown }[];
+	readonly failures: readonly SkillCandidateWorkStageFailure[];
+	readonly retryable: boolean;
+	readonly retryAttempt: number;
 
 	constructor(
 		stage: SkillCandidateWorkStage,
-		failures: readonly { readonly groupId: string; readonly error: unknown }[],
+		failures: readonly SkillCandidateWorkStageFailure[],
 		message: string,
+		options: { readonly retryable: boolean; readonly retryAttempt: number },
 	) {
 		super(
 			failures.map((failure) => failure.error),
@@ -299,6 +323,8 @@ class SkillCandidateWorkStageError extends AggregateError {
 		this.name = "SkillCandidateWorkStageError";
 		this.stage = stage;
 		this.failures = failures;
+		this.retryable = options.retryable;
+		this.retryAttempt = options.retryAttempt;
 	}
 }
 
@@ -525,6 +551,7 @@ export class SkillCandidateRegistryWorker implements SkillCandidateWorkProcessor
 		job: EvolutionJob,
 		attempt: number,
 		retryAttempt: number,
+		retryable: boolean,
 		stage: SkillCandidateWorkStage,
 		diagnostics: readonly SkillCandidateGroupFailureDiagnostic[],
 		error: unknown,
@@ -554,12 +581,11 @@ export class SkillCandidateRegistryWorker implements SkillCandidateWorkProcessor
 				idempotencyKey,
 				attempt,
 				message: error instanceof Error ? error.message : String(error),
-				retryNotBefore:
-					retryAttempt >= this.#maxAttempts
-						? null
-						: new Date(
-								Date.parse(now) + retryDelay(retryAttempt, this.#retryBaseDelayMs, this.#retryMaxDelayMs),
-							).toISOString(),
+				retryNotBefore: retryable
+					? new Date(
+							Date.parse(now) + retryDelay(retryAttempt, this.#retryBaseDelayMs, this.#retryMaxDelayMs),
+						).toISOString()
+					: null,
 				stage,
 				diagnostics,
 			};
@@ -656,10 +682,8 @@ export class SkillCandidateRegistryWorker implements SkillCandidateWorkProcessor
 		if (skillCheckpoint === undefined || !hasSkillCandidates(job)) {
 			throw new Error(`Evolution job "${sourceEvolutionJobId}" has no checkpointed skill candidates`);
 		}
-		const history = workEvents(
-			(await this.#dependencies.store.loadSkillCandidateRegistry(job.metadata.scope)).events,
-			job.jobId,
-		);
+		const registryEvents = (await this.#dependencies.store.loadSkillCandidateRegistry(job.metadata.scope)).events;
+		const history = workEvents(registryEvents, job.jobId);
 		const terminal = latestWorkEvent(history);
 		if (
 			terminal?.type === "skill-candidate-work-checkpointed" &&
@@ -685,9 +709,6 @@ export class SkillCandidateRegistryWorker implements SkillCandidateWorkProcessor
 					latestLegacyFailure === null || failure.registrySequence > latestLegacyFailure.registrySequence,
 			).length + 1;
 		const attempt = failures.reduce((highest, failure) => Math.max(highest, failure.attempt), 0) + 1;
-		if (retryAttempt > this.#maxAttempts) {
-			throw new Error(`Skill candidate work for "${job.jobId}" exhausted retries`);
-		}
 		const recoveryGroupIds = legacySynthesisGroupIds(history);
 
 		let activeStage: SkillCandidateWorkStage = "consolidating";
@@ -757,6 +778,9 @@ export class SkillCandidateRegistryWorker implements SkillCandidateWorkProcessor
 				readonly proposalRevisionIds: readonly string[];
 				readonly idempotencyKey: string;
 				readonly error: unknown;
+				readonly attempt: number;
+				readonly retryPending: boolean;
+				readonly reasonCode: "skill-synthesis-attempts-exhausted" | "skill-synthesis-non-retryable";
 			}[] = [];
 			for (const group of synthesisTargets) {
 				activeGroupId = group.groupId;
@@ -774,11 +798,16 @@ export class SkillCandidateRegistryWorker implements SkillCandidateWorkProcessor
 						});
 					} catch (error) {
 						signal.throwIfAborted();
+						const synthesisAttempt = synthesisAttemptCount(registryEvents, group.synthesisIdempotencyKey) + 1;
+						const retryable = error instanceof EvolutionExecutionError && error.retryable;
 						synthesisFailures.push({
 							groupId: group.groupId,
 							proposalRevisionIds: group.proposalRevisions.map((revision) => revision.revisionId),
 							idempotencyKey: group.synthesisIdempotencyKey,
 							error,
+							attempt: synthesisAttempt,
+							retryPending: retryable && synthesisAttempt < this.#maxAttempts,
+							reasonCode: retryable ? "skill-synthesis-attempts-exhausted" : "skill-synthesis-non-retryable",
 						});
 						continue;
 					}
@@ -797,11 +826,17 @@ export class SkillCandidateRegistryWorker implements SkillCandidateWorkProcessor
 				);
 			}
 			activeGroupId = null;
-			if (synthesisFailures.length > 0 && retryAttempt >= this.#maxAttempts) {
+			const terminalSynthesisFailures = synthesisFailures.filter((failure) => !failure.retryPending);
+			if (terminalSynthesisFailures.length > 0) {
 				await this.#dependencies.registry.recordSynthesisFailures({
 					scope: job.metadata.scope,
 					lease: claim(),
-					failures: synthesisFailures.map(({ error: _error, ...failure }) => failure),
+					failures: terminalSynthesisFailures.map((failure) => ({
+						groupId: failure.groupId,
+						proposalRevisionIds: failure.proposalRevisionIds,
+						idempotencyKey: failure.idempotencyKey,
+						reasonCode: failure.reasonCode,
+					})),
 					createdAt: this.#dependencies.clock.now(),
 				});
 			}
@@ -928,10 +963,19 @@ export class SkillCandidateRegistryWorker implements SkillCandidateWorkProcessor
 			}
 			activeGroupId = null;
 			if (synthesisFailures.length > 0) {
+				const retryableFailures = synthesisFailures.filter((failure) => failure.retryPending);
 				throw new SkillCandidateWorkStageError(
 					"synthesizing",
-					synthesisFailures,
+					synthesisFailures.map((failure) => ({
+						groupId: failure.groupId,
+						synthesisIdempotencyKey: failure.idempotencyKey,
+						error: failure.error,
+					})),
 					`Skill synthesis failed for candidate groups: ${synthesisFailures.map((failure) => failure.groupId).join(", ")}`,
+					{
+						retryable: retryableFailures.length > 0,
+						retryAttempt: Math.max(1, ...retryableFailures.map((failure) => failure.attempt)),
+					},
 				);
 			}
 			activeStage = "completed";
@@ -949,10 +993,25 @@ export class SkillCandidateRegistryWorker implements SkillCandidateWorkProcessor
 				error instanceof SkillCandidateWorkStageError
 					? error.failures.map((failure) => ({
 							groupId: failure.groupId,
+							...(failure.synthesisIdempotencyKey === undefined
+								? {}
+								: { synthesisIdempotencyKey: failure.synthesisIdempotencyKey }),
 							error: errorDiagnostic(failure.error),
 						}))
 					: [{ groupId: activeGroupId, error: errorDiagnostic(error) }];
-			await this.#appendFailure(job, attempt, retryAttempt, stage, diagnostics, error, claim());
+			const failureRetryAttempt = error instanceof SkillCandidateWorkStageError ? error.retryAttempt : retryAttempt;
+			const failureRetryable =
+				error instanceof SkillCandidateWorkStageError ? error.retryable : retryAttempt < this.#maxAttempts;
+			await this.#appendFailure(
+				job,
+				attempt,
+				failureRetryAttempt,
+				failureRetryable,
+				stage,
+				diagnostics,
+				error,
+				claim(),
+			);
 			throw error;
 		}
 	}
