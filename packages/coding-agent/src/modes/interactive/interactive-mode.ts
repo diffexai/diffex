@@ -67,6 +67,7 @@ import {
 	computeCacheWaste,
 	detectCacheMiss,
 } from "../../core/cache-stats.ts";
+import { type DiffexAccountAuth, HostedDiffexAccountAuth } from "../../core/diffex-account-auth.ts";
 import type {
 	AutocompleteProviderFactory,
 	EditorFactory,
@@ -284,9 +285,13 @@ type LoginProviderCompletionOption = {
 	id: string;
 	name: string;
 	authTypes: AuthSelectorProvider["authType"][];
+	kind?: "provider" | "diffex_account";
 };
 
 const AUTH_TYPE_ORDER = { oauth: 0, api_key: 1 } satisfies Record<AuthSelectorProvider["authType"], number>;
+const DIFFEX_ACCOUNT_LOGIN_ID = "diffex";
+const DIFFEX_ACCOUNT_SELECTOR_ID = "diffex-account";
+const DIFFEX_ACCOUNT_LOGIN_LABEL = "Sign in to Diffex";
 const DIFFEX_UPDATE_AVAILABLE_NOTIFICATION_ENABLED = false;
 
 function createFuzzyAutocompleteItems<T>(
@@ -319,10 +324,14 @@ function getLoginProviderCompletionOptions(
 			authTypes: [provider.authType],
 		});
 	}
-	return Array.from(byId.values()).sort((a, b) => a.name.localeCompare(b.name));
+	return [
+		{ id: DIFFEX_ACCOUNT_LOGIN_ID, name: "Diffex", authTypes: [], kind: "diffex_account" },
+		...Array.from(byId.values()).sort((a, b) => a.name.localeCompare(b.name)),
+	];
 }
 
 function getLoginProviderSearchText(provider: LoginProviderCompletionOption): string {
+	if (provider.kind === "diffex_account") return "diffex account";
 	const authTypes = provider.authTypes
 		.map((authType) => `${authType} ${formatAuthSelectorProviderType(authType)}`)
 		.join(" ");
@@ -330,6 +339,7 @@ function getLoginProviderSearchText(provider: LoginProviderCompletionOption): st
 }
 
 function formatLoginProviderCompletionDescription(provider: LoginProviderCompletionOption): string {
+	if (provider.kind === "diffex_account") return "Diffex account";
 	const authTypes = provider.authTypes.map(formatAuthSelectorProviderType).join("/");
 	return provider.name === provider.id ? authTypes : `${provider.name} · ${authTypes}`;
 }
@@ -338,6 +348,8 @@ function formatLoginProviderCompletionDescription(provider: LoginProviderComplet
  * Options for InteractiveMode initialization.
  */
 export interface InteractiveModeOptions {
+	/** Diffex account authentication client, injectable for controlled hosts and tests. */
+	diffexAccountAuth?: DiffexAccountAuth;
 	/** Process-owned evolution controls for the current repository runtime. */
 	evolution?: EvolutionMenuClient;
 	/** Providers that were migrated to auth.json (shows warning) */
@@ -546,6 +558,7 @@ export class InteractiveMode {
 	private customHeader: (Component & { dispose?(): void }) | undefined = undefined;
 
 	private options: InteractiveModeOptions;
+	private readonly diffexAccountAuth: DiffexAccountAuth;
 	private readonly onRightClickPaste = (): void => {
 		void this.handleRightClickPaste();
 	};
@@ -568,6 +581,7 @@ export class InteractiveMode {
 
 	constructor(runtimeHost: AgentSessionRuntime, options: InteractiveModeOptions = {}) {
 		this.runtimeHost = runtimeHost;
+		this.diffexAccountAuth = options.diffexAccountAuth ?? new HostedDiffexAccountAuth();
 		const tuiMode = options.tuiMode ?? this.settingsManager.getTuiMode();
 		this.options = { ...options, tuiMode };
 		this.autoTrustOnReloadCwd = options.autoTrustOnReloadCwd;
@@ -5375,7 +5389,11 @@ export class InteractiveMode {
 	}
 
 	private async getLogoutProviderOptions(): Promise<AuthSelectorProvider[]> {
-		return (await this.session.modelRuntime.listCredentials({ signal: AbortSignal.timeout(15_000) }))
+		const [credentials, hasDiffexAccount] = await Promise.all([
+			this.session.modelRuntime.listCredentials({ signal: AbortSignal.timeout(15_000) }),
+			this.diffexAccountAuth.hasSession(AbortSignal.timeout(15_000)),
+		]);
+		const providerOptions = credentials
 			.map(({ providerId, type }) => ({
 				id: providerId,
 				name: this.session.modelRuntime.getProvider(providerId)?.name ?? providerId,
@@ -5383,6 +5401,18 @@ export class InteractiveMode {
 				status: { type, source: "stored credential" },
 			}))
 			.sort((a, b) => a.name.localeCompare(b.name));
+		return hasDiffexAccount
+			? [
+					{
+						id: DIFFEX_ACCOUNT_SELECTOR_ID,
+						name: "Diffex account",
+						authType: "oauth",
+						kind: "diffex_account",
+						status: { type: "oauth", source: "stored credential" },
+					} satisfies AuthSelectorProvider,
+					...providerOptions,
+				]
+			: providerOptions;
 	}
 
 	private findLoginProviderOptions(providerRef: string): AuthSelectorProvider[] {
@@ -5401,6 +5431,10 @@ export class InteractiveMode {
 	private async handleLoginCommand(providerRef?: string): Promise<void> {
 		if (!providerRef) {
 			this.showLoginAuthTypeSelector();
+			return;
+		}
+		if (providerRef.trim().toLowerCase() === DIFFEX_ACCOUNT_LOGIN_ID) {
+			await this.showDiffexAccountLoginDialog();
 			return;
 		}
 
@@ -5440,7 +5474,7 @@ export class InteractiveMode {
 		const availableAuthTypes = providerOptions
 			? new Set(providerOptions.map((provider) => provider.authType))
 			: new Set<AuthSelectorProvider["authType"]>(["oauth", "api_key"]);
-		const options: string[] = [];
+		const options: string[] = providerOptions ? [] : [DIFFEX_ACCOUNT_LOGIN_LABEL];
 		if (availableAuthTypes.has("oauth")) {
 			options.push(subscriptionLabel);
 		}
@@ -5470,6 +5504,10 @@ export class InteractiveMode {
 				options,
 				(option) => {
 					done();
+					if (option === DIFFEX_ACCOUNT_LOGIN_LABEL) {
+						void this.showDiffexAccountLoginDialog();
+						return;
+					}
 					const authType = option === subscriptionLabel ? "oauth" : "api_key";
 					if (providerOptions) {
 						const providerOption = providerOptions.find((provider) => provider.authType === authType);
@@ -5547,7 +5585,7 @@ export class InteractiveMode {
 		}
 		if (providerOptions.length === 0) {
 			this.showStatus(
-				"No stored credentials to remove. /logout only removes credentials saved by /login; environment variables and models.json config are unchanged.",
+				"No stored Diffex account or provider credentials to remove. /logout leaves environment variables and models.json config unchanged.",
 			);
 			return;
 		}
@@ -5561,6 +5599,21 @@ export class InteractiveMode {
 
 					const providerOption = providerOptions.find((provider) => provider.id === providerId);
 					if (!providerOption) {
+						return;
+					}
+					if (providerOption.kind === "diffex_account") {
+						try {
+							const result = await this.diffexAccountAuth.logout(AbortSignal.timeout(15_000));
+							if (!result.hadSession) {
+								this.showStatus("Already signed out of Diffex.");
+							} else if (result.remoteConfirmed) {
+								this.showStatus("Signed out of Diffex.");
+							} else {
+								this.showWarning("Signed out of Diffex locally, but server logout could not be confirmed.");
+							}
+						} catch (error) {
+							this.showError(`Diffex logout failed: ${error instanceof Error ? error.message : String(error)}`);
+						}
 						return;
 					}
 
@@ -5590,6 +5643,45 @@ export class InteractiveMode {
 			);
 			return { component: selector, focus: selector };
 		});
+	}
+
+	private async showDiffexAccountLoginDialog(): Promise<void> {
+		const dialog = new LoginDialogComponent(
+			this.ui,
+			DIFFEX_ACCOUNT_LOGIN_ID,
+			(_success, _message) => {},
+			"Diffex",
+			"Sign in to Diffex",
+		);
+		this.editorContainer.clear();
+		this.editorContainer.addChild(dialog);
+		this.ui.setFocus(dialog);
+		this.ui.requestRender();
+
+		const restoreEditor = () => {
+			this.editorContainer.clear();
+			this.editorContainer.addChild(this.editor);
+			this.ui.setFocus(this.editor);
+			this.ui.requestRender();
+		};
+
+		try {
+			await this.diffexAccountAuth.login({
+				signal: dialog.signal,
+				onDeviceAuthorization: (prompt) => {
+					dialog.showDeviceCode(prompt);
+					dialog.showWaiting("Waiting for Diffex authentication...");
+				},
+			});
+			restoreEditor();
+			this.showStatus("Signed in to Diffex.");
+		} catch (error) {
+			restoreEditor();
+			const message = error instanceof Error ? error.message : String(error);
+			if (message !== "Sign in cancelled") {
+				this.showError(`Failed to sign in to Diffex: ${message}`);
+			}
+		}
 	}
 
 	private async completeProviderAuthentication(

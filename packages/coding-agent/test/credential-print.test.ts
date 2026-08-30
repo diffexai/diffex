@@ -120,6 +120,9 @@ describe("credential print commands", () => {
 		expect(isAuthCommandHelp(["auth", "print-bearer-token", "-h"])).toBe(true);
 		expect(isAuthCommandHelp(["auth", "check", "--help"])).toBe(true);
 		expect(() => parseAuthCommand(["auth", "unknown"])).toThrow(AuthCommandError);
+		expect(() => parseAuthCommand(["auth", "login"])).toThrow('Unknown auth command "login"');
+		expect(() => parseAuthCommand(["auth", "status"])).toThrow('Unknown auth command "status"');
+		expect(() => parseAuthCommand(["auth", "logout"])).toThrow('Unknown auth command "logout"');
 		await expect(resolveCredentialForPrint(parseArgs([]), runtime, "api_key")).rejects.toThrow(
 			"requires --provider <provider> or --model <model>",
 		);

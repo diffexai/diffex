@@ -4,30 +4,46 @@ import {
 	type DiffexAccountSession,
 	DiffexAccountStorageError,
 	KeyringDiffexAccountAuthStorage,
-} from "../core/account-auth-storage.ts";
-import { openBrowser } from "../utils/open-browser.ts";
+} from "./account-auth-storage.ts";
 
 const DEFAULT_API_ORIGIN = "https://api.diffex.ai";
 const REQUEST_TIMEOUT_MS = 15_000;
 const REFRESH_WINDOW_MS = 60_000;
 const MAX_POLL_INTERVAL_MS = 30_000;
 
-export type AccountAuthCommandKind = "login" | "status" | "logout";
-
-export interface AccountAuthCommand {
-	kind: AccountAuthCommandKind;
-	apiOrigin: string;
-	noBrowser: boolean;
-	json: boolean;
+export interface DiffexDeviceAuthorizationPrompt {
+	verificationUri: string;
+	userCode: string;
 }
 
-export interface AccountAuthCommandDependencies {
+export interface DiffexAccountLoginOptions {
+	signal?: AbortSignal;
+	onDeviceAuthorization: (prompt: DiffexDeviceAuthorizationPrompt) => void;
+}
+
+export interface DiffexAccountLogoutResult {
+	hadSession: boolean;
+	remoteConfirmed: boolean;
+}
+
+export interface DiffexAccountAuth {
+	readonly apiOrigin: string;
+	hasSession(signal?: AbortSignal): Promise<boolean>;
+	login(options: DiffexAccountLoginOptions): Promise<void>;
+	logout(signal?: AbortSignal): Promise<DiffexAccountLogoutResult>;
+}
+
+export interface DiffexAccountAuthDependencies {
 	fetch: (input: string | URL, init?: RequestInit) => Promise<Response>;
 	storage: DiffexAccountAuthStorage;
-	openBrowser: (target: string) => void;
-	writeLine: (line: string) => void;
 	now: () => number;
-	sleep: (milliseconds: number) => Promise<void>;
+	sleep: (milliseconds: number, signal?: AbortSignal) => Promise<void>;
+}
+
+export interface HostedDiffexAccountAuthOptions {
+	apiOrigin?: string;
+	env?: Record<string, string | undefined>;
+	dependencies?: DiffexAccountAuthDependencies;
 }
 
 type DeviceAuthorization = {
@@ -52,178 +68,143 @@ type JsonResponse = {
 	body: unknown;
 };
 
-export class AccountAuthCommandError extends Error {
+export class DiffexAccountAuthError extends Error {
 	constructor(message: string, cause?: unknown) {
 		super(message, cause === undefined ? undefined : { cause });
-		this.name = "AccountAuthCommandError";
+		this.name = "DiffexAccountAuthError";
 	}
 }
 
-export function parseAccountAuthCommand(
-	args: string[],
-	env: Record<string, string | undefined> = process.env,
-): AccountAuthCommand | undefined {
-	if (args[0] !== "auth") return undefined;
-	const kind = args[1];
-	if (kind !== "login" && kind !== "status" && kind !== "logout") return undefined;
+export class HostedDiffexAccountAuth implements DiffexAccountAuth {
+	readonly apiOrigin: string;
+	readonly #dependencies: DiffexAccountAuthDependencies;
 
-	let apiOrigin = normalizeApiOrigin(env.DIFFEX_API_URL ?? DEFAULT_API_ORIGIN);
-	let noBrowser = false;
-	let json = false;
-
-	for (let index = 2; index < args.length; index++) {
-		const argument = args[index];
-		if (argument === "--api-url") {
-			const value = args[++index];
-			if (!value) throw new AccountAuthCommandError("--api-url requires an origin");
-			apiOrigin = normalizeApiOrigin(value);
-			continue;
-		}
-		if (argument?.startsWith("--api-url=")) {
-			apiOrigin = normalizeApiOrigin(argument.slice("--api-url=".length));
-			continue;
-		}
-		if (argument === "--no-browser") {
-			if (kind !== "login") throw new AccountAuthCommandError("--no-browser is only supported by auth login");
-			noBrowser = true;
-			continue;
-		}
-		if (argument === "--json") {
-			if (kind !== "status") throw new AccountAuthCommandError("--json is only supported by auth status");
-			json = true;
-			continue;
-		}
-		throw new AccountAuthCommandError(`Unknown option for auth ${kind}: ${argument ?? ""}`);
+	constructor(options: HostedDiffexAccountAuthOptions = {}) {
+		this.apiOrigin = normalizeApiOrigin(
+			options.apiOrigin ?? options.env?.DIFFEX_API_URL ?? process.env.DIFFEX_API_URL ?? DEFAULT_API_ORIGIN,
+		);
+		this.#dependencies = options.dependencies ?? createDefaultDependencies();
 	}
 
-	return { kind, apiOrigin, noBrowser, json };
-}
+	async hasSession(signal?: AbortSignal): Promise<boolean> {
+		try {
+			return (await this.#dependencies.storage.read(this.apiOrigin, signal)) !== undefined;
+		} catch (error) {
+			throw normalizeStorageError(error);
+		}
+	}
 
-export async function executeAccountAuthCommand(
-	command: AccountAuthCommand,
-	dependencies: AccountAuthCommandDependencies = createDefaultDependencies(),
-): Promise<number> {
-	try {
-		switch (command.kind) {
-			case "login":
-				return await login(command, dependencies);
-			case "status":
-				return await status(command, dependencies);
-			case "logout":
-				return await logout(command, dependencies);
+	async login(options: DiffexAccountLoginOptions): Promise<void> {
+		try {
+			throwIfLoginCancelled(options.signal);
+			const started = await postJson(
+				this.#dependencies,
+				this.apiOrigin,
+				"/v1/auth/cli/start",
+				{},
+				{},
+				options.signal,
+			);
+			if (!started.response.ok) throw responseError(started, "Unable to start Diffex sign in");
+			const authorization = parseDeviceAuthorization(started.body, this.apiOrigin);
+			options.onDeviceAuthorization({
+				verificationUri: authorization.verificationUriComplete ?? authorization.verificationUri,
+				userCode: authorization.userCode,
+			});
+
+			const token = await pollForToken(this.apiOrigin, authorization, this.#dependencies, options.signal);
+			const session = toStoredSession(this.apiOrigin, token, this.#dependencies.now());
+			await this.#dependencies.storage.write(session, options.signal);
+		} catch (error) {
+			if (options.signal?.aborted) throw loginCancelled(error);
+			throw normalizeStorageError(error);
 		}
-	} catch (error) {
-		if (error instanceof DiffexAccountStorageError) {
-			throw new AccountAuthCommandError(error.message, error);
+	}
+
+	async logout(signal?: AbortSignal): Promise<DiffexAccountLogoutResult> {
+		let stored: DiffexAccountSession | undefined;
+		try {
+			stored = await this.#dependencies.storage.read(this.apiOrigin, signal);
+		} catch (error) {
+			throw normalizeStorageError(error);
 		}
-		throw error;
+		if (!stored) return { hadSession: false, remoteConfirmed: true };
+
+		let remoteConfirmed = true;
+		try {
+			const session =
+				stored.expiresAt <= this.#dependencies.now() + REFRESH_WINDOW_MS
+					? await refreshSession(stored, this.#dependencies, signal)
+					: stored;
+			const result = await postJson(
+				this.#dependencies,
+				this.apiOrigin,
+				"/v1/auth/logout",
+				{},
+				{ authorization: `Bearer ${session.accessToken}` },
+				signal,
+			);
+			remoteConfirmed = result.response.ok || result.response.status === 401;
+		} catch {
+			remoteConfirmed = false;
+		}
+
+		try {
+			await this.#dependencies.storage.delete(this.apiOrigin);
+		} catch (error) {
+			throw normalizeStorageError(error);
+		}
+		return { hadSession: true, remoteConfirmed };
 	}
 }
 
-function createDefaultDependencies(): AccountAuthCommandDependencies {
+function createDefaultDependencies(): DiffexAccountAuthDependencies {
 	return {
 		fetch: (input, init) => globalThis.fetch(input, init),
 		storage: new KeyringDiffexAccountAuthStorage(),
-		openBrowser,
-		writeLine: (line) => console.log(line),
 		now: () => Date.now(),
-		sleep: async (milliseconds) => {
-			await sleep(milliseconds);
+		sleep: async (milliseconds, signal) => {
+			await sleep(milliseconds, undefined, signal ? { signal } : undefined);
 		},
 	};
-}
-
-async function login(command: AccountAuthCommand, dependencies: AccountAuthCommandDependencies): Promise<number> {
-	const started = await postJson(dependencies, command.apiOrigin, "/v1/auth/cli/start", {});
-	if (!started.response.ok) throw responseError(started, "Unable to start Diffex sign in");
-	const authorization = parseDeviceAuthorization(started.body, command.apiOrigin);
-	const browserUrl = authorization.verificationUriComplete ?? authorization.verificationUri;
-
-	dependencies.writeLine("Open this URL to sign in:");
-	dependencies.writeLine(browserUrl);
-	dependencies.writeLine(`Confirmation code: ${authorization.userCode}`);
-	if (!command.noBrowser) dependencies.openBrowser(browserUrl);
-
-	const token = await pollForToken(command.apiOrigin, authorization, dependencies);
-	const session = toStoredSession(command.apiOrigin, token, dependencies.now());
-	await dependencies.storage.write(session);
-	dependencies.writeLine("Signed in to Diffex.");
-	return 0;
-}
-
-async function status(command: AccountAuthCommand, dependencies: AccountAuthCommandDependencies): Promise<number> {
-	let session = await dependencies.storage.read(command.apiOrigin);
-	if (!session) {
-		writeStatus(command, dependencies, "signed_out");
-		return 1;
-	}
-
-	if (session.expiresAt <= dependencies.now() + REFRESH_WINDOW_MS) {
-		session = await refreshSession(session, dependencies);
-	}
-
-	writeStatus(command, dependencies, "signed_in", session);
-	return 0;
-}
-
-async function logout(command: AccountAuthCommand, dependencies: AccountAuthCommandDependencies): Promise<number> {
-	const stored = await dependencies.storage.read(command.apiOrigin);
-	if (!stored) {
-		dependencies.writeLine("Already signed out.");
-		return 0;
-	}
-
-	let remoteFailure: unknown;
-	try {
-		const session =
-			stored.expiresAt <= dependencies.now() + REFRESH_WINDOW_MS
-				? await refreshSession(stored, dependencies)
-				: stored;
-		const result = await postJson(
-			dependencies,
-			command.apiOrigin,
-			"/v1/auth/logout",
-			{},
-			{ authorization: `Bearer ${session.accessToken}` },
-		);
-		if (!result.response.ok && result.response.status !== 401) {
-			remoteFailure = responseError(result, "Unable to confirm server logout");
-		}
-	} catch (error) {
-		remoteFailure = error;
-	}
-
-	await dependencies.storage.delete(command.apiOrigin);
-	dependencies.writeLine("Signed out of Diffex.");
-	if (remoteFailure) {
-		throw new AccountAuthCommandError(
-			"Local credentials were removed, but server logout could not be confirmed",
-			remoteFailure,
-		);
-	}
-	return 0;
 }
 
 async function pollForToken(
 	apiOrigin: string,
 	authorization: DeviceAuthorization,
-	dependencies: AccountAuthCommandDependencies,
+	dependencies: DiffexAccountAuthDependencies,
+	signal?: AbortSignal,
 ): Promise<TokenResponse> {
 	const deadline = dependencies.now() + authorization.expiresIn * 1_000;
 	let intervalMs = authorization.interval * 1_000;
 
 	while (dependencies.now() < deadline) {
+		throwIfLoginCancelled(signal);
 		const remaining = deadline - dependencies.now();
-		await dependencies.sleep(Math.min(intervalMs, remaining));
+		try {
+			await dependencies.sleep(Math.min(intervalMs, remaining), signal);
+		} catch (error) {
+			if (signal?.aborted) throw loginCancelled(error);
+			throw error;
+		}
+		throwIfLoginCancelled(signal);
 		if (dependencies.now() >= deadline) break;
 
 		let result: JsonResponse;
 		try {
-			result = await postJson(dependencies, apiOrigin, "/v1/auth/cli/poll", {
-				device_code: authorization.deviceCode,
-				interval: Math.ceil(intervalMs / 1_000),
-			});
-		} catch {
+			result = await postJson(
+				dependencies,
+				apiOrigin,
+				"/v1/auth/cli/poll",
+				{
+					device_code: authorization.deviceCode,
+					interval: Math.ceil(intervalMs / 1_000),
+				},
+				{},
+				signal,
+			);
+		} catch (error) {
+			if (signal?.aborted) throw loginCancelled(error);
 			intervalMs = Math.min(intervalMs * 2, MAX_POLL_INTERVAL_MS);
 			continue;
 		}
@@ -245,40 +226,48 @@ async function pollForToken(
 		throw responseError(result, "Diffex sign in was not completed");
 	}
 
-	throw new AccountAuthCommandError("The sign-in code expired. Run diffex auth login again.");
+	throw new DiffexAccountAuthError("The sign-in code expired. Use /login to try again.");
 }
 
 async function refreshSession(
 	session: DiffexAccountSession,
-	dependencies: AccountAuthCommandDependencies,
+	dependencies: DiffexAccountAuthDependencies,
+	signal?: AbortSignal,
 ): Promise<DiffexAccountSession> {
-	const result = await postJson(dependencies, session.apiOrigin, "/v1/auth/token/refresh", {
-		refresh_token: session.refreshToken,
-	});
+	const result = await postJson(
+		dependencies,
+		session.apiOrigin,
+		"/v1/auth/token/refresh",
+		{ refresh_token: session.refreshToken },
+		{},
+		signal,
+	);
 	if (!result.response.ok) {
 		const code = responseErrorCode(result.body);
 		if (code === "invalid_grant" || code === "unauthenticated" || result.response.status === 401) {
 			await dependencies.storage.delete(session.apiOrigin);
-			throw new AccountAuthCommandError("Your Diffex session expired. Run diffex auth login again.");
+			throw new DiffexAccountAuthError("Your Diffex session expired. Use /login to sign in again.");
 		}
 		throw responseError(result, "Unable to refresh the Diffex session");
 	}
 
 	const token = parseTokenResponse(result.body);
 	const refreshed = toStoredSession(session.apiOrigin, token, dependencies.now(), session.context);
-	await dependencies.storage.write(refreshed);
+	await dependencies.storage.write(refreshed, signal);
 	return refreshed;
 }
 
 async function postJson(
-	dependencies: AccountAuthCommandDependencies,
+	dependencies: DiffexAccountAuthDependencies,
 	apiOrigin: string,
 	path: string,
 	body: Record<string, unknown>,
 	extraHeaders: Record<string, string> = {},
+	signal?: AbortSignal,
 ): Promise<JsonResponse> {
 	let response: Response;
 	try {
+		const timeoutSignal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
 		response = await dependencies.fetch(new URL(path, apiOrigin), {
 			method: "POST",
 			headers: {
@@ -287,10 +276,11 @@ async function postJson(
 				...extraHeaders,
 			},
 			body: JSON.stringify(body),
-			signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+			signal: signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal,
 		});
 	} catch (error) {
-		throw new AccountAuthCommandError("Unable to reach the Diffex authentication service", error);
+		if (signal?.aborted) throw loginCancelled(error);
+		throw new DiffexAccountAuthError("Unable to reach the Diffex authentication service", error);
 	}
 
 	let responseBody: unknown = {};
@@ -377,38 +367,19 @@ function toStoredSession(
 	};
 }
 
-function writeStatus(
-	command: AccountAuthCommand,
-	dependencies: AccountAuthCommandDependencies,
-	statusValue: "signed_in" | "signed_out",
-	session?: DiffexAccountSession,
-): void {
-	if (command.json) {
-		dependencies.writeLine(
-			JSON.stringify({
-				status: statusValue,
-				api_url: command.apiOrigin,
-				...(session === undefined ? {} : { expires_at: new Date(session.expiresAt).toISOString() }),
-			}),
-		);
-		return;
-	}
-	dependencies.writeLine(statusValue === "signed_in" ? "Signed in to Diffex." : "Not signed in to Diffex.");
-}
-
-function responseError(result: JsonResponse, fallback: string): AccountAuthCommandError {
+function responseError(result: JsonResponse, fallback: string): DiffexAccountAuthError {
 	const code = responseErrorCode(result.body);
 	const message =
 		code === "access_denied"
 			? "Diffex sign in was denied."
 			: code === "expired_token"
-				? "The sign-in code expired. Run diffex auth login again."
+				? "The sign-in code expired. Use /login to try again."
 				: code === "rate_limited" || result.response.status === 429
 					? "Too many authentication attempts. Try again shortly."
 					: code === "auth_temporarily_unavailable" || result.response.status >= 500
 						? "Diffex authentication is temporarily unavailable."
 						: `${fallback} (${result.response.status})`;
-	return new AccountAuthCommandError(message);
+	return new DiffexAccountAuthError(message);
 }
 
 function responseErrorCode(value: unknown): string | undefined {
@@ -421,7 +392,7 @@ function normalizeApiOrigin(value: string): string {
 	try {
 		url = new URL(value);
 	} catch (error) {
-		throw new AccountAuthCommandError("Diffex API URL must be a valid origin", error);
+		throw new DiffexAccountAuthError("Diffex API URL must be a valid origin", error);
 	}
 	const localHttp = url.protocol === "http:" && isLocalApiHostname(url.hostname);
 	if (
@@ -432,7 +403,7 @@ function normalizeApiOrigin(value: string): string {
 		url.search !== "" ||
 		url.hash !== ""
 	) {
-		throw new AccountAuthCommandError("Diffex API URL must be an HTTPS origin without credentials or a path");
+		throw new DiffexAccountAuthError("Diffex API URL must be an HTTPS origin without credentials or a path");
 	}
 	return url.origin;
 }
@@ -468,8 +439,20 @@ function parseRetryAfter(value: string | null): number | undefined {
 	return Number.isFinite(seconds) && seconds > 0 ? Math.ceil(seconds) : undefined;
 }
 
-function invalidServerResponse(cause?: unknown): AccountAuthCommandError {
-	return new AccountAuthCommandError("The Diffex authentication service returned an invalid response", cause);
+function invalidServerResponse(cause?: unknown): DiffexAccountAuthError {
+	return new DiffexAccountAuthError("The Diffex authentication service returned an invalid response", cause);
+}
+
+function loginCancelled(cause?: unknown): DiffexAccountAuthError {
+	return new DiffexAccountAuthError("Sign in cancelled", cause);
+}
+
+function throwIfLoginCancelled(signal?: AbortSignal): void {
+	if (signal?.aborted) throw loginCancelled(signal.reason);
+}
+
+function normalizeStorageError(error: unknown): unknown {
+	return error instanceof DiffexAccountStorageError ? new DiffexAccountAuthError(error.message, error) : error;
 }
 
 function isPositiveNumber(value: unknown): value is number {

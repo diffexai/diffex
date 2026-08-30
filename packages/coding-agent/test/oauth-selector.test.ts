@@ -86,6 +86,74 @@ describe("OAuthSelectorComponent", () => {
 		expect(output).not.toContain("✓ configured");
 	});
 
+	it("labels a Diffex account separately from provider authentication", () => {
+		const selector = new OAuthSelectorComponent(
+			"logout",
+			[
+				{
+					id: "diffex-account",
+					name: "Diffex account",
+					authType: "oauth",
+					kind: "diffex_account",
+					status: { type: "oauth", source: "stored credential" },
+				},
+				{ id: "openai", name: "OpenAI", authType: "api_key", status: { type: "api_key" } },
+			],
+			() => {},
+			() => {},
+		);
+
+		const output = stripAnsi(selector.render(120).join("\n"));
+		expect(output).toContain("Diffex account [Diffex account]");
+		expect(output).not.toContain("Diffex account [subscription]");
+	});
+
+	it("routes the diffex login argument to account authentication", async () => {
+		const handleLoginCommand = (
+			InteractiveMode as unknown as {
+				prototype: {
+					handleLoginCommand(
+						this: { showDiffexAccountLoginDialog: () => Promise<void> },
+						ref?: string,
+					): Promise<void>;
+				};
+			}
+		).prototype.handleLoginCommand;
+		let accountLoginStarted = false;
+
+		await handleLoginCommand.call(
+			{
+				showDiffexAccountLoginDialog: async () => {
+					accountLoginStarted = true;
+				},
+			},
+			"diffex",
+		);
+
+		expect(accountLoginStarted).toBe(true);
+	});
+
+	it("includes a stored Diffex account in the logout selector", async () => {
+		const getLogoutProviderOptions = (
+			InteractiveMode as unknown as {
+				prototype: {
+					getLogoutProviderOptions(this: object): Promise<Array<{ id: string; kind?: string }>>;
+				};
+			}
+		).prototype.getLogoutProviderOptions;
+		const options = await getLogoutProviderOptions.call({
+			diffexAccountAuth: { hasSession: async () => true },
+			session: {
+				modelRuntime: {
+					listCredentials: async () => [],
+					getProvider: () => undefined,
+				},
+			},
+		});
+
+		expect(options).toMatchObject([{ id: "diffex-account", kind: "diffex_account" }]);
+	});
+
 	it("shows OAuth auth distinctly in the API key selector", () => {
 		const selector = new OAuthSelectorComponent(
 			"login",

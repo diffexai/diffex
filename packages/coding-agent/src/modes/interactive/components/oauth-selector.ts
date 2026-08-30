@@ -17,6 +17,7 @@ export type AuthSelectorProvider = {
 	id: string;
 	name: string;
 	authType: "oauth" | "api_key";
+	kind?: "provider" | "diffex_account";
 	method?: ApiKeyAuth | OAuthAuth;
 	status?: AuthCheck;
 };
@@ -131,7 +132,10 @@ export class OAuthSelectorComponent extends Container implements Focusable {
 
 			const statusIndicator = this.formatStatusIndicator(provider);
 			const authTypeLabel = this.showAuthTypeLabels
-				? theme.fg("muted", ` [${formatAuthSelectorProviderType(provider.authType)}]`)
+				? theme.fg(
+						"muted",
+						` [${provider.kind === "diffex_account" ? "Diffex account" : formatAuthSelectorProviderType(provider.authType)}]`,
+					)
 				: "";
 			let line = "";
 			if (isSelected) {

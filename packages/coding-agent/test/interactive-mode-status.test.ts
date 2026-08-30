@@ -570,6 +570,12 @@ describe("InteractiveMode.createBaseAutocompleteProvider", () => {
 				description: "Anthropic · subscription/API key",
 			},
 		]);
+
+		const accountLine = "/login diff";
+		const accountSuggestions = await provider.getSuggestions([accountLine], 0, accountLine.length, {
+			signal: new AbortController().signal,
+		});
+		expect(accountSuggestions?.items).toEqual([{ value: "diffex", label: "diffex", description: "Diffex account" }]);
 	});
 });
 describe("InteractiveMode.showLoadedResources", () => {
