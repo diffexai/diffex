@@ -272,7 +272,17 @@ export class CodingAgentEvolutionModelExecutor implements EvolutionModelExecutor
 				}
 			}
 			if (assistant.stopReason === "error" || assistant.stopReason === "aborted") {
-				throw new Error(assistant.errorMessage ?? `Evolution model stopped with ${assistant.stopReason}`);
+				throw new EvolutionExecutionError(
+					assistant.errorMessage ?? `Evolution model stopped with ${assistant.stopReason}`,
+					{
+						reasonCode: "model-call-failed",
+						retryable: true,
+						diagnostics: {
+							stopReason: assistant.stopReason,
+							providerError: assistant.errorMessage ?? null,
+						},
+					},
+				);
 			}
 			messages.push(assistant);
 			const calls = assistant.content.filter((part) => part.type === "toolCall");

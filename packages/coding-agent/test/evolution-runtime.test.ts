@@ -659,6 +659,46 @@ describe("coding-agent evolution runtime", () => {
 		});
 	});
 
+	it("preserves provider stop diagnostics for evolution failures", async () => {
+		const harness = await createHarness();
+		harnesses.push(harness);
+		harness.setResponses([
+			fauxAssistantMessage("", {
+				stopReason: "error",
+				errorMessage: "Provider rejected the structured response",
+			}),
+		]);
+		const executor = new CodingAgentEvolutionModelExecutor(harness.session, harness.session.modelRuntime, {
+			async waitUntilBackgroundAllowed() {},
+		});
+		const model = harness.getModel();
+
+		await expect(
+			executor.execute({
+				stage: "skill-synthesizer",
+				model: {
+					provider: model.provider,
+					model: model.id,
+					configurationDigest: `sha256:${"1".repeat(64)}`,
+				},
+				promptVersion: "skill-synthesizer-v1",
+				idempotencyKey: "provider-stop-diagnostics",
+				input: {},
+				outputSchema: { type: "object" },
+				tools: [],
+			}),
+		).rejects.toMatchObject({
+			name: "EvolutionExecutionError",
+			message: "Provider rejected the structured response",
+			reasonCode: "model-call-failed",
+			retryable: true,
+			diagnostics: {
+				stopReason: "error",
+				providerError: "Provider rejected the structured response",
+			},
+		});
+	});
+
 	it("corrects an invalid response-tool submission within the active transcript", async () => {
 		const harness = await createHarness();
 		harnesses.push(harness);
