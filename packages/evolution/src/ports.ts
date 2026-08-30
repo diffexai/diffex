@@ -341,6 +341,7 @@ export interface SkillCandidateSynthesisFailureRecordingInput {
 		readonly groupId: string;
 		readonly proposalRevisionIds: readonly string[];
 		readonly idempotencyKey: string;
+		readonly reasonCode: "skill-synthesis-attempts-exhausted" | "skill-synthesis-non-retryable";
 	}[];
 	readonly createdAt: string;
 }

@@ -324,6 +324,7 @@ function isCandidateGroupFailureDiagnostic(value: unknown): boolean {
 	return (
 		isRecord(value) &&
 		(value.groupId === null || typeof value.groupId === "string") &&
+		(value.synthesisIdempotencyKey === undefined || typeof value.synthesisIdempotencyKey === "string") &&
 		isCandidateWorkErrorDiagnostic(value.error)
 	);
 }

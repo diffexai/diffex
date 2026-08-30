@@ -210,6 +210,12 @@ export async function retryAssistantCall(
 	}
 }
 
+/** Classifies whether provider or transport error text describes a transient failure. */
+export function isRetryableProviderErrorMessage(errorMessage: string): boolean {
+	if (NON_RETRYABLE_PROVIDER_LIMIT_ERROR_PATTERN.test(errorMessage)) return false;
+	return RETRYABLE_PROVIDER_ERROR_PATTERN.test(errorMessage);
+}
+
 /**
  * Classifies whether a failed assistant message looks like a transient provider
  * or transport error, so callers can decide if the last assistant turn should be
@@ -220,8 +226,9 @@ export async function retryAssistantCall(
  * before restarting the assistant turn.
  */
 export function isRetryableAssistantError(message: AssistantMessage): boolean {
-	if (message.stopReason !== "error" || !message.errorMessage) return false;
-	const errorMessage = message.errorMessage;
-	if (NON_RETRYABLE_PROVIDER_LIMIT_ERROR_PATTERN.test(errorMessage)) return false;
-	return RETRYABLE_PROVIDER_ERROR_PATTERN.test(errorMessage);
+	return (
+		message.stopReason === "error" &&
+		message.errorMessage !== undefined &&
+		isRetryableProviderErrorMessage(message.errorMessage)
+	);
 }

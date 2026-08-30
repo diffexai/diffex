@@ -155,6 +155,7 @@ function candidateWorkFailureEvent(eventId: string, registrySequence: number): S
 		diagnostics: [
 			{
 				groupId: "group-1",
+				synthesisIdempotencyKey: "skill-synthesis-group-1",
 				error: {
 					name: "EvolutionExecutionError",
 					message: "Skill synthesizer failed to produce a draft",

@@ -865,7 +865,7 @@ export class PersistentSkillCandidateRegistry implements SkillCandidateRegistry 
 					failure.groupId,
 					"evidence-qualified",
 					"synthesis-failed",
-					["skill-synthesis-attempts-exhausted"],
+					[failure.reasonCode],
 					nextSequence(snapshot.events, planned.length),
 					failure.idempotencyKey,
 					this.#producer,

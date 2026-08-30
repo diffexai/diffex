@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import { fauxAssistantMessage } from "../src/providers/faux.ts";
-import { isRetryableAssistantError, type RetryPolicy, retryAssistantCall } from "../src/utils/retry.ts";
+import {
+	isRetryableAssistantError,
+	isRetryableProviderErrorMessage,
+	type RetryPolicy,
+	retryAssistantCall,
+} from "../src/utils/retry.ts";
 
 const openAIExplicitRetryMessage =
 	"An error occurred while processing your request. You can retry your request, or contact us through our help center at help.openai.com if the error persists. Please include the request ID req_******** in your message.";
@@ -55,6 +60,7 @@ describe("provider retry classification", () => {
 				fauxAssistantMessage("", { stopReason: "error", errorMessage: openAIResponsesEarlyEofMessage }),
 			),
 		).toBe(true);
+		expect(isRetryableProviderErrorMessage(openAIResponsesEarlyEofMessage)).toBe(true);
 	});
 
 	it("keeps provider limit errors non-retryable", () => {

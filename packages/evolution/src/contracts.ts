@@ -992,6 +992,8 @@ export interface SkillCandidateWorkErrorDiagnostic {
 
 export interface SkillCandidateGroupFailureDiagnostic {
 	readonly groupId: string | null;
+	/** Present for synthesis failures so retry budgets follow the immutable synthesis identity across jobs. */
+	readonly synthesisIdempotencyKey?: string;
 	readonly error: SkillCandidateWorkErrorDiagnostic;
 }
 

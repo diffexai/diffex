@@ -3,7 +3,15 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { promisify } from "node:util";
-import { type AssistantMessage, contentText, type Message, type Model, type Tool } from "@earendil-works/diffex-ai";
+import {
+	type AssistantMessage,
+	contentText,
+	isRetryableAssistantError,
+	isRetryableProviderErrorMessage,
+	type Message,
+	type Model,
+	type Tool,
+} from "@earendil-works/diffex-ai";
 import type { HarnessStateStore, HarnessVersion } from "@earendil-works/diffex-harness-state";
 import lockfile from "proper-lockfile";
 import type { TSchema } from "typebox";
@@ -268,15 +276,33 @@ export class CodingAgentEvolutionModelExecutor implements EvolutionModelExecutor
 						});
 					}
 					request.signal?.throwIfAborted();
-					if (!(error instanceof EvolutionProviderTimeoutError) || providerAttempt >= 2) throw error;
+					if (error instanceof EvolutionProviderTimeoutError && providerAttempt < 2) continue;
+					if (error instanceof EvolutionProviderTimeoutError) {
+						throw new EvolutionExecutionError(error.message, {
+							reasonCode: "model-call-failed",
+							retryable: true,
+							diagnostics: { providerTimeout: error.deadline },
+						});
+					}
+					const errorMessage = error instanceof Error ? error.message : String(error);
+					if (isRetryableProviderErrorMessage(errorMessage)) {
+						throw new EvolutionExecutionError(errorMessage, {
+							reasonCode: "model-call-failed",
+							retryable: true,
+							cause: error,
+							diagnostics: { transportError: errorMessage },
+						});
+					}
+					throw error;
 				}
 			}
+			request.signal?.throwIfAborted();
 			if (assistant.stopReason === "error" || assistant.stopReason === "aborted") {
 				throw new EvolutionExecutionError(
 					assistant.errorMessage ?? `Evolution model stopped with ${assistant.stopReason}`,
 					{
 						reasonCode: "model-call-failed",
-						retryable: true,
+						retryable: isRetryableAssistantError(assistant),
 						diagnostics: {
 							stopReason: assistant.stopReason,
 							providerError: assistant.errorMessage ?? null,
