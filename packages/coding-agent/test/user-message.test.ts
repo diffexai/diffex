@@ -1,3 +1,4 @@
+import { getGlyphs, visibleWidth } from "@earendil-works/diffex-tui";
 import { describe, expect, test } from "vitest";
 import { UserMessageComponent } from "../src/modes/interactive/components/user-message.ts";
 import { initTheme } from "../src/modes/interactive/theme/theme.ts";
@@ -8,19 +9,19 @@ const OSC133_ZONE_END = "\x1b]133;B\x07";
 const OSC133_ZONE_FINAL = "\x1b]133;C\x07";
 
 describe("UserMessageComponent", () => {
-	test("renders a compact role row without a full-width background", () => {
+	test("renders the prompt inside a full-width user surface", () => {
 		initTheme("dark");
 
 		const component = new UserMessageComponent("hello");
 		const lines = component.render(20);
 
-		expect(lines).toHaveLength(2);
+		expect(lines).toHaveLength(3);
 		expect(lines[0]).toContain(OSC133_ZONE_START);
 		expect(lines[0]).not.toContain(OSC133_ZONE_END);
-		expect(stripAnsi(lines[0])).toContain("You");
-		expect(lines[1]).toContain("hello");
-		expect(lines[1].startsWith(OSC133_ZONE_END + OSC133_ZONE_FINAL)).toBe(true);
-		expect(lines.join("\n")).not.toContain("\x1b[48");
+		expect(stripAnsi(lines[1])).toContain(`${getGlyphs().selected} hello`);
+		expect(stripAnsi(lines.join("\n"))).not.toContain("You");
+		expect(lines[2].startsWith(OSC133_ZONE_END + OSC133_ZONE_FINAL)).toBe(true);
+		expect(lines.every((line) => visibleWidth(line) === 20)).toBe(true);
 	});
 
 	test("chains Markdown transformers with user message context", () => {
@@ -29,7 +30,7 @@ describe("UserMessageComponent", () => {
 		const component = new UserMessageComponent("The input is $x^2$.", undefined, 1, [
 			(markdown, context) => {
 				calls.push("formula");
-				expect(context).toEqual({ messageType: "user", isStreaming: false, availableWidth: 78 });
+				expect(context).toEqual({ messageType: "user", isStreaming: false, availableWidth: 76 });
 				return markdown.replace("$x^2$", "x²");
 			},
 			(markdown) => {

@@ -3,7 +3,7 @@ import { getGlyphs } from "../glyphs.ts";
 import { renderLatex } from "../latex.ts";
 import { getCapabilities, hyperlink, isImageLine } from "../terminal-image.ts";
 import type { Component } from "../tui.ts";
-import { applyBackgroundToLine, visibleWidth, wrapTextWithAnsi } from "../utils.ts";
+import { applyBackgroundToLine, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../utils.ts";
 
 const STRICT_STRIKETHROUGH_REGEX = /^(~~)(?=[^\s~])((?:\\.|[^\\])*?(?:\\.|[^\s~\\]))\1(?=[^~]|$)/;
 
@@ -219,6 +219,8 @@ export interface MarkdownTheme {
 }
 
 export interface MarkdownOptions {
+	/** Styled prefix for the first content line. Continuation lines reserve the same width. */
+	firstLinePrefix?: string;
 	/** Preserve source list markers instead of normalizing them. */
 	preserveOrderedListMarkers?: boolean;
 	/** Preserve source backslash escapes instead of normalizing escaped punctuation. */
@@ -283,9 +285,12 @@ export class Markdown implements Component {
 			return this.cachedLines;
 		}
 
-		// Calculate available width for content (subtract horizontal padding)
+		// Calculate available width for content (subtract horizontal padding and hanging prefix)
 		const contentWidth = Math.max(1, width - this.paddingX * 2);
-		const text = this.options.transform?.(this.text, contentWidth) ?? this.text;
+		const firstLinePrefix = truncateToWidth(this.options.firstLinePrefix ?? "", Math.max(0, contentWidth - 1), "");
+		const prefixWidth = visibleWidth(firstLinePrefix);
+		const bodyWidth = Math.max(1, contentWidth - prefixWidth);
+		const text = this.options.transform?.(this.text, bodyWidth) ?? this.text;
 
 		// Don't render anything if there's no actual text
 		if (!text || text.trim() === "") {
@@ -310,7 +315,7 @@ export class Markdown implements Component {
 		for (let i = 0; i < tokens.length; i++) {
 			const token = tokens[i];
 			const nextToken = tokens[i + 1];
-			const tokenLines = this.renderToken(token, contentWidth, nextToken?.type);
+			const tokenLines = this.renderToken(token, bodyWidth, nextToken?.type);
 			for (const tokenLine of tokenLines) {
 				renderedLines.push(tokenLine);
 			}
@@ -322,7 +327,7 @@ export class Markdown implements Component {
 			if (isImageLine(line)) {
 				wrappedLines.push(line);
 			} else {
-				for (const wrappedLine of wrapTextWithAnsi(line, contentWidth)) {
+				for (const wrappedLine of wrapTextWithAnsi(line, bodyWidth)) {
 					wrappedLines.push(wrappedLine);
 				}
 			}
@@ -334,13 +339,16 @@ export class Markdown implements Component {
 		const bgFn = this.defaultTextStyle?.bgColor;
 		const contentLines: string[] = [];
 
+		let hasContentLine = false;
 		for (const line of wrappedLines) {
 			if (isImageLine(line)) {
 				contentLines.push(line);
 				continue;
 			}
 
-			const lineWithMargins = leftMargin + line + rightMargin;
+			const prefix = hasContentLine ? " ".repeat(prefixWidth) : firstLinePrefix;
+			hasContentLine = true;
+			const lineWithMargins = leftMargin + prefix + line + rightMargin;
 
 			if (bgFn) {
 				contentLines.push(applyBackgroundToLine(lineWithMargins, width, bgFn));

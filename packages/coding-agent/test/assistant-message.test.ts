@@ -1,4 +1,5 @@
 import type { AssistantMessage } from "@earendil-works/diffex-ai";
+import { getGlyphs } from "@earendil-works/diffex-tui";
 import { describe, expect, test } from "vitest";
 import { AssistantMessageComponent } from "../src/modes/interactive/components/assistant-message.ts";
 import { UserMessageComponent } from "../src/modes/interactive/components/user-message.ts";
@@ -171,8 +172,9 @@ describe("AssistantMessageComponent", () => {
 
 		component.updateContent(message, true);
 		const streaming = stripAnsi(component.render(80).join("\n"));
-		expect(streaming).toContain("Diffex");
-		expect(streaming).toContain("responding");
+		expect(streaming).toContain("partial");
+		expect(streaming).not.toContain("Diffex");
+		expect(streaming).not.toContain("responding");
 		expect(streaming).not.toContain("transformed");
 
 		component.updateContent(message, false);
@@ -191,9 +193,8 @@ describe("AssistantMessageComponent", () => {
 			createAssistantMessage([], { stopReason: "error", errorMessage: "provider unavailable" }),
 		);
 
-		expect(stripAnsi(cancelled.render(80).join("\n"))).toContain("cancelled");
-		expect(stripAnsi(failed.render(80).join("\n"))).toContain("failed");
-		expect(stripAnsi(failed.render(80).join("\n"))).toContain("provider unavailable");
+		expect(stripAnsi(cancelled.render(80).join("\n"))).toContain("Operation aborted");
+		expect(stripAnsi(failed.render(80).join("\n"))).toContain("Error: provider unavailable");
 	});
 
 	test("reapplies Markdown transformers when available width changes", () => {
@@ -274,10 +275,10 @@ describe("AssistantMessageComponent", () => {
 
 		const paddedComponent = new UserMessageComponent("hello", undefined, 1);
 		const paddedLines = paddedComponent.render(40).map((line) => stripAnsi(line));
-		expect(paddedLines.some((line) => line.startsWith(" hello"))).toBe(true);
+		expect(paddedLines.some((line) => line.startsWith(` ${getGlyphs().selected} hello`))).toBe(true);
 
 		const unpaddedComponent = new UserMessageComponent("hello", undefined, 0);
 		const unpaddedLines = unpaddedComponent.render(40).map((line) => stripAnsi(line));
-		expect(unpaddedLines.some((line) => line.startsWith("hello"))).toBe(true);
+		expect(unpaddedLines.some((line) => line.startsWith(`${getGlyphs().selected} hello`))).toBe(true);
 	});
 });
