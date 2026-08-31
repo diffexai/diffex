@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { highlightCode, initTheme } from "../src/modes/interactive/theme/theme.ts";
 import { highlight, renderHighlightedHtml, supportsLanguage } from "../src/utils/syntax-highlight.ts";
 
+const originalNoColor = process.env.NO_COLOR;
+
 describe("syntax highlight renderer", () => {
 	it("renders highlighted spans with the provided theme", () => {
 		const rendered = renderHighlightedHtml('<span class="hljs-keyword">const</span> value', {
@@ -51,26 +53,32 @@ describe("syntax highlight renderer", () => {
 
 describe("theme syntax highlighting", () => {
 	beforeEach(() => {
+		process.env.NO_COLOR = "";
 		setCapabilities({ images: null, trueColor: true, hyperlinks: false });
 		initTheme("dark");
 	});
 
 	afterEach(() => {
+		if (originalNoColor === undefined) {
+			delete process.env.NO_COLOR;
+		} else {
+			process.env.NO_COLOR = originalNoColor;
+		}
 		resetCapabilitiesCache();
 	});
 
 	it("colors diff additions and deletions in fenced diff blocks", () => {
 		const lines = highlightCode("-old\n+new\n", "diff");
 
-		expect(lines[0]).toBe("\x1b[38;2;204;102;102m-old\x1b[39m");
-		expect(lines[1]).toBe("\x1b[38;2;88;161;112m+new\x1b[39m");
+		expect(lines[0]).toBe("\x1b[38;2;240;113;120m-old\x1b[39m");
+		expect(lines[1]).toBe("\x1b[38;2;115;201;145m+new\x1b[39m");
 	});
 
 	it("keeps cli-highlight default styled scopes mapped to theme styles", () => {
 		expect(highlightCode("const re = /foo+/gi;", "javascript")[0]).toContain(
-			"\x1b[38;2;206;145;120m/foo+/gi\x1b[39m",
+			"\x1b[38;2;230;154;117m/foo+/gi\x1b[39m",
 		);
-		expect(highlightCode("@decorator", "python")[0]).toBe("\x1b[38;2;128;128;128m@decorator\x1b[39m");
-		expect(highlightCode("<div></div>", "html")[0]).toContain("\x1b[38;2;86;156;214mdiv\x1b[39m");
+		expect(highlightCode("@decorator", "python")[0]).toBe("\x1b[38;2;160;168;184m@decorator\x1b[39m");
+		expect(highlightCode("<div></div>", "html")[0]).toContain("\x1b[38;2;130;170;255mdiv\x1b[39m");
 	});
 });

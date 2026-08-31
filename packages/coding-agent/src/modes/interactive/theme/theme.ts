@@ -188,6 +188,10 @@ type ColorMode = "truecolor" | "256color";
 // Color Utilities
 // ============================================================================
 
+function isNoColorRequested(env: NodeJS.ProcessEnv = process.env): boolean {
+	return env.NO_COLOR !== undefined && env.NO_COLOR !== "";
+}
+
 function hexToRgb(hex: string): { r: number; g: number; b: number } {
 	const cleaned = hex.replace("#", "");
 	if (cleaned.length !== 6) {
@@ -373,6 +377,7 @@ export class Theme {
 	private fgColors: Map<ThemeColor, string>;
 	private bgColors: Map<ThemeBg, string>;
 	private mode: ColorMode;
+	private colorsEnabled: boolean;
 
 	constructor(
 		fgColors: Record<ThemeColor, string | number>,
@@ -385,10 +390,11 @@ export class Theme {
 		this.sourcePath = options.sourcePath;
 		this.sourceInfo = options.sourceInfo;
 		this.mode = mode;
+		this.colorsEnabled = !isNoColorRequested();
 		this.fgColors = new Map();
 		const colors = { ...fgColors, thinkingMax: fgColors.thinkingMax ?? fgColors.thinkingXhigh };
 		for (const [key, value] of Object.entries(colors) as [ThemeColor, string | number][]) {
-			this.fgColors.set(key, fgAnsi(value, mode));
+			this.fgColors.set(key, this.colorsEnabled ? fgAnsi(value, mode) : "");
 		}
 		this.bgColors = new Map();
 		const backgrounds = {
@@ -396,19 +402,21 @@ export class Theme {
 			scrollbarThumb: bgColors.scrollbarThumb ?? bgColors.selectedBg,
 		};
 		for (const [key, value] of Object.entries(backgrounds) as [ThemeBg, string | number][]) {
-			this.bgColors.set(key, bgAnsi(value, mode));
+			this.bgColors.set(key, this.colorsEnabled ? bgAnsi(value, mode) : "");
 		}
 	}
 
 	fg(color: ThemeColor, text: string): string {
 		const ansi = this.fgColors.get(color);
-		if (!ansi) throw new Error(`Unknown theme color: ${color}`);
+		if (ansi === undefined) throw new Error(`Unknown theme color: ${color}`);
+		if (!this.colorsEnabled) return text;
 		return `${ansi}${text}\x1b[39m`; // Reset only foreground color
 	}
 
 	bg(color: ThemeBg, text: string): string {
 		const ansi = this.bgColors.get(color);
-		if (!ansi) throw new Error(`Unknown theme background color: ${color}`);
+		if (ansi === undefined) throw new Error(`Unknown theme background color: ${color}`);
+		if (!this.colorsEnabled) return text;
 		return `${ansi}${text}\x1b[49m`; // Reset only background color
 	}
 
@@ -434,13 +442,13 @@ export class Theme {
 
 	getFgAnsi(color: ThemeColor): string {
 		const ansi = this.fgColors.get(color);
-		if (!ansi) throw new Error(`Unknown theme color: ${color}`);
+		if (ansi === undefined) throw new Error(`Unknown theme color: ${color}`);
 		return ansi;
 	}
 
 	getBgAnsi(color: ThemeBg): string {
 		const ansi = this.bgColors.get(color);
-		if (!ansi) throw new Error(`Unknown theme background color: ${color}`);
+		if (ansi === undefined) throw new Error(`Unknown theme background color: ${color}`);
 		return ansi;
 	}
 
