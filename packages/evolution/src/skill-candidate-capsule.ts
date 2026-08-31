@@ -112,6 +112,21 @@ export function missingCapsuleMaterial(
 	);
 }
 
+export function capsuleRequiresEnrichment(
+	capsule: Pick<SkillCandidateGroupCapsule, "conflicts" | "contract" | "historicalAdditions">,
+	candidates: readonly SkillCandidate[],
+): boolean {
+	const missing = missingCapsuleMaterial(capsule, candidates);
+	const explicitlyOmittedConflictValues = capsule.conflicts.reduce(
+		(total, conflict) => total + conflict.omittedAlternativeCount,
+		0,
+	);
+	if (missing.length !== explicitlyOmittedConflictValues) {
+		throw new Error("Canonical capsule material coverage is inconsistent with its conflict overflow");
+	}
+	return missing.length > 0;
+}
+
 function contentWithoutMetadata<T extends { readonly metadata: unknown }>(value: T): Omit<T, "metadata"> {
 	const { metadata: _metadata, ...content } = value;
 	return content;
