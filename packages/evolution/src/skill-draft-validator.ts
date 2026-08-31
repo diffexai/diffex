@@ -6,7 +6,10 @@ import type {
 	EvolutionInputSnapshot,
 	EvolutionSkillCatalogEntry,
 	SkillCandidate,
+	SkillCandidateFailureHandling,
 	SkillCandidateGroup,
+	SkillCandidateGroupCapsule,
+	SkillCandidateProcedureStep,
 	SkillDraftValidationIssue,
 	SkillDraftValidationReport,
 } from "./contracts.ts";
@@ -20,6 +23,7 @@ import type {
 	SkillDraftValidatorInput,
 } from "./ports.ts";
 import { computeEvolutionContentDigest, createEvolutionArtifactMetadata } from "./provenance.ts";
+import { isCanonicalGroupCapsule, missingCapsuleMaterial } from "./skill-candidate-capsule.ts";
 
 const DEFAULT_MAX_CONTENT_BYTES = 64 * 1024;
 const DEFAULT_MAX_PACKAGE_BYTES = 256 * 1024;
@@ -77,6 +81,10 @@ function contentWithoutMetadata<T extends { readonly metadata: unknown }>(value:
 	return content;
 }
 
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function isInputSnapshot(artifact: EvolutionArtifact): artifact is EvolutionInputSnapshot {
 	return "evidenceSources" in artifact && "repository" in artifact && "harness" in artifact && "trigger" in artifact;
 }
@@ -87,6 +95,24 @@ function isSkillCandidate(artifact: EvolutionArtifact): artifact is SkillCandida
 
 function normalizedText(value: string): string {
 	return value.normalize("NFKC").trim().replace(/\s+/gu, " ").toLocaleLowerCase("en-US");
+}
+
+function isProcedureStep(value: unknown): value is SkillCandidateProcedureStep {
+	return (
+		isRecord(value) &&
+		typeof value.sequence === "number" &&
+		typeof value.action === "string" &&
+		(typeof value.condition === "string" || value.condition === null)
+	);
+}
+
+function isFailureHandling(value: unknown): value is SkillCandidateFailureHandling {
+	return (
+		isRecord(value) &&
+		typeof value.signal === "string" &&
+		typeof value.mitigation === "string" &&
+		typeof value.recovery === "string"
+	);
 }
 
 function localReferenceTargets(content: string): string[] {
@@ -148,6 +174,98 @@ function latestCatalogVersions(source: CandidateSource): readonly EvolutionSkill
 	});
 }
 
+function validateDraftAgainstCapsule(
+	capsule: SkillCandidateGroupCapsule,
+	content: string,
+	add: (code: string, message: string) => void,
+): void {
+	const normalizedContent = normalizedText(content);
+	const requireText = (code: string, label: string, value: string) => {
+		if (!normalizedContent.includes(normalizedText(value))) add(code, `The draft omits ${label} "${value}"`);
+	};
+	for (const trigger of [capsule.contract.trigger.description, ...capsule.contract.trigger.positiveExamples]) {
+		requireText("trigger-condition-missing", "trigger condition", trigger);
+	}
+	for (const precondition of capsule.contract.preconditions) {
+		requireText("precondition-missing", "precondition", precondition);
+	}
+	let previousActionIndex = -1;
+	for (const step of capsule.contract.procedure.steps) {
+		const actionIndex = normalizedContent.indexOf(normalizedText(step.action));
+		if (actionIndex === -1) {
+			add("procedure-action-missing", `The draft omits procedure action "${step.action}"`);
+		} else {
+			if (actionIndex <= previousActionIndex) {
+				add("procedure-action-order-invalid", "The draft changes the canonical procedure action order");
+			}
+			previousActionIndex = Math.max(previousActionIndex, actionIndex);
+		}
+		if (step.condition !== null) requireText("decision-branch-missing", "procedure condition", step.condition);
+	}
+	for (const tool of capsule.contract.procedure.requiredTools) {
+		requireText("tool-dependency-missing", "required tool", tool);
+	}
+	for (const requirement of capsule.contract.procedure.environment) {
+		requireText("environment-dependency-missing", "environment requirement", requirement);
+	}
+	for (const handling of capsule.contract.failureHandling) {
+		requireText("failure-signal-missing", "failure signal", handling.signal);
+		requireText("failure-mitigation-missing", "failure mitigation", handling.mitigation);
+		requireText("recovery-action-missing", "recovery action", handling.recovery);
+	}
+	for (const boundary of capsule.contract.applicabilityBoundaries) {
+		requireText("applicability-boundary-missing", "applicability boundary", boundary);
+	}
+	for (const counterexample of capsule.contract.trigger.negativeExamples) {
+		requireText("counterexample-missing", "counterexample", counterexample);
+	}
+	for (const criterion of [
+		...capsule.contract.verificationContract.checks,
+		capsule.contract.verificationContract.completionCondition,
+	]) {
+		requireText("acceptance-criterion-missing", "acceptance criterion", criterion);
+	}
+	for (const addition of capsule.historicalAdditions) {
+		if (typeof addition.value === "string") {
+			switch (addition.field) {
+				case "applicabilityBoundaries":
+					requireText("applicability-boundary-missing", "applicability boundary", addition.value);
+					break;
+				case "preconditions":
+					requireText("precondition-missing", "precondition", addition.value);
+					break;
+				case "procedure.environment":
+					requireText("environment-dependency-missing", "environment requirement", addition.value);
+					break;
+				case "procedure.requiredTools":
+					requireText("tool-dependency-missing", "required tool", addition.value);
+					break;
+				case "trigger.negativeExamples":
+					requireText("counterexample-missing", "counterexample", addition.value);
+					break;
+				case "trigger.positiveExamples":
+					requireText("trigger-condition-missing", "trigger condition", addition.value);
+					break;
+				case "verificationContract.checks":
+					requireText("acceptance-criterion-missing", "acceptance criterion", addition.value);
+					break;
+				case "failureHandling":
+				case "procedure.steps":
+					break;
+			}
+		} else if (addition.field === "procedure.steps" && isProcedureStep(addition.value)) {
+			requireText("procedure-action-missing", "procedure action", addition.value.action);
+			if (addition.value.condition !== null) {
+				requireText("decision-branch-missing", "procedure condition", addition.value.condition);
+			}
+		} else if (addition.field === "failureHandling" && isFailureHandling(addition.value)) {
+			requireText("failure-signal-missing", "failure signal", addition.value.signal);
+			requireText("failure-mitigation-missing", "failure mitigation", addition.value.mitigation);
+			requireText("recovery-action-missing", "recovery action", addition.value.recovery);
+		}
+	}
+}
+
 export class DeterministicSkillDraftValidator implements SkillDraftValidator {
 	readonly #dependencies: DeterministicSkillDraftValidatorDependencies;
 	readonly #producer: EvolutionArtifactProducer;
@@ -188,6 +306,18 @@ export class DeterministicSkillDraftValidator implements SkillDraftValidator {
 			artifactId: input.draft.metadata.artifactId,
 			contentDigest: computeEvolutionContentDigest(input.draft),
 		};
+		const capsuleArtifact = await this.#dependencies.artifacts.get(input.group.canonicalCapsule);
+		const capsule: SkillCandidateGroupCapsule | null = isCanonicalGroupCapsule(
+			capsuleArtifact,
+			input.group.canonicalCapsule,
+			input.group,
+		)
+			? capsuleArtifact
+			: null;
+		if (capsule === null) add("canonical-capsule-invalid", "The canonical group capsule is not immutable");
+		if (input.draft.synthesisRequest.capsuleDigest !== input.group.canonicalCapsule.contentDigest) {
+			add("synthesis-capsule-mismatch", "The draft was not synthesized from the current canonical capsule");
+		}
 		if (
 			input.draft.artifactKind !== "skill-draft" ||
 			input.draft.draftId === "" ||
@@ -249,6 +379,14 @@ export class DeterministicSkillDraftValidator implements SkillDraftValidator {
 		}
 
 		const candidates = sources.map((source) => source.candidate);
+		if (capsule !== null) {
+			for (const omission of missingCapsuleMaterial(capsule, candidates)) {
+				add(
+					"canonical-capsule-information-missing",
+					`The canonical capsule omits ${omission.field} value ${omission.valueDigest}`,
+				);
+			}
+		}
 		if (
 			!sameValues(
 				input.draft.sourceCandidateIds,
@@ -390,20 +528,6 @@ export class DeterministicSkillDraftValidator implements SkillDraftValidator {
 			if (environment.harnessVersion !== expectedHarnessVersion) {
 				add("harness-base-stale", "The active harness no longer matches the final candidate base");
 			}
-			if (
-				input.draft.operation !== latest.candidate.operation ||
-				input.draft.proposedName !== latest.candidate.proposedName ||
-				!sameValues(input.draft.existingSkillIds, latest.candidate.existingSkillIds) ||
-				input.draft.workspace.repositoryId !== latest.candidate.workspace.repositoryId ||
-				input.draft.workspace.directoryId !== latest.candidate.workspace.directoryId ||
-				input.draft.workspace.rootPath !== latest.candidate.workspace.rootPath ||
-				input.draft.workspace.repositoryRevision !== latest.candidate.workspace.repositoryRevision ||
-				input.draft.workspace.evolutionScope.repositoryId !==
-					latest.candidate.workspace.evolutionScope.repositoryId ||
-				input.draft.workspace.evolutionScope.scopeId !== latest.candidate.workspace.evolutionScope.scopeId
-			) {
-				add("final-candidate-mismatch", "The draft does not match the final candidate operation and scope");
-			}
 			const activeVersions = new Map(environment.skillVersions.map((skill) => [skill.skillId, skill]));
 			for (const frozen of latestCatalogVersions(latest)) {
 				const active = activeVersions.get(frozen.skillId);
@@ -415,71 +539,23 @@ export class DeterministicSkillDraftValidator implements SkillDraftValidator {
 					add("source-skill-stale", `Source skill "${frozen.skillId}" is no longer at its frozen version`);
 				}
 			}
-			const normalizedContent = normalizedText(input.draft.content);
-			for (const trigger of [latest.candidate.trigger.description, ...latest.candidate.trigger.positiveExamples]) {
-				if (!normalizedContent.includes(normalizedText(trigger))) {
-					add("trigger-condition-missing", `The draft omits trigger condition "${trigger}"`);
-				}
+		}
+		if (capsule !== null) {
+			if (
+				input.draft.operation !== capsule.contract.operation ||
+				input.draft.proposedName !== capsule.contract.proposedName ||
+				!sameValues(input.draft.existingSkillIds, capsule.contract.existingSkillIds) ||
+				input.draft.workspace.repositoryId !== capsule.contract.workspace.repositoryId ||
+				input.draft.workspace.directoryId !== capsule.contract.workspace.directoryId ||
+				input.draft.workspace.rootPath !== capsule.contract.workspace.rootPath ||
+				input.draft.workspace.repositoryRevision !== capsule.contract.workspace.repositoryRevision ||
+				input.draft.workspace.evolutionScope.repositoryId !==
+					capsule.contract.workspace.evolutionScope.repositoryId ||
+				input.draft.workspace.evolutionScope.scopeId !== capsule.contract.workspace.evolutionScope.scopeId
+			) {
+				add("canonical-contract-mismatch", "The draft does not match the canonical group operation and scope");
 			}
-			for (const precondition of latest.candidate.preconditions) {
-				if (!normalizedContent.includes(normalizedText(precondition))) {
-					add("precondition-missing", `The draft omits precondition "${precondition}"`);
-				}
-			}
-			let previousActionIndex = -1;
-			for (const step of latest.candidate.procedure.steps) {
-				const actionIndex = normalizedContent.indexOf(normalizedText(step.action));
-				if (actionIndex === -1) {
-					add("procedure-action-missing", `The draft omits procedure action "${step.action}"`);
-				} else {
-					if (actionIndex <= previousActionIndex) {
-						add("procedure-action-order-invalid", "The draft changes the candidate procedure action order");
-					}
-					previousActionIndex = Math.max(previousActionIndex, actionIndex);
-				}
-				if (step.condition !== null && !normalizedContent.includes(normalizedText(step.condition))) {
-					add("decision-branch-missing", `The draft omits procedure condition "${step.condition}"`);
-				}
-			}
-			for (const tool of latest.candidate.procedure.requiredTools) {
-				if (!normalizedContent.includes(normalizedText(tool))) {
-					add("tool-dependency-missing", `The draft omits required tool "${tool}"`);
-				}
-			}
-			for (const requirement of latest.candidate.procedure.environment) {
-				if (!normalizedContent.includes(normalizedText(requirement))) {
-					add("environment-dependency-missing", `The draft omits environment requirement "${requirement}"`);
-				}
-			}
-			for (const handling of latest.candidate.failureHandling) {
-				if (!normalizedContent.includes(normalizedText(handling.signal))) {
-					add("failure-signal-missing", `The draft omits failure signal "${handling.signal}"`);
-				}
-				if (!normalizedContent.includes(normalizedText(handling.mitigation))) {
-					add("failure-mitigation-missing", `The draft omits failure mitigation "${handling.mitigation}"`);
-				}
-				if (!normalizedContent.includes(normalizedText(handling.recovery))) {
-					add("recovery-action-missing", `The draft omits recovery action "${handling.recovery}"`);
-				}
-			}
-			for (const boundary of latest.candidate.applicabilityBoundaries) {
-				if (!normalizedContent.includes(normalizedText(boundary))) {
-					add("applicability-boundary-missing", `The draft omits applicability boundary "${boundary}"`);
-				}
-			}
-			for (const counterexample of latest.candidate.trigger.negativeExamples) {
-				if (!normalizedContent.includes(normalizedText(counterexample))) {
-					add("counterexample-missing", `The draft omits counterexample "${counterexample}"`);
-				}
-			}
-			for (const acceptanceCriterion of [
-				...latest.candidate.verificationContract.checks,
-				latest.candidate.verificationContract.completionCondition,
-			]) {
-				if (!normalizedContent.includes(normalizedText(acceptanceCriterion))) {
-					add("acceptance-criterion-missing", `The draft omits acceptance criterion "${acceptanceCriterion}"`);
-				}
-			}
+			validateDraftAgainstCapsule(capsule, input.draft.content, add);
 		}
 
 		const inventoryPath = `skills/${input.draft.proposedName}/SKILL.md`;

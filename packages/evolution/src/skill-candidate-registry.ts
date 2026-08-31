@@ -13,12 +13,10 @@ import type {
 	SkillCandidateGroupCapsule,
 	SkillCandidateGroupConflict,
 	SkillCandidateGroupConflictAlternative,
-	SkillCandidateGroupContract,
 	SkillCandidateGroupHistoricalAddition,
 	SkillCandidateGroupingProfile,
 	SkillCandidateGroupRevisionSpan,
 	SkillCandidateGroupValueSupport,
-	SkillCandidateMaterialField,
 	SkillCandidatePriorityScore,
 	SkillCandidatePriorityScoreComponents,
 	SkillCandidateProposalRecordedEvent,
@@ -44,6 +42,11 @@ import type {
 	SkillCandidateValidationRecordingInput,
 } from "./ports.ts";
 import { computeEvolutionContentDigest, createEvolutionArtifactMetadata } from "./provenance.ts";
+import {
+	type SkillCandidateMaterialEntry,
+	skillCandidateGroupContract,
+	skillCandidateMaterialEntries,
+} from "./skill-candidate-capsule.ts";
 
 export const SKILL_CANDIDATE_PRIORITY_SCORER_VERSION = "skill-candidate-priority-v1";
 
@@ -296,45 +299,7 @@ function uniqueValues<T>(values: readonly T[]): T[] {
 	});
 }
 
-function candidateContract(candidate: SkillCandidate): SkillCandidateGroupContract {
-	return {
-		operation: candidate.operation,
-		proposedName: candidate.proposedName,
-		workspace: candidate.workspace,
-		existingSkillIds: uniqueSorted(candidate.existingSkillIds),
-		skillability: candidate.skillability,
-		trigger: {
-			description: candidate.trigger.description,
-			positiveExamples: uniqueValues(candidate.trigger.positiveExamples),
-			negativeExamples: uniqueValues(candidate.trigger.negativeExamples),
-		},
-		preconditions: uniqueValues(candidate.preconditions),
-		procedure: {
-			steps: uniqueValues(candidate.procedure.steps),
-			requiredTools: uniqueValues(candidate.procedure.requiredTools),
-			environment: uniqueValues(candidate.procedure.environment),
-		},
-		failureHandling: uniqueValues(candidate.failureHandling),
-		applicabilityBoundaries: uniqueValues(candidate.applicabilityBoundaries),
-		verificationContract: {
-			checks: uniqueValues(candidate.verificationContract.checks),
-			completionCondition: candidate.verificationContract.completionCondition,
-		},
-		memoryRelationship: candidate.memoryRelationship,
-	};
-}
-
-type GroupMaterialValue =
-	| SkillCandidateGroupAdditionValue
-	| SkillCandidate["skillability"]
-	| SkillCandidate["memoryRelationship"];
-
-interface GroupMaterialEntry {
-	readonly field: SkillCandidateMaterialField;
-	readonly value: GroupMaterialValue;
-}
-
-interface GroupMaterialSupport extends GroupMaterialEntry {
+interface GroupMaterialSupport extends SkillCandidateMaterialEntry {
 	readonly valueDigest: string;
 	readonly revisionIndexes: number[];
 }
@@ -344,34 +309,7 @@ interface RevisionCandidate {
 	readonly candidate: SkillCandidate;
 }
 
-function materialEntries(contract: SkillCandidateGroupContract): GroupMaterialEntry[] {
-	return [
-		{ field: "operation", value: contract.operation },
-		{ field: "proposedName", value: contract.proposedName },
-		...contract.existingSkillIds.map((value) => ({ field: "existingSkillIds" as const, value })),
-		{ field: "skillability", value: contract.skillability },
-		{ field: "trigger.description", value: contract.trigger.description },
-		...contract.trigger.positiveExamples.map((value) => ({ field: "trigger.positiveExamples" as const, value })),
-		...contract.trigger.negativeExamples.map((value) => ({ field: "trigger.negativeExamples" as const, value })),
-		...contract.preconditions.map((value) => ({ field: "preconditions" as const, value })),
-		...contract.procedure.steps.map((value) => ({ field: "procedure.steps" as const, value })),
-		...contract.procedure.requiredTools.map((value) => ({ field: "procedure.requiredTools" as const, value })),
-		...contract.procedure.environment.map((value) => ({ field: "procedure.environment" as const, value })),
-		...contract.failureHandling.map((value) => ({ field: "failureHandling" as const, value })),
-		...contract.applicabilityBoundaries.map((value) => ({ field: "applicabilityBoundaries" as const, value })),
-		...contract.verificationContract.checks.map((value) => ({
-			field: "verificationContract.checks" as const,
-			value,
-		})),
-		{
-			field: "verificationContract.completionCondition",
-			value: contract.verificationContract.completionCondition,
-		},
-		{ field: "memoryRelationship", value: contract.memoryRelationship },
-	];
-}
-
-function materialKey(entry: GroupMaterialEntry): string {
+function materialKey(entry: SkillCandidateMaterialEntry): string {
 	return `${entry.field}\u0000${computeEvolutionContentDigest(entry.value)}`;
 }
 
@@ -397,10 +335,10 @@ function canonicalGroupCapsule(
 ): SkillCandidateGroupCapsule {
 	const latest = sources.at(-1);
 	if (latest === undefined) throw new Error(`Candidate group "${groupId}" has no proposal revisions`);
-	const contract = candidateContract(latest.candidate);
+	const contract = skillCandidateGroupContract(latest.candidate);
 	const supports = new Map<string, GroupMaterialSupport>();
 	for (const [revisionIndex, source] of sources.entries()) {
-		const entries = uniqueValues(materialEntries(candidateContract(source.candidate)));
+		const entries = uniqueValues(skillCandidateMaterialEntries(skillCandidateGroupContract(source.candidate)));
 		for (const entry of entries) {
 			const key = materialKey(entry);
 			const existing = supports.get(key);
@@ -426,11 +364,11 @@ function canonicalGroupCapsule(
 		"trigger.positiveExamples",
 		"verificationContract.checks",
 	]);
-	const baseKeys = new Set(materialEntries(contract).map(materialKey));
+	const baseKeys = new Set(skillCandidateMaterialEntries(contract).map(materialKey));
 	const addedKeys = new Set<string>();
 	const historicalAdditions: SkillCandidateGroupHistoricalAddition[] = [];
 	for (const source of [...sources.slice(0, -1)].reverse()) {
-		for (const entry of materialEntries(candidateContract(source.candidate))) {
+		for (const entry of skillCandidateMaterialEntries(skillCandidateGroupContract(source.candidate))) {
 			const key = materialKey(entry);
 			if (
 				baseKeys.has(key) ||
@@ -459,7 +397,7 @@ function canonicalGroupCapsule(
 		"verificationContract.completionCondition",
 		"memoryRelationship",
 	];
-	const baseEntries = new Map(materialEntries(contract).map((entry) => [entry.field, entry]));
+	const baseEntries = new Map(skillCandidateMaterialEntries(contract).map((entry) => [entry.field, entry]));
 	const conflicts = scalarConflictFields.flatMap((field): SkillCandidateGroupConflict[] => {
 		const base = baseEntries.get(field);
 		if (base === undefined) throw new Error(`Candidate group "${groupId}" base contract is incomplete`);
@@ -1110,11 +1048,17 @@ export class PersistentSkillCandidateRegistry implements SkillCandidateRegistry 
 			.sort((left, right) => left.groupId.localeCompare(right.groupId));
 	}
 
-	#qualification(group: MutableGroup): {
+	#qualification(
+		group: MutableGroup,
+		capsuleRequiresEnrichment = false,
+	): {
 		readonly state: SkillCandidateState;
 		readonly reasonCodes: readonly string[];
 	} {
 		const immutable = immutableGroup(group);
+		if (capsuleRequiresEnrichment) {
+			return { state: "proposed", reasonCodes: ["canonical-capsule-enrichment-required"] };
+		}
 		if (group.state !== "synthesis-failed") return this.#scorer.qualification(immutable);
 		if (
 			sameValues(
@@ -1712,6 +1656,7 @@ export class PersistentSkillCandidateRegistry implements SkillCandidateRegistry 
 			);
 			const planned: SkillCandidateRegistryEvent[] = [];
 			const changedGroupIds = new Set<string>();
+			const capsuleRequiresEnrichment = new Map<string, boolean>();
 
 			for (const item of candidates) {
 				const candidateKey = `${input.sourceEvolutionJobId}\u0000${item.candidate.candidateId}`;
@@ -1831,7 +1776,21 @@ export class PersistentSkillCandidateRegistry implements SkillCandidateRegistry 
 					);
 					changedGroupIds.add(group.groupId);
 				}
-				const qualification = this.#qualification(group);
+				if (group.canonicalCapsule === null) {
+					throw new Error(`Candidate group "${group.groupId}" has no canonical capsule`);
+				}
+				const capsuleArtifact = await this.#artifacts.get(group.canonicalCapsule);
+				if (
+					!("artifactKind" in capsuleArtifact) ||
+					capsuleArtifact.artifactKind !== "skill-candidate-group-capsule"
+				) {
+					throw new Error(`Candidate group "${group.groupId}" canonical capsule artifact is invalid`);
+				}
+				capsuleRequiresEnrichment.set(
+					group.groupId,
+					capsuleArtifact.conflicts.some((conflict) => conflict.omittedAlternativeCount > 0),
+				);
+				const qualification = this.#qualification(group, capsuleRequiresEnrichment.get(group.groupId));
 				if (!sameValues(group.scoredProposalRevisionIds, revisionIds) || qualification.state !== group.state) {
 					changedGroupIds.add(group.groupId);
 				}
@@ -1845,7 +1804,9 @@ export class PersistentSkillCandidateRegistry implements SkillCandidateRegistry 
 						group.groupId,
 						null,
 						"proposed",
-						["candidate-recorded"],
+						capsuleRequiresEnrichment.get(groupId)
+							? ["candidate-recorded", "canonical-capsule-enrichment-required"]
+							: ["candidate-recorded"],
 						nextSequence(snapshot.events, planned.length),
 						input.idempotencyKey,
 						this.#producer,
@@ -1893,7 +1854,7 @@ export class PersistentSkillCandidateRegistry implements SkillCandidateRegistry 
 					group.scoredProposalRevisionIds.length,
 					...scoreContent.proposalRevisionIds,
 				);
-				const qualification = this.#qualification(group);
+				const qualification = this.#qualification(group, capsuleRequiresEnrichment.get(groupId));
 				if (qualification.state !== group.state) {
 					const transition = transitionEvent(
 						groupId,
