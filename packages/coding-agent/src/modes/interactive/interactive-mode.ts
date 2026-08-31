@@ -2384,23 +2384,19 @@ export class InteractiveMode {
 	 */
 	private renderWidgets(): void {
 		if (!this.widgetContainerAbove || !this.widgetContainerBelow) return;
-		this.renderWidgetContainer(this.widgetContainerAbove, this.extensionWidgetsAbove, true, true);
-		this.renderWidgetContainer(this.widgetContainerBelow, this.extensionWidgetsBelow, false, false);
+		this.renderWidgetContainer(this.widgetContainerAbove, this.extensionWidgetsAbove, true);
+		this.renderWidgetContainer(this.widgetContainerBelow, this.extensionWidgetsBelow, false);
 		this.ui.requestRender();
 	}
 
 	private renderWidgetContainer(
 		container: Container,
 		widgets: Map<string, Component & { dispose?(): void }>,
-		spacerWhenEmpty: boolean,
 		leadingSpacer: boolean,
 	): void {
 		container.clear();
 
 		if (widgets.size === 0) {
-			if (spacerWhenEmpty) {
-				container.addChild(new Spacer(1));
-			}
 			return;
 		}
 
