@@ -1,4 +1,3 @@
-import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import type {
 	EvolutionArtifactProducer,
 	EvolutionInputSnapshot,
@@ -26,6 +25,7 @@ import {
 	createEvolutionArtifactMetadata,
 } from "./provenance.ts";
 import { isCanonicalGroupCapsule } from "./skill-candidate-capsule.ts";
+import { applicableSkillInstructions } from "./skill-synthesis-context.ts";
 import { EVOLUTION_TOKEN_ESTIMATOR_VERSION, measureEvolutionValue } from "./token-estimator.ts";
 
 const SYNTHESIS_CONTEXT_SAFETY_RATIO = 0.07;
@@ -323,32 +323,7 @@ export class StructuredSkillSynthesizer implements SkillSynthesizer {
 				skillVersions.push({ entry, artifact });
 			}
 		}
-		const repositoryRoot = resolve(sourceInput.repository.rootPath);
-		const skillPath = resolve(repositoryRoot, ".agents", "skills", capsuleArtifact.contract.proposedName, "SKILL.md");
-		const repositoryInstructions = sourceInput.instructions
-			.filter((instruction) => {
-				const instructionPath = resolve(instruction.path);
-				const relativeToRepository = relative(repositoryRoot, instructionPath);
-				if (
-					relativeToRepository === ".." ||
-					relativeToRepository.startsWith(`..${sep}`) ||
-					isAbsolute(relativeToRepository)
-				) {
-					return true;
-				}
-				const relativeToInstruction = relative(dirname(instructionPath), skillPath);
-				return (
-					relativeToInstruction !== ".." &&
-					!relativeToInstruction.startsWith(`..${sep}`) &&
-					!isAbsolute(relativeToInstruction)
-				);
-			})
-			.sort(
-				(left, right) =>
-					left.precedence - right.precedence ||
-					left.path.localeCompare(right.path) ||
-					left.contentDigest.localeCompare(right.contentDigest),
-			);
+		const repositoryInstructions = applicableSkillInstructions(sourceInput, capsuleArtifact.contract.proposedName);
 		const schema = outputSchema();
 		const requestInput = modelInput(capsuleArtifact, skillVersions, repositoryInstructions);
 		const limits = input.model.getModelLimits(sourceInput.modelConfiguration);

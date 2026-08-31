@@ -274,27 +274,6 @@ class MemoryRegistryStore implements SkillCandidateRegistryStore {
 	}
 }
 
-function workCheckpoint(
-	registrySequence: number,
-	stage: "synthesizing" | "evaluating" | "completed",
-	groupIds: readonly string[],
-	attempt = 3,
-): SkillCandidateRegistryEvent {
-	const content = {
-		schemaVersion: 1 as const,
-		eventId: `work-checkpoint-${registrySequence}`,
-		registrySequence,
-		type: "skill-candidate-work-checkpointed" as const,
-		workId: "work-job-1",
-		sourceEvolutionJobId: "job-1",
-		stage,
-		idempotencyKey: `work-checkpoint-${stage}`,
-		attempt,
-		groupIds,
-	};
-	return { metadata: metadata(content.eventId, [content.sourceEvolutionJobId, ...groupIds], content), ...content };
-}
-
 class CompletionAcknowledgementLostStore extends MemoryRegistryStore {
 	interrupted = false;
 
@@ -783,7 +762,7 @@ describe("skill candidate registry worker", () => {
 		]);
 	});
 
-	it("skips an oversized synthesis request and continues processing later candidates", async () => {
+	it("isolates three synthesis inputs while parking an oversized group", async () => {
 		const data = fixture(true);
 		const candidateReference = data.job.checkpoints[0]?.outputArtifacts[0];
 		if (candidateReference === undefined) throw new Error("Expected candidate reference");
@@ -803,6 +782,13 @@ describe("skill candidate registry worker", () => {
 				validationIdempotencyKey: "skill-validation-succeeding",
 				evaluationIdempotencyKey: "skill-evaluation-succeeding",
 			},
+			{
+				...group,
+				groupId: "group-third",
+				synthesisIdempotencyKey: "skill-synthesis-third",
+				validationIdempotencyKey: "skill-validation-third",
+				evaluationIdempotencyKey: "skill-evaluation-third",
+			},
 		);
 		data.synthesisFailures.set(
 			"group-failing",
@@ -818,16 +804,25 @@ describe("skill candidate registry worker", () => {
 		expect(data.synthesisRequests.map((request) => request.group.groupId)).toEqual([
 			"group-failing",
 			"group-succeeding",
+			"group-third",
 		]);
-		expect(data.validationRequests.map((request) => request.group.groupId)).toEqual(["group-succeeding"]);
-		expect(data.evaluationRequests.map((request) => request.group.groupId)).toEqual(["group-succeeding"]);
+		expect(data.validationRequests.map((request) => request.group.groupId)).toEqual([
+			"group-succeeding",
+			"group-third",
+		]);
+		expect(data.evaluationRequests.map((request) => request.group.groupId)).toEqual([
+			"group-succeeding",
+			"group-third",
+		]);
 		expect(data.registry.groups.find((candidateGroup) => candidateGroup.groupId === "group-failing")).toMatchObject({
 			state: "evidence-qualified",
 			dispositionHistory: [],
 		});
-		expect(data.registry.groups.find((candidateGroup) => candidateGroup.groupId === "group-succeeding")?.state).toBe(
-			"accepted",
-		);
+		for (const groupId of ["group-succeeding", "group-third"]) {
+			expect(data.registry.groups.find((candidateGroup) => candidateGroup.groupId === groupId)?.state).toBe(
+				"accepted",
+			);
+		}
 		expect(data.store.events.find((event) => event.type === "skill-candidate-work-failed")).toMatchObject({
 			message: "Skill synthesis deferred for oversized candidate groups: group-failing",
 			stage: "synthesizing",
@@ -859,6 +854,7 @@ describe("skill candidate registry worker", () => {
 		expect(data.synthesisRequests.map((request) => request.group.groupId)).toEqual([
 			"group-failing",
 			"group-succeeding",
+			"group-third",
 		]);
 
 		data.setModelLimits({ contextWindow: 256_000, maxOutputTokens: 16_384 });
@@ -869,6 +865,7 @@ describe("skill candidate registry worker", () => {
 		expect(data.synthesisRequests.map((request) => request.group.groupId)).toEqual([
 			"group-failing",
 			"group-succeeding",
+			"group-third",
 			"group-failing",
 		]);
 		expect(data.registry.groups.find((candidateGroup) => candidateGroup.groupId === "group-failing")?.state).toBe(

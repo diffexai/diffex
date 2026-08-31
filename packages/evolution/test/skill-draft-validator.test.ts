@@ -106,6 +106,14 @@ function inputSnapshot(): EvolutionInputSnapshot {
 				content: "Run focused tests.",
 				contentDigest: computeEvolutionContentDigest("Run focused tests."),
 			},
+			{
+				path: "/repo/packages/evolution/AGENTS.md",
+				precedence: 1,
+				content: "Instructions for source files under packages/evolution only.",
+				contentDigest: computeEvolutionContentDigest(
+					"Instructions for source files under packages/evolution only.",
+				),
+			},
 		],
 		skillCatalog: [
 			{

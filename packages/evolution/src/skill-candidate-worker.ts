@@ -667,10 +667,7 @@ export class SkillCandidateRegistryWorker implements SkillCandidateWorkProcessor
 			await this.#appendCheckpoint(job, activeStage, attempt, processedGroupIds, claim());
 			const synthesisTargets: SkillCandidateGroup[] = [];
 			for (const group of result.groups) {
-				if (
-					group.state === "evidence-qualified" &&
-					!(await this.#isKnownOversizedRequest(group, registryEvents))
-				) {
+				if (group.state === "evidence-qualified" && !(await this.#isKnownOversizedRequest(group, registryEvents))) {
 					synthesisTargets.push(group);
 				}
 			}
