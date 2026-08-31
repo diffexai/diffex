@@ -1,5 +1,6 @@
-import { type Component, getGlyphs, Text, truncateToWidth, visibleWidth } from "@earendil-works/diffex-tui";
+import { type Component, getGlyphs, truncateToWidth, visibleWidth } from "@earendil-works/diffex-tui";
 import { theme } from "../theme/theme.ts";
+import { DiffexPathLabel, DiffexPathRail } from "./diffex-path.ts";
 import type { ToolExecutionComponent } from "./tool-execution.ts";
 
 interface RenderedTool {
@@ -9,10 +10,12 @@ interface RenderedTool {
 export class ToolGroupComponent implements Component {
 	private readonly tools = new Map<string, ToolExecutionComponent>();
 	private outputPad: number;
+	private readonly continuesPath: boolean;
 	private settled = false;
 
-	constructor(outputPad = 1) {
+	constructor(outputPad = 1, continuesPath = false) {
 		this.outputPad = outputPad;
+		this.continuesPath = continuesPath;
 	}
 
 	addTool(toolCallId: string, component: ToolExecutionComponent): ToolExecutionComponent {
@@ -67,8 +70,10 @@ export class ToolGroupComponent implements Component {
 	render(width: number): string[] {
 		const safeWidth = Math.max(1, width);
 		const outputPad = Math.min(Math.max(0, this.outputPad), Math.max(0, safeWidth - 1));
-		const treeWidth = safeWidth - outputPad > 1 ? 1 : 0;
-		const toolWidth = Math.max(1, safeWidth - outputPad - treeWidth);
+		const outerRailWidth = safeWidth - outputPad > 1 ? 1 : 0;
+		const railGapWidth = safeWidth - outputPad - outerRailWidth > 1 ? 1 : 0;
+		const treeWidth = safeWidth - outputPad - outerRailWidth - railGapWidth > 1 ? 1 : 0;
+		const toolWidth = Math.max(1, safeWidth - outputPad - outerRailWidth - railGapWidth - treeWidth);
 		const renderedTools: RenderedTool[] = [];
 
 		for (const component of this.tools.values()) {
@@ -83,11 +88,18 @@ export class ToolGroupComponent implements Component {
 		}
 
 		const label = this.settled ? "Explored" : "Exploring";
-		const result = new Text(theme.fg("muted", theme.bold(label)), outputPad, 0)
-			.render(safeWidth)
-			.map((line) => (visibleWidth(line) > safeWidth ? truncateToWidth(line, safeWidth, "") : line));
+		const result = this.continuesPath ? new DiffexPathRail(outputPad).render(safeWidth) : [];
+		result.push(
+			...new DiffexPathLabel(label, {
+				marker: this.continuesPath ? "branch" : "start",
+				padding: outputPad,
+				labelColor: (text) => theme.fg("muted", theme.bold(text)),
+			}).render(safeWidth),
+		);
 		const glyphs = getGlyphs();
 		const leftPad = " ".repeat(outputPad);
+		const outerRail = outerRailWidth > 0 ? theme.fg("borderMuted", glyphs.rail) : "";
+		const railGap = " ".repeat(railGapWidth);
 
 		for (let toolIndex = 0; toolIndex < renderedTools.length; toolIndex++) {
 			const { lines } = renderedTools[toolIndex]!;
@@ -110,7 +122,7 @@ export class ToolGroupComponent implements Component {
 							? glyphs.end
 							: glyphs.branch;
 				}
-				const decoratedLine = leftPad + theme.fg("muted", connector) + line;
+				const decoratedLine = leftPad + outerRail + railGap + theme.fg("muted", connector) + line;
 				result.push(
 					visibleWidth(decoratedLine) > safeWidth ? truncateToWidth(decoratedLine, safeWidth, "") : decoratedLine,
 				);

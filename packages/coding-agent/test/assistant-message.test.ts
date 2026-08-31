@@ -89,6 +89,22 @@ describe("AssistantMessageComponent", () => {
 		);
 
 		expect(component.render(60)).toEqual([]);
+		expect(component.continuesPathToTools()).toBe(false);
+	});
+
+	test("leaves reasoning open for a following tool group", () => {
+		initTheme("dark");
+		const component = new AssistantMessageComponent(
+			createAssistantMessage([
+				{ type: "thinking", thinking: "inspect the repository" },
+				{ type: "toolCall", id: "tool-1", name: "read", arguments: { path: "README.md" } },
+			]),
+		);
+		const lines = component.render(60).map((line) => stripAnsi(line).trimEnd());
+
+		expect(lines).toEqual([` ${getGlyphs().start} Reasoning`, ` ${getGlyphs().rail}`, "   inspect the repository"]);
+		expect(component.continuesPathToTools()).toBe(true);
+		expect(lines.join("\n")).not.toContain("Diffex");
 	});
 
 	test("renders length stops with neutral truncation wording", () => {
@@ -124,7 +140,7 @@ describe("AssistantMessageComponent", () => {
 		expect(rendered).toContain("answer");
 	});
 
-	test("restores Diffex hierarchy with deliberate reasoning rhythm", () => {
+	test("drops reasoning into the branded Diffex answer endpoint", () => {
 		initTheme("dark");
 		const component = new AssistantMessageComponent(
 			createAssistantMessage([
@@ -133,16 +149,27 @@ describe("AssistantMessageComponent", () => {
 			]),
 		);
 
-		for (const width of [60, 80, 120]) {
+		const compact = component.render(60).map((line) => stripAnsi(line).trimEnd());
+		expect(compact).toEqual([
+			` ${getGlyphs().start} Reasoning`,
+			` ${getGlyphs().rail}`,
+			"   brief reasoning",
+			` ${getGlyphs().rail}`,
+			` ${getGlyphs().end}${getGlyphs().separator} Diffex`,
+			"",
+			"   final answer",
+		]);
+
+		for (const width of [80, 120]) {
 			const lines = component.render(width).map((line) => stripAnsi(line).trimEnd());
-			expect(lines).toEqual([
-				` ${getGlyphs().end} Diffex`,
-				` ${getGlyphs().branch} Reasoning`,
-				"",
-				" brief reasoning",
-				"",
-				" final answer",
+			expect(lines.slice(0, 4)).toEqual([
+				` ${getGlyphs().start} Reasoning`,
+				` ${getGlyphs().rail}`,
+				"   brief reasoning",
+				` ${getGlyphs().rail}`,
 			]);
+			expect(lines[4]?.startsWith(` ${getGlyphs().end}${getGlyphs().separator} Diffex `)).toBe(true);
+			expect(lines.slice(5)).toEqual(["", "   final answer"]);
 		}
 	});
 
@@ -159,17 +186,17 @@ describe("AssistantMessageComponent", () => {
 			createAssistantMessage([], { stopReason: "error", errorMessage: "provider unavailable" }),
 		);
 
-		expect(hidden.render(80).map((line) => stripAnsi(line).trimEnd())).toEqual([
-			` ${getGlyphs().end} Diffex`,
-			` ${getGlyphs().branch} Reasoning ${getGlyphs().bullet} hidden`,
-			"",
-			" visible",
+		const hiddenLines = hidden.render(80).map((line) => stripAnsi(line).trimEnd());
+		expect(hiddenLines.slice(0, 2)).toEqual([
+			` ${getGlyphs().start} Reasoning ${getGlyphs().bullet} hidden`,
+			` ${getGlyphs().rail}`,
 		]);
-		expect(failed.render(80).map((line) => stripAnsi(line).trimEnd())).toEqual([
-			` ${getGlyphs().end} Diffex`,
-			"",
-			" Error: provider unavailable",
-		]);
+		expect(hiddenLines[2]?.startsWith(` ${getGlyphs().end}${getGlyphs().separator} Diffex `)).toBe(true);
+		expect(hiddenLines.slice(3)).toEqual(["", "   visible"]);
+
+		const failedLines = failed.render(80).map((line) => stripAnsi(line).trimEnd());
+		expect(failedLines[0]?.startsWith(` ${getGlyphs().end}${getGlyphs().separator} Diffex `)).toBe(true);
+		expect(failedLines.slice(1)).toEqual(["", "   Error: provider unavailable"]);
 	});
 
 	test("uses configured output padding for text and thinking", () => {
@@ -187,13 +214,13 @@ describe("AssistantMessageComponent", () => {
 		);
 		const lines = component.render(80).map((line) => stripAnsi(line));
 
-		expect(lines.some((line) => line.includes(" hello"))).toBe(true);
-		expect(lines.some((line) => line.includes(" reasoning"))).toBe(true);
+		expect(lines.some((line) => line.includes("   hello"))).toBe(true);
+		expect(lines.some((line) => line.includes("   reasoning"))).toBe(true);
 
 		component.setOutputPad(0);
 		const updatedLines = component.render(80).map((line) => stripAnsi(line));
-		expect(updatedLines.some((line) => line.startsWith("hello"))).toBe(true);
-		expect(updatedLines.some((line) => line.startsWith("reasoning"))).toBe(true);
+		expect(updatedLines.some((line) => line.startsWith("  hello"))).toBe(true);
+		expect(updatedLines.some((line) => line.startsWith("  reasoning"))).toBe(true);
 	});
 
 	test("chains Markdown transformers in registration order", () => {
@@ -203,7 +230,7 @@ describe("AssistantMessageComponent", () => {
 		const component = new AssistantMessageComponent(message, false, undefined, "Thinking...", 1, [
 			(markdown, context) => {
 				calls.push("formula");
-				expect(context).toEqual({ messageType: "assistant", isStreaming: false, availableWidth: 78 });
+				expect(context).toEqual({ messageType: "assistant", isStreaming: false, availableWidth: 74 });
 				return markdown.replace("$x^2$", "x²");
 			},
 			(markdown) => {
@@ -272,10 +299,10 @@ describe("AssistantMessageComponent", () => {
 			],
 		);
 
-		expect(stripAnsi(component.render(80).join("\n"))).toContain("answer (78)");
+		expect(stripAnsi(component.render(80).join("\n"))).toContain("answer (74)");
 		component.render(80);
-		expect(stripAnsi(component.render(60).join("\n"))).toContain("answer (58)");
-		expect(availableWidths).toEqual([78, 58]);
+		expect(stripAnsi(component.render(60).join("\n"))).toContain("answer (54)");
+		expect(availableWidths).toEqual([74, 54]);
 	});
 
 	test("continues the Markdown transformer chain when a transformer throws", () => {

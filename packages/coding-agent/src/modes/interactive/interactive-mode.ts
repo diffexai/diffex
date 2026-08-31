@@ -2088,10 +2088,12 @@ export class InteractiveMode {
 		return component;
 	}
 
-	private getOrCreateActiveToolGroup(): ToolGroupComponent {
+	private getOrCreateActiveToolGroup(continuesPath = false): ToolGroupComponent {
 		if (!this.activeToolGroup) {
-			this.activeToolGroup = new ToolGroupComponent(this.outputPad);
-			this.addChatSpacer();
+			this.activeToolGroup = new ToolGroupComponent(this.outputPad, continuesPath);
+			if (!continuesPath) {
+				this.addChatSpacer();
+			}
 			this.chatContainer.addChild(this.activeToolGroup);
 		}
 		return this.activeToolGroup;
@@ -2105,7 +2107,10 @@ export class InteractiveMode {
 		}
 
 		const component = this.createToolExecutionComponent(toolName, toolCallId, args);
-		this.getOrCreateActiveToolGroup().addTool(toolCallId, component);
+		this.getOrCreateActiveToolGroup(this.streamingComponent?.continuesPathToTools() ?? false).addTool(
+			toolCallId,
+			component,
+		);
 		this.pendingTools.set(toolCallId, component);
 		return component;
 	}
@@ -3806,7 +3811,12 @@ export class InteractiveMode {
 				for (const content of message.content) {
 					if (content.type === "toolCall") {
 						const component = this.createToolExecutionComponent(content.name, content.id, content.arguments);
-						this.getOrCreateActiveToolGroup().addTool(content.id, component);
+						const continuesPath = message.content.some(
+							(part) =>
+								(part.type === "text" && part.text.trim().length > 0) ||
+								(part.type === "thinking" && part.thinking.trim().length > 0),
+						);
+						this.getOrCreateActiveToolGroup(continuesPath).addTool(content.id, component);
 
 						if (message.stopReason === "aborted" || message.stopReason === "error") {
 							let errorMessage: string;
