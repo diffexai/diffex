@@ -180,11 +180,11 @@ import { editInExternalEditor } from "./external-editor.ts";
 import { getModelSearchText } from "./model-search.ts";
 import {
 	classifyViewport,
+	getResponsiveSectionMaxLines,
 	type ResponsiveEditorPresentation,
 	ResponsiveEditorRegion,
 	ResponsiveQueuedMessagesComponent,
 	ResponsiveSection,
-	getResponsiveSectionMaxLines,
 	ResponsiveSpacer,
 	ResponsiveViewportRoot,
 	TooSmallTerminalComponent,
@@ -1007,8 +1007,7 @@ export class InteractiveMode {
 			hint: (text) => theme.fg("dim", text),
 		});
 		const pendingMessagesRegion = new ResponsiveSection(this.pendingMessagesContainer, this.viewportSource, {
-			maxLines: (profile) =>
-				getResponsiveSectionMaxLines(this.ui.mode, profile, profile.height < 16 ? 1 : 2),
+			maxLines: (profile) => getResponsiveSectionMaxLines(this.ui.mode, profile, profile.height < 16 ? 1 : 2),
 			retention: "edges",
 			trimLeadingBlankWhenCompact: true,
 		});
@@ -1018,8 +1017,7 @@ export class InteractiveMode {
 			trimLeadingBlankWhenCompact: true,
 		});
 		const widgetAboveRegion = new ResponsiveSection(this.widgetContainerAbove, this.viewportSource, {
-			maxLines: (profile) =>
-				getResponsiveSectionMaxLines(this.ui.mode, profile, profile.height < 16 ? 1 : 2),
+			maxLines: (profile) => getResponsiveSectionMaxLines(this.ui.mode, profile, profile.height < 16 ? 1 : 2),
 			retention: "start",
 			trimLeadingBlankWhenCompact: true,
 		});
@@ -1027,8 +1025,7 @@ export class InteractiveMode {
 			this.applyResponsiveEditorPresentation(presentation);
 		});
 		const widgetBelowRegion = new ResponsiveSection(this.widgetContainerBelow, this.viewportSource, {
-			maxLines: (profile) =>
-				getResponsiveSectionMaxLines(this.ui.mode, profile, profile.height < 16 ? 1 : 2),
+			maxLines: (profile) => getResponsiveSectionMaxLines(this.ui.mode, profile, profile.height < 16 ? 1 : 2),
 			retention: "start",
 			trimLeadingBlankWhenCompact: true,
 		});

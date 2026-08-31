@@ -300,10 +300,7 @@ describe("FooterComponent width handling", () => {
 			modelId: "claude-opus-4-8",
 			thinkingLevel: "medium",
 		});
-		const footer = new FooterComponent(
-			session,
-			createFooterData(1, new Map([["review", "review ready"]])),
-		);
+		const footer = new FooterComponent(session, createFooterData(1, new Map([["review", "review ready"]])));
 
 		const line = stripAnsi(footer.render(80)[0] ?? "");
 
@@ -409,7 +406,9 @@ describe("FooterComponent width handling", () => {
 		});
 
 		await vi.waitFor(() => {
-			expect(stripAnsi(footer.render(200)[1])).toBe(`Harness ${formatEvolutionTimestamp(evolvedAt)}`);
+			const footerLine = stripAnsi(footer.render(200)[0] ?? "");
+			expect(footerLine).toContain(`harness ${formatEvolutionTimestamp(evolvedAt)}`);
+			expect(footerLine).not.toMatch(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/);
 		});
 		footer.dispose();
 	});

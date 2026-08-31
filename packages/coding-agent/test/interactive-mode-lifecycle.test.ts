@@ -52,9 +52,7 @@ describe("InteractiveMode terminal lifecycle", () => {
 			isShuttingDown: false,
 			unregisterSignalHandlers,
 			ui,
-			stopForTerminalHandoff(
-				tui: Pick<StartableTui, "mode" | "stop"> = ui,
-			): void {
+			stopForTerminalHandoff(tui: Pick<StartableTui, "mode" | "stop"> = ui): void {
 				if (tui.mode === "fullscreen") {
 					tui.stop({ preserveScreen: true });
 					return;
