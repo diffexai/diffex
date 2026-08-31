@@ -1,6 +1,12 @@
-import { Container, type SelectItem, SelectList, type SelectListLayoutOptions } from "@earendil-works/diffex-tui";
-import { getAvailableThemes, getSelectListTheme } from "../theme/theme.ts";
-import { DynamicBorder } from "./dynamic-border.ts";
+import {
+	Container,
+	type SelectItem,
+	SelectList,
+	type SelectListLayoutOptions,
+	Spacer,
+	Text,
+} from "@earendil-works/diffex-tui";
+import { getAvailableThemes, getSelectListTheme, theme } from "../theme/theme.ts";
 
 const THEME_SELECT_LIST_LAYOUT: SelectListLayoutOptions = {
 	minPrimaryColumnWidth: 12,
@@ -31,8 +37,8 @@ export class ThemeSelectorComponent extends Container {
 			description: name === currentTheme ? "(current)" : undefined,
 		}));
 
-		// Add top border
-		this.addChild(new DynamicBorder());
+		this.addChild(new Text(theme.fg("accent", theme.bold("Theme")), 1, 0));
+		this.addChild(new Spacer(1));
 
 		// Create selector
 		this.selectList = new SelectList(themeItems, 10, getSelectListTheme(), THEME_SELECT_LIST_LAYOUT);
@@ -56,9 +62,6 @@ export class ThemeSelectorComponent extends Container {
 		};
 
 		this.addChild(this.selectList);
-
-		// Add bottom border
-		this.addChild(new DynamicBorder());
 	}
 
 	getSelectList(): SelectList {

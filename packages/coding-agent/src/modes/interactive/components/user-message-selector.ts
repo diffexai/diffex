@@ -7,9 +7,9 @@ import {
 	Text,
 	truncateToWidth,
 	UNSELECTED_LIST_PREFIX,
+	visibleWidth,
 } from "@earendil-works/diffex-tui";
 import { theme } from "../theme/theme.ts";
-import { DynamicBorder } from "./dynamic-border.ts";
 
 interface UserMessageItem {
 	id: string; // Entry ID in the session
@@ -54,7 +54,8 @@ class UserMessageList implements Component {
 		);
 		const endIndex = Math.min(startIndex + this.maxVisible, this.messages.length);
 
-		// Render visible messages (2 lines per message + blank line)
+		// Render one compact row per message. The selected row carries its
+		// position so history stays readable without tripling the list height.
 		for (let i = startIndex; i < endIndex; i++) {
 			const message = this.messages[i];
 			const isSelected = i === this.selectedIndex;
@@ -64,19 +65,16 @@ class UserMessageList implements Component {
 
 			// First line: cursor + message
 			const cursor = isSelected ? theme.fg("selectionAccent", SELECTED_LIST_PREFIX) : UNSELECTED_LIST_PREFIX;
-			const maxMsgWidth = width - 2; // Account for cursor (2 chars)
+			const metadata = isSelected ? `${i + 1}/${this.messages.length}` : "";
+			const metadataWidth = metadata ? visibleWidth(metadata) + 2 : 0;
+			const maxMsgWidth = Math.max(1, width - 2 - metadataWidth);
 			const truncatedMsg = truncateToWidth(normalizedMessage, maxMsgWidth);
-			const messageLine =
-				cursor + (isSelected ? theme.bold(theme.fg("selectionAccent", truncatedMsg)) : truncatedMsg);
-
-			lines.push(messageLine);
-
-			// Second line: metadata (position in history)
-			const position = i + 1;
-			const metadata = `  Message ${position} of ${this.messages.length}`;
-			const metadataLine = theme.fg("muted", metadata);
-			lines.push(metadataLine);
-			lines.push(""); // Blank line between messages
+			const styledMessage = isSelected ? theme.bold(theme.fg("selectionAccent", truncatedMsg)) : truncatedMsg;
+			const spacing = metadata
+				? " ".repeat(Math.max(2, width - 2 - visibleWidth(truncatedMsg) - visibleWidth(metadata)))
+				: "";
+			const suffix = metadata ? theme.fg("muted", metadata) : "";
+			lines.push(cursor + styledMessage + spacing + suffix);
 		}
 
 		// Add scroll indicator if needed
@@ -128,8 +126,6 @@ export class UserMessageSelectorComponent extends Container {
 	) {
 		super();
 
-		// Add header
-		this.addChild(new Spacer(1));
 		this.addChild(new Text(theme.bold("Fork from Message"), 1, 0));
 		this.addChild(
 			new Text(
@@ -139,8 +135,6 @@ export class UserMessageSelectorComponent extends Container {
 			),
 		);
 		this.addChild(new Spacer(1));
-		this.addChild(new DynamicBorder());
-		this.addChild(new Spacer(1));
 
 		// Create message list
 		this.messageList = new UserMessageList(messages, initialSelectedId);
@@ -148,10 +142,6 @@ export class UserMessageSelectorComponent extends Container {
 		this.messageList.onCancel = onCancel;
 
 		this.addChild(this.messageList);
-
-		// Add bottom border
-		this.addChild(new Spacer(1));
-		this.addChild(new DynamicBorder());
 
 		// Auto-cancel if no messages
 		if (messages.length === 0) {

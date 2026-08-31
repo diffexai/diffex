@@ -11,7 +11,6 @@ import {
 } from "@earendil-works/diffex-tui";
 import type { EvolutionHarnessVersionInfo } from "#evolution";
 import { theme } from "../theme/theme.ts";
-import { DynamicBorder } from "./dynamic-border.ts";
 import { formatHarnessVersionLabel, sanitizeDisplayText } from "./harness-version-display.ts";
 import { keyHint, rawKeyHint } from "./keybinding-hints.ts";
 
@@ -176,8 +175,6 @@ export class HarnessVersionSelectorComponent extends Container implements Focusa
 		this.onSelectCallback = onSelect;
 		this.onCancelCallback = onCancel;
 
-		this.addChild(new DynamicBorder());
-		this.addChild(new Spacer(1));
 		this.addChild(new TruncatedText(theme.fg("accent", theme.bold("Select harness version:")), 1, 0));
 		this.addChild(new Spacer(1));
 
@@ -197,8 +194,6 @@ export class HarnessVersionSelectorComponent extends Container implements Focusa
 				0,
 			),
 		);
-		this.addChild(new Spacer(1));
-		this.addChild(new DynamicBorder());
 
 		this.updateList();
 	}

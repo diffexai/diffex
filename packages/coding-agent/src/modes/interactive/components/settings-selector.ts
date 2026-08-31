@@ -27,13 +27,14 @@ import {
 	type TerminalTheme,
 	theme,
 } from "../theme/theme.ts";
-import { DynamicBorder } from "./dynamic-border.ts";
-import { keyDisplayText } from "./keybinding-hints.ts";
+import { keyDisplayText, keyHint } from "./keybinding-hints.ts";
 
 const SETTINGS_SUBMENU_SELECT_LIST_LAYOUT: SelectListLayoutOptions = {
 	minPrimaryColumnWidth: 12,
 	maxPrimaryColumnWidth: 32,
 };
+const SHORT_SETTINGS_MAX_ROWS = 15;
+const SHORT_SETTINGS_VISIBLE_ITEMS = 3;
 
 const THINKING_DESCRIPTIONS: Record<ThinkingLevel, string> = {
 	off: "No reasoning",
@@ -125,6 +126,10 @@ export interface SettingsCallbacks {
 	onCancel: () => void;
 }
 
+export interface SettingsSelectorOptions {
+	getViewportRows?: () => number;
+}
+
 /**
  * A submenu component for selecting from a list of options.
  */
@@ -136,6 +141,9 @@ class WarningSettingsSubmenu extends Container {
 		super();
 
 		this.state = { ...warnings };
+		this.addChild(new Text(theme.fg("accent", theme.bold("Warnings")), 1, 0));
+		this.addChild(new Text(theme.fg("muted", "Choose which provider warnings Diffex should show."), 1, 0));
+		this.addChild(new Spacer(1));
 
 		const items: SettingItem[] = [
 			{
@@ -184,16 +192,12 @@ class SelectSubmenu extends Container {
 	) {
 		super();
 
-		// Title
-		this.addChild(new Text(theme.bold(theme.fg("accent", title)), 0, 0));
+		this.addChild(new Text(theme.bold(theme.fg("accent", title)), 1, 0));
 
-		// Description
 		if (description) {
-			this.addChild(new Spacer(1));
-			this.addChild(new Text(theme.fg("muted", description), 0, 0));
+			this.addChild(new Text(theme.fg("muted", description), 1, 0));
 		}
 
-		// Spacer
 		this.addChild(new Spacer(1));
 
 		// Select list
@@ -224,9 +228,9 @@ class SelectSubmenu extends Container {
 
 		this.addChild(this.selectList);
 
-		// Hint
-		this.addChild(new Spacer(1));
-		this.addChild(new Text(theme.fg("dim", "  Enter to select · Esc to go back"), 0, 0));
+		this.addChild(
+			new Text(`${keyHint("tui.select.confirm", "select")}  ${keyHint("tui.select.cancel", "back")}`, 1, 0),
+		);
 	}
 
 	handleInput(data: string): void {
@@ -352,10 +356,9 @@ class ThemeSubmenu extends Container {
 	private showAutomaticMenu(): void {
 		this.mode = "automatic";
 		const content = new Container();
-		content.addChild(new Text(theme.bold(theme.fg("accent", "Automatic Theme")), 0, 0));
-		content.addChild(new Spacer(1));
-		content.addChild(new Text(theme.fg("muted", "Choose themes for terminal light and dark appearance."), 0, 0));
-		content.addChild(new Text(theme.fg("muted", "Light/dark detection requires terminal support."), 0, 0));
+		content.addChild(new Text(theme.bold(theme.fg("accent", "Automatic Theme")), 1, 0));
+		content.addChild(new Text(theme.fg("muted", "Choose themes for terminal light and dark appearance."), 1, 0));
+		content.addChild(new Text(theme.fg("muted", "Light/dark detection requires terminal support."), 1, 0));
 		content.addChild(new Spacer(1));
 
 		const items: SettingItem[] = [
@@ -482,9 +485,12 @@ class ThemeSubmenu extends Container {
  */
 export class SettingsSelectorComponent extends Container {
 	private settingsList: SettingsList;
+	private readonly titleText: Text;
+	private readonly getViewportRows: () => number;
 
-	constructor(config: SettingsConfig, callbacks: SettingsCallbacks) {
+	constructor(config: SettingsConfig, callbacks: SettingsCallbacks, options: SettingsSelectorOptions = {}) {
 		super();
+		this.getViewportRows = options.getViewportRows ?? (() => Number.POSITIVE_INFINITY);
 
 		const supportsImages = getCapabilities().images;
 		const followUpKey = keyDisplayText("app.message.followUp");
@@ -762,8 +768,10 @@ export class SettingsSelectorComponent extends Container {
 			values: ["true", "false"],
 		});
 
-		// Add borders
-		this.addChild(new DynamicBorder());
+		this.titleText = new Text(theme.fg("accent", theme.bold("Settings")), 1, 0);
+		this.addChild(this.titleText);
+		this.addChild(new Text(theme.fg("muted", "Search and adjust how Diffex looks and behaves."), 1, 0));
+		this.addChild(new Spacer(1));
 
 		this.settingsList = new SettingsList(
 			items,
@@ -869,7 +877,16 @@ export class SettingsSelectorComponent extends Container {
 		);
 
 		this.addChild(this.settingsList);
-		this.addChild(new DynamicBorder());
+	}
+
+	override render(width: number): string[] {
+		const short = this.getViewportRows() <= SHORT_SETTINGS_MAX_ROWS;
+		this.settingsList.setMaxVisible(short ? SHORT_SETTINGS_VISIBLE_ITEMS : 10);
+		this.settingsList.setCompactMode(short ? true : undefined);
+		if (short) {
+			return [...this.titleText.render(width), ...this.settingsList.render(width)];
+		}
+		return super.render(width);
 	}
 
 	getSettingsList(): SettingsList {

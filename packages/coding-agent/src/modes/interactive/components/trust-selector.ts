@@ -12,7 +12,6 @@ import {
 	type ProjectTrustStoreEntry,
 } from "../../../core/trust-manager.ts";
 import { theme } from "../theme/theme.ts";
-import { DynamicBorder } from "./dynamic-border.ts";
 import { keyHint, rawKeyHint } from "./keybinding-hints.ts";
 
 export type TrustSelection = Pick<ProjectTrustOption, "trusted" | "updates">;
@@ -23,6 +22,7 @@ export interface TrustSelectorOptions {
 	projectTrusted: boolean;
 	onSelect: (selection: TrustSelection) => void;
 	onCancel: () => void;
+	getViewportRows?: () => number;
 }
 
 function formatDecision(trustPath: string | undefined, decision: ProjectTrustStoreEntry | null): string {
@@ -43,6 +43,12 @@ export class TrustSelectorComponent extends Container {
 	private readonly savedDecision: ProjectTrustStoreEntry | null;
 	private readonly onSelectCallback: (selection: TrustSelection) => void;
 	private readonly onCancelCallback: () => void;
+	private readonly getViewportRows: () => number;
+	private readonly titleText: Text;
+	private readonly pathText: Text;
+	private readonly savedDecisionText: Text;
+	private readonly currentSessionText: Text;
+	private readonly hintText: Text;
 
 	constructor(options: TrustSelectorOptions) {
 		super();
@@ -55,45 +61,56 @@ export class TrustSelectorComponent extends Container {
 		);
 		this.onSelectCallback = options.onSelect;
 		this.onCancelCallback = options.onCancel;
+		this.getViewportRows = options.getViewportRows ?? (() => Number.POSITIVE_INFINITY);
 
-		this.addChild(new DynamicBorder());
+		this.titleText = new Text(theme.fg("accent", theme.bold("Project trust")), 1, 0);
+		this.pathText = new Text(theme.fg("muted", options.cwd), 1, 0);
+		this.addChild(this.titleText);
+		this.addChild(this.pathText);
 		this.addChild(new Spacer(1));
-		this.addChild(new Text(theme.fg("accent", theme.bold("Project trust")), 1, 0));
-		this.addChild(new Text(theme.fg("muted", options.cwd), 1, 0));
-		this.addChild(new Spacer(1));
-		this.addChild(
-			new Text(
-				theme.fg(
-					"muted",
-					`Saved decision: ${formatDecision(this.trustOptions[0]?.savedPath, options.savedDecision)}`,
-				),
-				1,
-				0,
-			),
+		this.savedDecisionText = new Text(
+			theme.fg("muted", `Saved decision: ${formatDecision(this.trustOptions[0]?.savedPath, options.savedDecision)}`),
+			1,
+			0,
 		);
-		this.addChild(
-			new Text(theme.fg("muted", `Current session: ${options.projectTrusted ? "trusted" : "untrusted"}`), 1, 0),
+		this.currentSessionText = new Text(
+			theme.fg("muted", `Current session: ${options.projectTrusted ? "trusted" : "untrusted"}`),
+			1,
+			0,
 		);
+		this.addChild(this.savedDecisionText);
+		this.addChild(this.currentSessionText);
 		this.addChild(new Spacer(1));
 
 		this.listContainer = new Container();
 		this.addChild(this.listContainer);
 		this.addChild(new Spacer(1));
-		this.addChild(
-			new Text(
-				rawKeyHint("↑↓", "navigate") +
-					"  " +
-					keyHint("tui.select.confirm", "save") +
-					"  " +
-					keyHint("tui.select.cancel", "cancel"),
-				1,
-				0,
-			),
+		this.hintText = new Text(
+			rawKeyHint("↑↓", "navigate") +
+				"  " +
+				keyHint("tui.select.confirm", "save") +
+				"  " +
+				keyHint("tui.select.cancel", "cancel"),
+			1,
+			0,
 		);
-		this.addChild(new Spacer(1));
-		this.addChild(new DynamicBorder());
+		this.addChild(this.hintText);
 
 		this.updateList();
+	}
+
+	override render(width: number): string[] {
+		if (this.getViewportRows() > 15) {
+			return super.render(width);
+		}
+		return [
+			...this.titleText.render(width),
+			...this.pathText.render(width),
+			...this.savedDecisionText.render(width),
+			...this.currentSessionText.render(width),
+			...this.listContainer.render(width),
+			...this.hintText.render(width),
+		];
 	}
 
 	private isSavedOption(option: ProjectTrustOption): boolean {

@@ -10,11 +10,11 @@ import {
 	Spacer,
 	Text,
 	type TUI,
+	truncateToWidth,
 	UNSELECTED_LIST_PREFIX,
 } from "@earendil-works/diffex-tui";
 import { theme } from "../theme/theme.ts";
 import { CountdownTimer } from "./countdown-timer.ts";
-import { DynamicBorder } from "./dynamic-border.ts";
 import { keyHint, rawKeyHint } from "./keybinding-hints.ts";
 
 export interface ExtensionSelectorOptions {
@@ -30,9 +30,12 @@ export class ExtensionSelectorComponent extends Container {
 	private onSelectCallback: (option: string) => void;
 	private onCancelCallback: () => void;
 	private titleText: Text;
+	private hintText: Text;
 	private baseTitle: string;
+	private displayTitle: string;
 	private countdown: CountdownTimer | undefined;
 	private onToggleToolsExpanded: (() => void) | undefined;
+	private tui: TUI | undefined;
 
 	constructor(
 		title: string,
@@ -48,9 +51,8 @@ export class ExtensionSelectorComponent extends Container {
 		this.onCancelCallback = onCancel;
 		this.onToggleToolsExpanded = opts?.onToggleToolsExpanded;
 		this.baseTitle = title;
-
-		this.addChild(new DynamicBorder());
-		this.addChild(new Spacer(1));
+		this.displayTitle = title;
+		this.tui = opts?.tui;
 
 		this.titleText = new Text(theme.fg("accent", theme.bold(title)), 1, 0);
 		this.addChild(this.titleText);
@@ -60,7 +62,10 @@ export class ExtensionSelectorComponent extends Container {
 			this.countdown = new CountdownTimer(
 				opts.timeout,
 				opts.tui,
-				(s) => this.titleText.setText(theme.fg("accent", theme.bold(`${this.baseTitle} (${s}s)`))),
+				(s) => {
+					const [firstLine = "", ...remainingLines] = this.baseTitle.split("\n");
+					this.setTitle([`${firstLine} (${s}s)`, ...remainingLines].join("\n"));
+				},
 				() => this.onCancelCallback(),
 			);
 		}
@@ -68,31 +73,78 @@ export class ExtensionSelectorComponent extends Container {
 		this.listContainer = new Container();
 		this.addChild(this.listContainer);
 		this.addChild(new Spacer(1));
-		this.addChild(
-			new Text(
-				rawKeyHint("↑↓", "navigate") +
-					"  " +
-					keyHint("tui.select.confirm", "select") +
-					"  " +
-					keyHint("tui.select.cancel", "cancel"),
-				1,
-				0,
-			),
+		this.hintText = new Text(
+			rawKeyHint("↑↓", "navigate") +
+				"  " +
+				keyHint("tui.select.confirm", "select") +
+				"  " +
+				keyHint("tui.select.cancel", "cancel"),
+			1,
+			0,
 		);
-		this.addChild(new Spacer(1));
-		this.addChild(new DynamicBorder());
+		this.addChild(this.hintText);
 
 		this.updateList();
+	}
+
+	override render(width: number): string[] {
+		const rows = this.tui?.terminal.rows;
+		if (rows === undefined || rows > 12) {
+			return super.render(width);
+		}
+
+		const renderHeight = Math.max(1, rows);
+		const sourceLines = this.displayTitle.split("\n");
+		const descriptionStart = sourceLines.findIndex((line) => line.trim().length === 0);
+		const titleCandidates = (descriptionStart === -1 ? sourceLines : sourceLines.slice(0, descriptionStart)).filter(
+			(line) => line.trim().length > 0,
+		);
+		const titleLimit = Math.max(1, Math.min(2, renderHeight - 1));
+		const titleLines = titleCandidates
+			.slice(0, titleLimit)
+			.map((line) => truncateToWidth(theme.fg("accent", theme.bold(` ${line}`)), width, ""));
+		const hintLine = this.hintText.render(width)[0];
+		const hintLines = hintLine === undefined || renderHeight === 1 ? [] : [hintLine];
+		let remainingRows = Math.max(0, renderHeight - titleLines.length - hintLines.length);
+		const spareRows = Math.max(0, remainingRows - this.options.length);
+		const leadingSpacer = spareRows > 0;
+		const trailingSpacer = spareRows > 1;
+		remainingRows -= Number(leadingSpacer) + Number(trailingSpacer);
+
+		const visibleCount = Math.min(this.options.length, remainingRows);
+		const startIndex = Math.max(
+			0,
+			Math.min(this.selectedIndex - Math.floor(visibleCount / 2), this.options.length - visibleCount),
+		);
+		const optionLines = Array.from({ length: visibleCount }, (_, offset) =>
+			truncateToWidth(` ${this.getOptionText(startIndex + offset)}`, width, ""),
+		);
+
+		return [
+			...titleLines,
+			...(leadingSpacer ? [""] : []),
+			...optionLines,
+			...(trailingSpacer ? [""] : []),
+			...hintLines,
+		];
+	}
+
+	private setTitle(title: string): void {
+		this.displayTitle = title;
+		this.titleText.setText(theme.fg("accent", theme.bold(title)));
+	}
+
+	private getOptionText(index: number): string {
+		const isSelected = index === this.selectedIndex;
+		return isSelected
+			? theme.fg("selectionAccent", SELECTED_LIST_PREFIX) + theme.fg("selectionAccent", this.options[index] ?? "")
+			: `${UNSELECTED_LIST_PREFIX}${theme.fg("text", this.options[index] ?? "")}`;
 	}
 
 	private updateList(): void {
 		this.listContainer.clear();
 		for (let i = 0; i < this.options.length; i++) {
-			const isSelected = i === this.selectedIndex;
-			const text = isSelected
-				? theme.fg("selectionAccent", SELECTED_LIST_PREFIX) + theme.fg("selectionAccent", this.options[i])
-				: `${UNSELECTED_LIST_PREFIX}${theme.fg("text", this.options[i])}`;
-			this.listContainer.addChild(new Text(text, 1, 0));
+			this.listContainer.addChild(new Text(this.getOptionText(i), 1, 0));
 		}
 	}
 

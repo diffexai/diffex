@@ -16,7 +16,6 @@ import {
 import type { KeybindingsManager } from "../../../core/keybindings.ts";
 import { editInExternalEditor } from "../external-editor.ts";
 import { getEditorTheme, theme } from "../theme/theme.ts";
-import { DynamicBorder } from "./dynamic-border.ts";
 import { keyHint } from "./keybinding-hints.ts";
 
 export class ExtensionEditorComponent extends Container implements Focusable {
@@ -58,16 +57,13 @@ export class ExtensionEditorComponent extends Container implements Focusable {
 		this.onSubmitCallback = onSubmit;
 		this.onCancelCallback = onCancel;
 
-		// Add top border
-		this.addChild(new DynamicBorder());
+		this.addChild(new Text(theme.fg("accent", theme.bold(title)), 1, 0));
 		this.addChild(new Spacer(1));
 
-		// Add title
-		this.addChild(new Text(theme.fg("accent", title), 1, 0));
-		this.addChild(new Spacer(1));
-
-		// Create editor
-		this.editor = new Editor(tui, getEditorTheme(), options);
+		this.editor = new Editor(tui, getEditorTheme(), {
+			...options,
+			frameStyle: options?.frameStyle ?? "top",
+		});
 		if (prefill) {
 			this.editor.setText(prefill);
 		}
@@ -88,11 +84,6 @@ export class ExtensionEditorComponent extends Container implements Focusable {
 			keyHint("tui.select.cancel", "cancel") +
 			`  ${keyHint("app.editor.external", "external editor")}`;
 		this.addChild(new Text(hint, 1, 0));
-
-		this.addChild(new Spacer(1));
-
-		// Add bottom border
-		this.addChild(new DynamicBorder());
 	}
 
 	handleInput(keyData: string): void {

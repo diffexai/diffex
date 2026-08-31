@@ -1,7 +1,13 @@
 import type { ThinkingLevel } from "@earendil-works/diffex-agent-core";
-import { Container, type SelectItem, SelectList, type SelectListLayoutOptions } from "@earendil-works/diffex-tui";
-import { getSelectListTheme } from "../theme/theme.ts";
-import { DynamicBorder } from "./dynamic-border.ts";
+import {
+	Container,
+	type SelectItem,
+	SelectList,
+	type SelectListLayoutOptions,
+	Spacer,
+	Text,
+} from "@earendil-works/diffex-tui";
+import { getSelectListTheme, theme } from "../theme/theme.ts";
 
 const THINKING_SELECT_LIST_LAYOUT: SelectListLayoutOptions = {
 	minPrimaryColumnWidth: 12,
@@ -19,7 +25,7 @@ const LEVEL_DESCRIPTIONS: Record<ThinkingLevel, string> = {
 };
 
 /**
- * Component that renders a thinking level selector with borders
+ * Component that renders a thinking level selector.
  */
 export class ThinkingSelectorComponent extends Container {
 	private selectList: SelectList;
@@ -38,8 +44,8 @@ export class ThinkingSelectorComponent extends Container {
 			description: LEVEL_DESCRIPTIONS[level],
 		}));
 
-		// Add top border
-		this.addChild(new DynamicBorder());
+		this.addChild(new Text(theme.fg("accent", theme.bold("Thinking level")), 1, 0));
+		this.addChild(new Spacer(1));
 
 		// Create selector
 		this.selectList = new SelectList(
@@ -64,9 +70,6 @@ export class ThinkingSelectorComponent extends Container {
 		};
 
 		this.addChild(this.selectList);
-
-		// Add bottom border
-		this.addChild(new DynamicBorder());
 	}
 
 	getSelectList(): SelectList {

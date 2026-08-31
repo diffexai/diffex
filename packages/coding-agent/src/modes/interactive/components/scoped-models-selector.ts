@@ -14,7 +14,6 @@ import {
 } from "@earendil-works/diffex-tui";
 import { getModelSearchText } from "../model-search.ts";
 import { theme } from "../theme/theme.ts";
-import { DynamicBorder } from "./dynamic-border.ts";
 import { keyText } from "./keybinding-hints.ts";
 
 // EnabledIds: null = all enabled (no filter), string[] = explicit ordered list
@@ -129,8 +128,6 @@ export class ScopedModelsSelectorComponent extends Container implements Focusabl
 		this.filteredItems = this.buildItems();
 
 		// Header
-		this.addChild(new DynamicBorder());
-		this.addChild(new Spacer(1));
 		this.addChild(new Text(theme.fg("accent", theme.bold("Model Configuration")), 0, 0));
 		this.addChild(
 			new Text(theme.fg("muted", `Session-only. ${keyText("app.models.save")} to save to settings.`), 0, 0),
@@ -155,7 +152,6 @@ export class ScopedModelsSelectorComponent extends Container implements Focusabl
 		this.footerText = new Text(this.getFooterText(), 0, 0);
 		this.addChild(this.footerText);
 
-		this.addChild(new DynamicBorder());
 		this.updateList();
 	}
 
@@ -270,7 +266,6 @@ export class ScopedModelsSelectorComponent extends Container implements Focusabl
 
 		if (this.filteredItems.length > 0) {
 			const selected = this.filteredItems[this.selectedIndex];
-			this.listContainer.addChild(new Spacer(1));
 			this.listContainer.addChild(
 				new Text(
 					theme.fg("muted", `  ${selected.model ? `Model Name: ${selected.model.name}` : "Model unavailable"}`),

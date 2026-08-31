@@ -1,4 +1,4 @@
-import { setKeybindings } from "@earendil-works/diffex-tui";
+import { getGlyphs, setKeybindings } from "@earendil-works/diffex-tui";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { KeybindingsManager } from "../src/core/keybindings.ts";
 import { TrustSelectorComponent } from "../src/modes/interactive/components/trust-selector.ts";
@@ -27,7 +27,7 @@ describe("TrustSelectorComponent", () => {
 
 		expect(output).toContain("Saved decision: trusted (/project)");
 		expect(output).toContain("Current session: trusted");
-		expect(output).toContain("> Trust ✓");
+		expect(output).toContain(`${getGlyphs().selected} Trust ✓`);
 		expect(output).not.toContain("→");
 		expect(output).toContain("Trust ✓");
 		expect(output).not.toContain("Do not trust ✓");
@@ -85,5 +85,30 @@ describe("TrustSelectorComponent", () => {
 				{ path: "/parent/project", decision: null },
 			],
 		});
+	});
+
+	it("preserves trust context, choices, and controls at 60x12", () => {
+		const selector = new TrustSelectorComponent({
+			cwd: "/parent/project",
+			savedDecision: null,
+			projectTrusted: false,
+			onSelect: () => {},
+			onCancel: () => {},
+			getViewportRows: () => 12,
+		});
+
+		const lines = stripAnsi(selector.render(60).join("\n")).split("\n");
+
+		expect(lines[0]).toContain("Project trust");
+		expect(lines[1]).toContain("/parent/project");
+		expect(lines.join("\n")).toContain("Saved decision: none");
+		expect(lines.join("\n")).toContain("Current session: untrusted");
+		expect(lines.join("\n")).toContain("Trust parent folder (/parent)");
+		expect(lines.join("\n")).toContain("Do not trust");
+		expect(lines.at(-1)).toContain("navigate");
+		expect(lines.at(-1)).toContain("save");
+		expect(lines.at(-1)).toContain("cancel");
+		expect(lines).toHaveLength(8);
+		expect(lines.every((line) => Array.from(line).length <= 60)).toBe(true);
 	});
 });

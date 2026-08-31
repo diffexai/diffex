@@ -1,6 +1,12 @@
-import { Container, type SelectItem, SelectList, type SelectListLayoutOptions } from "@earendil-works/diffex-tui";
-import { getSelectListTheme } from "../theme/theme.ts";
-import { DynamicBorder } from "./dynamic-border.ts";
+import {
+	Container,
+	type SelectItem,
+	SelectList,
+	type SelectListLayoutOptions,
+	Spacer,
+	Text,
+} from "@earendil-works/diffex-tui";
+import { getSelectListTheme, theme } from "../theme/theme.ts";
 
 const SHOW_IMAGES_SELECT_LIST_LAYOUT: SelectListLayoutOptions = {
 	minPrimaryColumnWidth: 12,
@@ -8,7 +14,7 @@ const SHOW_IMAGES_SELECT_LIST_LAYOUT: SelectListLayoutOptions = {
 };
 
 /**
- * Component that renders a show images selector with borders
+ * Component that renders the inline image preference.
  */
 export class ShowImagesSelectorComponent extends Container {
 	private selectList: SelectList;
@@ -21,8 +27,8 @@ export class ShowImagesSelectorComponent extends Container {
 			{ value: "no", label: "No", description: "Show text placeholder instead" },
 		];
 
-		// Add top border
-		this.addChild(new DynamicBorder());
+		this.addChild(new Text(theme.fg("accent", theme.bold("Inline images")), 1, 0));
+		this.addChild(new Spacer(1));
 
 		// Create selector
 		this.selectList = new SelectList(items, 5, getSelectListTheme(), SHOW_IMAGES_SELECT_LIST_LAYOUT);
@@ -39,9 +45,6 @@ export class ShowImagesSelectorComponent extends Container {
 		};
 
 		this.addChild(this.selectList);
-
-		// Add bottom border
-		this.addChild(new DynamicBorder());
 	}
 
 	getSelectList(): SelectList {

@@ -1,4 +1,4 @@
-import { setKeybindings, Text } from "@earendil-works/diffex-tui";
+import { getGlyphs, setKeybindings, Text } from "@earendil-works/diffex-tui";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { KeybindingsManager } from "../src/core/keybindings.ts";
 import { SettingsManager } from "../src/core/settings-manager.ts";
@@ -13,6 +13,43 @@ import {
 } from "../src/modes/interactive/components/settings-selector.ts";
 import { initTheme } from "../src/modes/interactive/theme/theme.ts";
 import { stripAnsi } from "../src/utils/ansi.ts";
+function settingsConfig(overrides: Partial<SettingsConfig> = {}): SettingsConfig {
+	return {
+		autoCompact: true,
+		showImages: true,
+		imageWidthCells: 80,
+		autoResizeImages: true,
+		blockImages: false,
+		steeringMode: "one-at-a-time",
+		followUpMode: "one-at-a-time",
+		transport: "sse",
+		httpIdleTimeoutMs: 300_000,
+		thinkingLevel: "medium",
+		availableThinkingLevels: ["off", "low", "medium", "high"],
+		currentTheme: "dark",
+		terminalTheme: "dark",
+		availableThemes: ["dark", "light"],
+		hideThinkingBlock: false,
+		mermaidRenderingMode: "final",
+		showCacheMissNotices: true,
+		collapseChangelog: true,
+		enableInstallTelemetry: true,
+		doubleEscapeAction: "tree",
+		treeFilterMode: "default",
+		showHardwareCursor: false,
+		editorPaddingX: 1,
+		outputPad: 1,
+		autocompleteMaxVisible: 7,
+		quietStartup: false,
+		defaultProjectTrust: "ask",
+		clearOnShrink: false,
+		showTerminalProgress: true,
+		tuiMode: "regular",
+		fullscreenScrollbar: "auto",
+		warnings: {},
+		...overrides,
+	};
+}
 
 describe("SettingsSelectorComponent", () => {
 	beforeAll(() => {
@@ -77,15 +114,9 @@ describe("SettingsSelectorComponent", () => {
 
 	it("cycles through fullscreen scrollbar modes", () => {
 		const onChange = vi.fn();
-		const selector = new SettingsSelectorComponent(
-			{
-				fullscreenScrollbar: "auto",
-				warnings: {},
-				availableThinkingLevels: [],
-				availableThemes: [],
-			} as unknown as SettingsConfig,
-			{ onFullscreenScrollbarChange: onChange } as unknown as SettingsCallbacks,
-		);
+		const selector = new SettingsSelectorComponent(settingsConfig(), {
+			onFullscreenScrollbarChange: onChange,
+		} as unknown as SettingsCallbacks);
 		const settingsList = selector.getSettingsList();
 
 		for (const character of "Fullscreen scrollbar") settingsList.handleInput(character);
@@ -94,5 +125,78 @@ describe("SettingsSelectorComponent", () => {
 		settingsList.handleInput("\r");
 
 		expect(onChange.mock.calls.flat()).toEqual(["always", "hidden", "auto"]);
+	});
+
+	it("renders an open settings surface without full-width framing", () => {
+		const selector = new SettingsSelectorComponent(settingsConfig(), {} as SettingsCallbacks);
+		const lines = stripAnsi(selector.render(80).join("\n"))
+			.split("\n")
+			.map((line) => line.trimEnd());
+
+		expect(lines.slice(0, 3)).toEqual([" Settings", " Search and adjust how Diffex looks and behaves.", ""]);
+		expect(lines.join("\n")).toContain(`${getGlyphs().selected} Auto-compact`);
+		expect(lines.at(-1)).toContain("Type to search · Enter/Space to change · Esc to cancel");
+		expect(lines.some((line) => /^─+$/.test(line))).toBe(false);
+	});
+
+	it("keeps the hierarchy readable at narrow widths", () => {
+		const selector = new SettingsSelectorComponent(settingsConfig(), {} as SettingsCallbacks);
+		const lines = stripAnsi(selector.render(52).join("\n"))
+			.split("\n")
+			.map((line) => line.trimEnd());
+
+		expect(lines[0]).toBe(" Settings");
+		expect(lines.join("\n")).toContain("Search and adjust how Diffex looks and behaves.");
+		expect(lines.at(-1)).toContain("Enter/Space change · Esc close");
+		expect(lines.every((line) => Array.from(line).length <= 52)).toBe(true);
+	});
+
+	it("keeps the settings title, search field, and controls visible at 60x12", () => {
+		let viewportRows = 12;
+		const selector = new SettingsSelectorComponent(settingsConfig(), {} as SettingsCallbacks, {
+			getViewportRows: () => viewportRows,
+		});
+		const compactLines = stripAnsi(selector.render(60).join("\n"))
+			.split("\n")
+			.map((line) => line.trimEnd());
+
+		expect(compactLines[0]).toBe(" Settings");
+		expect(compactLines[1]).toBe(">");
+		expect(compactLines.join("\n")).toContain(`${getGlyphs().selected} Auto-compact`);
+		expect(compactLines.join("\n")).toContain("(1/27)");
+		expect(compactLines.at(-1)).toContain("Type to search · Enter/Space change · Esc close");
+		expect(compactLines).toHaveLength(8);
+		expect(compactLines.every((line) => Array.from(line).length <= 60)).toBe(true);
+
+		viewportRows = 24;
+		const restoredLines = stripAnsi(selector.render(80).join("\n"))
+			.split("\n")
+			.map((line) => line.trimEnd());
+		expect(restoredLines.slice(0, 3)).toEqual([" Settings", " Search and adjust how Diffex looks and behaves.", ""]);
+		expect(restoredLines.at(-1)).toContain("Type to search · Enter/Space to change · Esc to cancel");
+	});
+
+	it("opens and applies a thinking-level submenu without changing its controls", () => {
+		const onThinkingLevelChange = vi.fn();
+		const selector = new SettingsSelectorComponent(settingsConfig(), {
+			onThinkingLevelChange,
+		} as unknown as SettingsCallbacks);
+		const settingsList = selector.getSettingsList();
+
+		for (const character of "Thinking level") settingsList.handleInput(character);
+		settingsList.handleInput("\r");
+
+		const submenu = stripAnsi(selector.render(80).join("\n"))
+			.split("\n")
+			.map((line) => line.trimEnd())
+			.join("\n");
+		expect(submenu).toContain(" Thinking Level\n Select reasoning depth for thinking-capable models\n");
+		expect(submenu).toContain("enter select  escape/ctrl+c back");
+
+		settingsList.handleInput("\u001b[B");
+		settingsList.handleInput("\r");
+
+		expect(onThinkingLevelChange).toHaveBeenCalledWith("high");
+		expect(stripAnsi(selector.render(80).join("\n"))).toContain("Thinking level");
 	});
 });

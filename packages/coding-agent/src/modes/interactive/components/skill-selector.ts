@@ -11,7 +11,6 @@ import {
 } from "@earendil-works/diffex-tui";
 import type { SkillReference, SkillReferenceGroup } from "../../../core/skills.ts";
 import { theme } from "../theme/theme.ts";
-import { DynamicBorder } from "./dynamic-border.ts";
 import { keyHint, rawKeyHint } from "./keybinding-hints.ts";
 
 const GROUP_ORDER = ["installed-workspace", "installed-global", "evolved-workspace"] as const;
@@ -68,12 +67,8 @@ export class SkillSelectorComponent extends Container implements Focusable {
 
 	private rebuild(): void {
 		this.clear();
-		this.addChild(new DynamicBorder());
-		this.addChild(new Spacer(1));
 		if (this.activeGroup === undefined) this.buildGroupView();
 		else this.buildSkillView();
-		this.addChild(new Spacer(1));
-		this.addChild(new DynamicBorder());
 	}
 
 	private buildGroupView(): void {

@@ -15,7 +15,6 @@ import type { ModelRuntime } from "../../../core/model-runtime.ts";
 import type { SettingsManager } from "../../../core/settings-manager.ts";
 import { getModelSelectorSearchText } from "../model-search.ts";
 import { theme } from "../theme/theme.ts";
-import { DynamicBorder } from "./dynamic-border.ts";
 import { keyHint } from "./keybinding-hints.ts";
 
 interface ModelItem {
@@ -90,9 +89,7 @@ export class ModelSelectorComponent extends Container implements Focusable {
 		this.onSelectCallback = onSelect;
 		this.onCancelCallback = onCancel;
 
-		// Add top border
-		this.addChild(new DynamicBorder());
-		this.addChild(new Spacer(1));
+		this.addChild(new Text(theme.fg("accent", theme.bold("Models")), 0, 0));
 
 		// Add hint about model filtering
 		if (scopedModels.length > 0) {
@@ -124,11 +121,6 @@ export class ModelSelectorComponent extends Container implements Focusable {
 		// Create list container
 		this.listContainer = new Container();
 		this.addChild(this.listContainer);
-
-		this.addChild(new Spacer(1));
-
-		// Add bottom border
-		this.addChild(new DynamicBorder());
 
 		// Render the current snapshot immediately, then refresh in the background.
 		this.loadModelsFromSnapshot();
@@ -308,11 +300,9 @@ export class ModelSelectorComponent extends Container implements Focusable {
 			this.listContainer.addChild(new Text(theme.fg("muted", "  No matching models"), 0, 0));
 		} else {
 			const selected = this.filteredModels[this.selectedIndex];
-			this.listContainer.addChild(new Spacer(1));
 			this.listContainer.addChild(new Text(theme.fg("muted", `  Model Name: ${selected.model.name}`), 0, 0));
 		}
 		if (this.refreshStatusMessage) {
-			this.listContainer.addChild(new Spacer(1));
 			this.listContainer.addChild(
 				new Text(theme.fg(this.refreshStatusSuccess ? "success" : "muted", `  ${this.refreshStatusMessage}`), 0, 0),
 			);

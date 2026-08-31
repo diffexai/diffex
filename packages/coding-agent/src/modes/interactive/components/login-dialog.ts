@@ -2,7 +2,6 @@ import type { AuthInfoLink, OAuthDeviceCodeInfo } from "@earendil-works/diffex-a
 import { Container, type Focusable, getKeybindings, Input, Spacer, Text, type TUI } from "@earendil-works/diffex-tui";
 import { openBrowser } from "../../../utils/open-browser.ts";
 import { theme } from "../theme/theme.ts";
-import { DynamicBorder } from "./dynamic-border.ts";
 import { keyHint } from "./keybinding-hints.ts";
 
 /**
@@ -41,9 +40,6 @@ export class LoginDialogComponent extends Container implements Focusable {
 		const providerName = providerNameOverride || providerId;
 		const title = titleOverride ?? `Login to ${providerName}`;
 
-		// Top border
-		this.addChild(new DynamicBorder());
-
 		// Title
 		this.addChild(new Text(theme.fg("accent", theme.bold(title)), 1, 0));
 
@@ -65,9 +61,6 @@ export class LoginDialogComponent extends Container implements Focusable {
 		this.input.onEscape = () => {
 			this.cancel();
 		};
-
-		// Bottom border
-		this.addChild(new DynamicBorder());
 	}
 
 	get signal(): AbortSignal {

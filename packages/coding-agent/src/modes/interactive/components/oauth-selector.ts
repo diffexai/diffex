@@ -11,7 +11,6 @@ import {
 	UNSELECTED_LIST_PREFIX,
 } from "@earendil-works/diffex-tui";
 import { theme } from "../theme/theme.ts";
-import { DynamicBorder } from "./dynamic-border.ts";
 
 export type AuthSelectorProvider = {
 	id: string;
@@ -67,10 +66,6 @@ export class OAuthSelectorComponent extends Container implements Focusable {
 		this.onSelectCallback = onSelect;
 		this.onCancelCallback = onCancel;
 
-		// Add top border
-		this.addChild(new DynamicBorder());
-		this.addChild(new Spacer(1));
-
 		// Add title
 		const title = mode === "login" ? "Select provider to configure:" : "Select provider to logout:";
 		this.addChild(new TruncatedText(theme.fg("accent", theme.bold(title)), 1, 0));
@@ -92,11 +87,6 @@ export class OAuthSelectorComponent extends Container implements Focusable {
 		// Create list container
 		this.listContainer = new Container();
 		this.addChild(this.listContainer);
-
-		this.addChild(new Spacer(1));
-
-		// Add bottom border
-		this.addChild(new DynamicBorder());
 
 		// Initial render
 		this.filterProviders(initialSearchInput ?? "");
