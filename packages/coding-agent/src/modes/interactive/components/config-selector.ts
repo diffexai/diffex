@@ -958,6 +958,10 @@ export class ConfigSelectorComponent extends Container implements Focusable {
 		this.resourceList.setWriteScope(this.writeScope);
 	}
 
+	handleInput(data: string): void {
+		this.resourceList.handleInput(data);
+	}
+
 	getResourceList(): ResourceList {
 		return this.resourceList;
 	}

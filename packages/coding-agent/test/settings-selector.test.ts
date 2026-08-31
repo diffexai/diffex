@@ -76,6 +76,61 @@ describe("SettingsSelectorComponent", () => {
 		expect(createInstalledSkillsSettings).toHaveBeenCalledOnce();
 	});
 
+	it("routes input through the installed skills submenu", () => {
+		const resolved = {
+			extensions: [],
+			skills: [
+				{
+					path: "/tmp/skills/review/SKILL.md",
+					enabled: true,
+					metadata: { source: "auto", scope: "user", origin: "top-level", baseDir: "/tmp/skills" },
+				},
+				{
+					path: "/tmp/skills/deploy/SKILL.md",
+					enabled: true,
+					metadata: { source: "auto", scope: "user", origin: "top-level", baseDir: "/tmp/skills" },
+				},
+			],
+			prompts: [],
+			themes: [],
+		} satisfies ScopedResolvedPaths["global"];
+		const selector = new SettingsSelectorComponent(settingsConfig(), {
+			createInstalledSkillsSettings: (done: () => void) =>
+				new ConfigSelectorComponent(
+					{ global: resolved, project: resolved },
+					SettingsManager.inMemory(),
+					"/tmp/workspace",
+					"/tmp/agent",
+					done,
+					() => {},
+					() => {},
+					24,
+					"global",
+					false,
+				),
+		} as unknown as SettingsCallbacks);
+		const settingsList = selector.getSettingsList();
+
+		for (const character of "Installed skills") settingsList.handleInput(character);
+		settingsList.handleInput("\r");
+		for (const character of "review") settingsList.handleInput(character);
+
+		const filtered = stripAnsi(selector.render(80).join("\n"));
+		expect(filtered).toContain("review");
+		expect(filtered).not.toContain("deploy");
+
+		settingsList.handleInput("\u001b");
+		const restored = stripAnsi(selector.render(80).join("\n"));
+		expect(restored).toContain("Installed skills");
+		expect(restored).not.toContain("Global Resources");
+
+		settingsList.handleInput("\r");
+		settingsList.handleInput("\u0003");
+		const ctrlCRestored = stripAnsi(selector.render(80).join("\n"));
+		expect(ctrlCRestored).toContain("Installed skills");
+		expect(ctrlCRestored).not.toContain("Global Resources");
+	});
+
 	it("shows installed skill scope and path while persisting disablement", () => {
 		const settingsManager = SettingsManager.inMemory();
 		const resolved = {
