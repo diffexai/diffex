@@ -13,6 +13,7 @@ import {
 	type EvolutionJobStore,
 	type EvolutionModelRequest,
 	type EvolutionScope,
+	measureEvolutionValue,
 	type EvolutionSkillContentArtifact,
 	type SkillCandidate,
 	type SkillCandidateGroup,
@@ -660,6 +661,24 @@ describe("StructuredSkillSynthesizer", () => {
 				requestDigest: expect.stringMatching(/^sha256:/),
 			},
 		});
+		const submittedRequest = request as Extract<
+			EvolutionModelRequest,
+			{ readonly stage: "skill-synthesizer" }
+		> | null;
+		if (submittedRequest === null) throw new Error("Expected a synthesis request");
+		const {
+			requestDiagnostics,
+			validateOutput: _validateOutput,
+			signal: _signal,
+			...requestPayload
+		} = submittedRequest;
+		expect(requestDiagnostics.serializedBytes).toBe(measureEvolutionValue(requestPayload).serializedBytes);
+		expect(requestDiagnostics.estimatedTokens).toBe(measureEvolutionValue(requestPayload).estimatedTokens);
+		expect(requestDiagnostics.inputSerializedBytes).toBe(measureEvolutionValue(requestPayload.input).serializedBytes);
+		expect(requestDiagnostics.inputEstimatedTokens).toBe(measureEvolutionValue(requestPayload.input).estimatedTokens);
+		expect(requestDiagnostics.schemaDigest).toBe(computeEvolutionContentDigest(requestPayload.outputSchema));
+		expect(requestDiagnostics.requestDigest).toBe(computeEvolutionContentDigest(requestPayload));
+		expect(draft.synthesisRequest).toEqual(requestDiagnostics);
 		expect(draft).toMatchObject({
 			artifactKind: "skill-draft",
 			groupId: "group-1",
