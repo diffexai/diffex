@@ -700,12 +700,12 @@ describe("StructuredSkillSynthesizer", () => {
 
 	it("binds the immutable draft ID to synthesized content", async () => {
 		const data = fixture();
-		const synthesize = (skillMarkdown: string) =>
+		const synthesize = (skillMarkdown: string, contextWindow = 128_000) =>
 			data.synthesizer.synthesize({
 				group: data.group,
 				model: {
 					maxProviderCallsPerExecution: 20,
-					getModelLimits: () => ({ contextWindow: 128_000, maxOutputTokens: 16_384 }),
+					getModelLimits: () => ({ contextWindow, maxOutputTokens: 16_384 }),
 					async execute() {
 						return { output: { skillMarkdown, files: [] }, model: { provider: "faux", model: "fixture" } };
 					},
@@ -717,9 +717,11 @@ describe("StructuredSkillSynthesizer", () => {
 		const first = await synthesize(draftMarkdown);
 		const repeated = await synthesize(draftMarkdown);
 		const changed = await synthesize(`${draftMarkdown}\nAdditional verification detail.\n`);
+		const changedBudget = await synthesize(draftMarkdown, 127_000);
 
 		expect(repeated.draftId).toBe(first.draftId);
 		expect(changed.draftId).not.toBe(first.draftId);
+		expect(changedBudget.draftId).not.toBe(first.draftId);
 	});
 
 	it("rejects an oversized request before provider invocation and persists its diagnostics on the error", async () => {
