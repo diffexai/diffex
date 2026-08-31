@@ -1,5 +1,5 @@
 import type { AssistantMessage } from "@earendil-works/diffex-ai";
-import { Container, getGlyphs, Markdown, type MarkdownTheme, Text } from "@earendil-works/diffex-tui";
+import { Container, getGlyphs, Markdown, type MarkdownTheme, Spacer, Text } from "@earendil-works/diffex-tui";
 import type { MarkdownTransformer } from "../../../core/extensions/types.ts";
 import { getMarkdownTheme, theme } from "../theme/theme.ts";
 import { createMarkdownTransform } from "./markdown-transform.ts";
@@ -95,18 +95,33 @@ export class AssistantMessageComponent extends Container {
 
 		const glyphs = getGlyphs();
 		const hasToolCalls = message.content.some((c) => c.type === "toolCall");
+		const hasVisibleContent = message.content.some(
+			(c) => (c.type === "text" && c.text.trim()) || (c.type === "thinking" && c.thinking.trim()),
+		);
+		const hasTerminalNotice =
+			message.stopReason === "length" ||
+			(!hasToolCalls && (message.stopReason === "aborted" || message.stopReason === "error"));
 		this.hasToolCalls = hasToolCalls;
+		if (hasVisibleContent || hasTerminalNotice) {
+			this.contentContainer.addChild(
+				new Text(theme.fg("accent", `${glyphs.end} ${theme.bold("Diffex")}`), this.outputPad, 0),
+			);
+		}
+
+		let hasRenderedSection = false;
 
 		// Render content in order
 		for (let i = 0; i < message.content.length; i++) {
 			const content = message.content[i];
 			if (content.type === "text" && content.text.trim()) {
+				this.contentContainer.addChild(new Spacer(1));
 				this.contentContainer.addChild(
 					new Markdown(content.text.trim(), this.outputPad, 0, this.markdownTheme, undefined, {
 						tableStyle: "compact",
 						transform: createMarkdownTransform("assistant", this.isStreaming, this.markdownTransformers),
 					}),
 				);
+				hasRenderedSection = true;
 			} else if (content.type === "thinking") {
 				const thinkingBlocks: string[] = [];
 				for (; i < message.content.length; i++) {
@@ -124,14 +139,24 @@ export class AssistantMessageComponent extends Container {
 				if (thinkingBlocks.length === 0) {
 					continue;
 				}
+				if (hasRenderedSection) {
+					this.contentContainer.addChild(new Spacer(1));
+				}
 
 				if (this.hideThinkingBlock) {
 					const hiddenLabel = this.hiddenThinkingLabel === "Thinking..." ? "hidden" : this.hiddenThinkingLabel;
 					this.contentContainer.addChild(
-						new Text(theme.fg("thinkingText", `Reasoning ${glyphs.bullet} ${hiddenLabel}`), this.outputPad, 0),
+						new Text(
+							theme.fg("thinkingText", `${glyphs.branch} Reasoning ${glyphs.bullet} ${hiddenLabel}`),
+							this.outputPad,
+							0,
+						),
 					);
 				} else {
-					this.contentContainer.addChild(new Text(theme.fg("thinkingText", "Reasoning"), this.outputPad, 0));
+					this.contentContainer.addChild(
+						new Text(theme.fg("thinkingText", `${glyphs.branch} Reasoning`), this.outputPad, 0),
+					);
+					this.contentContainer.addChild(new Spacer(1));
 					this.contentContainer.addChild(
 						new Markdown(
 							thinkingBlocks.join("\n\n"),
@@ -153,11 +178,13 @@ export class AssistantMessageComponent extends Container {
 						),
 					);
 				}
+				hasRenderedSection = true;
 			}
 		}
 
 		// Tool execution rows carry failures for responses with tool calls.
 		if (message.stopReason === "length") {
+			this.contentContainer.addChild(new Spacer(1));
 			this.contentContainer.addChild(
 				new Text(theme.fg("warning", "Response was truncated before completion."), this.outputPad, 0),
 			);
@@ -167,9 +194,11 @@ export class AssistantMessageComponent extends Container {
 					message.errorMessage && message.errorMessage !== "Request was aborted"
 						? message.errorMessage
 						: "Operation aborted";
+				this.contentContainer.addChild(new Spacer(1));
 				this.contentContainer.addChild(new Text(theme.fg("warning", abortMessage), this.outputPad, 0));
 			} else if (message.stopReason === "error") {
 				const errorMsg = message.errorMessage || "Unknown error";
+				this.contentContainer.addChild(new Spacer(1));
 				this.contentContainer.addChild(new Text(theme.fg("error", `Error: ${errorMsg}`), this.outputPad, 0));
 			}
 		}
