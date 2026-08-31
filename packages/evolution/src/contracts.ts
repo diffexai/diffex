@@ -836,6 +836,23 @@ export interface SkillPackageFile {
 	readonly content: string;
 }
 
+export interface SkillSynthesisRequestDiagnostics {
+	readonly serialization: "canonical-json-utf8-v1";
+	readonly serializedBytes: number;
+	readonly estimatedTokens: number;
+	readonly inputSerializedBytes: number;
+	readonly inputEstimatedTokens: number;
+	readonly contextWindow: number;
+	readonly maxOutputTokens: number;
+	readonly schemaEstimatedTokens: number;
+	readonly protocolOverheadTokens: number;
+	readonly safetyMarginTokens: number;
+	readonly inputBudgetTokens: number;
+	readonly schemaDigest: string;
+	readonly capsuleDigest: string;
+	readonly requestDigest: string;
+}
+
 export interface SkillDraft {
 	readonly artifactKind: "skill-draft";
 	readonly metadata: EvolutionArtifactMetadata;
@@ -852,6 +869,7 @@ export interface SkillDraft {
 		readonly contentDigest: string;
 	}[];
 	readonly repositoryInstructionDigests: readonly string[];
+	readonly synthesisRequest: SkillSynthesisRequestDiagnostics;
 	readonly operation: SkillCandidateOperation;
 	readonly proposedName: string;
 	readonly existingSkillIds: readonly string[];
@@ -1497,6 +1515,7 @@ export type EvolutionFailureReasonCode =
 	| "curation-invalid-response"
 	| "skill-curation-invalid-response"
 	| "skill-synthesis-invalid-response"
+	| "skill-synthesis-request-too-large"
 	| "reflection-budget-exhausted"
 	| "reflection-invalid-response"
 	| "shutdown"

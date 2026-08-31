@@ -51,6 +51,7 @@ import type {
 	SkillLifecycleReport,
 	SkillMutationBatch,
 	SkillRetrievalEvaluationResult,
+	SkillSynthesisRequestDiagnostics,
 	ValidationReport,
 } from "./contracts.ts";
 
@@ -151,6 +152,8 @@ export interface SkillSynthesizerModelRequest {
 	readonly input: JsonObject;
 	readonly outputSchema: JsonObject;
 	readonly tools: readonly EvolutionModelTool[];
+	readonly maxOutputTokens: number;
+	readonly requestDiagnostics: SkillSynthesisRequestDiagnostics;
 	readonly validateOutput?: (output: JsonObject) => void;
 	readonly signal?: AbortSignal;
 }
@@ -170,9 +173,18 @@ export interface EvolutionModelResponse {
 	};
 }
 
+export interface EvolutionModelLimits {
+	readonly contextWindow: number;
+	readonly maxOutputTokens: number;
+}
+
 export interface EvolutionModelExecutor {
 	readonly maxProviderCallsPerExecution: number;
 	execute(request: EvolutionModelRequest): Promise<EvolutionModelResponse>;
+}
+
+export interface SkillSynthesisModelExecutor extends EvolutionModelExecutor {
+	getModelLimits(model: EvolutionModelIdentity): EvolutionModelLimits;
 }
 
 export interface EvolutionFailureRecord {
@@ -407,7 +419,7 @@ export interface SkillCandidateRegistry {
 
 export interface SkillSynthesizerInput {
 	readonly group: SkillCandidateGroup;
-	readonly model: EvolutionModelExecutor;
+	readonly model: SkillSynthesisModelExecutor;
 	readonly idempotencyKey: string;
 	readonly createdAt: string;
 	readonly signal?: AbortSignal;

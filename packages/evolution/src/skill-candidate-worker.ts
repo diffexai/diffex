@@ -24,12 +24,12 @@ import type {
 	EvolutionClock,
 	EvolutionJobStore,
 	EvolutionLeaseStore,
-	EvolutionModelExecutor,
 	InteractivePriorityGate,
 	SkillCandidateRegistry,
 	SkillCandidateRegistryStore,
 	SkillDraftValidator,
 	SkillEvaluator,
+	SkillSynthesisModelExecutor,
 	SkillSynthesizer,
 } from "./ports.ts";
 import { computeEvolutionContentDigest, createEvolutionArtifactMetadata } from "./provenance.ts";
@@ -71,7 +71,7 @@ export interface SkillCandidateRegistryWorkerDependencies {
 	readonly synthesizer: SkillSynthesizer;
 	readonly validator: SkillDraftValidator;
 	readonly evaluator?: SkillEvaluator;
-	readonly model: EvolutionModelExecutor;
+	readonly model: SkillSynthesisModelExecutor;
 }
 
 export interface SkillCandidateRegistryWorkerOptions {

@@ -41,6 +41,7 @@ import {
 	type SkillEvaluatorInput,
 	type SkillSynthesizerInput,
 } from "../src/index.ts";
+import { synthesisRequestFixture } from "./synthesis-request-fixture.ts";
 
 const now = "2026-08-25T12:00:00.000Z";
 const harnessVersion = `sha256:${"2".repeat(64)}`;
@@ -555,6 +556,7 @@ function fixture(withEvaluator = false, store: MemoryRegistryStore = new MemoryR
 						sourceTraceIds: [],
 						sourceSkillVersions: [],
 						repositoryInstructionDigests: [],
+						synthesisRequest: synthesisRequestFixture,
 						operation: "CREATE" as const,
 						proposedName: "fixture-skill",
 						existingSkillIds: [],
@@ -667,6 +669,7 @@ function fixture(withEvaluator = false, store: MemoryRegistryStore = new MemoryR
 				: {}),
 			model: {
 				maxProviderCallsPerExecution: 20,
+				getModelLimits: () => ({ contextWindow: 128_000, maxOutputTokens: 16_384 }),
 				execute: () => Promise.reject(new Error("Fixture synthesizer does not call the model")),
 			},
 		}),

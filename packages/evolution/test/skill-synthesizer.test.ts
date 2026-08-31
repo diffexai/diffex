@@ -146,6 +146,12 @@ function inputSnapshot(
 				content: "Run focused tests after changing code.",
 				contentDigest: computeEvolutionTextDigest("Run focused tests after changing code."),
 			},
+			{
+				path: "/repo/packages/evolution/AGENTS.md",
+				precedence: 1,
+				content: "Instructions for source files under packages/evolution only.",
+				contentDigest: computeEvolutionTextDigest("Instructions for source files under packages/evolution only."),
+			},
 		],
 		skillCatalog: [
 			{
@@ -542,6 +548,7 @@ describe("StructuredSkillSynthesizer", () => {
 			group: data.group,
 			model: {
 				maxProviderCallsPerExecution: 20,
+				getModelLimits: () => ({ contextWindow: 128_000, maxOutputTokens: 16_384 }),
 				async execute(value) {
 					request = value;
 					return {
@@ -631,6 +638,28 @@ describe("StructuredSkillSynthesizer", () => {
 		expect(serializedRequest).not.toContain("trace-success");
 		expect(serializedRequest).not.toContain("task-failure-1");
 		expect(serializedRequest).not.toContain("focused test passed");
+		expect(serializedRequest).not.toContain("Instructions for source files under packages/evolution only.");
+		expect(serializedRequest).not.toContain('"sourceKind"');
+		expect(serializedRequest).not.toContain('"scope"');
+		expect(request).toMatchObject({
+			maxOutputTokens: 16_384,
+			requestDiagnostics: {
+				serialization: "canonical-json-utf8-v1",
+				serializedBytes: expect.any(Number),
+				estimatedTokens: expect.any(Number),
+				inputSerializedBytes: expect.any(Number),
+				inputEstimatedTokens: expect.any(Number),
+				contextWindow: 128_000,
+				maxOutputTokens: 16_384,
+				schemaEstimatedTokens: expect.any(Number),
+				protocolOverheadTokens: 1_024,
+				safetyMarginTokens: 8_960,
+				inputBudgetTokens: expect.any(Number),
+				schemaDigest: expect.stringMatching(/^sha256:/),
+				capsuleDigest: data.group.canonicalCapsule.contentDigest,
+				requestDigest: expect.stringMatching(/^sha256:/),
+			},
+		});
 		expect(draft).toMatchObject({
 			artifactKind: "skill-draft",
 			groupId: "group-1",
@@ -641,6 +670,10 @@ describe("StructuredSkillSynthesizer", () => {
 			sourceTraceIds: ["trace-failure", "trace-success"],
 			operation: "UPDATE",
 			proposedName: "focused-verification",
+			synthesisRequest: expect.objectContaining({
+				capsuleDigest: data.group.canonicalCapsule.contentDigest,
+				requestDigest: expect.stringMatching(/^sha256:/),
+			}),
 			content: draftMarkdown,
 			files: [{ path: "scripts/verify.sh", content: "#!/bin/sh\nexec npm run test:focused\n" }],
 		});
@@ -653,6 +686,7 @@ describe("StructuredSkillSynthesizer", () => {
 				group: data.group,
 				model: {
 					maxProviderCallsPerExecution: 20,
+					getModelLimits: () => ({ contextWindow: 128_000, maxOutputTokens: 16_384 }),
 					async execute() {
 						return { output: { skillMarkdown, files: [] }, model: { provider: "faux", model: "fixture" } };
 					},
@@ -669,6 +703,42 @@ describe("StructuredSkillSynthesizer", () => {
 		expect(changed.draftId).not.toBe(first.draftId);
 	});
 
+	it("rejects an oversized request before provider invocation and persists its diagnostics on the error", async () => {
+		const data = fixture();
+		let called = false;
+
+		await expect(
+			data.synthesizer.synthesize({
+				group: data.group,
+				model: {
+					maxProviderCallsPerExecution: 20,
+					getModelLimits: () => ({ contextWindow: 2_000, maxOutputTokens: 1_000 }),
+					async execute(): Promise<never> {
+						called = true;
+						throw new Error("unexpected model call");
+					},
+				},
+				idempotencyKey: data.group.synthesisIdempotencyKey,
+				createdAt,
+			}),
+		).rejects.toMatchObject({
+			name: "EvolutionExecutionError",
+			reasonCode: "skill-synthesis-request-too-large",
+			retryable: false,
+			diagnostics: {
+				request: {
+					contextWindow: 2_000,
+					maxOutputTokens: 1_000,
+					inputBudgetTokens: 0,
+					schemaDigest: expect.stringMatching(/^sha256:/),
+					capsuleDigest: data.group.canonicalCapsule.contentDigest,
+					requestDigest: expect.stringMatching(/^sha256:/),
+				},
+			},
+		});
+		expect(called).toBe(false);
+	});
+
 	it("classifies invalid structured output as a synthesis failure", async () => {
 		const data = fixture();
 
@@ -677,6 +747,7 @@ describe("StructuredSkillSynthesizer", () => {
 				group: data.group,
 				model: {
 					maxProviderCallsPerExecution: 20,
+					getModelLimits: () => ({ contextWindow: 128_000, maxOutputTokens: 16_384 }),
 					async execute() {
 						return { output: { unexpected: true }, model: { provider: "faux", model: "fixture" } };
 					},
@@ -700,6 +771,7 @@ describe("StructuredSkillSynthesizer", () => {
 				group: data.group,
 				model: {
 					maxProviderCallsPerExecution: 20,
+					getModelLimits: () => ({ contextWindow: 128_000, maxOutputTokens: 16_384 }),
 					async execute(): Promise<never> {
 						called = true;
 						throw new Error("unexpected model call");
