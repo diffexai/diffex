@@ -9,6 +9,7 @@ import type {
 	JsonObject,
 	SkillCandidate,
 	SkillCandidateGroup,
+	SkillCandidateGroupCapsule,
 	SkillDraft,
 	SkillPackageFile,
 } from "./contracts.ts";
@@ -83,6 +84,46 @@ function isInputSnapshot(artifact: EvolutionArtifact): artifact is EvolutionInpu
 
 function isSkillCandidate(artifact: EvolutionArtifact): artifact is SkillCandidate {
 	return "artifactKind" in artifact && artifact.artifactKind === "skill-candidate";
+}
+
+function isGroupCapsule(artifact: EvolutionArtifact): artifact is SkillCandidateGroupCapsule {
+	return "artifactKind" in artifact && artifact.artifactKind === "skill-candidate-group-capsule";
+}
+
+function sameOrderedValues(left: readonly string[], right: readonly string[]): boolean {
+	return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function assertGroupCapsule(
+	artifact: EvolutionArtifact,
+	reference: EvolutionArtifactReference,
+	group: SkillCandidateGroup,
+): asserts artifact is SkillCandidateGroupCapsule {
+	const proposalRevisionIds = group.proposalRevisions.map((revision) => revision.revisionId);
+	const latestProposalRevisionId = proposalRevisionIds.at(-1);
+	if (
+		!isGroupCapsule(artifact) ||
+		artifact.groupId !== group.groupId ||
+		artifact.capsuleId !== reference.artifactId ||
+		artifact.metadata.artifactId !== artifact.capsuleId ||
+		artifact.metadata.contentDigest !== computeEvolutionContentDigest(contentWithoutMetadata(artifact)) ||
+		computeEvolutionContentDigest(artifact) !== reference.contentDigest ||
+		artifact.baseProposalRevisionId !== latestProposalRevisionId ||
+		!sameOrderedValues(artifact.proposalRevisionIds, proposalRevisionIds) ||
+		!sameOrderedValues(
+			artifact.sourceDigests,
+			group.proposalRevisions.map((revision) => revision.candidate.contentDigest),
+		) ||
+		artifact.contract.workspace.repositoryId !== group.profile.workspace.repositoryId ||
+		artifact.contract.workspace.directoryId !== group.profile.workspace.directoryId ||
+		artifact.contract.workspace.evolutionScope.repositoryId !== group.profile.workspace.evolutionScope.repositoryId ||
+		artifact.contract.workspace.evolutionScope.scopeId !== group.profile.workspace.evolutionScope.scopeId
+	) {
+		throw new EvolutionExecutionError(`Canonical capsule for candidate group "${group.groupId}" is invalid`, {
+			reasonCode: "artifact-corrupt",
+			retryable: false,
+		});
+	}
 }
 
 function assertCandidate(
@@ -275,14 +316,10 @@ function instructions(sources: readonly CandidateSource[]): readonly (Instructio
 }
 
 function modelInput(
-	group: SkillCandidateGroup,
-	sources: readonly CandidateSource[],
-	evidence: readonly EvidenceContext[],
+	capsule: SkillCandidateGroupCapsule,
 	skills: readonly SkillVersionContext[],
 	repositoryInstructions: readonly (InstructionDocumentSnapshot & { readonly repositoryRevision: string })[],
 ): JsonObject {
-	const latest = sources.at(-1);
-	if (latest === undefined) throw new Error(`Candidate group "${group.groupId}" has no source candidates`);
 	return {
 		control: {
 			objective: "synthesize-one-outcome-grounded-agent-skill-draft",
@@ -322,27 +359,39 @@ function modelInput(
 				"verification steps and observable completion condition",
 			],
 		},
-		candidateGroup: {
-			groupId: group.groupId,
-			operation: latest.candidate.operation,
-			proposedName: latest.candidate.proposedName,
-			existingSkillIds: latest.candidate.existingSkillIds,
-			workspace: jsonObject(latest.candidate.workspace),
-			candidateRevisions: sources.map(({ candidate }) => ({
-				candidateId: candidate.candidateId,
-				operation: candidate.operation,
-				proposedName: candidate.proposedName,
-				skillability: jsonObject(candidate.skillability),
-				trigger: jsonObject(candidate.trigger),
-				preconditions: candidate.preconditions,
-				procedure: jsonObject(candidate.procedure),
-				failureHandling: candidate.failureHandling.map(jsonObject),
-				applicabilityBoundaries: candidate.applicabilityBoundaries,
-				verificationContract: jsonObject(candidate.verificationContract),
-				memoryRelationship: jsonObject(candidate.memoryRelationship),
+		candidateGroup: jsonObject({
+			contract: capsule.contract,
+			historicalAdditions: capsule.historicalAdditions.map((addition) => ({
+				field: addition.field,
+				value: addition.value,
+				valueDigest: addition.valueDigest,
+				supportCount: addition.supportCount,
 			})),
-		},
-		sourceEvidence: evidence.map(jsonObject),
+			unresolvedConflicts: capsule.conflicts.map((conflict) => ({
+				field: conflict.field,
+				baseValueDigest: conflict.baseValueDigest,
+				alternatives: conflict.alternatives.map((alternative) => ({
+					value: alternative.value,
+					valueDigest: alternative.valueDigest,
+					supportCount: alternative.supportCount,
+				})),
+				omittedAlternativeCount: conflict.omittedAlternativeCount,
+				omittedAlternativesDigest: conflict.omittedAlternativesDigest,
+			})),
+			aggregateSupport: capsule.support.map((support) => ({
+				field: support.field,
+				valueDigest: support.valueDigest,
+				supportCount: support.supportCount,
+			})),
+			aggregateEvidence: {
+				supportingEvidenceCount: capsule.evidence.supportingEvidenceIds.length,
+				contradictingEvidenceCount: capsule.evidence.contradictingEvidenceIds.length,
+				supportingTraceCount: capsule.evidence.supportingTraceIds.length,
+				contradictingTraceCount: capsule.evidence.contradictingTraceIds.length,
+				supportingTaskLineageCount: capsule.evidence.supportingTaskLineageIds.length,
+				contradictingTaskLineageCount: capsule.evidence.contradictingTaskLineageIds.length,
+			},
+		}),
 		existingSkillVersions: skills.map(({ entry, artifact }) => ({
 			skillId: entry.skillId,
 			name: entry.name,
@@ -390,6 +439,8 @@ export class StructuredSkillSynthesizer implements SkillSynthesizer {
 		if (input.idempotencyKey !== input.group.synthesisIdempotencyKey) {
 			throw new Error(`Candidate group "${input.group.groupId}" synthesis key is stale`);
 		}
+		const capsuleArtifact = await this.#dependencies.artifacts.get(input.group.canonicalCapsule);
+		assertGroupCapsule(capsuleArtifact, input.group.canonicalCapsule, input.group);
 		const sources: CandidateSource[] = [];
 		for (const revision of input.group.proposalRevisions) {
 			const candidateArtifact = await this.#dependencies.artifacts.get(revision.candidate);
@@ -449,7 +500,7 @@ export class StructuredSkillSynthesizer implements SkillSynthesizer {
 					model: latest.input.modelConfiguration,
 					promptVersion: latest.input.promptVersions.skillSynthesizer,
 					idempotencyKey: input.idempotencyKey,
-					input: modelInput(input.group, sources, evidence, [...skillVersions.values()], repositoryInstructions),
+					input: modelInput(capsuleArtifact, [...skillVersions.values()], repositoryInstructions),
 					outputSchema: schema,
 					tools: [],
 					validateOutput: (output) => void parseOutput(output),

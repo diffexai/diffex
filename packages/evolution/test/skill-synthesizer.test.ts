@@ -16,6 +16,7 @@ import {
 	type EvolutionSkillContentArtifact,
 	type SkillCandidate,
 	type SkillCandidateGroup,
+	type SkillCandidateGroupCapsule,
 	StructuredSkillSynthesizer,
 } from "../src/index.ts";
 
@@ -274,6 +275,73 @@ function candidate(
 	return { metadata: metadata(candidateId, content.sourceLessonIds, content), ...content };
 }
 
+function groupCapsule(
+	groupId: string,
+	revisions: SkillCandidateGroup["proposalRevisions"],
+	latest: SkillCandidate,
+): SkillCandidateGroupCapsule {
+	const contract = {
+		operation: latest.operation,
+		proposedName: latest.proposedName,
+		workspace: latest.workspace,
+		existingSkillIds: latest.existingSkillIds,
+		skillability: latest.skillability,
+		trigger: latest.trigger,
+		preconditions: latest.preconditions,
+		procedure: latest.procedure,
+		failureHandling: latest.failureHandling,
+		applicabilityBoundaries: latest.applicabilityBoundaries,
+		verificationContract: latest.verificationContract,
+		memoryRelationship: latest.memoryRelationship,
+	};
+	const historicalValue = "Preserve the unique older setup detail.";
+	const historicalValueDigest = computeEvolutionContentDigest(historicalValue);
+	const triggerDigest = computeEvolutionContentDigest(latest.trigger.description);
+	const content = {
+		artifactKind: "skill-candidate-group-capsule" as const,
+		capsuleId: "skill-candidate-group-capsule-1",
+		groupId,
+		baseProposalRevisionId: revisions.at(-1)!.revisionId,
+		proposalRevisionIds: revisions.map((revision) => revision.revisionId),
+		sourceDigests: revisions.map((revision) => revision.candidate.contentDigest),
+		contract,
+		historicalAdditions: [
+			{
+				field: "preconditions" as const,
+				value: historicalValue,
+				valueDigest: historicalValueDigest,
+				supportCount: 1,
+				revisionSpans: [{ startIndex: 0, endIndex: 0 }],
+			},
+		],
+		support: [
+			{
+				field: "trigger.description" as const,
+				valueDigest: triggerDigest,
+				supportCount: 2,
+				revisionSpans: [{ startIndex: 0, endIndex: 1 }],
+			},
+		],
+		conflicts: [],
+		evidence: {
+			supportingEvidenceIds: ["support-1"],
+			contradictingEvidenceIds: ["failure-1"],
+			supportingTraceIds: ["trace-success"],
+			contradictingTraceIds: ["trace-failure"],
+			supportingTaskLineageIds: ["task-support-1"],
+			contradictingTaskLineageIds: ["task-failure-1"],
+		},
+	};
+	return {
+		metadata: metadata(
+			content.capsuleId,
+			revisions.map((revision) => revision.candidateId),
+			content,
+		),
+		...content,
+	};
+}
+
 function completedJob(jobId: string, input: EvolutionInputSnapshot): EvolutionJob {
 	const inputReference = reference(input);
 	const content: Omit<EvolutionJob, "metadata"> = {
@@ -355,7 +423,6 @@ function fixture(state: SkillCandidateGroup["state"] = "evidence-qualified") {
 	);
 	const first = candidate("candidate-1", successfulInput, ["support-1"], []);
 	const second = candidate("candidate-2", failedInput, [], ["failure-1"]);
-	const artifacts = new MemoryArtifactStore([skill, successfulInput, failedInput, first, second]);
 	const revisions = [
 		{
 			revisionId: "revision-1",
@@ -388,12 +455,11 @@ function fixture(state: SkillCandidateGroup["state"] = "evidence-qualified") {
 			},
 		},
 	];
+	const capsule = groupCapsule("group-1", revisions, second);
+	const artifacts = new MemoryArtifactStore([skill, successfulInput, failedInput, first, second, capsule]);
 	const group: SkillCandidateGroup = {
 		groupId: "group-1",
-		canonicalCapsule: {
-			artifactId: "skill-candidate-group-capsule-1",
-			contentDigest: `sha256:${"9".repeat(64)}`,
-		},
+		canonicalCapsule: reference(capsule),
 		profile: {
 			workspace: { repositoryId: "diffex", directoryId: "directory-1", evolutionScope: scope },
 			existingSkillIds: ["installed:workspace:focused-verification"],
@@ -499,10 +565,28 @@ describe("StructuredSkillSynthesizer", () => {
 						"verification actions and observable completion conditions",
 					],
 				},
-				sourceEvidence: [
-					{ evidenceId: "support-1", relationship: "supporting", terminationStatus: "completed" },
-					{ evidenceId: "failure-1", relationship: "contradicting", terminationStatus: "failed" },
-				],
+				candidateGroup: {
+					contract: expect.objectContaining({
+						operation: "UPDATE",
+						proposedName: "focused-verification",
+					}),
+					historicalAdditions: [
+						expect.objectContaining({
+							field: "preconditions",
+							value: "Preserve the unique older setup detail.",
+							supportCount: 1,
+						}),
+					],
+					aggregateSupport: [expect.objectContaining({ field: "trigger.description", supportCount: 2 })],
+					aggregateEvidence: {
+						supportingEvidenceCount: 1,
+						contradictingEvidenceCount: 1,
+						supportingTraceCount: 1,
+						contradictingTraceCount: 1,
+						supportingTaskLineageCount: 1,
+						contradictingTaskLineageCount: 1,
+					},
+				},
 				existingSkillVersions: [
 					{
 						skillId: "installed:workspace:focused-verification",
@@ -512,6 +596,13 @@ describe("StructuredSkillSynthesizer", () => {
 				repositoryInstructions: [{ path: "/repo/AGENTS.md", content: "Run focused tests after changing code." }],
 			},
 		});
+		const serializedRequest = JSON.stringify(request);
+		expect(serializedRequest).not.toContain("sourceEvidence");
+		expect(serializedRequest).not.toContain("candidate-1");
+		expect(serializedRequest).not.toContain("revision-1");
+		expect(serializedRequest).not.toContain("support-1");
+		expect(serializedRequest).not.toContain("trace-success");
+		expect(serializedRequest).not.toContain("focused test passed");
 		expect(draft).toMatchObject({
 			artifactKind: "skill-draft",
 			groupId: "group-1",
