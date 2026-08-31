@@ -1,4 +1,4 @@
-import { type Component, getGlyphs, Text } from "@earendil-works/diffex-tui";
+import { type Component, getGlyphs, Text, truncateToWidth, visibleWidth } from "@earendil-works/diffex-tui";
 import { theme } from "../theme/theme.ts";
 import type { ToolExecutionComponent } from "./tool-execution.ts";
 
@@ -83,7 +83,9 @@ export class ToolGroupComponent implements Component {
 		}
 
 		const label = this.settled ? "Explored" : "Exploring";
-		const result = new Text(theme.fg("muted", theme.bold(label)), outputPad, 0).render(safeWidth);
+		const result = new Text(theme.fg("muted", theme.bold(label)), outputPad, 0)
+			.render(safeWidth)
+			.map((line) => (visibleWidth(line) > safeWidth ? truncateToWidth(line, safeWidth, "") : line));
 		const glyphs = getGlyphs();
 		const leftPad = " ".repeat(outputPad);
 
@@ -108,7 +110,10 @@ export class ToolGroupComponent implements Component {
 							? glyphs.end
 							: glyphs.branch;
 				}
-				result.push(leftPad + theme.fg("muted", connector) + line);
+				const decoratedLine = leftPad + theme.fg("muted", connector) + line;
+				result.push(
+					visibleWidth(decoratedLine) > safeWidth ? truncateToWidth(decoratedLine, safeWidth, "") : decoratedLine,
+				);
 				renderedFirstLine = true;
 			}
 		}

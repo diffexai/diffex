@@ -1,4 +1,4 @@
-import { getGlyphs, Text, type TUI } from "@earendil-works/diffex-tui";
+import { getGlyphs, Text, type TUI, visibleWidth } from "@earendil-works/diffex-tui";
 import { Type } from "typebox";
 import { beforeAll, describe, expect, test, vi } from "vitest";
 import type { ToolDefinition } from "../src/core/extensions/types.ts";
@@ -68,6 +68,15 @@ describe("ToolGroupComponent", () => {
 		expect(setExpanded).toHaveBeenCalledWith(true);
 		expect(setShowImages).toHaveBeenCalledWith(false);
 		expect(setImageWidthCells).toHaveBeenCalledWith(42);
+	});
+
+	test.each([1, 2, 20, 80])("stays within a %d-column viewport", (width) => {
+		const group = new ToolGroupComponent(1);
+		group.addTool("responsive", createTool("responsive", "Responsive tool"));
+
+		for (const line of group.render(width)) {
+			expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+		}
 	});
 
 	test("hides the group when every tool renders no rows", () => {
