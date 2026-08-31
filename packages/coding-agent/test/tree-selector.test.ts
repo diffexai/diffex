@@ -1,5 +1,5 @@
 import { stripVTControlCharacters } from "node:util";
-import { setKeybindings, visibleWidth } from "@earendil-works/diffex-tui";
+import { SELECTED_LIST_PREFIX, setKeybindings, visibleWidth } from "@earendil-works/diffex-tui";
 import { beforeAll, beforeEach, describe, expect, test } from "vitest";
 import { KeybindingsManager } from "../src/core/keybindings.ts";
 import type {
@@ -126,7 +126,7 @@ function buildTree(entries: Array<SessionEntry>): SessionTreeNode[] {
 }
 
 describe("TreeSelectorComponent", () => {
-	test("uses the shared greater-than selection marker", () => {
+	test("uses the shared Diffex selection marker", () => {
 		const tree = buildTree([userMessage("user-1", null, "hello")]);
 		const selector = new TreeSelectorComponent(
 			tree,
@@ -137,8 +137,8 @@ describe("TreeSelectorComponent", () => {
 		);
 
 		const rendered = selector.getTreeList().render(80).map(stripVTControlCharacters).join("\n");
-		expect(rendered).toContain("> ");
-		expect(rendered).not.toContain("›");
+		expect(rendered).toContain(SELECTED_LIST_PREFIX);
+		expect(rendered).not.toContain("→");
 	});
 
 	describe("initial selection with metadata entries", () => {

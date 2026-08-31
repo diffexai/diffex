@@ -1,4 +1,5 @@
 import type { AutocompleteProvider, AutocompleteSuggestions } from "../autocomplete.ts";
+import { getGlyphs } from "../glyphs.ts";
 import { getKeybindings } from "../keybindings.ts";
 import { decodePrintableKey, matchesKey } from "../keys.ts";
 import { KillRing } from "../kill-ring.ts";
@@ -238,6 +239,10 @@ export interface EditorOptions {
 	placeholderStyle?: (text: string) => string;
 	/** Style applied to short labels for registered text tokens. */
 	textTokenStyle?: (text: string) => string;
+	/** Structural frame used around the input area. Defaults to the legacy paired rules. */
+	frameStyle?: "lines" | "top" | "none";
+	/** Optional fixed cap for visible editor content rows. */
+	maxVisibleLines?: number;
 }
 
 const SLASH_COMMAND_SELECT_LIST_LAYOUT: SelectListLayoutOptions = {
@@ -262,11 +267,11 @@ function buildDebouncePattern(triggerCharacters: string[]): RegExp {
 	return new RegExp(`(?:^|[ \\t])(?:@(?:"[^"]*|[^\\s]*)|[${escapedWithoutAt.join("")}][^\\s]*)$`);
 }
 
-function createScrollBorder(direction: "↑" | "↓", hiddenLineCount: number, width: number): string {
+function createScrollBorder(direction: string, horizontal: string, hiddenLineCount: number, width: number): string {
 	const availableWidth = Math.max(0, width);
-	const indicator = `─── ${direction} ${hiddenLineCount} more `;
+	const indicator = `${horizontal.repeat(3)} ${direction} ${hiddenLineCount} more `;
 	const remaining = availableWidth - visibleWidth(indicator);
-	if (remaining >= 0) return indicator + "─".repeat(remaining);
+	if (remaining >= 0) return indicator + horizontal.repeat(remaining);
 
 	const ellipsis = "...".slice(0, availableWidth);
 	const indicatorWidth = availableWidth - visibleWidth(ellipsis);
@@ -292,6 +297,8 @@ export class Editor implements Component, Focusable {
 	private placeholder: string = "";
 	private placeholderStyle: (text: string) => string = (text) => text;
 	private textTokenStyle: (text: string) => string = (text) => text;
+	private frameStyle: "lines" | "top" | "none" = "lines";
+	private maxVisibleLineCount: number | undefined;
 	private cursorBlinkVisible = true;
 	private cursorBlinkTimer?: ReturnType<typeof setTimeout>;
 
@@ -374,6 +381,30 @@ export class Editor implements Component, Focusable {
 		this.placeholder = options.placeholder ?? "";
 		this.placeholderStyle = options.placeholderStyle ?? ((text) => text);
 		this.textTokenStyle = options.textTokenStyle ?? ((text) => text);
+		this.frameStyle = options.frameStyle ?? "lines";
+		this.maxVisibleLineCount = this.normalizeMaxVisibleLines(options.maxVisibleLines);
+	}
+
+	private normalizeMaxVisibleLines(value: number | undefined): number | undefined {
+		if (value === undefined || !Number.isFinite(value)) return undefined;
+		return Math.max(1, Math.floor(value));
+	}
+
+	setFrameStyle(frameStyle: "lines" | "top" | "none"): void {
+		if (this.frameStyle === frameStyle) return;
+		this.frameStyle = frameStyle;
+		this.tui.requestRender();
+	}
+
+	setMaxVisibleLines(maxVisibleLines?: number): void {
+		const normalized = this.normalizeMaxVisibleLines(maxVisibleLines);
+		if (this.maxVisibleLineCount === normalized) return;
+		this.maxVisibleLineCount = normalized;
+		this.tui.requestRender();
+	}
+
+	private getMaxVisibleLines(): number {
+		return this.maxVisibleLineCount ?? Math.max(5, Math.floor(this.tui.terminal.rows * 0.3));
 	}
 
 	/** Set of currently valid paste IDs, for marker-aware segmentation. */
@@ -562,6 +593,7 @@ export class Editor implements Component, Focusable {
 	}
 
 	render(width: number): string[] {
+		const glyphs = getGlyphs();
 		const maxPadding = Math.max(0, Math.floor((width - 1) / 2));
 		const paddingX = Math.min(this.paddingX, maxPadding);
 		const innerWidth = Math.max(1, width - paddingX * 2);
@@ -576,14 +608,14 @@ export class Editor implements Component, Focusable {
 		// Store for cursor navigation (must match wrapping width)
 		this.lastWidth = layoutWidth;
 
-		const horizontal = this.borderColor("─");
+		const horizontalGlyph = glyphs.separator;
+		const horizontal = this.borderColor(horizontalGlyph);
 
 		// Layout the text
 		const layoutLines = this.layoutText(layoutWidth);
 
-		// Calculate max visible lines: 30% of terminal height, minimum 5 lines
-		const terminalRows = this.tui.terminal.rows;
-		const maxVisibleLines = Math.max(5, Math.floor(terminalRows * 0.3));
+		// Use a responsive default unless the host provides a dock-specific cap.
+		const maxVisibleLines = this.getMaxVisibleLines();
 
 		// Find the cursor line index in layoutLines
 		let cursorLineIndex = layoutLines.findIndex((line) => line.hasCursor);
@@ -609,9 +641,9 @@ export class Editor implements Component, Focusable {
 
 		// Render top border (with scroll indicator if scrolled down)
 		if (this.scrollOffset > 0) {
-			const border = createScrollBorder("↑", this.scrollOffset, width);
+			const border = createScrollBorder(glyphs.up, horizontalGlyph, this.scrollOffset, width);
 			result.push(this.borderColor(border));
-		} else {
+		} else if (this.frameStyle !== "none") {
 			result.push(horizontal.repeat(width));
 		}
 
@@ -693,9 +725,9 @@ export class Editor implements Component, Focusable {
 		// Render bottom border (with scroll indicator if more content below)
 		const linesBelow = layoutLines.length - (this.scrollOffset + visibleLines.length);
 		if (linesBelow > 0) {
-			const border = createScrollBorder("↓", linesBelow, width);
+			const border = createScrollBorder(glyphs.down, horizontalGlyph, linesBelow, width);
 			result.push(this.borderColor(border));
-		} else {
+		} else if (this.frameStyle === "lines") {
 			result.push(horizontal.repeat(width));
 		}
 
@@ -2021,8 +2053,7 @@ export class Editor implements Component, Focusable {
 	 */
 	private pageScroll(direction: -1 | 1): void {
 		this.lastAction = null;
-		const terminalRows = this.tui.terminal.rows;
-		const pageSize = Math.max(5, Math.floor(terminalRows * 0.3));
+		const pageSize = this.getMaxVisibleLines();
 
 		const visualLines = this.buildVisualLineMap(this.lastWidth);
 		const currentVisualLine = this.findCurrentVisualLine(visualLines);

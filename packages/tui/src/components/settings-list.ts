@@ -42,6 +42,7 @@ export class SettingsList implements Component {
 	private onCancel: () => void;
 	private searchInput?: Input;
 	private searchEnabled: boolean;
+	private compactMode: boolean | undefined;
 
 	// Submenu state
 	private submenuComponent: Component | null = null;
@@ -75,6 +76,16 @@ export class SettingsList implements Component {
 		}
 	}
 
+	/** Update the visible row budget without recreating selection or search state. */
+	setMaxVisible(maxVisible: number): void {
+		this.maxVisible = Math.max(1, Math.floor(maxVisible));
+	}
+
+	/** Override width-based compact rendering, or clear the override with undefined. */
+	setCompactMode(compact: boolean | undefined): void {
+		this.compactMode = compact;
+	}
+
 	invalidate(): void {
 		this.submenuComponent?.invalidate?.();
 	}
@@ -90,10 +101,11 @@ export class SettingsList implements Component {
 
 	private renderMainList(width: number): string[] {
 		const lines: string[] = [];
+		const compact = this.compactMode ?? width < 60;
 
 		if (this.searchEnabled && this.searchInput) {
 			lines.push(...this.searchInput.render(width));
-			lines.push("");
+			if (!compact) lines.push("");
 		}
 
 		if (this.items.length === 0) {
@@ -118,8 +130,10 @@ export class SettingsList implements Component {
 		);
 		const endIndex = Math.min(startIndex + this.maxVisible, displayItems.length);
 
-		// Calculate max label width for alignment
-		const maxLabelWidth = Math.min(30, Math.max(...this.items.map((item) => visibleWidth(item.label))));
+		// Keep the value column usable as the terminal narrows.
+		const widestLabel = Math.max(...this.items.map((item) => visibleWidth(item.label)));
+		const labelCap = compact ? Math.max(8, Math.floor(width * 0.45)) : 30;
+		const maxLabelWidth = Math.max(1, Math.min(labelCap, widestLabel));
 
 		// Render visible items
 		for (let i = startIndex; i < endIndex; i++) {
@@ -131,13 +145,14 @@ export class SettingsList implements Component {
 			const prefixWidth = visibleWidth(prefix);
 
 			// Pad label to align values
-			const labelPadded = item.label + " ".repeat(Math.max(0, maxLabelWidth - visibleWidth(item.label)));
+			const label = truncateToWidth(item.label, maxLabelWidth, "");
+			const labelPadded = label + " ".repeat(Math.max(0, maxLabelWidth - visibleWidth(label)));
 			const labelText = this.theme.label(labelPadded, isSelected);
 
 			// Calculate space for value
-			const separator = "  ";
+			const separator = compact ? " " : "  ";
 			const usedWidth = prefixWidth + maxLabelWidth + visibleWidth(separator);
-			const valueMaxWidth = width - usedWidth - 2;
+			const valueMaxWidth = Math.max(1, width - usedWidth);
 
 			const valueText = this.theme.value(truncateToWidth(item.currentValue, valueMaxWidth, ""), isSelected);
 
@@ -153,8 +168,8 @@ export class SettingsList implements Component {
 		// Add description for selected item
 		const selectedItem = displayItems[this.selectedIndex];
 		if (selectedItem?.description) {
-			lines.push("");
-			const wrappedDesc = wrapTextWithAnsi(selectedItem.description, width - 4);
+			const descriptionIndent = compact ? 2 : 4;
+			const wrappedDesc = wrapTextWithAnsi(selectedItem.description, Math.max(1, width - descriptionIndent));
 			for (const line of wrappedDesc) {
 				lines.push(this.theme.description(`  ${line}`));
 			}
@@ -235,13 +250,18 @@ export class SettingsList implements Component {
 	}
 
 	private addHintLine(lines: string[], width: number): void {
-		lines.push("");
+		const compact = this.compactMode ?? width < 60;
+		if (!compact) lines.push("");
 		lines.push(
 			truncateToWidth(
 				this.theme.hint(
-					this.searchEnabled
-						? "  Type to search · Enter/Space to change · Esc to cancel"
-						: "  Enter/Space to change · Esc to cancel",
+					compact
+						? this.searchEnabled
+							? "  Type to search · Enter/Space change · Esc close"
+							: "  Enter/Space change · Esc close"
+						: this.searchEnabled
+							? "  Type to search · Enter/Space to change · Esc to cancel"
+							: "  Enter/Space to change · Esc to cancel",
 				),
 				width,
 			),

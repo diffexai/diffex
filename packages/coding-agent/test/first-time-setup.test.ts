@@ -10,7 +10,7 @@ import { initTheme } from "../src/modes/interactive/theme/theme.ts";
 import { stripAnsi } from "../src/utils/ansi.ts";
 
 describe("FirstTimeSetupComponent", () => {
-	it("uses the shared greater-than selection marker", () => {
+	it("uses the shared Diffex selection marker", () => {
 		initTheme("dark", false);
 		const component = new FirstTimeSetupComponent({
 			detectedTheme: "dark",

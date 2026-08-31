@@ -6,6 +6,10 @@ export interface LoaderIndicatorOptions {
 	frames?: string[];
 	/** Frame interval in milliseconds for animated indicators. */
 	intervalMs?: number;
+	/** Stable content rendered before both the message and indicator. */
+	prefix?: string;
+	/** Place the animated indicator after the message while preserving its frames. */
+	indicatorPosition?: "before" | "after";
 }
 
 const DEFAULT_FRAMES = [
@@ -45,6 +49,8 @@ export class Loader extends Text {
 	private spinnerColorFn: (str: string) => string;
 	private messageColorFn: (str: string) => string;
 	private message: string = "Loading...";
+	private prefix = "";
+	private indicatorPosition: "before" | "after" = "before";
 
 	constructor(
 		ui: TUI,
@@ -59,10 +65,6 @@ export class Loader extends Text {
 		this.messageColorFn = messageColorFn;
 		this.message = message;
 		this.setIndicator(indicator);
-	}
-
-	render(width: number): string[] {
-		return ["", ...super.render(width)];
 	}
 
 	start(): void {
@@ -83,9 +85,11 @@ export class Loader extends Text {
 	}
 
 	setIndicator(indicator?: LoaderIndicatorOptions): void {
-		this.renderIndicatorVerbatim = indicator !== undefined;
+		this.renderIndicatorVerbatim = indicator?.frames !== undefined;
 		this.frames = indicator?.frames !== undefined ? [...indicator.frames] : [...DEFAULT_FRAMES];
 		this.intervalMs = indicator?.intervalMs && indicator.intervalMs > 0 ? indicator.intervalMs : DEFAULT_INTERVAL_MS;
+		this.prefix = indicator?.prefix ?? "";
+		this.indicatorPosition = indicator?.indicatorPosition ?? "before";
 		this.currentFrame = 0;
 		this.start();
 	}
@@ -104,8 +108,12 @@ export class Loader extends Text {
 	private updateDisplay(): void {
 		const frame = this.frames[this.currentFrame] ?? "";
 		const renderedFrame = this.renderIndicatorVerbatim ? frame : this.spinnerColorFn(frame);
-		const indicator = frame.length > 0 ? `${renderedFrame} ` : "";
-		this.setText(`${indicator}${this.messageColorFn(this.message)}`);
+		const message = this.messageColorFn(this.message);
+		const content =
+			this.indicatorPosition === "after"
+				? `${message}${frame.length > 0 ? ` ${renderedFrame}` : ""}`
+				: `${frame.length > 0 ? `${renderedFrame} ` : ""}${message}`;
+		this.setText(`${this.prefix}${content}`);
 		if (this.ui) {
 			this.ui.requestRender();
 		}

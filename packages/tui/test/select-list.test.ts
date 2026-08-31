@@ -127,7 +127,7 @@ describe("SelectList", () => {
 		assert.ok(!rendered.join("\n").includes("(1/8)"));
 	});
 
-	it("uses a bracket selected prefix without a dash", () => {
+	it("uses the slim Diffex selected prefix", () => {
 		const list = new SelectList([{ value: "command", label: "command" }], 5, {
 			...testTheme,
 			selectedPrefix: (text: string) => `[${text}]`,
@@ -135,6 +135,6 @@ describe("SelectList", () => {
 		});
 		const rendered = list.render(80);
 
-		assert.equal(rendered[0], "[> ]{command}");
+		assert.equal(rendered[0], "[› ]{command}");
 	});
 });

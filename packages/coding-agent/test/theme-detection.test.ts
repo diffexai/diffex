@@ -1,7 +1,12 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type RgbColor, resetCapabilitiesCache, setCapabilities } from "@earendil-works/diffex-tui";
+import {
+	type RgbColor,
+	resetCapabilitiesCache,
+	SELECTED_LIST_PREFIX,
+	setCapabilities,
+} from "@earendil-works/diffex-tui";
 import { afterEach, describe, expect, it } from "vitest";
 import {
 	detectTerminalBackgroundFromEnv,
@@ -201,7 +206,9 @@ describe("selection theme", () => {
 		);
 		expect(getEditorTheme().selectList.selectedPrefix("> ")).toBe(`${theme.getFgAnsi("selectionAccent")}> \x1b[39m`);
 		expect(getSelectListTheme().selectedText("command")).toBe(`${theme.getFgAnsi("selectionAccent")}command\x1b[39m`);
-		expect(getSettingsListTheme().cursor).toBe(`${theme.getFgAnsi("selectionAccent")}> \x1b[39m`);
+		expect(getSettingsListTheme().cursor).toBe(
+			`${theme.getFgAnsi("selectionAccent")}${SELECTED_LIST_PREFIX}\x1b[39m`,
+		);
 	});
 
 	it("falls back for themes without selection or startup intro tokens", () => {

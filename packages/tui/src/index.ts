@@ -49,6 +49,8 @@ export {
 export type { EditorComponent } from "./editor-component.ts";
 // Fuzzy matching
 export { type FuzzyMatch, fuzzyFilter, fuzzyMatch } from "./fuzzy.ts";
+// Semantic terminal glyphs
+export { detectGlyphMode, type GlyphMode, getGlyphs, type TuiGlyphs } from "./glyphs.ts";
 // Keybindings
 export {
 	getKeybindings,

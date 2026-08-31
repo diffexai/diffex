@@ -1,4 +1,5 @@
 import { Marked, type Token, Tokenizer, type TokenizerExtension, type Tokens } from "marked";
+import { getGlyphs } from "../glyphs.ts";
 import { renderLatex } from "../latex.ts";
 import { getCapabilities, hyperlink, isImageLine } from "../terminal-image.ts";
 import type { Component } from "../tui.ts";
@@ -226,6 +227,8 @@ export interface MarkdownOptions {
 	transform?: (markdown: string, availableWidth: number) => string;
 	/** Render supported LaTeX math expressions as Unicode text (default: true). */
 	renderLatex?: boolean;
+	/** Table chrome. Compact tables use one header rule and no outer box. */
+	tableStyle?: "grid" | "compact";
 }
 
 interface InlineStyleContext {
@@ -841,14 +844,15 @@ export class Markdown implements Component {
 	): string[] {
 		const lines: string[] = [];
 		const numCols = token.header.length;
+		const compact = this.options.tableStyle === "compact";
 
 		if (numCols === 0) {
 			return lines;
 		}
 
-		// Calculate border overhead: "│ " + (n-1) * " │ " + " │"
-		// = 2 + (n-1) * 3 + 2 = 3n + 1
-		const borderOverhead = 3 * numCols + 1;
+		// Compact tables use two spaces between columns. Grid tables retain
+		// the legacy outer and inner borders for callers that need them.
+		const borderOverhead = compact ? Math.max(0, 2 * (numCols - 1)) : 3 * numCols + 1;
 		const availableForCells = availableWidth - borderOverhead;
 		if (availableForCells < numCols) {
 			// Too narrow to render a stable table. Fall back to raw markdown.
@@ -950,9 +954,10 @@ export class Markdown implements Component {
 			}
 		}
 
-		// Render top border
-		const topBorderCells = columnWidths.map((w) => "─".repeat(w));
-		lines.push(`┌─${topBorderCells.join("─┬─")}─┐`);
+		if (!compact) {
+			const topBorderCells = columnWidths.map((w) => "─".repeat(w));
+			lines.push(`┌─${topBorderCells.join("─┬─")}─┐`);
+		}
 
 		// Render header with wrapping
 		const headerCellLines: string[][] = token.header.map((cell, i) => {
@@ -967,12 +972,13 @@ export class Markdown implements Component {
 				const padded = text + " ".repeat(Math.max(0, columnWidths[colIdx] - visibleWidth(text)));
 				return this.theme.bold(padded);
 			});
-			lines.push(`│ ${rowParts.join(" │ ")} │`);
+			lines.push(compact ? rowParts.join("  ") : `│ ${rowParts.join(" │ ")} │`);
 		}
 
 		// Render separator
-		const separatorCells = columnWidths.map((w) => "─".repeat(w));
-		const separatorLine = `├─${separatorCells.join("─┼─")}─┤`;
+		const compactSeparator = getGlyphs().separator;
+		const separatorCells = columnWidths.map((w) => (compact ? compactSeparator : "─").repeat(w));
+		const separatorLine = compact ? separatorCells.join("  ") : `├─${separatorCells.join("─┼─")}─┤`;
 		lines.push(separatorLine);
 
 		// Render rows with wrapping
@@ -989,17 +995,18 @@ export class Markdown implements Component {
 					const text = cellLines[lineIdx] || "";
 					return text + " ".repeat(Math.max(0, columnWidths[colIdx] - visibleWidth(text)));
 				});
-				lines.push(`│ ${rowParts.join(" │ ")} │`);
+				lines.push(compact ? rowParts.join("  ") : `│ ${rowParts.join(" │ ")} │`);
 			}
 
-			if (rowIndex < token.rows.length - 1) {
+			if (!compact && rowIndex < token.rows.length - 1) {
 				lines.push(separatorLine);
 			}
 		}
 
-		// Render bottom border
-		const bottomBorderCells = columnWidths.map((w) => "─".repeat(w));
-		lines.push(`└─${bottomBorderCells.join("─┴─")}─┘`);
+		if (!compact) {
+			const bottomBorderCells = columnWidths.map((w) => "─".repeat(w));
+			lines.push(`└─${bottomBorderCells.join("─┴─")}─┘`);
+		}
 
 		if (nextTokenType && nextTokenType !== "space") {
 			lines.push(""); // Add spacing after table

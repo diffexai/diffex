@@ -1,3 +1,4 @@
+import { getGlyphs } from "../glyphs.ts";
 import { getKeybindings } from "../keybindings.ts";
 import type { Component } from "../tui.ts";
 import { truncateToWidth, visibleWidth } from "../utils.ts";
@@ -5,7 +6,7 @@ import { truncateToWidth, visibleWidth } from "../utils.ts";
 const DEFAULT_PRIMARY_COLUMN_WIDTH = 32;
 const PRIMARY_COLUMN_GAP = 2;
 const MIN_DESCRIPTION_WIDTH = 10;
-export const SELECTED_LIST_PREFIX = "> ";
+export const SELECTED_LIST_PREFIX = `${getGlyphs().selected} `;
 export const UNSELECTED_LIST_PREFIX = "  ";
 
 const normalizeToSingleLine = (text: string): string => text.replace(/[\r\n]+/g, " ").trim();

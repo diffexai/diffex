@@ -1,6 +1,7 @@
 import assert from "node:assert";
 import { describe, it } from "node:test";
 import { SettingsList, type SettingsListTheme } from "../src/components/settings-list.ts";
+import { visibleWidth } from "../src/utils.ts";
 
 const testTheme: SettingsListTheme = {
 	label: (text) => text,
@@ -54,5 +55,53 @@ describe("SettingsList", () => {
 		list.handleInput(" ");
 
 		assert.deepStrictEqual(changes, [{ id: "tui-mode", value: "fullscreen" }]);
+	});
+
+	it("uses a compact, width-safe layout in narrow terminals", () => {
+		const list = new SettingsList(
+			[
+				{
+					...items[0]!,
+					description: "Choose how Diffex uses the terminal viewport.",
+				},
+			],
+			10,
+			testTheme,
+			() => {},
+			() => {},
+		);
+
+		const rendered = list.render(32);
+
+		assert.ok(rendered.every((line) => line !== ""));
+		assert.ok(rendered.every((line) => visibleWidth(line) <= 32));
+		assert.match(rendered[0]!, /^> TUI mode/);
+		assert.match(rendered.at(-1)!, /Enter\/Space change/);
+	});
+
+	it("can compact a searchable list to a short viewport without losing its search hint", () => {
+		const list = new SettingsList(
+			Array.from({ length: 6 }, (_, index) => ({
+				id: `setting-${index}`,
+				label: `Setting ${index}`,
+				description: index === 0 ? "Selected setting description" : undefined,
+				currentValue: "true",
+				values: ["true", "false"],
+			})),
+			10,
+			testTheme,
+			() => {},
+			() => {},
+			{ enableSearch: true },
+		);
+		list.setMaxVisible(3);
+		list.setCompactMode(true);
+
+		const rendered = list.render(80);
+
+		assert.strictEqual(rendered.length, 7);
+		assert.ok(rendered.every((line) => line !== ""));
+		assert.match(rendered[4]!, /\(1\/6\)/);
+		assert.match(rendered.at(-1)!, /Type to search.*Enter\/Space change.*Esc close/);
 	});
 });
