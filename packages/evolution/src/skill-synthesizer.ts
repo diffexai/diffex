@@ -420,11 +420,22 @@ export class StructuredSkillSynthesizer implements SkillSynthesizer {
 				input.signal,
 			);
 		} catch (error) {
-			if (error instanceof EvolutionExecutionError) throw error;
+			if (error instanceof EvolutionExecutionError) {
+				throw new EvolutionExecutionError(error.message, {
+					reasonCode: error.reasonCode,
+					retryable: error.retryable,
+					cause: error,
+					diagnostics: {
+						request: jsonObject(requestDiagnostics),
+						failure: error.diagnostics,
+					},
+				});
+			}
 			throw new EvolutionExecutionError("Skill synthesizer failed to produce a draft", {
 				reasonCode: "skill-synthesis-invalid-response",
 				retryable: false,
 				cause: error,
+				diagnostics: { request: jsonObject(requestDiagnostics) },
 			});
 		}
 		let output: ReturnType<typeof parseOutput>;
@@ -435,7 +446,7 @@ export class StructuredSkillSynthesizer implements SkillSynthesizer {
 				reasonCode: "skill-synthesis-invalid-response",
 				retryable: false,
 				cause: error,
-				diagnostics: { output: response.output },
+				diagnostics: { request: jsonObject(requestDiagnostics), output: response.output },
 			});
 		}
 		const { content, files } = output;

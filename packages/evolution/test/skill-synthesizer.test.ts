@@ -110,6 +110,7 @@ function inputSnapshot(
 	traceId: string,
 	terminationStatus: MaterializedInvocation["terminationStatus"],
 	skill: EvolutionSkillContentArtifact,
+	repositoryInstruction = "Run focused tests after changing code.",
 ): EvolutionInputSnapshot {
 	const materialized = invocation(evidenceItem, traceId, terminationStatus);
 	const skillReference = reference(skill);
@@ -144,8 +145,8 @@ function inputSnapshot(
 			{
 				path: "/repo/AGENTS.md",
 				precedence: 0,
-				content: "Run focused tests after changing code.",
-				contentDigest: computeEvolutionTextDigest("Run focused tests after changing code."),
+				content: repositoryInstruction,
+				contentDigest: computeEvolutionTextDigest(repositoryInstruction),
 			},
 			{
 				path: "/repo/packages/evolution/AGENTS.md",
@@ -428,7 +429,10 @@ class MemoryJobStore implements EvolutionJobStore {
 	}
 }
 
-function fixture(state: SkillCandidateGroup["state"] = "evidence-qualified") {
+function fixture(
+	state: SkillCandidateGroup["state"] = "evidence-qualified",
+	repositoryInstruction = "Run focused tests after changing code.",
+) {
 	const skill = existingSkill();
 	const successfulInput = inputSnapshot(
 		"success",
@@ -443,6 +447,7 @@ function fixture(state: SkillCandidateGroup["state"] = "evidence-qualified") {
 		"trace-failure",
 		"failed",
 		skill,
+		repositoryInstruction,
 	);
 	const first = candidate("candidate-1", successfulInput, ["support-1"], []);
 	const second = candidate("candidate-2", failedInput, [], ["failure-1"]);
@@ -752,6 +757,67 @@ describe("StructuredSkillSynthesizer", () => {
 					maxOutputTokens: 1_000,
 					inputBudgetTokens: 0,
 					schemaDigest: expect.stringMatching(/^sha256:/),
+					capsuleDigest: data.group.canonicalCapsule.contentDigest,
+					requestDigest: expect.stringMatching(/^sha256:/),
+				},
+			},
+		});
+		expect(called).toBe(false);
+	});
+
+	it("persists request diagnostics when provider execution fails", async () => {
+		const data = fixture();
+
+		await expect(
+			data.synthesizer.synthesize({
+				group: data.group,
+				model: {
+					maxProviderCallsPerExecution: 20,
+					getModelLimits: () => ({ contextWindow: 128_000, maxOutputTokens: 16_384 }),
+					async execute(): Promise<never> {
+						throw new Error("provider unavailable");
+					},
+				},
+				idempotencyKey: data.group.synthesisIdempotencyKey,
+				createdAt,
+			}),
+		).rejects.toMatchObject({
+			name: "EvolutionExecutionError",
+			diagnostics: {
+				request: {
+					capsuleDigest: data.group.canonicalCapsule.contentDigest,
+					requestDigest: expect.stringMatching(/^sha256:/),
+				},
+			},
+		});
+	});
+
+	it("rejects multi-megabyte frozen instructions before provider invocation", async () => {
+		const repositoryInstruction = "Required repository instruction.\n".repeat(80_000);
+		expect(Buffer.byteLength(repositoryInstruction)).toBeGreaterThan(2_000_000);
+		const data = fixture("evidence-qualified", repositoryInstruction);
+		let called = false;
+
+		await expect(
+			data.synthesizer.synthesize({
+				group: data.group,
+				model: {
+					maxProviderCallsPerExecution: 20,
+					getModelLimits: () => ({ contextWindow: 128_000, maxOutputTokens: 16_384 }),
+					async execute(): Promise<never> {
+						called = true;
+						throw new Error("unexpected model call");
+					},
+				},
+				idempotencyKey: data.group.synthesisIdempotencyKey,
+				createdAt,
+			}),
+		).rejects.toMatchObject({
+			reasonCode: "skill-synthesis-request-too-large",
+			diagnostics: {
+				request: {
+					inputSerializedBytes: expect.any(Number),
+					contextWindow: 128_000,
 					capsuleDigest: data.group.canonicalCapsule.contentDigest,
 					requestDigest: expect.stringMatching(/^sha256:/),
 				},
