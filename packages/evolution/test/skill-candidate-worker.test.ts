@@ -799,7 +799,7 @@ describe("skill candidate registry worker", () => {
 		]);
 	});
 
-	it("continues processing later candidates when one synthesis fails", async () => {
+	it("skips an oversized synthesis request and continues processing later candidates", async () => {
 		const data = fixture(true);
 		const candidateReference = data.job.checkpoints[0]?.outputArtifacts[0];
 		if (candidateReference === undefined) throw new Error("Expected candidate reference");
@@ -820,15 +820,12 @@ describe("skill candidate registry worker", () => {
 				evaluationIdempotencyKey: "skill-evaluation-succeeding",
 			},
 		);
-		const providerError = new Error("Provider rejected the structured response");
-		providerError.name = "ProviderError";
 		data.synthesisFailures.set(
 			"group-failing",
-			new EvolutionExecutionError("Skill synthesizer failed to produce a draft", {
-				reasonCode: "skill-synthesis-invalid-response",
+			new EvolutionExecutionError("Skill synthesis request exceeds the selected model context", {
+				reasonCode: "skill-synthesis-request-too-large",
 				retryable: false,
-				cause: providerError,
-				diagnostics: { lastCorrection: "files must be an array" },
+				diagnostics: { request: { ...synthesisRequestFixture } },
 			}),
 		);
 
@@ -858,11 +855,11 @@ describe("skill candidate registry worker", () => {
 					synthesisIdempotencyKey: "skill-synthesis-failing",
 					error: {
 						name: "EvolutionExecutionError",
-						message: "Skill synthesizer failed to produce a draft",
-						reasonCode: "skill-synthesis-invalid-response",
+						message: "Skill synthesis request exceeds the selected model context",
+						reasonCode: "skill-synthesis-request-too-large",
 						retryable: false,
-						diagnostics: { lastCorrection: "files must be an array" },
-						cause: { name: "ProviderError", message: "Provider rejected the structured response" },
+						diagnostics: { request: synthesisRequestFixture },
+						cause: null,
 					},
 				},
 			],

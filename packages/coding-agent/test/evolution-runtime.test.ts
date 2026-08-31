@@ -729,6 +729,58 @@ describe("coding-agent evolution runtime", () => {
 		});
 	});
 
+	it("uses the resolved runtime model output limit for synthesis", async () => {
+		const harness = await createHarness();
+		harnesses.push(harness);
+		const model = harness.getModel();
+		let maxTokens: number | undefined;
+		const response = fauxAssistantMessage(fauxToolCall("submit_evolution_response", { complete: true }), {
+			stopReason: "toolUse",
+		});
+		const modelRuntime = {
+			getModel() {
+				return model;
+			},
+			streamSimple(
+				_model: unknown,
+				_context: unknown,
+				options?: { maxTokens?: number },
+			) {
+				maxTokens = options?.maxTokens;
+				return {
+					[Symbol.asyncIterator]() {
+						return {
+							next: async () => ({ done: false as const, value: { type: "done" as const, message: response } }),
+						};
+					},
+				};
+			},
+		} as unknown as ModelRuntime;
+		const executor = new CodingAgentEvolutionModelExecutor(harness.session, modelRuntime, {
+			async waitUntilBackgroundAllowed() {},
+		});
+		const modelIdentity = {
+			provider: model.provider,
+			model: model.id,
+			configurationDigest: `sha256:${"1".repeat(64)}`,
+		};
+		const limits = executor.getModelLimits(modelIdentity);
+
+		await expect(
+			executor.execute({
+				stage: "skill-synthesizer",
+				model: modelIdentity,
+				promptVersion: "skill-synthesizer-v1",
+				idempotencyKey: "bounded-synthesis-output",
+				input: {},
+				outputSchema: { type: "object" },
+				tools: [],
+				...synthesisRequestBudget(limits),
+			}),
+		).resolves.toMatchObject({ output: { complete: true } });
+		expect(maxTokens).toBe(model.maxTokens);
+	});
+
 	it("classifies deterministic provider stops as non-retryable", async () => {
 		const harness = await createHarness();
 		harnesses.push(harness);
