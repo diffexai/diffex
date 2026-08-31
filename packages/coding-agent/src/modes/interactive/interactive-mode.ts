@@ -173,6 +173,7 @@ import {
 } from "./components/status-indicator.ts";
 import { SubagentsComponent } from "./components/subagents.ts";
 import { ToolExecutionComponent } from "./components/tool-execution.ts";
+import { ToolGroupComponent } from "./components/tool-group.ts";
 import { TreeSelectorComponent } from "./components/tree-selector.ts";
 import { TrustSelectorComponent } from "./components/trust-selector.ts";
 import { UserMessageComponent } from "./components/user-message.ts";
@@ -535,6 +536,8 @@ export class InteractiveMode {
 
 	// Tool execution tracking: toolCallId -> component
 	private pendingTools = new Map<string, ToolExecutionComponent>();
+	private activeToolGroup: ToolGroupComponent | undefined = undefined;
+	private turnBoundaryPending = false;
 
 	// Tool output expansion state
 	private toolOutputExpanded = false;
@@ -2056,6 +2059,8 @@ export class InteractiveMode {
 		this.streamingComponent = undefined;
 		this.streamingMessage = undefined;
 		this.pendingTools.clear();
+		this.activeToolGroup = undefined;
+		this.turnBoundaryPending = false;
 		this.renderInitialMessages();
 	}
 
@@ -2064,6 +2069,87 @@ export class InteractiveMode {
 	 */
 	private getRegisteredToolDefinition(toolName: string) {
 		return this.session.getToolDefinition(toolName);
+	}
+
+	private createToolExecutionComponent(toolName: string, toolCallId: string, args: unknown): ToolExecutionComponent {
+		const component = new ToolExecutionComponent(
+			toolName,
+			toolCallId,
+			args,
+			{
+				showImages: this.settingsManager.getShowImages(),
+				imageWidthCells: this.settingsManager.getImageWidthCells(),
+			},
+			this.getRegisteredToolDefinition(toolName),
+			this.ui,
+			this.sessionManager.getCwd(),
+		);
+		component.setExpanded(this.toolOutputExpanded);
+		return component;
+	}
+
+	private getOrCreateActiveToolGroup(): ToolGroupComponent {
+		if (!this.activeToolGroup) {
+			this.activeToolGroup = new ToolGroupComponent(this.outputPad);
+			this.addChatSpacer();
+			this.chatContainer.addChild(this.activeToolGroup);
+		}
+		return this.activeToolGroup;
+	}
+
+	private getOrCreateLiveTool(toolName: string, toolCallId: string, args: unknown): ToolExecutionComponent {
+		const existing = this.pendingTools.get(toolCallId) ?? this.activeToolGroup?.getTool(toolCallId);
+		if (existing) {
+			existing.updateArgs(args);
+			return existing;
+		}
+
+		const component = this.createToolExecutionComponent(toolName, toolCallId, args);
+		this.getOrCreateActiveToolGroup().addTool(toolCallId, component);
+		this.pendingTools.set(toolCallId, component);
+		return component;
+	}
+
+	private completeTranscriptTurn(): void {
+		this.activeToolGroup?.markSettled();
+		this.activeToolGroup = undefined;
+		this.turnBoundaryPending = true;
+	}
+
+	private addChatSpacer(): Spacer | undefined {
+		const lastChild = this.chatContainer.children.at(-1);
+		if (!lastChild || lastChild instanceof Spacer) {
+			return lastChild instanceof Spacer ? lastChild : undefined;
+		}
+		const spacer = new Spacer(1);
+		this.chatContainer.addChild(spacer);
+		return spacer;
+	}
+
+	private flushTranscriptBoundary(): void {
+		if (!this.turnBoundaryPending) {
+			return;
+		}
+		this.turnBoundaryPending = false;
+		if (this.chatContainer.children.length === 0) {
+			return;
+		}
+
+		let lastNonSpacer: Component | undefined;
+		for (let index = this.chatContainer.children.length - 1; index >= 0; index--) {
+			const child = this.chatContainer.children[index];
+			if (child && !(child instanceof Spacer)) {
+				lastNonSpacer = child;
+				break;
+			}
+		}
+		if (lastNonSpacer instanceof DynamicBorder) {
+			return;
+		}
+
+		this.addChatSpacer();
+		this.chatContainer.addChild(new DynamicBorder());
+		this.chatContainer.addChild(new Spacer(1));
 	}
 
 	private getMarkdownTransformers(): MarkdownTransformer[] {
@@ -3205,6 +3291,16 @@ export class InteractiveMode {
 				this.ui.requestRender();
 				break;
 
+			case "turn_start":
+				this.flushTranscriptBoundary();
+				this.ui.requestRender();
+				break;
+
+			case "turn_end":
+				this.completeTranscriptTurn();
+				this.ui.requestRender();
+				break;
+
 			case "queue_update":
 				this.updatePendingMessagesDisplay();
 				this.ui.requestRender();
@@ -3259,28 +3355,7 @@ export class InteractiveMode {
 
 					for (const content of this.streamingMessage.content) {
 						if (content.type === "toolCall") {
-							if (!this.pendingTools.has(content.id)) {
-								const component = new ToolExecutionComponent(
-									content.name,
-									content.id,
-									content.arguments,
-									{
-										showImages: this.settingsManager.getShowImages(),
-										imageWidthCells: this.settingsManager.getImageWidthCells(),
-									},
-									this.getRegisteredToolDefinition(content.name),
-									this.ui,
-									this.sessionManager.getCwd(),
-								);
-								component.setExpanded(this.toolOutputExpanded);
-								this.chatContainer.addChild(component);
-								this.pendingTools.set(content.id, component);
-							} else {
-								const component = this.pendingTools.get(content.id);
-								if (component) {
-									component.updateArgs(content.arguments);
-								}
-							}
+							this.getOrCreateLiveTool(content.name, content.id, content.arguments);
 						}
 					}
 					this.ui.requestRender();
@@ -3332,24 +3407,7 @@ export class InteractiveMode {
 				break;
 
 			case "tool_execution_start": {
-				let component = this.pendingTools.get(event.toolCallId);
-				if (!component) {
-					component = new ToolExecutionComponent(
-						event.toolName,
-						event.toolCallId,
-						event.args,
-						{
-							showImages: this.settingsManager.getShowImages(),
-							imageWidthCells: this.settingsManager.getImageWidthCells(),
-						},
-						this.getRegisteredToolDefinition(event.toolName),
-						this.ui,
-						this.sessionManager.getCwd(),
-					);
-					component.setExpanded(this.toolOutputExpanded);
-					this.chatContainer.addChild(component);
-					this.pendingTools.set(event.toolCallId, component);
-				}
+				const component = this.getOrCreateLiveTool(event.toolName, event.toolCallId, event.args);
 				component.markExecutionStarted();
 				this.ui.requestRender();
 				break;
@@ -3384,6 +3442,7 @@ export class InteractiveMode {
 					this.streamingComponent = undefined;
 					this.streamingMessage = undefined;
 				}
+				this.completeTranscriptTurn();
 				if (this.agentResponseStartMs !== undefined) {
 					const summary = formatResponseUsageSummary(event.messages, Date.now() - this.agentResponseStartMs);
 					this.agentResponseStartMs = undefined;
@@ -3391,6 +3450,7 @@ export class InteractiveMode {
 						this.showStatus(summary);
 					}
 				}
+				this.flushTranscriptBoundary();
 				this.pendingTools.clear();
 
 				this.ui.requestRender();
@@ -3644,9 +3704,7 @@ export class InteractiveMode {
 			case "user": {
 				const textContent = this.getUserMessageText(message);
 				if (textContent) {
-					if (this.chatContainer.children.length > 0) {
-						this.chatContainer.addChild(new Spacer(1));
-					}
+					this.addChatSpacer();
 					const skillInvocation = parseSkillInvocation(textContent);
 					if (skillInvocation) {
 						for (const skillBlock of skillInvocation.skills) {
@@ -3709,7 +3767,18 @@ export class InteractiveMode {
 		options: { updateFooter?: boolean; populateHistory?: boolean } = {},
 	): void {
 		this.pendingTools.clear();
+		this.activeToolGroup = undefined;
+		this.turnBoundaryPending = false;
 		const renderedPendingTools = new Map<string, ToolExecutionComponent>();
+		let replayTurnOpen = false;
+		const completeReplayTurn = () => {
+			if (!replayTurnOpen) {
+				return;
+			}
+			this.completeTranscriptTurn();
+			this.flushTranscriptBoundary();
+			replayTurnOpen = false;
+		};
 		// Cache-miss notices are not persisted; re-derive them from the full entry
 		// list and re-inject them after the assistant messages that paid for them.
 		const cacheMisses = this.settingsManager.getShowCacheMissNotices()
@@ -3730,24 +3799,14 @@ export class InteractiveMode {
 			const message = item;
 			// Assistant messages need special handling for tool calls
 			if (message.role === "assistant") {
+				completeReplayTurn();
 				this.addMessageToChat(message);
+				replayTurnOpen = true;
 				// Render tool call components
 				for (const content of message.content) {
 					if (content.type === "toolCall") {
-						const component = new ToolExecutionComponent(
-							content.name,
-							content.id,
-							content.arguments,
-							{
-								showImages: this.settingsManager.getShowImages(),
-								imageWidthCells: this.settingsManager.getImageWidthCells(),
-							},
-							this.getRegisteredToolDefinition(content.name),
-							this.ui,
-							this.sessionManager.getCwd(),
-						);
-						component.setExpanded(this.toolOutputExpanded);
-						this.chatContainer.addChild(component);
+						const component = this.createToolExecutionComponent(content.name, content.id, content.arguments);
+						this.getOrCreateActiveToolGroup().addTool(content.id, component);
 
 						if (message.stopReason === "aborted" || message.stopReason === "error") {
 							let errorMessage: string;
@@ -3779,8 +3838,13 @@ export class InteractiveMode {
 				}
 			} else {
 				// All other messages use standard rendering
+				completeReplayTurn();
 				this.addMessageToChat(message, options);
 			}
+		}
+
+		if (replayTurnOpen && renderedPendingTools.size === 0) {
+			completeReplayTurn();
 		}
 
 		for (const [toolCallId, component] of renderedPendingTools) {
@@ -3860,7 +3924,7 @@ export class InteractiveMode {
 		}
 
 		if (this.chatContainer.children.length > 0) {
-			this.chatContainer.addChild(new Spacer(1));
+			this.addChatSpacer();
 		}
 		this.chatContainer.addChild(
 			new Text(
@@ -4644,7 +4708,7 @@ export class InteractiveMode {
 					onShowImagesChange: (enabled) => {
 						this.settingsManager.setShowImages(enabled);
 						for (const child of this.chatContainer.children) {
-							if (child instanceof ToolExecutionComponent) {
+							if (child instanceof ToolExecutionComponent || child instanceof ToolGroupComponent) {
 								child.setShowImages(enabled);
 							}
 						}
@@ -4652,7 +4716,7 @@ export class InteractiveMode {
 					onImageWidthCellsChange: (width) => {
 						this.settingsManager.setImageWidthCells(width);
 						for (const child of this.chatContainer.children) {
-							if (child instanceof ToolExecutionComponent) {
+							if (child instanceof ToolExecutionComponent || child instanceof ToolGroupComponent) {
 								child.setImageWidthCells(width);
 							}
 						}
@@ -4745,7 +4809,8 @@ export class InteractiveMode {
 								if (
 									child instanceof AssistantMessageComponent ||
 									child instanceof CustomMessageComponent ||
-									child instanceof UserMessageComponent
+									child instanceof UserMessageComponent ||
+									child instanceof ToolGroupComponent
 								) {
 									child.setOutputPad(padding);
 								}

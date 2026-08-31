@@ -175,6 +175,8 @@ describe("InteractiveMode.handleEvent response usage summary", () => {
 				streamingComponent: undefined,
 				chatContainer: { removeChild: vi.fn() },
 				pendingTools: new Map(),
+				completeTranscriptTurn: vi.fn(),
+				flushTranscriptBoundary: vi.fn(),
 				agentResponseStartMs: 1000,
 				showStatus: vi.fn(),
 			};

@@ -5,6 +5,7 @@ import { beforeAll, describe, expect, test, vi } from "vitest";
 import type { AgentSessionEvent } from "../../../src/core/agent-session.ts";
 import type { SessionEntry } from "../../../src/core/session-manager.ts";
 import type { ToolExecutionComponent } from "../../../src/modes/interactive/components/tool-execution.ts";
+import type { ToolGroupComponent } from "../../../src/modes/interactive/components/tool-group.ts";
 import { InteractiveMode } from "../../../src/modes/interactive/interactive-mode.ts";
 import { initTheme } from "../../../src/modes/interactive/theme/theme.ts";
 import { stripAnsi } from "../../../src/utils/ansi.ts";
@@ -35,6 +36,8 @@ type RenderSessionItems = (
 
 type RenderSessionContextThis = {
 	pendingTools: Map<string, ToolExecutionComponent>;
+	activeToolGroup: ToolGroupComponent | undefined;
+	turnBoundaryPending: boolean;
 	chatContainer: Container;
 	footer: { invalidate(): void };
 	ui: TUI;
@@ -46,6 +49,7 @@ type RenderSessionContextThis = {
 	sessionManager: { getCwd(): string; getEntries(): SessionEntry[] };
 	session: { retryAttempt: number; modelRegistry: { find(provider: string, modelId: string): undefined } };
 	toolOutputExpanded: boolean;
+	outputPad: number;
 	isInitialized: boolean;
 	updateEditorBorderColor(): void;
 	getRegisteredToolDefinition(toolName: string): undefined;
@@ -63,8 +67,10 @@ type HandleEvent = (this: RenderSessionContextThis, event: AgentSessionEvent) =>
 
 function createFakeInteractiveModeThis(): RenderSessionContextThis {
 	const chatContainer = new Container();
-	return {
+	const context = {
 		pendingTools: new Map<string, ToolExecutionComponent>(),
+		activeToolGroup: undefined,
+		turnBoundaryPending: false,
 		chatContainer,
 		footer: { invalidate: vi.fn() },
 		ui: { requestRender: vi.fn() } as unknown as TUI,
@@ -76,6 +82,7 @@ function createFakeInteractiveModeThis(): RenderSessionContextThis {
 		sessionManager: { getCwd: () => process.cwd(), getEntries: () => [] },
 		session: { retryAttempt: 0, modelRegistry: { find: () => undefined } },
 		toolOutputExpanded: false,
+		outputPad: 1,
 		isInitialized: true,
 		updateEditorBorderColor: vi.fn(),
 		getRegisteredToolDefinition: (_toolName: string) => undefined,
@@ -85,6 +92,8 @@ function createFakeInteractiveModeThis(): RenderSessionContextThis {
 			chatContainer.addChild(new Text(message.role, 0, 0));
 		},
 	};
+	Object.setPrototypeOf(context, InteractiveMode.prototype);
+	return context;
 }
 
 function createAssistantToolCallMessage(): AssistantMessage {
