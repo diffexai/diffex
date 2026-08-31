@@ -741,11 +741,7 @@ describe("coding-agent evolution runtime", () => {
 			getModel() {
 				return model;
 			},
-			streamSimple(
-				_model: unknown,
-				_context: unknown,
-				options?: { maxTokens?: number },
-			) {
+			streamSimple(_model: unknown, _context: unknown, options?: { maxTokens?: number }) {
 				maxTokens = options?.maxTokens;
 				return {
 					[Symbol.asyncIterator]() {
