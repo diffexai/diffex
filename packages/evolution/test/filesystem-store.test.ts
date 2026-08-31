@@ -385,6 +385,18 @@ describe("filesystem evolution persistence", () => {
 		).rejects.toThrow("contiguous sequence");
 	});
 
+	it("rejects candidate work failures without stage diagnostics", async () => {
+		const { store } = await storeFixture();
+		const complete = candidateWorkFailureEvent("candidate-event-1", 1);
+		if (complete.type !== "skill-candidate-work-failed") throw new Error("Expected candidate work failure");
+		const { stage: _stage, diagnostics: _diagnostics, ...incompleteContent } = complete;
+		const incomplete = incompleteContent as unknown as SkillCandidateRegistryEvent;
+
+		await expect(store.appendSkillCandidateRegistryEvents(scope, 0, [incomplete])).rejects.toThrow(
+			"skill candidate registry event is invalid",
+		);
+	});
+
 	it("fences candidate registry appends with a candidate-work lease", async () => {
 		const { store } = await storeFixture();
 		const now = new Date().toISOString();
