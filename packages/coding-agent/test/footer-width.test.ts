@@ -1,6 +1,6 @@
 import type { HarnessVersion } from "@earendil-works/diffex-harness-state";
-import { visibleWidth } from "@earendil-works/diffex-tui";
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import { setKeybindings, visibleWidth } from "@earendil-works/diffex-tui";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	AUTOMATIC_EVOLUTION_TOKEN_THRESHOLD,
 	type EvolutionHarnessVersionInfo,
@@ -9,11 +9,23 @@ import {
 import type { AgentSession } from "../src/core/agent-session.ts";
 import type { EvolutionRuntimeEvent } from "../src/core/evolution-runtime.ts";
 import type { ReadonlyFooterDataProvider } from "../src/core/footer-data-provider.ts";
+import { KeybindingsManager } from "../src/core/keybindings.ts";
 import type { EvolutionFooterStatusClient } from "../src/modes/interactive/components/evolution-footer-status.ts";
 import { FooterComponent, formatCwdForFooter } from "../src/modes/interactive/components/footer.ts";
 import { formatEvolutionTimestamp } from "../src/modes/interactive/components/harness-version-display.ts";
 import { initTheme, theme } from "../src/modes/interactive/theme/theme.ts";
 import { stripAnsi } from "../src/utils/ansi.ts";
+
+const originalNoColor = process.env.NO_COLOR;
+
+afterAll(() => {
+	if (originalNoColor === undefined) {
+		delete process.env.NO_COLOR;
+	} else {
+		process.env.NO_COLOR = originalNoColor;
+	}
+	initTheme("dark", false);
+});
 
 type AssistantUsage = {
 	input: number;
@@ -135,10 +147,13 @@ function evolutionOverview(
 	};
 }
 
-function createFooterData(providerCount: number): ReadonlyFooterDataProvider {
+function createFooterData(
+	providerCount: number,
+	extensionStatuses: ReadonlyMap<string, string> = new Map(),
+): ReadonlyFooterDataProvider {
 	const provider = {
 		getGitBranch: () => "main",
-		getExtensionStatuses: () => new Map<string, string>(),
+		getExtensionStatuses: () => extensionStatuses,
 		getAvailableProviderCount: () => providerCount,
 		onBranchChange: (callback: () => void) => {
 			void callback;
@@ -161,8 +176,10 @@ describe("formatCwdForFooter", () => {
 });
 
 describe("FooterComponent width handling", () => {
-	beforeAll(() => {
+	beforeEach(() => {
+		process.env.NO_COLOR = "";
 		initTheme(undefined, false);
+		setKeybindings(new KeybindingsManager());
 	});
 
 	it("keeps all lines within width for wide session names", () => {
@@ -200,7 +217,7 @@ describe("FooterComponent width handling", () => {
 		}
 	});
 
-	it("shows harness status on a second row aligned below the model", () => {
+	it("shows model, thinking, context, and harness on one priority row", () => {
 		const session = createSession({
 			sessionName: "",
 			modelId: "gpt-5.5",
@@ -208,11 +225,13 @@ describe("FooterComponent width handling", () => {
 		});
 		const footer = new FooterComponent(session, createFooterData(1));
 
-		const [statsLine, harnessLine] = footer.render(120).map(stripAnsi);
-		expect(statsLine).toBe("gpt-5.5 medium • Context 12.3% used • 200k window");
-		expect(harnessLine).toBe("Harness default");
-		expect(statsLine?.startsWith("gpt-5.5")).toBe(true);
-		expect(harnessLine?.startsWith("Harness")).toBe(true);
+		const lines = footer.render(120).map(stripAnsi);
+		expect(lines).toHaveLength(1);
+		expect(lines[0]).toContain("gpt-5.5");
+		expect(lines[0]).toContain("thinking medium");
+		expect(lines[0]).toContain("context 12.3% / 200k");
+		expect(lines[0]).toContain("harness default");
+		expect(lines[0]).toContain("/hotkeys");
 	});
 
 	it("uses dedicated colors for footer model, context usage, and context window", () => {
@@ -224,9 +243,74 @@ describe("FooterComponent width handling", () => {
 		const footer = new FooterComponent(session, createFooterData(1));
 
 		const statsLine = footer.render(120)[0];
-		expect(statsLine).toContain(theme.fg("footerModel", "gpt-5.5 medium"));
-		expect(statsLine).toContain(theme.fg("footerContext", "Context 12.3% used"));
-		expect(statsLine).toContain(theme.fg("footerWindow", "200k window"));
+		expect(statsLine).toContain(theme.fg("footerModel", "gpt-5.5"));
+		expect(statsLine).toContain(theme.fg("thinkingText", "thinking medium"));
+		expect(statsLine).toContain(theme.fg("footerContext", "context 12.3%"));
+		expect(statsLine).toContain(theme.fg("footerWindow", "200k"));
+	});
+
+	it("keeps model and context visible instead of truncating the full row at narrow widths", () => {
+		const session = createSession({
+			sessionName: "",
+			modelId: "very-long-model-name-that-needs-compacting",
+			thinkingLevel: "high",
+		});
+		const footer = new FooterComponent(session, createFooterData(1));
+
+		const lines = footer.render(32);
+		const line = stripAnsi(lines[0] ?? "");
+
+		expect(lines).toHaveLength(1);
+		expect(line).toContain("very-long");
+		expect(line).toContain("12%");
+		expect(visibleWidth(lines[0] ?? "")).toBeLessThanOrEqual(32);
+	});
+
+	it("derives wide-screen hints from configured keybindings", () => {
+		setKeybindings(
+			new KeybindingsManager({
+				"app.thinking.cycle": "alt+t",
+				"app.model.cycleForward": "alt+m",
+			}),
+		);
+		const session = createSession({ sessionName: "", modelId: "gpt-5.5", thinkingLevel: "medium" });
+		const footer = new FooterComponent(session, createFooterData(1));
+
+		const line = stripAnsi(footer.render(160)[0] ?? "");
+
+		const altKey = process.platform === "darwin" ? "option" : "alt";
+		expect(line).toContain(`${altKey}+t thinking`);
+		expect(line).toContain(`${altKey}+m model`);
+		expect(line).toContain("/hotkeys");
+	});
+
+	it("keeps extension statuses on the same row when space permits", () => {
+		const session = createSession({ sessionName: "", modelId: "gpt-5.5", thinkingLevel: "medium" });
+		const footer = new FooterComponent(session, createFooterData(1, new Map([["review", "review ready"]])));
+
+		const lines = footer.render(160).map(stripAnsi);
+
+		expect(lines).toHaveLength(1);
+		expect(lines[0]).toContain("review ready");
+	});
+
+	it("prioritizes extension statuses over optional hints at standard width", () => {
+		const session = createSession({
+			sessionName: "",
+			modelId: "claude-opus-4-8",
+			thinkingLevel: "medium",
+		});
+		const footer = new FooterComponent(
+			session,
+			createFooterData(1, new Map([["review", "review ready"]])),
+		);
+
+		const line = stripAnsi(footer.render(80)[0] ?? "");
+
+		expect(line).toContain("claude-opus-4-8");
+		expect(line).toContain("12.3%");
+		expect(line).toContain("review ready");
+		expect(visibleWidth(line)).toBeLessThanOrEqual(80);
 	});
 
 	it("shows the active evolved harness completion time", async () => {
@@ -246,7 +330,9 @@ describe("FooterComponent width handling", () => {
 		});
 
 		await vi.waitFor(() => {
-			expect(stripAnsi(footer.render(200)[1])).toBe(`Harness ${formatEvolutionTimestamp(evolvedAt.toISOString())}`);
+			expect(stripAnsi(footer.render(200)[0])).toContain(
+				`harness ${formatEvolutionTimestamp(evolvedAt.toISOString())}`,
+			);
 		});
 		footer.dispose();
 	});
@@ -283,8 +369,8 @@ describe("FooterComponent width handling", () => {
 		});
 
 		await vi.waitFor(() => {
-			const harnessLine = stripAnsi(footer.render(200)[1]);
-			expect(harnessLine).toMatch(new RegExp(`Harness ${formatEvolutionTimestamp(evolvedAt)} [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]`));
+			const footerLine = stripAnsi(footer.render(200)[0]);
+			expect(footerLine).toMatch(new RegExp(`harness ${formatEvolutionTimestamp(evolvedAt)} [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]`));
 		});
 		footer.dispose();
 	});

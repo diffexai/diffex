@@ -110,4 +110,70 @@ describe("InteractiveMode subagent coordination", () => {
 		expect(editor.setText).toHaveBeenCalledWith("steer\n\nfollow up\n\ndraft");
 		expect(abort).toHaveBeenCalledOnce();
 	});
+
+	it.each([
+		{
+			terminalProgressEnabled: true,
+			workingVisible: true,
+			expectedProgressCalls: [[false], [true]],
+			expectedWorkingIndicator: true,
+		},
+		{
+			terminalProgressEnabled: false,
+			workingVisible: true,
+			expectedProgressCalls: [],
+			expectedWorkingIndicator: true,
+		},
+		{
+			terminalProgressEnabled: true,
+			workingVisible: false,
+			expectedProgressCalls: [[false], [true]],
+			expectedWorkingIndicator: false,
+		},
+	])(
+		"restores nested wait state with terminal progress $terminalProgressEnabled and visibility $workingVisible",
+		async ({ terminalProgressEnabled, workingVisible, expectedProgressCalls, expectedWorkingIndicator }) => {
+			const setProgress = vi.fn();
+			const showStatusIndicator = vi.fn();
+			const context = Object.assign(Object.create(InteractiveMode.prototype), {
+				runtimeHost: {
+					session: {
+						isStreaming: true,
+						settingsManager: { getShowTerminalProgress: () => terminalProgressEnabled },
+					},
+				},
+				isInitialized: true,
+				footer: { invalidate: vi.fn() },
+				workingVisible,
+				workingMessage: "Responding",
+				workingIndicatorOptions: undefined,
+				activeStatusIndicator: { kind: "subagentWait", dispose: vi.fn() },
+				statusContainer: { clear: vi.fn(), addChild: vi.fn() },
+				showStatusIndicator,
+				options: { tuiMode: "regular" },
+				ui: {
+					terminal: { setProgress },
+					getClearOnShrink: () => false,
+					requestRender: vi.fn(),
+				},
+			});
+			const handleEvent = Reflect.get(InteractiveMode.prototype, "handleEvent") as (
+				this: typeof context,
+				event: unknown,
+			) => Promise<void>;
+
+			await handleEvent.call(context, {
+				type: "subagent_wait_end",
+				names: ["alpha"],
+				cancelled: false,
+			});
+
+			expect(setProgress.mock.calls).toEqual(expectedProgressCalls);
+			expect(showStatusIndicator).toHaveBeenCalledTimes(expectedWorkingIndicator ? 1 : 0);
+			if (expectedWorkingIndicator) {
+				expect(showStatusIndicator.mock.calls[0]?.[0]).toMatchObject({ kind: "working" });
+			}
+			(showStatusIndicator.mock.calls[0]?.[0] as { dispose(): void } | undefined)?.dispose();
+		},
+	);
 });

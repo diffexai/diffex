@@ -1,10 +1,11 @@
 import { isAbsolute, relative, resolve, sep } from "node:path";
-import { type Component, truncateToWidth, visibleWidth } from "@earendil-works/diffex-tui";
+import { type Component, getGlyphs, truncateToWidth, visibleWidth } from "@earendil-works/diffex-tui";
 import type { AgentSession } from "../../../core/agent-session.ts";
 import type { ReadonlyFooterDataProvider } from "../../../core/footer-data-provider.ts";
 import { theme } from "../theme/theme.ts";
 import { EvolutionFooterStatus, type EvolutionFooterStatusClient } from "./evolution-footer-status.ts";
 import { formatEvolutionTimestamp } from "./harness-version-display.ts";
+import { keyText } from "./keybinding-hints.ts";
 
 /**
  * Sanitize text for display in a single-line status.
@@ -93,19 +94,27 @@ export class FooterComponent implements Component {
 	}
 
 	render(width: number): string[] {
+		if (width <= 0) {
+			return [""];
+		}
+
 		const state = this.session.state;
+		const glyphs = getGlyphs();
 
 		// Calculate context usage from session (handles compaction correctly).
 		// After compaction, tokens are unknown until the next LLM response.
 		const contextUsage = this.session.getContextUsage();
 		const contextWindow = contextUsage?.contextWindow ?? state.model?.contextWindow ?? 0;
-		const contextPercentValue = contextUsage?.percent ?? 0;
-		const contextPercent = contextUsage?.percent !== null ? contextPercentValue.toFixed(1) : "?";
-
-		const contextPercentDisplay = `Context ${contextPercent}% used`;
+		const contextPercentValue = contextUsage?.percent;
+		const contextPercent =
+			contextPercentValue === null || contextPercentValue === undefined ? "?" : contextPercentValue.toFixed(1);
+		const compactContextPercent =
+			contextPercentValue === null || contextPercentValue === undefined
+				? "?"
+				: Math.round(contextPercentValue).toString();
 		const modelName = state.model?.id || "no-model";
 		const thinkingLevel = state.thinkingLevel || "off";
-		const windowDisplay = `${formatTokens(contextWindow)} window`;
+		const windowDisplay = contextWindow > 0 ? formatTokens(contextWindow) : "?";
 		const evolutionSnapshot = this.evolutionStatus?.getSnapshot();
 		const harnessInfo = evolutionSnapshot?.activeVersionInfo;
 		const harnessVersion =
@@ -123,35 +132,100 @@ export class FooterComponent implements Component {
 		const evolutionSpinner = evolutionSnapshot?.running
 			? ` ${theme.fg("accent", evolutionSnapshot.spinnerFrame)}`
 			: "";
-		const separator = theme.fg("dim", " • ");
-		const modelDisplay = theme.fg("footerModel", `${modelName} ${thinkingLevel}`);
-		let statsLine = [
-			modelDisplay,
-			theme.fg("footerContext", contextPercentDisplay),
-			theme.fg("footerWindow", windowDisplay),
-		].join(separator);
-		let harnessLine = `Harness ${harnessVersion}${evolutionSpinner}`;
+		const separator = theme.fg("borderMuted", ` ${glyphs.bullet} `);
+		const separatorWidth = visibleWidth(separator);
+		const contextCompact = theme.fg("footerContext", `${compactContextPercent}%`);
+		const contextMedium =
+			theme.fg("footerContext", `ctx ${contextPercent}%`) +
+			theme.fg("borderMuted", "/") +
+			theme.fg("footerWindow", windowDisplay);
+		const contextFull =
+			theme.fg("footerContext", `context ${contextPercent}%`) +
+			theme.fg("borderMuted", " / ") +
+			theme.fg("footerWindow", windowDisplay);
 
-		if (visibleWidth(statsLine) > width) {
-			statsLine = truncateToWidth(statsLine, width, "...");
+		if (width <= visibleWidth(contextCompact) + separatorWidth) {
+			return [truncateToWidth(theme.fg("footerModel", modelName), width, glyphs.ellipsis)];
 		}
-		if (visibleWidth(harnessLine) > width) {
-			harnessLine = truncateToWidth(harnessLine, width, "...");
-		}
 
-		const lines = [statsLine, theme.fg("dim", harnessLine)];
+		type FooterField = { key: string; order: number; text: string };
+		const modelWidth = Math.min(
+			width - visibleWidth(contextCompact) - separatorWidth,
+			Math.max(1, Math.floor(width * 0.45)),
+		);
+		let fields: FooterField[] = [
+			{
+				key: "model",
+				order: 0,
+				text: truncateToWidth(theme.fg("footerModel", modelName), modelWidth, glyphs.ellipsis),
+			},
+			{ key: "context", order: 2, text: contextCompact },
+		];
+		const renderFields = (candidate: FooterField[]): string =>
+			[...candidate]
+				.sort((a, b) => a.order - b.order)
+				.map((field) => field.text)
+				.join(separator);
+		const trySetFields = (candidate: FooterField[]): boolean => {
+			if (visibleWidth(renderFields(candidate)) > width) {
+				return false;
+			}
+			fields = candidate;
+			return true;
+		};
+		const tryAddField = (field: FooterField): boolean => trySetFields([...fields, field]);
+		const tryUpgradeField = (key: string, text: string): boolean =>
+			trySetFields(fields.map((field) => (field.key === key ? { ...field, text } : field)));
 
-		// Add extension statuses on a single line, sorted by key alphabetically
+		// Extension statuses are public UI state, so admit them before optional
+		// detail upgrades and shortcut hints. Truncate only their own field.
 		const extensionStatuses = this.footerData.getExtensionStatuses();
 		if (extensionStatuses.size > 0) {
-			const sortedStatuses = Array.from(extensionStatuses.entries())
+			const statusText = Array.from(extensionStatuses.entries())
 				.sort(([a], [b]) => a.localeCompare(b))
-				.map(([, text]) => sanitizeStatusText(text));
-			const statusLine = sortedStatuses.join(" ");
-			// Truncate to terminal width with dim ellipsis for consistency with footer style
-			lines.push(truncateToWidth(statusLine, width, theme.fg("dim", "...")));
+				.map(([, text]) => sanitizeStatusText(text))
+				.filter((text) => text.length > 0)
+				.join(" ");
+			const availableWidth = width - visibleWidth(renderFields(fields)) - separatorWidth;
+			if (statusText.length > 0 && availableWidth > 0) {
+				tryAddField({
+					key: "extensions",
+					order: 4,
+					text: truncateToWidth(theme.fg("dim", statusText), availableWidth, glyphs.ellipsis),
+				});
+			}
 		}
 
-		return lines;
+		tryAddField({ key: "thinking", order: 1, text: theme.fg("thinkingText", thinkingLevel) });
+		tryAddField({
+			key: "harness",
+			order: 3,
+			text: theme.fg("dim", `h:${harnessVersion}`) + evolutionSpinner,
+		});
+		tryUpgradeField("context", contextMedium);
+		tryUpgradeField("thinking", theme.fg("thinkingText", `thinking ${thinkingLevel}`));
+		tryUpgradeField("harness", theme.fg("dim", `harness ${harnessVersion}`) + evolutionSpinner);
+		tryUpgradeField("context", contextFull);
+
+		tryAddField({ key: "hotkeys", order: 7, text: theme.fg("dim", "/hotkeys") });
+
+		const getBindingHint = (action: "app.thinking.cycle" | "app.model.cycleForward", label: string) => {
+			try {
+				const binding = keyText(action);
+				return binding ? theme.fg("dim", `${binding} ${label}`) : undefined;
+			} catch {
+				return undefined;
+			}
+		};
+		const thinkingHint = getBindingHint("app.thinking.cycle", "thinking");
+		if (thinkingHint) {
+			tryAddField({ key: "thinkingHint", order: 5, text: thinkingHint });
+		}
+		const modelHint = getBindingHint("app.model.cycleForward", "model");
+		if (modelHint) {
+			tryAddField({ key: "modelHint", order: 6, text: modelHint });
+		}
+
+		return [renderFields(fields)];
 	}
 }

@@ -2,13 +2,15 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.ts";
 
 type FakeUi = {
+	mode: "regular" | "fullscreen";
 	start: () => void;
-	stop: () => void;
+	stop: (options?: { preserveScreen?: boolean }) => void;
 	requestRender: (force?: boolean) => void;
 };
 
 type HandleCtrlZThis = {
 	ui: FakeUi;
+	stopForTerminalHandoff(tui?: FakeUi): void;
 };
 
 type ProcessSignalHandler = () => void;
@@ -30,12 +32,17 @@ describe("InteractiveMode.handleCtrlZ", () => {
 
 	test("shows a status message and skips suspend on Windows", () => {
 		const ui: FakeUi = {
+			mode: "fullscreen",
 			start: vi.fn(),
 			stop: vi.fn(),
 			requestRender: vi.fn(),
 		};
 		const showStatus = vi.fn();
-		const context: HandleCtrlZThis & { showStatus: (message: string) => void } = { ui, showStatus };
+		const context: HandleCtrlZThis & { showStatus: (message: string) => void } = {
+			ui,
+			showStatus,
+			stopForTerminalHandoff: () => ui.stop({ preserveScreen: true }),
+		};
 		const platformDescriptor = Object.getOwnPropertyDescriptor(process, "platform");
 		Object.defineProperty(process, "platform", {
 			configurable: true,
@@ -64,11 +71,15 @@ describe("InteractiveMode.handleCtrlZ", () => {
 
 	test("keeps the process alive while suspended and restores the TUI on SIGCONT", () => {
 		const ui: FakeUi = {
+			mode: "fullscreen",
 			start: vi.fn(),
 			stop: vi.fn(),
 			requestRender: vi.fn(),
 		};
-		const context: HandleCtrlZThis = { ui };
+		const context: HandleCtrlZThis = {
+			ui,
+			stopForTerminalHandoff: () => ui.stop({ preserveScreen: true }),
+		};
 		const keepAliveHandle = setTimeout(() => undefined, 0);
 		clearTimeout(keepAliveHandle);
 
@@ -99,7 +110,7 @@ describe("InteractiveMode.handleCtrlZ", () => {
 		expect(setIntervalSpy).toHaveBeenCalledWith(expect.any(Function), 2 ** 30);
 		expect(processOnSpy).toHaveBeenCalledWith("SIGINT", expect.any(Function));
 		expect(processOnceSpy).toHaveBeenCalledWith("SIGCONT", expect.any(Function));
-		expect(ui.stop).toHaveBeenCalledTimes(1);
+		expect(ui.stop).toHaveBeenCalledWith({ preserveScreen: true });
 		expect(processKillSpy).toHaveBeenCalledWith(0, "SIGTSTP");
 		expect(sigintHandler).toBeDefined();
 		expect(sigcontHandler).toBeDefined();
@@ -114,11 +125,15 @@ describe("InteractiveMode.handleCtrlZ", () => {
 
 	test("cleans up the temporary handlers if suspension fails", () => {
 		const ui: FakeUi = {
+			mode: "fullscreen",
 			start: vi.fn(),
 			stop: vi.fn(),
 			requestRender: vi.fn(),
 		};
-		const context: HandleCtrlZThis = { ui };
+		const context: HandleCtrlZThis = {
+			ui,
+			stopForTerminalHandoff: () => ui.stop({ preserveScreen: true }),
+		};
 		const keepAliveHandle = setTimeout(() => undefined, 0);
 		clearTimeout(keepAliveHandle);
 		const suspendError = new Error("suspend failed");
@@ -131,19 +146,22 @@ describe("InteractiveMode.handleCtrlZ", () => {
 		const removeListenerSpy = vi
 			.spyOn(process, "removeListener")
 			.mockImplementation(((_event: string, _listener: () => void) => process) as typeof process.removeListener);
-		vi.spyOn(process, "once").mockImplementation(
-			((_event: string, _listener: () => void) => process) as typeof process.once,
-		);
+		let sigcontHandler: ProcessSignalHandler | undefined;
+		vi.spyOn(process, "once").mockImplementation(((event: string, listener: () => void) => {
+			if (event === "SIGCONT") sigcontHandler = listener;
+			return process;
+		}) as typeof process.once);
 		vi.spyOn(process, "kill").mockImplementation(() => {
 			throw suspendError;
 		});
 
 		expect(() => callHandleCtrlZ(context)).toThrow(suspendError);
-		expect(ui.stop).toHaveBeenCalledTimes(1);
+		expect(ui.stop).toHaveBeenCalledWith({ preserveScreen: true });
 		expect(setIntervalSpy).toHaveBeenCalledTimes(1);
 		expect(clearIntervalSpy).toHaveBeenCalledWith(keepAliveHandle);
 		expect(removeListenerSpy).toHaveBeenCalledWith("SIGINT", expect.any(Function));
-		expect(ui.start).not.toHaveBeenCalled();
-		expect(ui.requestRender).not.toHaveBeenCalled();
+		expect(removeListenerSpy).toHaveBeenCalledWith("SIGCONT", sigcontHandler);
+		expect(ui.start).toHaveBeenCalledTimes(1);
+		expect(ui.requestRender).toHaveBeenCalledWith(true);
 	});
 });

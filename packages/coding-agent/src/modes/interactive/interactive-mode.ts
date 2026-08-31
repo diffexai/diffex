@@ -39,7 +39,6 @@ import {
 	Spacer,
 	setKeybindings,
 	Text,
-	TruncatedText,
 	type TUI,
 	TuiAltScreen,
 	TuiMainScreen,
@@ -180,6 +179,18 @@ import { UserMessageSelectorComponent } from "./components/user-message-selector
 import { editInExternalEditor } from "./external-editor.ts";
 import { getModelSearchText } from "./model-search.ts";
 import {
+	classifyViewport,
+	type ResponsiveEditorPresentation,
+	ResponsiveEditorRegion,
+	ResponsiveQueuedMessagesComponent,
+	ResponsiveSection,
+	getResponsiveSectionMaxLines,
+	ResponsiveSpacer,
+	ResponsiveViewportRoot,
+	TooSmallTerminalComponent,
+	type ViewportSource,
+} from "./responsive-layout.ts";
+import {
 	getAvailableThemes,
 	getAvailableThemesWithPaths,
 	getEditorTheme,
@@ -227,6 +238,11 @@ class ExpandableText extends Text implements Expandable {
 type CompactionQueuedMessage = {
 	text: string;
 	mode: "steer" | "followUp";
+};
+
+type ResponsiveEditorComponent = EditorComponent & {
+	setFrameStyle?: (frameStyle: "lines" | "top" | "none") => void;
+	setMaxVisibleLines?: (maxVisibleLines?: number) => void;
 };
 
 type RenderSessionItem = AgentMessage | Extract<SessionEntry, { type: "custom" }>;
@@ -450,6 +466,7 @@ export class InteractiveMode {
 	private transcriptScrollView: TuiLayouts.ScrollView | undefined;
 	private fullscreenLayoutRoot: Component | undefined;
 	private pendingMessagesContainer: Container;
+	private queuedMessagesComponent: ResponsiveQueuedMessagesComponent;
 	private statusContainer: Container;
 	private defaultEditor: CustomEditor;
 	private editor: EditorComponent;
@@ -545,6 +562,10 @@ export class InteractiveMode {
 	private extensionWidgetsBelow = new Map<string, Component & { dispose?(): void }>();
 	private widgetContainerAbove!: Container;
 	private widgetContainerBelow!: Container;
+	private readonly viewportSource: ViewportSource;
+	private readonly responsiveWidgetSpacer: ResponsiveSpacer;
+	private responsiveEditorTarget: ResponsiveEditorComponent | undefined;
+	private responsiveEditorPresentation: ResponsiveEditorPresentation | undefined;
 
 	// Custom footer from extension (undefined = use built-in footer)
 	private customFooter: (Component & { dispose?(): void }) | undefined = undefined;
@@ -600,6 +621,11 @@ export class InteractiveMode {
 			onRightClickPaste: this.onRightClickPaste,
 		});
 		this.ui = createInteractiveTuiReference(() => this.renderer);
+		this.viewportSource = () => ({
+			width: this.ui.terminal.columns,
+			height: this.ui.terminal.rows,
+		});
+		this.responsiveWidgetSpacer = new ResponsiveSpacer(this.viewportSource);
 		this.ui.setClearOnShrink(this.settingsManager.getClearOnShrink());
 		this.headerContainer = new Container();
 		this.loadedResourcesContainer = new Container();
@@ -614,6 +640,12 @@ export class InteractiveMode {
 		this.widgetContainerBelow = new Container();
 		this.keybindings = KeybindingsManager.create();
 		setKeybindings(this.keybindings);
+		this.queuedMessagesComponent = new ResponsiveQueuedMessagesComponent(
+			() => this.getAllQueuedMessages(),
+			() => this.getAppKeyDisplay("app.message.dequeue"),
+			this.viewportSource,
+			{ text: (value) => theme.fg("dim", value) },
+		);
 		const editorPaddingX = this.settingsManager.getEditorPaddingX();
 		const autocompleteMaxVisible = this.settingsManager.getAutocompleteMaxVisible();
 		this.defaultEditor = new CustomEditor(this.ui, getEditorTheme(), this.keybindings, {
@@ -621,11 +653,11 @@ export class InteractiveMode {
 			autocompleteMaxVisible,
 			prompt: SELECTED_LIST_PREFIX,
 			promptStyle: (text) =>
-				this.isBashMode ? theme.fg("bashMode", text.replace(/^>/, "!")) : theme.fg("selectionAccent", text),
+				this.isBashMode ? theme.fg("bashMode", text.replace(/^\S/u, "!")) : theme.fg("selectionAccent", text),
 			concealedInputPrefix: "!",
 			placeholder: "Ask Diffex to do something for you.",
 			placeholderStyle: (text) => theme.fg("muted", text),
-			textTokenStyle: (text) => `\x1b[38;2;196;114;214m${text}\x1b[39m`,
+			textTokenStyle: (text) => theme.fg("customMessageLabel", text),
 		});
 		this.editor = this.defaultEditor;
 		this.editorContainer = new Container();
@@ -820,7 +852,9 @@ export class InteractiveMode {
 			this.chatContainer.addChild(new Text(theme.bold(theme.fg("accent", "What's New")), 1, 0));
 			this.chatContainer.addChild(new Spacer(1));
 			this.chatContainer.addChild(
-				new Markdown(this.changelogMarkdown.trim(), 1, 0, this.getMarkdownThemeWithSettings()),
+				new Markdown(this.changelogMarkdown.trim(), 1, 0, this.getMarkdownThemeWithSettings(), undefined, {
+					tableStyle: "compact",
+				}),
 			);
 			this.chatContainer.addChild(new Spacer(1));
 		}
@@ -833,6 +867,41 @@ export class InteractiveMode {
 			if (!this.fullscreenLayoutRoot) throw new Error("Fullscreen layout is not initialized");
 			tui.setLayoutRoot(this.fullscreenLayoutRoot);
 		}
+	}
+
+	private startInteractiveTui(tui: TuiMainScreen | TuiAltScreen): void {
+		try {
+			tui.start();
+		} catch (error) {
+			try {
+				this.stopForTerminalHandoff(tui);
+			} catch {}
+			throw error;
+		}
+	}
+
+	private stopForTerminalHandoff(tui: TUI = this.ui): void {
+		if (tui.mode === "fullscreen") {
+			tui.stop({ preserveScreen: true });
+			return;
+		}
+		tui.stop();
+	}
+
+	private applyResponsiveEditorPresentation(presentation: ResponsiveEditorPresentation): void {
+		const editor = this.editor as ResponsiveEditorComponent;
+		if (
+			this.responsiveEditorTarget === editor &&
+			this.responsiveEditorPresentation?.frameStyle === presentation.frameStyle &&
+			this.responsiveEditorPresentation.maxVisibleLines === presentation.maxVisibleLines
+		) {
+			return;
+		}
+
+		this.responsiveEditorTarget = editor;
+		this.responsiveEditorPresentation = presentation;
+		editor.setFrameStyle?.(presentation.frameStyle);
+		editor.setMaxVisibleLines?.(presentation.maxVisibleLines);
 	}
 
 	private stopInteractiveTui(): void {
@@ -882,7 +951,7 @@ export class InteractiveMode {
 		nextUi.invalidate();
 		nextUi.setFocus(focus);
 		if (!startRenderer) return true;
-		nextUi.start();
+		this.startInteractiveTui(nextUi);
 		this.themeController.rebindTui();
 		this.rebindExtensionTerminalInputListeners();
 		if (
@@ -924,7 +993,7 @@ export class InteractiveMode {
 		}
 
 		// Keep one component tree and remount it when changing renderers.
-		this.renderWidgets(); // Initialize with default spacer
+		this.renderWidgets();
 		this.transcriptScrollView = new TuiLayouts.ScrollView(this.documentContainer, {
 			follow: "end",
 			primary: true,
@@ -932,26 +1001,88 @@ export class InteractiveMode {
 			scrollbar: this.settingsManager.getFullscreenScrollbar(),
 			scrollbarStyle: (text) => theme.bg("scrollbarThumb", text),
 		});
+		const tooSmallTerminal = new TooSmallTerminalComponent(this.viewportSource, {
+			title: (text) => theme.bold(theme.fg("accent", text)),
+			detail: (text) => theme.fg("muted", text),
+			hint: (text) => theme.fg("dim", text),
+		});
+		const pendingMessagesRegion = new ResponsiveSection(this.pendingMessagesContainer, this.viewportSource, {
+			maxLines: (profile) =>
+				getResponsiveSectionMaxLines(this.ui.mode, profile, profile.height < 16 ? 1 : 2),
+			retention: "edges",
+			trimLeadingBlankWhenCompact: true,
+		});
+		const statusRegion = new ResponsiveSection(this.statusContainer, this.viewportSource, {
+			maxLines: (profile) => getResponsiveSectionMaxLines(this.ui.mode, profile, 1),
+			retention: "start",
+			trimLeadingBlankWhenCompact: true,
+		});
+		const widgetAboveRegion = new ResponsiveSection(this.widgetContainerAbove, this.viewportSource, {
+			maxLines: (profile) =>
+				getResponsiveSectionMaxLines(this.ui.mode, profile, profile.height < 16 ? 1 : 2),
+			retention: "start",
+			trimLeadingBlankWhenCompact: true,
+		});
+		const editorRegion = new ResponsiveEditorRegion(this.editorContainer, this.viewportSource, (presentation) => {
+			this.applyResponsiveEditorPresentation(presentation);
+		});
+		const widgetBelowRegion = new ResponsiveSection(this.widgetContainerBelow, this.viewportSource, {
+			maxLines: (profile) =>
+				getResponsiveSectionMaxLines(this.ui.mode, profile, profile.height < 16 ? 1 : 2),
+			retention: "start",
+			trimLeadingBlankWhenCompact: true,
+		});
+		const footerRegion = new ResponsiveSection(this.footerContainer, this.viewportSource, {
+			maxLines: (profile) => getResponsiveSectionMaxLines(this.ui.mode, profile, 1),
+			retention: "start",
+			trimLeadingBlankWhenCompact: true,
+		});
 		const dock = new TuiLayouts.VStack([
-			{ component: this.pendingMessagesContainer, shrink: 1, minSize: 0 },
-			{ component: this.statusContainer, shrink: 1, minSize: 0 },
-			{ component: this.widgetContainerAbove, shrink: 1, minSize: 0 },
-			{ component: this.editorContainer, shrink: 1, minSize: 3 },
-			{ component: this.widgetContainerBelow, shrink: 1, minSize: 0 },
-			{ component: this.footerContainer, shrink: 1, minSize: 1 },
+			{ component: this.queuedMessagesComponent, shrink: 1, minSize: 0 },
+			{ component: pendingMessagesRegion, shrink: 1, minSize: 0 },
+			{ component: statusRegion, shrink: 1, minSize: 0 },
+			{ component: widgetAboveRegion, shrink: 1, minSize: 0 },
+			{ component: editorRegion, shrink: 1, minSize: 3 },
+			{ component: widgetBelowRegion, shrink: 1, minSize: 0 },
+			{ component: footerRegion, shrink: 1, minSize: 1 },
+		]);
+		const fullscreenContent = new TuiLayouts.VStack([
+			{ component: this.transcriptScrollView, basis: 0, grow: 1, shrink: 1, minSize: 2 },
+			{ component: dock, basis: "auto", grow: 0, shrink: 1, minSize: 3 },
 		]);
 		this.fullscreenLayoutRoot = new TuiLayouts.VStack([
-			{ component: this.transcriptScrollView, basis: 0, grow: 1, shrink: 1, minSize: 1 },
-			{ component: dock, basis: "auto", grow: 0, shrink: 1, minSize: 1 },
+			{
+				component: fullscreenContent,
+				basis: 0,
+				grow: 1,
+				shrink: 1,
+				minSize: 1,
+				visible: (viewport) => classifyViewport(viewport.width, viewport.height).tier !== "too-small",
+			},
+			{
+				component: tooSmallTerminal,
+				basis: 0,
+				grow: 1,
+				shrink: 1,
+				minSize: 1,
+				visible: (viewport) => classifyViewport(viewport.width, viewport.height).tier === "too-small",
+			},
 		]);
-		this.mountInteractiveTui(this.renderer, [
+		const regularContent = new Container();
+		for (const component of [
 			this.documentContainer,
-			this.pendingMessagesContainer,
-			this.statusContainer,
-			this.widgetContainerAbove,
-			this.editorContainer,
-			this.widgetContainerBelow,
-			this.footerContainer,
+			this.queuedMessagesComponent,
+			pendingMessagesRegion,
+			statusRegion,
+			widgetAboveRegion,
+			editorRegion,
+			widgetBelowRegion,
+			footerRegion,
+		]) {
+			regularContent.addChild(component);
+		}
+		this.mountInteractiveTui(this.renderer, [
+			new ResponsiveViewportRoot(regularContent, tooSmallTerminal, this.viewportSource),
 		]);
 		this.ui.setFocus(this.editor);
 
@@ -959,7 +1090,12 @@ export class InteractiveMode {
 		this.setupEditorSubmitHandler();
 
 		// Start the UI before initializing extensions so session_start handlers can use interactive dialogs
-		this.ui.start();
+		try {
+			this.startInteractiveTui(this.renderer);
+		} catch (error) {
+			this.unregisterSignalHandlers();
+			throw error;
+		}
 		this.isInitialized = true;
 
 		await this.themeController.applyFromSettings();
@@ -981,9 +1117,9 @@ export class InteractiveMode {
 			);
 
 			// Setup UI layout
-			this.headerContainer.addChild(new Spacer(1));
+			this.headerContainer.addChild(new ResponsiveSpacer(this.viewportSource));
 			this.headerContainer.addChild(this.builtInHeader);
-			this.headerContainer.addChild(new Spacer(1));
+			this.headerContainer.addChild(new ResponsiveSpacer(this.viewportSource));
 		} else {
 			// Minimal header when silenced
 			this.builtInHeader = new Text("", 0, 0);
@@ -1995,6 +2131,7 @@ export class InteractiveMode {
 		this.chatContainer.clear();
 		this.pendingMessagesContainer.clear();
 		this.compactionQueuedMessages = [];
+		this.queuedMessagesComponent.invalidate();
 		this.streamingComponent = undefined;
 		this.streamingMessage = undefined;
 		this.pendingTools.clear();
@@ -2097,6 +2234,15 @@ export class InteractiveMode {
 		if (hadActiveStatusIndicator && this.options.tuiMode === "regular" && this.ui.getClearOnShrink()) {
 			this.statusContainer.addChild(this.idleStatus);
 		}
+	}
+
+	private restoreWorkingStatusAfterPhase(): void {
+		if (!this.session.isStreaming || this.activeStatusIndicator) return;
+		if (this.settingsManager.getShowTerminalProgress()) {
+			this.ui.terminal.setProgress(true);
+		}
+		if (!this.workingVisible) return;
+		this.showStatusIndicator(new WorkingStatusIndicator(this.ui, this.workingMessage, this.workingIndicatorOptions));
 	}
 
 	private setWorkingVisible(visible: boolean): void {
@@ -2246,13 +2392,13 @@ export class InteractiveMode {
 
 		if (widgets.size === 0) {
 			if (spacerWhenEmpty) {
-				container.addChild(new Spacer(1));
+				container.addChild(this.responsiveWidgetSpacer);
 			}
 			return;
 		}
 
 		if (leadingSpacer) {
-			container.addChild(new Spacer(1));
+			container.addChild(this.responsiveWidgetSpacer);
 		}
 		for (const component of widgets.values()) {
 			container.addChild(component);
@@ -3344,7 +3490,9 @@ export class InteractiveMode {
 			case "subagent_notice":
 				this.chatContainer.addChild(new Spacer(1));
 				this.chatContainer.addChild(
-					new Markdown(event.text, this.outputPad, 0, this.getMarkdownThemeWithSettings()),
+					new Markdown(event.text, this.outputPad, 0, this.getMarkdownThemeWithSettings(), undefined, {
+						tableStyle: "compact",
+					}),
 				);
 				this.ui.requestRender();
 				break;
@@ -3354,6 +3502,7 @@ export class InteractiveMode {
 					this.ui.terminal.setProgress(false);
 				}
 				this.clearStatusIndicator("subagentWait");
+				this.restoreWorkingStatusAfterPhase();
 				this.ui.requestRender();
 				break;
 
@@ -3380,6 +3529,7 @@ export class InteractiveMode {
 					this.autoCompactionEscapeHandler = undefined;
 				}
 				this.clearStatusIndicator("compaction");
+				this.restoreWorkingStatusAfterPhase();
 				if (event.aborted) {
 					if (event.reason === "manual") {
 						this.showError("Compaction cancelled");
@@ -3430,6 +3580,7 @@ export class InteractiveMode {
 					this.retryEscapeHandler = undefined;
 				}
 				this.clearStatusIndicator("retry");
+				this.restoreWorkingStatusAfterPhase();
 				// Show error only on final failure (success shows normal response)
 				if (!event.success) {
 					this.showError(`Retry failed after ${event.attempt} attempts: ${event.finalError || "Unknown error"}`);
@@ -3460,6 +3611,7 @@ export class InteractiveMode {
 
 			case "summarization_retry_finished": {
 				this.clearStatusIndicator("retry");
+				this.restoreWorkingStatusAfterPhase();
 				this.ui.requestRender();
 				break;
 			}
@@ -3904,7 +4056,7 @@ export class InteractiveMode {
 	 * cursor, requiring `stty sane && reset` to recover.
 	 *
 	 * Unlike emergencyTerminalExit, the terminal is still alive here, so we
-	 * call ui.stop() to restore cooked mode, the cursor, and disable bracketed
+	 * stop the renderer to restore cooked mode, the cursor, and disable bracketed
 	 * paste / Kitty / modifyOtherKeys sequences.
 	 */
 	private uncaughtCrash(error: Error): never {
@@ -3919,7 +4071,7 @@ export class InteractiveMode {
 			killTrackedDetachedChildren();
 		} catch {}
 		try {
-			this.ui.stop();
+			this.stopForTerminalHandoff();
 		} catch {}
 		console.error("Diffex exiting due to uncaughtException:");
 		console.error(error);
@@ -3998,22 +4150,32 @@ export class InteractiveMode {
 		process.on("SIGINT", ignoreSigint);
 
 		// Set up handler to restore TUI when resumed
-		process.once("SIGCONT", () => {
+		const resume = () => {
 			clearInterval(suspendKeepAlive);
 			process.removeListener("SIGINT", ignoreSigint);
 			this.ui.start();
 			this.ui.requestRender(true);
-		});
+		};
+		process.once("SIGCONT", resume);
 
+		let tuiStopped = false;
 		try {
 			// Stop the TUI (restore terminal to normal mode)
-			this.ui.stop();
+			this.stopForTerminalHandoff();
+			tuiStopped = true;
 
 			// Send SIGTSTP to process group (pid=0 means all processes in group)
 			process.kill(0, "SIGTSTP");
 		} catch (error) {
 			clearInterval(suspendKeepAlive);
 			process.removeListener("SIGINT", ignoreSigint);
+			process.removeListener("SIGCONT", resume);
+			if (tuiStopped) {
+				try {
+					this.ui.start();
+					this.ui.requestRender(true);
+				} catch {}
+			}
 			throw error;
 		}
 	}
@@ -4141,7 +4303,7 @@ export class InteractiveMode {
 	private async handleOpenExternalEditor(): Promise<void> {
 		const editorCmd = this.settingsManager.getExternalEditorCommand();
 		const content = this.editor.getExpandedText?.() ?? this.editor.getText();
-		this.ui.stop();
+		this.stopForTerminalHandoff();
 		try {
 			const result = await editInExternalEditor({
 				command: editorCmd,
@@ -4151,7 +4313,7 @@ export class InteractiveMode {
 				this.editor.setText(result.content);
 			}
 		} finally {
-			this.ui.start();
+			this.startInteractiveTui(this.renderer);
 			this.ui.requestRender(true);
 		}
 	}
@@ -4199,9 +4361,18 @@ export class InteractiveMode {
 		if (note) {
 			this.chatContainer.addChild(new Spacer(1));
 			this.chatContainer.addChild(
-				new Markdown(note, 1, 0, this.getMarkdownThemeWithSettings(), {
-					color: (text) => theme.fg("muted", text),
-				}),
+				new Markdown(
+					note,
+					1,
+					0,
+					this.getMarkdownThemeWithSettings(),
+					{
+						color: (text) => theme.fg("muted", text),
+					},
+					{
+						tableStyle: "compact",
+					},
+				),
 			);
 			this.chatContainer.addChild(new Spacer(1));
 		}
@@ -4265,22 +4436,7 @@ export class InteractiveMode {
 	}
 
 	private updatePendingMessagesDisplay(): void {
-		this.pendingMessagesContainer.clear();
-		const { steering: steeringMessages, followUp: followUpMessages } = this.getAllQueuedMessages();
-		if (steeringMessages.length > 0 || followUpMessages.length > 0) {
-			this.pendingMessagesContainer.addChild(new Spacer(1));
-			for (const message of steeringMessages) {
-				const text = theme.fg("dim", `Steering: ${message}`);
-				this.pendingMessagesContainer.addChild(new TruncatedText(text, 1, 0));
-			}
-			for (const message of followUpMessages) {
-				const text = theme.fg("dim", `Follow-up: ${message}`);
-				this.pendingMessagesContainer.addChild(new TruncatedText(text, 1, 0));
-			}
-			const dequeueHint = this.getAppKeyDisplay("app.message.dequeue");
-			const hintText = theme.fg("dim", `↳ ${dequeueHint} to edit all queued messages`);
-			this.pendingMessagesContainer.addChild(new TruncatedText(hintText, 1, 0));
-		}
+		this.queuedMessagesComponent.invalidate();
 	}
 
 	private restoreQueuedMessagesToEditor(options?: { abort?: boolean; currentText?: string }): number {
@@ -4724,6 +4880,7 @@ export class InteractiveMode {
 						this.ui.requestRender();
 					},
 				},
+				{ getViewportRows: () => this.ui.terminal.rows },
 			);
 			return { component: selector, focus: selector.getSettingsList() };
 		});
@@ -4950,6 +5107,7 @@ export class InteractiveMode {
 				cwd,
 				savedDecision,
 				projectTrusted: this.settingsManager.isProjectTrusted(),
+				getViewportRows: () => this.ui.terminal.rows,
 				onSelect: (selection) => {
 					trustStore.setMany(selection.updates);
 					done();
@@ -6390,7 +6548,11 @@ export class InteractiveMode {
 		this.chatContainer.addChild(new DynamicBorder());
 		this.chatContainer.addChild(new Text(theme.bold(theme.fg("accent", "What's New")), 1, 0));
 		this.chatContainer.addChild(new Spacer(1));
-		this.chatContainer.addChild(new Markdown(changelogMarkdown, 1, 1, this.getMarkdownThemeWithSettings()));
+		this.chatContainer.addChild(
+			new Markdown(changelogMarkdown, 1, 1, this.getMarkdownThemeWithSettings(), undefined, {
+				tableStyle: "compact",
+			}),
+		);
 		this.chatContainer.addChild(new DynamicBorder());
 		this.ui.requestRender();
 	}
@@ -6521,7 +6683,11 @@ export class InteractiveMode {
 		this.chatContainer.addChild(new DynamicBorder());
 		this.chatContainer.addChild(new Text(theme.bold(theme.fg("accent", "Keyboard Shortcuts")), 1, 0));
 		this.chatContainer.addChild(new Spacer(1));
-		this.chatContainer.addChild(new Markdown(hotkeys.trim(), 1, 1, this.getMarkdownThemeWithSettings()));
+		this.chatContainer.addChild(
+			new Markdown(hotkeys.trim(), 1, 1, this.getMarkdownThemeWithSettings(), undefined, {
+				tableStyle: "compact",
+			}),
+		);
 		this.chatContainer.addChild(new DynamicBorder());
 		this.ui.requestRender();
 	}

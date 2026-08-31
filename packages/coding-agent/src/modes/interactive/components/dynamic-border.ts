@@ -1,4 +1,4 @@
-import type { Component } from "@earendil-works/diffex-tui";
+import { type Component, getGlyphs } from "@earendil-works/diffex-tui";
 import { theme } from "../theme/theme.ts";
 
 /**
@@ -20,6 +20,9 @@ export class DynamicBorder implements Component {
 	}
 
 	render(width: number): string[] {
-		return [this.color("─".repeat(Math.max(1, width)))];
+		const inset = width >= 4 ? 1 : 0;
+		const margin = " ".repeat(inset);
+		const separator = getGlyphs().separator.repeat(Math.max(1, width - inset * 2));
+		return [`${margin}${this.color(separator)}${margin}`];
 	}
 }
