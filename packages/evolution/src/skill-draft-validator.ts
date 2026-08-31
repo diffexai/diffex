@@ -24,6 +24,7 @@ import type {
 } from "./ports.ts";
 import { computeEvolutionContentDigest, createEvolutionArtifactMetadata } from "./provenance.ts";
 import { isCanonicalGroupCapsule, missingCapsuleMaterial } from "./skill-candidate-capsule.ts";
+import { applicableSkillInstructions } from "./skill-synthesis-context.ts";
 
 const DEFAULT_MAX_CONTENT_BYTES = 64 * 1024;
 const DEFAULT_MAX_PACKAGE_BYTES = 256 * 1024;
@@ -423,25 +424,29 @@ export class DeterministicSkillDraftValidator implements SkillDraftValidator {
 		if (!sameValues(input.draft.sourceTraceIds, derivedTraceIds)) {
 			add("trace-closure-invalid", "The draft source trace closure is incomplete");
 		}
+		const latest = sources.at(-1);
 		const expectedInstructionDigests = uniqueSorted(
-			sources.flatMap((source) => source.input.instructions.map((instruction) => instruction.contentDigest)),
+			latest === undefined
+				? []
+				: applicableSkillInstructions(latest.input, capsule?.contract.proposedName ?? input.draft.proposedName).map(
+						(instruction) => instruction.contentDigest,
+					),
 		);
 		if (!sameValues(input.draft.repositoryInstructionDigests, expectedInstructionDigests)) {
 			add("instruction-closure-invalid", "The draft repository instruction closure is incomplete");
 		}
+		if (latest !== undefined) {
+			for (const skillId of latest.candidate.existingSkillIds) {
+				if (latest.input.skillCatalog.filter((skill) => skill.skillId === skillId).length !== 1) {
+					add(
+						"source-skill-provenance-invalid",
+						`Candidate "${latest.candidate.candidateId}" does not resolve skill "${skillId}" uniquely`,
+					);
+				}
+			}
+		}
 		const expectedSkillVersions = uniqueSorted(
-			sources.flatMap((source) =>
-				source.candidate.existingSkillIds.flatMap((skillId) => {
-					const matches = source.input.skillCatalog.filter((skill) => skill.skillId === skillId);
-					if (matches.length !== 1) {
-						add(
-							"source-skill-provenance-invalid",
-							`Candidate "${source.candidate.candidateId}" does not resolve skill "${skillId}" uniquely`,
-						);
-					}
-					return matches.map((skill) => skillVersionKey(skill));
-				}),
-			),
+			latest === undefined ? [] : latestCatalogVersions(latest).map(skillVersionKey),
 		);
 		if (!sameValues(input.draft.sourceSkillVersions.map(skillVersionKey), expectedSkillVersions)) {
 			add("source-skill-closure-invalid", "The draft source skill version closure is incomplete");
@@ -520,7 +525,6 @@ export class DeterministicSkillDraftValidator implements SkillDraftValidator {
 		if (!workspaceMatches(input.group, environment)) {
 			add("workspace-scope-mismatch", "The active workspace does not match the candidate workspace");
 		}
-		const latest = sources.at(-1);
 		if (latest === undefined) {
 			add("final-candidate-missing", "The final candidate revision is unavailable");
 		} else {

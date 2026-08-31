@@ -518,6 +518,14 @@ describe("persistent skill candidate registry", () => {
 		expect(artifact.sourceDigests).toHaveLength(200);
 		expect(artifact.historicalAdditions).toEqual([]);
 		expect(artifact.conflicts).toEqual([]);
+		expect(artifact.evidence).toEqual({
+			supportingEvidenceIds: ["support-a"],
+			contradictingEvidenceIds: [],
+			supportingTraceIds: ["trace-a"],
+			contradictingTraceIds: [],
+			supportingTaskLineageIds: ["task-a"],
+			contradictingTaskLineageIds: [],
+		});
 		expect(serialized.split(repeatedProcedure)).toHaveLength(2);
 		expect(serialized.length).toBeLessThan(candidateBytes / 4);
 		expect(artifact.support.find((support) => support.field === "procedure.steps")).toEqual(
