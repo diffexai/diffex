@@ -1,19 +1,18 @@
-import { Box, Markdown, type MarkdownTheme, Spacer, Text } from "@earendil-works/diffex-tui";
+import { Container, getGlyphs, Markdown, type MarkdownTheme, Text } from "@earendil-works/diffex-tui";
 import type { BranchSummaryMessage } from "../../../core/messages.ts";
 import { getMarkdownTheme, theme } from "../theme/theme.ts";
 import { keyText } from "./keybinding-hints.ts";
 
 /**
  * Component that renders a branch summary message with collapsed/expanded state.
- * Uses same background color as custom messages for visual consistency.
  */
-export class BranchSummaryMessageComponent extends Box {
+export class BranchSummaryMessageComponent extends Container {
 	private expanded = false;
 	private message: BranchSummaryMessage;
 	private markdownTheme: MarkdownTheme;
 
 	constructor(message: BranchSummaryMessage, markdownTheme: MarkdownTheme = getMarkdownTheme()) {
-		super(1, 1, (t) => theme.bg("customMessageBg", t));
+		super();
 		this.message = message;
 		this.markdownTheme = markdownTheme;
 		this.updateDisplay();
@@ -31,27 +30,24 @@ export class BranchSummaryMessageComponent extends Box {
 
 	private updateDisplay(): void {
 		this.clear();
-
-		const label = theme.fg("customMessageLabel", `\x1b[1m[branch]\x1b[22m`);
-		this.addChild(new Text(label, 0, 0));
-		this.addChild(new Spacer(1));
+		const glyphs = getGlyphs();
+		const label = theme.fg("customMessageLabel", `${glyphs.branch} ${theme.bold("Branch summary")}`);
 
 		if (this.expanded) {
-			const header = "**Branch Summary**\n\n";
+			this.addChild(new Text(`${label}${theme.fg("dim", ` ${glyphs.bullet} expanded`)}`, 1, 0));
 			this.addChild(
-				new Markdown(header + this.message.summary, 0, 0, this.markdownTheme, {
-					color: (text: string) => theme.fg("customMessageText", text),
-				}),
+				new Markdown(
+					this.message.summary,
+					2,
+					0,
+					this.markdownTheme,
+					{ color: (text: string) => theme.fg("customMessageText", text) },
+					{ tableStyle: "compact" },
+				),
 			);
 		} else {
 			this.addChild(
-				new Text(
-					theme.fg("customMessageText", "Branch summary (") +
-						theme.fg("dim", keyText("app.tools.expand")) +
-						theme.fg("customMessageText", " to expand)"),
-					0,
-					0,
-				),
+				new Text(`${label}${theme.fg("dim", ` ${glyphs.bullet} ${keyText("app.tools.expand")} expand`)}`, 1, 0),
 			);
 		}
 	}

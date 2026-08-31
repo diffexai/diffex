@@ -11,7 +11,7 @@ const OSC133_ZONE_FINAL = "\x1b]133;C\x07";
 
 function createAssistantMessage(
 	content: AssistantMessage["content"],
-	overrides: Partial<Pick<AssistantMessage, "stopReason">> = {},
+	overrides: Partial<Pick<AssistantMessage, "stopReason" | "errorMessage">> = {},
 ): AssistantMessage {
 	return {
 		role: "assistant",
@@ -28,6 +28,7 @@ function createAssistantMessage(
 			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 		},
 		stopReason: overrides.stopReason ?? "stop",
+		errorMessage: overrides.errorMessage,
 		timestamp: Date.now(),
 	};
 }
@@ -89,7 +90,8 @@ describe("AssistantMessageComponent", () => {
 		);
 		const rendered = component.render(80).join("\n");
 
-		expect(rendered).toContain("Thinking...");
+		expect(rendered).toContain("Reasoning");
+		expect(rendered).toContain("hidden");
 		expect(rendered).toContain("Response was truncated before completion.");
 	});
 
@@ -107,7 +109,8 @@ describe("AssistantMessageComponent", () => {
 		);
 		const rendered = stripAnsi(component.render(80).join("\n"));
 
-		expect(rendered.match(/Thinking\.\.\./g)).toHaveLength(1);
+		expect(rendered.match(/Reasoning/g)).toHaveLength(1);
+		expect(rendered.match(/hidden/g)).toHaveLength(1);
 		expect(rendered).toContain("answer");
 	});
 
@@ -167,11 +170,30 @@ describe("AssistantMessageComponent", () => {
 		]);
 
 		component.updateContent(message, true);
-		expect(stripAnsi(component.render(80).join("\n"))).not.toContain("transformed");
+		const streaming = stripAnsi(component.render(80).join("\n"));
+		expect(streaming).toContain("Diffex");
+		expect(streaming).toContain("responding");
+		expect(streaming).not.toContain("transformed");
 
 		component.updateContent(message, false);
-		expect(stripAnsi(component.render(80).join("\n"))).toContain("partial transformed");
+		const complete = stripAnsi(component.render(80).join("\n"));
+		expect(complete).toContain("partial transformed");
+		expect(complete).not.toContain("responding");
 		expect(streamingStates).toEqual([true, false]);
+	});
+
+	test("keeps cancellation and failure explicit without color", () => {
+		initTheme("dark");
+		const cancelled = new AssistantMessageComponent(
+			createAssistantMessage([{ type: "text", text: "partial" }], { stopReason: "aborted" }),
+		);
+		const failed = new AssistantMessageComponent(
+			createAssistantMessage([], { stopReason: "error", errorMessage: "provider unavailable" }),
+		);
+
+		expect(stripAnsi(cancelled.render(80).join("\n"))).toContain("cancelled");
+		expect(stripAnsi(failed.render(80).join("\n"))).toContain("failed");
+		expect(stripAnsi(failed.render(80).join("\n"))).toContain("provider unavailable");
 	});
 
 	test("reapplies Markdown transformers when available width changes", () => {

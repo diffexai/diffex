@@ -1,6 +1,6 @@
 import type { TextContent } from "@earendil-works/diffex-ai";
 import type { Component } from "@earendil-works/diffex-tui";
-import { Box, Container, Markdown, type MarkdownTheme, Spacer, Text } from "@earendil-works/diffex-tui";
+import { Container, getGlyphs, Markdown, type MarkdownTheme, Spacer, Text } from "@earendil-works/diffex-tui";
 import type { MessageRenderer } from "../../../core/extensions/types.ts";
 import type { CustomMessage } from "../../../core/messages.ts";
 import { getMarkdownTheme, theme } from "../theme/theme.ts";
@@ -12,7 +12,7 @@ import { getMarkdownTheme, theme } from "../theme/theme.ts";
 export class CustomMessageComponent extends Container {
 	private message: CustomMessage<unknown>;
 	private customRenderer?: MessageRenderer;
-	private box: Box;
+	private defaultContainer: Container;
 	private customComponent?: Component;
 	private markdownTheme: MarkdownTheme;
 	private _expanded = false;
@@ -32,8 +32,7 @@ export class CustomMessageComponent extends Container {
 
 		this.addChild(new Spacer(1));
 
-		// Create box with purple background (used for default rendering)
-		this.box = new Box(1, 1, (t) => theme.bg("customMessageBg", t));
+		this.defaultContainer = new Container();
 
 		this.rebuild();
 	}
@@ -63,7 +62,7 @@ export class CustomMessageComponent extends Container {
 			this.removeChild(this.customComponent);
 			this.customComponent = undefined;
 		}
-		this.removeChild(this.box);
+		this.removeChild(this.defaultContainer);
 
 		// Try custom renderer first - it handles its own styling
 		if (this.customRenderer) {
@@ -84,14 +83,12 @@ export class CustomMessageComponent extends Container {
 			}
 		}
 
-		// Default rendering uses our box
-		this.addChild(this.box);
-		this.box.clear();
+		this.addChild(this.defaultContainer);
+		this.defaultContainer.clear();
 
-		// Default rendering: label + content
-		const label = theme.fg("customMessageLabel", `\x1b[1m[${this.message.customType}]\x1b[22m`);
-		this.box.addChild(new Text(label, 0, 0));
-		this.box.addChild(new Spacer(1));
+		const glyphs = getGlyphs();
+		const label = theme.fg("customMessageLabel", `${glyphs.branch} ${theme.bold(this.message.customType)}`);
+		this.defaultContainer.addChild(new Text(label, this.outputPad, 0));
 
 		// Extract text content
 		let text: string;
@@ -104,10 +101,15 @@ export class CustomMessageComponent extends Container {
 				.join("\n");
 		}
 
-		this.box.addChild(
-			new Markdown(text, 0, 0, this.markdownTheme, {
-				color: (text: string) => theme.fg("customMessageText", text),
-			}),
+		this.defaultContainer.addChild(
+			new Markdown(
+				text,
+				this.outputPad,
+				0,
+				this.markdownTheme,
+				{ color: (text: string) => theme.fg("customMessageText", text) },
+				{ tableStyle: "compact" },
+			),
 		);
 	}
 }

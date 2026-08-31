@@ -6,22 +6,21 @@ import { stripAnsi } from "../src/utils/ansi.ts";
 const OSC133_ZONE_START = "\x1b]133;A\x07";
 const OSC133_ZONE_END = "\x1b]133;B\x07";
 const OSC133_ZONE_FINAL = "\x1b]133;C\x07";
-const BG_RESET = "\x1b[49m";
 
 describe("UserMessageComponent", () => {
-	test("keeps user message height stable while moving closing OSC markers off line end", () => {
+	test("renders a compact role row without a full-width background", () => {
 		initTheme("dark");
 
 		const component = new UserMessageComponent("hello");
 		const lines = component.render(20);
 
-		expect(lines).toHaveLength(3);
+		expect(lines).toHaveLength(2);
 		expect(lines[0]).toContain(OSC133_ZONE_START);
-		expect(lines[0].endsWith(BG_RESET)).toBe(true);
 		expect(lines[0]).not.toContain(OSC133_ZONE_END);
+		expect(stripAnsi(lines[0])).toContain("You");
 		expect(lines[1]).toContain("hello");
-		expect(lines[2].startsWith(OSC133_ZONE_END + OSC133_ZONE_FINAL)).toBe(true);
-		expect(lines[2].endsWith(BG_RESET)).toBe(true);
+		expect(lines[1].startsWith(OSC133_ZONE_END + OSC133_ZONE_FINAL)).toBe(true);
+		expect(lines.join("\n")).not.toContain("\x1b[48");
 	});
 
 	test("chains Markdown transformers with user message context", () => {

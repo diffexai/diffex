@@ -1,5 +1,5 @@
 import type { AssistantMessage } from "@earendil-works/diffex-ai";
-import { Container, Markdown, type MarkdownTheme, Spacer, Text } from "@earendil-works/diffex-tui";
+import { Container, getGlyphs, Markdown, type MarkdownTheme, Text } from "@earendil-works/diffex-tui";
 import type { MarkdownTransformer } from "../../../core/extensions/types.ts";
 import { getMarkdownTheme, theme } from "../theme/theme.ts";
 import { createMarkdownTransform } from "./markdown-transform.ts";
@@ -93,22 +93,31 @@ export class AssistantMessageComponent extends Container {
 		// Clear content container
 		this.contentContainer.clear();
 
-		const hasVisibleContent = message.content.some(
-			(c) => (c.type === "text" && c.text.trim()) || (c.type === "thinking" && c.thinking.trim()),
-		);
+		const glyphs = getGlyphs();
+		const hasToolCalls = message.content.some((c) => c.type === "toolCall");
+		this.hasToolCalls = hasToolCalls;
 
-		if (hasVisibleContent) {
-			this.contentContainer.addChild(new Spacer(1));
+		let header: string;
+		if (this.isStreaming) {
+			header = theme.fg("accent", `${glyphs.running} ${theme.bold("Diffex")} ${glyphs.bullet} responding`);
+		} else if (message.stopReason === "aborted") {
+			header = theme.fg("warning", `${glyphs.cancelled} ${theme.bold("Diffex")} ${glyphs.bullet} cancelled`);
+		} else if (message.stopReason === "error") {
+			header = theme.fg("error", `${glyphs.error} ${theme.bold("Diffex")} ${glyphs.bullet} failed`);
+		} else if (message.stopReason === "length") {
+			header = theme.fg("warning", `${glyphs.warning} ${theme.bold("Diffex")} ${glyphs.bullet} truncated`);
+		} else {
+			header = theme.fg("accent", `${glyphs.end} ${theme.bold("Diffex")}`);
 		}
+		this.contentContainer.addChild(new Text(header, this.outputPad, 0));
 
 		// Render content in order
 		for (let i = 0; i < message.content.length; i++) {
 			const content = message.content[i];
 			if (content.type === "text" && content.text.trim()) {
-				// Assistant text messages with no background - trim the text
-				// Set paddingY=0 to avoid extra spacing before tool executions
 				this.contentContainer.addChild(
 					new Markdown(content.text.trim(), this.outputPad, 0, this.markdownTheme, undefined, {
+						tableStyle: "compact",
 						transform: createMarkdownTransform("assistant", this.isStreaming, this.markdownTransformers),
 					}),
 				);
@@ -130,19 +139,19 @@ export class AssistantMessageComponent extends Container {
 					continue;
 				}
 
-				// Add spacing only when another visible assistant content block follows.
-				// This avoids a superfluous blank line before separately-rendered tool execution blocks.
-				const hasVisibleContentAfter = message.content
-					.slice(i + 1)
-					.some((c) => (c.type === "text" && c.text.trim()) || (c.type === "thinking" && c.thinking.trim()));
-
 				if (this.hideThinkingBlock) {
-					// Show one static label for each run of thinking blocks when hidden.
+					const hiddenLabel = this.hiddenThinkingLabel === "Thinking..." ? "hidden" : this.hiddenThinkingLabel;
 					this.contentContainer.addChild(
-						new Text(theme.italic(theme.fg("thinkingText", this.hiddenThinkingLabel)), this.outputPad, 0),
+						new Text(
+							theme.fg("thinkingText", `${glyphs.branch} Reasoning ${glyphs.bullet} ${hiddenLabel}`),
+							this.outputPad,
+							0,
+						),
 					);
 				} else {
-					// Render each run of thinking blocks as one Markdown section.
+					this.contentContainer.addChild(
+						new Text(theme.fg("thinkingText", `${glyphs.branch} Reasoning`), this.outputPad, 0),
+					);
 					this.contentContainer.addChild(
 						new Markdown(
 							thinkingBlocks.join("\n\n"),
@@ -154,6 +163,7 @@ export class AssistantMessageComponent extends Container {
 								italic: true,
 							},
 							{
+								tableStyle: "compact",
 								transform: createMarkdownTransform(
 									"assistant-thinking",
 									this.isStreaming,
@@ -163,21 +173,13 @@ export class AssistantMessageComponent extends Container {
 						),
 					);
 				}
-				if (hasVisibleContentAfter) {
-					this.contentContainer.addChild(new Spacer(1));
-				}
 			}
 		}
 
-		// Check if incomplete/failed - show after partial content.
-		// For aborted/error tool calls, tool execution components show the error.
-		// Length stops can happen before a tool call is complete, so surface them here too.
-		const hasToolCalls = message.content.some((c) => c.type === "toolCall");
-		this.hasToolCalls = hasToolCalls;
+		// Tool execution rows carry failures for responses with tool calls.
 		if (message.stopReason === "length") {
-			this.contentContainer.addChild(new Spacer(1));
 			this.contentContainer.addChild(
-				new Text(theme.fg("error", "Response was truncated before completion."), this.outputPad, 0),
+				new Text(theme.fg("warning", "Response was truncated before completion."), this.outputPad + 1, 0),
 			);
 		} else if (!hasToolCalls) {
 			if (message.stopReason === "aborted") {
@@ -185,12 +187,10 @@ export class AssistantMessageComponent extends Container {
 					message.errorMessage && message.errorMessage !== "Request was aborted"
 						? message.errorMessage
 						: "Operation aborted";
-				this.contentContainer.addChild(new Spacer(1));
-				this.contentContainer.addChild(new Text(theme.fg("error", abortMessage), this.outputPad, 0));
+				this.contentContainer.addChild(new Text(theme.fg("warning", abortMessage), this.outputPad + 1, 0));
 			} else if (message.stopReason === "error") {
 				const errorMsg = message.errorMessage || "Unknown error";
-				this.contentContainer.addChild(new Spacer(1));
-				this.contentContainer.addChild(new Text(theme.fg("error", `Error: ${errorMsg}`), this.outputPad, 0));
+				this.contentContainer.addChild(new Text(theme.fg("error", errorMsg), this.outputPad + 1, 0));
 			}
 		}
 	}

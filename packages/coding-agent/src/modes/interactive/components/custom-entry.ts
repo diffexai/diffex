@@ -1,5 +1,5 @@
 import type { Component } from "@earendil-works/diffex-tui";
-import { Box, Container, Spacer, Text } from "@earendil-works/diffex-tui";
+import { Container, getGlyphs, Spacer, Text } from "@earendil-works/diffex-tui";
 import type { EntryRenderer } from "../../../core/extensions/types.ts";
 import type { CustomEntry } from "../../../core/session-manager.ts";
 import { theme } from "../theme/theme.ts";
@@ -46,9 +46,17 @@ export class CustomEntryComponent extends Container {
 			component = this.renderer(this.entry, { expanded: this._expanded }, theme);
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
-			const box = new Box(1, 1, (text) => theme.bg("customMessageBg", text));
-			box.addChild(new Text(theme.fg("error", `[${this.entry.customType}] renderer failed: ${message}`), 0, 0));
-			component = box;
+			const failure = new Container();
+			const glyphs = getGlyphs();
+			failure.addChild(
+				new Text(
+					theme.fg("error", `${glyphs.error} ${this.entry.customType} ${glyphs.bullet} renderer failed`),
+					1,
+					0,
+				),
+			);
+			failure.addChild(new Text(theme.fg("error", message), 2, 0));
+			component = failure;
 		}
 
 		if (!component) {
