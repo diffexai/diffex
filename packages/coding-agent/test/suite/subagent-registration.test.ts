@@ -41,7 +41,7 @@ const INCOMPATIBLE_PARENT_HOOKS = [
 	"message_end",
 ] as const;
 type IncompatibleParentHook = (typeof INCOMPATIBLE_PARENT_HOOKS)[number];
-type ObservationParentHook = "agent_start" | "after_provider_response" | "tool_execution_start";
+type ObservationParentHook = "agent_start" | "after_provider_response" | "message_start" | "tool_execution_start";
 
 function registerParentHook(api: ExtensionAPI, hook: IncompatibleParentHook | ObservationParentHook): void {
 	switch (hook) {
@@ -80,6 +80,9 @@ function registerParentHook(api: ExtensionAPI, hook: IncompatibleParentHook | Ob
 			break;
 		case "after_provider_response":
 			api.on("after_provider_response", () => {});
+			break;
+		case "message_start":
+			api.on("message_start", () => {});
 			break;
 		case "tool_execution_start":
 			api.on("tool_execution_start", () => {});
@@ -389,6 +392,7 @@ describe("root subagent tool registration", () => {
 		const observed = await createPolicyRoot(harness, [
 			"agent_start",
 			"after_provider_response",
+			"message_start",
 			"tool_execution_start",
 		]);
 		await getActiveTool(observed.session, "spawn_agent").execute("spawn", { name: "worker", task: "task" });

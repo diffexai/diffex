@@ -217,9 +217,9 @@ export default function promptUrlWidgetExtension(pi: ExtensionAPI) {
 		});
 	};
 
-	pi.on("before_agent_start", async (event, ctx) => {
-		if (!ctx.hasUI) return;
-		const match = extractPromptMatch(event.prompt);
+	pi.on("message_start", async (event, ctx) => {
+		if (!ctx.hasUI || event.message.role !== "user") return;
+		const match = extractPromptMatch(getUserText(event.message.content));
 		if (!match) {
 			return;
 		}
@@ -231,7 +231,7 @@ export default function promptUrlWidgetExtension(pi: ExtensionAPI) {
 		rebuildFromSession(ctx);
 	});
 
-	const getUserText = (content: string | { type: string; text?: string }[] | undefined): string => {
+	function getUserText(content: string | { type: string; text?: string }[] | undefined): string {
 		if (!content) return "";
 		if (typeof content === "string") return content;
 		return (
@@ -240,7 +240,7 @@ export default function promptUrlWidgetExtension(pi: ExtensionAPI) {
 				.map((block) => block.text)
 				.join("\n") ?? ""
 		);
-	};
+	}
 
 	const rebuildFromSession = (ctx: ExtensionContext) => {
 		if (!ctx.hasUI) return;
