@@ -13,6 +13,7 @@ import {
 } from "../src/modes/interactive/components/settings-selector.ts";
 import { initTheme } from "../src/modes/interactive/theme/theme.ts";
 import { stripAnsi } from "../src/utils/ansi.ts";
+
 function settingsConfig(overrides: Partial<SettingsConfig> = {}): SettingsConfig {
 	return {
 		autoCompact: true,

@@ -1,7 +1,7 @@
+import { getGlyphs } from "@earendil-works/diffex-tui";
 import { mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { getGlyphs } from "@earendil-works/diffex-tui";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { shouldRunFirstTimeSetup } from "../src/cli/startup-ui.ts";
 import { ENV_AGENT_DIR } from "../src/config.ts";
