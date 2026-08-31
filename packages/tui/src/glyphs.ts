@@ -2,6 +2,7 @@ export type GlyphMode = "unicode" | "ascii";
 
 export interface TuiGlyphs {
 	selected: string;
+	start: string;
 	rail: string;
 	branch: string;
 	end: string;
@@ -20,6 +21,7 @@ export interface TuiGlyphs {
 
 const UNICODE_GLYPHS: TuiGlyphs = {
 	selected: "›",
+	start: "╭",
 	rail: "│",
 	branch: "├",
 	end: "╰",
@@ -38,6 +40,7 @@ const UNICODE_GLYPHS: TuiGlyphs = {
 
 const ASCII_GLYPHS: TuiGlyphs = {
 	selected: ">",
+	start: "+",
 	rail: "|",
 	branch: "+",
 	end: "\\",

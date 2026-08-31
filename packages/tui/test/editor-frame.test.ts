@@ -85,6 +85,7 @@ describe("TUI glyphs", () => {
 	it("uses the Diffex Unicode vocabulary by default", () => {
 		assert.strictEqual(detectGlyphMode({ TERM: "xterm-256color" }), "unicode");
 		assert.strictEqual(getGlyphs("unicode").selected, "›");
+		assert.strictEqual(getGlyphs("unicode").start, "╭");
 		assert.strictEqual(getGlyphs("unicode").rail, "│");
 	});
 });
