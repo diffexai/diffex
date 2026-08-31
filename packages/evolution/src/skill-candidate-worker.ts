@@ -243,6 +243,10 @@ function hasAwaitingEvaluation(
 	);
 }
 
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function isInputSnapshot(artifact: EvolutionArtifact): artifact is EvolutionInputSnapshot {
 	return "evidenceSources" in artifact && "repository" in artifact && "harness" in artifact && "trigger" in artifact;
 }
@@ -283,6 +287,33 @@ function errorDiagnostic(error: unknown): SkillCandidateWorkErrorDiagnostic {
 	};
 }
 
+function knownOversizedModelLimits(
+	events: readonly SkillCandidateRegistryEvent[],
+	synthesisIdempotencyKey: string,
+): { readonly contextWindow: number; readonly maxOutputTokens: number } | null {
+	for (const event of [...events].reverse()) {
+		if (event.type !== "skill-candidate-work-failed") continue;
+		const diagnostic = event.diagnostics?.find(
+			(item) =>
+				item.synthesisIdempotencyKey === synthesisIdempotencyKey &&
+				item.error.reasonCode === "skill-synthesis-request-too-large",
+		);
+		if (diagnostic === undefined || !isRecord(diagnostic.error.diagnostics)) continue;
+		const request = diagnostic.error.diagnostics.request;
+		if (
+			!isRecord(request) ||
+			typeof request.contextWindow !== "number" ||
+			!Number.isSafeInteger(request.contextWindow) ||
+			typeof request.maxOutputTokens !== "number" ||
+			!Number.isSafeInteger(request.maxOutputTokens)
+		) {
+			continue;
+		}
+		return { contextWindow: request.contextWindow, maxOutputTokens: request.maxOutputTokens };
+	}
+	return null;
+}
+
 function synthesisAttemptCount(
 	events: readonly SkillCandidateRegistryEvent[],
 	synthesisIdempotencyKey: string,
@@ -291,7 +322,11 @@ function synthesisAttemptCount(
 		(count, event) =>
 			event.type === "skill-candidate-work-failed" &&
 			event.stage === "synthesizing" &&
-			event.diagnostics?.some((diagnostic) => diagnostic.synthesisIdempotencyKey === synthesisIdempotencyKey)
+			event.diagnostics?.some(
+				(diagnostic) =>
+					diagnostic.synthesisIdempotencyKey === synthesisIdempotencyKey &&
+					diagnostic.error.reasonCode !== "skill-synthesis-request-too-large",
+			)
 				? count + 1
 				: count,
 		0,
@@ -668,6 +703,25 @@ export class SkillCandidateRegistryWorker implements SkillCandidateWorkProcessor
 		}
 	}
 
+	async #isKnownOversizedRequest(
+		group: SkillCandidateGroup,
+		events: readonly SkillCandidateRegistryEvent[],
+	): Promise<boolean> {
+		const knownLimits = knownOversizedModelLimits(events, group.synthesisIdempotencyKey);
+		if (knownLimits === null) return false;
+		const latestRevision = group.proposalRevisions.at(-1);
+		if (latestRevision === undefined) return false;
+		const sourceJob = await this.#dependencies.jobs.load(latestRevision.sourceEvolutionJobId);
+		if (sourceJob === null) return false;
+		const sourceInput = await this.#dependencies.artifacts.get(sourceJob.inputSnapshot);
+		if (!isInputSnapshot(sourceInput)) return false;
+		const currentLimits = this.#dependencies.model.getModelLimits(sourceInput.modelConfiguration);
+		return (
+			currentLimits.contextWindow === knownLimits.contextWindow &&
+			currentLimits.maxOutputTokens === knownLimits.maxOutputTokens
+		);
+	}
+
 	async #processClaimed(
 		sourceEvolutionJobId: string,
 		claim: () => EvolutionLeaseToken,
@@ -759,11 +813,16 @@ export class SkillCandidateRegistryWorker implements SkillCandidateWorkProcessor
 			];
 			activeStage = "scoring";
 			await this.#appendCheckpoint(job, activeStage, attempt, processedGroupIds, claim());
-			const synthesisTargets = result.groups.filter(
-				(group) =>
+			const synthesisTargets: SkillCandidateGroup[] = [];
+			for (const group of result.groups) {
+				if (
 					group.state === "evidence-qualified" &&
-					(recoveryGroupIds === null || recoveryGroupIds.has(group.groupId)),
-			);
+					(recoveryGroupIds === null || recoveryGroupIds.has(group.groupId)) &&
+					!(await this.#isKnownOversizedRequest(group, registryEvents))
+				) {
+					synthesisTargets.push(group);
+				}
+			}
 			activeStage = "synthesizing";
 			await this.#appendCheckpoint(
 				job,
@@ -780,6 +839,7 @@ export class SkillCandidateRegistryWorker implements SkillCandidateWorkProcessor
 				readonly error: unknown;
 				readonly attempt: number;
 				readonly retryPending: boolean;
+				readonly parked: boolean;
 				readonly reasonCode: "skill-synthesis-attempts-exhausted" | "skill-synthesis-non-retryable";
 			}[] = [];
 			for (const group of synthesisTargets) {
@@ -799,6 +859,9 @@ export class SkillCandidateRegistryWorker implements SkillCandidateWorkProcessor
 					} catch (error) {
 						signal.throwIfAborted();
 						const synthesisAttempt = synthesisAttemptCount(registryEvents, group.synthesisIdempotencyKey) + 1;
+						const parked =
+							error instanceof EvolutionExecutionError &&
+							error.reasonCode === "skill-synthesis-request-too-large";
 						const retryable = error instanceof EvolutionExecutionError && error.retryable;
 						synthesisFailures.push({
 							groupId: group.groupId,
@@ -806,7 +869,8 @@ export class SkillCandidateRegistryWorker implements SkillCandidateWorkProcessor
 							idempotencyKey: group.synthesisIdempotencyKey,
 							error,
 							attempt: synthesisAttempt,
-							retryPending: retryable && synthesisAttempt < this.#maxAttempts,
+							retryPending: !parked && retryable && synthesisAttempt < this.#maxAttempts,
+							parked,
 							reasonCode: retryable ? "skill-synthesis-attempts-exhausted" : "skill-synthesis-non-retryable",
 						});
 						continue;
@@ -826,7 +890,9 @@ export class SkillCandidateRegistryWorker implements SkillCandidateWorkProcessor
 				);
 			}
 			activeGroupId = null;
-			const terminalSynthesisFailures = synthesisFailures.filter((failure) => !failure.retryPending);
+			const terminalSynthesisFailures = synthesisFailures.filter(
+				(failure) => !failure.parked && !failure.retryPending,
+			);
 			if (terminalSynthesisFailures.length > 0) {
 				await this.#dependencies.registry.recordSynthesisFailures({
 					scope: job.metadata.scope,
@@ -962,8 +1028,9 @@ export class SkillCandidateRegistryWorker implements SkillCandidateWorkProcessor
 				}
 			}
 			activeGroupId = null;
-			if (synthesisFailures.length > 0) {
-				const retryableFailures = synthesisFailures.filter((failure) => failure.retryPending);
+			const activeSynthesisFailures = synthesisFailures.filter((failure) => !failure.parked);
+			if (activeSynthesisFailures.length > 0) {
+				const retryableFailures = activeSynthesisFailures.filter((failure) => failure.retryPending);
 				throw new SkillCandidateWorkStageError(
 					"synthesizing",
 					synthesisFailures.map((failure) => ({
@@ -971,11 +1038,44 @@ export class SkillCandidateRegistryWorker implements SkillCandidateWorkProcessor
 						synthesisIdempotencyKey: failure.idempotencyKey,
 						error: failure.error,
 					})),
-					`Skill synthesis failed for candidate groups: ${synthesisFailures.map((failure) => failure.groupId).join(", ")}`,
+					`Skill synthesis failed for candidate groups: ${activeSynthesisFailures
+						.map((failure) => failure.groupId)
+						.join(", ")}`,
 					{
 						retryable: retryableFailures.length > 0,
 						retryAttempt: Math.max(1, ...retryableFailures.map((failure) => failure.attempt)),
 					},
+				);
+			}
+			const parkedSynthesisFailures = synthesisFailures.filter((failure) => failure.parked);
+			if (parkedSynthesisFailures.length > 0) {
+				const parkedError = new SkillCandidateWorkStageError(
+					"synthesizing",
+					parkedSynthesisFailures.map((failure) => ({
+						groupId: failure.groupId,
+						synthesisIdempotencyKey: failure.idempotencyKey,
+						error: failure.error,
+					})),
+					`Skill synthesis deferred for oversized candidate groups: ${parkedSynthesisFailures
+						.map((failure) => failure.groupId)
+						.join(", ")}`,
+					{ retryable: false, retryAttempt: 1 },
+				);
+				await this.#appendFailure(
+					job,
+					attempt,
+					1,
+					false,
+					"synthesizing",
+					parkedError.failures.map((failure) => ({
+						groupId: failure.groupId,
+						...(failure.synthesisIdempotencyKey === undefined
+							? {}
+							: { synthesisIdempotencyKey: failure.synthesisIdempotencyKey }),
+						error: errorDiagnostic(failure.error),
+					})),
+					parkedError,
+					claim(),
 				);
 			}
 			activeStage = "completed";

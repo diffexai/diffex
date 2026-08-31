@@ -43,6 +43,7 @@ import type {
 } from "./ports.ts";
 import { computeEvolutionContentDigest, createEvolutionArtifactMetadata } from "./provenance.ts";
 import {
+	capsuleRequiresEnrichment,
 	type SkillCandidateMaterialEntry,
 	skillCandidateGroupContract,
 	skillCandidateMaterialEntries,
@@ -457,6 +458,10 @@ function canonicalGroupCapsule(
 		conflicts,
 		evidence: mergeEvidence(sources.map((source) => source.revision)),
 	};
+	capsuleRequiresEnrichment(
+		capsuleBody,
+		sources.map((source) => source.candidate),
+	);
 	const capsuleId = stableId("skill-candidate-group-capsule", capsuleBody);
 	const content = {
 		artifactKind: "skill-candidate-group-capsule" as const,

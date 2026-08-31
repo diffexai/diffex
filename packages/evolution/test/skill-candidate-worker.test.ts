@@ -517,6 +517,7 @@ function fixture(withEvaluator = false, store: MemoryRegistryStore = new MemoryR
 	const validationRequests: SkillDraftValidatorInput[] = [];
 	const evaluationRequests: SkillEvaluatorInput[] = [];
 	let clockTime = now;
+	let modelLimits = { contextWindow: 128_000, maxOutputTokens: 16_384 };
 	const clock = { now: () => clockTime };
 	return {
 		job,
@@ -530,6 +531,9 @@ function fixture(withEvaluator = false, store: MemoryRegistryStore = new MemoryR
 		clock,
 		setClock(value: string) {
 			clockTime = value;
+		},
+		setModelLimits(value: typeof modelLimits) {
+			modelLimits = value;
 		},
 		worker: new SkillCandidateRegistryWorker({
 			version: "1",
@@ -669,7 +673,7 @@ function fixture(withEvaluator = false, store: MemoryRegistryStore = new MemoryR
 				: {}),
 			model: {
 				maxProviderCallsPerExecution: 20,
-				getModelLimits: () => ({ contextWindow: 128_000, maxOutputTokens: 16_384 }),
+				getModelLimits: () => modelLimits,
 				execute: () => Promise.reject(new Error("Fixture synthesizer does not call the model")),
 			},
 		}),
@@ -829,9 +833,7 @@ describe("skill candidate registry worker", () => {
 			}),
 		);
 
-		await expect(data.worker.process(data.job.jobId)).rejects.toThrow(
-			"Skill synthesis failed for candidate groups: group-failing",
-		);
+		await expect(data.worker.process(data.job.jobId)).resolves.toBe("processed");
 
 		expect(data.synthesisRequests.map((request) => request.group.groupId)).toEqual([
 			"group-failing",
@@ -840,14 +842,14 @@ describe("skill candidate registry worker", () => {
 		expect(data.validationRequests.map((request) => request.group.groupId)).toEqual(["group-succeeding"]);
 		expect(data.evaluationRequests.map((request) => request.group.groupId)).toEqual(["group-succeeding"]);
 		expect(data.registry.groups.find((candidateGroup) => candidateGroup.groupId === "group-failing")).toMatchObject({
-			state: "synthesis-failed",
-			dispositionHistory: [expect.objectContaining({ reasonCodes: ["skill-synthesis-non-retryable"] })],
+			state: "evidence-qualified",
+			dispositionHistory: [],
 		});
 		expect(data.registry.groups.find((candidateGroup) => candidateGroup.groupId === "group-succeeding")?.state).toBe(
 			"accepted",
 		);
 		expect(data.store.events.find((event) => event.type === "skill-candidate-work-failed")).toMatchObject({
-			message: "Skill synthesis failed for candidate groups: group-failing",
+			message: "Skill synthesis deferred for oversized candidate groups: group-failing",
 			stage: "synthesizing",
 			diagnostics: [
 				{
@@ -869,7 +871,29 @@ describe("skill candidate registry worker", () => {
 			data.store.events.some(
 				(event) => event.type === "skill-candidate-work-checkpointed" && event.stage === "completed",
 			),
-		).toBe(false);
+		).toBe(true);
+
+		const nextJob = { ...data.job, jobId: "job-oversized-retry" };
+		data.jobs.jobs.push(nextJob);
+		await data.worker.process(nextJob.jobId);
+		expect(data.synthesisRequests.map((request) => request.group.groupId)).toEqual([
+			"group-failing",
+			"group-succeeding",
+		]);
+
+		data.setModelLimits({ contextWindow: 256_000, maxOutputTokens: 16_384 });
+		data.synthesisFailures.delete("group-failing");
+		const resumedJob = { ...data.job, jobId: "job-oversized-capability-resumed" };
+		data.jobs.jobs.push(resumedJob);
+		await data.worker.process(resumedJob.jobId);
+		expect(data.synthesisRequests.map((request) => request.group.groupId)).toEqual([
+			"group-failing",
+			"group-succeeding",
+			"group-failing",
+		]);
+		expect(data.registry.groups.find((candidateGroup) => candidateGroup.groupId === "group-failing")?.state).toBe(
+			"accepted",
+		);
 	});
 
 	it("reconciles legacy exhausted synthesis by identity under fresh bounded retries", async () => {
