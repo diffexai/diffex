@@ -2,6 +2,7 @@ import assert from "node:assert";
 import { describe, it } from "node:test";
 import { stripVTControlCharacters } from "node:util";
 import { Markdown } from "../src/components/markdown.ts";
+import { getGlyphs } from "../src/glyphs.ts";
 import { defaultMarkdownTheme } from "./test-themes.ts";
 
 const TABLE = `| Name | State |
@@ -21,7 +22,7 @@ describe("Compact Markdown tables", () => {
 
 		assert.deepStrictEqual(plain(markdown.render(40)), [
 			"Name  State",
-			"────  ───────",
+			`${getGlyphs().separator.repeat(4)}  ${getGlyphs().separator.repeat(7)}`,
 			"sync  done",
 			"ship  pending",
 		]);

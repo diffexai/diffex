@@ -1,6 +1,7 @@
 import assert from "node:assert";
 import { describe, it } from "node:test";
 import { SelectList } from "../src/components/select-list.ts";
+import { getGlyphs } from "../src/glyphs.ts";
 import { visibleWidth } from "../src/utils.ts";
 
 const testTheme = {
@@ -135,6 +136,6 @@ describe("SelectList", () => {
 		});
 		const rendered = list.render(80);
 
-		assert.equal(rendered[0], "[› ]{command}");
+		assert.equal(rendered[0], `[${getGlyphs().selected} ]{command}`);
 	});
 });
