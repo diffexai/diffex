@@ -2,7 +2,7 @@
  * Component for displaying bash command execution with streaming output.
  */
 
-import { Container, Loader, Spacer, Text, type TUI } from "@earendil-works/diffex-tui";
+import { Container, getGlyphs, Loader, Spacer, Text, type TUI } from "@earendil-works/diffex-tui";
 import {
 	DEFAULT_MAX_BYTES,
 	DEFAULT_MAX_LINES,
@@ -11,7 +11,6 @@ import {
 } from "../../../core/tools/truncate.ts";
 import { stripAnsi } from "../../../utils/ansi.ts";
 import { theme } from "../theme/theme.ts";
-import { DynamicBorder } from "./dynamic-border.ts";
 import { keyHint, keyText } from "./keybinding-hints.ts";
 import { truncateToVisualLines } from "./visual-truncate.ts";
 
@@ -28,40 +27,33 @@ export class BashExecutionComponent extends Container {
 	private fullOutputPath?: string;
 	private expanded = false;
 	private contentContainer: Container;
+	private excludeFromContext: boolean;
 
 	constructor(command: string, ui: TUI, excludeFromContext = false) {
 		super();
 		this.command = command;
+		this.excludeFromContext = excludeFromContext;
 
-		// Use dim border for excluded-from-context commands (!! prefix)
 		const colorKey = excludeFromContext ? "dim" : "bashMode";
-		const borderColor = (str: string) => theme.fg(colorKey, str);
 
-		// Add spacer
+		// A direct bash invocation is its own transcript turn.
 		this.addChild(new Spacer(1));
 
-		// Top border
-		this.addChild(new DynamicBorder(borderColor));
-
-		// Content container (holds dynamic content between borders)
 		this.contentContainer = new Container();
 		this.addChild(this.contentContainer);
 
-		// Command header
-		const header = new Text(theme.fg(colorKey, theme.bold(`$ ${command}`)), 1, 0);
-		this.contentContainer.addChild(header);
-
-		// Loader
+		const glyphs = getGlyphs();
 		this.loader = new Loader(
 			ui,
 			(spinner) => theme.fg(colorKey, spinner),
 			(text) => theme.fg("muted", text),
-			`Running... (${keyText("tui.select.cancel")} to cancel)`, // Plain text for loader
+			`Bash ${glyphs.bullet} running ${glyphs.bullet} ${keyText("tui.select.cancel")} cancel`,
+			{
+				prefix: theme.fg(colorKey, `${glyphs.running} `),
+				indicatorPosition: "after",
+			},
 		);
-		this.contentContainer.addChild(this.loader);
-
-		// Bottom border
-		this.addChild(new DynamicBorder(borderColor));
+		this.updateDisplay();
 	}
 
 	/**
@@ -117,6 +109,7 @@ export class BashExecutionComponent extends Container {
 	}
 
 	private updateDisplay(): void {
+		const glyphs = getGlyphs();
 		// Apply truncation for LLM context limits (same limits as bash tool)
 		const fullOutput = this.outputLines.join("\n");
 		const contextTruncation = truncateTail(fullOutput, {
@@ -134,8 +127,29 @@ export class BashExecutionComponent extends Container {
 		// Rebuild content container
 		this.contentContainer.clear();
 
-		// Command header
-		const header = new Text(theme.fg("bashMode", theme.bold(`$ ${this.command}`)), 1, 0);
+		if (this.status === "running") {
+			this.contentContainer.addChild(this.loader);
+		} else if (this.status === "cancelled") {
+			this.contentContainer.addChild(
+				new Text(theme.fg("warning", `${glyphs.cancelled} Bash ${glyphs.bullet} cancelled`), 1, 0),
+			);
+		} else if (this.status === "error") {
+			this.contentContainer.addChild(
+				new Text(
+					theme.fg("error", `${glyphs.error} Bash ${glyphs.bullet} failed ${glyphs.bullet} exit ${this.exitCode}`),
+					1,
+					0,
+				),
+			);
+		} else {
+			this.contentContainer.addChild(
+				new Text(theme.fg("success", `${glyphs.success} Bash ${glyphs.bullet} complete`), 1, 0),
+			);
+		}
+
+		const colorKey = this.excludeFromContext ? "dim" : "bashMode";
+		const commandPrefix = this.excludeFromContext ? "!!" : "$";
+		const header = new Text(theme.fg(colorKey, theme.bold(`${commandPrefix} ${this.command}`)), 2, 0);
 		this.contentContainer.addChild(header);
 
 		// Output
@@ -143,17 +157,17 @@ export class BashExecutionComponent extends Container {
 			if (this.expanded) {
 				// Show all lines
 				const displayText = availableLines.map((line) => theme.fg("muted", line)).join("\n");
-				this.contentContainer.addChild(new Text(`\n${displayText}`, 1, 0));
+				this.contentContainer.addChild(new Text(displayText, 2, 0));
 			} else {
 				// Use shared visual truncation utility with width-aware caching
 				const styledOutput = previewLogicalLines.map((line) => theme.fg("muted", line)).join("\n");
-				const styledInput = `\n${styledOutput}`;
+				const styledInput = styledOutput;
 				let cachedWidth: number | undefined;
 				let cachedLines: string[] | undefined;
 				this.contentContainer.addChild({
 					render: (width: number) => {
 						if (cachedLines === undefined || cachedWidth !== width) {
-							const result = truncateToVisualLines(styledInput, PREVIEW_LINES, width, 1);
+							const result = truncateToVisualLines(styledInput, PREVIEW_LINES, width, 2);
 							cachedLines = result.visualLines;
 							cachedWidth = width;
 						}
@@ -167,10 +181,7 @@ export class BashExecutionComponent extends Container {
 			}
 		}
 
-		// Loader or status
-		if (this.status === "running") {
-			this.contentContainer.addChild(this.loader);
-		} else {
+		if (this.status !== "running") {
 			const statusParts: string[] = [];
 
 			// Show how many lines are hidden (collapsed preview)
@@ -186,12 +197,6 @@ export class BashExecutionComponent extends Container {
 				}
 			}
 
-			if (this.status === "cancelled") {
-				statusParts.push(theme.fg("warning", "(cancelled)"));
-			} else if (this.status === "error") {
-				statusParts.push(theme.fg("error", `(exit ${this.exitCode})`));
-			}
-
 			// Add truncation warning (context truncation, not preview truncation)
 			const wasTruncated = this.truncationResult?.truncated || contextTruncation.truncated;
 			if (wasTruncated && this.fullOutputPath) {
@@ -199,7 +204,7 @@ export class BashExecutionComponent extends Container {
 			}
 
 			if (statusParts.length > 0) {
-				this.contentContainer.addChild(new Text(`\n${statusParts.join("\n")}`, 1, 0));
+				this.contentContainer.addChild(new Text(statusParts.join("\n"), 2, 0));
 			}
 		}
 	}

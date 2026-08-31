@@ -1,19 +1,51 @@
 import type { TUI } from "@earendil-works/diffex-tui";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { IdleStatus, RetryStatusIndicator } from "../src/modes/interactive/components/status-indicator.ts";
-import { initTheme } from "../src/modes/interactive/theme/theme.ts";
+import { BorderedLoader } from "../src/modes/interactive/components/bordered-loader.ts";
+import {
+	IdleStatus,
+	RetryStatusIndicator,
+	WorkingStatusIndicator,
+} from "../src/modes/interactive/components/status-indicator.ts";
+import { initTheme, theme } from "../src/modes/interactive/theme/theme.ts";
 
 describe("status indicators", () => {
 	afterEach(() => {
 		vi.useRealTimers();
 	});
 
-	it("keeps idle status at the same height as status indicators", () => {
+	it("reserves one stable row while idle", () => {
 		const idleStatus = new IdleStatus();
 
 		const lines = idleStatus.render(20);
-		expect(lines).toHaveLength(2);
-		expect(lines).toEqual([" ".repeat(20), " ".repeat(20)]);
+		expect(lines).toEqual([" ".repeat(20)]);
+	});
+
+	it("renders active work on one row", () => {
+		initTheme("dark");
+		vi.useFakeTimers();
+		const tui = { requestRender: vi.fn() } as unknown as TUI;
+		const indicator = new WorkingStatusIndicator(tui, "Responding");
+
+		const lines = indicator.render(40);
+		expect(lines).toHaveLength(1);
+		expect(lines[0]).toContain("Responding");
+
+		indicator.dispose();
+	});
+
+	it("keeps cancellable editor loaders to one borderless row", () => {
+		initTheme("dark");
+		vi.useFakeTimers();
+		const tui = { requestRender: vi.fn() } as unknown as TUI;
+		const loader = new BorderedLoader(tui, theme, "Preparing share");
+
+		const lines = loader.render(60);
+		expect(lines).toHaveLength(1);
+		expect(lines[0]).toContain("Preparing share");
+		expect(lines[0]).toContain("cancel");
+		expect(lines[0]).not.toContain("─");
+
+		loader.dispose();
 	});
 
 	it("disposes retry countdown updates", () => {

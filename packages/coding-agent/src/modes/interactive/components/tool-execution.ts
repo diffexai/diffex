@@ -3,6 +3,7 @@ import {
 	type Component,
 	Container,
 	getCapabilities,
+	getGlyphs,
 	Image,
 	Spacer,
 	Text,
@@ -20,6 +21,7 @@ export interface ToolExecutionOptions {
 }
 
 export class ToolExecutionComponent extends Container {
+	private stateText: Text;
 	private contentBox: Box;
 	private contentText: Text;
 	private selfRenderContainer: Container;
@@ -69,14 +71,14 @@ export class ToolExecutionComponent extends Container {
 		this.ui = ui;
 		this.cwd = cwd;
 
-		this.addChild(new Spacer(1));
-
 		// Always create all shell variants. contentBox is used for default renderer-based composition.
 		// selfRenderContainer is used when the tool renders its own framing.
 		// contentText is reserved for generic fallback rendering when no tool definition exists.
-		this.contentBox = new Box(1, 1, (text: string) => theme.bg("toolPendingBg", text));
-		this.contentText = new Text("", 1, 1, (text: string) => theme.bg("toolPendingBg", text));
+		this.stateText = new Text("", 1, 0);
+		this.contentBox = new Box(1, 0);
+		this.contentText = new Text("", 1, 0);
 		this.selfRenderContainer = new Container();
+		this.addChild(this.stateText);
 
 		if (this.hasRendererDefinition()) {
 			this.addChild(this.getRenderShell() === "self" ? this.selfRenderContainer : this.contentBox);
@@ -238,9 +240,8 @@ export class ToolExecutionComponent extends Container {
 				return [];
 			}
 
-			const lines: string[] = [];
+			const lines: string[] = this.stateText.render(width);
 			if (contentLines.length > 0) {
-				lines.push("");
 				lines.push(...contentLines);
 			}
 			for (let i = 0; i < this.imageComponents.length; i++) {
@@ -259,20 +260,45 @@ export class ToolExecutionComponent extends Container {
 		return super.render(width);
 	}
 
-	private updateDisplay(): void {
-		const bgFn = this.isPartial
-			? (text: string) => theme.bg("toolPendingBg", text)
-			: this.result?.isError
-				? (text: string) => theme.bg("toolErrorBg", text)
-				: (text: string) => theme.bg("toolSuccessBg", text);
+	private isCancelledResult(): boolean {
+		if (!this.result?.isError || this.isPartial) {
+			return false;
+		}
+		const message = this.result.content
+			.filter((content) => content.type === "text" && content.text)
+			.map((content) => content.text)
+			.join("\n")
+			.trim();
+		return /^(?:Operation aborted|Request was aborted|Aborted after \d+ retry attempts?)$/i.test(message);
+	}
 
+	private updateStateText(): void {
+		const glyphs = getGlyphs();
+		const rawLabel = this.toolDefinition?.label ?? this.builtInToolDefinition?.label ?? this.toolName;
+		const normalizedLabel = rawLabel.replaceAll("_", " ");
+		const label = normalizedLabel.charAt(0).toUpperCase() + normalizedLabel.slice(1);
+
+		if (this.isCancelledResult()) {
+			this.stateText.setText(theme.fg("warning", `${glyphs.cancelled} ${label} ${glyphs.bullet} cancelled`));
+		} else if (this.result && !this.isPartial) {
+			if (this.result.isError) {
+				this.stateText.setText(theme.fg("error", `${glyphs.error} ${label} ${glyphs.bullet} failed`));
+			} else {
+				this.stateText.setText(theme.fg("success", `${glyphs.success} ${label} ${glyphs.bullet} complete`));
+			}
+		} else if (this.executionStarted || this.result) {
+			this.stateText.setText(theme.fg("accent", `${glyphs.running} ${label} ${glyphs.bullet} running`));
+		} else {
+			this.stateText.setText(theme.fg("muted", `${glyphs.pending} ${label} ${glyphs.bullet} pending`));
+		}
+	}
+
+	private updateDisplay(): void {
+		this.updateStateText();
 		let hasContent = false;
 		this.hideComponent = false;
 		if (this.hasRendererDefinition()) {
 			const renderContainer = this.getRenderShell() === "self" ? this.selfRenderContainer : this.contentBox;
-			if (renderContainer instanceof Box) {
-				renderContainer.setBgFn(bgFn);
-			}
 			renderContainer.clear();
 
 			const callRenderer = this.getCallRenderer();
@@ -322,7 +348,6 @@ export class ToolExecutionComponent extends Container {
 				}
 			}
 		} else {
-			this.contentText.setCustomBgFn(bgFn);
 			this.contentText.setText(this.formatToolExecution());
 			hasContent = true;
 		}

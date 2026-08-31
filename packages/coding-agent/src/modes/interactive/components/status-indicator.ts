@@ -1,4 +1,4 @@
-import { type Component, Loader, type TUI } from "@earendil-works/diffex-tui";
+import { type Component, getGlyphs, Loader, type TUI } from "@earendil-works/diffex-tui";
 import type { WorkingIndicatorOptions } from "../../../core/extensions/index.ts";
 import { theme } from "../theme/theme.ts";
 import { CountdownTimer } from "./countdown-timer.ts";
@@ -6,8 +6,6 @@ import { keyText } from "./keybinding-hints.ts";
 import { createSpinnerVerbSequence } from "./spinner-verbs.ts";
 
 const SPINNER_VERB_CHANGE_INTERVAL_MS = 5000;
-const SPINNER_VERB_DOT_INTERVAL_MS = 500;
-const SPINNER_VERB_CHANGE_TICKS = SPINNER_VERB_CHANGE_INTERVAL_MS / SPINNER_VERB_DOT_INTERVAL_MS;
 
 export type StatusIndicatorKind = "working" | "retry" | "compaction" | "branchSummary" | "subagentWait";
 
@@ -35,7 +33,6 @@ export class WorkingStatusIndicator extends StatusIndicator {
 	private readonly nextSpinnerVerb: () => string;
 	private currentSpinnerVerb: string;
 	private verbAnimationIntervalId: NodeJS.Timeout | undefined;
-	private verbAnimationTick = 0;
 
 	constructor(ui: TUI, message?: string, indicator?: WorkingIndicatorOptions) {
 		const nextSpinnerVerb = createSpinnerVerbSequence();
@@ -45,7 +42,7 @@ export class WorkingStatusIndicator extends StatusIndicator {
 			ui,
 			(spinner) => theme.fg("accent", spinner),
 			(text) => theme.fg("muted", text),
-			message ?? `${initialSpinnerVerb}.`,
+			message ?? `${initialSpinnerVerb}...`,
 			indicator,
 		);
 		this.nextSpinnerVerb = nextSpinnerVerb;
@@ -73,18 +70,12 @@ export class WorkingStatusIndicator extends StatusIndicator {
 		this.stopVerbAnimation();
 		if (updateImmediately) {
 			this.currentSpinnerVerb = this.nextSpinnerVerb();
-			this.verbAnimationTick = 0;
-			this.setMessage(`${this.currentSpinnerVerb}.`);
+			this.setMessage(`${this.currentSpinnerVerb}...`);
 		}
 		this.verbAnimationIntervalId = setInterval(() => {
-			this.verbAnimationTick += 1;
-			if (this.verbAnimationTick === SPINNER_VERB_CHANGE_TICKS) {
-				this.currentSpinnerVerb = this.nextSpinnerVerb();
-				this.verbAnimationTick = 0;
-			}
-			const dots = ".".repeat((this.verbAnimationTick % 3) + 1);
-			this.setMessage(`${this.currentSpinnerVerb}${dots}`);
-		}, SPINNER_VERB_DOT_INTERVAL_MS);
+			this.currentSpinnerVerb = this.nextSpinnerVerb();
+			this.setMessage(`${this.currentSpinnerVerb}...`);
+		}, SPINNER_VERB_CHANGE_INTERVAL_MS);
 	}
 
 	private stopVerbAnimation(): void {
@@ -99,8 +90,9 @@ export class RetryStatusIndicator extends StatusIndicator {
 	private countdown: CountdownTimer | undefined;
 
 	constructor(ui: TUI, attempt: number, maxAttempts: number, delayMs: number) {
+		const separator = ` ${getGlyphs().bullet} `;
 		const retryMessage = (seconds: number) =>
-			`Retrying (${attempt}/${maxAttempts}) in ${seconds}s... (${keyText("app.interrupt")} to cancel)`;
+			`Retry ${attempt}/${maxAttempts} in ${seconds}s${separator}${keyText("app.interrupt")} cancel`;
 		super(
 			"retry",
 			ui,
@@ -131,11 +123,11 @@ export type CompactionStatusReason = "manual" | "threshold" | "overflow";
 
 export class CompactionStatusIndicator extends StatusIndicator {
 	constructor(ui: TUI, reason: CompactionStatusReason) {
-		const cancelHint = `(${keyText("app.interrupt")} to cancel)`;
+		const cancelHint = `${getGlyphs().bullet} ${keyText("app.interrupt")} cancel`;
 		const label =
 			reason === "manual"
-				? `Compacting context... ${cancelHint}`
-				: `${reason === "overflow" ? "Context overflow detected, " : ""}Auto-compacting... ${cancelHint}`;
+				? `Compacting context ${cancelHint}`
+				: `${reason === "overflow" ? "Context overflow" : "Auto-compacting context"} ${cancelHint}`;
 		super(
 			"compaction",
 			ui,
@@ -148,25 +140,27 @@ export class CompactionStatusIndicator extends StatusIndicator {
 
 export class BranchSummaryStatusIndicator extends StatusIndicator {
 	constructor(ui: TUI) {
+		const glyphs = getGlyphs();
 		super(
 			"branchSummary",
 			ui,
 			(spinner) => theme.fg("accent", spinner),
 			(text) => theme.fg("muted", text),
-			`Summarizing branch... (${keyText("app.interrupt")} to cancel)`,
+			`Summarizing branch ${glyphs.bullet} ${keyText("app.interrupt")} cancel`,
 		);
 	}
 }
 
 export class SubagentWaitStatusIndicator extends StatusIndicator {
 	constructor(ui: TUI, count: number) {
+		const glyphs = getGlyphs();
 		const label = count === 1 ? "Waiting for subagent" : `Waiting for ${count} subagents`;
 		super(
 			"subagentWait",
 			ui,
 			(spinner) => theme.fg("accent", spinner),
 			(text) => theme.fg("muted", text),
-			`${label}... (${keyText("app.interrupt")} to cancel)`,
+			`${label} ${glyphs.bullet} ${keyText("app.interrupt")} cancel`,
 		);
 	}
 }
@@ -178,6 +172,6 @@ export class IdleStatus implements Component {
 
 	render(width: number): string[] {
 		const emptyLine = " ".repeat(width);
-		return [emptyLine, emptyLine];
+		return [emptyLine];
 	}
 }

@@ -1,5 +1,5 @@
 import { join, resolve } from "node:path";
-import { Text, type TUI } from "@earendil-works/diffex-tui";
+import { getGlyphs, Text, type TUI } from "@earendil-works/diffex-tui";
 import { Type } from "typebox";
 import { beforeAll, describe, expect, test } from "vitest";
 import { getReadmePath } from "../src/config.ts";
@@ -33,6 +33,50 @@ function createFakeTui(): TUI {
 describe("ToolExecutionComponent parity", () => {
 	beforeAll(() => {
 		initTheme("dark");
+	});
+
+	test("renders every tool lifecycle state explicitly without relying on color", () => {
+		const separator = ` ${getGlyphs().bullet} `;
+		const component = new ToolExecutionComponent(
+			"custom_tool",
+			"tool-state",
+			{},
+			{},
+			createBaseToolDefinition(),
+			createFakeTui(),
+			process.cwd(),
+		);
+		expect(stripAnsi(component.render(120).join("\n"))).toContain(`Custom tool${separator}pending`);
+
+		component.markExecutionStarted();
+		expect(stripAnsi(component.render(120).join("\n"))).toContain(`Custom tool${separator}running`);
+
+		component.updateResult({ content: [{ type: "text", text: "done" }], isError: false }, false);
+		expect(stripAnsi(component.render(120).join("\n"))).toContain(`Custom tool${separator}complete`);
+
+		const failed = new ToolExecutionComponent(
+			"custom_tool",
+			"tool-failed",
+			{},
+			{},
+			createBaseToolDefinition(),
+			createFakeTui(),
+			process.cwd(),
+		);
+		failed.updateResult({ content: [{ type: "text", text: "boom" }], isError: true }, false);
+		expect(stripAnsi(failed.render(120).join("\n"))).toContain(`Custom tool${separator}failed`);
+
+		const cancelled = new ToolExecutionComponent(
+			"custom_tool",
+			"tool-cancelled",
+			{},
+			{},
+			createBaseToolDefinition(),
+			createFakeTui(),
+			process.cwd(),
+		);
+		cancelled.updateResult({ content: [{ type: "text", text: "Operation aborted" }], isError: true }, false);
+		expect(stripAnsi(cancelled.render(120).join("\n"))).toContain(`Custom tool${separator}cancelled`);
 	});
 
 	test("stacks custom call and result renderers like the old implementation", () => {
