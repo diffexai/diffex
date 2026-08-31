@@ -33,6 +33,7 @@
 			"@earendil-works/diffex-client/websocket": ["./packages/client/src/websocket.ts"],
 			"@earendil-works/diffex-client/*": ["./packages/client/src/*"],
 			"@earendil-works/diffex-server": ["./packages/server/src/index.ts"],
+			"@earendil-works/diffex-server/testing": ["./packages/server/src/testing/index.ts"],
 			"@earendil-works/diffex-server/websocket": [
 				"./packages/server/src/transports/websocket/index.ts"
 			],
