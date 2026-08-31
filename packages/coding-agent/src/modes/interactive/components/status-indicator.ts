@@ -1,7 +1,8 @@
-import { type Component, getGlyphs, Loader, type TUI } from "@earendil-works/diffex-tui";
+import { type Component, getGlyphs, Loader, type LoaderIndicatorOptions, type TUI } from "@earendil-works/diffex-tui";
 import type { WorkingIndicatorOptions } from "../../../core/extensions/index.ts";
 import { theme } from "../theme/theme.ts";
 import { CountdownTimer } from "./countdown-timer.ts";
+import { formatDiffexPathPrefix } from "./diffex-path.ts";
 import { keyText } from "./keybinding-hints.ts";
 import { createSpinnerVerbSequence } from "./spinner-verbs.ts";
 
@@ -22,6 +23,13 @@ export class StatusIndicator extends Loader {
 	) {
 		super(ui, spinnerColorFn, messageColorFn, message, indicator);
 		this.kind = kind;
+	}
+
+	override setIndicator(indicator?: LoaderIndicatorOptions): void {
+		super.setIndicator({
+			...indicator,
+			prefix: `${formatDiffexPathPrefix("start")}${indicator?.prefix ?? ""}`,
+		});
 	}
 
 	dispose(): void {

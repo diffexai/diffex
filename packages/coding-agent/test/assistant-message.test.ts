@@ -258,6 +258,7 @@ describe("AssistantMessageComponent", () => {
 		const streaming = stripAnsi(component.render(80).join("\n"));
 		expect(streaming).toContain("partial");
 		expect(streaming.match(/Diffex/g)).toHaveLength(1);
+		expect(streaming).toContain(`${getGlyphs().start}${getGlyphs().separator} Diffex`);
 		expect(streaming).not.toContain("responding");
 		expect(streaming).not.toContain("transformed");
 
@@ -265,6 +266,7 @@ describe("AssistantMessageComponent", () => {
 		const complete = stripAnsi(component.render(80).join("\n"));
 		expect(complete).toContain("partial transformed");
 		expect(complete.match(/Diffex/g)).toHaveLength(1);
+		expect(complete).toContain(`${getGlyphs().end}${getGlyphs().separator} Diffex`);
 		expect(complete).not.toContain("responding");
 		expect(streamingStates).toEqual([true, false]);
 	});

@@ -1,4 +1,4 @@
-import type { TUI } from "@earendil-works/diffex-tui";
+import { getGlyphs, type TUI } from "@earendil-works/diffex-tui";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BorderedLoader } from "../src/modes/interactive/components/bordered-loader.ts";
 import {
@@ -7,6 +7,7 @@ import {
 	WorkingStatusIndicator,
 } from "../src/modes/interactive/components/status-indicator.ts";
 import { initTheme, theme } from "../src/modes/interactive/theme/theme.ts";
+import { stripAnsi } from "../src/utils/ansi.ts";
 
 describe("status indicators", () => {
 	afterEach(() => {
@@ -29,7 +30,22 @@ describe("status indicators", () => {
 		const lines = indicator.render(40);
 		expect(lines).toHaveLength(1);
 		expect(lines[0]).toContain("Responding");
+		const plain = stripAnsi(lines[0] ?? "");
+		expect(plain.indexOf(getGlyphs().start)).toBeLessThan(plain.indexOf("Responding"));
 
+		indicator.dispose();
+	});
+
+	it("preserves the open path when an extension replaces the animation", () => {
+		initTheme("dark");
+		vi.useFakeTimers();
+		const tui = { requestRender: vi.fn() } as unknown as TUI;
+		const indicator = new WorkingStatusIndicator(tui, "Inspecting");
+
+		indicator.setIndicator({ frames: ["*"] });
+		const plain = stripAnsi(indicator.render(40)[0] ?? "");
+
+		expect(plain).toContain(`${getGlyphs().start} * Inspecting`);
 		indicator.dispose();
 	});
 
