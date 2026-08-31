@@ -1150,10 +1150,8 @@ export interface SkillCandidateWorkFailedEvent extends SkillCandidateRegistryEve
 	readonly attempt: number;
 	readonly message: string;
 	readonly retryNotBefore: string | null;
-	/** Absent only on records written before structured candidate-work failure diagnostics were introduced. */
-	readonly stage?: SkillCandidateWorkStage;
-	/** Absent only on records written before structured candidate-work failure diagnostics were introduced. */
-	readonly diagnostics?: readonly SkillCandidateGroupFailureDiagnostic[];
+	readonly stage: SkillCandidateWorkStage;
+	readonly diagnostics: readonly SkillCandidateGroupFailureDiagnostic[];
 }
 
 export type SkillCandidateRegistryEvent =

@@ -453,10 +453,6 @@ function isCandidateRegistryEventContent(value: Readonly<Record<string, unknown>
 	) {
 		return false;
 	}
-	const hasStage = value.stage !== undefined;
-	const hasDiagnostics = value.diagnostics !== undefined;
-	if (hasStage !== hasDiagnostics) return false;
-	if (!hasStage) return true;
 	return (
 		typeof value.stage === "string" &&
 		SKILL_CANDIDATE_WORK_STAGES.has(value.stage) &&

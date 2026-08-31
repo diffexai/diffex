@@ -1018,8 +1018,6 @@ export async function createCodingAgentEvolutionRuntime(
 		clock,
 		jobs: persistence,
 		store: persistence,
-		registry: candidateRegistry,
-		evaluatorAvailable: options.skillEvaluator !== undefined,
 	});
 	const candidateWorker = new SkillCandidateBackgroundWorker({
 		clock,
@@ -1095,7 +1093,6 @@ export async function createCodingAgentEvolutionRuntime(
 	return {
 		control,
 		async start() {
-			await candidateSource.reconcileLegacyWork();
 			const abandoned = (await persistence.list(scope)).filter((job) => job.outcome === "active");
 			for (const job of abandoned) {
 				abandonedJobIds.add(job.jobId);
