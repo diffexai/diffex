@@ -21,6 +21,7 @@ import {
 	type SkillDraftValidationReport,
 	type SkillEvaluationReport,
 } from "../src/index.ts";
+import { synthesisRequestFixture } from "./synthesis-request-fixture.ts";
 
 const createdAt = "2026-08-25T12:00:00.000Z";
 const scope: EvolutionScope = { repositoryId: "diffex", scopeId: "repository" };
@@ -743,6 +744,7 @@ describe("persistent skill candidate registry", () => {
 			sourceTraceIds: ["trace-a", "trace-b"],
 			sourceSkillVersions: [],
 			repositoryInstructionDigests: [],
+			synthesisRequest: synthesisRequestFixture,
 			operation: secondCandidate.candidate.operation,
 			proposedName: secondCandidate.candidate.proposedName,
 			existingSkillIds: [],

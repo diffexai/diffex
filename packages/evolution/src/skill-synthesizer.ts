@@ -1,3 +1,4 @@
+import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import type {
 	EvolutionArtifactProducer,
 	EvolutionArtifactReference,
@@ -10,6 +11,7 @@ import type {
 	SkillCandidateGroupCapsule,
 	SkillDraft,
 	SkillPackageFile,
+	SkillSynthesisRequestDiagnostics,
 } from "./contracts.ts";
 import { EvolutionExecutionError } from "./errors.ts";
 import type {
@@ -25,6 +27,10 @@ import {
 	computeEvolutionTextDigest,
 	createEvolutionArtifactMetadata,
 } from "./provenance.ts";
+import { EVOLUTION_TOKEN_ESTIMATOR_VERSION, measureEvolutionValue } from "./token-estimator.ts";
+
+const SYNTHESIS_CONTEXT_SAFETY_RATIO = 0.07;
+const SYNTHESIS_PROTOCOL_OVERHEAD_TOKENS = 1_024;
 
 interface SkillVersionContext {
 	readonly entry: EvolutionSkillCatalogEntry;
@@ -195,7 +201,7 @@ function parseOutput(output: JsonObject): { readonly content: string; readonly f
 function modelInput(
 	capsule: SkillCandidateGroupCapsule,
 	skills: readonly SkillVersionContext[],
-	repositoryInstructions: readonly (InstructionDocumentSnapshot & { readonly repositoryRevision: string })[],
+	repositoryInstructions: readonly InstructionDocumentSnapshot[],
 ): JsonObject {
 	return {
 		control: {
@@ -265,14 +271,15 @@ function modelInput(
 		}),
 		existingSkillVersions: skills.map(({ entry, artifact }) => ({
 			skillId: entry.skillId,
-			name: entry.name,
 			version: entry.version,
 			contentDigest: entry.contentDigest,
-			sourceKind: entry.sourceKind,
-			scope: entry.scope,
 			content: artifact.skill.content,
 		})),
-		repositoryInstructions: repositoryInstructions.map(jsonObject),
+		repositoryInstructions: repositoryInstructions.map((instruction) => ({
+			path: instruction.path,
+			contentDigest: instruction.contentDigest,
+			content: instruction.content,
+		})),
 	};
 }
 
@@ -356,8 +363,26 @@ export class StructuredSkillSynthesizer implements SkillSynthesizer {
 				skillVersions.push({ entry, artifact });
 			}
 		}
+		const repositoryRoot = resolve(sourceInput.repository.rootPath);
+		const skillPath = resolve(repositoryRoot, ".agents", "skills", capsuleArtifact.contract.proposedName, "SKILL.md");
 		const repositoryInstructions = sourceInput.instructions
-			.map((instruction) => ({ ...instruction, repositoryRevision: sourceInput.repository.revision }))
+			.filter((instruction) => {
+				const instructionPath = resolve(instruction.path);
+				const relativeToRepository = relative(repositoryRoot, instructionPath);
+				if (
+					relativeToRepository === ".." ||
+					relativeToRepository.startsWith(`..${sep}`) ||
+					isAbsolute(relativeToRepository)
+				) {
+					return true;
+				}
+				const relativeToInstruction = relative(dirname(instructionPath), skillPath);
+				return (
+					relativeToInstruction !== ".." &&
+					!relativeToInstruction.startsWith(`..${sep}`) &&
+					!isAbsolute(relativeToInstruction)
+				);
+			})
 			.sort(
 				(left, right) =>
 					left.precedence - right.precedence ||
@@ -365,17 +390,70 @@ export class StructuredSkillSynthesizer implements SkillSynthesizer {
 					left.contentDigest.localeCompare(right.contentDigest),
 			);
 		const schema = outputSchema();
+		const requestInput = modelInput(capsuleArtifact, skillVersions, repositoryInstructions);
+		const limits = input.model.getModelLimits(sourceInput.modelConfiguration);
+		if (
+			!Number.isSafeInteger(limits.contextWindow) ||
+			limits.contextWindow < 1 ||
+			!Number.isSafeInteger(limits.maxOutputTokens) ||
+			limits.maxOutputTokens < 1
+		) {
+			throw new Error("Skill synthesis model limits must be positive integers");
+		}
+		const inputSize = measureEvolutionValue(requestInput);
+		const schemaSize = measureEvolutionValue(schema);
+		const safetyMarginTokens = Math.ceil(limits.contextWindow * SYNTHESIS_CONTEXT_SAFETY_RATIO);
+		const inputBudgetTokens = Math.max(
+			0,
+			limits.contextWindow -
+				limits.maxOutputTokens -
+				schemaSize.estimatedTokens -
+				SYNTHESIS_PROTOCOL_OVERHEAD_TOKENS -
+				safetyMarginTokens,
+		);
+		const requestPayload = {
+			stage: "skill-synthesizer" as const,
+			model: sourceInput.modelConfiguration,
+			promptVersion: sourceInput.promptVersions.skillSynthesizer,
+			idempotencyKey: input.idempotencyKey,
+			input: requestInput,
+			outputSchema: schema,
+			tools: [],
+			maxOutputTokens: limits.maxOutputTokens,
+		};
+		const requestSize = measureEvolutionValue(requestPayload);
+		const requestDiagnostics: SkillSynthesisRequestDiagnostics = {
+			serialization: EVOLUTION_TOKEN_ESTIMATOR_VERSION,
+			serializedBytes: requestSize.serializedBytes,
+			estimatedTokens: requestSize.estimatedTokens,
+			inputSerializedBytes: inputSize.serializedBytes,
+			inputEstimatedTokens: inputSize.estimatedTokens,
+			contextWindow: limits.contextWindow,
+			maxOutputTokens: limits.maxOutputTokens,
+			schemaEstimatedTokens: schemaSize.estimatedTokens,
+			protocolOverheadTokens: SYNTHESIS_PROTOCOL_OVERHEAD_TOKENS,
+			safetyMarginTokens,
+			inputBudgetTokens,
+			schemaDigest: computeEvolutionContentDigest(schema),
+			capsuleDigest: input.group.canonicalCapsule.contentDigest,
+			requestDigest: computeEvolutionContentDigest(requestPayload),
+		};
+		if (inputSize.estimatedTokens > inputBudgetTokens) {
+			throw new EvolutionExecutionError(
+				`Skill synthesis request requires ${inputSize.estimatedTokens} input tokens but the model budget is ${inputBudgetTokens}`,
+				{
+					reasonCode: "skill-synthesis-request-too-large",
+					retryable: false,
+					diagnostics: { request: jsonObject(requestDiagnostics) },
+				},
+			);
+		}
 		let response: EvolutionModelResponse;
 		try {
 			response = await abortable(
 				input.model.execute({
-					stage: "skill-synthesizer",
-					model: sourceInput.modelConfiguration,
-					promptVersion: sourceInput.promptVersions.skillSynthesizer,
-					idempotencyKey: input.idempotencyKey,
-					input: modelInput(capsuleArtifact, skillVersions, repositoryInstructions),
-					outputSchema: schema,
-					tools: [],
+					...requestPayload,
+					requestDiagnostics,
 					validateOutput: (output) => void parseOutput(output),
 					signal: input.signal,
 				}),
@@ -449,6 +527,7 @@ export class StructuredSkillSynthesizer implements SkillSynthesizer {
 			repositoryInstructionDigests: uniqueSorted(
 				repositoryInstructions.map((instruction) => instruction.contentDigest),
 			),
+			synthesisRequest: requestDiagnostics,
 			operation: capsuleArtifact.contract.operation,
 			proposedName: capsuleArtifact.contract.proposedName,
 			existingSkillIds: capsuleArtifact.contract.existingSkillIds,

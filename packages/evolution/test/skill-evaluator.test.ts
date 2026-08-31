@@ -19,6 +19,7 @@ import {
 	type SkillEvaluationSelectionInput,
 	type SkillEvaluationVerifier,
 } from "../src/index.ts";
+import { synthesisRequestFixture } from "./synthesis-request-fixture.ts";
 
 const createdAt = "2026-08-25T12:00:00.000Z";
 const scope: EvolutionScope = { repositoryId: "diffex", scopeId: "repository" };
@@ -184,6 +185,7 @@ function fixture(
 		sourceTraceIds: ["trace-a", "trace-b"],
 		sourceSkillVersions: [],
 		repositoryInstructionDigests: [],
+		synthesisRequest: synthesisRequestFixture,
 		operation: "CREATE" as const,
 		proposedName: "focused-verification",
 		existingSkillIds: [],

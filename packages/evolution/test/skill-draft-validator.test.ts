@@ -17,6 +17,7 @@ import {
 	type SkillDraft,
 	type SkillDraftValidationEnvironment,
 } from "../src/index.ts";
+import { synthesisRequestFixture } from "./synthesis-request-fixture.ts";
 
 const createdAt = "2026-08-25T12:00:00.000Z";
 const scope: EvolutionScope = { repositoryId: "diffex", scopeId: "repository" };
@@ -365,6 +366,7 @@ function fixture(
 			},
 		],
 		repositoryInstructionDigests: [input.instructions[0]!.contentDigest],
+		synthesisRequest: synthesisRequestFixture,
 		operation: sourceCandidate.operation,
 		proposedName: sourceCandidate.proposedName,
 		existingSkillIds: sourceCandidate.existingSkillIds,

@@ -27,6 +27,7 @@ import {
 	type SkillEvaluationReport,
 	SkillWriter,
 } from "../src/index.ts";
+import { synthesisRequestFixture } from "./synthesis-request-fixture.ts";
 
 const now = "2026-08-29T12:00:00.000Z";
 const scope: EvolutionScope = { repositoryId: "diffex", scopeId: "repository" };
@@ -216,6 +217,7 @@ async function writerFixture(options: WriterFixtureOptions) {
 			contentDigest: existingSkills[index]?.contentHash ?? `sha256:${"9".repeat(64)}`,
 		})),
 		repositoryInstructionDigests: [],
+		synthesisRequest: synthesisRequestFixture,
 		operation: options.operation,
 		proposedName: options.proposedName,
 		existingSkillIds,
