@@ -1,13 +1,11 @@
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import type {
 	EvolutionArtifactProducer,
-	EvolutionArtifactReference,
 	EvolutionInputSnapshot,
 	EvolutionSkillCatalogEntry,
 	EvolutionSkillContentArtifact,
 	InstructionDocumentSnapshot,
 	JsonObject,
-	SkillCandidateGroup,
 	SkillCandidateGroupCapsule,
 	SkillDraft,
 	SkillPackageFile,
@@ -27,6 +25,7 @@ import {
 	computeEvolutionTextDigest,
 	createEvolutionArtifactMetadata,
 } from "./provenance.ts";
+import { isCanonicalGroupCapsule } from "./skill-candidate-capsule.ts";
 import { EVOLUTION_TOKEN_ESTIMATOR_VERSION, measureEvolutionValue } from "./token-estimator.ts";
 
 const SYNTHESIS_CONTEXT_SAFETY_RATIO = 0.07;
@@ -61,55 +60,8 @@ function stableId(kind: string, value: unknown): string {
 	return `${kind}-${computeEvolutionContentDigest(value).slice("sha256:".length, "sha256:".length + 32)}`;
 }
 
-function contentWithoutMetadata<T extends { readonly metadata: unknown }>(value: T): Omit<T, "metadata"> {
-	const { metadata: _metadata, ...content } = value;
-	return content;
-}
-
 function isInputSnapshot(artifact: EvolutionArtifact): artifact is EvolutionInputSnapshot {
 	return "evidenceSources" in artifact && "repository" in artifact && "harness" in artifact && "trigger" in artifact;
-}
-
-function isGroupCapsule(artifact: EvolutionArtifact): artifact is SkillCandidateGroupCapsule {
-	return "artifactKind" in artifact && artifact.artifactKind === "skill-candidate-group-capsule";
-}
-
-function sameOrderedValues(left: readonly string[], right: readonly string[]): boolean {
-	return left.length === right.length && left.every((value, index) => value === right[index]);
-}
-
-function assertGroupCapsule(
-	artifact: EvolutionArtifact,
-	reference: EvolutionArtifactReference,
-	group: SkillCandidateGroup,
-): asserts artifact is SkillCandidateGroupCapsule {
-	const proposalRevisionIds = group.proposalRevisions.map((revision) => revision.revisionId);
-	const latestProposalRevisionId = proposalRevisionIds.at(-1);
-	if (
-		!isGroupCapsule(artifact) ||
-		artifact.groupId !== group.groupId ||
-		artifact.capsuleId !== reference.artifactId ||
-		artifact.metadata.artifactId !== artifact.capsuleId ||
-		artifact.metadata.contentDigest !== computeEvolutionContentDigest(contentWithoutMetadata(artifact)) ||
-		computeEvolutionContentDigest(artifact) !== reference.contentDigest ||
-		artifact.metadata.scope.repositoryId !== group.profile.workspace.evolutionScope.repositoryId ||
-		artifact.metadata.scope.scopeId !== group.profile.workspace.evolutionScope.scopeId ||
-		artifact.baseProposalRevisionId !== latestProposalRevisionId ||
-		!sameOrderedValues(artifact.proposalRevisionIds, proposalRevisionIds) ||
-		!sameOrderedValues(
-			artifact.sourceDigests,
-			group.proposalRevisions.map((revision) => revision.candidate.contentDigest),
-		) ||
-		artifact.contract.workspace.repositoryId !== group.profile.workspace.repositoryId ||
-		artifact.contract.workspace.directoryId !== group.profile.workspace.directoryId ||
-		artifact.contract.workspace.evolutionScope.repositoryId !== group.profile.workspace.evolutionScope.repositoryId ||
-		artifact.contract.workspace.evolutionScope.scopeId !== group.profile.workspace.evolutionScope.scopeId
-	) {
-		throw new EvolutionExecutionError(`Canonical capsule for candidate group "${group.groupId}" is invalid`, {
-			reasonCode: "artifact-corrupt",
-			retryable: false,
-		});
-	}
 }
 
 function sameWorkspace(
@@ -318,7 +270,15 @@ export class StructuredSkillSynthesizer implements SkillSynthesizer {
 			throw new Error(`Candidate group "${input.group.groupId}" synthesis key is stale`);
 		}
 		const capsuleArtifact = await this.#dependencies.artifacts.get(input.group.canonicalCapsule);
-		assertGroupCapsule(capsuleArtifact, input.group.canonicalCapsule, input.group);
+		if (!isCanonicalGroupCapsule(capsuleArtifact, input.group.canonicalCapsule, input.group)) {
+			throw new EvolutionExecutionError(
+				`Canonical capsule for candidate group "${input.group.groupId}" is invalid`,
+				{
+					reasonCode: "artifact-corrupt",
+					retryable: false,
+				},
+			);
+		}
 		const latestRevision = input.group.proposalRevisions.at(-1);
 		if (latestRevision === undefined) {
 			throw new Error(`Candidate group "${input.group.groupId}" has no proposal revisions`);

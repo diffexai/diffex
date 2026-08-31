@@ -14,6 +14,7 @@ import {
 	type EvolutionScope,
 	type SkillCandidate,
 	type SkillCandidateGroup,
+	type SkillCandidateGroupCapsule,
 	type SkillDraft,
 	type SkillDraftValidationEnvironment,
 } from "../src/index.ts";
@@ -343,12 +344,59 @@ function fixture(
 		readonly content?: string;
 		readonly environment?: Partial<SkillDraftValidationEnvironment>;
 		readonly files?: SkillDraft["files"];
+		readonly historicalAdditions?: SkillCandidateGroupCapsule["historicalAdditions"];
 	} = {},
 ) {
 	const input = inputSnapshot();
 	const sourceCandidate = candidate(input);
 	const candidateReference = reference(sourceCandidate);
 	const job = completedJob(input);
+	const proposalRevision = {
+		revisionId: "proposal-revision-1",
+		candidateId: sourceCandidate.candidateId,
+		candidate: candidateReference,
+		sourceEvolutionJobId: job.jobId,
+		createdAt,
+		evidence: {
+			supportingEvidenceIds: sourceCandidate.supportingEvidenceIds,
+			contradictingEvidenceIds: [],
+			supportingTraceIds: sourceCandidate.supportingTraceIds,
+			contradictingTraceIds: [],
+			supportingTaskLineageIds: sourceCandidate.taskLineageIds,
+			contradictingTaskLineageIds: [],
+		},
+	};
+	const capsuleContent = {
+		artifactKind: "skill-candidate-group-capsule" as const,
+		capsuleId: "skill-candidate-group-capsule-1",
+		groupId: "group-1",
+		baseProposalRevisionId: proposalRevision.revisionId,
+		proposalRevisionIds: [proposalRevision.revisionId],
+		sourceDigests: [candidateReference.contentDigest],
+		contract: {
+			operation: sourceCandidate.operation,
+			proposedName: sourceCandidate.proposedName,
+			workspace: sourceCandidate.workspace,
+			existingSkillIds: sourceCandidate.existingSkillIds,
+			skillability: sourceCandidate.skillability,
+			trigger: sourceCandidate.trigger,
+			preconditions: sourceCandidate.preconditions,
+			procedure: sourceCandidate.procedure,
+			failureHandling: sourceCandidate.failureHandling,
+			applicabilityBoundaries: sourceCandidate.applicabilityBoundaries,
+			verificationContract: sourceCandidate.verificationContract,
+			memoryRelationship: sourceCandidate.memoryRelationship,
+		},
+		historicalAdditions: options.historicalAdditions ?? [],
+		support: [],
+		conflicts: [],
+		evidence: proposalRevision.evidence,
+	};
+	const capsule: SkillCandidateGroupCapsule = {
+		metadata: metadata(capsuleContent.capsuleId, [sourceCandidate.candidateId], capsuleContent),
+		...capsuleContent,
+	};
+	const capsuleReference = reference(capsule);
 	const draftContent = {
 		artifactKind: "skill-draft" as const,
 		draftId: "draft-1",
@@ -366,7 +414,7 @@ function fixture(
 			},
 		],
 		repositoryInstructionDigests: [input.instructions[0]!.contentDigest],
-		synthesisRequest: synthesisRequestFixture,
+		synthesisRequest: { ...synthesisRequestFixture, capsuleDigest: capsuleReference.contentDigest },
 		operation: sourceCandidate.operation,
 		proposedName: sourceCandidate.proposedName,
 		existingSkillIds: sourceCandidate.existingSkillIds,
@@ -391,10 +439,7 @@ function fixture(
 	const draftReference = reference(draft);
 	const group: SkillCandidateGroup = {
 		groupId: "group-1",
-		canonicalCapsule: {
-			artifactId: "skill-candidate-group-capsule-1",
-			contentDigest: `sha256:${"9".repeat(64)}`,
-		},
+		canonicalCapsule: capsuleReference,
 		profile: {
 			workspace: { repositoryId: "diffex", directoryId: "directory-1", evolutionScope: scope },
 			existingSkillIds: sourceCandidate.existingSkillIds,
@@ -403,23 +448,7 @@ function fixture(
 			proceduralIntentTerms: ["focused", "test"],
 			applicabilityTerms: ["repository"],
 		},
-		proposalRevisions: [
-			{
-				revisionId: "proposal-revision-1",
-				candidateId: sourceCandidate.candidateId,
-				candidate: candidateReference,
-				sourceEvolutionJobId: job.jobId,
-				createdAt,
-				evidence: {
-					supportingEvidenceIds: sourceCandidate.supportingEvidenceIds,
-					contradictingEvidenceIds: [],
-					supportingTraceIds: sourceCandidate.supportingTraceIds,
-					contradictingTraceIds: [],
-					supportingTaskLineageIds: sourceCandidate.taskLineageIds,
-					contradictingTaskLineageIds: [],
-				},
-			},
-		],
+		proposalRevisions: [proposalRevision],
 		state: "drafted",
 		dispositionHistory: [],
 		evidence: {
@@ -455,10 +484,23 @@ function fixture(
 		group,
 		validator: new DeterministicSkillDraftValidator({
 			version: "validator-v1",
-			artifacts: new MemoryArtifactStore([input, sourceCandidate]),
+			artifacts: new MemoryArtifactStore([input, sourceCandidate, capsule]),
 			jobs: new MemoryJobStore(job),
 			environment: { capture: async () => environment },
 		}),
+	};
+}
+
+function historicalAddition(
+	field: SkillCandidateGroupCapsule["historicalAdditions"][number]["field"],
+	value: SkillCandidateGroupCapsule["historicalAdditions"][number]["value"],
+): SkillCandidateGroupCapsule["historicalAdditions"][number] {
+	return {
+		field,
+		value,
+		valueDigest: computeEvolutionContentDigest(value),
+		supportCount: 1,
+		revisionSpans: [{ startIndex: 0, endIndex: 0 }],
 	};
 }
 
@@ -485,6 +527,50 @@ describe("DeterministicSkillDraftValidator", () => {
 			validatedHarnessVersion: harnessVersion,
 			canonicalInventory: ["skills/focused-verification/SKILL.md", "skills/focused-verification/scripts/verify.sh"],
 		});
+	});
+
+	it("rejects a draft that omits unique historical capsule requirements", async () => {
+		const data = fixture({
+			historicalAdditions: [
+				historicalAddition("preconditions", "The legacy verifier is installed."),
+				historicalAddition("procedure.requiredTools", "legacy-verifier"),
+				historicalAddition("procedure.environment", "Legacy package workspace"),
+				historicalAddition("procedure.steps", {
+					sequence: 3,
+					action: "Archive the legacy verifier output.",
+					condition: "The legacy verifier ran.",
+				}),
+				historicalAddition("failureHandling", {
+					signal: "The legacy verifier cannot start.",
+					mitigation: "Inspect the legacy verifier installation.",
+					recovery: "Install the verifier and rerun it.",
+				}),
+				historicalAddition("applicabilityBoundaries", "Legacy packages only."),
+				historicalAddition("verificationContract.checks", "The archived verifier output is readable."),
+			],
+		});
+		const report = await data.validator.validate({
+			group: data.group,
+			draft: data.draft,
+			idempotencyKey: "skill-validation-1",
+			createdAt,
+		});
+
+		expect(report.disposition).toBe("rejected");
+		expect(report.issues.map((item) => item.code)).toEqual(
+			expect.arrayContaining([
+				"precondition-missing",
+				"tool-dependency-missing",
+				"environment-dependency-missing",
+				"procedure-action-missing",
+				"decision-branch-missing",
+				"failure-signal-missing",
+				"failure-mitigation-missing",
+				"recovery-action-missing",
+				"applicability-boundary-missing",
+				"acceptance-criterion-missing",
+			]),
+		);
 	});
 
 	it.each([
@@ -606,6 +692,22 @@ describe("DeterministicSkillDraftValidator", () => {
 			fixture: () =>
 				fixture({ content: validMarkdown.replace("Correct the issue and rerun the test.", "Recover safely.") }),
 			code: "recovery-action-missing",
+		},
+		{
+			name: "omitted negative triggers",
+			fixture: () => fixture({ content: validMarkdown.replace("No repository files changed.", "Never use this.") }),
+			code: "counterexample-missing",
+		},
+		{
+			name: "omitted verification checks",
+			fixture: () =>
+				fixture({ content: validMarkdown.replace("The focused test exits successfully.", "The check completes.") }),
+			code: "acceptance-criterion-missing",
+		},
+		{
+			name: "omitted completion conditions",
+			fixture: () => fixture({ content: validMarkdown.replace("The focused test passes.", "Work is done.") }),
+			code: "acceptance-criterion-missing",
 		},
 	] as const)("rejects $name", async ({ fixture: createFixture, code }) => {
 		const data = createFixture();

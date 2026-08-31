@@ -528,16 +528,16 @@ describe("persistent skill candidate registry", () => {
 		);
 	});
 
-	it("bounds material conflict alternatives while retaining an overflow digest", async () => {
+	it("routes digest-only material conflict overflow back for enrichment", async () => {
 		const fixture = registryFixture();
-		const sourceInput = input([evidence("support-a", "task-a", 0)], "trace-a");
+		const sourceInput = input([evidence("support-a", "task-a", 0), evidence("support-b", "task-b", 1)], "trace-a");
 		const candidates = Array.from({ length: 12 }, (_value, index) =>
 			candidate({
 				candidateId: `candidate-conflict-${index.toString().padStart(2, "0")}`,
 				input: sourceInput,
 				proposedName: `focused-check-${index.toString().padStart(2, "0")}`,
-				supportingEvidenceIds: ["support-a"],
-				taskLineageIds: ["task-a"],
+				supportingEvidenceIds: ["support-a", "support-b"],
+				taskLineageIds: ["task-a", "task-b"],
 			}),
 		);
 		const result = await fixture.registry.consolidate({
@@ -558,6 +558,14 @@ describe("persistent skill candidate registry", () => {
 		expect(conflict?.alternatives).toHaveLength(8);
 		expect(conflict?.omittedAlternativeCount).toBe(3);
 		expect(conflict?.omittedAlternativesDigest).toMatch(/^sha256:[0-9a-f]{64}$/);
+		expect(group).toMatchObject({
+			state: "proposed",
+			dispositionHistory: [
+				expect.objectContaining({
+					reasonCodes: ["candidate-recorded", "canonical-capsule-enrichment-required"],
+				}),
+			],
+		});
 	});
 
 	it("requalifies an exhausted synthesis only after the proposal revision set changes", async () => {
