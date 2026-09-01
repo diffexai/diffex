@@ -4,6 +4,7 @@ import { Container, getGlyphs, Text, type TUI } from "@earendil-works/diffex-tui
 import { beforeAll, describe, expect, test, vi } from "vitest";
 import type { AgentSessionEvent } from "../src/core/agent-session.ts";
 import type { SessionEntry } from "../src/core/session-manager.ts";
+import type { AssistantMessageComponent } from "../src/modes/interactive/components/assistant-message.ts";
 import { CustomEntryComponent } from "../src/modes/interactive/components/custom-entry.ts";
 import { DynamicBorder } from "../src/modes/interactive/components/dynamic-border.ts";
 import { ToolExecutionComponent } from "../src/modes/interactive/components/tool-execution.ts";
@@ -32,20 +33,22 @@ type TestContext = {
 		getShowImages(): boolean;
 		getImageWidthCells(): number;
 		getShowCacheMissNotices(): boolean;
+		setHideThinkingBlock(hidden: boolean): void;
 	};
 	ui: TUI;
 	chatContainer: Container;
 	pendingTools: Map<string, ToolExecutionComponent>;
 	activeToolGroup: ToolGroupComponent | undefined;
 	turnBoundaryPending: boolean;
-	streamingComponent: undefined;
-	streamingMessage: undefined;
+	streamingComponent: AssistantMessageComponent | undefined;
+	streamingMessage: AssistantMessage | undefined;
 	hideThinkingBlock: boolean;
 	hiddenThinkingLabel: string;
 	outputPad: number;
 	toolOutputExpanded: boolean;
 	agentResponseStartMs: number | undefined;
 	session: {
+		isStreaming: boolean;
 		retryAttempt: number;
 		extensionRunner: { getEntryRenderer(customType: string): (() => Text) | undefined };
 	};
@@ -65,6 +68,7 @@ type RenderSessionItems = (
 	items: readonly (AgentMessage | Extract<SessionEntry, { type: "custom" }>)[],
 	options?: { updateFooter?: boolean; populateHistory?: boolean },
 ) => void;
+type ToggleThinkingBlockVisibility = (this: TestContext) => void;
 
 function createAssistantMessage(
 	content: AssistantMessage["content"],
@@ -113,6 +117,7 @@ function createContext(): TestContext {
 			getShowImages: () => false,
 			getImageWidthCells: () => 60,
 			getShowCacheMissNotices: () => false,
+			setHideThinkingBlock: vi.fn(),
 		},
 		ui: {
 			terminal: { setProgress: vi.fn() },
@@ -130,6 +135,7 @@ function createContext(): TestContext {
 		toolOutputExpanded: false,
 		agentResponseStartMs: undefined,
 		session: {
+			isStreaming: false,
 			retryAttempt: 0,
 			extensionRunner: {
 				getEntryRenderer: (customType) =>
@@ -226,6 +232,52 @@ describe("Interactive transcript layout", () => {
 		expect(groupIndex).toBeGreaterThanOrEqual(0);
 		expect(entryIndex).toBeGreaterThan(groupIndex);
 		expect(boundaryIndex).toBeGreaterThan(entryIndex);
+	});
+
+	test("toggles thinking without rebuilding an active tool transcript", async () => {
+		const context = createContext();
+		const handleEvent = (InteractiveMode.prototype as unknown as { handleEvent: HandleEvent }).handleEvent;
+		const toggleThinkingBlockVisibility = (
+			InteractiveMode.prototype as unknown as {
+				toggleThinkingBlockVisibility: ToggleThinkingBlockVisibility;
+			}
+		).toggleThinkingBlockVisibility;
+		const toolCall = {
+			type: "toolCall" as const,
+			id: TOOL_CALL_ID,
+			name: TOOL_NAME,
+			arguments: { path: "README.md" },
+		};
+		const streamingMessage = createAssistantMessage(
+			[{ type: "thinking", thinking: "inspect the relevant file" }, toolCall],
+			"pending",
+		);
+		context.session.isStreaming = true;
+
+		await handleEvent.call(context, { type: "message_start", message: streamingMessage });
+		await handleEvent.call(context, {
+			type: "message_update",
+			message: streamingMessage,
+			assistantMessageEvent: {
+				type: "toolcall_end",
+				contentIndex: 1,
+				toolCall,
+				partial: streamingMessage,
+			},
+		});
+		const children = [...context.chatContainer.children];
+		const assistantComponent = context.streamingComponent;
+		const toolGroup = context.activeToolGroup;
+		const pendingTool = context.pendingTools.get(TOOL_CALL_ID);
+
+		toggleThinkingBlockVisibility.call(context);
+
+		expect(context.hideThinkingBlock).toBe(true);
+		expect(context.chatContainer.children).toEqual(children);
+		expect(context.streamingComponent).toBe(assistantComponent);
+		expect(context.activeToolGroup).toBe(toolGroup);
+		expect(context.pendingTools.get(TOOL_CALL_ID)).toBe(pendingTool);
+		expect(renderChat(context)).toContain(`Reasoning ${getGlyphs().bullet} hidden`);
 	});
 
 	test("groups cumulative live tool updates and sections model turns", async () => {
