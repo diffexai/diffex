@@ -22,6 +22,7 @@ export class AssistantMessageComponent extends Container {
 	private lastMessage?: AssistantMessage;
 	private hasToolCalls = false;
 	private pathContinuesToTools = false;
+	private visibleOutput = false;
 	private isStreaming = false;
 
 	constructor(
@@ -81,6 +82,10 @@ export class AssistantMessageComponent extends Container {
 		return this.pathContinuesToTools;
 	}
 
+	hasVisibleOutput(): boolean {
+		return this.visibleOutput;
+	}
+
 	override render(width: number): string[] {
 		const lines = super.render(width);
 		if (this.hasToolCalls || lines.length === 0) {
@@ -106,6 +111,7 @@ export class AssistantMessageComponent extends Container {
 			(!hasToolCalls && (message.stopReason === "aborted" || message.stopReason === "error"));
 		this.hasToolCalls = hasToolCalls;
 		this.pathContinuesToTools = hasToolCalls && hasVisibleContent;
+		this.visibleOutput = Boolean(hasVisibleContent || hasTerminalNotice);
 		let hasRenderedPath = false;
 		let hasRenderedIdentity = false;
 

@@ -1,16 +1,17 @@
 import type { AgentMessage } from "@earendil-works/diffex-agent-core";
 import type { AssistantMessage, ToolResultMessage, Usage } from "@earendil-works/diffex-ai";
-import { Container, getGlyphs, Text, type TUI } from "@earendil-works/diffex-tui";
+import { Container, getGlyphs, Spacer, Text, type TUI } from "@earendil-works/diffex-tui";
 import { Type } from "typebox";
 import { beforeAll, describe, expect, test, vi } from "vitest";
 import type { AgentSessionEvent } from "../src/core/agent-session.ts";
 import type { ToolDefinition } from "../src/core/extensions/types.ts";
 import type { SessionEntry } from "../src/core/session-manager.ts";
-import type { AssistantMessageComponent } from "../src/modes/interactive/components/assistant-message.ts";
+import { AssistantMessageComponent } from "../src/modes/interactive/components/assistant-message.ts";
 import { CustomEntryComponent } from "../src/modes/interactive/components/custom-entry.ts";
 import { DynamicBorder } from "../src/modes/interactive/components/dynamic-border.ts";
 import { ToolExecutionComponent } from "../src/modes/interactive/components/tool-execution.ts";
 import { ToolGroupComponent } from "../src/modes/interactive/components/tool-group.ts";
+import { UserMessageComponent } from "../src/modes/interactive/components/user-message.ts";
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.ts";
 import { getMarkdownTheme, initTheme } from "../src/modes/interactive/theme/theme.ts";
 import { stripAnsi } from "../src/utils/ansi.ts";
@@ -71,6 +72,7 @@ type RenderSessionItems = (
 	options?: { updateFooter?: boolean; populateHistory?: boolean },
 ) => void;
 type ToggleThinkingBlockVisibility = (this: TestContext) => void;
+type AddMessageToChat = (this: TestContext, message: AgentMessage, options?: { populateHistory?: boolean }) => void;
 
 function createAssistantMessage(
 	content: AssistantMessage["content"],
@@ -168,6 +170,23 @@ function createContext(): TestContext {
 
 function renderChat(context: TestContext): string {
 	return stripAnsi(context.chatContainer.render(100).join("\n"));
+}
+
+function useTranscriptMessageRendering(context: TestContext): AddMessageToChat {
+	const addMessageToChat = (InteractiveMode.prototype as unknown as { addMessageToChat: AddMessageToChat })
+		.addMessageToChat;
+	context.addMessageToChat = (message) => addMessageToChat.call(context, message);
+	return addMessageToChat;
+}
+
+function expectUserAssistantGap(context: TestContext, width: number, assistantLabel: string): void {
+	const lines = context.chatContainer.render(width).map((line) => stripAnsi(line).trimEnd());
+	const userLine = lines.findIndex((line) => line.includes("explain the theorem"));
+	const assistantLine = lines.findIndex((line) => line.includes(assistantLabel));
+
+	expect(userLine).toBeGreaterThanOrEqual(0);
+	expect(assistantLine).toBeGreaterThan(userLine);
+	expect(lines.slice(userLine + 1, assistantLine)).toEqual(["", ""]);
 }
 
 describe("Interactive transcript layout", () => {
@@ -308,6 +327,113 @@ describe("Interactive transcript layout", () => {
 		const rendered = renderChat(context);
 		expect(rendered).toContain("Hidden error tool");
 		expect(rendered).toContain("failed");
+	});
+
+	test.each([60, 80])("adds one neutral row before live reasoning at %d columns", async (width) => {
+		const context = createContext();
+		const addMessageToChat = useTranscriptMessageRendering(context);
+		const handleEvent = (InteractiveMode.prototype as unknown as { handleEvent: HandleEvent }).handleEvent;
+		const userMessage: AgentMessage = {
+			role: "user",
+			content: "explain the theorem",
+			timestamp: Date.now(),
+		};
+		const emptyAssistantMessage = createAssistantMessage([], "pending");
+		const thinkingMessage = createAssistantMessage(
+			[{ type: "thinking", thinking: "identify the relevant formula" }],
+			"pending",
+		);
+
+		addMessageToChat.call(context, userMessage);
+		await handleEvent.call(context, { type: "message_start", message: emptyAssistantMessage });
+		expect(context.chatContainer.children).toEqual([
+			expect.any(UserMessageComponent),
+			expect.any(AssistantMessageComponent),
+		]);
+
+		await handleEvent.call(context, {
+			type: "message_update",
+			message: thinkingMessage,
+			assistantMessageEvent: {
+				type: "thinking_delta",
+				contentIndex: 0,
+				delta: "identify the relevant formula",
+				partial: thinkingMessage,
+			},
+		});
+
+		expect(context.chatContainer.children).toEqual([
+			expect.any(UserMessageComponent),
+			expect.any(Spacer),
+			expect.any(AssistantMessageComponent),
+		]);
+		expectUserAssistantGap(context, width, "Reasoning");
+	});
+
+	test.each([60, 80])("replays one neutral row before assistant content at %d columns", (width) => {
+		const context = createContext();
+		const addMessageToChat = useTranscriptMessageRendering(context);
+		const userMessage: AgentMessage = {
+			role: "user",
+			content: "explain the theorem",
+			timestamp: Date.now(),
+		};
+		const assistantMessage = createAssistantMessage(
+			[{ type: "thinking", thinking: "identify the relevant formula" }],
+			"stop",
+		);
+
+		addMessageToChat.call(context, userMessage);
+		addMessageToChat.call(context, assistantMessage);
+
+		expect(context.chatContainer.children).toEqual([
+			expect.any(UserMessageComponent),
+			expect.any(Spacer),
+			expect.any(AssistantMessageComponent),
+		]);
+		expectUserAssistantGap(context, width, "Reasoning");
+	});
+
+	test("does not double-space a replayed tool-only turn", () => {
+		const context = createContext();
+		useTranscriptMessageRendering(context);
+		const renderSessionItems = (InteractiveMode.prototype as unknown as { renderSessionItems: RenderSessionItems })
+			.renderSessionItems;
+		const userMessage: AgentMessage = {
+			role: "user",
+			content: "explain the theorem",
+			timestamp: Date.now(),
+		};
+		const toolMessage = createAssistantMessage(
+			[{ type: "toolCall", id: TOOL_CALL_ID, name: TOOL_NAME, arguments: { path: "README.md" } }],
+			"toolUse",
+		);
+
+		renderSessionItems.call(context, [userMessage, toolMessage, createToolResult()]);
+
+		const userIndex = context.chatContainer.children.findIndex((child) => child instanceof UserMessageComponent);
+		const toolGroupIndex = context.chatContainer.children.findIndex((child) => child instanceof ToolGroupComponent);
+		const transitionChildren = context.chatContainer.children.slice(userIndex + 1, toolGroupIndex);
+		expect(transitionChildren.filter((child) => child instanceof Spacer)).toHaveLength(1);
+		expect(transitionChildren.filter((child) => child instanceof AssistantMessageComponent)).toHaveLength(1);
+	});
+
+	test("reuses an existing transcript boundary spacer", () => {
+		const context = createContext();
+		const addMessageToChat = useTranscriptMessageRendering(context);
+		context.chatContainer.addChild(new DynamicBorder());
+		context.chatContainer.addChild(new Spacer(1));
+
+		addMessageToChat.call(
+			context,
+			createAssistantMessage([{ type: "text", text: "answer after the boundary" }], "stop"),
+		);
+
+		expect(context.chatContainer.children).toEqual([
+			expect.any(DynamicBorder),
+			expect.any(Spacer),
+			expect.any(AssistantMessageComponent),
+		]);
 	});
 
 	test("groups cumulative live tool updates and sections model turns", async () => {

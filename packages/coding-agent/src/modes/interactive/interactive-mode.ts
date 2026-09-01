@@ -2131,6 +2131,21 @@ export class InteractiveMode {
 		return spacer;
 	}
 
+	private ensureVisibleAssistantSpacer(component: AssistantMessageComponent): void {
+		if (!component.hasVisibleOutput()) {
+			return;
+		}
+		const componentIndex = this.chatContainer.children.indexOf(component);
+		if (componentIndex === -1) {
+			this.addChatSpacer();
+			return;
+		}
+		if (componentIndex === 0 || this.chatContainer.children[componentIndex - 1] instanceof Spacer) {
+			return;
+		}
+		this.chatContainer.children.splice(componentIndex, 0, new Spacer(1));
+	}
+
 	private flushTranscriptBoundary(): void {
 		if (!this.turnBoundaryPending) {
 			return;
@@ -3345,6 +3360,7 @@ export class InteractiveMode {
 					this.streamingMessage = event.message;
 					this.chatContainer.addChild(this.streamingComponent);
 					this.streamingComponent.updateContent(this.streamingMessage, true);
+					this.ensureVisibleAssistantSpacer(this.streamingComponent);
 					this.ui.requestRender();
 				}
 				break;
@@ -3353,6 +3369,7 @@ export class InteractiveMode {
 				if (this.streamingComponent && event.message.role === "assistant") {
 					this.streamingMessage = event.message;
 					this.streamingComponent.updateContent(this.streamingMessage, true);
+					this.ensureVisibleAssistantSpacer(this.streamingComponent);
 
 					for (const content of this.streamingMessage.content) {
 						if (content.type === "toolCall") {
@@ -3377,6 +3394,7 @@ export class InteractiveMode {
 						this.streamingMessage.errorMessage = errorMessage;
 					}
 					this.streamingComponent.updateContent(this.streamingMessage, false);
+					this.ensureVisibleAssistantSpacer(this.streamingComponent);
 
 					if (this.streamingMessage.stopReason === "aborted" || this.streamingMessage.stopReason === "error") {
 						if (!errorMessage) {
@@ -3751,6 +3769,7 @@ export class InteractiveMode {
 					this.outputPad,
 					this.getMarkdownTransformers(),
 				);
+				this.ensureVisibleAssistantSpacer(assistantComponent);
 				this.chatContainer.addChild(assistantComponent);
 				break;
 			}
