@@ -211,7 +211,7 @@ export class AssistantMessageComponent extends Container {
 			}
 		}
 
-		if (!hasToolCalls && !hasRenderedIdentity && (hasVisibleContent || hasTerminalNotice)) {
+		if (!this.isStreaming && !hasToolCalls && !hasRenderedIdentity && (hasVisibleContent || hasTerminalNotice)) {
 			if (hasRenderedPath) {
 				this.contentContainer.addChild(new DiffexPathRail(this.outputPad));
 			}

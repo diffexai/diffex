@@ -107,6 +107,20 @@ describe("AssistantMessageComponent", () => {
 		expect(lines.join("\n")).not.toContain("Diffex");
 	});
 
+	test("does not close a reasoning-only path while it is still streaming", () => {
+		initTheme("dark");
+		const message = createAssistantMessage([{ type: "thinking", thinking: "partial reasoning" }]);
+		const component = new AssistantMessageComponent();
+
+		component.updateContent(message, true);
+		const streaming = component.render(60).map((line) => stripAnsi(line).trimEnd());
+		expect(streaming).toEqual([` ${getGlyphs().start} Reasoning`, ` ${getGlyphs().rail}`, "   partial reasoning"]);
+
+		component.updateContent(message, false);
+		const settled = component.render(60).map((line) => stripAnsi(line).trimEnd());
+		expect(settled.at(-1)).toBe(` ${getGlyphs().end}${getGlyphs().separator} Diffex`);
+	});
+
 	test("renders length stops with neutral truncation wording", () => {
 		initTheme("dark");
 
