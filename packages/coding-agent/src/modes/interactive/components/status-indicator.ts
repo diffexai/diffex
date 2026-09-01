@@ -36,6 +36,10 @@ export class StatusIndicator extends Loader {
 		});
 	}
 
+	setOutputPad(padding: number): void {
+		this.setPaddingX(padding);
+	}
+
 	dispose(): void {
 		this.stop();
 	}

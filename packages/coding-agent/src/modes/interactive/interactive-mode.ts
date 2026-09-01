@@ -120,7 +120,7 @@ import { killTrackedDetachedChildren } from "../../utils/shell.ts";
 import { ensureTool } from "../../utils/tools-manager.ts";
 import { checkForNewDiffexVersion, type LatestDiffexRelease } from "../../utils/version-check.ts";
 import { ArminComponent } from "./components/armin.ts";
-import { AssistantMessageComponent } from "./components/assistant-message.ts";
+import { AssistantMessageComponent, getAssistantMessagePathState } from "./components/assistant-message.ts";
 import { BashExecutionComponent } from "./components/bash-execution.ts";
 import { BorderedLoader } from "./components/bordered-loader.ts";
 import { BranchSummaryMessageComponent } from "./components/branch-summary-message.ts";
@@ -2093,7 +2093,7 @@ export class InteractiveMode {
 
 	private getOrCreateActiveToolGroup(continuesPath = false): ToolGroupComponent {
 		if (!this.activeToolGroup) {
-			const dockedToUser = !continuesPath && this.consumePendingUserDock();
+			const dockedToUser = !continuesPath && this.consumePendingUserDock(undefined, { insertHinge: false });
 			const pathOrigin: DiffexPathOrigin = continuesPath ? "continued" : dockedToUser ? "user-dock" : "standalone";
 			this.activeToolGroup = new ToolGroupComponent(this.outputPad, pathOrigin);
 			if (pathOrigin === "standalone") {
@@ -2106,9 +2106,13 @@ export class InteractiveMode {
 
 	private getOrCreateLiveTool(toolName: string, toolCallId: string, args: unknown): ToolExecutionComponent {
 		const existing = this.pendingTools.get(toolCallId) ?? this.activeToolGroup?.getTool(toolCallId);
-		if (existing) {
+		if (existing?.matchesToolCall(toolCallId, toolName)) {
 			existing.updateArgs(args);
 			return existing;
+		}
+		if (existing) {
+			this.pendingTools.delete(toolCallId);
+			this.activeToolGroup?.removeTool(toolCallId);
 		}
 
 		const component = this.createToolExecutionComponent(toolName, toolCallId, args);
@@ -2118,6 +2122,69 @@ export class InteractiveMode {
 		);
 		this.pendingTools.set(toolCallId, component);
 		return component;
+	}
+
+	private reconcileLiveToolsFromAssistantMessage(message: AssistantMessage): void {
+		const toolCalls = message.content.filter((content) => content.type === "toolCall");
+		const previouslyPending = new Set(this.pendingTools.keys());
+		const orderedTools: Array<readonly [string, ToolExecutionComponent]> = [];
+		const nextPendingTools = new Map<string, ToolExecutionComponent>();
+		for (const toolCall of toolCalls) {
+			const existing = this.pendingTools.get(toolCall.id) ?? this.activeToolGroup?.getTool(toolCall.id);
+			let component: ToolExecutionComponent;
+			if (existing?.matchesToolCall(toolCall.id, toolCall.name)) {
+				component = existing;
+				component.updateArgs(toolCall.arguments);
+			} else {
+				component = this.createToolExecutionComponent(toolCall.name, toolCall.id, toolCall.arguments);
+			}
+			orderedTools.push([toolCall.id, component]);
+			if (previouslyPending.has(toolCall.id) || component !== existing) {
+				nextPendingTools.set(toolCall.id, component);
+			}
+		}
+		this.pendingTools.clear();
+		for (const [toolCallId, component] of nextPendingTools) {
+			this.pendingTools.set(toolCallId, component);
+		}
+		if (orderedTools.length > 0) {
+			this.getOrCreateActiveToolGroup(this.streamingComponent?.continuesPathToTools() ?? false).replaceTools(
+				orderedTools,
+			);
+		} else {
+			this.activeToolGroup?.replaceTools([]);
+		}
+		if (
+			this.streamingComponent &&
+			!this.streamingComponent.hasVisibleOutput() &&
+			this.activeToolGroup?.getPathOrigin() === "continued"
+		) {
+			const componentIndex = this.chatContainer.children.indexOf(this.streamingComponent);
+			const groupIndex = this.chatContainer.children.indexOf(this.activeToolGroup);
+			if (componentIndex >= 0 && groupIndex === componentIndex + 1) {
+				const precedingComponent = this.chatContainer.children[componentIndex - 1];
+				if (precedingComponent instanceof DiffexPathDockHinge) {
+					this.chatContainer.children.splice(componentIndex - 1, 1);
+					this.activeToolGroup.setPathOrigin("user-dock");
+				} else {
+					this.activeToolGroup.setPathOrigin("standalone");
+				}
+			}
+		}
+
+		if (this.activeToolGroup?.hasTools() === false) {
+			const groupIndex = this.chatContainer.children.indexOf(this.activeToolGroup);
+			if (
+				this.activeToolGroup.getPathOrigin() === "standalone" &&
+				groupIndex > 0 &&
+				this.chatContainer.children[groupIndex - 1] instanceof Spacer
+			) {
+				this.chatContainer.children.splice(groupIndex - 1, 2);
+			} else {
+				this.chatContainer.removeChild(this.activeToolGroup);
+			}
+			this.activeToolGroup = undefined;
+		}
 	}
 
 	private completeTranscriptTurn(): void {
@@ -2137,7 +2204,7 @@ export class InteractiveMode {
 		return spacer;
 	}
 
-	private consumePendingUserDock(target?: Component): boolean {
+	private consumePendingUserDock(target?: Component, options: { insertHinge?: boolean } = {}): boolean {
 		const userComponent = this.pendingUserDock;
 		this.pendingUserDock = undefined;
 		if (!userComponent) {
@@ -2173,6 +2240,12 @@ export class InteractiveMode {
 		}
 
 		userComponent.setDocked(true);
+		if (options.insertHinge === false) {
+			if (transitionComponent instanceof Spacer || transitionComponent instanceof DiffexPathDockHinge) {
+				this.chatContainer.children.splice(transitionIndex, 1);
+			}
+			return true;
+		}
 		if (transitionComponent instanceof Spacer) {
 			this.chatContainer.children.splice(transitionIndex, 1, new DiffexPathDockHinge(this.outputPad));
 		} else if (!(transitionComponent instanceof DiffexPathDockHinge)) {
@@ -2186,12 +2259,21 @@ export class InteractiveMode {
 			return;
 		}
 		if (this.activeToolGroup && this.activeToolGroup.getPathOrigin() !== "continued") {
-			const toolPathOrigin = this.activeToolGroup.getPathOrigin();
-			component.setPathOrigin(toolPathOrigin === "user-dock" ? "user-dock" : "standalone");
-			this.activeToolGroup.setPathOrigin("continued");
+			const componentIndex = this.chatContainer.children.indexOf(component);
 			const toolGroupIndex = this.chatContainer.children.indexOf(this.activeToolGroup);
-			if (toolGroupIndex > 0 && this.chatContainer.children[toolGroupIndex - 1] instanceof Spacer) {
-				this.chatContainer.children.splice(toolGroupIndex - 1, 1);
+			const transitionComponent = this.chatContainer.children[componentIndex + 1];
+			const groupFollowsComponent = toolGroupIndex === componentIndex + 1;
+			const groupFollowsSpacer = transitionComponent instanceof Spacer && toolGroupIndex === componentIndex + 2;
+			if (componentIndex >= 0 && (groupFollowsComponent || groupFollowsSpacer)) {
+				const toolPathOrigin = this.activeToolGroup.getPathOrigin();
+				component.setPathOrigin(toolPathOrigin === "user-dock" ? "user-dock" : "standalone");
+				this.activeToolGroup.setPathOrigin("continued");
+				if (groupFollowsSpacer) {
+					this.chatContainer.children.splice(componentIndex + 1, 1);
+				}
+				if (toolPathOrigin === "user-dock") {
+					this.chatContainer.children.splice(componentIndex, 0, new DiffexPathDockHinge(this.outputPad));
+				}
 			}
 		}
 		if (this.consumePendingUserDock(component)) {
@@ -2314,6 +2396,7 @@ export class InteractiveMode {
 	private showStatusIndicator(indicator: StatusIndicator): void {
 		this.activeStatusIndicator?.dispose();
 		this.activeStatusIndicator = indicator;
+		indicator.setOutputPad(this.outputPad);
 		this.statusContainer.clear();
 		this.statusContainer.addChild(indicator);
 	}
@@ -3430,6 +3513,7 @@ export class InteractiveMode {
 					this.chatContainer.addChild(this.streamingComponent);
 					this.streamingComponent.updateContent(this.streamingMessage, true);
 					this.ensureVisibleAssistantTransition(this.streamingComponent);
+					this.reconcileLiveToolsFromAssistantMessage(this.streamingMessage);
 					this.ui.requestRender();
 				}
 				break;
@@ -3440,11 +3524,7 @@ export class InteractiveMode {
 					this.streamingComponent.updateContent(this.streamingMessage, true);
 					this.ensureVisibleAssistantTransition(this.streamingComponent);
 
-					for (const content of this.streamingMessage.content) {
-						if (content.type === "toolCall") {
-							this.getOrCreateLiveTool(content.name, content.id, content.arguments);
-						}
-					}
+					this.reconcileLiveToolsFromAssistantMessage(this.streamingMessage);
 					this.ui.requestRender();
 				}
 				break;
@@ -3464,6 +3544,7 @@ export class InteractiveMode {
 					}
 					this.streamingComponent.updateContent(this.streamingMessage, false);
 					this.ensureVisibleAssistantTransition(this.streamingComponent);
+					this.reconcileLiveToolsFromAssistantMessage(this.streamingMessage);
 
 					if (this.streamingMessage.stopReason === "aborted" || this.streamingMessage.stopReason === "error") {
 						if (!errorMessage) {
@@ -3503,7 +3584,7 @@ export class InteractiveMode {
 
 			case "tool_execution_update": {
 				const component = this.pendingTools.get(event.toolCallId);
-				if (component) {
+				if (component?.matchesToolCall(event.toolCallId, event.toolName)) {
 					component.updateResult({ ...event.partialResult, isError: false }, true);
 					this.ui.requestRender();
 				}
@@ -3512,7 +3593,7 @@ export class InteractiveMode {
 
 			case "tool_execution_end": {
 				const component = this.pendingTools.get(event.toolCallId);
-				if (component) {
+				if (component?.matchesToolCall(event.toolCallId, event.toolName)) {
 					component.updateResult({ ...event.result, isError: event.isError });
 					this.pendingTools.delete(event.toolCallId);
 					this.ui.requestRender();
@@ -3909,11 +3990,7 @@ export class InteractiveMode {
 				for (const content of message.content) {
 					if (content.type === "toolCall") {
 						const component = this.createToolExecutionComponent(content.name, content.id, content.arguments);
-						const continuesPath = message.content.some(
-							(part) =>
-								(part.type === "text" && part.text.trim().length > 0) ||
-								(part.type === "thinking" && part.thinking.trim().length > 0),
-						);
+						const { continuesPathToTools: continuesPath } = getAssistantMessagePathState(message);
 						this.getOrCreateActiveToolGroup(continuesPath).addTool(content.id, component);
 
 						if (message.stopReason === "aborted" || message.stopReason === "error") {
@@ -4920,6 +4997,7 @@ export class InteractiveMode {
 					onOutputPadChange: (padding) => {
 						this.settingsManager.setOutputPad(padding);
 						this.outputPad = padding;
+						this.activeStatusIndicator?.setOutputPad(padding);
 						if (this.streamingComponent || this.session.isStreaming) {
 							for (const child of this.chatContainer.children) {
 								if (

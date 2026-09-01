@@ -74,18 +74,20 @@ describe("ToolGroupComponent", () => {
 		expect(lines[2]?.startsWith(` ${glyphs.rail} ${glyphs.end}`)).toBe(true);
 	});
 
-	test("joins a user dock without drawing a duplicate rail", () => {
+	test("joins a user dock with one owned hinge", () => {
 		const glyphs = getGlyphs();
 		const group = new ToolGroupComponent(1, "user-dock");
 		group.addTool("docked", createTool("docked", "Docked"));
 		const lines = group.render(80).map((line) => stripAnsi(line).trimEnd());
 
-		expect(lines[0]).toBe(` ${glyphs.branch} Exploring`);
-		expect(lines[1]?.startsWith(` ${glyphs.rail} ${glyphs.end}`)).toBe(true);
+		expect(lines[0]).toBe("");
+		expect(lines[1]).toBe(` ${glyphs.start}${glyphs.separator.repeat(2)}`);
+		expect(lines[2]).toBe(` ${glyphs.branch} Exploring`);
+		expect(lines[3]?.startsWith(` ${glyphs.rail} ${glyphs.end}`)).toBe(true);
 	});
 
 	test("forwards display settings to existing tool components", () => {
-		const group = new ToolGroupComponent();
+		const group = new ToolGroupComponent(1, "user-dock");
 		const tool = createTool("settings", "Settings");
 		const setExpanded = vi.spyOn(tool, "setExpanded");
 		const setShowImages = vi.spyOn(tool, "setShowImages");
@@ -99,6 +101,24 @@ describe("ToolGroupComponent", () => {
 		expect(setExpanded).toHaveBeenCalledWith(true);
 		expect(setShowImages).toHaveBeenCalledWith(false);
 		expect(setImageWidthCells).toHaveBeenCalledWith(42);
+	});
+
+	test("replaces and reorders tools to match the final assistant message", () => {
+		const group = new ToolGroupComponent(1);
+		const first = createTool("first", "First");
+		const second = createTool("second", "Second");
+		const replacement = createTool("replacement", "Replacement");
+		group.addTool("first", first);
+		group.addTool("second", second);
+
+		group.replaceTools([
+			["second", second],
+			["first", replacement],
+		]);
+
+		const rendered = stripAnsi(group.render(80).join("\n"));
+		expect(rendered.indexOf("Second")).toBeLessThan(rendered.indexOf("Replacement"));
+		expect(rendered).not.toContain("First");
 	});
 
 	test.each([1, 2, 20, 80])("stays within a %d-column viewport", (width) => {
@@ -133,6 +153,63 @@ describe("ToolGroupComponent", () => {
 		const failed = stripAnsi(group.render(80).join("\n"));
 		expect(failed).toContain("Empty");
 		expect(failed).toContain("failed");
+	});
+
+	test("closes a continued path when every tool renders no rows", () => {
+		const definition: ToolDefinition = {
+			name: "empty-continued",
+			label: "Empty continued",
+			description: "empty",
+			parameters: Type.Any(),
+			execute: async () => ({ content: [], details: {} }),
+			renderShell: "self",
+			renderCall: () => new Text("", 0, 0),
+		};
+		const tool = new ToolExecutionComponent(
+			"empty-continued",
+			"empty-continued",
+			{},
+			{},
+			definition,
+			createFakeTui(),
+			process.cwd(),
+		);
+		const group = new ToolGroupComponent(1, "continued");
+		group.addTool("empty-continued", tool);
+
+		expect(group.render(80).map((line) => stripAnsi(line).trimEnd())).toEqual([` ${getGlyphs().rail}`]);
+		group.markSettled();
+		expect(group.render(80).map((line) => stripAnsi(line).trimEnd())).toEqual([` ${getGlyphs().end}`]);
+	});
+
+	test("keeps a continued path open until a self-rendered result appears", () => {
+		const definition: ToolDefinition = {
+			name: "result-only",
+			label: "Result only",
+			description: "renders only its result",
+			parameters: Type.Any(),
+			execute: async () => ({ content: [], details: {} }),
+			renderShell: "self",
+			renderCall: () => new Text("", 0, 0),
+			renderResult: () => new Text("result became visible", 0, 0),
+		};
+		const tool = new ToolExecutionComponent(
+			"result-only",
+			"result-only",
+			{},
+			{},
+			definition,
+			createFakeTui(),
+			process.cwd(),
+		);
+		const group = new ToolGroupComponent(1, "continued");
+		group.addTool("result-only", tool);
+
+		expect(group.render(80).map((line) => stripAnsi(line).trimEnd())).toEqual([` ${getGlyphs().rail}`]);
+		tool.updateResult({ content: [{ type: "text", text: "result" }], details: {}, isError: false });
+		const visible = stripAnsi(group.render(80).join("\n"));
+		expect(visible).toContain("Exploring");
+		expect(visible).toContain("result became visible");
 	});
 
 	test("preserves reserved empty image rows", () => {

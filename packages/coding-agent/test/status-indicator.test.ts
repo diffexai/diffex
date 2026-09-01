@@ -57,6 +57,20 @@ describe("status indicators", () => {
 		indicator.dispose();
 	});
 
+	it("aligns the working path with configured output padding", () => {
+		initTheme("dark");
+		vi.useFakeTimers();
+		const tui = { requestRender: vi.fn() } as unknown as TUI;
+		const indicator = new WorkingStatusIndicator(tui, "Responding");
+
+		indicator.setOutputPad(0);
+		expect(stripAnsi(indicator.render(40)[0] ?? "").startsWith(getGlyphs().start)).toBe(true);
+		indicator.setOutputPad(2);
+		expect(stripAnsi(indicator.render(40)[0] ?? "").startsWith(`  ${getGlyphs().start}`)).toBe(true);
+
+		indicator.dispose();
+	});
+
 	it("refreshes the path accent when the theme changes", () => {
 		const previousNoColor = process.env.NO_COLOR;
 		const previousTerm = process.env.TERM;

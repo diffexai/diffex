@@ -160,6 +160,10 @@ export class ToolExecutionComponent extends Container {
 		this.updateDisplay();
 	}
 
+	matchesToolCall(toolCallId: string, toolName: string): boolean {
+		return this.toolCallId === toolCallId && this.toolName === toolName;
+	}
+
 	markExecutionStarted(): void {
 		this.executionStarted = true;
 		this.updateDisplay();

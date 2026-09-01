@@ -63,10 +63,11 @@ describe("Diffex path", () => {
 		expect(stripAnsi(hinge.render(60)[0] ?? "")).toBe("╭");
 		hinge.setExtended(true);
 		expect(stripAnsi(hinge.render(80)[0] ?? "")).toBe("╭──");
-		expect(stripAnsi(dockHinge.render(60)[0] ?? "")).toBe(" ╭");
-		expect(stripAnsi(dockHinge.render(80)[0] ?? "")).toBe(" ╭──");
+		expect(dockHinge.render(60)[0]).toBe("");
+		expect(stripAnsi(dockHinge.render(60)[1] ?? "")).toBe(" ╭");
+		expect(stripAnsi(dockHinge.render(80)[1] ?? "")).toBe(" ╭──");
 		dockHinge.setOutputPad(2);
-		expect(stripAnsi(dockHinge.render(80)[0] ?? "")).toBe("  ╭──");
+		expect(stripAnsi(dockHinge.render(80)[1] ?? "")).toBe("  ╭──");
 	});
 
 	test("uses the same hierarchy in ASCII mode", () => {
@@ -80,7 +81,7 @@ describe("Diffex path", () => {
 		const hinge = new DiffexPathHinge();
 		hinge.setExtended(true);
 		expect(stripAnsi(hinge.render(80)[0] ?? "")).toBe("+--");
-		expect(stripAnsi(new DiffexPathDockHinge().render(80)[0] ?? "")).toBe(" +--");
+		expect(stripAnsi(new DiffexPathDockHinge().render(80)[1] ?? "")).toBe(" +--");
 	});
 
 	test.each([1, 2, 8, 60, 80, 120])("never exceeds a %d-column viewport", (width) => {

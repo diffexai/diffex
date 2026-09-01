@@ -1,6 +1,12 @@
 import { type Component, getGlyphs, truncateToWidth, visibleWidth } from "@earendil-works/diffex-tui";
 import { theme } from "../theme/theme.ts";
-import { DiffexPathLabel, type DiffexPathOrigin, DiffexPathRail } from "./diffex-path.ts";
+import {
+	DiffexPathDockHinge,
+	DiffexPathLabel,
+	type DiffexPathOrigin,
+	DiffexPathRail,
+	DiffexPathTerminus,
+} from "./diffex-path.ts";
 import type { ToolExecutionComponent } from "./tool-execution.ts";
 
 interface RenderedTool {
@@ -29,6 +35,18 @@ export class ToolGroupComponent implements Component {
 
 	getTool(toolCallId: string): ToolExecutionComponent | undefined {
 		return this.tools.get(toolCallId);
+	}
+
+	removeTool(toolCallId: string): boolean {
+		return this.tools.delete(toolCallId);
+	}
+
+	replaceTools(tools: ReadonlyArray<readonly [string, ToolExecutionComponent]>): void {
+		this.tools.clear();
+		for (const [toolCallId, component] of tools) {
+			this.tools.delete(toolCallId);
+			this.tools.set(toolCallId, component);
+		}
 	}
 
 	hasTools(): boolean {
@@ -92,12 +110,21 @@ export class ToolGroupComponent implements Component {
 		}
 
 		if (renderedTools.length === 0) {
-			return [];
+			if (this.pathOrigin !== "continued") {
+				return [];
+			}
+			return this.settled
+				? new DiffexPathTerminus(outputPad).render(safeWidth)
+				: new DiffexPathRail(outputPad).render(safeWidth);
 		}
 
 		const label = this.settled ? "Explored" : "Exploring";
 		const continuesPath = this.pathOrigin === "continued";
-		const result = continuesPath ? new DiffexPathRail(outputPad).render(safeWidth) : [];
+		const result = continuesPath
+			? new DiffexPathRail(outputPad).render(safeWidth)
+			: this.pathOrigin === "user-dock"
+				? new DiffexPathDockHinge(outputPad).render(safeWidth)
+				: [];
 		result.push(
 			...new DiffexPathLabel(label, {
 				marker: this.pathOrigin === "standalone" ? "start" : "branch",

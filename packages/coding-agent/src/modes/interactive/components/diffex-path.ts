@@ -168,7 +168,7 @@ export class DiffexPathDockHinge implements Component {
 
 	render(width: number): string[] {
 		this.hinge.setExtended(shouldExtendDiffexPathHinge(width));
-		return this.hinge.render(width);
+		return ["", ...this.hinge.render(width)];
 	}
 }
 

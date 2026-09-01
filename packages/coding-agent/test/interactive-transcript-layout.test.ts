@@ -61,7 +61,7 @@ type TestContext = {
 		retryAttempt: number;
 		extensionRunner: { getEntryRenderer(customType: string): (() => Text) | undefined };
 	};
-	sessionManager: { getCwd(): string; getEntries(): SessionEntry[] };
+	sessionManager: { getCwd(): string; getEntries(): SessionEntry[]; buildContextEntries(): SessionEntry[] };
 	clearStatusIndicator(kind?: string): void;
 	getMarkdownThemeWithSettings(): ReturnType<typeof getMarkdownTheme>;
 	getMarkdownTransformers(): [];
@@ -79,6 +79,7 @@ type RenderSessionItems = (
 ) => void;
 type ToggleThinkingBlockVisibility = (this: TestContext) => void;
 type AddMessageToChat = (this: TestContext, message: AgentMessage, options?: { populateHistory?: boolean }) => void;
+type ToggleThinkingBlockVisibility = (this: TestContext) => void;
 
 function createAssistantMessage(
 	content: AssistantMessage["content"],
@@ -155,7 +156,7 @@ function createContext(): TestContext {
 					customType === "turn-note" ? () => new Text("next turn note", 0, 0) : undefined,
 			},
 		},
-		sessionManager: { getCwd: () => process.cwd(), getEntries: () => [] },
+		sessionManager: { getCwd: () => process.cwd(), getEntries: () => [], buildContextEntries: () => [] },
 		clearStatusIndicator: vi.fn(),
 		getMarkdownThemeWithSettings: () => getMarkdownTheme(),
 		getMarkdownTransformers: () => [],
@@ -197,11 +198,28 @@ function expectUserAssistantGap(context: TestContext, width: number, assistantLa
 	expect(userLine).toBeGreaterThanOrEqual(0);
 	expect(assistantLine).toBeGreaterThan(userLine);
 	const hinge = width >= 80 ? `${getGlyphs().start}${getGlyphs().separator.repeat(2)}` : getGlyphs().start;
-	const transitionLines = ["", ` ${hinge}`];
+	const transitionLines = ["", "", ` ${hinge}`];
 	expect(lines.slice(userLine + 1, assistantLine)).toEqual(transitionLines);
 	expect(renderedLines[userLine + 1]).toMatch(/\x1b\[48;/);
 	expect(renderedLines[userLine + 1]).toContain("\x1b[49m");
 	expect(renderedLines[userLine + 2]).not.toMatch(/\x1b\[48;/);
+}
+
+function expectConnectedTruncationPath(context: TestContext): void {
+	const lines = context.chatContainer.render(80).map((line) => stripAnsi(line).trimEnd());
+	const diffexIndex = lines.indexOf(` ${getGlyphs().branch} Diffex`);
+	const noticeIndex = lines.findIndex((line) => line.includes("Response was truncated before completion."));
+	const exploredIndex = lines.findIndex((line) => line.includes("Explor"));
+
+	expect(diffexIndex).toBeGreaterThanOrEqual(0);
+	expect(noticeIndex).toBeGreaterThan(diffexIndex);
+	expect(exploredIndex).toBeGreaterThan(noticeIndex);
+	expect(lines[exploredIndex - 1]).toBe(` ${getGlyphs().rail}`);
+	expect(context.chatContainer.children.filter((child) => child instanceof DiffexPathDockHinge)).toHaveLength(1);
+	const toolGroup = context.chatContainer.children.find(
+		(child): child is ToolGroupComponent => child instanceof ToolGroupComponent,
+	);
+	expect(toolGroup?.getPathOrigin()).toBe("continued");
 }
 
 describe("Interactive transcript layout", () => {
@@ -423,6 +441,138 @@ describe("Interactive transcript layout", () => {
 		expect(context.clearStatusIndicator).not.toHaveBeenCalled();
 	});
 
+	test("toggles thinking in place during a docked tool stream", async () => {
+		const context = createContext();
+		const addMessageToChat = useTranscriptMessageRendering(context);
+		const handleEvent = (InteractiveMode.prototype as unknown as { handleEvent: HandleEvent }).handleEvent;
+		const toggleThinkingBlockVisibility = (
+			InteractiveMode.prototype as unknown as {
+				toggleThinkingBlockVisibility: ToggleThinkingBlockVisibility;
+			}
+		).toggleThinkingBlockVisibility;
+		const toolCall = {
+			type: "toolCall" as const,
+			id: TOOL_CALL_ID,
+			name: TOOL_NAME,
+			arguments: { path: "README.md" },
+		};
+		const streamingMessage = createAssistantMessage(
+			[{ type: "thinking", thinking: "inspect the relevant file" }, toolCall],
+			"pending",
+		);
+
+		addMessageToChat.call(context, {
+			role: "user",
+			content: "explain the theorem",
+			timestamp: Date.now(),
+		});
+		await handleEvent.call(context, { type: "message_start", message: streamingMessage });
+		await handleEvent.call(context, {
+			type: "message_update",
+			message: streamingMessage,
+			assistantMessageEvent: {
+				type: "toolcall_end",
+				contentIndex: 1,
+				toolCall,
+				partial: streamingMessage,
+			},
+		});
+
+		const userComponent = context.chatContainer.children.find(
+			(child): child is UserMessageComponent => child instanceof UserMessageComponent,
+		);
+		const hinge = context.chatContainer.children.find(
+			(child): child is DiffexPathDockHinge => child instanceof DiffexPathDockHinge,
+		);
+		const assistantComponent = context.streamingComponent;
+		const toolGroup = context.activeToolGroup;
+		const pendingTool = context.pendingTools.get(TOOL_CALL_ID);
+
+		toggleThinkingBlockVisibility.call(context);
+
+		expect(context.hideThinkingBlock).toBe(true);
+		expect(context.streamingComponent).toBe(assistantComponent);
+		expect(context.activeToolGroup).toBe(toolGroup);
+		expect(context.pendingTools.get(TOOL_CALL_ID)).toBe(pendingTool);
+		expect(context.chatContainer.children).toContain(userComponent);
+		expect(context.chatContainer.children).toContain(assistantComponent);
+		expect(context.chatContainer.children).toContain(toolGroup);
+		expect(context.chatContainer.children.filter((child) => child instanceof DiffexPathDockHinge)).toEqual([hinge]);
+		expect(renderChat(context)).toContain(`Reasoning ${getGlyphs().bullet} hidden`);
+	});
+
+	test("preserves the pending user dock when thinking is toggled before output", async () => {
+		const context = createContext();
+		const addMessageToChat = useTranscriptMessageRendering(context);
+		const handleEvent = (InteractiveMode.prototype as unknown as { handleEvent: HandleEvent }).handleEvent;
+		const toggleThinkingBlockVisibility = (
+			InteractiveMode.prototype as unknown as {
+				toggleThinkingBlockVisibility: ToggleThinkingBlockVisibility;
+			}
+		).toggleThinkingBlockVisibility;
+		const emptyAssistantMessage = createAssistantMessage([], "pending");
+		const thinkingMessage = createAssistantMessage(
+			[{ type: "thinking", thinking: "inspect the relevant file" }],
+			"pending",
+		);
+
+		addMessageToChat.call(context, {
+			role: "user",
+			content: "explain the theorem",
+			timestamp: Date.now(),
+		});
+		await handleEvent.call(context, { type: "message_start", message: emptyAssistantMessage });
+		toggleThinkingBlockVisibility.call(context);
+		await handleEvent.call(context, {
+			type: "message_update",
+			message: thinkingMessage,
+			assistantMessageEvent: {
+				type: "thinking_delta",
+				contentIndex: 0,
+				delta: "inspect the relevant file",
+				partial: thinkingMessage,
+			},
+		});
+
+		expect(context.chatContainer.children.filter((child) => child instanceof DiffexPathDockHinge)).toHaveLength(1);
+		expect(
+			context.chatContainer.children
+				.find((child): child is UserMessageComponent => child instanceof UserMessageComponent)
+				?.isDocked(),
+		).toBe(true);
+	});
+
+	test("preserves the pending user dock when thinking is toggled before message start", async () => {
+		const context = createContext();
+		const addMessageToChat = useTranscriptMessageRendering(context);
+		const handleEvent = (InteractiveMode.prototype as unknown as { handleEvent: HandleEvent }).handleEvent;
+		const toggleThinkingBlockVisibility = (
+			InteractiveMode.prototype as unknown as {
+				toggleThinkingBlockVisibility: ToggleThinkingBlockVisibility;
+			}
+		).toggleThinkingBlockVisibility;
+		const thinkingMessage = createAssistantMessage(
+			[{ type: "thinking", thinking: "inspect the relevant file" }],
+			"pending",
+		);
+
+		addMessageToChat.call(context, {
+			role: "user",
+			content: "explain the theorem",
+			timestamp: Date.now(),
+		});
+		context.session.isStreaming = true;
+		toggleThinkingBlockVisibility.call(context);
+		await handleEvent.call(context, { type: "message_start", message: thinkingMessage });
+
+		expect(context.chatContainer.children.filter((child) => child instanceof DiffexPathDockHinge)).toHaveLength(1);
+		expect(
+			context.chatContainer.children
+				.find((child): child is UserMessageComponent => child instanceof UserMessageComponent)
+				?.isDocked(),
+		).toBe(true);
+	});
+
 	test("preserves an extension-controlled working signal for a tool-only response", async () => {
 		const context = createContext();
 		context.workingIndicatorOptions = { frames: ["*"] };
@@ -448,6 +598,218 @@ describe("Interactive transcript layout", () => {
 		});
 
 		expect(context.clearStatusIndicator).not.toHaveBeenCalled();
+	});
+
+	test("registers tools from a settled assistant start without an update event", async () => {
+		const context = createContext();
+		const addMessageToChat = useTranscriptMessageRendering(context);
+		const handleEvent = (InteractiveMode.prototype as unknown as { handleEvent: HandleEvent }).handleEvent;
+		const toolCall = {
+			type: "toolCall" as const,
+			id: TOOL_CALL_ID,
+			name: TOOL_NAME,
+			arguments: { path: "README.md" },
+		};
+		const settledMessage = createAssistantMessage(
+			[{ type: "text", text: "I will inspect the file" }, toolCall],
+			"toolUse",
+		);
+
+		addMessageToChat.call(context, {
+			role: "user",
+			content: "explain the theorem",
+			timestamp: Date.now(),
+		});
+		await handleEvent.call(context, { type: "message_start", message: settledMessage });
+		await handleEvent.call(context, { type: "message_end", message: settledMessage });
+		await handleEvent.call(context, {
+			type: "tool_execution_start",
+			toolCallId: TOOL_CALL_ID,
+			toolName: TOOL_NAME,
+			args: { path: "README.md" },
+		});
+
+		expect(context.activeToolGroup?.getPathOrigin()).toBe("continued");
+		expect(context.pendingTools.has(TOOL_CALL_ID)).toBe(true);
+		const lines = context.chatContainer.render(80).map((line) => stripAnsi(line).trimEnd());
+		expect(lines.filter((line) => line.startsWith(` ${getGlyphs().start}`))).toHaveLength(1);
+	});
+
+	test("registers a tool added by a final assistant replacement", async () => {
+		const context = createContext();
+		const addMessageToChat = useTranscriptMessageRendering(context);
+		const handleEvent = (InteractiveMode.prototype as unknown as { handleEvent: HandleEvent }).handleEvent;
+		const initialMessage = createAssistantMessage([{ type: "text", text: "I will inspect the file" }], "pending");
+		const toolCall = {
+			type: "toolCall" as const,
+			id: TOOL_CALL_ID,
+			name: TOOL_NAME,
+			arguments: { path: "README.md" },
+		};
+		const replacementMessage = createAssistantMessage(
+			[{ type: "text", text: "I will inspect the file" }, toolCall],
+			"toolUse",
+		);
+
+		addMessageToChat.call(context, {
+			role: "user",
+			content: "explain the theorem",
+			timestamp: Date.now(),
+		});
+		await handleEvent.call(context, { type: "message_start", message: initialMessage });
+		await handleEvent.call(context, { type: "message_end", message: replacementMessage });
+
+		expect(context.activeToolGroup?.getPathOrigin()).toBe("continued");
+		expect(context.pendingTools.has(TOOL_CALL_ID)).toBe(true);
+	});
+
+	test("removes a streamed tool omitted by a final assistant replacement", async () => {
+		const context = createContext();
+		const addMessageToChat = useTranscriptMessageRendering(context);
+		const handleEvent = (InteractiveMode.prototype as unknown as { handleEvent: HandleEvent }).handleEvent;
+		const toolCall = {
+			type: "toolCall" as const,
+			id: TOOL_CALL_ID,
+			name: TOOL_NAME,
+			arguments: { path: "README.md" },
+		};
+		const streamedMessage = createAssistantMessage(
+			[{ type: "text", text: "I may inspect the file" }, toolCall],
+			"pending",
+		);
+		const replacementMessage = createAssistantMessage([{ type: "text", text: "No tool is needed" }], "stop");
+
+		addMessageToChat.call(context, {
+			role: "user",
+			content: "explain the theorem",
+			timestamp: Date.now(),
+		});
+		await handleEvent.call(context, { type: "message_start", message: streamedMessage });
+		await handleEvent.call(context, {
+			type: "message_update",
+			message: streamedMessage,
+			assistantMessageEvent: {
+				type: "toolcall_end",
+				contentIndex: 1,
+				toolCall,
+				partial: streamedMessage,
+			},
+		});
+		await handleEvent.call(context, { type: "message_end", message: replacementMessage });
+
+		expect(context.activeToolGroup).toBeUndefined();
+		expect(context.pendingTools.has(TOOL_CALL_ID)).toBe(false);
+		expect(context.chatContainer.children.some((child) => child instanceof ToolGroupComponent)).toBe(false);
+		expect(renderChat(context)).not.toContain("Exploring");
+	});
+
+	test("replaces a streamed tool when the final message changes its name", async () => {
+		const context = createContext();
+		const handleEvent = (InteractiveMode.prototype as unknown as { handleEvent: HandleEvent }).handleEvent;
+		const renderReplacementCall = vi.fn(() => new Text("Search", 0, 0));
+		const replacementDefinition: ToolDefinition = {
+			name: "search",
+			label: "Search",
+			description: "Search the workspace",
+			parameters: Type.Any(),
+			execute: async () => ({ content: [], details: {} }),
+			renderCall: renderReplacementCall,
+		};
+		context.getRegisteredToolDefinition = (toolName) =>
+			toolName === replacementDefinition.name ? replacementDefinition : undefined;
+		const streamedTool = {
+			type: "toolCall" as const,
+			id: TOOL_CALL_ID,
+			name: "inspect",
+			arguments: { path: "README.md" },
+		};
+		const replacementTool = {
+			...streamedTool,
+			name: "search",
+			arguments: { query: "Diffex" },
+		};
+		const streamedMessage = createAssistantMessage([streamedTool], "pending");
+		const replacementMessage = createAssistantMessage([replacementTool], "toolUse");
+
+		await handleEvent.call(context, { type: "message_start", message: streamedMessage });
+		const initialComponent = context.pendingTools.get(TOOL_CALL_ID);
+		await handleEvent.call(context, { type: "message_end", message: replacementMessage });
+
+		const replacementComponent = context.pendingTools.get(TOOL_CALL_ID);
+		expect(replacementComponent).not.toBe(initialComponent);
+		expect(replacementComponent?.matchesToolCall(TOOL_CALL_ID, "search")).toBe(true);
+		// Constructor rendering, shared display settings, and final args completion each render once.
+		expect(renderReplacementCall).toHaveBeenCalledTimes(3);
+		expect(renderChat(context)).toContain("Search");
+		expect(renderChat(context)).not.toContain("Inspect");
+
+		await handleEvent.call(context, {
+			type: "tool_execution_end",
+			toolCallId: TOOL_CALL_ID,
+			toolName: "inspect",
+			result: createToolResult(),
+			isError: false,
+		});
+		expect(context.pendingTools.get(TOOL_CALL_ID)).toBe(replacementComponent);
+	});
+
+	test("reorders streamed tools to match the final assistant message", async () => {
+		const context = createContext();
+		const handleEvent = (InteractiveMode.prototype as unknown as { handleEvent: HandleEvent }).handleEvent;
+		const firstTool = {
+			type: "toolCall" as const,
+			id: "first-tool",
+			name: "first_tool",
+			arguments: {},
+		};
+		const secondTool = {
+			type: "toolCall" as const,
+			id: "second-tool",
+			name: "second_tool",
+			arguments: {},
+		};
+		const streamedMessage = createAssistantMessage([firstTool, secondTool], "pending");
+		const replacementMessage = createAssistantMessage([secondTool, firstTool], "toolUse");
+
+		await handleEvent.call(context, { type: "message_start", message: streamedMessage });
+		await handleEvent.call(context, { type: "message_end", message: replacementMessage });
+
+		const rendered = renderChat(context);
+		expect(rendered.indexOf("Second tool")).toBeLessThan(rendered.indexOf("First tool"));
+	});
+
+	test("returns a final tool-only replacement to the user dock", async () => {
+		const context = createContext();
+		const addMessageToChat = useTranscriptMessageRendering(context);
+		const handleEvent = (InteractiveMode.prototype as unknown as { handleEvent: HandleEvent }).handleEvent;
+		const toolCall = {
+			type: "toolCall" as const,
+			id: TOOL_CALL_ID,
+			name: TOOL_NAME,
+			arguments: { path: "README.md" },
+		};
+		const streamedMessage = createAssistantMessage(
+			[{ type: "text", text: "I will inspect the file" }, toolCall],
+			"pending",
+		);
+		const replacementMessage = createAssistantMessage([toolCall], "toolUse");
+
+		addMessageToChat.call(context, {
+			role: "user",
+			content: "explain the theorem",
+			timestamp: Date.now(),
+		});
+		await handleEvent.call(context, { type: "message_start", message: streamedMessage });
+		expect(context.activeToolGroup?.getPathOrigin()).toBe("continued");
+		expect(context.chatContainer.children.some((child) => child instanceof DiffexPathDockHinge)).toBe(true);
+
+		await handleEvent.call(context, { type: "message_end", message: replacementMessage });
+
+		expect(context.activeToolGroup?.getPathOrigin()).toBe("user-dock");
+		expect(context.chatContainer.children.some((child) => child instanceof DiffexPathDockHinge)).toBe(false);
+		const lines = context.chatContainer.render(80).map((line) => stripAnsi(line).trimEnd());
+		expect(lines.filter((line) => line.startsWith(` ${getGlyphs().start}`))).toHaveLength(1);
+		expect(lines).not.toContain(` ${getGlyphs().branch} Diffex`);
 	});
 
 	test.each([60, 80])("replays the two-row user handoff at %d columns", (width) => {
@@ -494,10 +856,30 @@ describe("Interactive transcript layout", () => {
 		const userIndex = context.chatContainer.children.findIndex((child) => child instanceof UserMessageComponent);
 		const toolGroupIndex = context.chatContainer.children.findIndex((child) => child instanceof ToolGroupComponent);
 		const transitionChildren = context.chatContainer.children.slice(userIndex + 1, toolGroupIndex);
-		expect(transitionChildren.filter((child) => child instanceof DiffexPathDockHinge)).toHaveLength(1);
+		expect(transitionChildren.filter((child) => child instanceof DiffexPathDockHinge)).toHaveLength(0);
 		expect(transitionChildren.filter((child) => child instanceof Spacer)).toHaveLength(0);
 		expect(transitionChildren.filter((child) => child instanceof AssistantMessageComponent)).toHaveLength(1);
 		expect((context.chatContainer.children[userIndex] as UserMessageComponent).isDocked()).toBe(true);
+	});
+
+	test("replays a truncated tool-only response as one connected path", () => {
+		const context = createContext();
+		useTranscriptMessageRendering(context);
+		const renderSessionItems = (InteractiveMode.prototype as unknown as { renderSessionItems: RenderSessionItems })
+			.renderSessionItems;
+		const userMessage: AgentMessage = {
+			role: "user",
+			content: "explain the theorem",
+			timestamp: Date.now(),
+		};
+		const truncatedMessage = createAssistantMessage(
+			[{ type: "toolCall", id: TOOL_CALL_ID, name: TOOL_NAME, arguments: { path: "README.md" } }],
+			"length",
+		);
+
+		renderSessionItems.call(context, [userMessage, truncatedMessage, createToolResult()]);
+
+		expectConnectedTruncationPath(context);
 	});
 
 	test("docks a live tool-only response through its empty assistant placeholder", async () => {
@@ -532,7 +914,6 @@ describe("Interactive transcript layout", () => {
 
 		expect(context.chatContainer.children).toEqual([
 			expect.any(UserMessageComponent),
-			expect.any(DiffexPathDockHinge),
 			expect.any(AssistantMessageComponent),
 			expect.any(ToolGroupComponent),
 		]);
@@ -544,6 +925,85 @@ describe("Interactive transcript layout", () => {
 
 		expect(context.clearStatusIndicator).toHaveBeenCalledOnce();
 		expect(context.clearStatusIndicator).toHaveBeenCalledWith("working");
+	});
+
+	test("keeps a live truncated tool-only response on its user path", async () => {
+		const context = createContext();
+		const addMessageToChat = useTranscriptMessageRendering(context);
+		const handleEvent = (InteractiveMode.prototype as unknown as { handleEvent: HandleEvent }).handleEvent;
+		const toolCall = {
+			type: "toolCall" as const,
+			id: TOOL_CALL_ID,
+			name: TOOL_NAME,
+			arguments: { path: "README.md" },
+		};
+		const pendingMessage = createAssistantMessage([toolCall], "pending");
+		const truncatedMessage = createAssistantMessage([toolCall], "length");
+
+		addMessageToChat.call(context, {
+			role: "user",
+			content: "explain the theorem",
+			timestamp: Date.now(),
+		});
+		await handleEvent.call(context, { type: "message_start", message: pendingMessage });
+		await handleEvent.call(context, {
+			type: "message_update",
+			message: pendingMessage,
+			assistantMessageEvent: {
+				type: "toolcall_end",
+				contentIndex: 0,
+				toolCall,
+				partial: pendingMessage,
+			},
+		});
+		await handleEvent.call(context, { type: "message_end", message: truncatedMessage });
+
+		expectConnectedTruncationPath(context);
+	});
+
+	test.each([60, 80])("does not show an orphan hinge for a hidden tool group at %d columns", async (width) => {
+		const context = createContext();
+		const addMessageToChat = useTranscriptMessageRendering(context);
+		const handleEvent = (InteractiveMode.prototype as unknown as { handleEvent: HandleEvent }).handleEvent;
+		const hiddenToolName = "hidden-transcript-tool";
+		const definition: ToolDefinition = {
+			name: hiddenToolName,
+			label: "Hidden transcript tool",
+			description: "Renders no transcript rows",
+			parameters: Type.Any(),
+			execute: async () => ({ content: [], details: {} }),
+			renderShell: "self",
+			renderCall: () => new Text("", 0, 0),
+		};
+		context.getRegisteredToolDefinition = (toolName) => (toolName === hiddenToolName ? definition : undefined);
+		const toolCall = {
+			type: "toolCall" as const,
+			id: "hidden-transcript-call",
+			name: hiddenToolName,
+			arguments: {},
+		};
+		const toolMessage = createAssistantMessage([toolCall], "toolUse");
+
+		addMessageToChat.call(context, {
+			role: "user",
+			content: "explain the theorem",
+			timestamp: Date.now(),
+		});
+		await handleEvent.call(context, { type: "message_start", message: toolMessage });
+		await handleEvent.call(context, {
+			type: "message_update",
+			message: toolMessage,
+			assistantMessageEvent: {
+				type: "toolcall_end",
+				contentIndex: 0,
+				toolCall,
+				partial: toolMessage,
+			},
+		});
+
+		expect(context.activeToolGroup?.render(width)).toEqual([]);
+		expect(context.chatContainer.children.some((child) => child instanceof DiffexPathDockHinge)).toBe(false);
+		expect(stripAnsi(context.chatContainer.render(width).join("\n"))).not.toContain("Exploring");
 	});
 
 	test("keeps a late assistant text block on the tool-first user path", async () => {
@@ -594,6 +1054,51 @@ describe("Interactive transcript layout", () => {
 		expect(pathStarts).toHaveLength(1);
 		expect(lines).toContain(` ${getGlyphs().branch} Diffex`);
 		expect(lines).toContain(` ${getGlyphs().branch} Exploring`);
+	});
+
+	test("does not reconnect a response path across an intervening warning", async () => {
+		const context = createContext();
+		const addMessageToChat = useTranscriptMessageRendering(context);
+		const handleEvent = (InteractiveMode.prototype as unknown as { handleEvent: HandleEvent }).handleEvent;
+		const toolCall = {
+			type: "toolCall" as const,
+			id: TOOL_CALL_ID,
+			name: TOOL_NAME,
+			arguments: { path: "README.md" },
+		};
+		const toolMessage = createAssistantMessage([toolCall], "toolUse");
+
+		addMessageToChat.call(context, {
+			role: "user",
+			content: "explain the theorem",
+			timestamp: Date.now(),
+		});
+		await handleEvent.call(context, { type: "message_start", message: toolMessage });
+		await handleEvent.call(context, {
+			type: "message_update",
+			message: toolMessage,
+			assistantMessageEvent: {
+				type: "toolcall_end",
+				contentIndex: 0,
+				toolCall,
+				partial: toolMessage,
+			},
+		});
+		await handleEvent.call(context, { type: "message_end", message: toolMessage });
+		const toolGroup = context.activeToolGroup;
+
+		InteractiveMode.prototype.showWarning.call(context as unknown as InteractiveMode, "intervening notice");
+		const lateAssistant = createAssistantMessage([{ type: "text", text: "separate response" }], "pending");
+		await handleEvent.call(context, { type: "message_start", message: lateAssistant });
+
+		expect(toolGroup?.getPathOrigin()).toBe("user-dock");
+		const rendered = renderChat(context);
+		const lines = rendered.split("\n").map((line) => line.trimEnd());
+		expect(rendered.indexOf("intervening notice")).toBeLessThan(rendered.indexOf("separate response"));
+		expect(lines.some((line) => line.startsWith(` ${getGlyphs().start}${getGlyphs().separator} Diffex`))).toBe(true);
+		expect(lines.some((line) => line.startsWith(` ${getGlyphs().branch}${getGlyphs().separator} Diffex`))).toBe(
+			false,
+		);
 	});
 
 	test("reuses an existing transcript boundary spacer", () => {
