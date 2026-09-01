@@ -2138,7 +2138,7 @@ export class InteractiveMode {
 		return spacer;
 	}
 
-	private consumePendingUserDock(): boolean {
+	private consumePendingUserDock(target?: Component): boolean {
 		const userComponent = this.pendingUserDock;
 		this.pendingUserDock = undefined;
 		if (!userComponent) {
@@ -2149,9 +2149,30 @@ export class InteractiveMode {
 			return false;
 		}
 
-		userComponent.setDocked(true);
 		const transitionIndex = userIndex + 1;
 		const transitionComponent = this.chatContainer.children[transitionIndex];
+		const contentIndex =
+			transitionComponent instanceof Spacer || transitionComponent instanceof DiffexPathDockHinge
+				? transitionIndex + 1
+				: transitionIndex;
+		if (target) {
+			const targetIndex = this.chatContainer.children.indexOf(target);
+			const expectedTargetIndex = targetIndex === -1 ? this.chatContainer.children.length : targetIndex;
+			if (contentIndex !== expectedTargetIndex) {
+				return false;
+			}
+		} else {
+			const trailingComponents = this.chatContainer.children.slice(contentIndex);
+			if (
+				trailingComponents.length > 1 ||
+				(trailingComponents.length === 1 &&
+					(!(trailingComponents[0] instanceof AssistantMessageComponent) || trailingComponents[0].hasVisibleOutput()))
+			) {
+				return false;
+			}
+		}
+
+		userComponent.setDocked(true);
 		if (transitionComponent instanceof Spacer) {
 			this.chatContainer.children.splice(transitionIndex, 1, new DiffexPathDockHinge(this.outputPad));
 		} else if (!(transitionComponent instanceof DiffexPathDockHinge)) {
@@ -2165,7 +2186,7 @@ export class InteractiveMode {
 			return;
 		}
 		this.handoffDefaultWorkingStatus();
-		if (this.consumePendingUserDock()) {
+		if (this.consumePendingUserDock(component)) {
 			component.setPathOrigin("user-dock");
 			return;
 		}
@@ -2983,6 +3004,7 @@ export class InteractiveMode {
 	 * Show an extension error in the UI.
 	 */
 	private showExtensionError(extensionPath: string, error: string, stack?: string): void {
+		this.pendingUserDock = undefined;
 		const errorMsg = `Extension "${extensionPath}" error: ${error}`;
 		const errorText = new Text(theme.fg("error", errorMsg), 1, 0);
 		this.chatContainer.addChild(errorText);
@@ -4410,18 +4432,21 @@ export class InteractiveMode {
 	}
 
 	showError(errorMessage: string): void {
+		this.pendingUserDock = undefined;
 		this.chatContainer.addChild(new Spacer(1));
 		this.chatContainer.addChild(new Text(theme.fg("error", `Error: ${errorMessage}`), this.outputPad, 0));
 		this.ui.requestRender();
 	}
 
 	showWarning(warningMessage: string): void {
+		this.pendingUserDock = undefined;
 		this.chatContainer.addChild(new Spacer(1));
 		this.chatContainer.addChild(new Text(theme.fg("warning", `Warning: ${warningMessage}`), 1, 0));
 		this.ui.requestRender();
 	}
 
 	showNewVersionNotification(release: LatestDiffexRelease): void {
+		this.pendingUserDock = undefined;
 		const action = theme.fg("accent", `${APP_NAME} update`);
 		const updateInstruction = theme.fg("muted", `New version ${release.version} is available. Run `) + action;
 		const changelogUrl = "https://github.com/diffexai/diffex/blob/main/packages/coding-agent/CHANGELOG.md";

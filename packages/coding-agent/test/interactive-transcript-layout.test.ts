@@ -576,6 +576,26 @@ describe("Interactive transcript layout", () => {
 		expect(context.chatContainer.children.filter((child) => child instanceof DynamicBorder)).toHaveLength(1);
 	});
 
+	test("does not dock an assistant response across an intervening warning", () => {
+		const context = createContext();
+		const addMessageToChat = useTranscriptMessageRendering(context);
+		addMessageToChat.call(context, {
+			role: "user",
+			content: "explain the theorem",
+			timestamp: Date.now(),
+		});
+
+		InteractiveMode.prototype.showWarning.call(context as unknown as InteractiveMode, "intervening notice");
+		addMessageToChat.call(
+			context,
+			createAssistantMessage([{ type: "text", text: "separate response" }], "stop"),
+		);
+
+		expect(context.chatContainer.children.filter((child) => child instanceof DiffexPathDockHinge)).toHaveLength(0);
+		const rendered = renderChat(context);
+		expect(rendered.indexOf("intervening notice")).toBeLessThan(rendered.indexOf("separate response"));
+	});
+
 	test("groups cumulative live tool updates and sections model turns", async () => {
 		const context = createContext();
 		const handleEvent = (InteractiveMode.prototype as unknown as { handleEvent: HandleEvent }).handleEvent;
