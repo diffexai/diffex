@@ -5,8 +5,6 @@
 ### Added
 
 - Added `pi auth check` provider/model auth preflight with optional credential output ([#7152](https://github.com/earendil-works/pi/issues/7152)).
-- Added durable, branch-scoped sub-agent rosters and child histories for saved sessions, with interrupted restoration and explicit wake without automatic work, replay, or result delivery.
-- Added bounded child-to-parent escalation reports for root-controlled sub-agents, with hidden delivery that can resume coordinated work without consuming terminal results.
 
 ### Changed
 
@@ -15,27 +13,8 @@
 
 ### Fixed
 
-- Fixed evolved skills being limited to instruction-only `SKILL.md` files by validating, versioning, persisting, reviewing, and activating complete UTF-8 skill packages.
-- Fixed skill-specific rollback leaving an evolved skill active when later harness descendants preserved it.
-- Fixed accepted skill candidates failing activation after a compatible harness memory change by safely rebasing them onto the selected revision.
-- Fixed the harness footer showing an evolution spinner while self-evolution is disabled.
-- Fixed evolution setting changes not reaching already-running Diffex processes, which could let stale processes continue tracing and launch automatic work.
-- Fixed an open, idle `/evolve` menu retaining enabled actions after another Diffex process disables evolution.
-- Fixed one failed skill candidate synthesis preventing later qualified candidates from being drafted, validated, and evaluated.
-- Fixed skill synthesis requests ignoring the selected model's context and output limits by applying conservative preflight budgets and persisting request diagnostics.
-- Fixed exhausted skill synthesis being retried by unrelated later evolution jobs instead of remaining terminal until new evidence revises the candidate.
-- Fixed skill synthesis retrying deterministic failures and resetting transient retry budgets between source evolution jobs instead of tracking each synthesis identity.
-- Fixed persisted skill candidate failures discarding the affected candidate group, work stage, provider or schema error, stop reason, and structured diagnostics.
-- Fixed legacy skill-candidate failure events being misclassified as corrupt storage and preventing the TUI footer from displaying independently available harness metadata.
-- Fixed startup leaving legacy exhausted skill synthesis and unevaluated structurally valid candidates permanently stranded.
-- Fixed completed evolution analysis hiding asynchronous candidate-generation progress or failure, candidate lifecycle states and reasons, and distinct stage outcomes.
-- Fixed skill candidate review leading with unreadable provenance IDs instead of an `EVOLVE.md`-style summary and materialized supporting and contradicting evidence.
-- Fixed the evolution menu remaining on its loading screen after cancellation and flickering during active-job refreshes.
-- Fixed assistant Markdown headings and fenced code blocks appearing with literal source delimiters in the interactive transcript.
 - Fixed extension TUI method wrappers recursing indefinitely when delegating to the original method ([#7731](https://github.com/earendil-works/pi/issues/7731)).
 - Fixed right-click not pasting clipboard text in fullscreen mode on Windows.
-- Fixed sub-agent spawning bypassing execution-mutating parent extension hooks by rejecting incompatible parent policies before child creation.
-- Fixed delegated sub-agent result and escalation guidance disappearing from custom, extension-returned, or tool-filtered root prompts.
 
 ## [0.84.0] - 2026-08-06
 

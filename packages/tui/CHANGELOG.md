@@ -10,7 +10,6 @@
 
 ### Fixed
 
-- Fixed Markdown headings and fenced code blocks exposing their source delimiters instead of rendering as styled terminal blocks.
 - Fixed LaTeX relation, multiplication, and named-operator spacing, and correctly composed matrices with stacked fractions, operator limits, and adjacent matrices.
 - Reduced fullscreen mouse event volume under tmux, Zellij, and GNU Screen by using button-motion tracking instead of all-motion tracking.
 
