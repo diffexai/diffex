@@ -57,6 +57,37 @@ describe("status indicators", () => {
 		indicator.dispose();
 	});
 
+	it("refreshes the path accent when the theme changes", () => {
+		const previousNoColor = process.env.NO_COLOR;
+		const previousTerm = process.env.TERM;
+		delete process.env.NO_COLOR;
+		process.env.TERM = "xterm-256color";
+		vi.useFakeTimers();
+		initTheme("dark");
+		const indicator = new WorkingStatusIndicator({ requestRender: vi.fn() } as unknown as TUI, "Responding");
+
+		try {
+			indicator.invalidate();
+			const darkMarker = theme.fg("borderAccent", getGlyphs().start);
+			expect(indicator.render(40).join("\n")).toContain(darkMarker);
+
+			initTheme("light");
+			const lightMarker = theme.fg("borderAccent", getGlyphs().start);
+			expect(lightMarker).not.toBe(darkMarker);
+			indicator.invalidate();
+			const rendered = indicator.render(40).join("\n");
+			expect(rendered).toContain(lightMarker);
+			expect(rendered).not.toContain(darkMarker);
+		} finally {
+			indicator.dispose();
+			if (previousNoColor === undefined) delete process.env.NO_COLOR;
+			else process.env.NO_COLOR = previousNoColor;
+			if (previousTerm === undefined) delete process.env.TERM;
+			else process.env.TERM = previousTerm;
+			initTheme("dark");
+		}
+	});
+
 	it("keeps cancellable editor loaders to one borderless row", () => {
 		initTheme("dark");
 		vi.useFakeTimers();

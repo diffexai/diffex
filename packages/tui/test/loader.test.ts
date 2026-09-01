@@ -96,6 +96,28 @@ test("can place the unchanged animation after a stable line prefix", (context) =
 	}
 });
 
+test("refreshes a lazy prefix when invalidated", (context) => {
+	context.mock.timers.enable({ apis: ["setInterval"] });
+	let prefix = "first ";
+	const loader = new Loader(
+		{ requestRender() {} } as unknown as TUI,
+		(value) => value,
+		(value) => value,
+		"Busy",
+		{ prefix: () => prefix },
+	);
+
+	try {
+		assert.ok(loader.render(40)[0]?.includes("first "));
+		prefix = "second ";
+		loader.invalidate();
+		assert.ok(loader.render(40)[0]?.includes("second "));
+		assert.ok(!loader.render(40)[0]?.includes("first "));
+	} finally {
+		loader.stop();
+	}
+});
+
 test("uses ASCII signal glyphs in compatibility mode", (context) => {
 	context.mock.timers.enable({ apis: ["setInterval"] });
 	const restoreGlyphMode = useGlyphMode("ascii");

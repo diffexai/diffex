@@ -8,7 +8,7 @@ export interface LoaderIndicatorOptions {
 	/** Frame interval in milliseconds for animated indicators. */
 	intervalMs?: number;
 	/** Stable content rendered before both the message and indicator. */
-	prefix?: string;
+	prefix?: string | (() => string);
 	/** Place the animated indicator after the message while preserving its frames. */
 	indicatorPosition?: "before" | "after";
 }
@@ -40,7 +40,7 @@ export class Loader extends Text {
 	private spinnerColorFn: (str: string) => string;
 	private messageColorFn: (str: string) => string;
 	private message: string = "Loading...";
-	private prefix = "";
+	private prefix: string | (() => string) = "";
 	private indicatorPosition: "before" | "after" = "before";
 
 	constructor(
@@ -85,6 +85,11 @@ export class Loader extends Text {
 		this.start();
 	}
 
+	override invalidate(): void {
+		this.updateDisplay(false);
+		super.invalidate();
+	}
+
 	private restartAnimation(): void {
 		this.stop();
 		if (this.frames.length <= 1) {
@@ -96,7 +101,7 @@ export class Loader extends Text {
 		}, this.intervalMs);
 	}
 
-	private updateDisplay(): void {
+	private updateDisplay(requestRender = true): void {
 		const frame = this.frames[this.currentFrame] ?? "";
 		const renderedFrame = this.renderIndicatorVerbatim ? frame : this.spinnerColorFn(frame);
 		const message = this.messageColorFn(this.message);
@@ -104,8 +109,9 @@ export class Loader extends Text {
 			this.indicatorPosition === "after"
 				? `${message}${frame.length > 0 ? ` ${renderedFrame}` : ""}`
 				: `${frame.length > 0 ? `${renderedFrame} ` : ""}${message}`;
-		this.setText(`${this.prefix}${content}`);
-		if (this.ui) {
+		const prefix = typeof this.prefix === "function" ? this.prefix() : this.prefix;
+		this.setText(`${prefix}${content}`);
+		if (requestRender && this.ui) {
 			this.ui.requestRender();
 		}
 	}

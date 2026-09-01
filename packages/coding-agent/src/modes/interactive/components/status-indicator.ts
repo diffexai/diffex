@@ -26,9 +26,13 @@ export class StatusIndicator extends Loader {
 	}
 
 	override setIndicator(indicator?: LoaderIndicatorOptions): void {
+		const indicatorPrefix = indicator?.prefix;
 		super.setIndicator({
 			...indicator,
-			prefix: `${formatDiffexPathPrefix("start")}${indicator?.prefix ?? ""}`,
+			prefix: () =>
+				`${formatDiffexPathPrefix("start")}${
+					typeof indicatorPrefix === "function" ? indicatorPrefix() : (indicatorPrefix ?? "")
+				}`,
 		});
 	}
 
