@@ -201,6 +201,24 @@ describe("AssistantMessageComponent", () => {
 		}
 	});
 
+	test("keeps the response path open when reasoning follows answer text", () => {
+		initTheme("dark");
+		const component = new AssistantMessageComponent(
+			createAssistantMessage([
+				{ type: "text", text: "provisional answer" },
+				{ type: "thinking", thinking: "later reasoning" },
+			]),
+		);
+
+		const lines = component.render(60).map((line) => stripAnsi(line).trimEnd());
+		const identityIndex = lines.findIndex((line) => line.includes("Diffex"));
+		const reasoningIndex = lines.findIndex((line) => line.includes("Reasoning"));
+
+		expect(identityIndex).toBeLessThan(reasoningIndex);
+		expect(lines[identityIndex]?.startsWith(` ${getGlyphs().start}${getGlyphs().separator} Diffex`)).toBe(true);
+		expect(lines.at(-1)).toBe(` ${getGlyphs().end}`);
+	});
+
 	test("keeps hidden reasoning and terminal notices free of orphan gaps", () => {
 		initTheme("dark");
 		const hidden = new AssistantMessageComponent(

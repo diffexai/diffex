@@ -99,11 +99,22 @@ export class DiffexPathRail implements Component {
 		// Styling is resolved during render so theme changes do not require cached state.
 	}
 
+	protected resolveGlyph(): string {
+		return getGlyphs().rail;
+	}
+
 	render(width: number): string[] {
 		const safeWidth = Math.max(1, width);
 		const padding = Math.min(Math.max(0, this.padding), Math.max(0, safeWidth - 1));
-		const line = `${" ".repeat(padding)}${this.color(getGlyphs().rail)}`;
+		const line = `${" ".repeat(padding)}${this.color(this.resolveGlyph())}`;
 		return [visibleWidth(line) > safeWidth ? truncateToWidth(line, safeWidth, "") : line];
+	}
+}
+
+/** Close an otherwise unlabeled response path after its final content block. */
+export class DiffexPathTerminus extends DiffexPathRail {
+	protected override resolveGlyph(): string {
+		return getGlyphs().end;
 	}
 }
 

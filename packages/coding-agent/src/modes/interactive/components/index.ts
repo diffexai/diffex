@@ -14,6 +14,7 @@ export {
 	DiffexPathHinge,
 	DiffexPathLabel,
 	DiffexPathRail,
+	DiffexPathTerminus,
 	formatDiffexPathPrefix,
 	shouldExtendDiffexPathHinge,
 } from "./diffex-path.ts";

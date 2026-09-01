@@ -2,7 +2,13 @@ import type { AssistantMessage } from "@earendil-works/diffex-ai";
 import { Container, getGlyphs, Markdown, type MarkdownTheme, Spacer, Text } from "@earendil-works/diffex-tui";
 import type { MarkdownTransformer } from "../../../core/extensions/types.ts";
 import { getMarkdownTheme, theme } from "../theme/theme.ts";
-import { DiffexPathLabel, type DiffexPathMarker, type DiffexPathOrigin, DiffexPathRail } from "./diffex-path.ts";
+import {
+	DiffexPathLabel,
+	type DiffexPathMarker,
+	type DiffexPathOrigin,
+	DiffexPathRail,
+	DiffexPathTerminus,
+} from "./diffex-path.ts";
 import { createMarkdownTransform } from "./markdown-transform.ts";
 
 const OSC133_ZONE_START = "\x1b]133;A\x07";
@@ -120,11 +126,23 @@ export class AssistantMessageComponent extends Container {
 		const hasTerminalNotice =
 			message.stopReason === "length" ||
 			(!hasToolCalls && (message.stopReason === "aborted" || message.stopReason === "error"));
+		let lastVisibleContentIndex = -1;
+		for (let i = message.content.length - 1; i >= 0; i--) {
+			const content = message.content[i];
+			if (
+				(content?.type === "text" && content.text.trim()) ||
+				(content?.type === "thinking" && content.thinking.trim())
+			) {
+				lastVisibleContentIndex = i;
+				break;
+			}
+		}
 		this.hasToolCalls = hasToolCalls;
 		this.pathContinuesToTools = hasToolCalls && hasVisibleContent;
 		this.visibleOutput = Boolean(hasVisibleContent || hasTerminalNotice);
 		let hasRenderedPath = false;
 		let hasRenderedIdentity = false;
+		let pathClosed = false;
 		const firstPathMarker: DiffexPathMarker = this.pathOrigin === "user-dock" ? "branch" : "start";
 
 		for (let i = 0; i < message.content.length; i++) {
@@ -142,7 +160,11 @@ export class AssistantMessageComponent extends Container {
 							? hasRenderedPath
 								? "branch"
 								: firstPathMarker
-							: "end";
+							: i === lastVisibleContentIndex
+								? "end"
+								: hasRenderedPath
+									? "branch"
+									: firstPathMarker;
 					this.contentContainer.addChild(
 						new DiffexPathLabel("Diffex", {
 							marker,
@@ -152,6 +174,7 @@ export class AssistantMessageComponent extends Container {
 							labelColor: (text) => theme.fg("accent", theme.bold(text)),
 						}),
 					);
+					pathClosed = marker === "end";
 					this.contentContainer.addChild(new Spacer(1));
 					hasRenderedIdentity = true;
 				} else {
@@ -243,6 +266,8 @@ export class AssistantMessageComponent extends Container {
 				}),
 			);
 			hasRenderedIdentity = true;
+		} else if (!this.isStreaming && !hasToolCalls && hasRenderedIdentity && hasRenderedPath && !pathClosed) {
+			this.contentContainer.addChild(new DiffexPathTerminus(this.outputPad));
 		}
 
 		if (message.stopReason === "length") {

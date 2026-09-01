@@ -5,6 +5,7 @@ import {
 	DiffexPathHinge,
 	DiffexPathLabel,
 	DiffexPathRail,
+	DiffexPathTerminus,
 	formatDiffexPathPrefix,
 } from "../src/modes/interactive/components/diffex-path.ts";
 import { initTheme } from "../src/modes/interactive/theme/theme.ts";
@@ -37,6 +38,7 @@ describe("Diffex path", () => {
 
 		expect(stripAnsi(new DiffexPathLabel("Reasoning", { marker: "start" }).render(80)[0] ?? "")).toBe(" ╭ Reasoning");
 		expect(stripAnsi(new DiffexPathRail().render(80)[0] ?? "")).toBe(" │");
+		expect(stripAnsi(new DiffexPathTerminus().render(80)[0] ?? "")).toBe(" ╰");
 		expect(stripAnsi(formatDiffexPathPrefix("branch"))).toBe("├ ");
 	});
 
@@ -88,6 +90,7 @@ describe("Diffex path", () => {
 			new DiffexPathLabel("A deliberately long activity label", { marker: "branch" }),
 			new DiffexPathLabel("Diffex", { marker: "end", fill: true }),
 			new DiffexPathRail(),
+			new DiffexPathTerminus(),
 		];
 
 		for (const component of components) {
