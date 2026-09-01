@@ -1,13 +1,14 @@
 import type { HarnessVersion } from "@earendil-works/diffex-harness-state";
 import { setKeybindings } from "@earendil-works/diffex-tui";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import type {
-	EvolutionJobDetail,
-	EvolutionJobSummary,
-	EvolutionMemoryProposal,
-	EvolutionOverview,
-	EvolutionProposalDetail,
-	EvolutionSkillCandidateDetail,
+import {
+	AUTOMATIC_EVOLUTION_TOKEN_THRESHOLD,
+	type EvolutionJobDetail,
+	type EvolutionJobSummary,
+	type EvolutionMemoryProposal,
+	type EvolutionOverview,
+	type EvolutionProposalDetail,
+	type EvolutionSkillCandidateDetail,
 } from "#evolution";
 import type { EvolutionRuntimeEvent } from "../src/core/evolution-runtime.ts";
 import { KeybindingsManager } from "../src/core/keybindings.ts";
@@ -112,7 +113,7 @@ function overview(overrides: Partial<EvolutionOverview> = {}): EvolutionOverview
 		ingestionHighWaterCursor: 8,
 		unprocessedEstimatedTokens: 1_100_001,
 		settledInvocationCount: 6,
-		automaticTokenThreshold: 1_000_000,
+		automaticTokenThreshold: AUTOMATIC_EVOLUTION_TOKEN_THRESHOLD,
 		automaticMinimumInvocations: 5,
 		lastEvolutionAt: null,
 		cooldownRemainingMs: 0,

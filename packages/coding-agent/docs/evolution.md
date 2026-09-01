@@ -29,7 +29,7 @@ The footer identifies the active harness and shows background evolution activity
 
 When evolution is enabled, automatic work requires all of the following:
 
-- more than 1,000,000 estimated unprocessed evidence tokens;
+- more than 750,000 estimated unprocessed evidence tokens;
 - at least three eligible settled invocations;
 - no blocking job;
 - a 20-minute cooldown after the previous automatic run.

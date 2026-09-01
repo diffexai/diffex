@@ -1,7 +1,11 @@
 import type { HarnessVersion } from "@earendil-works/diffex-harness-state";
 import { visibleWidth } from "@earendil-works/diffex-tui";
 import { beforeAll, describe, expect, it, vi } from "vitest";
-import type { EvolutionHarnessVersionInfo, EvolutionOverview } from "#evolution";
+import {
+	AUTOMATIC_EVOLUTION_TOKEN_THRESHOLD,
+	type EvolutionHarnessVersionInfo,
+	type EvolutionOverview,
+} from "#evolution";
 import type { AgentSession } from "../src/core/agent-session.ts";
 import type { EvolutionRuntimeEvent } from "../src/core/evolution-runtime.ts";
 import type { ReadonlyFooterDataProvider } from "../src/core/footer-data-provider.ts";
@@ -117,7 +121,7 @@ function evolutionOverview(
 		ingestionHighWaterCursor: 0,
 		unprocessedEstimatedTokens: 0,
 		settledInvocationCount: 0,
-		automaticTokenThreshold: 1_000_000,
+		automaticTokenThreshold: AUTOMATIC_EVOLUTION_TOKEN_THRESHOLD,
 		automaticMinimumInvocations: 5,
 		lastEvolutionAt: null,
 		cooldownRemainingMs: 0,
