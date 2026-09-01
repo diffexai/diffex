@@ -1,7 +1,7 @@
 import { getGlyphs, visibleWidth } from "@earendil-works/diffex-tui";
 import { describe, expect, test } from "vitest";
 import { UserMessageComponent } from "../src/modes/interactive/components/user-message.ts";
-import { initTheme } from "../src/modes/interactive/theme/theme.ts";
+import { initTheme, theme } from "../src/modes/interactive/theme/theme.ts";
 import { stripAnsi } from "../src/utils/ansi.ts";
 
 const OSC133_ZONE_START = "\x1b]133;A\x07";
@@ -54,5 +54,35 @@ describe("UserMessageComponent", () => {
 		component.invalidate();
 
 		expect(stripAnsi(component.render(80).join("\n"))).toContain("Message after");
+	});
+
+	test("rebuilds the prompt accent when the theme changes", () => {
+		const previousNoColor = process.env.NO_COLOR;
+		const previousTerm = process.env.TERM;
+		delete process.env.NO_COLOR;
+		process.env.TERM = "xterm-256color";
+
+		try {
+			initTheme("dark");
+			const component = new UserMessageComponent("Message");
+			const darkPrefix = theme.fg("accent", `${getGlyphs().selected} `);
+
+			expect(component.render(80).join("\n")).toContain(darkPrefix);
+
+			initTheme("light");
+			const lightPrefix = theme.fg("accent", `${getGlyphs().selected} `);
+			expect(lightPrefix).not.toBe(darkPrefix);
+			component.invalidate();
+
+			const rendered = component.render(80).join("\n");
+			expect(rendered).toContain(lightPrefix);
+			expect(rendered).not.toContain(darkPrefix);
+		} finally {
+			if (previousNoColor === undefined) delete process.env.NO_COLOR;
+			else process.env.NO_COLOR = previousNoColor;
+			if (previousTerm === undefined) delete process.env.TERM;
+			else process.env.TERM = previousTerm;
+			initTheme("dark");
+		}
 	});
 });

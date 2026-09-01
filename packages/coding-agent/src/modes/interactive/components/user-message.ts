@@ -15,6 +15,7 @@ export class UserMessageComponent extends Container {
 	private markdownTheme: MarkdownTheme;
 	private outputPad: number;
 	private markdownTransformers: readonly MarkdownTransformer[];
+	private docked = false;
 
 	constructor(
 		text: string,
@@ -32,6 +33,21 @@ export class UserMessageComponent extends Container {
 
 	setOutputPad(padding: number): void {
 		this.outputPad = padding;
+		this.rebuild();
+	}
+
+	setDocked(docked: boolean): void {
+		if (this.docked === docked) {
+			return;
+		}
+		this.docked = docked;
+	}
+
+	isDocked(): boolean {
+		return this.docked;
+	}
+
+	override invalidate(): void {
 		this.rebuild();
 	}
 
