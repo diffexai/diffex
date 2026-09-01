@@ -7,6 +7,7 @@ import { VirtualTerminal } from "../../tui/test/virtual-terminal.ts";
 import { createEditToolDefinition } from "../src/core/tools/edit.ts";
 import { computeEditsDiff, type Edit } from "../src/core/tools/edit-diff.ts";
 import { ToolExecutionComponent } from "../src/modes/interactive/components/tool-execution.ts";
+import { ToolGroupComponent } from "../src/modes/interactive/components/tool-group.ts";
 import { getEditorTheme, initTheme } from "../src/modes/interactive/theme/theme.ts";
 
 const TARGET_FILE = "streamed-edit-target.txt";
@@ -86,8 +87,10 @@ describe("streamed edit terminal rendering", () => {
 				prompt: "› ",
 			});
 			editor.setText(EDITOR_TEXT);
+			const toolGroup = new ToolGroupComponent(1);
+			toolGroup.addTool("streamed-edit-call", component);
 			root.addChild(new Text("existing conversation", 0, 0));
-			root.addChild(component);
+			root.addChild(toolGroup);
 			root.addChild(new Spacer(1));
 			root.addChild(editor);
 			root.addChild(new Text(FOOTER_TEXT, 0, 0));
@@ -102,6 +105,11 @@ describe("streamed edit terminal rendering", () => {
 				await waitForText(terminal, "beta five");
 				expectStableComposition(terminal);
 
+				terminal.resize(60, 24);
+				ui.requestRender();
+				await waitForText(terminal, TARGET_FILE);
+				expectStableComposition(terminal);
+
 				component.markExecutionStarted();
 				await waitForText(terminal, "running");
 				expectStableComposition(terminal);
@@ -114,9 +122,11 @@ describe("streamed edit terminal rendering", () => {
 					},
 					false,
 				);
+				toolGroup.markSettled();
 				ui.requestRender();
 				await terminal.waitForRender();
 				const settled = terminal.getScrollBuffer().join("\n");
+				expect(settled).toContain("Explored");
 				expect(settled).toContain("beta five");
 				expect(settled).not.toContain("running");
 				expect(settled).not.toContain("complete");
