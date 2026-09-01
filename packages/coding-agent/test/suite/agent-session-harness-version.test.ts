@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { InMemoryTelemetryContext } from "@earendil-works/diffex-agent-core";
 import { fauxAssistantMessage } from "@earendil-works/diffex-ai";
 import {
+	computeHarnessSkillPackageVersion,
 	computeHarnessVersion,
 	HARNESS_VERSION_SCHEMA_VERSION,
 	HarnessStateStore,
@@ -175,7 +176,8 @@ describe("AgentSession harness revisions", () => {
 				name: "atomic-review",
 				sourceKind: "evolved",
 				harnessRevision: revision.manifest.version,
-				version: revision.state.skills[0]?.contentHash,
+				version: revision.state.skills[0]?.packageVersion,
+				contentDigest: revision.state.skills[0]?.contentHash,
 			}),
 		]);
 		const promptOperation = telemetry
@@ -189,7 +191,8 @@ describe("AgentSession harness revisions", () => {
 				event.name === "diffex.skill.available" && event.attributes["diffex.skill.source_kind"] === "evolved",
 		);
 		expect(availableEvent?.attributes).toMatchObject({
-			"diffex.skill.version": revision.state.skills[0]?.contentHash,
+			"diffex.skill.version": revision.state.skills[0]?.packageVersion,
+			"diffex.skill.content_digest": revision.state.skills[0]?.contentHash,
 			"diffex.skill.source_kind": "evolved",
 			"diffex.skill.scope": "workspace",
 			"diffex.skill.harness_revision": revision.manifest.version,
@@ -210,6 +213,7 @@ describe("AgentSession harness revisions", () => {
 		const workspace = await resolveHarnessWorkspace(harness.tempDir);
 		const skillContent =
 			"---\nname: manual-review\ndescription: Trace the manually assembled review workflow.\n---\n\n# Manual review\n";
+		const skillVersion = computeHarnessSkillPackageVersion({ content: skillContent });
 		const revision = writeHarnessRevision({
 			agentDir,
 			base: rootVersion,
@@ -241,7 +245,8 @@ describe("AgentSession harness revisions", () => {
 			name: "manual-review",
 			sourceKind: "evolved",
 			harnessRevision: revision,
-			version: contentHash(skillContent),
+			version: skillVersion,
+			contentDigest: contentHash(skillContent),
 		});
 		const firstPromptOperation = telemetry
 			.getSpans()
@@ -255,7 +260,8 @@ describe("AgentSession harness revisions", () => {
 					event.name === "diffex.skill.available" && event.attributes["diffex.skill.source_kind"] === "evolved",
 			)?.attributes,
 		).toMatchObject({
-			"diffex.skill.version": contentHash(skillContent),
+			"diffex.skill.version": skillVersion,
+			"diffex.skill.content_digest": contentHash(skillContent),
 			"diffex.skill.harness_revision": revision,
 			"diffex.harness.version": revision,
 			"diffex.workspace.repository_id": workspace.workspace.repositoryId,

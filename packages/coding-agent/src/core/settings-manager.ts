@@ -2,7 +2,7 @@ import type { ThinkingLevel } from "@earendil-works/diffex-agent-core";
 import type { Transport } from "@earendil-works/diffex-ai";
 import type { TuiMode as RendererTuiMode, ScrollViewScrollbar } from "@earendil-works/diffex-tui";
 import { randomUUID } from "crypto";
-import { existsSync, mkdirSync, readFileSync, type Stats, unwatchFile, watchFile, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
 import lockfile from "proper-lockfile";
 import { CONFIG_DIR_NAME, getAgentDir } from "../config.ts";
@@ -269,18 +269,23 @@ export class FileSettingsStorage implements SettingsStorage {
 
 	watch(scope: SettingsScope, listener: () => void, intervalMs: number): () => void {
 		const path = this.pathForScope(scope);
-		const onChange = (current: Stats, previous: Stats) => {
-			if (
-				current.mtimeMs !== previous.mtimeMs ||
-				current.ctimeMs !== previous.ctimeMs ||
-				current.size !== previous.size ||
-				current.ino !== previous.ino
-			) {
-				listener();
+		const readSignature = (): string | undefined => {
+			try {
+				const stats = statSync(path);
+				return `${stats.mtimeMs}:${stats.ctimeMs}:${stats.size}:${stats.ino}`;
+			} catch {
+				return undefined;
 			}
 		};
-		watchFile(path, { interval: intervalMs, persistent: false }, onChange);
-		return () => unwatchFile(path, onChange);
+		let previousSignature = readSignature();
+		const timer = setInterval(() => {
+			const currentSignature = readSignature();
+			if (currentSignature === previousSignature) return;
+			previousSignature = currentSignature;
+			listener();
+		}, intervalMs);
+		timer.unref();
+		return () => clearInterval(timer);
 	}
 }
 
