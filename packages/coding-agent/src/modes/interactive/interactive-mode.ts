@@ -130,7 +130,7 @@ import { CustomEditor } from "./components/custom-editor.ts";
 import { CustomEntryComponent } from "./components/custom-entry.ts";
 import { CustomMessageComponent } from "./components/custom-message.ts";
 import { DaxnutsComponent } from "./components/daxnuts.ts";
-import { DiffexPathDockRail, type DiffexPathOrigin } from "./components/diffex-path.ts";
+import { DiffexPathDockHinge, type DiffexPathOrigin } from "./components/diffex-path.ts";
 import {
 	DiffexWelcomeHeader,
 	diffexIntroAccent,
@@ -2153,9 +2153,9 @@ export class InteractiveMode {
 		const transitionIndex = userIndex + 1;
 		const transitionComponent = this.chatContainer.children[transitionIndex];
 		if (transitionComponent instanceof Spacer) {
-			this.chatContainer.children.splice(transitionIndex, 1, new DiffexPathDockRail(this.outputPad));
-		} else if (!(transitionComponent instanceof DiffexPathDockRail)) {
-			this.chatContainer.children.splice(transitionIndex, 0, new DiffexPathDockRail(this.outputPad));
+			this.chatContainer.children.splice(transitionIndex, 1, new DiffexPathDockHinge(this.outputPad));
+		} else if (!(transitionComponent instanceof DiffexPathDockHinge)) {
+			this.chatContainer.children.splice(transitionIndex, 0, new DiffexPathDockHinge(this.outputPad));
 		}
 		return true;
 	}
@@ -2178,7 +2178,7 @@ export class InteractiveMode {
 			return;
 		}
 		const previousComponent = this.chatContainer.children[componentIndex - 1];
-		if (previousComponent instanceof Spacer || previousComponent instanceof DiffexPathDockRail) {
+		if (previousComponent instanceof Spacer || previousComponent instanceof DiffexPathDockHinge) {
 			return;
 		}
 		this.chatContainer.children.splice(componentIndex, 0, new Spacer(1));
@@ -4898,7 +4898,7 @@ export class InteractiveMode {
 								if (
 									child instanceof AssistantMessageComponent ||
 									child instanceof CustomMessageComponent ||
-									child instanceof DiffexPathDockRail ||
+									child instanceof DiffexPathDockHinge ||
 									child instanceof UserMessageComponent ||
 									child instanceof ToolGroupComponent
 								) {

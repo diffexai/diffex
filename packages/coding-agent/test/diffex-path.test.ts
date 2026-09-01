@@ -1,7 +1,7 @@
 import { visibleWidth } from "@earendil-works/diffex-tui";
 import { afterEach, beforeAll, describe, expect, test } from "vitest";
 import {
-	DiffexPathDockRail,
+	DiffexPathDockHinge,
 	DiffexPathHinge,
 	DiffexPathLabel,
 	DiffexPathRail,
@@ -52,16 +52,19 @@ describe("Diffex path", () => {
 		expect(stripAnsi(compact)).toBe(" ╰─ Diffex");
 	});
 
-	test("renders a compact transmitter hinge and one response rail", () => {
+	test("renders the transmitter hinge on the external dock row", () => {
 		delete process.env.DIFFEX_ASCII;
 		process.env.TERM = "xterm-256color";
 		const hinge = new DiffexPathHinge();
-		const dockRail = new DiffexPathDockRail();
+		const dockHinge = new DiffexPathDockHinge();
 
 		expect(stripAnsi(hinge.render(60)[0] ?? "")).toBe("╭");
 		hinge.setExtended(true);
 		expect(stripAnsi(hinge.render(80)[0] ?? "")).toBe("╭──");
-		expect(stripAnsi(dockRail.render(80)[0] ?? "")).toBe(" │");
+		expect(stripAnsi(dockHinge.render(60)[0] ?? "")).toBe(" ╭");
+		expect(stripAnsi(dockHinge.render(80)[0] ?? "")).toBe(" ╭──");
+		dockHinge.setOutputPad(2);
+		expect(stripAnsi(dockHinge.render(80)[0] ?? "")).toBe("  ╭──");
 	});
 
 	test("uses the same hierarchy in ASCII mode", () => {
@@ -75,12 +78,12 @@ describe("Diffex path", () => {
 		const hinge = new DiffexPathHinge();
 		hinge.setExtended(true);
 		expect(stripAnsi(hinge.render(80)[0] ?? "")).toBe("+--");
-		expect(stripAnsi(new DiffexPathDockRail().render(80)[0] ?? "")).toBe(" |");
+		expect(stripAnsi(new DiffexPathDockHinge().render(80)[0] ?? "")).toBe(" +--");
 	});
 
 	test.each([1, 2, 8, 60, 80, 120])("never exceeds a %d-column viewport", (width) => {
 		const components = [
-			new DiffexPathDockRail(),
+			new DiffexPathDockHinge(),
 			new DiffexPathHinge(),
 			new DiffexPathLabel("A deliberately long activity label", { marker: "branch" }),
 			new DiffexPathLabel("Diffex", { marker: "end", fill: true }),

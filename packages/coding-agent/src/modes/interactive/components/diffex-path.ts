@@ -107,12 +107,21 @@ export class DiffexPathRail implements Component {
 	}
 }
 
-/** Draw the transmitter socket inside the user surface without changing its height. */
+/** Draw the transmitter socket below the user surface. */
 export class DiffexPathHinge implements Component {
 	private extended = false;
+	private padding: number;
+
+	constructor(padding = 0) {
+		this.padding = padding;
+	}
 
 	setExtended(extended: boolean): void {
 		this.extended = extended;
+	}
+
+	setPadding(padding: number): void {
+		this.padding = padding;
 	}
 
 	invalidate(): void {
@@ -121,32 +130,34 @@ export class DiffexPathHinge implements Component {
 
 	render(width: number): string[] {
 		const safeWidth = Math.max(1, width);
+		const padding = Math.min(Math.max(0, this.padding), Math.max(0, safeWidth - 1));
 		const glyphs = getGlyphs();
 		const corner = theme.fg("borderAccent", resolveMarker("start"));
 		const lip = this.extended ? theme.fg("borderMuted", glyphs.separator.repeat(2)) : "";
-		const line = `${corner}${lip}`;
+		const line = `${" ".repeat(padding)}${corner}${lip}`;
 		return [visibleWidth(line) > safeWidth ? truncateToWidth(line, safeWidth, "") : line];
 	}
 }
 
 /** Join a docked user surface to the first response node. */
-export class DiffexPathDockRail implements Component {
-	private readonly rail: DiffexPathRail;
+export class DiffexPathDockHinge implements Component {
+	private readonly hinge: DiffexPathHinge;
 
 	constructor(padding = 1) {
-		this.rail = new DiffexPathRail(padding);
+		this.hinge = new DiffexPathHinge(padding);
 	}
 
 	setOutputPad(padding: number): void {
-		this.rail.setPadding(padding);
+		this.hinge.setPadding(padding);
 	}
 
 	invalidate(): void {
-		this.rail.invalidate();
+		this.hinge.invalidate();
 	}
 
 	render(width: number): string[] {
-		return this.rail.render(width);
+		this.hinge.setExtended(shouldExtendDiffexPathHinge(width));
+		return this.hinge.render(width);
 	}
 }
 

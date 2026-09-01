@@ -1,7 +1,6 @@
 import { Box, Container, getGlyphs, Markdown, type MarkdownTheme, Spacer } from "@earendil-works/diffex-tui";
 import type { MarkdownTransformer } from "../../../core/extensions/types.ts";
 import { getMarkdownTheme, theme } from "../theme/theme.ts";
-import { DiffexPathHinge, shouldExtendDiffexPathHinge } from "./diffex-path.ts";
 import { createMarkdownTransform } from "./markdown-transform.ts";
 
 const OSC133_ZONE_START = "\x1b]133;A\x07";
@@ -17,7 +16,6 @@ export class UserMessageComponent extends Container {
 	private outputPad: number;
 	private markdownTransformers: readonly MarkdownTransformer[];
 	private docked = false;
-	private readonly dockHinge = new DiffexPathHinge();
 
 	constructor(
 		text: string,
@@ -43,7 +41,6 @@ export class UserMessageComponent extends Container {
 			return;
 		}
 		this.docked = docked;
-		this.rebuild();
 	}
 
 	isDocked(): boolean {
@@ -77,12 +74,11 @@ export class UserMessageComponent extends Container {
 				},
 			),
 		);
-		surface.addChild(this.docked ? this.dockHinge : new Spacer(1));
+		surface.addChild(new Spacer(1));
 		this.addChild(surface);
 	}
 
 	override render(width: number): string[] {
-		this.dockHinge.setExtended(shouldExtendDiffexPathHinge(width));
 		const lines = super.render(width);
 		if (lines.length === 0) {
 			return lines;

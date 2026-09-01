@@ -2,13 +2,13 @@ import type { AgentMessage } from "@earendil-works/diffex-agent-core";
 import type { AssistantMessage, ToolResultMessage, Usage } from "@earendil-works/diffex-ai";
 import { Container, getGlyphs, Spacer, Text, type TUI } from "@earendil-works/diffex-tui";
 import { Type } from "typebox";
-import { beforeAll, describe, expect, test, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
 import type { AgentSessionEvent } from "../src/core/agent-session.ts";
 import type { ToolDefinition } from "../src/core/extensions/types.ts";
 import type { SessionEntry } from "../src/core/session-manager.ts";
 import { AssistantMessageComponent } from "../src/modes/interactive/components/assistant-message.ts";
 import { CustomEntryComponent } from "../src/modes/interactive/components/custom-entry.ts";
-import { DiffexPathDockRail } from "../src/modes/interactive/components/diffex-path.ts";
+import { DiffexPathDockHinge } from "../src/modes/interactive/components/diffex-path.ts";
 import { DynamicBorder } from "../src/modes/interactive/components/dynamic-border.ts";
 import { ToolExecutionComponent } from "../src/modes/interactive/components/tool-execution.ts";
 import { ToolGroupComponent } from "../src/modes/interactive/components/tool-group.ts";
@@ -19,6 +19,7 @@ import { stripAnsi } from "../src/utils/ansi.ts";
 
 const TOOL_CALL_ID = "tool-transcript";
 const TOOL_NAME = "inspect";
+const originalNoColor = process.env.NO_COLOR;
 
 const EMPTY_USAGE: Usage = {
 	input: 0,
@@ -187,20 +188,33 @@ function useTranscriptMessageRendering(context: TestContext): AddMessageToChat {
 }
 
 function expectUserAssistantGap(context: TestContext, width: number, assistantLabel: string): void {
-	const lines = context.chatContainer.render(width).map((line) => stripAnsi(line).trimEnd());
+	const renderedLines = context.chatContainer.render(width);
+	const lines = renderedLines.map((line) => stripAnsi(line).trimEnd());
 	const userLine = lines.findIndex((line) => line.includes("explain the theorem"));
 	const assistantLine = lines.findIndex((line) => line.includes(assistantLabel));
 
 	expect(userLine).toBeGreaterThanOrEqual(0);
 	expect(assistantLine).toBeGreaterThan(userLine);
 	const hinge = width >= 80 ? `${getGlyphs().start}${getGlyphs().separator.repeat(2)}` : getGlyphs().start;
-	const transitionLines = [` ${hinge}`, ` ${getGlyphs().rail}`];
+	const transitionLines = ["", ` ${hinge}`];
 	expect(lines.slice(userLine + 1, assistantLine)).toEqual(transitionLines);
+	expect(renderedLines[userLine + 1]).toMatch(/\x1b\[48;/);
+	expect(renderedLines[userLine + 1]).toContain("\x1b[49m");
+	expect(renderedLines[userLine + 2]).not.toMatch(/\x1b\[48;/);
 }
 
 describe("Interactive transcript layout", () => {
 	beforeAll(() => {
+		process.env.NO_COLOR = "";
 		initTheme("dark");
+	});
+
+	afterAll(() => {
+		if (originalNoColor === undefined) {
+			delete process.env.NO_COLOR;
+		} else {
+			process.env.NO_COLOR = originalNoColor;
+		}
 	});
 
 	test("flushes a pending turn boundary before a displayed extension entry", async () => {
@@ -383,10 +397,10 @@ describe("Interactive transcript layout", () => {
 
 		expect(context.chatContainer.children).toEqual([
 			expect.any(UserMessageComponent),
-			expect.any(DiffexPathDockRail),
+			expect.any(DiffexPathDockHinge),
 			expect.any(AssistantMessageComponent),
 		]);
-		expect(context.chatContainer.children.filter((child) => child instanceof DiffexPathDockRail)).toHaveLength(1);
+		expect(context.chatContainer.children.filter((child) => child instanceof DiffexPathDockHinge)).toHaveLength(1);
 		expectUserAssistantGap(context, width, "Reasoning");
 		expect(context.clearStatusIndicator).toHaveBeenCalledWith("working");
 	});
@@ -447,7 +461,7 @@ describe("Interactive transcript layout", () => {
 
 		expect(context.chatContainer.children).toEqual([
 			expect.any(UserMessageComponent),
-			expect.any(DiffexPathDockRail),
+			expect.any(DiffexPathDockHinge),
 			expect.any(AssistantMessageComponent),
 		]);
 		expectUserAssistantGap(context, width, "Reasoning");
@@ -473,7 +487,7 @@ describe("Interactive transcript layout", () => {
 		const userIndex = context.chatContainer.children.findIndex((child) => child instanceof UserMessageComponent);
 		const toolGroupIndex = context.chatContainer.children.findIndex((child) => child instanceof ToolGroupComponent);
 		const transitionChildren = context.chatContainer.children.slice(userIndex + 1, toolGroupIndex);
-		expect(transitionChildren.filter((child) => child instanceof DiffexPathDockRail)).toHaveLength(1);
+		expect(transitionChildren.filter((child) => child instanceof DiffexPathDockHinge)).toHaveLength(1);
 		expect(transitionChildren.filter((child) => child instanceof Spacer)).toHaveLength(0);
 		expect(transitionChildren.filter((child) => child instanceof AssistantMessageComponent)).toHaveLength(1);
 		expect((context.chatContainer.children[userIndex] as UserMessageComponent).isDocked()).toBe(true);
@@ -511,7 +525,7 @@ describe("Interactive transcript layout", () => {
 
 		expect(context.chatContainer.children).toEqual([
 			expect.any(UserMessageComponent),
-			expect.any(DiffexPathDockRail),
+			expect.any(DiffexPathDockHinge),
 			expect.any(AssistantMessageComponent),
 			expect.any(ToolGroupComponent),
 		]);
@@ -558,7 +572,7 @@ describe("Interactive transcript layout", () => {
 			(child): child is UserMessageComponent => child instanceof UserMessageComponent,
 		);
 		expect(userComponent?.isDocked()).toBe(false);
-		expect(context.chatContainer.children.filter((child) => child instanceof DiffexPathDockRail)).toHaveLength(0);
+		expect(context.chatContainer.children.filter((child) => child instanceof DiffexPathDockHinge)).toHaveLength(0);
 		expect(context.chatContainer.children.filter((child) => child instanceof DynamicBorder)).toHaveLength(1);
 	});
 

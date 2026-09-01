@@ -10,7 +10,7 @@ export { CustomMessageComponent } from "./custom-message.ts";
 export { DaxnutsComponent } from "./daxnuts.ts";
 export { type RenderDiffOptions, renderDiff } from "./diff.ts";
 export {
-	DiffexPathDockRail,
+	DiffexPathDockHinge,
 	DiffexPathHinge,
 	DiffexPathLabel,
 	DiffexPathRail,
