@@ -409,7 +409,7 @@ describe("Interactive transcript layout", () => {
 		]);
 		expect(context.chatContainer.children.filter((child) => child instanceof DiffexPathDockHinge)).toHaveLength(1);
 		expectUserAssistantGap(context, width, "Reasoning");
-		expect(context.clearStatusIndicator).toHaveBeenCalledWith("working");
+		expect(context.clearStatusIndicator).not.toHaveBeenCalled();
 	});
 
 	test("preserves extension-controlled working status after visible output", async () => {
@@ -536,9 +536,14 @@ describe("Interactive transcript layout", () => {
 			expect.any(AssistantMessageComponent),
 			expect.any(ToolGroupComponent),
 		]);
-		expect(context.clearStatusIndicator).toHaveBeenCalledWith("working");
+		expect(context.clearStatusIndicator).not.toHaveBeenCalled();
 		const rendered = context.chatContainer.render(80).map((line) => stripAnsi(line).trimEnd());
 		expect(rendered).toContain(` ${getGlyphs().branch} Exploring`);
+
+		await handleEvent.call(context, { type: "agent_end", messages: [toolMessage], willRetry: false });
+
+		expect(context.clearStatusIndicator).toHaveBeenCalledOnce();
+		expect(context.clearStatusIndicator).toHaveBeenCalledWith("working");
 	});
 
 	test("keeps a late assistant text block on the tool-first user path", async () => {
