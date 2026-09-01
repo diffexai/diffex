@@ -2186,6 +2186,15 @@ export class InteractiveMode {
 			return;
 		}
 		this.handoffDefaultWorkingStatus();
+		if (this.activeToolGroup && this.activeToolGroup.getPathOrigin() !== "continued") {
+			const toolPathOrigin = this.activeToolGroup.getPathOrigin();
+			component.setPathOrigin(toolPathOrigin === "user-dock" ? "user-dock" : "standalone");
+			this.activeToolGroup.setPathOrigin("continued");
+			const toolGroupIndex = this.chatContainer.children.indexOf(this.activeToolGroup);
+			if (toolGroupIndex > 0 && this.chatContainer.children[toolGroupIndex - 1] instanceof Spacer) {
+				this.chatContainer.children.splice(toolGroupIndex - 1, 1);
+			}
+		}
 		if (this.consumePendingUserDock(component)) {
 			component.setPathOrigin("user-dock");
 			return;

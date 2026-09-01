@@ -10,7 +10,7 @@ interface RenderedTool {
 export class ToolGroupComponent implements Component {
 	private readonly tools = new Map<string, ToolExecutionComponent>();
 	private outputPad: number;
-	private readonly pathOrigin: DiffexPathOrigin;
+	private pathOrigin: DiffexPathOrigin;
 	private settled = false;
 
 	constructor(outputPad = 1, pathOrigin: DiffexPathOrigin = "standalone") {
@@ -33,6 +33,14 @@ export class ToolGroupComponent implements Component {
 
 	hasTools(): boolean {
 		return this.tools.size > 0;
+	}
+
+	getPathOrigin(): DiffexPathOrigin {
+		return this.pathOrigin;
+	}
+
+	setPathOrigin(pathOrigin: DiffexPathOrigin): void {
+		this.pathOrigin = pathOrigin;
 	}
 
 	markSettled(): void {

@@ -20,6 +20,7 @@ import { stripAnsi } from "../src/utils/ansi.ts";
 const TOOL_CALL_ID = "tool-transcript";
 const TOOL_NAME = "inspect";
 const originalNoColor = process.env.NO_COLOR;
+const originalTerm = process.env.TERM;
 
 const EMPTY_USAGE: Usage = {
 	input: 0,
@@ -206,6 +207,7 @@ function expectUserAssistantGap(context: TestContext, width: number, assistantLa
 describe("Interactive transcript layout", () => {
 	beforeAll(() => {
 		process.env.NO_COLOR = "";
+		process.env.TERM = "xterm-256color";
 		initTheme("dark");
 	});
 
@@ -214,6 +216,11 @@ describe("Interactive transcript layout", () => {
 			delete process.env.NO_COLOR;
 		} else {
 			process.env.NO_COLOR = originalNoColor;
+		}
+		if (originalTerm === undefined) {
+			delete process.env.TERM;
+		} else {
+			process.env.TERM = originalTerm;
 		}
 	});
 
@@ -532,6 +539,56 @@ describe("Interactive transcript layout", () => {
 		expect(context.clearStatusIndicator).toHaveBeenCalledWith("working");
 		const rendered = context.chatContainer.render(80).map((line) => stripAnsi(line).trimEnd());
 		expect(rendered).toContain(` ${getGlyphs().branch} Exploring`);
+	});
+
+	test("keeps a late assistant text block on the tool-first user path", async () => {
+		const context = createContext();
+		const addMessageToChat = useTranscriptMessageRendering(context);
+		const handleEvent = (InteractiveMode.prototype as unknown as { handleEvent: HandleEvent }).handleEvent;
+		const toolCall = {
+			type: "toolCall" as const,
+			id: TOOL_CALL_ID,
+			name: TOOL_NAME,
+			arguments: { path: "README.md" },
+		};
+		const toolOnlyMessage = createAssistantMessage([toolCall], "toolUse");
+		const textAndToolMessage = createAssistantMessage(
+			[{ type: "text", text: "I found the relevant file" }, toolCall],
+			"toolUse",
+		);
+
+		addMessageToChat.call(context, {
+			role: "user",
+			content: "explain the theorem",
+			timestamp: Date.now(),
+		});
+		await handleEvent.call(context, { type: "message_start", message: toolOnlyMessage });
+		await handleEvent.call(context, {
+			type: "message_update",
+			message: toolOnlyMessage,
+			assistantMessageEvent: {
+				type: "toolcall_end",
+				contentIndex: 0,
+				toolCall,
+				partial: toolOnlyMessage,
+			},
+		});
+		await handleEvent.call(context, {
+			type: "message_update",
+			message: textAndToolMessage,
+			assistantMessageEvent: {
+				type: "text_delta",
+				contentIndex: 0,
+				delta: "I found the relevant file",
+				partial: textAndToolMessage,
+			},
+		});
+
+		const lines = context.chatContainer.render(80).map((line) => stripAnsi(line).trimEnd());
+		const pathStarts = lines.filter((line) => line.startsWith(` ${getGlyphs().start}`));
+		expect(pathStarts).toHaveLength(1);
+		expect(lines).toContain(` ${getGlyphs().branch} Diffex`);
+		expect(lines).toContain(` ${getGlyphs().branch} Exploring`);
 	});
 
 	test("reuses an existing transcript boundary spacer", () => {
