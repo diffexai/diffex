@@ -115,7 +115,11 @@ describe("streamed edit terminal rendering", () => {
 					false,
 				);
 				ui.requestRender();
-				await waitForText(terminal, "complete");
+				await terminal.waitForRender();
+				const settled = terminal.getScrollBuffer().join("\n");
+				expect(settled).toContain("beta five");
+				expect(settled).not.toContain("running");
+				expect(settled).not.toContain("complete");
 				expectStableComposition(terminal);
 			} finally {
 				ui.stop();
