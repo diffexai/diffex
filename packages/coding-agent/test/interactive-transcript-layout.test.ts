@@ -79,7 +79,6 @@ type RenderSessionItems = (
 ) => void;
 type ToggleThinkingBlockVisibility = (this: TestContext) => void;
 type AddMessageToChat = (this: TestContext, message: AgentMessage, options?: { populateHistory?: boolean }) => void;
-type ToggleThinkingBlockVisibility = (this: TestContext) => void;
 
 function createAssistantMessage(
 	content: AssistantMessage["content"],
