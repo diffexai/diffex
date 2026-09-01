@@ -394,7 +394,13 @@ export class SkillCuratorToolRegistry {
 			if (this.#revoked)
 				throw new EvolutionToolDeniedError("registry-revoked", "Skill Curator tool registry is revoked");
 			if (this.#toolCalls > this.#maxToolCalls) {
-				throw new EvolutionToolDeniedError("tool-budget-exhausted", "Skill Curator tool budget is exhausted");
+				denialCode = "tool-budget-exhausted";
+				const output = {
+					inspectionFinished: true,
+					note: "Inspection is finished because the Skill Curator tool budget is exhausted. Submit a best-effort response now using the information already inspected.",
+				};
+				resultDigest = computeEvolutionContentDigest(output);
+				return output;
 			}
 			this.#signal?.throwIfAborted();
 			const result = await run();

@@ -587,6 +587,48 @@ describe("StructuredSkillCurator", () => {
 		]);
 	});
 
+	it("returns a finalization result when the inspection budget is exhausted", async () => {
+		const storedSkill = skillArtifact();
+		const artifacts = new FixtureArtifactStore([storedSkill]);
+		const ledger: EvolutionLedgerEvent[] = [];
+		const curator = new StructuredSkillCurator(
+			{
+				version: "1",
+				artifacts,
+				ledger: { append: async (event) => void ledger.push(event), read: async () => ledger },
+			},
+			{ maxToolCalls: 1 },
+		);
+		const input = fixtureInput(storedSkill.reference);
+		const result = await curator.curate(
+			curatorInput(async (request) => {
+				const evidenceTool = request.tools.find((tool) => tool.name === "inspect_source_evidence");
+				expect(await evidenceTool?.execute({ evidenceRefs: ["E1"] })).toMatchObject({
+					evidence: [{ evidenceRef: "E1" }],
+				});
+				expect(await evidenceTool?.execute({ evidenceRefs: ["E2"] })).toEqual({
+					inspectionFinished: true,
+					note: "Inspection is finished because the Skill Curator tool budget is exhausted. Submit a best-effort response now using the information already inspected.",
+				});
+				return {
+					output: { decisions: [], proceduralInformationLosses: [] },
+					model: { provider: "faux", model: "fixture" },
+				};
+			}, input),
+		);
+
+		expect(result).toEqual({ candidates: [], deferredFindings: [], proceduralInformationLossFindings: [] });
+		expect(ledger).toMatchObject([
+			{ type: "skill-curator-tool-call", denialCode: null, resolvedEvidenceIds: ["support-1"] },
+			{
+				type: "skill-curator-tool-call",
+				denialCode: "tool-budget-exhausted",
+				requestedReferences: ["E2"],
+				resolvedEvidenceIds: [],
+			},
+		]);
+	});
+
 	it("rejects a candidate whose canonical capsule exceeds the fixed ceiling", async () => {
 		const storedSkill = skillArtifact();
 		const artifacts = new FixtureArtifactStore([storedSkill]);
