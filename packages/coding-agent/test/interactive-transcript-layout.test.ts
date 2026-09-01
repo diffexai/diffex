@@ -376,6 +376,25 @@ describe("Interactive transcript layout", () => {
 		expect(getTranscriptTopology(replayContext).slice(0, 4)).toEqual(getTranscriptTopology(context));
 	});
 
+	test("does not duplicate extension spacing after a warning", async () => {
+		const context = createContext();
+		const handleEvent = (InteractiveMode.prototype as unknown as { handleEvent: HandleEvent }).handleEvent;
+		const assistantMessage = createAssistantMessage([{ type: "text", text: "visible response" }], "pending");
+
+		InteractiveMode.prototype.showWarning.call(context as unknown as InteractiveMode, "intervening warning");
+		await handleEvent.call(context, { type: "message_start", message: assistantMessage });
+		await handleEvent.call(context, { type: "entry_appended", entry: createCustomEntry() });
+
+		const lines = renderChat(context)
+			.split("\n")
+			.map((line) => line.trimEnd());
+		const warningIndex = lines.findIndex((line) => line.includes("Warning: intervening warning"));
+		const entryIndex = lines.indexOf("next turn note");
+		expect(warningIndex).toBeGreaterThanOrEqual(0);
+		expect(entryIndex).toBeGreaterThan(warningIndex);
+		expect(lines.slice(warningIndex + 1, entryIndex)).toEqual([""]);
+	});
+
 	test("removes extension spacing when a final response becomes empty", async () => {
 		const context = createContext();
 		const addMessageToChat = useTranscriptMessageRendering(context);

@@ -3890,10 +3890,7 @@ export class InteractiveMode {
 					}
 				}
 
-				if (
-					children[streamingIndex - 1] instanceof DiffexPathSpacer &&
-					children[streamingIndex - 2] instanceof CustomEntryComponent
-				) {
+				if (children[streamingIndex - 1] instanceof DiffexPathSpacer) {
 					children.splice(streamingIndex - 1, 1);
 					streamingIndex -= 1;
 				}
