@@ -643,10 +643,7 @@ describe("Interactive transcript layout", () => {
 		});
 
 		InteractiveMode.prototype.showWarning.call(context as unknown as InteractiveMode, "intervening notice");
-		addMessageToChat.call(
-			context,
-			createAssistantMessage([{ type: "text", text: "separate response" }], "stop"),
-		);
+		addMessageToChat.call(context, createAssistantMessage([{ type: "text", text: "separate response" }], "stop"));
 
 		expect(context.chatContainer.children.filter((child) => child instanceof DiffexPathDockHinge)).toHaveLength(0);
 		const rendered = renderChat(context);

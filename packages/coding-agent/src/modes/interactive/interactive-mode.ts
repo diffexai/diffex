@@ -2166,7 +2166,8 @@ export class InteractiveMode {
 			if (
 				trailingComponents.length > 1 ||
 				(trailingComponents.length === 1 &&
-					(!(trailingComponents[0] instanceof AssistantMessageComponent) || trailingComponents[0].hasVisibleOutput()))
+					(!(trailingComponents[0] instanceof AssistantMessageComponent) ||
+						trailingComponents[0].hasVisibleOutput()))
 			) {
 				return false;
 			}
