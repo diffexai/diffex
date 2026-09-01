@@ -52,7 +52,9 @@ describe("ToolExecutionComponent parity", () => {
 		expect(stripAnsi(component.render(120).join("\n"))).toContain(`Custom tool${separator}running`);
 
 		component.updateResult({ content: [{ type: "text", text: "done" }], isError: false }, false);
-		expect(stripAnsi(component.render(120).join("\n"))).toContain(`Custom tool${separator}complete`);
+		const completed = stripAnsi(component.render(120).join("\n"));
+		expect(completed).toContain(`${getGlyphs().success} Custom tool`);
+		expect(completed).not.toContain("complete");
 
 		const failed = new ToolExecutionComponent(
 			"custom_tool",

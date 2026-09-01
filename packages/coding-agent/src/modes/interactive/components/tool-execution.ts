@@ -284,7 +284,7 @@ export class ToolExecutionComponent extends Container {
 			if (this.result.isError) {
 				this.stateText.setText(theme.fg("error", `${glyphs.error} ${label} ${glyphs.bullet} failed`));
 			} else {
-				this.stateText.setText(theme.fg("success", `${glyphs.success} ${label} ${glyphs.bullet} complete`));
+				this.stateText.setText(theme.fg("success", `${glyphs.success} ${label}`));
 			}
 		} else if (this.executionStarted || this.result) {
 			this.stateText.setText(theme.fg("accent", `${glyphs.running} ${label} ${glyphs.bullet} running`));

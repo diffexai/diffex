@@ -368,7 +368,7 @@ describe("Interactive transcript layout", () => {
 		expect(context.chatContainer.children.filter((child) => child instanceof ToolExecutionComponent)).toHaveLength(0);
 		expect(context.chatContainer.children.filter((child) => child instanceof DynamicBorder)).toHaveLength(2);
 		const rendered = renderChat(context);
-		expect(rendered.match(/Inspect .* complete/g)).toHaveLength(1);
+		expect(rendered.match(/Inspect/g)).toHaveLength(1);
 		expect(rendered.indexOf("Explored")).toBeLessThan(rendered.indexOf("final answer"));
 		expect(rendered.indexOf("input tokens: 12")).toBeLessThan(rendered.lastIndexOf(getGlyphs().separator.repeat(4)));
 	});
