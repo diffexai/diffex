@@ -3789,6 +3789,9 @@ export class InteractiveMode {
 
 		for (const item of items) {
 			if (isCustomSessionEntry(item)) {
+				if (replayTurnOpen && renderedPendingTools.size === 0) {
+					completeReplayTurn();
+				}
 				this.addCustomEntryToChat(item);
 				continue;
 			}

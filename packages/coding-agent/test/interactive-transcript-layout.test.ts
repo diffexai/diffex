@@ -62,7 +62,7 @@ type TestContext = {
 type HandleEvent = (this: TestContext, event: AgentSessionEvent) => Promise<void>;
 type RenderSessionItems = (
 	this: TestContext,
-	items: readonly AgentMessage[],
+	items: readonly (AgentMessage | Extract<SessionEntry, { type: "custom" }>)[],
 	options?: { updateFooter?: boolean; populateHistory?: boolean },
 ) => void;
 
@@ -90,6 +90,16 @@ function createToolResult(): ToolResultMessage {
 		content: [{ type: "text", text: "inspection complete" }],
 		isError: false,
 		timestamp: Date.now(),
+	};
+}
+
+function createCustomEntry(): Extract<SessionEntry, { type: "custom" }> {
+	return {
+		type: "custom",
+		customType: "turn-note",
+		id: "entry-turn-note",
+		parentId: null,
+		timestamp: new Date().toISOString(),
 	};
 }
 
@@ -180,6 +190,44 @@ describe("Interactive transcript layout", () => {
 		expect(entryIndex).toBeGreaterThan(boundaryIndex);
 		expect(context.turnBoundaryPending).toBe(false);
 	});
+
+	test("replays a displayed extension entry after a completed assistant boundary", () => {
+		const context = createContext();
+		const renderSessionItems = (InteractiveMode.prototype as unknown as { renderSessionItems: RenderSessionItems })
+			.renderSessionItems;
+		const assistantMessage = createAssistantMessage([{ type: "text", text: "final answer" }], "stop");
+
+		renderSessionItems.call(context, [assistantMessage, createCustomEntry()]);
+
+		const answerIndex = context.chatContainer.children.findIndex(
+			(child) => child instanceof Text && stripAnsi(child.render(100).join("\n")).includes("final answer"),
+		);
+		const boundaryIndex = context.chatContainer.children.findIndex((child) => child instanceof DynamicBorder);
+		const entryIndex = context.chatContainer.children.findIndex((child) => child instanceof CustomEntryComponent);
+		expect(answerIndex).toBeGreaterThanOrEqual(0);
+		expect(boundaryIndex).toBeGreaterThan(answerIndex);
+		expect(entryIndex).toBeGreaterThan(boundaryIndex);
+	});
+
+	test("keeps displayed extension entries inside unresolved tool turns during replay", () => {
+		const context = createContext();
+		const renderSessionItems = (InteractiveMode.prototype as unknown as { renderSessionItems: RenderSessionItems })
+			.renderSessionItems;
+		const toolMessage = createAssistantMessage(
+			[{ type: "toolCall", id: TOOL_CALL_ID, name: TOOL_NAME, arguments: { path: "README.md" } }],
+			"toolUse",
+		);
+
+		renderSessionItems.call(context, [toolMessage, createCustomEntry(), createToolResult()]);
+
+		const groupIndex = context.chatContainer.children.findIndex((child) => child instanceof ToolGroupComponent);
+		const entryIndex = context.chatContainer.children.findIndex((child) => child instanceof CustomEntryComponent);
+		const boundaryIndex = context.chatContainer.children.findIndex((child) => child instanceof DynamicBorder);
+		expect(groupIndex).toBeGreaterThanOrEqual(0);
+		expect(entryIndex).toBeGreaterThan(groupIndex);
+		expect(boundaryIndex).toBeGreaterThan(entryIndex);
+	});
+
 	test("groups cumulative live tool updates and sections model turns", async () => {
 		const context = createContext();
 		const handleEvent = (InteractiveMode.prototype as unknown as { handleEvent: HandleEvent }).handleEvent;
