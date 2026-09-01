@@ -204,8 +204,8 @@ export class SkillCuratorToolRegistry {
 						evidenceRefs: {
 							type: "array",
 							minItems: 1,
-							maxItems: this.#maxReferencesPerCall,
 							items: { type: "string", enum: this.evidence.references },
+							description: `Only the first ${String(this.#maxReferencesPerCall)} references are fetched per call.`,
 						},
 						contextBefore: { type: "integer", minimum: 0, maximum: MAX_TRACE_CONTEXT_ITEMS },
 						contextAfter: { type: "integer", minimum: 0, maximum: MAX_TRACE_CONTEXT_ITEMS },
@@ -224,8 +224,8 @@ export class SkillCuratorToolRegistry {
 						skillRefs: {
 							type: "array",
 							minItems: 1,
-							maxItems: this.#maxReferencesPerCall,
 							items: { type: "string", enum: this.skills.references },
+							description: `Only the first ${String(this.#maxReferencesPerCall)} references are fetched per call.`,
 						},
 					},
 					["skillRefs"],
@@ -262,7 +262,7 @@ export class SkillCuratorToolRegistry {
 	async #inspectSourceEvidence(input: JsonObject): Promise<JsonObject> {
 		return this.#execute("inspect_source_evidence", input, async () => {
 			this.#assertAllowedFields(input, ["evidenceRefs", "contextBefore", "contextAfter"]);
-			const selected = this.#references(input.evidenceRefs, "evidenceRefs", this.evidence);
+			const { selected, truncationNote } = this.#references(input.evidenceRefs, "evidenceRefs", this.evidence);
 			const contextBefore = this.#contextSize(input.contextBefore, "contextBefore");
 			const contextAfter = this.#contextSize(input.contextAfter, "contextAfter");
 			const contextBySource = new Map<string, SkillCuratorEvidenceBinding>();
@@ -296,6 +296,7 @@ export class SkillCuratorToolRegistry {
 						terminationStatus: binding.invocation.terminationStatus,
 						item: jsonObject(binding.evidence),
 					})),
+					...(truncationNote === null ? {} : { note: truncationNote }),
 				},
 				evidence: context,
 				skills: [],
@@ -317,7 +318,7 @@ export class SkillCuratorToolRegistry {
 	async #inspectSkills(input: JsonObject): Promise<JsonObject> {
 		return this.#execute("inspect_skills", input, async () => {
 			this.#assertAllowedFields(input, ["skillRefs"]);
-			const selected = this.#references(input.skillRefs, "skillRefs", this.skills);
+			const { selected, truncationNote } = this.#references(input.skillRefs, "skillRefs", this.skills);
 			const inspected = await Promise.all(
 				selected.map(async (entry) => {
 					const artifact = await this.#artifacts.get(entry.contentArtifact);
@@ -338,19 +339,30 @@ export class SkillCuratorToolRegistry {
 					};
 				}),
 			);
-			return { output: { skills: inspected }, evidence: [], skills: selected };
+			return {
+				output: {
+					skills: inspected,
+					...(truncationNote === null ? {} : { note: truncationNote }),
+				},
+				evidence: [],
+				skills: selected,
+			};
 		});
 	}
 
-	#references<T>(value: unknown, field: string, catalog: EvolutionModelReferenceCatalog<T>): readonly T[] {
-		const selected = referenceArray(value, field, catalog, { allowEmpty: false });
-		if (selected.length > this.#maxReferencesPerCall) {
-			throw new EvolutionToolDeniedError(
-				"invalid-request",
-				`${field} exceeds the ${String(this.#maxReferencesPerCall)}-reference limit`,
-			);
-		}
-		return selected;
+	#references<T>(
+		value: unknown,
+		field: string,
+		catalog: EvolutionModelReferenceCatalog<T>,
+	): { readonly selected: readonly T[]; readonly truncationNote: string | null } {
+		const requested = referenceArray(value, field, catalog, { allowEmpty: false });
+		return {
+			selected: requested.slice(0, this.#maxReferencesPerCall),
+			truncationNote:
+				requested.length <= this.#maxReferencesPerCall
+					? null
+					: `Only the first ${String(this.#maxReferencesPerCall)} of ${String(requested.length)} requested references were fetched. Fetch at most ${String(this.#maxReferencesPerCall)} per call to inspect the remainder.`,
+		};
 	}
 
 	#assertAllowedFields(input: JsonObject, fields: readonly string[]): void {

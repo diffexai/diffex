@@ -548,6 +548,45 @@ describe("StructuredSkillCurator", () => {
 		expect(ledger.map((event) => event.type)).toEqual(["skill-curator-tool-call", "skill-curator-tool-call"]);
 	});
 
+	it("truncates oversized inspection requests and tells the model how to fetch the remainder", async () => {
+		const storedSkill = skillArtifact();
+		const artifacts = new FixtureArtifactStore([storedSkill]);
+		const ledger: EvolutionLedgerEvent[] = [];
+		const curator = new StructuredSkillCurator(
+			{
+				version: "1",
+				artifacts,
+				ledger: { append: async (event) => void ledger.push(event), read: async () => ledger },
+			},
+			{ maxReferencesPerToolCall: 1 },
+		);
+		const input = fixtureInput(storedSkill.reference);
+		const result = await curator.curate(
+			curatorInput(async (request) => {
+				const evidenceTool = request.tools.find((tool) => tool.name === "inspect_source_evidence");
+				expect(JSON.stringify(evidenceTool?.inputSchema)).not.toContain('"maxItems"');
+				expect(await evidenceTool?.execute({ evidenceRefs: ["E1", "E2"] })).toMatchObject({
+					evidence: [{ evidenceRef: "E1" }],
+					note: "Only the first 1 of 2 requested references were fetched. Fetch at most 1 per call to inspect the remainder.",
+				});
+				return {
+					output: { decisions: [], proceduralInformationLosses: [] },
+					model: { provider: "faux", model: "fixture" },
+				};
+			}, input),
+		);
+
+		expect(result).toEqual({ candidates: [], deferredFindings: [], proceduralInformationLossFindings: [] });
+		expect(ledger).toMatchObject([
+			{
+				type: "skill-curator-tool-call",
+				requestedReferences: ["E1", "E2"],
+				resolvedEvidenceIds: ["support-1"],
+				denialCode: null,
+			},
+		]);
+	});
+
 	it("rejects a candidate whose canonical capsule exceeds the fixed ceiling", async () => {
 		const storedSkill = skillArtifact();
 		const artifacts = new FixtureArtifactStore([storedSkill]);
