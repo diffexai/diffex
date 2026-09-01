@@ -3641,6 +3641,7 @@ export class InteractiveMode {
 		if (!component.hasContent()) {
 			return;
 		}
+		this.flushTranscriptBoundary();
 
 		if (this.streamingComponent) {
 			const streamingIndex = this.chatContainer.children.indexOf(this.streamingComponent);

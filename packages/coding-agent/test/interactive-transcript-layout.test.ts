@@ -4,6 +4,7 @@ import { Container, getGlyphs, Text, type TUI } from "@earendil-works/diffex-tui
 import { beforeAll, describe, expect, test, vi } from "vitest";
 import type { AgentSessionEvent } from "../src/core/agent-session.ts";
 import type { SessionEntry } from "../src/core/session-manager.ts";
+import { CustomEntryComponent } from "../src/modes/interactive/components/custom-entry.ts";
 import { DynamicBorder } from "../src/modes/interactive/components/dynamic-border.ts";
 import { ToolExecutionComponent } from "../src/modes/interactive/components/tool-execution.ts";
 import { ToolGroupComponent } from "../src/modes/interactive/components/tool-group.ts";
@@ -44,7 +45,10 @@ type TestContext = {
 	outputPad: number;
 	toolOutputExpanded: boolean;
 	agentResponseStartMs: number | undefined;
-	session: { retryAttempt: number };
+	session: {
+		retryAttempt: number;
+		extensionRunner: { getEntryRenderer(customType: string): (() => Text) | undefined };
+	};
 	sessionManager: { getCwd(): string; getEntries(): SessionEntry[] };
 	clearStatusIndicator(): void;
 	getMarkdownThemeWithSettings(): ReturnType<typeof getMarkdownTheme>;
@@ -115,7 +119,13 @@ function createContext(): TestContext {
 		outputPad: 1,
 		toolOutputExpanded: false,
 		agentResponseStartMs: undefined,
-		session: { retryAttempt: 0 },
+		session: {
+			retryAttempt: 0,
+			extensionRunner: {
+				getEntryRenderer: (customType) =>
+					customType === "turn-note" ? () => new Text("next turn note", 0, 0) : undefined,
+			},
+		},
 		sessionManager: { getCwd: () => process.cwd(), getEntries: () => [] },
 		clearStatusIndicator: vi.fn(),
 		getMarkdownThemeWithSettings: () => getMarkdownTheme(),
@@ -147,6 +157,29 @@ describe("Interactive transcript layout", () => {
 		initTheme("dark");
 	});
 
+	test("flushes a pending turn boundary before a displayed extension entry", async () => {
+		const context = createContext();
+		const handleEvent = (InteractiveMode.prototype as unknown as { handleEvent: HandleEvent }).handleEvent;
+		context.chatContainer.addChild(new Text("previous response", 0, 0));
+		context.turnBoundaryPending = true;
+
+		await handleEvent.call(context, {
+			type: "entry_appended",
+			entry: {
+				type: "custom",
+				customType: "turn-note",
+				id: "entry-turn-note",
+				parentId: null,
+				timestamp: new Date().toISOString(),
+			},
+		});
+
+		const boundaryIndex = context.chatContainer.children.findIndex((child) => child instanceof DynamicBorder);
+		const entryIndex = context.chatContainer.children.findIndex((child) => child instanceof CustomEntryComponent);
+		expect(boundaryIndex).toBeGreaterThan(0);
+		expect(entryIndex).toBeGreaterThan(boundaryIndex);
+		expect(context.turnBoundaryPending).toBe(false);
+	});
 	test("groups cumulative live tool updates and sections model turns", async () => {
 		const context = createContext();
 		const handleEvent = (InteractiveMode.prototype as unknown as { handleEvent: HandleEvent }).handleEvent;
