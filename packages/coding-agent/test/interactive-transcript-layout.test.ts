@@ -1,8 +1,10 @@
 import type { AgentMessage } from "@earendil-works/diffex-agent-core";
 import type { AssistantMessage, ToolResultMessage, Usage } from "@earendil-works/diffex-ai";
 import { Container, getGlyphs, Text, type TUI } from "@earendil-works/diffex-tui";
+import { Type } from "typebox";
 import { beforeAll, describe, expect, test, vi } from "vitest";
 import type { AgentSessionEvent } from "../src/core/agent-session.ts";
+import type { ToolDefinition } from "../src/core/extensions/types.ts";
 import type { SessionEntry } from "../src/core/session-manager.ts";
 import type { AssistantMessageComponent } from "../src/modes/interactive/components/assistant-message.ts";
 import { CustomEntryComponent } from "../src/modes/interactive/components/custom-entry.ts";
@@ -56,7 +58,7 @@ type TestContext = {
 	clearStatusIndicator(): void;
 	getMarkdownThemeWithSettings(): ReturnType<typeof getMarkdownTheme>;
 	getMarkdownTransformers(): [];
-	getRegisteredToolDefinition(): undefined;
+	getRegisteredToolDefinition(toolName: string): ToolDefinition | undefined;
 	maybeShowCacheMissNotice(): void;
 	addMessageToChat(message: AgentMessage): void;
 	updateEditorBorderColor(): void;
@@ -278,6 +280,34 @@ describe("Interactive transcript layout", () => {
 		expect(context.activeToolGroup).toBe(toolGroup);
 		expect(context.pendingTools.get(TOOL_CALL_ID)).toBe(pendingTool);
 		expect(renderChat(context)).toContain(`Reasoning ${getGlyphs().bullet} hidden`);
+	});
+
+	test("shows failures from tools whose custom renderer hides every row", () => {
+		const context = createContext();
+		const renderSessionItems = (InteractiveMode.prototype as unknown as { renderSessionItems: RenderSessionItems })
+			.renderSessionItems;
+		const hiddenToolName = "hidden-error-tool";
+		const definition: ToolDefinition = {
+			name: hiddenToolName,
+			label: "Hidden error tool",
+			description: "Renders no transcript rows",
+			parameters: Type.Any(),
+			execute: async () => ({ content: [], details: {} }),
+			renderShell: "self",
+			renderCall: () => new Text("", 0, 0),
+		};
+		context.getRegisteredToolDefinition = (toolName) => (toolName === hiddenToolName ? definition : undefined);
+		const failedMessage = createAssistantMessage(
+			[{ type: "toolCall", id: "hidden-error-call", name: hiddenToolName, arguments: {} }],
+			"error",
+		);
+		failedMessage.errorMessage = "extension failed";
+
+		renderSessionItems.call(context, [failedMessage]);
+
+		const rendered = renderChat(context);
+		expect(rendered).toContain("Hidden error tool");
+		expect(rendered).toContain("failed");
 	});
 
 	test("groups cumulative live tool updates and sections model turns", async () => {

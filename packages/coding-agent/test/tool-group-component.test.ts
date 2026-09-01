@@ -94,6 +94,14 @@ describe("ToolGroupComponent", () => {
 		group.addTool("empty", tool);
 
 		expect(group.render(80)).toEqual([]);
+
+		tool.updateResult({
+			content: [{ type: "text", text: "extension failed" }],
+			isError: true,
+		});
+		const failed = stripAnsi(group.render(80).join("\n"));
+		expect(failed).toContain("Empty");
+		expect(failed).toContain("failed");
 	});
 
 	test("preserves reserved empty image rows", () => {

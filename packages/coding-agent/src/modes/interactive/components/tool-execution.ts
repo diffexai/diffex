@@ -237,7 +237,7 @@ export class ToolExecutionComponent extends Container {
 		if (this.hasRendererDefinition() && this.getRenderShell() === "self") {
 			const contentLines = this.selfRenderContainer.render(width);
 			if (contentLines.length === 0 && this.imageComponents.length === 0) {
-				return [];
+				return this.result?.isError && !this.isPartial ? this.stateText.render(width) : [];
 			}
 
 			const lines: string[] = this.stateText.render(width);
