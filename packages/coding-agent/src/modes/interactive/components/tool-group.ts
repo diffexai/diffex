@@ -17,11 +17,17 @@ export class ToolGroupComponent implements Component {
 	private readonly tools = new Map<string, ToolExecutionComponent>();
 	private outputPad: number;
 	private pathOrigin: DiffexPathOrigin;
+	private reusesLeadingGap: boolean;
 	private settled = false;
 
-	constructor(outputPad = 1, pathOrigin: DiffexPathOrigin = "standalone") {
+	constructor(
+		outputPad = 1,
+		pathOrigin: DiffexPathOrigin = "standalone",
+		options: { reuseLeadingGap?: boolean } = {},
+	) {
 		this.outputPad = outputPad;
 		this.pathOrigin = pathOrigin;
+		this.reusesLeadingGap = pathOrigin === "standalone" && options.reuseLeadingGap === true;
 	}
 
 	addTool(toolCallId: string, component: ToolExecutionComponent): ToolExecutionComponent {
@@ -57,8 +63,9 @@ export class ToolGroupComponent implements Component {
 		return this.pathOrigin;
 	}
 
-	setPathOrigin(pathOrigin: DiffexPathOrigin): void {
+	setPathOrigin(pathOrigin: DiffexPathOrigin, options: { reuseLeadingGap?: boolean } = {}): void {
 		this.pathOrigin = pathOrigin;
+		this.reusesLeadingGap = pathOrigin === "standalone" && options.reuseLeadingGap === true;
 	}
 
 	markSettled(): void {
@@ -124,7 +131,9 @@ export class ToolGroupComponent implements Component {
 			? new DiffexPathRail(outputPad).render(safeWidth)
 			: this.pathOrigin === "user-dock"
 				? new DiffexPathDockHinge(outputPad).render(safeWidth)
-				: [];
+				: this.reusesLeadingGap
+					? []
+					: [""];
 		result.push(
 			...new DiffexPathLabel(label, {
 				marker: this.pathOrigin === "standalone" ? "start" : "branch",

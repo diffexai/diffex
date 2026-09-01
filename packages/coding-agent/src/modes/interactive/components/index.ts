@@ -14,6 +14,7 @@ export {
 	DiffexPathHinge,
 	DiffexPathLabel,
 	DiffexPathRail,
+	DiffexPathSpacer,
 	DiffexPathTerminus,
 	formatDiffexPathPrefix,
 	shouldExtendDiffexPathHinge,

@@ -118,6 +118,10 @@ export class AssistantMessageComponent extends Container {
 		return this.pathContinuesToTools;
 	}
 
+	containsToolCalls(): boolean {
+		return this.hasToolCalls;
+	}
+
 	hasVisibleOutput(): boolean {
 		return this.visibleOutput;
 	}

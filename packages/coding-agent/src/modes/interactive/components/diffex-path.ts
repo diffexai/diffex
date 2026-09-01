@@ -1,4 +1,4 @@
-import { type Component, getGlyphs, truncateToWidth, visibleWidth } from "@earendil-works/diffex-tui";
+import { type Component, getGlyphs, Spacer, truncateToWidth, visibleWidth } from "@earendil-works/diffex-tui";
 import { STANDARD_VIEWPORT_MIN_COLUMNS } from "../responsive-layout.ts";
 import { theme } from "../theme/theme.ts";
 
@@ -108,6 +108,13 @@ export class DiffexPathRail implements Component {
 		const padding = Math.min(Math.max(0, this.padding), Math.max(0, safeWidth - 1));
 		const line = `${" ".repeat(padding)}${this.color(this.resolveGlyph())}`;
 		return [visibleWidth(line) > safeWidth ? truncateToWidth(line, safeWidth, "") : line];
+	}
+}
+
+/** A blank row owned by an adjacent response path transition. */
+export class DiffexPathSpacer extends Spacer {
+	constructor() {
+		super(1);
 	}
 }
 

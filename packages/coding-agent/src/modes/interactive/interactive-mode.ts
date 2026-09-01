@@ -130,7 +130,7 @@ import { CustomEditor } from "./components/custom-editor.ts";
 import { CustomEntryComponent } from "./components/custom-entry.ts";
 import { CustomMessageComponent } from "./components/custom-message.ts";
 import { DaxnutsComponent } from "./components/daxnuts.ts";
-import { DiffexPathDockHinge, type DiffexPathOrigin } from "./components/diffex-path.ts";
+import { DiffexPathDockHinge, type DiffexPathOrigin, DiffexPathSpacer } from "./components/diffex-path.ts";
 import {
 	DiffexWelcomeHeader,
 	diffexIntroAccent,
@@ -2095,10 +2095,16 @@ export class InteractiveMode {
 		if (!this.activeToolGroup) {
 			const dockedToUser = !continuesPath && this.consumePendingUserDock(undefined, { insertHinge: false });
 			const pathOrigin: DiffexPathOrigin = continuesPath ? "continued" : dockedToUser ? "user-dock" : "standalone";
-			this.activeToolGroup = new ToolGroupComponent(this.outputPad, pathOrigin);
-			if (pathOrigin === "standalone") {
-				this.addChatSpacer();
-			}
+			const lastChild = this.chatContainer.children.at(-1);
+			const reusesLeadingGap =
+				pathOrigin === "standalone" &&
+				(lastChild instanceof Spacer ||
+					(lastChild instanceof AssistantMessageComponent &&
+						!lastChild.hasVisibleOutput() &&
+						this.chatContainer.children.at(-2) instanceof Spacer));
+			this.activeToolGroup = new ToolGroupComponent(this.outputPad, pathOrigin, {
+				reuseLeadingGap: reusesLeadingGap,
+			});
 			this.chatContainer.addChild(this.activeToolGroup);
 		}
 		return this.activeToolGroup;
@@ -2167,22 +2173,27 @@ export class InteractiveMode {
 					this.chatContainer.children.splice(componentIndex - 1, 1);
 					this.activeToolGroup.setPathOrigin("user-dock");
 				} else {
-					this.activeToolGroup.setPathOrigin("standalone");
+					this.activeToolGroup.setPathOrigin("standalone", {
+						reuseLeadingGap: precedingComponent instanceof Spacer,
+					});
 				}
 			}
 		}
 
 		if (this.activeToolGroup?.hasTools() === false) {
-			const groupIndex = this.chatContainer.children.indexOf(this.activeToolGroup);
 			if (
-				this.activeToolGroup.getPathOrigin() === "standalone" &&
-				groupIndex > 0 &&
-				this.chatContainer.children[groupIndex - 1] instanceof Spacer
+				this.activeToolGroup.getPathOrigin() === "user-dock" &&
+				this.streamingComponent &&
+				!this.streamingComponent.hasVisibleOutput()
 			) {
-				this.chatContainer.children.splice(groupIndex - 1, 2);
-			} else {
-				this.chatContainer.removeChild(this.activeToolGroup);
+				const componentIndex = this.chatContainer.children.indexOf(this.streamingComponent);
+				const userComponent = this.chatContainer.children[componentIndex - 1];
+				if (userComponent instanceof UserMessageComponent) {
+					userComponent.setDocked(false);
+					this.pendingUserDock = userComponent;
+				}
 			}
+			this.chatContainer.removeChild(this.activeToolGroup);
 			this.activeToolGroup = undefined;
 		}
 	}
@@ -2254,8 +2265,29 @@ export class InteractiveMode {
 		return true;
 	}
 
-	private ensureVisibleAssistantTransition(component: AssistantMessageComponent): void {
+	private ensureAssistantTransition(component: AssistantMessageComponent): void {
 		if (!component.hasVisibleOutput()) {
+			const componentIndex = this.chatContainer.children.indexOf(component);
+			const precedingComponent = this.chatContainer.children[componentIndex - 1];
+			if (precedingComponent instanceof DiffexPathDockHinge) {
+				const userComponent = this.chatContainer.children[componentIndex - 2];
+				this.chatContainer.children.splice(componentIndex - 1, 1);
+				if (userComponent instanceof UserMessageComponent) {
+					const activeGroupFollows =
+						this.activeToolGroup !== undefined &&
+						this.chatContainer.children.indexOf(this.activeToolGroup) ===
+							this.chatContainer.children.indexOf(component) + 1;
+					if (component.containsToolCalls() && activeGroupFollows) {
+						this.activeToolGroup?.setPathOrigin("user-dock");
+					} else {
+						userComponent.setDocked(false);
+						this.pendingUserDock = component.containsToolCalls() ? userComponent : undefined;
+					}
+				}
+			} else if (precedingComponent instanceof DiffexPathSpacer) {
+				this.chatContainer.children.splice(componentIndex - 1, 1);
+			}
+			component.setPathOrigin("standalone");
 			return;
 		}
 		if (this.activeToolGroup && this.activeToolGroup.getPathOrigin() !== "continued") {
@@ -2282,7 +2314,10 @@ export class InteractiveMode {
 		}
 		const componentIndex = this.chatContainer.children.indexOf(component);
 		if (componentIndex === -1) {
-			this.addChatSpacer();
+			const lastChild = this.chatContainer.children.at(-1);
+			if (lastChild && !(lastChild instanceof Spacer)) {
+				this.chatContainer.addChild(new DiffexPathSpacer());
+			}
 			return;
 		}
 		if (componentIndex === 0) {
@@ -2292,7 +2327,7 @@ export class InteractiveMode {
 		if (previousComponent instanceof Spacer || previousComponent instanceof DiffexPathDockHinge) {
 			return;
 		}
-		this.chatContainer.children.splice(componentIndex, 0, new Spacer(1));
+		this.chatContainer.children.splice(componentIndex, 0, new DiffexPathSpacer());
 	}
 
 	private flushTranscriptBoundary(): void {
@@ -3512,7 +3547,7 @@ export class InteractiveMode {
 					this.streamingMessage = event.message;
 					this.chatContainer.addChild(this.streamingComponent);
 					this.streamingComponent.updateContent(this.streamingMessage, true);
-					this.ensureVisibleAssistantTransition(this.streamingComponent);
+					this.ensureAssistantTransition(this.streamingComponent);
 					this.reconcileLiveToolsFromAssistantMessage(this.streamingMessage);
 					this.ui.requestRender();
 				}
@@ -3522,7 +3557,7 @@ export class InteractiveMode {
 				if (this.streamingComponent && event.message.role === "assistant") {
 					this.streamingMessage = event.message;
 					this.streamingComponent.updateContent(this.streamingMessage, true);
-					this.ensureVisibleAssistantTransition(this.streamingComponent);
+					this.ensureAssistantTransition(this.streamingComponent);
 
 					this.reconcileLiveToolsFromAssistantMessage(this.streamingMessage);
 					this.ui.requestRender();
@@ -3543,7 +3578,7 @@ export class InteractiveMode {
 						this.streamingMessage.errorMessage = errorMessage;
 					}
 					this.streamingComponent.updateContent(this.streamingMessage, false);
-					this.ensureVisibleAssistantTransition(this.streamingComponent);
+					this.ensureAssistantTransition(this.streamingComponent);
 					this.reconcileLiveToolsFromAssistantMessage(this.streamingMessage);
 
 					if (this.streamingMessage.stopReason === "aborted" || this.streamingMessage.stopReason === "error") {
@@ -3819,9 +3854,53 @@ export class InteractiveMode {
 		this.pendingUserDock = undefined;
 
 		if (this.streamingComponent) {
-			const streamingIndex = this.chatContainer.children.indexOf(this.streamingComponent);
+			const children = this.chatContainer.children;
+			let streamingIndex = children.indexOf(this.streamingComponent);
 			if (streamingIndex >= 0) {
-				this.chatContainer.children.splice(streamingIndex, 0, component);
+				const precedingComponent = children[streamingIndex - 1];
+				if (precedingComponent instanceof DiffexPathDockHinge) {
+					const userComponent = children[streamingIndex - 2];
+					if (userComponent instanceof UserMessageComponent) {
+						userComponent.setDocked(false);
+					}
+					children.splice(streamingIndex - 1, 1);
+					streamingIndex -= 1;
+				} else if (precedingComponent instanceof UserMessageComponent) {
+					precedingComponent.setDocked(false);
+				}
+
+				this.streamingComponent.setPathOrigin("standalone");
+				if (this.activeToolGroup) {
+					const groupIndex = children.indexOf(this.activeToolGroup);
+					const transitionComponent = children[streamingIndex + 1];
+					const groupFollowsComponent = groupIndex === streamingIndex + 1;
+					const groupFollowsSpacer = transitionComponent instanceof Spacer && groupIndex === streamingIndex + 2;
+					if (groupFollowsComponent || groupFollowsSpacer) {
+						if (this.streamingComponent.hasVisibleOutput()) {
+							this.activeToolGroup.setPathOrigin("continued");
+							if (groupFollowsSpacer) {
+								children.splice(streamingIndex + 1, 1);
+							}
+						} else {
+							this.activeToolGroup.setPathOrigin("standalone");
+							if (groupFollowsSpacer) {
+								children.splice(streamingIndex + 1, 1);
+							}
+						}
+					}
+				}
+
+				if (
+					children[streamingIndex - 1] instanceof DiffexPathSpacer &&
+					children[streamingIndex - 2] instanceof CustomEntryComponent
+				) {
+					children.splice(streamingIndex - 1, 1);
+					streamingIndex -= 1;
+				}
+				children.splice(streamingIndex, 0, component);
+				if (this.streamingComponent.hasVisibleOutput()) {
+					this.ensureAssistantTransition(this.streamingComponent);
+				}
 				return;
 			}
 		}
@@ -3928,7 +4007,7 @@ export class InteractiveMode {
 					this.outputPad,
 					this.getMarkdownTransformers(),
 				);
-				this.ensureVisibleAssistantTransition(assistantComponent);
+				this.ensureAssistantTransition(assistantComponent);
 				this.chatContainer.addChild(assistantComponent);
 				break;
 			}

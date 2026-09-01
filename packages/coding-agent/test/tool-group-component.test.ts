@@ -59,6 +59,17 @@ describe("ToolGroupComponent", () => {
 		group.addTool("single", createTool("single", "Single"));
 		const lines = group.render(80).map((line) => stripAnsi(line).trimEnd());
 
+		expect(lines[0]).toBe("");
+		expect(lines[1]).toBe(` ${glyphs.start} Exploring`);
+		expect(lines[2]?.startsWith(` ${glyphs.rail} ${glyphs.end}`)).toBe(true);
+	});
+
+	test("reuses an existing gap before a standalone tool group", () => {
+		const glyphs = getGlyphs();
+		const group = new ToolGroupComponent(1, "standalone", { reuseLeadingGap: true });
+		group.addTool("single", createTool("single", "Single"));
+		const lines = group.render(80).map((line) => stripAnsi(line).trimEnd());
+
 		expect(lines[0]).toBe(` ${glyphs.start} Exploring`);
 		expect(lines[1]?.startsWith(` ${glyphs.rail} ${glyphs.end}`)).toBe(true);
 	});
@@ -141,7 +152,7 @@ describe("ToolGroupComponent", () => {
 			renderCall: () => new Text("", 0, 0),
 		};
 		const tool = new ToolExecutionComponent("empty", "empty", {}, {}, definition, createFakeTui(), process.cwd());
-		const group = new ToolGroupComponent();
+		const group = new ToolGroupComponent(1, "standalone", { reuseLeadingGap: true });
 		group.addTool("empty", tool);
 
 		expect(group.render(80)).toEqual([]);
@@ -224,8 +235,8 @@ describe("ToolGroupComponent", () => {
 
 		const lines = group.render(80);
 
-		expect(lines).toHaveLength(4);
-		expect(lines[1]).toContain("\x1b_G");
-		expect(lines.slice(2)).toEqual(["", ""]);
+		expect(lines).toHaveLength(5);
+		expect(lines[2]).toContain("\x1b_G");
+		expect(lines.slice(3)).toEqual(["", ""]);
 	});
 });
