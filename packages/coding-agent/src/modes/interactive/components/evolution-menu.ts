@@ -2,6 +2,7 @@ import {
 	Container,
 	type Focusable,
 	getKeybindings,
+	markActiveRow,
 	SELECTED_LIST_PREFIX,
 	Spacer,
 	Text,
@@ -897,7 +898,7 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 		this.#selectedIndex = Math.max(0, Math.min(this.#selectedIndex, Math.max(0, entries.length - 1)));
 		entries.forEach((entry, index) => {
 			const selected = index === this.#selectedIndex;
-			const prefix = selected ? SELECTED_LIST_PREFIX : UNSELECTED_LIST_PREFIX;
+			const prefix = selected ? markActiveRow(SELECTED_LIST_PREFIX) : UNSELECTED_LIST_PREFIX;
 			const status = entry.status === undefined ? "" : ` [${entry.status}]`;
 			const disabled =
 				entry.enabled || entry.status !== undefined ? "" : ` [${entry.disabledStatus ?? "unavailable"}]`;

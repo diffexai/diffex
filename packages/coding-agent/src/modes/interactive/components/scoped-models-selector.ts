@@ -6,6 +6,7 @@ import {
 	getKeybindings,
 	Input,
 	Key,
+	markActiveRow,
 	matchesKey,
 	SELECTED_LIST_PREFIX,
 	Spacer,
@@ -243,7 +244,9 @@ export class ScopedModelsSelectorComponent extends Container implements Focusabl
 		for (let i = startIndex; i < endIndex; i++) {
 			const item = this.filteredItems[i]!;
 			const isSelected = i === this.selectedIndex;
-			const prefix = isSelected ? theme.fg("selectionAccent", SELECTED_LIST_PREFIX) : UNSELECTED_LIST_PREFIX;
+			const prefix = isSelected
+				? markActiveRow(theme.fg("selectionAccent", SELECTED_LIST_PREFIX))
+				: UNSELECTED_LIST_PREFIX;
 			const id = item.model?.id ?? item.fullId;
 			const modelText = isSelected ? theme.fg("selectionAccent", id) : id;
 			const providerBadge = theme.fg("muted", item.model ? ` [${item.model.provider}]` : " [unavailable]");

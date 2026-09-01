@@ -2,6 +2,7 @@ import {
 	type Component,
 	Container,
 	getKeybindings,
+	markActiveRow,
 	SELECTED_LIST_PREFIX,
 	Spacer,
 	Text,
@@ -64,7 +65,9 @@ class UserMessageList implements Component {
 			const normalizedMessage = message.text.replace(/\n/g, " ").trim();
 
 			// First line: cursor + message
-			const cursor = isSelected ? theme.fg("selectionAccent", SELECTED_LIST_PREFIX) : UNSELECTED_LIST_PREFIX;
+			const cursor = isSelected
+				? markActiveRow(theme.fg("selectionAccent", SELECTED_LIST_PREFIX))
+				: UNSELECTED_LIST_PREFIX;
 			const metadata = isSelected ? `${i + 1}/${this.messages.length}` : "";
 			const metadataWidth = metadata ? visibleWidth(metadata) + 2 : 0;
 			const maxMsgWidth = Math.max(1, width - 2 - metadataWidth);

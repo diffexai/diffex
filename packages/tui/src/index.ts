@@ -79,6 +79,12 @@ export {
 } from "./keys.ts";
 // LaTeX rendering
 export { type RenderLatexOptions, renderLatex } from "./latex.ts";
+export {
+	cropFocusedLines,
+	type FocusedLineWindow,
+	getFocusedLineWindow,
+	renderLayoutFrame,
+} from "./layout.ts";
 // Input buffering for batch splitting
 export { StdinBuffer, type StdinBufferEventMap, type StdinBufferOptions } from "./stdin-buffer.ts";
 // Terminal interface and implementations
@@ -119,6 +125,7 @@ export {
 	type TerminalCapabilities,
 } from "./terminal-image.ts";
 export {
+	ACTIVE_ROW_MARKER,
 	type Component,
 	Container,
 	CURSOR_MARKER,
@@ -126,6 +133,7 @@ export {
 	type Focusable,
 	isFocusable,
 	isViewportTUI,
+	markActiveRow,
 	type OverlayAnchor,
 	type OverlayHandle,
 	type OverlayMargin,

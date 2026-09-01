@@ -8,6 +8,7 @@ import {
 	type Focusable,
 	getKeybindings,
 	Input,
+	markActiveRow,
 	SELECTED_LIST_PREFIX,
 	Spacer,
 	Text,
@@ -476,7 +477,9 @@ class SessionList implements Component, Focusable {
 			}
 
 			// Cursor
-			const cursor = isSelected ? theme.fg("selectionAccent", SELECTED_LIST_PREFIX) : UNSELECTED_LIST_PREFIX;
+			const cursor = isSelected
+				? markActiveRow(theme.fg("selectionAccent", SELECTED_LIST_PREFIX))
+				: UNSELECTED_LIST_PREFIX;
 
 			// Calculate available width for message
 			const prefixWidth = visibleWidth(prefix);

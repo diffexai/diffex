@@ -6,6 +6,7 @@
 import {
 	Container,
 	getKeybindings,
+	markActiveRow,
 	SELECTED_LIST_PREFIX,
 	Spacer,
 	Text,
@@ -137,7 +138,8 @@ export class ExtensionSelectorComponent extends Container {
 	private getOptionText(index: number): string {
 		const isSelected = index === this.selectedIndex;
 		return isSelected
-			? theme.fg("selectionAccent", SELECTED_LIST_PREFIX) + theme.fg("selectionAccent", this.options[index] ?? "")
+			? markActiveRow(theme.fg("selectionAccent", SELECTED_LIST_PREFIX)) +
+					theme.fg("selectionAccent", this.options[index] ?? "")
 			: `${UNSELECTED_LIST_PREFIX}${theme.fg("text", this.options[index] ?? "")}`;
 	}
 

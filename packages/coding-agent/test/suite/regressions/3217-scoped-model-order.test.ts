@@ -1,10 +1,9 @@
-import { SELECTED_LIST_PREFIX, setKeybindings, type TUI } from "@earendil-works/diffex-tui";
+import { SELECTED_LIST_PREFIX, setKeybindings, stripTerminalSequences, type TUI } from "@earendil-works/diffex-tui";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { KeybindingsManager } from "../../../src/core/keybindings.ts";
 import { ModelSelectorComponent } from "../../../src/modes/interactive/components/model-selector.ts";
 import { ScopedModelsSelectorComponent } from "../../../src/modes/interactive/components/scoped-models-selector.ts";
 import { initTheme } from "../../../src/modes/interactive/theme/theme.ts";
-import { stripAnsi } from "../../../src/utils/ansi.ts";
 import { createHarness, type Harness } from "../harness.ts";
 
 function createFakeTui(): TUI {
@@ -86,12 +85,12 @@ describe("issue #3217 scoped model ordering", () => {
 		);
 
 		await vi.waitFor(() => {
-			const rendered = stripAnsi(selector.render(120).join("\n"));
+			const rendered = stripTerminalSequences(selector.render(120).join("\n"));
 			expect(rendered).toContain(`[${modelOne.provider}]`);
 			expect(rendered).toContain("Model catalogs refreshed.");
 		});
 
-		const renderedLines = stripAnsi(selector.render(120).join("\n"))
+		const renderedLines = stripTerminalSequences(selector.render(120).join("\n"))
 			.split("\n")
 			.filter((line) => line.includes(`[${modelOne.provider}]`));
 		const orderedIds = renderedLines.slice(0, 3).map((line) => {

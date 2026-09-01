@@ -5,6 +5,7 @@ import {
 	getKeybindings,
 	Input,
 	type Keybinding,
+	markActiveRow,
 	SELECTED_LIST_PREFIX,
 	Spacer,
 	sliceByColumn,
@@ -688,7 +689,9 @@ class TreeList implements Component {
 			const isSelected = i === this.selectedIndex;
 
 			// Build line: cursor + prefix + path marker + label + content
-			const cursor = isSelected ? theme.fg("selectionAccent", SELECTED_LIST_PREFIX) : UNSELECTED_LIST_PREFIX;
+			const cursor = isSelected
+				? markActiveRow(theme.fg("selectionAccent", SELECTED_LIST_PREFIX))
+				: UNSELECTED_LIST_PREFIX;
 
 			// If multiple roots, shift display (roots at 0, not 1)
 			const displayIndent = this.multipleRoots ? Math.max(0, flatNode.indent - 1) : flatNode.indent;

@@ -4,6 +4,7 @@ import {
 	fuzzyFilter,
 	getKeybindings,
 	Input,
+	markActiveRow,
 	SELECTED_LIST_PREFIX,
 	Spacer,
 	TruncatedText,
@@ -122,7 +123,7 @@ export class SkillSelectorComponent extends Container implements Focusable {
 		for (let index = 0; index < this.groups.length; index += 1) {
 			const group = this.groups[index]!;
 			const focused = index === this.selectedGroupIndex;
-			const prefix = focused ? SELECTED_LIST_PREFIX : UNSELECTED_LIST_PREFIX;
+			const prefix = focused ? markActiveRow(SELECTED_LIST_PREFIX) : UNSELECTED_LIST_PREFIX;
 			const label = focused ? theme.fg("selectionAccent", GROUP_LABELS[group]) : GROUP_LABELS[group];
 			const references = this.allReferences.filter((reference) => reference.group === group);
 			const selectedCount = references.filter((reference) => this.selectedKeys.has(referenceKey(reference))).length;
@@ -194,7 +195,7 @@ export class SkillSelectorComponent extends Container implements Focusable {
 			const reference = this.filteredReferences[index];
 			if (!reference) continue;
 			const focused = index === this.selectedIndex;
-			const prefix = focused ? SELECTED_LIST_PREFIX : UNSELECTED_LIST_PREFIX;
+			const prefix = focused ? markActiveRow(SELECTED_LIST_PREFIX) : UNSELECTED_LIST_PREFIX;
 			const selected = this.selectedKeys.has(referenceKey(reference));
 			const selection = selected ? theme.fg("success", " ✓") : "";
 			const name = focused ? theme.fg("selectionAccent", reference.name) : reference.name;

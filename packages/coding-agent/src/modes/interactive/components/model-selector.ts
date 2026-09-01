@@ -5,6 +5,7 @@ import {
 	fuzzyFilter,
 	getKeybindings,
 	Input,
+	markActiveRow,
 	SELECTED_LIST_PREFIX,
 	Spacer,
 	Text,
@@ -268,7 +269,7 @@ export class ModelSelectorComponent extends Container implements Focusable {
 
 			let line = "";
 			if (isSelected) {
-				const prefix = theme.fg("selectionAccent", SELECTED_LIST_PREFIX);
+				const prefix = markActiveRow(theme.fg("selectionAccent", SELECTED_LIST_PREFIX));
 				const modelText = `${item.id}`;
 				const providerBadge = theme.fg("muted", `[${item.provider}]`);
 				const checkmark = isCurrent ? theme.fg("success", " ✓") : "";

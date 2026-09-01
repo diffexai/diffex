@@ -1,6 +1,6 @@
 import { fuzzyFilter } from "../fuzzy.ts";
 import { getKeybindings } from "../keybindings.ts";
-import type { Component } from "../tui.ts";
+import { type Component, type Focusable, isFocusable, markActiveRow } from "../tui.ts";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../utils.ts";
 import { Input } from "./input.ts";
 import { UNSELECTED_LIST_PREFIX } from "./select-list.ts";
@@ -32,7 +32,7 @@ export interface SettingsListOptions {
 	enableSearch?: boolean;
 }
 
-export class SettingsList implements Component {
+export class SettingsList implements Component, Focusable {
 	private items: SettingItem[];
 	private filteredItems: SettingItem[];
 	private theme: SettingsListTheme;
@@ -43,6 +43,7 @@ export class SettingsList implements Component {
 	private searchInput?: Input;
 	private searchEnabled: boolean;
 	private compactMode: boolean | undefined;
+	private _focused = false;
 
 	// Submenu state
 	private submenuComponent: Component | null = null;
@@ -66,6 +67,15 @@ export class SettingsList implements Component {
 		if (this.searchEnabled) {
 			this.searchInput = new Input();
 		}
+	}
+
+	get focused(): boolean {
+		return this._focused;
+	}
+
+	set focused(value: boolean) {
+		this._focused = value;
+		this.syncFocusedChild();
 	}
 
 	/** Update an item's currentValue */
@@ -141,7 +151,7 @@ export class SettingsList implements Component {
 			if (!item) continue;
 
 			const isSelected = i === this.selectedIndex;
-			const prefix = isSelected ? this.theme.cursor : UNSELECTED_LIST_PREFIX;
+			const prefix = isSelected ? markActiveRow(this.theme.cursor) : UNSELECTED_LIST_PREFIX;
 			const prefixWidth = visibleWidth(prefix);
 
 			// Pad label to align values
@@ -225,6 +235,7 @@ export class SettingsList implements Component {
 				}
 				this.closeSubmenu();
 			});
+			this.syncFocusedChild();
 		} else if (item.values && item.values.length > 0) {
 			// Cycle through values
 			const currentIndex = item.values.indexOf(item.currentValue);
@@ -236,11 +247,24 @@ export class SettingsList implements Component {
 	}
 
 	private closeSubmenu(): void {
+		if (isFocusable(this.submenuComponent)) {
+			this.submenuComponent.focused = false;
+		}
 		this.submenuComponent = null;
 		// Restore selection to the item that opened the submenu
 		if (this.submenuItemIndex !== null) {
 			this.selectedIndex = this.submenuItemIndex;
 			this.submenuItemIndex = null;
+		}
+		this.syncFocusedChild();
+	}
+
+	private syncFocusedChild(): void {
+		if (this.searchInput) {
+			this.searchInput.focused = this._focused && this.submenuComponent === null;
+		}
+		if (isFocusable(this.submenuComponent)) {
+			this.submenuComponent.focused = this._focused;
 		}
 	}
 

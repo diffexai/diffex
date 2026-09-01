@@ -1,4 +1,4 @@
-import { getGlyphs, setKeybindings, Text } from "@earendil-works/diffex-tui";
+import { CURSOR_MARKER, getGlyphs, setKeybindings, Text } from "@earendil-works/diffex-tui";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { KeybindingsManager } from "../src/core/keybindings.ts";
 import { SettingsManager } from "../src/core/settings-manager.ts";
@@ -111,9 +111,11 @@ describe("SettingsSelectorComponent", () => {
 				),
 		} as unknown as SettingsCallbacks);
 		const settingsList = selector.getSettingsList();
+		selector.focused = true;
 
 		for (const character of "Installed skills") settingsList.handleInput(character);
 		settingsList.handleInput("\r");
+		expect(selector.render(80).join("\n")).toContain(CURSOR_MARKER);
 		for (const character of "review") settingsList.handleInput(character);
 
 		const filtered = stripAnsi(selector.render(80).join("\n"));
@@ -121,6 +123,7 @@ describe("SettingsSelectorComponent", () => {
 		expect(filtered).not.toContain("deploy");
 
 		settingsList.handleInput("\u001b");
+		expect(selector.render(80).join("\n")).toContain(CURSOR_MARKER);
 		const restored = stripAnsi(selector.render(80).join("\n"));
 		expect(restored).toContain("Installed skills");
 		expect(restored).not.toContain("Global Resources");
@@ -193,6 +196,18 @@ describe("SettingsSelectorComponent", () => {
 		expect(lines.join("\n")).toContain(`${getGlyphs().selected} Auto-compact`);
 		expect(lines.at(-1)).toContain("Type to search · Enter/Space to change · Esc to cancel");
 		expect(lines.some((line) => /^─+$/.test(line))).toBe(false);
+	});
+
+	it("propagates focus to the settings search field", () => {
+		const selector = new SettingsSelectorComponent(settingsConfig(), {} as SettingsCallbacks);
+
+		selector.focused = true;
+		expect(selector.getSettingsList().focused).toBe(true);
+		expect(selector.render(80).join("\n")).toContain(CURSOR_MARKER);
+
+		selector.focused = false;
+		expect(selector.getSettingsList().focused).toBe(false);
+		expect(selector.render(80).join("\n")).not.toContain(CURSOR_MARKER);
 	});
 
 	it("keeps the hierarchy readable at narrow widths", () => {

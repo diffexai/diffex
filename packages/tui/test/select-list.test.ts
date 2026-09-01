@@ -2,6 +2,7 @@ import assert from "node:assert";
 import { describe, it } from "node:test";
 import { SelectList } from "../src/components/select-list.ts";
 import { getGlyphs } from "../src/glyphs.ts";
+import { ACTIVE_ROW_MARKER } from "../src/tui.ts";
 import { visibleWidth } from "../src/utils.ts";
 
 const testTheme = {
@@ -64,8 +65,8 @@ describe("SelectList", () => {
 		});
 		const rendered = list.render(80);
 
-		assert.equal(rendered[0].indexOf("first"), 14);
-		assert.equal(rendered[1].indexOf("second"), 14);
+		assert.equal(visibleIndexOf(rendered[0], "first"), 14);
+		assert.equal(visibleIndexOf(rendered[1], "second"), 14);
 	});
 
 	it("uses the configured maximum primary column width", () => {
@@ -136,6 +137,7 @@ describe("SelectList", () => {
 		});
 		const rendered = list.render(80);
 
-		assert.equal(rendered[0], `[${getGlyphs().selected} ]{command}`);
+		assert.equal(rendered[0], `[${ACTIVE_ROW_MARKER}${getGlyphs().selected} ]{command}`);
+		assert.equal(visibleWidth(rendered[0]), visibleWidth(`[${getGlyphs().selected} ]{command}`));
 	});
 });

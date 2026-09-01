@@ -10,6 +10,7 @@ import {
 	type Focusable,
 	getKeybindings,
 	Input,
+	markActiveRow,
 	matchesKey,
 	SELECTED_LIST_PREFIX,
 	Spacer,
@@ -428,7 +429,9 @@ class ResourceList implements Component, Focusable {
 			} else {
 				// Resource item (cursor only on items)
 				const item = entry.item;
-				const cursor = isSelected ? theme.fg("selectionAccent", SELECTED_LIST_PREFIX) : UNSELECTED_LIST_PREFIX;
+				const cursor = isSelected
+					? markActiveRow(theme.fg("selectionAccent", SELECTED_LIST_PREFIX))
+					: UNSELECTED_LIST_PREFIX;
 				const dimmed = this.isDimmedItem(item);
 				const nameText = isSelected && !dimmed ? theme.bold(item.displayName) : item.displayName;
 				const name = dimmed

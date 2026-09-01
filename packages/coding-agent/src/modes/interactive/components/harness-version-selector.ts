@@ -4,6 +4,7 @@ import {
 	fuzzyFilter,
 	getKeybindings,
 	Input,
+	markActiveRow,
 	SELECTED_LIST_PREFIX,
 	Spacer,
 	TruncatedText,
@@ -219,7 +220,7 @@ export class HarnessVersionSelectorComponent extends Container implements Focusa
 			const item = this.filteredItems[index];
 			if (!item) continue;
 			const selected = index === this.selectedIndex;
-			const prefix = selected ? SELECTED_LIST_PREFIX : UNSELECTED_LIST_PREFIX;
+			const prefix = selected ? markActiveRow(SELECTED_LIST_PREFIX) : UNSELECTED_LIST_PREFIX;
 			const label = formatHarnessVersionLabel(item.display, this.currentVersion);
 			const unavailable = item.diagnostic ? ` - unavailable: ${sanitizeTerminalText(item.diagnostic)}` : "";
 			const line = `${prefix}${label}${unavailable}`;

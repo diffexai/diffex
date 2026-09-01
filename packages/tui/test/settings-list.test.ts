@@ -1,7 +1,8 @@
 import assert from "node:assert";
 import { describe, it } from "node:test";
 import { SettingsList, type SettingsListTheme } from "../src/components/settings-list.ts";
-import { visibleWidth } from "../src/utils.ts";
+import { ACTIVE_ROW_MARKER, type Component, CURSOR_MARKER, type Focusable } from "../src/tui.ts";
+import { stripTerminalSequences, visibleWidth } from "../src/utils.ts";
 
 const testTheme: SettingsListTheme = {
 	label: (text) => text,
@@ -19,6 +20,16 @@ const items = [
 		values: ["regular", "fullscreen"],
 	},
 ];
+
+class FocusableSubmenu implements Component, Focusable {
+	focused = false;
+
+	render(_width: number): string[] {
+		return [`${this.focused ? CURSOR_MARKER : ""}submenu`];
+	}
+
+	invalidate(): void {}
+}
 
 describe("SettingsList", () => {
 	it("includes spaces in an active search instead of changing the selected setting", () => {
@@ -75,7 +86,8 @@ describe("SettingsList", () => {
 
 		assert.ok(rendered.every((line) => line !== ""));
 		assert.ok(rendered.every((line) => visibleWidth(line) <= 32));
-		assert.match(rendered[0]!, /^> TUI mode/);
+		assert.ok(rendered[0]!.includes(ACTIVE_ROW_MARKER));
+		assert.match(stripTerminalSequences(rendered[0]!), /^> TUI mode/);
 		assert.match(rendered.at(-1)!, /Enter\/Space change/);
 	});
 
@@ -103,5 +115,50 @@ describe("SettingsList", () => {
 		assert.ok(rendered.every((line) => line !== ""));
 		assert.match(rendered[4]!, /\(1\/6\)/);
 		assert.match(rendered.at(-1)!, /Type to search.*Enter\/Space change.*Esc close/);
+	});
+
+	it("moves focus between its search input and a focusable submenu", () => {
+		let submenu: FocusableSubmenu | undefined;
+		let closeSubmenu: (() => void) | undefined;
+		const list = new SettingsList(
+			[
+				{
+					id: "nested",
+					label: "Nested",
+					currentValue: "configure",
+					submenu: (_currentValue, done) => {
+						submenu = new FocusableSubmenu();
+						closeSubmenu = done;
+						return submenu;
+					},
+				},
+			],
+			10,
+			testTheme,
+			() => {},
+			() => {},
+			{ enableSearch: true },
+		);
+
+		list.focused = true;
+		assert.ok(list.render(80)[0]?.includes(CURSOR_MARKER));
+
+		list.handleInput("\r");
+		assert.ok(submenu);
+		assert.strictEqual(submenu.focused, true);
+		assert.ok(list.render(80)[0]?.includes(CURSOR_MARKER));
+
+		list.focused = false;
+		assert.strictEqual(submenu.focused, false);
+		list.focused = true;
+		assert.strictEqual(submenu.focused, true);
+
+		assert.ok(closeSubmenu);
+		closeSubmenu();
+		assert.strictEqual(submenu.focused, false);
+		assert.ok(list.render(80)[0]?.includes(CURSOR_MARKER));
+
+		list.focused = false;
+		assert.ok(!list.render(80)[0]?.includes(CURSOR_MARKER));
 	});
 });

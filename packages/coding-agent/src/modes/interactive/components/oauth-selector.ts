@@ -5,6 +5,7 @@ import {
 	fuzzyFilter,
 	getKeybindings,
 	Input,
+	markActiveRow,
 	SELECTED_LIST_PREFIX,
 	Spacer,
 	TruncatedText,
@@ -129,7 +130,7 @@ export class OAuthSelectorComponent extends Container implements Focusable {
 				: "";
 			let line = "";
 			if (isSelected) {
-				const prefix = theme.fg("selectionAccent", SELECTED_LIST_PREFIX);
+				const prefix = markActiveRow(theme.fg("selectionAccent", SELECTED_LIST_PREFIX));
 				const text = theme.fg("selectionAccent", provider.name);
 				line = prefix + text + authTypeLabel + statusIndicator;
 			} else {

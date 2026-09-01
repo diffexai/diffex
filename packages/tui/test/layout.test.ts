@@ -4,8 +4,9 @@ import { HStack } from "../src/components/h-stack.ts";
 import { ScrollView } from "../src/components/scroll-view.ts";
 import { Text } from "../src/components/text.ts";
 import { VStack } from "../src/components/v-stack.ts";
-import { renderLayoutFrame } from "../src/layout.ts";
+import { cropFocusedLines, getFocusedLineWindow, renderLayoutFrame } from "../src/layout.ts";
 import { encodeKitty, registerKittyImageMetadata } from "../src/terminal-image.ts";
+import { ACTIVE_ROW_MARKER, CURSOR_MARKER } from "../src/tui.ts";
 import { stripTerminalSequences } from "../src/utils.ts";
 
 function visibleLines(lines: string[]): string[] {
@@ -13,6 +14,62 @@ function visibleLines(lines: string[]): string[] {
 }
 
 describe("viewport layout", () => {
+	it("anchors clipped content to the active row", () => {
+		const lines = [
+			`${CURSOR_MARKER}search`,
+			"one",
+			"two",
+			"three",
+			"four",
+			"five",
+			`${ACTIVE_ROW_MARKER}selected`,
+			"seven",
+			"eight",
+		];
+
+		assert.deepStrictEqual(getFocusedLineWindow(lines, 4), { start: 4, end: 8 });
+		assert.deepStrictEqual(getFocusedLineWindow(lines, 8), { start: 0, end: 8 });
+	});
+
+	it("keeps the input cursor and active row together when they fit", () => {
+		const lines = ["title", `${CURSOR_MARKER}search`, "one", "two", `${ACTIVE_ROW_MARKER}selected`, "tail"];
+
+		assert.deepStrictEqual(getFocusedLineWindow(lines, 4), { start: 1, end: 5 });
+	});
+
+	it("retains distant input and active rows within a compact crop", () => {
+		const lines = [
+			`${CURSOR_MARKER}search`,
+			...Array.from({ length: 11 }, (_, index) => `model ${index + 1}`),
+			`${ACTIVE_ROW_MARKER}selected`,
+			"hint",
+		];
+
+		const cropped = cropFocusedLines(lines, 5);
+		assert.strictEqual(cropped.length, 5);
+		assert.ok(cropped.some((line) => line.includes(CURSOR_MARKER)));
+		assert.ok(cropped.some((line) => line.includes(ACTIVE_ROW_MARKER)));
+		assert.deepStrictEqual(cropFocusedLines(lines, 2), [lines[0], lines[12]]);
+	});
+
+	it("anchors to the active row nearest the input cursor", () => {
+		const lines = [
+			`${ACTIVE_ROW_MARKER}inactive selection`,
+			"one",
+			"two",
+			"three",
+			"four",
+			`${CURSOR_MARKER}search`,
+			`${ACTIVE_ROW_MARKER}focused selection`,
+			"tail",
+		];
+
+		const cropped = cropFocusedLines(lines, 3);
+		assert.ok(!cropped.includes(lines[0] ?? ""));
+		assert.ok(cropped.includes(lines[5] ?? ""));
+		assert.ok(cropped.includes(lines[6] ?? ""));
+	});
+
 	it("allocates vertical grow space deterministically", () => {
 		const frame = renderLayoutFrame(
 			new VStack([

@@ -1,6 +1,7 @@
 import {
 	Container,
 	getKeybindings,
+	markActiveRow,
 	SELECTED_LIST_PREFIX,
 	Spacer,
 	Text,
@@ -132,7 +133,9 @@ export class TrustSelectorComponent extends Container {
 			const isSelected = i === this.selectedIndex;
 			const isCurrent = this.isSavedOption(option);
 			const checkmark = isCurrent ? theme.fg("success", " ✓") : "";
-			const prefix = isSelected ? theme.fg("selectionAccent", SELECTED_LIST_PREFIX) : UNSELECTED_LIST_PREFIX;
+			const prefix = isSelected
+				? markActiveRow(theme.fg("selectionAccent", SELECTED_LIST_PREFIX))
+				: UNSELECTED_LIST_PREFIX;
 			const label = isSelected ? theme.fg("selectionAccent", option.label) : theme.fg("text", option.label);
 			this.listContainer.addChild(new Text(`${prefix}${label}${checkmark}`, 1, 0));
 		}

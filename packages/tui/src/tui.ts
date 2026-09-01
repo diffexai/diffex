@@ -78,6 +78,18 @@ export function isFocusable(component: Component | null): component is Component
  */
 export const CURSOR_MARKER = "\x1b_pi:c\x07";
 
+/**
+ * Active row marker - APC sequence used by viewport layout.
+ * This is a zero-width escape sequence that terminals ignore.
+ * Selection components emit it on the row that must remain visible.
+ */
+export const ACTIVE_ROW_MARKER = "\x1b_pi:a\x07";
+
+/** Add the active-row marker once without changing the visible content. */
+export function markActiveRow(text: string): string {
+	return text.includes(ACTIVE_ROW_MARKER) ? text : `${ACTIVE_ROW_MARKER}${text}`;
+}
+
 export { visibleWidth };
 
 /**
@@ -1186,7 +1198,7 @@ export abstract class TuiBase extends Container implements TUI {
 		for (let i = 0; i < lines.length; i++) {
 			const line = lines[i];
 			if (!isImageLine(line)) {
-				lines[i] = normalizeTerminalOutput(line) + reset;
+				lines[i] = normalizeTerminalOutput(line.replaceAll(ACTIVE_ROW_MARKER, "")) + reset;
 			}
 		}
 		return lines;

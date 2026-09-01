@@ -1,6 +1,7 @@
 import {
 	Container,
 	getKeybindings,
+	markActiveRow,
 	SELECTED_LIST_PREFIX,
 	Spacer,
 	Text,
@@ -101,7 +102,9 @@ export class FirstTimeSetupComponent extends Container {
 	private addOptionList(labels: string[], selectedIndex: number): void {
 		for (let i = 0; i < labels.length; i++) {
 			const isSelected = i === selectedIndex;
-			const prefix = isSelected ? theme.fg("selectionAccent", SELECTED_LIST_PREFIX) : UNSELECTED_LIST_PREFIX;
+			const prefix = isSelected
+				? markActiveRow(theme.fg("selectionAccent", SELECTED_LIST_PREFIX))
+				: UNSELECTED_LIST_PREFIX;
 			const label = isSelected ? theme.fg("selectionAccent", labels[i]) : theme.fg("text", labels[i]);
 			this.addChild(new Text(`${prefix}${label}`, 1, 0));
 		}

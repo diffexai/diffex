@@ -3,6 +3,7 @@ import type { Transport } from "@earendil-works/diffex-ai";
 import {
 	type Component,
 	Container,
+	type Focusable,
 	getCapabilities,
 	type ScrollViewScrollbar,
 	type SelectItem,
@@ -483,10 +484,11 @@ class ThemeSubmenu extends Container {
 /**
  * Main settings selector component.
  */
-export class SettingsSelectorComponent extends Container {
+export class SettingsSelectorComponent extends Container implements Focusable {
 	private settingsList: SettingsList;
 	private readonly titleText: Text;
 	private readonly getViewportRows: () => number;
+	private _focused = false;
 
 	constructor(config: SettingsConfig, callbacks: SettingsCallbacks, options: SettingsSelectorOptions = {}) {
 		super();
@@ -877,6 +879,15 @@ export class SettingsSelectorComponent extends Container {
 		);
 
 		this.addChild(this.settingsList);
+	}
+
+	get focused(): boolean {
+		return this._focused;
+	}
+
+	set focused(value: boolean) {
+		this._focused = value;
+		this.settingsList.focused = value;
 	}
 
 	override render(width: number): string[] {

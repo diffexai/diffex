@@ -1,4 +1,4 @@
-import { getGlyphs, setKeybindings } from "@earendil-works/diffex-tui";
+import { getGlyphs, setKeybindings, visibleWidth } from "@earendil-works/diffex-tui";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { KeybindingsManager } from "../src/core/keybindings.ts";
 import { TrustSelectorComponent } from "../src/modes/interactive/components/trust-selector.ts";
@@ -109,6 +109,6 @@ describe("TrustSelectorComponent", () => {
 		expect(lines.at(-1)).toContain("save");
 		expect(lines.at(-1)).toContain("cancel");
 		expect(lines).toHaveLength(8);
-		expect(lines.every((line) => Array.from(line).length <= 60)).toBe(true);
+		expect(lines.every((line) => visibleWidth(line) <= 60)).toBe(true);
 	});
 });

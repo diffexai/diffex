@@ -31,11 +31,11 @@ import {
 	Container,
 	fuzzyFilter,
 	getCapabilities,
+	getGlyphs,
 	hyperlink,
 	Markdown,
 	matchesKey,
 	ProcessTerminal,
-	SELECTED_LIST_PREFIX,
 	Spacer,
 	setKeybindings,
 	Text,
@@ -665,7 +665,7 @@ export class InteractiveMode {
 		this.defaultEditor = new CustomEditor(this.ui, getEditorTheme(), this.keybindings, {
 			paddingX: editorPaddingX,
 			autocompleteMaxVisible,
-			prompt: SELECTED_LIST_PREFIX,
+			prompt: `${getGlyphs().selected} `,
 			promptStyle: (text) =>
 				this.isBashMode ? theme.fg("bashMode", text.replace(/^\S/u, "!")) : theme.fg("selectionAccent", text),
 			concealedInputPrefix: "!",

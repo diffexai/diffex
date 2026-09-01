@@ -2,7 +2,7 @@ import type { ScrollView } from "./components/scroll-view.ts";
 import { allocateStackSizes, visibleStackEntries } from "./components/stack.ts";
 import { getLayoutNode } from "./layout-node.ts";
 import { cropKittyImageLine, getKittyImageMetadata, isImageLine } from "./terminal-image.ts";
-import { type Component, CURSOR_MARKER, compositeTuiLine } from "./tui.ts";
+import { ACTIVE_ROW_MARKER, type Component, CURSOR_MARKER, compositeTuiLine } from "./tui.ts";
 import { extractAnsiCode, getGraphemeCellRange, sliceByColumn, visibleWidth } from "./utils.ts";
 
 const OSC133_ZONE_PREFIX = /^(?:\x1b\]133;[ABC](?:\x07|\x1b\\))+/;
@@ -49,6 +49,76 @@ interface LayoutContext {
 	renderCache: Map<Component, Map<number, string[]>>;
 	requestRender: () => void;
 	primaryScrollView: ScrollView | undefined;
+}
+
+export interface FocusedLineWindow {
+	start: number;
+	end: number;
+}
+
+interface FocusRows {
+	activeRow: number;
+	cursorRow: number;
+}
+
+function getFocusRows(lines: readonly string[]): FocusRows {
+	const cursorRow = lines.findIndex((line) => line.includes(CURSOR_MARKER));
+	const activeRows: number[] = [];
+	for (let index = 0; index < lines.length; index++) {
+		if (lines[index]?.includes(ACTIVE_ROW_MARKER)) activeRows.push(index);
+	}
+
+	const activeRow =
+		cursorRow === -1
+			? (activeRows[0] ?? -1)
+			: activeRows.reduce((closest, candidate) => {
+					if (closest === -1) return candidate;
+					return Math.abs(candidate - cursorRow) < Math.abs(closest - cursorRow) ? candidate : closest;
+				}, -1);
+	return { activeRow, cursorRow };
+}
+
+/** Choose a vertical window that retains the active row and input cursor when possible. */
+export function getFocusedLineWindow(lines: readonly string[], maxLines: number): FocusedLineWindow {
+	const limit = Math.max(0, Math.floor(maxLines));
+	if (limit === 0) return { start: 0, end: 0 };
+	if (lines.length <= limit) return { start: 0, end: lines.length };
+
+	const { activeRow, cursorRow } = getFocusRows(lines);
+	const lastStart = lines.length - limit;
+	let start = 0;
+
+	if (activeRow !== -1 && cursorRow !== -1 && Math.abs(activeRow - cursorRow) < limit) {
+		start = Math.max(0, Math.max(activeRow, cursorRow) - limit + 1);
+	} else if (activeRow !== -1) {
+		start = activeRow - Math.floor(limit / 2);
+	} else if (cursorRow !== -1) {
+		start = cursorRow - limit + 1;
+	}
+
+	start = Math.max(0, Math.min(start, lastStart));
+	return { start, end: start + limit };
+}
+
+/** Crop lines around focus anchors, retaining distant cursor and active rows when possible. */
+export function cropFocusedLines(lines: readonly string[], maxLines: number): string[] {
+	const limit = Math.max(0, Math.floor(maxLines));
+	if (limit === 0) return [];
+	if (lines.length <= limit) return [...lines];
+
+	const { activeRow, cursorRow } = getFocusRows(lines);
+	if (activeRow === -1 || cursorRow === -1 || Math.abs(activeRow - cursorRow) < limit) {
+		const window = getFocusedLineWindow(lines, limit);
+		return lines.slice(window.start, window.end);
+	}
+	if (limit === 1) return [lines[activeRow] ?? ""];
+
+	const activeBudget = limit - 1;
+	const activeStart = Math.max(0, Math.min(activeRow - Math.floor(activeBudget / 2), lines.length - activeBudget));
+	const retainedRows = new Set<number>([cursorRow]);
+	for (let index = activeStart; index < activeStart + activeBudget; index++) retainedRows.add(index);
+
+	return [...retainedRows].sort((left, right) => left - right).map((index) => lines[index] ?? "");
 }
 
 function intersect(a: LayoutRect, b: LayoutRect): LayoutRect {
@@ -111,11 +181,7 @@ function layoutComponent(
 	if (!node) {
 		const lines = renderCached(context, component, safeWidth);
 		const allocatedHeight = height === undefined ? lines.length : Math.max(0, Math.floor(height));
-		let lineOffset = 0;
-		if (lines.length > allocatedHeight && allocatedHeight > 0) {
-			const cursorLine = lines.findIndex((line) => line.includes(CURSOR_MARKER));
-			if (cursorLine >= allocatedHeight) lineOffset = cursorLine - allocatedHeight + 1;
-		}
+		const lineOffset = getFocusedLineWindow(lines, allocatedHeight).start;
 		return {
 			component,
 			rect: { x, y, width: safeWidth, height: allocatedHeight },
