@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { VirtualTerminal } from "../../tui/test/virtual-terminal.ts";
 import type { TuiMode } from "../src/core/settings-manager.ts";
 import {
+	createInteractiveLayout,
 	createInteractiveTui,
 	createInteractiveTuiReference,
 	InteractiveMode,
@@ -125,6 +126,44 @@ describe("createInteractiveTui", () => {
 
 		expect(stableUi.mode).toBe("regular");
 		expect([terminal.startCount, terminal.stopCount]).toEqual([2, 3]);
+	});
+
+	it("keeps the conversation and prompt usable in a constrained fullscreen pane", async () => {
+		const terminal = new RecordingTerminal(50, 24);
+		const tui = createInteractiveTui({
+			tuiMode: "fullscreen",
+			showHardwareCursor: false,
+			logDirectory: "/tmp",
+			terminal,
+		});
+		const document = new Text("conversation");
+		const transcript = new Container();
+		transcript.addChild(document);
+		const editor = new Text("prompt");
+		const layout = createInteractiveLayout({
+			document,
+			transcript,
+			pendingMessages: new Container(),
+			status: new Container(),
+			widgetAbove: new Container(),
+			editor,
+			widgetBelow: new Container(),
+			footer: new Text("footer"),
+		});
+		for (const component of layout.regularComponents) tui.addChild(component);
+		if (!isViewportTUI(tui)) throw new Error("Expected fullscreen renderer");
+		tui.setLayoutRoot(layout.fullscreenRoot);
+
+		tui.start();
+		try {
+			await terminal.waitForRender();
+			const viewport = terminal.getViewport().join("\n");
+			expect(viewport).toContain("conversation");
+			expect(viewport).toContain("prompt");
+			expect(viewport).not.toContain("Diffex needs more room");
+		} finally {
+			tui.stop();
+		}
 	});
 });
 

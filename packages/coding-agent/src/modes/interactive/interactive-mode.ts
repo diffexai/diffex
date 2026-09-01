@@ -39,6 +39,7 @@ import {
 	Spacer,
 	setKeybindings,
 	Text,
+	TruncatedText,
 	type TUI,
 	TuiAltScreen,
 	TuiMainScreen,
@@ -179,18 +180,6 @@ import { UserMessageSelectorComponent } from "./components/user-message-selector
 import { editInExternalEditor } from "./external-editor.ts";
 import { getModelSearchText } from "./model-search.ts";
 import {
-	classifyViewport,
-	getResponsiveSectionMaxLines,
-	type ResponsiveEditorPresentation,
-	ResponsiveEditorRegion,
-	ResponsiveQueuedMessagesComponent,
-	ResponsiveSection,
-	ResponsiveSpacer,
-	ResponsiveViewportRoot,
-	TooSmallTerminalComponent,
-	type ViewportSource,
-} from "./responsive-layout.ts";
-import {
 	getAvailableThemes,
 	getAvailableThemesWithPaths,
 	getEditorTheme,
@@ -238,11 +227,6 @@ class ExpandableText extends Text implements Expandable {
 type CompactionQueuedMessage = {
 	text: string;
 	mode: "steer" | "followUp";
-};
-
-type ResponsiveEditorComponent = EditorComponent & {
-	setFrameStyle?: (frameStyle: "lines" | "top" | "none") => void;
-	setMaxVisibleLines?: (maxVisibleLines?: number) => void;
 };
 
 type RenderSessionItem = AgentMessage | Extract<SessionEntry, { type: "custom" }>;
@@ -438,6 +422,47 @@ export function createInteractiveTuiReference(getTui: () => TUI): TUI {
 	});
 }
 
+interface InteractiveLayoutComponents {
+	document: Component;
+	transcript: Component;
+	pendingMessages: Component;
+	status: Component;
+	widgetAbove: Component;
+	editor: Component;
+	widgetBelow: Component;
+	footer: Component;
+}
+
+/** Shared interaction regions for the main-screen and alternate-screen renderers. */
+export function createInteractiveLayout(components: InteractiveLayoutComponents): {
+	regularComponents: readonly Component[];
+	fullscreenRoot: Component;
+} {
+	const dock = new TuiLayouts.VStack([
+		{ component: components.pendingMessages, shrink: 1, minSize: 0 },
+		{ component: components.status, shrink: 1, minSize: 0 },
+		{ component: components.widgetAbove, shrink: 1, minSize: 0 },
+		{ component: components.editor, shrink: 1, minSize: 3 },
+		{ component: components.widgetBelow, shrink: 1, minSize: 0 },
+		{ component: components.footer, shrink: 1, minSize: 1 },
+	]);
+	return {
+		regularComponents: [
+			components.document,
+			components.pendingMessages,
+			components.status,
+			components.widgetAbove,
+			components.editor,
+			components.widgetBelow,
+			components.footer,
+		],
+		fullscreenRoot: new TuiLayouts.VStack([
+			{ component: components.transcript, basis: 0, grow: 1, shrink: 1, minSize: 2 },
+			{ component: dock, basis: "auto", grow: 0, shrink: 1, minSize: 1 },
+		]),
+	};
+}
+
 export function formatResponseUsageSummary(messages: AgentMessage[], elapsedMs: number): string | undefined {
 	if (elapsedMs <= 0) return undefined;
 
@@ -466,7 +491,6 @@ export class InteractiveMode {
 	private transcriptScrollView: TuiLayouts.ScrollView | undefined;
 	private fullscreenLayoutRoot: Component | undefined;
 	private pendingMessagesContainer: Container;
-	private queuedMessagesComponent: ResponsiveQueuedMessagesComponent;
 	private statusContainer: Container;
 	private defaultEditor: CustomEditor;
 	private editor: EditorComponent;
@@ -562,10 +586,6 @@ export class InteractiveMode {
 	private extensionWidgetsBelow = new Map<string, Component & { dispose?(): void }>();
 	private widgetContainerAbove!: Container;
 	private widgetContainerBelow!: Container;
-	private readonly viewportSource: ViewportSource;
-	private readonly responsiveWidgetSpacer: ResponsiveSpacer;
-	private responsiveEditorTarget: ResponsiveEditorComponent | undefined;
-	private responsiveEditorPresentation: ResponsiveEditorPresentation | undefined;
 
 	// Custom footer from extension (undefined = use built-in footer)
 	private customFooter: (Component & { dispose?(): void }) | undefined = undefined;
@@ -621,11 +641,6 @@ export class InteractiveMode {
 			onRightClickPaste: this.onRightClickPaste,
 		});
 		this.ui = createInteractiveTuiReference(() => this.renderer);
-		this.viewportSource = () => ({
-			width: this.ui.terminal.columns,
-			height: this.ui.terminal.rows,
-		});
-		this.responsiveWidgetSpacer = new ResponsiveSpacer(this.viewportSource);
 		this.ui.setClearOnShrink(this.settingsManager.getClearOnShrink());
 		this.headerContainer = new Container();
 		this.loadedResourcesContainer = new Container();
@@ -640,12 +655,6 @@ export class InteractiveMode {
 		this.widgetContainerBelow = new Container();
 		this.keybindings = KeybindingsManager.create();
 		setKeybindings(this.keybindings);
-		this.queuedMessagesComponent = new ResponsiveQueuedMessagesComponent(
-			() => this.getAllQueuedMessages(),
-			() => this.getAppKeyDisplay("app.message.dequeue"),
-			this.viewportSource,
-			{ text: (value) => theme.fg("dim", value) },
-		);
 		const editorPaddingX = this.settingsManager.getEditorPaddingX();
 		const autocompleteMaxVisible = this.settingsManager.getAutocompleteMaxVisible();
 		this.defaultEditor = new CustomEditor(this.ui, getEditorTheme(), this.keybindings, {
@@ -888,22 +897,6 @@ export class InteractiveMode {
 		tui.stop();
 	}
 
-	private applyResponsiveEditorPresentation(presentation: ResponsiveEditorPresentation): void {
-		const editor = this.editor as ResponsiveEditorComponent;
-		if (
-			this.responsiveEditorTarget === editor &&
-			this.responsiveEditorPresentation?.frameStyle === presentation.frameStyle &&
-			this.responsiveEditorPresentation.maxVisibleLines === presentation.maxVisibleLines
-		) {
-			return;
-		}
-
-		this.responsiveEditorTarget = editor;
-		this.responsiveEditorPresentation = presentation;
-		editor.setFrameStyle?.(presentation.frameStyle);
-		editor.setMaxVisibleLines?.(presentation.maxVisibleLines);
-	}
-
 	private stopInteractiveTui(): void {
 		if (this.renderer.mode === "fullscreen") {
 			while (this.renderer.hasOverlayEntries) this.renderer.hideOverlay();
@@ -1001,86 +994,18 @@ export class InteractiveMode {
 			scrollbar: this.settingsManager.getFullscreenScrollbar(),
 			scrollbarStyle: (text) => theme.bg("scrollbarThumb", text),
 		});
-		const tooSmallTerminal = new TooSmallTerminalComponent(this.viewportSource, {
-			title: (text) => theme.bold(theme.fg("accent", text)),
-			detail: (text) => theme.fg("muted", text),
-			hint: (text) => theme.fg("dim", text),
+		const layout = createInteractiveLayout({
+			document: this.documentContainer,
+			transcript: this.transcriptScrollView,
+			pendingMessages: this.pendingMessagesContainer,
+			status: this.statusContainer,
+			widgetAbove: this.widgetContainerAbove,
+			editor: this.editorContainer,
+			widgetBelow: this.widgetContainerBelow,
+			footer: this.footerContainer,
 		});
-		const pendingMessagesRegion = new ResponsiveSection(this.pendingMessagesContainer, this.viewportSource, {
-			maxLines: (profile) => getResponsiveSectionMaxLines(this.ui.mode, profile, profile.height < 16 ? 1 : 2),
-			retention: "edges",
-			trimLeadingBlankWhenCompact: true,
-		});
-		const statusRegion = new ResponsiveSection(this.statusContainer, this.viewportSource, {
-			maxLines: (profile) => getResponsiveSectionMaxLines(this.ui.mode, profile, 1),
-			retention: "start",
-			trimLeadingBlankWhenCompact: true,
-		});
-		const widgetAboveRegion = new ResponsiveSection(this.widgetContainerAbove, this.viewportSource, {
-			maxLines: (profile) => getResponsiveSectionMaxLines(this.ui.mode, profile, profile.height < 16 ? 1 : 2),
-			retention: "start",
-			trimLeadingBlankWhenCompact: true,
-		});
-		const editorRegion = new ResponsiveEditorRegion(this.editorContainer, this.viewportSource, (presentation) => {
-			this.applyResponsiveEditorPresentation(presentation);
-		});
-		const widgetBelowRegion = new ResponsiveSection(this.widgetContainerBelow, this.viewportSource, {
-			maxLines: (profile) => getResponsiveSectionMaxLines(this.ui.mode, profile, profile.height < 16 ? 1 : 2),
-			retention: "start",
-			trimLeadingBlankWhenCompact: true,
-		});
-		const footerRegion = new ResponsiveSection(this.footerContainer, this.viewportSource, {
-			maxLines: (profile) => getResponsiveSectionMaxLines(this.ui.mode, profile, 1),
-			retention: "start",
-			trimLeadingBlankWhenCompact: true,
-		});
-		const dock = new TuiLayouts.VStack([
-			{ component: this.queuedMessagesComponent, shrink: 1, minSize: 0 },
-			{ component: pendingMessagesRegion, shrink: 1, minSize: 0 },
-			{ component: statusRegion, shrink: 1, minSize: 0 },
-			{ component: widgetAboveRegion, shrink: 1, minSize: 0 },
-			{ component: editorRegion, shrink: 1, minSize: 3 },
-			{ component: widgetBelowRegion, shrink: 1, minSize: 0 },
-			{ component: footerRegion, shrink: 1, minSize: 1 },
-		]);
-		const fullscreenContent = new TuiLayouts.VStack([
-			{ component: this.transcriptScrollView, basis: 0, grow: 1, shrink: 1, minSize: 2 },
-			{ component: dock, basis: "auto", grow: 0, shrink: 1, minSize: 3 },
-		]);
-		this.fullscreenLayoutRoot = new TuiLayouts.VStack([
-			{
-				component: fullscreenContent,
-				basis: 0,
-				grow: 1,
-				shrink: 1,
-				minSize: 1,
-				visible: (viewport) => classifyViewport(viewport.width, viewport.height).tier !== "too-small",
-			},
-			{
-				component: tooSmallTerminal,
-				basis: 0,
-				grow: 1,
-				shrink: 1,
-				minSize: 1,
-				visible: (viewport) => classifyViewport(viewport.width, viewport.height).tier === "too-small",
-			},
-		]);
-		const regularContent = new Container();
-		for (const component of [
-			this.documentContainer,
-			this.queuedMessagesComponent,
-			pendingMessagesRegion,
-			statusRegion,
-			widgetAboveRegion,
-			editorRegion,
-			widgetBelowRegion,
-			footerRegion,
-		]) {
-			regularContent.addChild(component);
-		}
-		this.mountInteractiveTui(this.renderer, [
-			new ResponsiveViewportRoot(regularContent, tooSmallTerminal, this.viewportSource),
-		]);
+		this.fullscreenLayoutRoot = layout.fullscreenRoot;
+		this.mountInteractiveTui(this.renderer, layout.regularComponents);
 		this.ui.setFocus(this.editor);
 
 		this.setupKeyHandlers();
@@ -1114,9 +1039,9 @@ export class InteractiveMode {
 			);
 
 			// Setup UI layout
-			this.headerContainer.addChild(new ResponsiveSpacer(this.viewportSource));
+			this.headerContainer.addChild(new Spacer(1));
 			this.headerContainer.addChild(this.builtInHeader);
-			this.headerContainer.addChild(new ResponsiveSpacer(this.viewportSource));
+			this.headerContainer.addChild(new Spacer(1));
 		} else {
 			// Minimal header when silenced
 			this.builtInHeader = new Text("", 0, 0);
@@ -2128,7 +2053,6 @@ export class InteractiveMode {
 		this.chatContainer.clear();
 		this.pendingMessagesContainer.clear();
 		this.compactionQueuedMessages = [];
-		this.queuedMessagesComponent.invalidate();
 		this.streamingComponent = undefined;
 		this.streamingMessage = undefined;
 		this.pendingTools.clear();
@@ -2389,13 +2313,13 @@ export class InteractiveMode {
 
 		if (widgets.size === 0) {
 			if (spacerWhenEmpty) {
-				container.addChild(this.responsiveWidgetSpacer);
+				container.addChild(new Spacer(1));
 			}
 			return;
 		}
 
 		if (leadingSpacer) {
-			container.addChild(this.responsiveWidgetSpacer);
+			container.addChild(new Spacer(1));
 		}
 		for (const component of widgets.values()) {
 			container.addChild(component);
@@ -4433,7 +4357,22 @@ export class InteractiveMode {
 	}
 
 	private updatePendingMessagesDisplay(): void {
-		this.queuedMessagesComponent.invalidate();
+		this.pendingMessagesContainer.clear();
+		const { steering: steeringMessages, followUp: followUpMessages } = this.getAllQueuedMessages();
+		if (steeringMessages.length > 0 || followUpMessages.length > 0) {
+			this.pendingMessagesContainer.addChild(new Spacer(1));
+			for (const message of steeringMessages) {
+				const text = theme.fg("dim", `Steering: ${message}`);
+				this.pendingMessagesContainer.addChild(new TruncatedText(text, 1, 0));
+			}
+			for (const message of followUpMessages) {
+				const text = theme.fg("dim", `Follow-up: ${message}`);
+				this.pendingMessagesContainer.addChild(new TruncatedText(text, 1, 0));
+			}
+			const dequeueHint = this.getAppKeyDisplay("app.message.dequeue");
+			const hintText = theme.fg("dim", `↳ ${dequeueHint} to edit all queued messages`);
+			this.pendingMessagesContainer.addChild(new TruncatedText(hintText, 1, 0));
+		}
 	}
 
 	private restoreQueuedMessagesToEditor(options?: { abort?: boolean; currentText?: string }): number {
