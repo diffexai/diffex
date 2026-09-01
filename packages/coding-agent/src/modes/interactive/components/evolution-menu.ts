@@ -113,10 +113,34 @@ function firstCharacters(value: string, maximum: number): string {
 	return [...sanitizeEvolutionText(value).replace(/\s+/gu, " ").trim()].slice(0, maximum).join("");
 }
 
+function formatEvolutionAnalysisStatus(job: EvolutionJobSummary): string {
+	if (job.analysisStatus !== "processing") return job.analysisStatus;
+	switch (job.stage) {
+		case "queued":
+			return "waiting";
+		case "snapshotting":
+			return "snapshotting";
+		case "counter-slot":
+			return "reserving counter slot";
+		case "reflecting":
+			return "reflecting";
+		case "curating":
+			return "curating EVOLVE.md";
+		case "validating":
+			return "validating proposals";
+		case "skill-curating":
+			return "curating skills";
+		case "writing":
+			return "writing EVOLVE.md";
+		case "activating":
+			return "activating harness";
+		case "completed":
+			return "completed";
+	}
+}
+
 export function formatEvolutionJobResult(job: EvolutionJobSummary): string {
-	if (job.analysisStatus === "waiting") return "analysis waiting";
-	if (job.analysisStatus === "processing") return "analysis processing";
-	if (job.analysisStatus === "failed") return "analysis failed";
+	if (job.analysisStatus !== "completed") return `analysis ${formatEvolutionAnalysisStatus(job)}`;
 	if (job.candidateGeneration.status === "not-applicable" || job.candidateGeneration.status === "completed") {
 		return "full success";
 	}
@@ -673,7 +697,7 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 		for (const line of [
 			`Trigger: ${job.trigger}`,
 			`Result: ${formatEvolutionJobResult(job)}`,
-			`Analysis: ${job.analysisStatus}`,
+			`Analysis: ${formatEvolutionAnalysisStatus(job)}`,
 			...(job.candidateGeneration.retryNotBefore === null
 				? []
 				: [`Candidate retry: ${formatEvolutionTimestamp(job.candidateGeneration.retryNotBefore)}`]),

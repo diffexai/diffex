@@ -19,6 +19,7 @@ import {
 	explainEvolutionCandidateReason,
 	formatEvolutionEvidencePreview,
 	formatEvolutionJobLabel,
+	formatEvolutionJobResult,
 	formatEvolutionProposalLabel,
 	formatEvolutionProposalOutcome,
 	formatEvolutionSkillCandidateOutcome,
@@ -598,8 +599,8 @@ describe("EvolutionMenuComponent", () => {
 
 		const output = stripAnsi(component.render(180).join("\n"));
 		expect(output).toContain("Trigger: manual");
-		expect(output).toContain("Result: analysis processing");
-		expect(output).toContain("Analysis: processing");
+		expect(output).toContain("Result: analysis reflecting");
+		expect(output).toContain("Analysis: reflecting");
 		expect(output).toContain("Evolution token: 12,345");
 		expect(output).toContain("Last checkpoint: Today at 9:05 am");
 		expect(output).toContain("Base harness: [current] Default Diffex Agent");
@@ -1057,6 +1058,22 @@ describe("EvolutionMenuComponent", () => {
 				},
 			}),
 		).toBe("Use precise verification guidance.");
+	});
+
+	it("displays each active analysis stage", () => {
+		const stages = [
+			["snapshotting", "analysis snapshotting"],
+			["counter-slot", "analysis reserving counter slot"],
+			["reflecting", "analysis reflecting"],
+			["curating", "analysis curating EVOLVE.md"],
+			["validating", "analysis validating proposals"],
+			["skill-curating", "analysis curating skills"],
+			["writing", "analysis writing EVOLVE.md"],
+			["activating", "analysis activating harness"],
+		] as const;
+		for (const [stage, expected] of stages) {
+			expect(formatEvolutionJobResult(job({ stage }))).toBe(expected);
+		}
 	});
 
 	it("formats evolution timestamps for today and earlier dates", () => {
