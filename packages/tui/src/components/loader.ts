@@ -1,3 +1,4 @@
+import { getGlyphs } from "../glyphs.ts";
 import type { TUI } from "../tui.ts";
 import { Text } from "./text.ts";
 
@@ -12,35 +13,25 @@ export interface LoaderIndicatorOptions {
 	indicatorPosition?: "before" | "after";
 }
 
-const DEFAULT_FRAMES = [
-	"،    ",
-	"′    ",
-	" ´   ",
-	"  ‾  ",
-	"   ⸌ ",
-	"    ⸌",
-	"    ⸊",
-	"    |",
-	"    ⁎",
-	"    ⁕",
-	"   ⁎⁕",
-	"  ⁕෴⁕",
-	" ⁕⁎⁕ ",
-	"⁕⁎෴⁎⁕",
-	" ⁎⁕⁎ ",
-	"  ෴  ",
-	"  ⁕  ",
-	"     ",
-	"     ",
-	"     ",
-];
-const DEFAULT_INTERVAL_MS = 80;
+const DEFAULT_INTERVAL_MS = 120;
+
+function getDefaultFrames(): string[] {
+	const { bullet, running } = getGlyphs();
+	return [
+		`${running}${bullet.repeat(3)}`,
+		`${bullet}${running}${bullet.repeat(2)}`,
+		`${bullet.repeat(2)}${running}${bullet}`,
+		`${bullet.repeat(3)}${running}`,
+		`${bullet.repeat(2)}${running}${bullet}`,
+		`${bullet}${running}${bullet.repeat(2)}`,
+	];
+}
 
 /**
  * Loader component that updates with an optional spinning animation.
  */
 export class Loader extends Text {
-	private frames = [...DEFAULT_FRAMES];
+	private frames = getDefaultFrames();
 	private intervalMs = DEFAULT_INTERVAL_MS;
 	private currentFrame = 0;
 	private intervalId: NodeJS.Timeout | null = null;
@@ -86,7 +77,7 @@ export class Loader extends Text {
 
 	setIndicator(indicator?: LoaderIndicatorOptions): void {
 		this.renderIndicatorVerbatim = indicator?.frames !== undefined;
-		this.frames = indicator?.frames !== undefined ? [...indicator.frames] : [...DEFAULT_FRAMES];
+		this.frames = indicator?.frames !== undefined ? [...indicator.frames] : getDefaultFrames();
 		this.intervalMs = indicator?.intervalMs && indicator.intervalMs > 0 ? indicator.intervalMs : DEFAULT_INTERVAL_MS;
 		this.prefix = indicator?.prefix ?? "";
 		this.indicatorPosition = indicator?.indicatorPosition ?? "before";

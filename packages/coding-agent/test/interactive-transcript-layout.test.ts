@@ -52,13 +52,15 @@ type TestContext = {
 	outputPad: number;
 	toolOutputExpanded: boolean;
 	agentResponseStartMs: number | undefined;
+	workingMessage: string | undefined;
+	workingIndicatorOptions: { frames: string[] } | undefined;
 	session: {
 		isStreaming: boolean;
 		retryAttempt: number;
 		extensionRunner: { getEntryRenderer(customType: string): (() => Text) | undefined };
 	};
 	sessionManager: { getCwd(): string; getEntries(): SessionEntry[] };
-	clearStatusIndicator(): void;
+	clearStatusIndicator(kind?: string): void;
 	getMarkdownThemeWithSettings(): ReturnType<typeof getMarkdownTheme>;
 	getMarkdownTransformers(): [];
 	getRegisteredToolDefinition(toolName: string): ToolDefinition | undefined;
@@ -141,6 +143,8 @@ function createContext(): TestContext {
 		outputPad: 1,
 		toolOutputExpanded: false,
 		agentResponseStartMs: undefined,
+		workingMessage: undefined,
+		workingIndicatorOptions: undefined,
 		session: {
 			isStreaming: false,
 			retryAttempt: 0,
@@ -384,6 +388,45 @@ describe("Interactive transcript layout", () => {
 		]);
 		expect(context.chatContainer.children.filter((child) => child instanceof DiffexPathDockRail)).toHaveLength(1);
 		expectUserAssistantGap(context, width, "Reasoning");
+		expect(context.clearStatusIndicator).toHaveBeenCalledWith("working");
+	});
+
+	test("preserves extension-controlled working status after visible output", async () => {
+		const context = createContext();
+		context.workingMessage = "Receiving telemetry";
+		const handleEvent = (InteractiveMode.prototype as unknown as { handleEvent: HandleEvent }).handleEvent;
+		const assistantMessage = createAssistantMessage([{ type: "text", text: "signal received" }], "pending");
+
+		await handleEvent.call(context, { type: "message_start", message: assistantMessage });
+
+		expect(context.clearStatusIndicator).not.toHaveBeenCalled();
+	});
+
+	test("preserves an extension-controlled working signal for a tool-only response", async () => {
+		const context = createContext();
+		context.workingIndicatorOptions = { frames: ["*"] };
+		const handleEvent = (InteractiveMode.prototype as unknown as { handleEvent: HandleEvent }).handleEvent;
+		const toolCall = {
+			type: "toolCall" as const,
+			id: TOOL_CALL_ID,
+			name: TOOL_NAME,
+			arguments: { path: "README.md" },
+		};
+		const toolMessage = createAssistantMessage([toolCall], "toolUse");
+
+		await handleEvent.call(context, { type: "message_start", message: toolMessage });
+		await handleEvent.call(context, {
+			type: "message_update",
+			message: toolMessage,
+			assistantMessageEvent: {
+				type: "toolcall_end",
+				contentIndex: 0,
+				toolCall,
+				partial: toolMessage,
+			},
+		});
+
+		expect(context.clearStatusIndicator).not.toHaveBeenCalled();
 	});
 
 	test.each([60, 80])("replays the two-row user handoff at %d columns", (width) => {
@@ -472,6 +515,7 @@ describe("Interactive transcript layout", () => {
 			expect.any(AssistantMessageComponent),
 			expect.any(ToolGroupComponent),
 		]);
+		expect(context.clearStatusIndicator).toHaveBeenCalledWith("working");
 		const rendered = context.chatContainer.render(80).map((line) => stripAnsi(line).trimEnd());
 		expect(rendered).toContain(` ${getGlyphs().branch} Exploring`);
 	});

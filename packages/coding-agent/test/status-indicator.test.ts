@@ -29,9 +29,17 @@ describe("status indicators", () => {
 
 		const lines = indicator.render(40);
 		expect(lines).toHaveLength(1);
-		expect(lines[0]).toContain("Responding");
 		const plain = stripAnsi(lines[0] ?? "");
-		expect(plain.indexOf(getGlyphs().start)).toBeLessThan(plain.indexOf("Responding"));
+		const glyphs = getGlyphs();
+		expect(plain).toContain(`${glyphs.start} ${glyphs.running}${glyphs.bullet.repeat(3)} Responding`);
+		const messageColumn = plain.indexOf("Responding");
+
+		vi.advanceTimersByTime(120);
+		const nextFrame = stripAnsi(indicator.render(40)[0] ?? "");
+		expect(nextFrame).toContain(
+			`${glyphs.start} ${glyphs.bullet}${glyphs.running}${glyphs.bullet.repeat(2)} Responding`,
+		);
+		expect(nextFrame.indexOf("Responding")).toBe(messageColumn);
 
 		indicator.dispose();
 	});
@@ -74,6 +82,20 @@ describe("status indicators", () => {
 
 		indicator.dispose();
 		vi.advanceTimersByTime(2000);
+
+		expect(requestRender).toHaveBeenCalledTimes(callsBeforeDispose);
+	});
+
+	it("disposes working signal and verb updates", () => {
+		initTheme("dark");
+		vi.useFakeTimers();
+		const requestRender = vi.fn();
+		const tui = { requestRender } as unknown as TUI;
+		const indicator = new WorkingStatusIndicator(tui);
+		const callsBeforeDispose = requestRender.mock.calls.length;
+
+		indicator.dispose();
+		vi.advanceTimersByTime(5000);
 
 		expect(requestRender).toHaveBeenCalledTimes(callsBeforeDispose);
 	});

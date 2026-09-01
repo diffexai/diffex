@@ -2093,6 +2093,7 @@ export class InteractiveMode {
 
 	private getOrCreateActiveToolGroup(continuesPath = false): ToolGroupComponent {
 		if (!this.activeToolGroup) {
+			this.handoffDefaultWorkingStatus();
 			const dockedToUser = !continuesPath && this.consumePendingUserDock();
 			const pathOrigin: DiffexPathOrigin = continuesPath ? "continued" : dockedToUser ? "user-dock" : "standalone";
 			this.activeToolGroup = new ToolGroupComponent(this.outputPad, pathOrigin);
@@ -2163,6 +2164,7 @@ export class InteractiveMode {
 		if (!component.hasVisibleOutput()) {
 			return;
 		}
+		this.handoffDefaultWorkingStatus();
 		if (this.consumePendingUserDock()) {
 			component.setPathOrigin("user-dock");
 			return;
@@ -2297,6 +2299,12 @@ export class InteractiveMode {
 		this.statusContainer.clear();
 		if (hadActiveStatusIndicator && this.options.tuiMode === "regular" && this.ui.getClearOnShrink()) {
 			this.statusContainer.addChild(this.idleStatus);
+		}
+	}
+
+	private handoffDefaultWorkingStatus(): void {
+		if (this.workingMessage === undefined && this.workingIndicatorOptions === undefined) {
+			this.clearStatusIndicator("working");
 		}
 	}
 
