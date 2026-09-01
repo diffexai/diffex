@@ -1,7 +1,10 @@
 import type { AssistantMessage } from "@earendil-works/diffex-ai";
 import { getGlyphs } from "@earendil-works/diffex-tui";
 import { describe, expect, test } from "vitest";
-import { AssistantMessageComponent } from "../src/modes/interactive/components/assistant-message.ts";
+import {
+	AssistantMessageComponent,
+	getAssistantMessagePathState,
+} from "../src/modes/interactive/components/assistant-message.ts";
 import { UserMessageComponent } from "../src/modes/interactive/components/user-message.ts";
 import { initTheme } from "../src/modes/interactive/theme/theme.ts";
 import { stripAnsi } from "../src/utils/ansi.ts";
@@ -90,6 +93,35 @@ describe("AssistantMessageComponent", () => {
 
 		expect(component.render(60)).toEqual([]);
 		expect(component.continuesPathToTools()).toBe(false);
+	});
+
+	test("classifies a truncated tool-only message as visible path output", () => {
+		const message = createAssistantMessage(
+			[{ type: "toolCall", id: "tool-1", name: "read", arguments: { path: "file.txt" } }],
+			{ stopReason: "length" },
+		);
+
+		expect(getAssistantMessagePathState(message)).toEqual({
+			hasToolCalls: true,
+			hasVisibleContent: false,
+			hasTerminalNotice: true,
+			hasVisibleOutput: true,
+			continuesPathToTools: true,
+		});
+	});
+
+	test("keeps a truncated tool-only response connected to its tool group", () => {
+		initTheme("dark");
+		const component = new AssistantMessageComponent(
+			createAssistantMessage([{ type: "toolCall", id: "tool-1", name: "read", arguments: { path: "file.txt" } }], {
+				stopReason: "length",
+			}),
+		);
+		const lines = component.render(80).map((line) => stripAnsi(line).trimEnd());
+
+		expect(lines[0]).toBe(` ${getGlyphs().start} Diffex`);
+		expect(lines.slice(1)).toEqual(["", "   Response was truncated before completion."]);
+		expect(component.continuesPathToTools()).toBe(true);
 	});
 
 	test("leaves reasoning open for a following tool group", () => {

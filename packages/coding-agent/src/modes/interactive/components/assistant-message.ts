@@ -15,6 +15,35 @@ const OSC133_ZONE_START = "\x1b]133;A\x07";
 const OSC133_ZONE_END = "\x1b]133;B\x07";
 const OSC133_ZONE_FINAL = "\x1b]133;C\x07";
 
+export interface AssistantMessagePathState {
+	hasToolCalls: boolean;
+	hasVisibleContent: boolean;
+	hasTerminalNotice: boolean;
+	hasVisibleOutput: boolean;
+	continuesPathToTools: boolean;
+}
+
+export function getAssistantMessagePathState(message: AssistantMessage): AssistantMessagePathState {
+	const hasToolCalls = message.content.some((content) => content.type === "toolCall");
+	const hasVisibleContent = message.content.some(
+		(content) =>
+			(content.type === "text" && Boolean(content.text.trim())) ||
+			(content.type === "thinking" && Boolean(content.thinking.trim())),
+	);
+	const hasTerminalNotice =
+		message.stopReason === "length" ||
+		(!hasToolCalls && (message.stopReason === "aborted" || message.stopReason === "error"));
+	const hasVisibleOutput = hasVisibleContent || hasTerminalNotice;
+
+	return {
+		hasToolCalls,
+		hasVisibleContent,
+		hasTerminalNotice,
+		hasVisibleOutput,
+		continuesPathToTools: hasToolCalls && hasVisibleOutput,
+	};
+}
+
 /**
  * Component that renders a complete assistant message
  */
@@ -119,13 +148,8 @@ export class AssistantMessageComponent extends Container {
 		this.isStreaming = isStreaming;
 		this.contentContainer.clear();
 
-		const hasToolCalls = message.content.some((c) => c.type === "toolCall");
-		const hasVisibleContent = message.content.some(
-			(c) => (c.type === "text" && c.text.trim()) || (c.type === "thinking" && c.thinking.trim()),
-		);
-		const hasTerminalNotice =
-			message.stopReason === "length" ||
-			(!hasToolCalls && (message.stopReason === "aborted" || message.stopReason === "error"));
+		const { hasToolCalls, hasTerminalNotice, hasVisibleOutput, continuesPathToTools } =
+			getAssistantMessagePathState(message);
 		let lastVisibleContentIndex = -1;
 		for (let i = message.content.length - 1; i >= 0; i--) {
 			const content = message.content[i];
@@ -138,8 +162,8 @@ export class AssistantMessageComponent extends Container {
 			}
 		}
 		this.hasToolCalls = hasToolCalls;
-		this.pathContinuesToTools = hasToolCalls && hasVisibleContent;
-		this.visibleOutput = Boolean(hasVisibleContent || hasTerminalNotice);
+		this.pathContinuesToTools = continuesPathToTools;
+		this.visibleOutput = hasVisibleOutput;
 		let hasRenderedPath = false;
 		let hasRenderedIdentity = false;
 		let pathClosed = false;
@@ -252,19 +276,21 @@ export class AssistantMessageComponent extends Container {
 			}
 		}
 
-		if (!this.isStreaming && !hasToolCalls && !hasRenderedIdentity && (hasVisibleContent || hasTerminalNotice)) {
+		if (!this.isStreaming && !hasRenderedIdentity && hasVisibleOutput && (!hasToolCalls || hasTerminalNotice)) {
 			if (hasRenderedPath) {
 				this.contentContainer.addChild(new DiffexPathRail(this.outputPad));
 			}
+			const marker: DiffexPathMarker = continuesPathToTools ? (hasRenderedPath ? "branch" : firstPathMarker) : "end";
 			this.contentContainer.addChild(
 				new DiffexPathLabel("Diffex", {
-					marker: "end",
+					marker,
 					padding: this.outputPad,
-					fill: true,
+					fill: !continuesPathToTools,
 					markerColor: (text) => theme.fg("accent", text),
 					labelColor: (text) => theme.fg("accent", theme.bold(text)),
 				}),
 			);
+			pathClosed = marker === "end";
 			hasRenderedIdentity = true;
 		} else if (!this.isStreaming && !hasToolCalls && hasRenderedIdentity && hasRenderedPath && !pathClosed) {
 			this.contentContainer.addChild(new DiffexPathTerminus(this.outputPad));
