@@ -8,6 +8,7 @@ import type { ToolDefinition } from "../src/core/extensions/types.ts";
 import type { SessionEntry } from "../src/core/session-manager.ts";
 import { AssistantMessageComponent } from "../src/modes/interactive/components/assistant-message.ts";
 import { CustomEntryComponent } from "../src/modes/interactive/components/custom-entry.ts";
+import { DiffexPathDockRail } from "../src/modes/interactive/components/diffex-path.ts";
 import { DynamicBorder } from "../src/modes/interactive/components/dynamic-border.ts";
 import { ToolExecutionComponent } from "../src/modes/interactive/components/tool-execution.ts";
 import { ToolGroupComponent } from "../src/modes/interactive/components/tool-group.ts";
@@ -43,6 +44,7 @@ type TestContext = {
 	pendingTools: Map<string, ToolExecutionComponent>;
 	activeToolGroup: ToolGroupComponent | undefined;
 	turnBoundaryPending: boolean;
+	pendingUserDock: UserMessageComponent | undefined;
 	streamingComponent: AssistantMessageComponent | undefined;
 	streamingMessage: AssistantMessage | undefined;
 	hideThinkingBlock: boolean;
@@ -131,6 +133,7 @@ function createContext(): TestContext {
 		pendingTools: new Map<string, ToolExecutionComponent>(),
 		activeToolGroup: undefined,
 		turnBoundaryPending: false,
+		pendingUserDock: undefined,
 		streamingComponent: undefined,
 		streamingMessage: undefined,
 		hideThinkingBlock: false,
@@ -186,7 +189,9 @@ function expectUserAssistantGap(context: TestContext, width: number, assistantLa
 
 	expect(userLine).toBeGreaterThanOrEqual(0);
 	expect(assistantLine).toBeGreaterThan(userLine);
-	expect(lines.slice(userLine + 1, assistantLine)).toEqual(["", ""]);
+	const hinge = width >= 80 ? `${getGlyphs().start}${getGlyphs().separator.repeat(2)}` : getGlyphs().start;
+	const transitionLines = [` ${hinge}`, ` ${getGlyphs().rail}`];
+	expect(lines.slice(userLine + 1, assistantLine)).toEqual(transitionLines);
 }
 
 describe("Interactive transcript layout", () => {
@@ -329,7 +334,7 @@ describe("Interactive transcript layout", () => {
 		expect(rendered).toContain("failed");
 	});
 
-	test.each([60, 80])("adds one neutral row before live reasoning at %d columns", async (width) => {
+	test.each([60, 80])("keeps a two-row live user handoff at %d columns", async (width) => {
 		const context = createContext();
 		const addMessageToChat = useTranscriptMessageRendering(context);
 		const handleEvent = (InteractiveMode.prototype as unknown as { handleEvent: HandleEvent }).handleEvent;
@@ -361,16 +366,27 @@ describe("Interactive transcript layout", () => {
 				partial: thinkingMessage,
 			},
 		});
+		await handleEvent.call(context, {
+			type: "message_update",
+			message: thinkingMessage,
+			assistantMessageEvent: {
+				type: "thinking_delta",
+				contentIndex: 0,
+				delta: "",
+				partial: thinkingMessage,
+			},
+		});
 
 		expect(context.chatContainer.children).toEqual([
 			expect.any(UserMessageComponent),
-			expect.any(Spacer),
+			expect.any(DiffexPathDockRail),
 			expect.any(AssistantMessageComponent),
 		]);
+		expect(context.chatContainer.children.filter((child) => child instanceof DiffexPathDockRail)).toHaveLength(1);
 		expectUserAssistantGap(context, width, "Reasoning");
 	});
 
-	test.each([60, 80])("replays one neutral row before assistant content at %d columns", (width) => {
+	test.each([60, 80])("replays the two-row user handoff at %d columns", (width) => {
 		const context = createContext();
 		const addMessageToChat = useTranscriptMessageRendering(context);
 		const userMessage: AgentMessage = {
@@ -388,7 +404,7 @@ describe("Interactive transcript layout", () => {
 
 		expect(context.chatContainer.children).toEqual([
 			expect.any(UserMessageComponent),
-			expect.any(Spacer),
+			expect.any(DiffexPathDockRail),
 			expect.any(AssistantMessageComponent),
 		]);
 		expectUserAssistantGap(context, width, "Reasoning");
@@ -414,8 +430,50 @@ describe("Interactive transcript layout", () => {
 		const userIndex = context.chatContainer.children.findIndex((child) => child instanceof UserMessageComponent);
 		const toolGroupIndex = context.chatContainer.children.findIndex((child) => child instanceof ToolGroupComponent);
 		const transitionChildren = context.chatContainer.children.slice(userIndex + 1, toolGroupIndex);
-		expect(transitionChildren.filter((child) => child instanceof Spacer)).toHaveLength(1);
+		expect(transitionChildren.filter((child) => child instanceof DiffexPathDockRail)).toHaveLength(1);
+		expect(transitionChildren.filter((child) => child instanceof Spacer)).toHaveLength(0);
 		expect(transitionChildren.filter((child) => child instanceof AssistantMessageComponent)).toHaveLength(1);
+		expect((context.chatContainer.children[userIndex] as UserMessageComponent).isDocked()).toBe(true);
+	});
+
+	test("docks a live tool-only response through its empty assistant placeholder", async () => {
+		const context = createContext();
+		const addMessageToChat = useTranscriptMessageRendering(context);
+		const handleEvent = (InteractiveMode.prototype as unknown as { handleEvent: HandleEvent }).handleEvent;
+		const userMessage: AgentMessage = {
+			role: "user",
+			content: "explain the theorem",
+			timestamp: Date.now(),
+		};
+		const toolCall = {
+			type: "toolCall" as const,
+			id: TOOL_CALL_ID,
+			name: TOOL_NAME,
+			arguments: { path: "README.md" },
+		};
+		const toolMessage = createAssistantMessage([toolCall], "toolUse");
+
+		addMessageToChat.call(context, userMessage);
+		await handleEvent.call(context, { type: "message_start", message: toolMessage });
+		await handleEvent.call(context, {
+			type: "message_update",
+			message: toolMessage,
+			assistantMessageEvent: {
+				type: "toolcall_end",
+				contentIndex: 0,
+				toolCall,
+				partial: toolMessage,
+			},
+		});
+
+		expect(context.chatContainer.children).toEqual([
+			expect.any(UserMessageComponent),
+			expect.any(DiffexPathDockRail),
+			expect.any(AssistantMessageComponent),
+			expect.any(ToolGroupComponent),
+		]);
+		const rendered = context.chatContainer.render(80).map((line) => stripAnsi(line).trimEnd());
+		expect(rendered).toContain(` ${getGlyphs().branch} Exploring`);
 	});
 
 	test("reuses an existing transcript boundary spacer", () => {
@@ -434,6 +492,30 @@ describe("Interactive transcript layout", () => {
 			expect.any(Spacer),
 			expect.any(AssistantMessageComponent),
 		]);
+	});
+
+	test("does not dock an assistant response across a transcript boundary", async () => {
+		const context = createContext();
+		const addMessageToChat = useTranscriptMessageRendering(context);
+		const handleEvent = (InteractiveMode.prototype as unknown as { handleEvent: HandleEvent }).handleEvent;
+		const userMessage: AgentMessage = {
+			role: "user",
+			content: "explain the theorem",
+			timestamp: Date.now(),
+		};
+		const assistantMessage = createAssistantMessage([{ type: "text", text: "separate response" }], "stop");
+
+		addMessageToChat.call(context, userMessage);
+		await handleEvent.call(context, { type: "turn_end", message: assistantMessage, toolResults: [] });
+		await handleEvent.call(context, { type: "turn_start" });
+		addMessageToChat.call(context, assistantMessage);
+
+		const userComponent = context.chatContainer.children.find(
+			(child): child is UserMessageComponent => child instanceof UserMessageComponent,
+		);
+		expect(userComponent?.isDocked()).toBe(false);
+		expect(context.chatContainer.children.filter((child) => child instanceof DiffexPathDockRail)).toHaveLength(0);
+		expect(context.chatContainer.children.filter((child) => child instanceof DynamicBorder)).toHaveLength(1);
 	});
 
 	test("groups cumulative live tool updates and sections model turns", async () => {

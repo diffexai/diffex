@@ -121,6 +121,20 @@ describe("AssistantMessageComponent", () => {
 		expect(settled.at(-1)).toBe(` ${getGlyphs().end}${getGlyphs().separator} Diffex`);
 	});
 
+	test("joins wide reasoning to a user conduit with a compact fallback", () => {
+		initTheme("dark");
+		const message = createAssistantMessage([{ type: "thinking", thinking: "decode the transmission" }]);
+		const component = new AssistantMessageComponent();
+
+		component.updateContent(message, true);
+		component.setPathOrigin("user-dock");
+
+		const narrow = component.render(60).map((line) => stripAnsi(line).trimEnd());
+		const standard = component.render(80).map((line) => stripAnsi(line).trimEnd());
+		expect(narrow[0]).toBe(` ${getGlyphs().branch} Reasoning`);
+		expect(standard[0]).toBe(` ${getGlyphs().branch} Reasoning`);
+	});
+
 	test("renders length stops with neutral truncation wording", () => {
 		initTheme("dark");
 

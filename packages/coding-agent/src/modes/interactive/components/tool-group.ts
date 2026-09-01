@@ -1,6 +1,6 @@
 import { type Component, getGlyphs, truncateToWidth, visibleWidth } from "@earendil-works/diffex-tui";
 import { theme } from "../theme/theme.ts";
-import { DiffexPathLabel, DiffexPathRail } from "./diffex-path.ts";
+import { DiffexPathLabel, type DiffexPathOrigin, DiffexPathRail } from "./diffex-path.ts";
 import type { ToolExecutionComponent } from "./tool-execution.ts";
 
 interface RenderedTool {
@@ -10,12 +10,12 @@ interface RenderedTool {
 export class ToolGroupComponent implements Component {
 	private readonly tools = new Map<string, ToolExecutionComponent>();
 	private outputPad: number;
-	private readonly continuesPath: boolean;
+	private readonly pathOrigin: DiffexPathOrigin;
 	private settled = false;
 
-	constructor(outputPad = 1, continuesPath = false) {
+	constructor(outputPad = 1, pathOrigin: DiffexPathOrigin = "standalone") {
 		this.outputPad = outputPad;
-		this.continuesPath = continuesPath;
+		this.pathOrigin = pathOrigin;
 	}
 
 	addTool(toolCallId: string, component: ToolExecutionComponent): ToolExecutionComponent {
@@ -88,10 +88,11 @@ export class ToolGroupComponent implements Component {
 		}
 
 		const label = this.settled ? "Explored" : "Exploring";
-		const result = this.continuesPath ? new DiffexPathRail(outputPad).render(safeWidth) : [];
+		const continuesPath = this.pathOrigin === "continued";
+		const result = continuesPath ? new DiffexPathRail(outputPad).render(safeWidth) : [];
 		result.push(
 			...new DiffexPathLabel(label, {
-				marker: this.continuesPath ? "branch" : "start",
+				marker: this.pathOrigin === "standalone" ? "start" : "branch",
 				padding: outputPad,
 				labelColor: (text) => theme.fg("muted", theme.bold(text)),
 			}).render(safeWidth),

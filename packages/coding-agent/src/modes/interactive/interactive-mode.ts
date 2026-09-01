@@ -130,6 +130,7 @@ import { CustomEditor } from "./components/custom-editor.ts";
 import { CustomEntryComponent } from "./components/custom-entry.ts";
 import { CustomMessageComponent } from "./components/custom-message.ts";
 import { DaxnutsComponent } from "./components/daxnuts.ts";
+import { DiffexPathDockRail, type DiffexPathOrigin } from "./components/diffex-path.ts";
 import {
 	DiffexWelcomeHeader,
 	diffexIntroAccent,
@@ -538,6 +539,7 @@ export class InteractiveMode {
 	private pendingTools = new Map<string, ToolExecutionComponent>();
 	private activeToolGroup: ToolGroupComponent | undefined = undefined;
 	private turnBoundaryPending = false;
+	private pendingUserDock: UserMessageComponent | undefined = undefined;
 
 	// Tool output expansion state
 	private toolOutputExpanded = false;
@@ -2061,6 +2063,7 @@ export class InteractiveMode {
 		this.pendingTools.clear();
 		this.activeToolGroup = undefined;
 		this.turnBoundaryPending = false;
+		this.pendingUserDock = undefined;
 		this.renderInitialMessages();
 	}
 
@@ -2090,8 +2093,10 @@ export class InteractiveMode {
 
 	private getOrCreateActiveToolGroup(continuesPath = false): ToolGroupComponent {
 		if (!this.activeToolGroup) {
-			this.activeToolGroup = new ToolGroupComponent(this.outputPad, continuesPath);
-			if (!continuesPath) {
+			const dockedToUser = !continuesPath && this.consumePendingUserDock();
+			const pathOrigin: DiffexPathOrigin = continuesPath ? "continued" : dockedToUser ? "user-dock" : "standalone";
+			this.activeToolGroup = new ToolGroupComponent(this.outputPad, pathOrigin);
+			if (pathOrigin === "standalone") {
 				this.addChatSpacer();
 			}
 			this.chatContainer.addChild(this.activeToolGroup);
@@ -2118,6 +2123,7 @@ export class InteractiveMode {
 	private completeTranscriptTurn(): void {
 		this.activeToolGroup?.markSettled();
 		this.activeToolGroup = undefined;
+		this.pendingUserDock = undefined;
 		this.turnBoundaryPending = true;
 	}
 
@@ -2131,8 +2137,34 @@ export class InteractiveMode {
 		return spacer;
 	}
 
-	private ensureVisibleAssistantSpacer(component: AssistantMessageComponent): void {
+	private consumePendingUserDock(): boolean {
+		const userComponent = this.pendingUserDock;
+		this.pendingUserDock = undefined;
+		if (!userComponent) {
+			return false;
+		}
+		const userIndex = this.chatContainer.children.indexOf(userComponent);
+		if (userIndex === -1) {
+			return false;
+		}
+
+		userComponent.setDocked(true);
+		const transitionIndex = userIndex + 1;
+		const transitionComponent = this.chatContainer.children[transitionIndex];
+		if (transitionComponent instanceof Spacer) {
+			this.chatContainer.children.splice(transitionIndex, 1, new DiffexPathDockRail(this.outputPad));
+		} else if (!(transitionComponent instanceof DiffexPathDockRail)) {
+			this.chatContainer.children.splice(transitionIndex, 0, new DiffexPathDockRail(this.outputPad));
+		}
+		return true;
+	}
+
+	private ensureVisibleAssistantTransition(component: AssistantMessageComponent): void {
 		if (!component.hasVisibleOutput()) {
+			return;
+		}
+		if (this.consumePendingUserDock()) {
+			component.setPathOrigin("user-dock");
 			return;
 		}
 		const componentIndex = this.chatContainer.children.indexOf(component);
@@ -2140,13 +2172,18 @@ export class InteractiveMode {
 			this.addChatSpacer();
 			return;
 		}
-		if (componentIndex === 0 || this.chatContainer.children[componentIndex - 1] instanceof Spacer) {
+		if (componentIndex === 0) {
+			return;
+		}
+		const previousComponent = this.chatContainer.children[componentIndex - 1];
+		if (previousComponent instanceof Spacer || previousComponent instanceof DiffexPathDockRail) {
 			return;
 		}
 		this.chatContainer.children.splice(componentIndex, 0, new Spacer(1));
 	}
 
 	private flushTranscriptBoundary(): void {
+		this.pendingUserDock = undefined;
 		if (!this.turnBoundaryPending) {
 			return;
 		}
@@ -3360,7 +3397,7 @@ export class InteractiveMode {
 					this.streamingMessage = event.message;
 					this.chatContainer.addChild(this.streamingComponent);
 					this.streamingComponent.updateContent(this.streamingMessage, true);
-					this.ensureVisibleAssistantSpacer(this.streamingComponent);
+					this.ensureVisibleAssistantTransition(this.streamingComponent);
 					this.ui.requestRender();
 				}
 				break;
@@ -3369,7 +3406,7 @@ export class InteractiveMode {
 				if (this.streamingComponent && event.message.role === "assistant") {
 					this.streamingMessage = event.message;
 					this.streamingComponent.updateContent(this.streamingMessage, true);
-					this.ensureVisibleAssistantSpacer(this.streamingComponent);
+					this.ensureVisibleAssistantTransition(this.streamingComponent);
 
 					for (const content of this.streamingMessage.content) {
 						if (content.type === "toolCall") {
@@ -3394,7 +3431,7 @@ export class InteractiveMode {
 						this.streamingMessage.errorMessage = errorMessage;
 					}
 					this.streamingComponent.updateContent(this.streamingMessage, false);
-					this.ensureVisibleAssistantSpacer(this.streamingComponent);
+					this.ensureVisibleAssistantTransition(this.streamingComponent);
 
 					if (this.streamingMessage.stopReason === "aborted" || this.streamingMessage.stopReason === "error") {
 						if (!errorMessage) {
@@ -3635,6 +3672,7 @@ export class InteractiveMode {
 	 * we update the previous status line instead of appending new ones to avoid log spam.
 	 */
 	private showStatus(message: string): void {
+		this.pendingUserDock = undefined;
 		const children = this.chatContainer.children;
 		const last = children.length > 0 ? children[children.length - 1] : undefined;
 		const secondLast = children.length > 1 ? children[children.length - 2] : undefined;
@@ -3665,6 +3703,7 @@ export class InteractiveMode {
 			return;
 		}
 		this.flushTranscriptBoundary();
+		this.pendingUserDock = undefined;
 
 		if (this.streamingComponent) {
 			const streamingIndex = this.chatContainer.children.indexOf(this.streamingComponent);
@@ -3680,6 +3719,7 @@ export class InteractiveMode {
 	private addMessageToChat(message: AgentMessage, options?: { populateHistory?: boolean }): void {
 		switch (message.role) {
 			case "bashExecution": {
+				this.pendingUserDock = undefined;
 				const component = new BashExecutionComponent(message.command, this.ui, message.excludeFromContext);
 				if (message.output) {
 					component.appendOutput(message.output);
@@ -3695,6 +3735,7 @@ export class InteractiveMode {
 			}
 			case "custom": {
 				if (message.display) {
+					this.pendingUserDock = undefined;
 					const renderer = this.session.extensionRunner.getMessageRenderer(message.customType);
 					const component = new CustomMessageComponent(
 						message,
@@ -3708,6 +3749,7 @@ export class InteractiveMode {
 				break;
 			}
 			case "compactionSummary": {
+				this.pendingUserDock = undefined;
 				this.chatContainer.addChild(new Spacer(1));
 				const component = new CompactionSummaryMessageComponent(message, this.getMarkdownThemeWithSettings());
 				component.setExpanded(this.toolOutputExpanded);
@@ -3715,6 +3757,7 @@ export class InteractiveMode {
 				break;
 			}
 			case "branchSummary": {
+				this.pendingUserDock = undefined;
 				this.chatContainer.addChild(new Spacer(1));
 				const component = new BranchSummaryMessageComponent(message, this.getMarkdownThemeWithSettings());
 				component.setExpanded(this.toolOutputExpanded);
@@ -3722,6 +3765,7 @@ export class InteractiveMode {
 				break;
 			}
 			case "user": {
+				this.pendingUserDock = undefined;
 				const textContent = this.getUserMessageText(message);
 				if (textContent) {
 					this.addChatSpacer();
@@ -3744,6 +3788,7 @@ export class InteractiveMode {
 								this.getMarkdownTransformers(),
 							);
 							this.chatContainer.addChild(userComponent);
+							this.pendingUserDock = userComponent;
 						}
 					} else {
 						const userComponent = new UserMessageComponent(
@@ -3753,6 +3798,7 @@ export class InteractiveMode {
 							this.getMarkdownTransformers(),
 						);
 						this.chatContainer.addChild(userComponent);
+						this.pendingUserDock = userComponent;
 					}
 					if (options?.populateHistory) {
 						this.editor.addToHistory?.(textContent);
@@ -3769,7 +3815,7 @@ export class InteractiveMode {
 					this.outputPad,
 					this.getMarkdownTransformers(),
 				);
-				this.ensureVisibleAssistantSpacer(assistantComponent);
+				this.ensureVisibleAssistantTransition(assistantComponent);
 				this.chatContainer.addChild(assistantComponent);
 				break;
 			}
@@ -3790,6 +3836,7 @@ export class InteractiveMode {
 		this.pendingTools.clear();
 		this.activeToolGroup = undefined;
 		this.turnBoundaryPending = false;
+		this.pendingUserDock = undefined;
 		const renderedPendingTools = new Map<string, ToolExecutionComponent>();
 		let replayTurnOpen = false;
 		const completeReplayTurn = () => {
@@ -3951,6 +3998,7 @@ export class InteractiveMode {
 		if (this.settingsManager.isProjectTrusted() || !hasTrustRequiringProjectResources(this.sessionManager.getCwd())) {
 			return;
 		}
+		this.pendingUserDock = undefined;
 
 		if (this.chatContainer.children.length > 0) {
 			this.addChatSpacer();
@@ -3983,6 +4031,7 @@ export class InteractiveMode {
 
 	private rebuildChatFromMessages(): void {
 		this.chatContainer.clear();
+		this.pendingUserDock = undefined;
 		this.renderSessionEntries(this.sessionManager.buildContextEntries());
 	}
 
@@ -4595,6 +4644,9 @@ export class InteractiveMode {
 
 	/** Move pending bash components from pending area to chat */
 	private flushPendingBashComponents(): void {
+		if (this.pendingBashComponents.length > 0) {
+			this.pendingUserDock = undefined;
+		}
 		for (const component of this.pendingBashComponents) {
 			this.pendingMessagesContainer.removeChild(component);
 			this.chatContainer.addChild(component);
@@ -4838,6 +4890,7 @@ export class InteractiveMode {
 								if (
 									child instanceof AssistantMessageComponent ||
 									child instanceof CustomMessageComponent ||
+									child instanceof DiffexPathDockRail ||
 									child instanceof UserMessageComponent ||
 									child instanceof ToolGroupComponent
 								) {

@@ -2,7 +2,7 @@ import type { AssistantMessage } from "@earendil-works/diffex-ai";
 import { Container, getGlyphs, Markdown, type MarkdownTheme, Spacer, Text } from "@earendil-works/diffex-tui";
 import type { MarkdownTransformer } from "../../../core/extensions/types.ts";
 import { getMarkdownTheme, theme } from "../theme/theme.ts";
-import { DiffexPathLabel, type DiffexPathMarker, DiffexPathRail } from "./diffex-path.ts";
+import { DiffexPathLabel, type DiffexPathMarker, type DiffexPathOrigin, DiffexPathRail } from "./diffex-path.ts";
 import { createMarkdownTransform } from "./markdown-transform.ts";
 
 const OSC133_ZONE_START = "\x1b]133;A\x07";
@@ -22,6 +22,7 @@ export class AssistantMessageComponent extends Container {
 	private lastMessage?: AssistantMessage;
 	private hasToolCalls = false;
 	private pathContinuesToTools = false;
+	private pathOrigin: Exclude<DiffexPathOrigin, "continued"> = "standalone";
 	private visibleOutput = false;
 	private isStreaming = false;
 
@@ -86,6 +87,16 @@ export class AssistantMessageComponent extends Container {
 		return this.visibleOutput;
 	}
 
+	setPathOrigin(origin: Exclude<DiffexPathOrigin, "continued">): void {
+		if (this.pathOrigin === origin) {
+			return;
+		}
+		this.pathOrigin = origin;
+		if (this.lastMessage) {
+			this.updateContent(this.lastMessage);
+		}
+	}
+
 	override render(width: number): string[] {
 		const lines = super.render(width);
 		if (this.hasToolCalls || lines.length === 0) {
@@ -114,6 +125,7 @@ export class AssistantMessageComponent extends Container {
 		this.visibleOutput = Boolean(hasVisibleContent || hasTerminalNotice);
 		let hasRenderedPath = false;
 		let hasRenderedIdentity = false;
+		const firstPathMarker: DiffexPathMarker = this.pathOrigin === "user-dock" ? "branch" : "start";
 
 		for (let i = 0; i < message.content.length; i++) {
 			const content = message.content[i];
@@ -125,11 +137,11 @@ export class AssistantMessageComponent extends Container {
 					const marker: DiffexPathMarker = hasToolCalls
 						? hasRenderedPath
 							? "branch"
-							: "start"
+							: firstPathMarker
 						: this.isStreaming
 							? hasRenderedPath
 								? "branch"
-								: "start"
+								: firstPathMarker
 							: "end";
 					this.contentContainer.addChild(
 						new DiffexPathLabel("Diffex", {
@@ -173,7 +185,7 @@ export class AssistantMessageComponent extends Container {
 					this.contentContainer.addChild(new DiffexPathRail(this.outputPad));
 				}
 
-				const marker: DiffexPathMarker = hasRenderedPath ? "branch" : "start";
+				const marker: DiffexPathMarker = hasRenderedPath ? "branch" : firstPathMarker;
 				if (this.hideThinkingBlock) {
 					const hiddenLabel = this.hiddenThinkingLabel === "Thinking..." ? "hidden" : this.hiddenThinkingLabel;
 					this.contentContainer.addChild(

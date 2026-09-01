@@ -65,13 +65,23 @@ describe("ToolGroupComponent", () => {
 
 	test("continues an assistant activity rail without adding a blank gap", () => {
 		const glyphs = getGlyphs();
-		const group = new ToolGroupComponent(1, true);
+		const group = new ToolGroupComponent(1, "continued");
 		group.addTool("continued", createTool("continued", "Continued"));
 		const lines = group.render(80).map((line) => stripAnsi(line).trimEnd());
 
 		expect(lines[0]).toBe(` ${glyphs.rail}`);
 		expect(lines[1]).toBe(` ${glyphs.branch} Exploring`);
 		expect(lines[2]?.startsWith(` ${glyphs.rail} ${glyphs.end}`)).toBe(true);
+	});
+
+	test("joins a user dock without drawing a duplicate rail", () => {
+		const glyphs = getGlyphs();
+		const group = new ToolGroupComponent(1, "user-dock");
+		group.addTool("docked", createTool("docked", "Docked"));
+		const lines = group.render(80).map((line) => stripAnsi(line).trimEnd());
+
+		expect(lines[0]).toBe(` ${glyphs.branch} Exploring`);
+		expect(lines[1]?.startsWith(` ${glyphs.rail} ${glyphs.end}`)).toBe(true);
 	});
 
 	test("forwards display settings to existing tool components", () => {

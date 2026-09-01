@@ -1,7 +1,9 @@
 import { type Component, getGlyphs, truncateToWidth, visibleWidth } from "@earendil-works/diffex-tui";
+import { STANDARD_VIEWPORT_MIN_COLUMNS } from "../responsive-layout.ts";
 import { theme } from "../theme/theme.ts";
 
 export type DiffexPathMarker = "start" | "branch" | "end";
+export type DiffexPathOrigin = "standalone" | "user-dock" | "continued";
 
 export interface DiffexPathLabelOptions {
 	marker: DiffexPathMarker;
@@ -103,4 +105,51 @@ export class DiffexPathRail implements Component {
 		const line = `${" ".repeat(padding)}${this.color(getGlyphs().rail)}`;
 		return [visibleWidth(line) > safeWidth ? truncateToWidth(line, safeWidth, "") : line];
 	}
+}
+
+/** Draw the transmitter socket inside the user surface without changing its height. */
+export class DiffexPathHinge implements Component {
+	private extended = false;
+
+	setExtended(extended: boolean): void {
+		this.extended = extended;
+	}
+
+	invalidate(): void {
+		// Styling and glyph mode are resolved during render.
+	}
+
+	render(width: number): string[] {
+		const safeWidth = Math.max(1, width);
+		const glyphs = getGlyphs();
+		const corner = theme.fg("borderAccent", resolveMarker("start"));
+		const lip = this.extended ? theme.fg("borderMuted", glyphs.separator.repeat(2)) : "";
+		const line = `${corner}${lip}`;
+		return [visibleWidth(line) > safeWidth ? truncateToWidth(line, safeWidth, "") : line];
+	}
+}
+
+/** Join a docked user surface to the first response node. */
+export class DiffexPathDockRail implements Component {
+	private readonly rail: DiffexPathRail;
+
+	constructor(padding = 1) {
+		this.rail = new DiffexPathRail(padding);
+	}
+
+	setOutputPad(padding: number): void {
+		this.rail.setPadding(padding);
+	}
+
+	invalidate(): void {
+		this.rail.invalidate();
+	}
+
+	render(width: number): string[] {
+		return this.rail.render(width);
+	}
+}
+
+export function shouldExtendDiffexPathHinge(width: number): boolean {
+	return width >= STANDARD_VIEWPORT_MIN_COLUMNS;
 }

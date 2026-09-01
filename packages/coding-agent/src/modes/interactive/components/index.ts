@@ -10,9 +10,12 @@ export { CustomMessageComponent } from "./custom-message.ts";
 export { DaxnutsComponent } from "./daxnuts.ts";
 export { type RenderDiffOptions, renderDiff } from "./diff.ts";
 export {
+	DiffexPathDockRail,
+	DiffexPathHinge,
 	DiffexPathLabel,
 	DiffexPathRail,
 	formatDiffexPathPrefix,
+	shouldExtendDiffexPathHinge,
 } from "./diffex-path.ts";
 export { DynamicBorder } from "./dynamic-border.ts";
 export { ExtensionEditorComponent } from "./extension-editor.ts";
