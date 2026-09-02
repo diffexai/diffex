@@ -51,6 +51,52 @@ function synthesisRequestBudget(limits: EvolutionModelLimits) {
 	};
 }
 
+function writeFailedOperationTrace(agentDir: string, traceId: string): void {
+	const traceDirectory = join(agentDir, "traces");
+	mkdirSync(traceDirectory, { recursive: true });
+	const records: readonly TraceRecord[] = [
+		{
+			type: "trace_header",
+			sequence: 1,
+			timestamp: "2026-08-20T12:00:00.000Z",
+			schemaVersion: 1,
+			traceId,
+			producer: {
+				diffexVersion: "0.2.0",
+				sourceRevision: "fixture-revision",
+				runtime: { kind: "node", version: "24.0.0" },
+				telemetrySchemaVersions: {},
+				metadata: {},
+			},
+		},
+		{
+			type: "span_start",
+			sequence: 2,
+			timestamp: "2026-08-20T12:00:01.000Z",
+			spanId: 1,
+			parentSpanId: null,
+			name: "diffex.coding_agent.operation",
+			attributes: { "diffex.operation.kind": "prompt" },
+		},
+		{
+			type: "span_end",
+			sequence: 3,
+			timestamp: "2026-08-20T12:00:02.000Z",
+			spanId: 1,
+			attributes: {},
+			status: { status: "error", error: { name: "Error", message: "verification failed" } },
+		},
+		{
+			type: "trace_footer",
+			sequence: 4,
+			timestamp: "2026-08-20T12:00:03.000Z",
+			terminationStatus: "completed",
+			health: { droppedRecords: 0, writerErrors: 0, writerDisabled: false, closed: true },
+		},
+	];
+	writeFileSync(join(traceDirectory, `${traceId}.jsonl`), records.map(encodeTraceRecord).join(""));
+}
+
 function materializedInvocation(traceId: string, sessionPath: string): MaterializedInvocation {
 	return {
 		version: 1,
@@ -155,7 +201,7 @@ describe("coding-agent evolution runtime", () => {
 		]);
 	});
 
-	it("shares one global control scope across working directories", async () => {
+	it("isolates control scopes across working directories", async () => {
 		const agentDir = join(tmpdir(), `diffex-evolution-runtime-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 		mkdirSync(agentDir, { recursive: true });
 		temporaryDirectories.push(agentDir);
@@ -187,9 +233,12 @@ describe("coding-agent evolution runtime", () => {
 		try {
 			const state = await runtime.control.overview();
 			const peerState = await peerRuntime.control.overview();
+			const workspace = await resolveEvolutionDirectoryIdentity(harness.tempDir);
+			const peerWorkspace = await resolveEvolutionDirectoryIdentity(peerDirectory);
 			expect(state.currentHarnessVersion).toBe(bundle.manifest.version);
-			expect(state.scope).toEqual({ repositoryId: "global", scopeId: "global" });
-			expect(peerState.scope).toEqual(state.scope);
+			expect(state.scope).toEqual({ repositoryId: "global", scopeId: workspace.directoryId });
+			expect(peerState.scope).toEqual({ repositoryId: "global", scopeId: peerWorkspace.directoryId });
+			expect(peerState.scope).not.toEqual(state.scope);
 			expect(state.settledInvocationCount).toBe(0);
 			expect(peerState.settledInvocationCount).toBe(0);
 			expect(await runtime.control.startManual()).toEqual({ status: "not-created", reason: "no-new-evidence" });
@@ -197,6 +246,52 @@ describe("coding-agent evolution runtime", () => {
 			await peerRuntime.stop();
 			await runtime.stop();
 		}
+	});
+
+	it("partitions evidence totals and jobs across workspace state directories", async () => {
+		const agentDir = join(
+			tmpdir(),
+			`diffex-evolution-partition-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+		);
+		const workspaceAState = join(agentDir, "workspace-a");
+		const workspaceBState = join(agentDir, "workspace-b");
+		mkdirSync(agentDir, { recursive: true });
+		temporaryDirectories.push(agentDir);
+		writeFailedOperationTrace(workspaceAState, "workspace-a-trace");
+		const store = new HarnessStateStore(agentDir);
+		const bundle = await store.initialize();
+		const harness = await createHarness({ harnessStateStore: store, harnessVersionBundle: bundle });
+		harnesses.push(harness);
+		const peerDirectory = join(harness.tempDir, "peer");
+		mkdirSync(peerDirectory);
+		const runtimeOptions = {
+			session: harness.session,
+			harnessState: store,
+			modelRuntime: harness.session.modelRuntime,
+			resourceLoader: harness.session.resourceLoader,
+		};
+		const runtimeA = await createCodingAgentEvolutionRuntime({
+			...runtimeOptions,
+			agentDir: workspaceAState,
+			cwd: harness.tempDir,
+		});
+		const runtimeB = await createCodingAgentEvolutionRuntime({
+			...runtimeOptions,
+			agentDir: workspaceBState,
+			cwd: peerDirectory,
+		});
+
+		const overviewA = await runtimeA.control.overview();
+		const overviewB = await runtimeB.control.overview();
+		expect(overviewA.settledInvocationCount).toBe(1);
+		expect(overviewA.unprocessedEstimatedTokens).toBeGreaterThan(0);
+		expect(overviewB.settledInvocationCount).toBe(0);
+		expect(overviewB.unprocessedEstimatedTokens).toBe(0);
+		const started = await runtimeA.control.startManual();
+		if (started.status !== "created") throw new Error("Expected workspace A evolution job");
+		expect(await runtimeA.control.listJobs()).toEqual([expect.objectContaining({ jobId: started.job.jobId })]);
+		expect(await runtimeB.control.listJobs()).toEqual([]);
+		await runtimeA.control.cancelJob(started.job.jobId);
 	});
 
 	it("freezes the session harness even when another harness is globally selected", async () => {
@@ -312,7 +407,7 @@ describe("coding-agent evolution runtime", () => {
 			workspace,
 			harnessState: store,
 			resourceLoader: harness.session.resourceLoader,
-		}).capture({ ...workspace, evolutionScope: { repositoryId: "global", scopeId: "global" } });
+		}).capture({ ...workspace, evolutionScope: { repositoryId: "global", scopeId: directory.directoryId } });
 
 		expect(environment.harnessVersion).toBe(selected.bundle.manifest.version);
 		expect(environment.skillVersions).toEqual([

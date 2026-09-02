@@ -182,7 +182,7 @@ async function serviceFixture(
 	);
 	const worker = new EvolutionBackgroundWorker({
 		clock,
-		source: new PollingEvolutionWorkSource(store, clock, { pollIntervalMs: 60_000 }),
+		source: new PollingEvolutionWorkSource(store, clock, scope, { pollIntervalMs: 60_000 }),
 		runner: controlPlane,
 		priority: { async waitUntilBackgroundAllowed() {} },
 	});

@@ -1,3 +1,4 @@
+import type { EvolutionScope } from "./contracts.ts";
 import type {
 	EvolutionClock,
 	EvolutionJobRunner,
@@ -35,11 +36,18 @@ export interface PollingEvolutionWorkSourceOptions {
 export class PollingEvolutionWorkSource implements EvolutionWorkSource {
 	readonly #jobs: EvolutionJobStore;
 	readonly #clock: EvolutionClock;
+	readonly #scope: EvolutionScope;
 	readonly #pollIntervalMs: number;
 
-	constructor(jobs: EvolutionJobStore, clock: EvolutionClock, options: PollingEvolutionWorkSourceOptions = {}) {
+	constructor(
+		jobs: EvolutionJobStore,
+		clock: EvolutionClock,
+		scope: EvolutionScope,
+		options: PollingEvolutionWorkSourceOptions = {},
+	) {
 		this.#jobs = jobs;
 		this.#clock = clock;
+		this.#scope = scope;
 		this.#pollIntervalMs = options.pollIntervalMs ?? DEFAULT_IDLE_POLL_MS;
 		if (!Number.isFinite(this.#pollIntervalMs) || this.#pollIntervalMs < 1) {
 			throw new Error("pollIntervalMs must be positive");
@@ -50,7 +58,7 @@ export class PollingEvolutionWorkSource implements EvolutionWorkSource {
 		signal?.throwIfAborted();
 		const nowMs = Date.parse(now);
 		if (!Number.isFinite(nowMs)) throw new Error("Evolution worker time must be a valid ISO timestamp");
-		const jobs = (await this.#jobs.list())
+		const jobs = (await this.#jobs.list(this.#scope))
 			.filter(
 				(job) =>
 					job.resolution === null &&

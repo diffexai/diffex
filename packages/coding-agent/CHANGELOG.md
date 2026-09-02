@@ -8,11 +8,13 @@
 
 ### Changed
 
+- Partitioned evolution traces, invocation and token accounting, jobs, candidate work, and harness selection by workspace while sharing them across sessions in the same workspace.
 - Softened the bash tool's `PI_*` environment guideline in an attempt to reduce unnecessary inspection commands ([#7128](https://github.com/earendil-works/pi/issues/7128)).
 - Reduced worst-case automatic terminal theme detection delay from 200 ms to 100 ms by probing color-scheme and background support concurrently.
 
 ### Fixed
 
+- Fixed the footer showing `Harness unknown` after another process creates or selects a harness revision.
 - Fixed extension TUI method wrappers recursing indefinitely when delegating to the original method ([#7731](https://github.com/earendil-works/pi/issues/7731)).
 - Fixed right-click not pasting clipboard text in fullscreen mode on Windows.
 

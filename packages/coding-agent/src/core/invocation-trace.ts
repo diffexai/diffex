@@ -1,5 +1,5 @@
 import { mkdir, unlink } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import {
 	AGENT_RUNTIME_TELEMETRY_SCHEMA,
 	AI_TELEMETRY_SCHEMA,
@@ -51,7 +51,7 @@ interface InvocationTraceRecorderHandle {
 	releaseTraceLock: () => Promise<void>;
 }
 
-type InvocationTraceRecorderFactory = () => Promise<InvocationTraceRecorderHandle>;
+type InvocationTraceRecorderFactory = (storageDirectory: string) => Promise<InvocationTraceRecorderHandle>;
 
 function invocationTracePath(agentDir: string, traceId: string): string {
 	const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
@@ -84,6 +84,7 @@ export class InvocationTrace implements AgentSessionLifecycleObserver, Telemetry
 	readonly telemetryContext: TelemetryContext = this;
 	readonly #createRecorder: InvocationTraceRecorderFactory | undefined;
 	readonly #onDiagnostic: ((diagnostic: AgentSessionRuntimeDiagnostic) => void) | undefined;
+	#storageDirectory: string | undefined;
 	readonly #sessions = new Map<SessionManager, InvocationSessionAttachmentReason>();
 	readonly #sessionBindings = new Map<SessionManager, string>();
 	readonly #pendingOperations = new Set<string>();
@@ -107,6 +108,7 @@ export class InvocationTrace implements AgentSessionLifecycleObserver, Telemetry
 		createRecorder?: InvocationTraceRecorderFactory,
 		onDiagnostic?: (diagnostic: AgentSessionRuntimeDiagnostic) => void,
 		enabled = true,
+		storageDirectory?: string,
 	) {
 		this.#recorder = initial?.recorder;
 		this.#releaseTraceLock = initial?.releaseTraceLock;
@@ -114,6 +116,7 @@ export class InvocationTrace implements AgentSessionLifecycleObserver, Telemetry
 		this.#createRecorder = createRecorder;
 		this.#onDiagnostic = onDiagnostic;
 		this.#enabled = enabled;
+		this.#storageDirectory = storageDirectory === undefined ? undefined : resolve(storageDirectory);
 		if (initial || createRecorder) this.#registerSignalObservers();
 	}
 
@@ -162,9 +165,9 @@ export class InvocationTrace implements AgentSessionLifecycleObserver, Telemetry
 	async #ensureRecorder(): Promise<JsonlTraceContext | undefined> {
 		if (this.#closed || !this.#enabled) return undefined;
 		if (this.#recorder) return this.#recorder;
-		if (!this.#createRecorder) return undefined;
+		if (!this.#createRecorder || this.#storageDirectory === undefined) return undefined;
 		if (!this.#recorderCreation) {
-			this.#recorderCreation = this.#createRecorder()
+			this.#recorderCreation = this.#createRecorder(this.#storageDirectory)
 				.then(async (handle) => {
 					if (this.#closed || !this.#enabled) {
 						const destinationPath = handle.recorder.destinationPath;
@@ -329,6 +332,23 @@ export class InvocationTrace implements AgentSessionLifecycleObserver, Telemetry
 		await recorder.flush();
 	}
 
+	async setStorageDirectory(storageDirectory: string): Promise<void> {
+		const resolvedStorageDirectory = resolve(storageDirectory);
+		if (resolvedStorageDirectory === this.#storageDirectory) return;
+		await this.#settlementQueue;
+		await this.#recorderCreation;
+		if (this.#pendingOperations.size > 0) {
+			throw new Error("Cannot switch invocation trace workspace while operations are pending");
+		}
+		await this.#closeCurrentRecorder(this.#intervalTerminationStatus);
+		this.#sessions.clear();
+		this.#sessionBindings.clear();
+		this.#untracedOperations.clear();
+		this.#activeHarnessVersion = undefined;
+		this.#lastDestinationPath = undefined;
+		this.#storageDirectory = resolvedStorageDirectory;
+	}
+
 	async setEnabled(enabled: boolean): Promise<void> {
 		if (this.#enabled === enabled) return;
 		this.#enabled = enabled;
@@ -394,9 +414,9 @@ export async function createInvocationTrace(
 
 	const version = options.diffexVersion ?? VERSION;
 	const runtime = runtimeIdentity();
-	const createRecorder = async (): Promise<InvocationTraceRecorderHandle> => {
+	const createRecorder = async (storageDirectory: string): Promise<InvocationTraceRecorderHandle> => {
 		const traceId = uuidv7();
-		const destinationPath = invocationTracePath(options.agentDir, traceId);
+		const destinationPath = invocationTracePath(storageDirectory, traceId);
 		let releaseTraceLock: (() => Promise<void>) | undefined;
 		try {
 			await mkdir(dirname(destinationPath), { recursive: true, mode: 0o700 });
@@ -425,5 +445,7 @@ export async function createInvocationTrace(
 		}
 	};
 
-	return { trace: new InvocationTrace(undefined, createRecorder, options.onDiagnostic, options.enabled) };
+	return {
+		trace: new InvocationTrace(undefined, createRecorder, options.onDiagnostic, options.enabled, options.agentDir),
+	};
 }

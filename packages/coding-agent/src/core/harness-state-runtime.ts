@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto";
 import { realpath, stat } from "node:fs/promises";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import {
 	HarnessStateStore,
 	type HarnessVersionBundle,
 	type HarnessWorkspaceIdentity,
+	harnessWorkspaceSelectionFileName,
 } from "@earendil-works/diffex-harness-state";
 
 export interface ResolvedHarnessWorkspace {
@@ -25,6 +26,14 @@ export async function resolveHarnessWorkspace(cwd: string): Promise<ResolvedHarn
 				});
 	const directoryId = `sha256:${createHash("sha256").update(identity).digest("hex")}`;
 	return { workspace: { repositoryId: "global", directoryId }, rootPath };
+}
+
+export function resolveEvolutionWorkspaceStateDirectory(agentDir: string, workspace: HarnessWorkspaceIdentity): string {
+	return join(
+		resolve(agentDir),
+		"evolution-workspaces",
+		harnessWorkspaceSelectionFileName(workspace).slice(0, -".json".length),
+	);
 }
 
 export interface LoadedHarnessState {

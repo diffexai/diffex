@@ -14,15 +14,19 @@ function waitForAbort(signal: AbortSignal): Promise<void> {
 	});
 }
 
+const scope = { repositoryId: "repository", scopeId: "workspace-a" };
+
 describe("evolution background worker", () => {
 	it("does not resume interrupted work without an explicit request", async () => {
+		let listedScope: typeof scope | undefined;
 		const jobs: EvolutionJobStore = {
 			async create() {},
 			async save() {},
 			async load() {
 				return null;
 			},
-			async list() {
+			async list(requestedScope) {
+				listedScope = requestedScope;
 				return [
 					{
 						jobId: "job-interrupted",
@@ -36,11 +40,16 @@ describe("evolution background worker", () => {
 				];
 			},
 		};
-		const source = new PollingEvolutionWorkSource(jobs, {
-			now: () => "2026-08-20T12:00:00.000Z",
-		});
+		const source = new PollingEvolutionWorkSource(
+			jobs,
+			{
+				now: () => "2026-08-20T12:00:00.000Z",
+			},
+			scope,
+		);
 
 		expect(await source.nextRunnableJob("2026-08-20T12:00:00.000Z")).toBeNull();
+		expect(listedScope).toEqual(scope);
 	});
 
 	it("admits durable work only after the interactive priority gate", async () => {

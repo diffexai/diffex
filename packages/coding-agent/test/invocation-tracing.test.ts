@@ -16,6 +16,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { EvolutionScope } from "#evolution";
 import { ENV_AGENT_DIR } from "../src/config.ts";
 import { TraceEvidenceCatalog } from "../src/core/evolution-runtime.ts";
+import { resolveEvolutionWorkspaceStateDirectory, resolveHarnessWorkspace } from "../src/core/harness-state-runtime.ts";
 import { createInvocationTrace } from "../src/core/invocation-trace.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
 
@@ -183,15 +184,31 @@ async function runCli(directories: TestDirectories, args: string[], extraEnv?: N
 }
 
 function tracePaths(agentDir: string): string[] {
-	const directory = join(agentDir, "traces");
+	const roots = [agentDir];
+	const workspaceRoot = join(agentDir, "evolution-workspaces");
 	try {
-		return readdirSync(directory)
-			.filter((name) => name.endsWith(".jsonl"))
-			.sort()
-			.map((name) => join(directory, name));
-	} catch {
-		return [];
-	}
+		roots.push(
+			...readdirSync(workspaceRoot, { withFileTypes: true })
+				.filter((entry) => entry.isDirectory())
+				.map((entry) => join(workspaceRoot, entry.name)),
+		);
+	} catch {}
+	return roots
+		.flatMap((root) => {
+			const directory = join(root, "traces");
+			try {
+				return readdirSync(directory)
+					.filter((name) => name.endsWith(".jsonl"))
+					.map((name) => join(directory, name));
+			} catch {
+				return [];
+			}
+		})
+		.sort();
+}
+
+function traceStorageDirectory(path: string): string {
+	return dirname(dirname(path));
 }
 
 function onlyTracePath(agentDir: string): string {
@@ -312,6 +329,60 @@ describe("CLI invocation tracing", () => {
 		expect(tracePaths(directories.agentDir)).toHaveLength(2);
 		await trace.close();
 		expect(tracePaths(directories.agentDir)).toHaveLength(2);
+	});
+
+	it("switches trace storage when the active workspace changes", async () => {
+		const directories = setup();
+		const secondProjectDir = join(directories.root, "second-project");
+		const secondStorageDir = join(directories.root, "second-evolution-state");
+		mkdirSync(secondProjectDir);
+		const firstManager = SessionManager.create(directories.projectDir, join(directories.agentDir, "sessions"));
+		const secondManager = SessionManager.create(secondProjectDir, join(directories.agentDir, "sessions"));
+		const { trace } = await createInvocationTrace({
+			agentDir: directories.agentDir,
+			sessionManager: firstManager,
+		});
+		await trace.attachSession(firstManager, "startup");
+		firstManager.appendMessage({ role: "user", content: "workspace A", timestamp: Date.now() });
+		firstManager.appendMessage(fauxAssistantMessage("workspace A response"));
+		await trace.startSpan(
+			{
+				name: "diffex.coding_agent.operation",
+				attributes: { "diffex.operation.id": "workspace-a", "diffex.operation.kind": "prompt" },
+			},
+			() => {},
+		);
+		await trace.operationSettled({
+			operationId: "workspace-a",
+			sessionManager: firstManager,
+			firstEntryOrdinal: 0,
+		});
+
+		await trace.setStorageDirectory(secondStorageDir);
+		await trace.attachSession(secondManager, "switch");
+		secondManager.appendMessage({ role: "user", content: "workspace B", timestamp: Date.now() });
+		secondManager.appendMessage(fauxAssistantMessage("workspace B response"));
+		await trace.startSpan(
+			{
+				name: "diffex.coding_agent.operation",
+				attributes: { "diffex.operation.id": "workspace-b", "diffex.operation.kind": "prompt" },
+			},
+			() => {},
+		);
+		await trace.operationSettled({
+			operationId: "workspace-b",
+			sessionManager: secondManager,
+			firstEntryOrdinal: 0,
+		});
+
+		const firstRecords = await readTrace(onlyTracePath(directories.agentDir));
+		const secondRecords = await readTrace(onlyTracePath(secondStorageDir));
+		expect(attachments(firstRecords)).toHaveLength(1);
+		expect(attachments(firstRecords)[0]?.path).toBe(firstManager.getSessionFile());
+		expect(attachments(secondRecords)).toHaveLength(1);
+		expect(attachments(secondRecords)[0]?.path).toBe(secondManager.getSessionFile());
+		expect(JSON.stringify(secondRecords)).not.toContain(firstManager.getSessionFile());
+		await trace.close();
 	});
 
 	it("settles concurrent process traces without overwriting either file", async () => {
@@ -461,7 +532,7 @@ describe("CLI invocation tracing", () => {
 		expect(footer(firstRecords)?.terminationStatus).toBe("completed");
 
 		if (process.platform !== "win32") {
-			expect(statSync(join(directories.agentDir, "traces")).mode & 0o777).toBe(0o700);
+			expect(statSync(dirname(firstTracePath)).mode & 0o777).toBe(0o700);
 			expect(statSync(firstTracePath).mode & 0o777).toBe(0o600);
 		}
 
@@ -794,7 +865,10 @@ describe("CLI invocation tracing", () => {
 
 	it("continues after trace creation fails and reports one warning", async () => {
 		const directories = setup();
-		writeFileSync(join(directories.agentDir, "traces"), "not a directory");
+		const workspace = await resolveHarnessWorkspace(directories.projectDir);
+		const storageDirectory = resolveEvolutionWorkspaceStateDirectory(directories.agentDir, workspace.workspace);
+		mkdirSync(storageDirectory, { recursive: true });
+		writeFileSync(join(storageDirectory, "traces"), "not a directory");
 
 		const result = await runCli(directories, [...commonArgs(directories), "-p", "hello"]);
 
@@ -812,10 +886,11 @@ describe("CLI invocation tracing", () => {
 
 		expect(result.code).toBe(1);
 		expect(result.stderr).toContain("intentional tracing test failure");
-		const records = await readTrace(onlyTracePath(directories.agentDir));
+		const tracePath = onlyTracePath(directories.agentDir);
+		const records = await readTrace(tracePath);
 		expect(footer(records)?.terminationStatus).toBe("failed");
 		const scope: EvolutionScope = { repositoryId: "global", scopeId: "global" };
-		const catalog = new TraceEvidenceCatalog({ agentDir: directories.agentDir, scope });
+		const catalog = new TraceEvidenceCatalog({ agentDir: traceStorageDirectory(tracePath), scope });
 		expect(await catalog.listSuccessful(scope, 0, await catalog.highWaterCursor(scope))).toHaveLength(1);
 	});
 

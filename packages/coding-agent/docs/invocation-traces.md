@@ -10,12 +10,12 @@ If the trace file cannot be created, Diffex prints one warning and continues wit
 
 ## Storage and Discovery
 
-Trace files are stored in `~/.diffex/agent/traces/` by default, or beneath the directory selected by `DIFFEX_CODING_AGENT_DIR`.
+Trace files are stored in `~/.diffex/agent/evolution-workspaces/<workspace-id>/traces/` by default, or under the corresponding workspace directory beneath `DIFFEX_CODING_AGENT_DIR`.
 Each file is named `<UTC timestamp>_<trace ID>.jsonl`.
 A long-running process can create multiple files as successive operations settle.
 The trace directory is restricted to the current user with mode `0700`, and each trace file uses mode `0600` on POSIX systems.
 
-Tools can discover traces by scanning this directory for `.jsonl` files and validating them with the harness trace reader.
+Tools can discover a workspace's traces by scanning its trace directory for `.jsonl` files and validating them with the harness trace reader. Trace directories are intentionally separate: sessions in the same workspace contribute to the same evidence stream, while another workspace has independent invocation ordering, token estimates, and evolution jobs.
 The trace header identifies the producing Diffex build and runtime.
 Session attachment records identify every referenced session ID, path, format, and transition reason.
 

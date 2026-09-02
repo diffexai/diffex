@@ -11,7 +11,11 @@ import {
 	harnessWorkspaceSelectionFileName,
 } from "@earendil-works/diffex-harness-state";
 import { afterEach, describe, expect, it } from "vitest";
-import { loadWorkspaceHarnessState } from "../src/core/harness-state-runtime.ts";
+import {
+	loadWorkspaceHarnessState,
+	resolveEvolutionWorkspaceStateDirectory,
+	resolveHarnessWorkspace,
+} from "../src/core/harness-state-runtime.ts";
 
 const WORKSPACE: HarnessWorkspaceIdentity = { repositoryId: "global", directoryId: "workspace-a" };
 
@@ -47,6 +51,24 @@ describe("workspace harness state startup", () => {
 	function contentHash(content: string): string {
 		return `sha256:${createHash("sha256").update(content, "utf8").digest("hex")}`;
 	}
+
+	it("derives shared evolution state for the same workspace and isolates different workspaces", async () => {
+		const agentDir = createAgentDir();
+		const workspaceAPath = join(agentDir, "workspace-a");
+		const workspaceBPath = join(agentDir, "workspace-b");
+		mkdirSync(workspaceAPath);
+		mkdirSync(workspaceBPath);
+		const firstWorkspaceA = await resolveHarnessWorkspace(workspaceAPath);
+		const secondWorkspaceA = await resolveHarnessWorkspace(workspaceAPath);
+		const workspaceB = await resolveHarnessWorkspace(workspaceBPath);
+
+		expect(resolveEvolutionWorkspaceStateDirectory(agentDir, firstWorkspaceA.workspace)).toBe(
+			resolveEvolutionWorkspaceStateDirectory(agentDir, secondWorkspaceA.workspace),
+		);
+		expect(resolveEvolutionWorkspaceStateDirectory(agentDir, firstWorkspaceA.workspace)).not.toBe(
+			resolveEvolutionWorkspaceStateDirectory(agentDir, workspaceB.workspace),
+		);
+	});
 
 	it("initializes and activates the empty root when its workspace selection is missing", async () => {
 		const loaded = await loadHarnessState(createAgentDir());

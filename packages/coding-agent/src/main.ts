@@ -49,6 +49,7 @@ import { AuthStorage, ReadOnlyAuthStorage } from "./core/auth-storage.ts";
 import { createCodingAgentEvolutionRuntime, EvolutionRuntimeCoordinator } from "./core/evolution-runtime.ts";
 import { exportFromFile } from "./core/export-html/index.ts";
 import type { InlineExtension } from "./core/extensions/types.ts";
+import { resolveEvolutionWorkspaceStateDirectory, resolveHarnessWorkspace } from "./core/harness-state-runtime.ts";
 import { applyHttpProxySettings, configureHttpDispatcher } from "./core/http-dispatcher.ts";
 import { createInvocationTrace } from "./core/invocation-trace.ts";
 import { resolveCliModel, resolveModelScope, type ScopedModel } from "./core/model-resolver.ts";
@@ -714,8 +715,9 @@ export async function main(args: string[], options?: MainOptions) {
 		}
 		sessionManager.appendSessionInfo(name);
 	}
+	const initialWorkspace = await resolveHarnessWorkspace(sessionManager.getCwd());
 	const invocationTraceResult = await createInvocationTrace({
-		agentDir,
+		agentDir: resolveEvolutionWorkspaceStateDirectory(agentDir, initialWorkspace.workspace),
 		sessionManager,
 		enabled: startupSettingsManager.getEvolutionEnabled(),
 		onDiagnostic: (diagnostic) => reportDiagnostics([diagnostic]),
@@ -771,6 +773,9 @@ export async function main(args: string[], options?: MainOptions) {
 		telemetryContext,
 		invocationSessionReason = "startup",
 	}) => {
+		const workspace = await resolveHarnessWorkspace(cwd);
+		const evolutionStateDirectory = resolveEvolutionWorkspaceStateDirectory(agentDir, workspace.workspace);
+		await invocationTrace.setStorageDirectory(evolutionStateDirectory);
 		await invocationTrace.attachSession(sessionManager, invocationSessionReason);
 		const isInitialRuntime = sessionStartEvent === undefined;
 		const projectTrustDiagnostics: AgentSessionRuntimeDiagnostic[] = [];
@@ -896,7 +901,7 @@ export async function main(args: string[], options?: MainOptions) {
 		};
 		await evolutionCoordinator.replace(
 			await createCodingAgentEvolutionRuntime({
-				agentDir,
+				agentDir: evolutionStateDirectory,
 				cwd,
 				session: created.session,
 				harnessState: services.harnessStateStore,

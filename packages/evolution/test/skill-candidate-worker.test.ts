@@ -215,6 +215,7 @@ function qualifiedGroup(candidateReference: EvolutionArtifactReference): SkillCa
 
 class MemoryJobStore implements EvolutionJobStore {
 	readonly jobs: EvolutionJob[];
+	readonly listedScopes: Array<EvolutionScope | undefined> = [];
 
 	constructor(jobs: readonly EvolutionJob[]) {
 		this.jobs = [...jobs];
@@ -227,8 +228,14 @@ class MemoryJobStore implements EvolutionJobStore {
 		return this.jobs.find((job) => job.jobId === jobId) ?? null;
 	}
 
-	async list(): Promise<readonly EvolutionJob[]> {
-		return this.jobs;
+	async list(requestedScope?: EvolutionScope): Promise<readonly EvolutionJob[]> {
+		this.listedScopes.push(requestedScope);
+		return this.jobs.filter(
+			(job) =>
+				requestedScope === undefined ||
+				(job.metadata.scope.repositoryId === requestedScope.repositoryId &&
+					job.metadata.scope.scopeId === requestedScope.scopeId),
+		);
 	}
 }
 
@@ -648,11 +655,13 @@ describe("skill candidate registry worker", () => {
 		const data = fixture();
 		const source = new PollingSkillCandidateWorkSource({
 			clock: data.clock,
+			scope,
 			jobs: data.jobs,
 			store: data.store,
 		});
 
 		expect(await source.nextRunnableJob(now)).toBe(data.job.jobId);
+		expect(data.jobs.listedScopes).toEqual([scope]);
 		await data.worker.process(data.job.jobId);
 		expect(await source.nextRunnableJob(now)).toBeNull();
 	});
@@ -720,6 +729,7 @@ describe("skill candidate registry worker", () => {
 		expect(store.events.some((event) => event.type === "skill-candidate-work-failed")).toBe(false);
 		const source = new PollingSkillCandidateWorkSource({
 			clock: data.clock,
+			scope,
 			jobs: data.jobs,
 			store,
 		});
@@ -964,6 +974,7 @@ describe("skill candidate registry worker", () => {
 			const reloadedStore = new FileEvolutionPersistence(persistenceRoot);
 			const source = new PollingSkillCandidateWorkSource({
 				clock: data.clock,
+				scope,
 				jobs: data.jobs,
 				store: reloadedStore,
 			});
@@ -1031,6 +1042,7 @@ describe("skill candidate registry worker", () => {
 		).toBe(true);
 		const source = new PollingSkillCandidateWorkSource({
 			clock: data.clock,
+			scope,
 			jobs: data.jobs,
 			store: data.store,
 		});
@@ -1071,6 +1083,7 @@ describe("skill candidate registry worker", () => {
 		data.registry.failuresRemaining = 1;
 		const source = new PollingSkillCandidateWorkSource({
 			clock: data.clock,
+			scope,
 			jobs: data.jobs,
 			store: data.store,
 		});

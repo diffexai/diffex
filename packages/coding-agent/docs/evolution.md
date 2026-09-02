@@ -23,11 +23,11 @@ Use `/version` to inspect compatible revisions for the current workspace and sel
 
 Harness selection is resolved at prompt admission. A fresh prompt observes the selected revision; in-flight work and already admitted queued messages keep their pinned memory and skill versions. Background candidate validation reads the atomically selected revision directly, so it does not depend on a session reaching its next prompt boundary first. If `/version` changes while an evolution job is running, the job continues from its frozen base and cannot replace the newer selection.
 
-The footer identifies the active harness and shows background evolution activity. `/skills` lists only evolved skills from the active revision whose workspace identity matches the current workspace.
+The footer identifies the active harness and shows background evolution activity. `/skills` lists only evolved skills from the active revision whose workspace identity matches the current workspace. Harness selection is workspace-scoped: sessions in the same workspace observe each other's selections at prompt boundaries, while sessions in other workspaces keep their own selected revision.
 
 ## Automatic eligibility
 
-When evolution is enabled, automatic work requires all of the following:
+When evolution is enabled, automatic work considers only invocation evidence accumulated by the active workspace and requires all of the following:
 
 - more than 600,000 estimated unprocessed evidence tokens;
 - at least three eligible settled invocations;
@@ -46,10 +46,13 @@ These checks do not prove semantic safety and are not a sandbox. When evaluation
 
 Evolution state is stored beneath the effective agent directory:
 
-- `traces/` contains immutable invocation evidence intervals;
-- `evolution/` contains jobs, artifacts, candidate history, observations, receipts, and recovery state;
-- `evolution-failures/` contains failure reports;
-- `harness-state/` contains immutable revisions and the selected pointer.
+- `evolution-workspaces/<workspace-id>/traces/` contains immutable invocation evidence intervals for one workspace;
+- `evolution-workspaces/<workspace-id>/evolution/` contains that workspace's jobs, artifacts, candidate history, observations, receipts, and recovery state;
+- `evolution-workspaces/<workspace-id>/evolution-failures/` contains that workspace's failure reports;
+- `harness-state/versions/` contains shared immutable revisions;
+- `harness-state/selections/` contains independent selected pointers keyed by workspace identity.
+
+Sessions resolved to the same workspace identity share evidence totals, jobs, candidates, and harness selection. Different workspace identities never contribute traces, invocation counts, token estimates, or jobs to each other. A process that switches to a session in another workspace rotates its trace destination before attaching the replacement session.
 
 Interrupted jobs and candidate work resume from durable checkpoints. Writer retries use stable idempotency keys, leases, exact base revisions, and compare-and-swap selection. Skill rollback follows immutable ancestry to the candidate's application boundary and selects its existing pre-activation revision; it does not mutate historical revisions.
 

@@ -45,6 +45,7 @@ const MAX_APPEND_ATTEMPTS = 5;
 
 export interface PollingSkillCandidateWorkSourceDependencies {
 	readonly clock: EvolutionClock;
+	readonly scope: EvolutionScope;
 	readonly jobs: EvolutionJobStore;
 	readonly store: SkillCandidateRegistryStore;
 }
@@ -312,7 +313,7 @@ export class PollingSkillCandidateWorkSource {
 	}
 
 	async #candidateJobs(): Promise<readonly EvolutionJob[]> {
-		return (await this.#dependencies.jobs.list())
+		return (await this.#dependencies.jobs.list(this.#dependencies.scope))
 			.filter((job) => job.outcome === "completed" && job.stage === "completed" && hasSkillCandidates(job))
 			.sort(
 				(left, right) =>
