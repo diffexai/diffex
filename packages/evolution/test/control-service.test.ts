@@ -680,7 +680,7 @@ describe("evolution control service", () => {
 		});
 	});
 
-	it("exposes candidate evidence, gates activation, and rolls back through preserving descendants", async () => {
+	it("exposes candidate evidence from legacy snapshots and gates activation and rollback", async () => {
 		const inputReference = { artifactId: "input-1", contentDigest: `sha256:${"1".repeat(64)}` };
 		const candidateReference = { artifactId: "candidate-1", contentDigest: `sha256:${"2".repeat(64)}` };
 		const draftReference = { artifactId: "draft-1", contentDigest: `sha256:${"3".repeat(64)}` };
@@ -771,7 +771,7 @@ describe("evolution control service", () => {
 			harness: { baseVersion: null },
 			expectedHarnessBaseVersion: `sha256:${"a".repeat(64)}`,
 			skillCatalog: [],
-			tokenMeasurement: { counterVersion: "fixture", inputTokens: 8, outputTokens: 2, totalTokens: 10 },
+			tokenMeasurement: { estimatorVersion: "canonical-json-utf8-v1", estimatedTokens: 10 },
 		} as unknown as EvolutionInputSnapshot;
 		const job = {
 			metadata: { scope },
@@ -882,6 +882,7 @@ describe("evolution control service", () => {
 		} as unknown as EvolutionControlServiceDependencies);
 
 		expect(await service.getJob(job.jobId)).toMatchObject({
+			observability: { evidenceTokens: 10 },
 			skillCandidates: [
 				{
 					candidateId: candidate.candidateId,

@@ -269,6 +269,12 @@ function isInputSnapshot(artifact: EvolutionArtifact): artifact is EvolutionInpu
 	return "ingestionHighWaterCursor" in artifact && "evidenceSources" in artifact && "harness" in artifact;
 }
 
+function evidenceTokenTotal(input: EvolutionInputSnapshot): number {
+	return "totalTokens" in input.tokenMeasurement
+		? input.tokenMeasurement.totalTokens
+		: input.tokenMeasurement.estimatedTokens;
+}
+
 function isScoredProposal(artifact: EvolutionArtifact): artifact is ScoredProposal {
 	return "proposal" in artifact && "evidenceRankingScore" in artifact;
 }
@@ -953,7 +959,7 @@ export class EvolutionControlService {
 			observability: {
 				queueAgeMs,
 				stageLatencies,
-				evidenceTokens: input.tokenMeasurement.totalTokens,
+				evidenceTokens: evidenceTokenTotal(input),
 				providerCostUsd: null,
 				reflectorBudget,
 				sliceCoverage,

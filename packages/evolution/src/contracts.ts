@@ -239,12 +239,18 @@ export interface EvolutionRepositorySnapshot {
 	readonly revision: string;
 }
 
-export interface EvolutionTokenMeasurement {
-	readonly counterVersion: string;
-	readonly inputTokens: number;
-	readonly outputTokens: number;
-	readonly totalTokens: number;
-}
+export type EvolutionTokenMeasurement =
+	| {
+			readonly counterVersion: string;
+			readonly inputTokens: number;
+			readonly outputTokens: number;
+			readonly totalTokens: number;
+	  }
+	| {
+			/** Present only on snapshots persisted before reported usage accounting. */
+			readonly estimatorVersion: string;
+			readonly estimatedTokens: number;
+	  };
 
 export interface EvolutionPromptVersions {
 	readonly reflector: string;
