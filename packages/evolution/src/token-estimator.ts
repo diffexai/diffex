@@ -2,7 +2,7 @@ import type { MaterializedInvocation } from "@earendil-works/diffex-harness-trac
 import { serializeEvolutionValue } from "./provenance.ts";
 
 export const EVOLUTION_TOKEN_ESTIMATOR_VERSION = "canonical-json-utf8-v1" as const;
-export const AUTOMATIC_EVOLUTION_TOKEN_THRESHOLD = 750_000;
+export const AUTOMATIC_EVOLUTION_TOKEN_THRESHOLD = 600_000;
 export const AUTOMATIC_EVOLUTION_MINIMUM_INVOCATIONS = 3;
 export const AUTOMATIC_EVOLUTION_COOLDOWN_MS = 20 * 60 * 1_000;
 
