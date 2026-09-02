@@ -47,6 +47,18 @@ class CursorComponent implements Component {
 	invalidate(): void {}
 }
 
+class FocusedSelectorComponent implements Component {
+	render(): string[] {
+		return [
+			`${CURSOR_MARKER}search`,
+			...Array.from({ length: 10 }, (_, index) => `model ${index + 1}`),
+			`${ACTIVE_ROW_MARKER}selected`,
+		];
+	}
+
+	invalidate(): void {}
+}
+
 class FocusUnsupportedTerminal extends RecordingTerminal {
 	override readonly focusReportingSupported = false;
 }
@@ -106,5 +118,22 @@ describe("TUI terminal focus", () => {
 		assert.ok(terminal.writes.every((write) => !write.includes(ACTIVE_ROW_MARKER)));
 		tui.stop();
 		assert.ok(terminal.writes.includes("\x1b[?1004l"));
+	});
+
+	it("keeps focused selector anchors visible on a constrained main screen", async () => {
+		const terminal = new RecordingTerminal(40, 6);
+		const tui = new TuiMainScreen(terminal);
+		tui.addChild({ render: () => ["history"], invalidate: () => {} });
+		tui.addChild(new FocusedSelectorComponent());
+		tui.addChild({ render: () => ["footer"], invalidate: () => {} });
+
+		tui.start();
+		tui.renderNow();
+		const viewport = (await terminal.flushAndGetViewport()).join("\n");
+		assert.match(viewport, /search/);
+		assert.match(viewport, /selected/);
+		assert.match(viewport, /footer/);
+		assert.ok(!viewport.includes(ACTIVE_ROW_MARKER));
+		tui.stop();
 	});
 });

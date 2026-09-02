@@ -52,6 +52,23 @@ describe("viewport layout", () => {
 		assert.deepStrictEqual(cropFocusedLines(lines, 2), [lines[0], lines[12]]);
 	});
 
+	it("applies focus-aware cropping to constrained leaf components", () => {
+		const selector = {
+			render: () => [
+				`${CURSOR_MARKER}search`,
+				...Array.from({ length: 11 }, (_, index) => `model ${index + 1}`),
+				`${ACTIVE_ROW_MARKER}selected`,
+				"hint",
+			],
+			invalidate: () => {},
+		};
+		const frame = renderLayoutFrame(new VStack([{ component: selector, grow: 1, minSize: 1 }]), 40, 5, () => {});
+
+		assert.strictEqual(frame.lines.length, 5);
+		assert.ok(frame.lines.some((line) => line.includes("search")));
+		assert.ok(frame.lines.some((line) => line.includes("selected")));
+	});
+
 	it("anchors to the active row nearest the input cursor", () => {
 		const lines = [
 			`${ACTIVE_ROW_MARKER}inactive selection`,

@@ -179,9 +179,13 @@ function layoutComponent(
 	const safeWidth = Math.max(1, Math.floor(width));
 	const node = getLayoutNode(component);
 	if (!node) {
-		const lines = renderCached(context, component, safeWidth);
-		const allocatedHeight = height === undefined ? lines.length : Math.max(0, Math.floor(height));
-		const lineOffset = getFocusedLineWindow(lines, allocatedHeight).start;
+		const renderedLines = renderCached(context, component, safeWidth);
+		const allocatedHeight = height === undefined ? renderedLines.length : Math.max(0, Math.floor(height));
+		const hasFocusAnchors = renderedLines.some(
+			(line) => line.includes(CURSOR_MARKER) || line.includes(ACTIVE_ROW_MARKER),
+		);
+		const lines = hasFocusAnchors ? cropFocusedLines(renderedLines, allocatedHeight) : renderedLines;
+		const lineOffset = hasFocusAnchors ? 0 : getFocusedLineWindow(lines, allocatedHeight).start;
 		return {
 			component,
 			rect: { x, y, width: safeWidth, height: allocatedHeight },

@@ -1,7 +1,8 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { cropFocusedLines } from "./layout.ts";
 import { deleteKittyImage, isImageLine } from "./terminal-image.ts";
-import { type TUI, TuiBase, type TuiStopOptions } from "./tui.ts";
+import { ACTIVE_ROW_MARKER, type Component, CURSOR_MARKER, type TUI, TuiBase, type TuiStopOptions } from "./tui.ts";
 import { visibleWidth } from "./utils.ts";
 
 const KITTY_SEQUENCE_PREFIX = "\x1b_G";
@@ -41,6 +42,26 @@ function extractKittyImageRows(line: string): number {
 
 function isTermuxSession(): boolean {
 	return Boolean(process.env.TERMUX_VERSION);
+}
+
+function renderViewportAwareChildren(children: readonly Component[], width: number, height: number): string[] {
+	const blocks = children.map((child) => child.render(width));
+	const focusedIndex = blocks.findIndex((lines) => lines.some((line) => line.includes(CURSOR_MARKER)));
+	if (focusedIndex === -1) return blocks.flat();
+
+	const focusedLines = blocks[focusedIndex] ?? [];
+	const trailingLines = blocks.slice(focusedIndex + 1).flat();
+	if (focusedLines.length + trailingLines.length <= height) return blocks.flat();
+
+	const requiresActiveRow = focusedLines.some((line) => line.includes(ACTIVE_ROW_MARKER));
+	const minimumFocusedRows = requiresActiveRow && height >= 2 ? 2 : 1;
+	const retainedTrailingLines = trailingLines.slice(-Math.max(0, height - minimumFocusedRows));
+	const focusedRows = Math.max(1, height - retainedTrailingLines.length);
+	return [
+		...blocks.slice(0, focusedIndex).flat(),
+		...cropFocusedLines(focusedLines, focusedRows),
+		...retainedTrailingLines,
+	];
 }
 
 export interface TuiMainScreenRenderState {
@@ -300,7 +321,7 @@ export class TuiMainScreen extends TuiBase implements TUI {
 		};
 
 		// Render all components to get new lines
-		let newLines = this.render(width);
+		let newLines = renderViewportAwareChildren(this.children, width, height);
 
 		// Composite overlays into the rendered lines (before differential compare)
 		if (this.hasOverlayEntries) {
