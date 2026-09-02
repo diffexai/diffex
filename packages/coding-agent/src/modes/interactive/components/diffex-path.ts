@@ -1,6 +1,7 @@
 import { type Component, getGlyphs, Spacer, truncateToWidth, visibleWidth } from "@earendil-works/diffex-tui";
-import { STANDARD_VIEWPORT_MIN_COLUMNS } from "../responsive-layout.ts";
 import { theme } from "../theme/theme.ts";
+
+const EXTENDED_HINGE_MIN_COLUMNS = 80;
 
 export type DiffexPathMarker = "start" | "branch" | "end";
 export type DiffexPathOrigin = "standalone" | "user-dock" | "continued";
@@ -180,5 +181,5 @@ export class DiffexPathDockHinge implements Component {
 }
 
 export function shouldExtendDiffexPathHinge(width: number): boolean {
-	return width >= STANDARD_VIEWPORT_MIN_COLUMNS;
+	return width >= EXTENDED_HINGE_MIN_COLUMNS;
 }
