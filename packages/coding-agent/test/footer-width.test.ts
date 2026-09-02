@@ -119,7 +119,7 @@ function evolutionOverview(
 		scope: { repositoryId: "repository", scopeId: "repository" },
 		processedEvidenceCursor: 0,
 		ingestionHighWaterCursor: 0,
-		unprocessedEstimatedTokens: 0,
+		unprocessedTokens: 0,
 		settledInvocationCount: 0,
 		automaticTokenThreshold: AUTOMATIC_EVOLUTION_TOKEN_THRESHOLD,
 		automaticMinimumInvocations: 5,

@@ -240,8 +240,10 @@ export interface EvolutionRepositorySnapshot {
 }
 
 export interface EvolutionTokenMeasurement {
-	readonly estimatorVersion: string;
-	readonly estimatedTokens: number;
+	readonly counterVersion: string;
+	readonly inputTokens: number;
+	readonly outputTokens: number;
+	readonly totalTokens: number;
 }
 
 export interface EvolutionPromptVersions {

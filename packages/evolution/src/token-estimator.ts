@@ -2,7 +2,8 @@ import type { MaterializedInvocation } from "@earendil-works/diffex-harness-trac
 import { serializeEvolutionValue } from "./provenance.ts";
 
 export const EVOLUTION_TOKEN_ESTIMATOR_VERSION = "canonical-json-utf8-v1" as const;
-export const AUTOMATIC_EVOLUTION_TOKEN_THRESHOLD = 600_000;
+export const EVOLUTION_TOKEN_COUNTER_VERSION = "reported-assistant-usage-v1" as const;
+export const AUTOMATIC_EVOLUTION_TOKEN_THRESHOLD = 400_000;
 export const AUTOMATIC_EVOLUTION_MINIMUM_INVOCATIONS = 3;
 export const AUTOMATIC_EVOLUTION_COOLDOWN_MS = 20 * 60 * 1_000;
 
@@ -21,9 +22,41 @@ export function measureEvolutionValue(value: unknown): EvolutionValueSize {
 	};
 }
 
-export function estimateEvolutionTokens(invocations: readonly MaterializedInvocation[]): number {
-	if (invocations.length === 0) return 0;
-	return measureEvolutionValue(invocations).estimatedTokens;
+export interface EvolutionTokenCount {
+	readonly inputTokens: number;
+	readonly outputTokens: number;
+	readonly totalTokens: number;
+}
+
+function recordValue(value: unknown): Readonly<Record<string, unknown>> | null {
+	return typeof value === "object" && value !== null && !Array.isArray(value)
+		? (value as Readonly<Record<string, unknown>>)
+		: null;
+}
+
+function reportedTokenCount(value: unknown): number {
+	return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : 0;
+}
+
+export function countEvolutionTokens(invocations: readonly MaterializedInvocation[]): EvolutionTokenCount {
+	let inputTokens = 0;
+	let outputTokens = 0;
+	for (const invocation of invocations) {
+		for (const evidence of invocation.evidence) {
+			if (evidence.kind !== "session_item") continue;
+			const message = recordValue(evidence.payload.message);
+			const usage =
+				message?.role === "assistant"
+					? recordValue(message.usage)
+					: evidence.itemType === "record.usage" && evidence.payload.cause === "assistant"
+						? recordValue(evidence.payload.usage)
+						: null;
+			if (usage === null) continue;
+			inputTokens += reportedTokenCount(usage.input);
+			outputTokens += reportedTokenCount(usage.output);
+		}
+	}
+	return { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens };
 }
 
 export type AutomaticEvolutionEligibilityReason =
@@ -37,7 +70,7 @@ export type AutomaticEvolutionEligibility =
 
 export interface AutomaticEvolutionEligibilityInput {
 	readonly invocationCount: number;
-	readonly estimatedTokens: number;
+	readonly tokens: number;
 	readonly now: string;
 	readonly previousAutomaticTerminalAt: string | null;
 }
@@ -48,7 +81,7 @@ export function evaluateAutomaticEvolutionEligibility(
 	if (input.invocationCount < AUTOMATIC_EVOLUTION_MINIMUM_INVOCATIONS) {
 		return { eligible: false, reason: "insufficient-invocations" };
 	}
-	if (input.estimatedTokens <= AUTOMATIC_EVOLUTION_TOKEN_THRESHOLD) {
+	if (input.tokens <= AUTOMATIC_EVOLUTION_TOKEN_THRESHOLD) {
 		return { eligible: false, reason: "insufficient-tokens" };
 	}
 	if (input.previousAutomaticTerminalAt !== null) {

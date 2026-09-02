@@ -8,8 +8,9 @@ import {
 	AUTOMATIC_EVOLUTION_TOKEN_THRESHOLD,
 	computeEvolutionContentDigest,
 	computeEvolutionTextDigest,
+	countEvolutionTokens,
 	createEvolutionArtifactMetadata,
-	EVOLUTION_TOKEN_ESTIMATOR_VERSION,
+	EVOLUTION_TOKEN_COUNTER_VERSION,
 	type EvolutionArtifactProducer,
 	EvolutionControlPlane,
 	type EvolutionEventSink,
@@ -27,7 +28,6 @@ import {
 	type EvolutionStageExecutor,
 	EvolutionTargetAdapterRegistry,
 	type EvolutionTargetWriter,
-	estimateEvolutionTokens,
 	evaluateAutomaticEvolutionEligibility,
 	FileEvolutionPersistence,
 	type Lesson,
@@ -72,7 +72,7 @@ class AdvancingClock {
 	}
 }
 
-function invocation(traceId: string): MaterializedInvocation {
+function invocation(traceId: string, inputTokens = 100, outputTokens = 25): MaterializedInvocation {
 	return {
 		version: 1,
 		tracePath: `/traces/${traceId}.jsonl`,
@@ -85,7 +85,19 @@ function invocation(traceId: string): MaterializedInvocation {
 			criteria: ["trace_sequence", "session_cursor", "timestamp", "span_parentage", "causal_id"],
 			ambiguity: [],
 		},
-		evidence: [],
+		evidence: [
+			{
+				evidenceId: `${traceId}:assistant`,
+				kind: "session_item",
+				itemType: "message",
+				order: { traceSequence: 1, timestamp: null, causalIdentifiers: [], ambiguity: [] },
+				traceSources: [],
+				payload: {
+					type: "message",
+					message: { role: "assistant", usage: { input: inputTokens, output: outputTokens } },
+				},
+			},
+		],
 		diagnostics: [],
 	};
 }
@@ -102,9 +114,9 @@ function materialization(sequence: number): SuccessfulMaterialization {
 }
 
 function automaticMaterializations(): readonly SuccessfulMaterialization[] {
-	const padding = "x".repeat(Math.ceil((AUTOMATIC_EVOLUTION_TOKEN_THRESHOLD * 4) / 3) + 1_000);
+	const inputTokens = Math.floor(AUTOMATIC_EVOLUTION_TOKEN_THRESHOLD / 3) + 1;
 	return [1, 2, 3].map((sequence) => {
-		const materialized = { ...invocation(`trace-${sequence}`), tracePath: `/traces/${padding}` };
+		const materialized = invocation(`trace-${sequence}`, inputTokens, 1);
 		return {
 			materializationId: `materialization-${sequence}`,
 			ingestionCursor: sequence,
@@ -464,7 +476,7 @@ describe("durable evolution control plane", () => {
 		expect(await fixture.persistence.list(scope)).toEqual([]);
 	});
 
-	it("records the deterministic estimator and rejects a small automatic corpus", async () => {
+	it("records reported token usage and rejects a small automatic corpus", async () => {
 		const fixture = await controlPlaneFixture(new RecordingExecutor());
 		await expect(fixture.controlPlane.createJob({ scope, trigger: "automatic" })).resolves.toEqual({
 			status: "not-created",
@@ -475,8 +487,10 @@ describe("durable evolution control plane", () => {
 		const snapshot = await fixture.persistence.get(created.inputSnapshot);
 		expect(snapshot).toMatchObject({
 			tokenMeasurement: {
-				estimatorVersion: EVOLUTION_TOKEN_ESTIMATOR_VERSION,
-				estimatedTokens: expect.any(Number),
+				counterVersion: EVOLUTION_TOKEN_COUNTER_VERSION,
+				inputTokens: 300,
+				outputTokens: 75,
+				totalTokens: 375,
 			},
 		});
 	});
@@ -1026,15 +1040,43 @@ describe("checkpointed evolution pipeline", () => {
 });
 
 describe("automatic evolution policy", () => {
-	it("reports zero tokens for an empty evidence corpus", () => {
-		expect(estimateEvolutionTokens([])).toBe(0);
+	it("counts reported assistant usage from supported session formats", () => {
+		const codingAgentInvocation = invocation("coding", 120, 30);
+		const harnessInvocation: MaterializedInvocation = {
+			...invocation("harness", 0, 0),
+			evidence: [
+				{
+					evidenceId: "harness:usage",
+					kind: "session_item",
+					itemType: "record.usage",
+					order: { traceSequence: 1, timestamp: null, causalIdentifiers: [], ambiguity: [] },
+					traceSources: [],
+					payload: { kind: "record", type: "usage", cause: "assistant", usage: { input: 80, output: 20 } },
+				},
+				{
+					evidenceId: "harness:compaction",
+					kind: "session_item",
+					itemType: "record.usage",
+					order: { traceSequence: 2, timestamp: null, causalIdentifiers: [], ambiguity: [] },
+					traceSources: [],
+					payload: { kind: "record", type: "usage", cause: "compaction", usage: { input: 1_000, output: 500 } },
+				},
+			],
+		};
+
+		expect(countEvolutionTokens([])).toEqual({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
+		expect(countEvolutionTokens([codingAgentInvocation, harnessInvocation])).toEqual({
+			inputTokens: 200,
+			outputTokens: 50,
+			totalTokens: 250,
+		});
 	});
 
 	it("requires a strict token threshold and at least three invocations", () => {
 		expect(
 			evaluateAutomaticEvolutionEligibility({
 				invocationCount: 3,
-				estimatedTokens: AUTOMATIC_EVOLUTION_TOKEN_THRESHOLD,
+				tokens: AUTOMATIC_EVOLUTION_TOKEN_THRESHOLD,
 				now: "2026-08-19T12:00:00.000Z",
 				previousAutomaticTerminalAt: null,
 			}),
@@ -1042,7 +1084,7 @@ describe("automatic evolution policy", () => {
 		expect(
 			evaluateAutomaticEvolutionEligibility({
 				invocationCount: 2,
-				estimatedTokens: AUTOMATIC_EVOLUTION_TOKEN_THRESHOLD + 1,
+				tokens: AUTOMATIC_EVOLUTION_TOKEN_THRESHOLD + 1,
 				now: "2026-08-19T12:00:00.000Z",
 				previousAutomaticTerminalAt: null,
 			}),
@@ -1055,7 +1097,7 @@ describe("automatic evolution policy", () => {
 		const atCooldown = new Date(Date.parse(previous) + AUTOMATIC_EVOLUTION_COOLDOWN_MS).toISOString();
 		const input = {
 			invocationCount: 3,
-			estimatedTokens: AUTOMATIC_EVOLUTION_TOKEN_THRESHOLD + 1,
+			tokens: AUTOMATIC_EVOLUTION_TOKEN_THRESHOLD + 1,
 			previousAutomaticTerminalAt: previous,
 		};
 

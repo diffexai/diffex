@@ -454,9 +454,11 @@ export {
 	type AutomaticEvolutionEligibility,
 	type AutomaticEvolutionEligibilityInput,
 	type AutomaticEvolutionEligibilityReason,
+	countEvolutionTokens,
+	EVOLUTION_TOKEN_COUNTER_VERSION,
 	EVOLUTION_TOKEN_ESTIMATOR_VERSION,
+	type EvolutionTokenCount,
 	type EvolutionValueSize,
-	estimateEvolutionTokens,
 	evaluateAutomaticEvolutionEligibility,
 	measureEvolutionValue,
 } from "./token-estimator.ts";

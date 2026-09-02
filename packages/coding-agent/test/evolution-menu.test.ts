@@ -84,7 +84,7 @@ function jobDetail(overrides: Partial<EvolutionJobDetail> = {}): EvolutionJobDet
 		observability: {
 			queueAgeMs: 10,
 			stageLatencies: [{ stage: "reflecting", durationMs: 20 }],
-			estimatedEvidenceTokens: 12_345,
+			evidenceTokens: 12_345,
 			providerCostUsd: null,
 			reflectorBudget: { modelCalls: 5, reflectionRounds: 2, toolCalls: 3 },
 			sliceCoverage: { analyzed: 3, corrupt: 0, skipped: 1, unreadable: 0 },
@@ -112,7 +112,7 @@ function overview(overrides: Partial<EvolutionOverview> = {}): EvolutionOverview
 		scope: { repositoryId: "repository", scopeId: "repository" },
 		processedEvidenceCursor: 2,
 		ingestionHighWaterCursor: 8,
-		unprocessedEstimatedTokens: 1_100_001,
+		unprocessedTokens: 1_100_001,
 		settledInvocationCount: 6,
 		automaticTokenThreshold: AUTOMATIC_EVOLUTION_TOKEN_THRESHOLD,
 		automaticMinimumInvocations: 5,

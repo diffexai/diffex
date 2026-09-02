@@ -49,8 +49,8 @@ import {
 } from "./provenance.ts";
 import {
 	type AutomaticEvolutionEligibilityReason,
-	EVOLUTION_TOKEN_ESTIMATOR_VERSION,
-	estimateEvolutionTokens,
+	countEvolutionTokens,
+	EVOLUTION_TOKEN_COUNTER_VERSION,
 	evaluateAutomaticEvolutionEligibility,
 } from "./token-estimator.ts";
 
@@ -521,7 +521,7 @@ export class EvolutionControlPlane implements EvolutionJobRunner {
 				return { status: "not-created", reason: "blocking-job", blockingJobId: blocking.jobId };
 			}
 
-			const estimatedTokens = estimateEvolutionTokens(materializations.map((item) => item.invocation));
+			const tokenCount = countEvolutionTokens(materializations.map((item) => item.invocation));
 			if (request.trigger === "automatic") {
 				const previousTerminalAt =
 					scopeJobs
@@ -531,7 +531,7 @@ export class EvolutionControlPlane implements EvolutionJobRunner {
 						.at(-1) ?? null;
 				const eligibility = evaluateAutomaticEvolutionEligibility({
 					invocationCount: materializations.length,
-					estimatedTokens,
+					tokens: tokenCount.totalTokens,
 					now: this.#dependencies.clock.now(),
 					previousAutomaticTerminalAt: previousTerminalAt,
 				});
@@ -654,8 +654,8 @@ export class EvolutionControlPlane implements EvolutionJobRunner {
 				pipelineVersion: frozen.pipelineVersion,
 				promptVersions: frozen.promptVersions,
 				tokenMeasurement: {
-					estimatorVersion: EVOLUTION_TOKEN_ESTIMATOR_VERSION,
-					estimatedTokens,
+					counterVersion: EVOLUTION_TOKEN_COUNTER_VERSION,
+					...tokenCount,
 				},
 				evidenceSources: materializations.map((materialization) => ({
 					sourceId: materialization.materializationId,

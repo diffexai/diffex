@@ -248,7 +248,7 @@ describe("coding-agent evolution runtime", () => {
 		}
 	});
 
-	it("partitions evidence totals and jobs across workspace state directories", async () => {
+	it("partitions evidence and jobs across workspace state directories", async () => {
 		const agentDir = join(
 			tmpdir(),
 			`diffex-evolution-partition-${Date.now()}-${Math.random().toString(36).slice(2)}`,
@@ -284,9 +284,9 @@ describe("coding-agent evolution runtime", () => {
 		const overviewA = await runtimeA.control.overview();
 		const overviewB = await runtimeB.control.overview();
 		expect(overviewA.settledInvocationCount).toBe(1);
-		expect(overviewA.unprocessedEstimatedTokens).toBeGreaterThan(0);
+		expect(overviewA.unprocessedTokens).toBe(0);
 		expect(overviewB.settledInvocationCount).toBe(0);
-		expect(overviewB.unprocessedEstimatedTokens).toBe(0);
+		expect(overviewB.unprocessedTokens).toBe(0);
 		const started = await runtimeA.control.startManual();
 		if (started.status !== "created") throw new Error("Expected workspace A evolution job");
 		expect(await runtimeA.control.listJobs()).toEqual([expect.objectContaining({ jobId: started.job.jobId })]);

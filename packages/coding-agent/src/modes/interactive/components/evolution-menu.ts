@@ -668,7 +668,7 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 
 	#renderOverview(overview: EvolutionOverview): void {
 		const evolutionEnabled = this.#client.getEnabled();
-		this.#addLine(`Evolution tokens: ${overview.unprocessedEstimatedTokens.toLocaleString()}`);
+		this.#addLine(`Evolution tokens: ${overview.unprocessedTokens.toLocaleString()}`);
 		this.#addLine(`Evolution invocations: ${overview.settledInvocationCount}`);
 		this.#addLine(`Last evolution: ${formatEvolutionTimestamp(overview.lastEvolutionAt)}`);
 		this.#addLine(
@@ -704,7 +704,7 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 			...(job.candidateGeneration.failureMessage === null
 				? []
 				: [`Candidate error: ${job.candidateGeneration.failureMessage}`]),
-			`Evolution token: ${job.observability.estimatedEvidenceTokens.toLocaleString()}`,
+			`Evolution token: ${job.observability.evidenceTokens.toLocaleString()}`,
 			`Last checkpoint: ${formatEvolutionTimestamp(job.lastCheckpointAt)}`,
 			`Base harness: ${formatHarnessVersionReference(
 				job.baseHarnessVersion,

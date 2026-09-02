@@ -54,7 +54,7 @@ import {
 	AUTOMATIC_EVOLUTION_COOLDOWN_MS,
 	AUTOMATIC_EVOLUTION_MINIMUM_INVOCATIONS,
 	AUTOMATIC_EVOLUTION_TOKEN_THRESHOLD,
-	estimateEvolutionTokens,
+	countEvolutionTokens,
 	evaluateAutomaticEvolutionEligibility,
 } from "./token-estimator.ts";
 import type { EvolutionBackgroundWorker } from "./worker.ts";
@@ -117,7 +117,7 @@ export interface EvolutionOverview {
 	readonly scope: EvolutionScope;
 	readonly processedEvidenceCursor: number;
 	readonly ingestionHighWaterCursor: number;
-	readonly unprocessedEstimatedTokens: number;
+	readonly unprocessedTokens: number;
 	readonly settledInvocationCount: number;
 	readonly automaticTokenThreshold: number;
 	readonly automaticMinimumInvocations: number;
@@ -208,7 +208,7 @@ export interface EvolutionStageLatency {
 export interface EvolutionJobObservability {
 	readonly queueAgeMs: number | null;
 	readonly stageLatencies: readonly EvolutionStageLatency[];
-	readonly estimatedEvidenceTokens: number;
+	readonly evidenceTokens: number;
 	readonly providerCostUsd: null;
 	readonly reflectorBudget: {
 		readonly modelCalls: number;
@@ -623,7 +623,7 @@ export class EvolutionControlService {
 			cursor.sequence,
 			highWater,
 		);
-		const estimatedTokens = estimateEvolutionTokens(materializations.map((entry) => entry.invocation));
+		const tokenCount = countEvolutionTokens(materializations.map((entry) => entry.invocation));
 		const lastAutomaticRunAt =
 			jobs
 				.filter((job) => !isCancelledJob(job) && job.trigger === "automatic" && job.terminalAt !== null)
@@ -648,7 +648,7 @@ export class EvolutionControlService {
 				? ({ eligible: false, reason: "blocking-job" } as const)
 				: evaluateAutomaticEvolutionEligibility({
 						invocationCount: materializations.length,
-						estimatedTokens,
+						tokens: tokenCount.totalTokens,
 						now: new Date(currentTime).toISOString(),
 						previousAutomaticTerminalAt: lastAutomaticRunAt,
 					});
@@ -662,7 +662,7 @@ export class EvolutionControlService {
 			scope: this.#dependencies.scope,
 			processedEvidenceCursor: cursor.sequence,
 			ingestionHighWaterCursor: highWater,
-			unprocessedEstimatedTokens: estimatedTokens,
+			unprocessedTokens: tokenCount.totalTokens,
 			settledInvocationCount: materializations.length,
 			automaticTokenThreshold: AUTOMATIC_EVOLUTION_TOKEN_THRESHOLD,
 			automaticMinimumInvocations: AUTOMATIC_EVOLUTION_MINIMUM_INVOCATIONS,
@@ -953,7 +953,7 @@ export class EvolutionControlService {
 			observability: {
 				queueAgeMs,
 				stageLatencies,
-				estimatedEvidenceTokens: input.tokenMeasurement.estimatedTokens,
+				evidenceTokens: input.tokenMeasurement.totalTokens,
 				providerCostUsd: null,
 				reflectorBudget,
 				sliceCoverage,

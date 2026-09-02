@@ -137,7 +137,7 @@ function input(items: readonly MaterializedEvidence[], traceId: string): Evoluti
 			validator: "validator-v1",
 			writer: "writer-v1",
 		},
-		tokenMeasurement: { estimatorVersion: "fixture", estimatedTokens: 100 },
+		tokenMeasurement: { counterVersion: "fixture", inputTokens: 80, outputTokens: 20, totalTokens: 100 },
 		evidenceSources: [source],
 	};
 }
