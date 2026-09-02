@@ -15,7 +15,7 @@ Each file is named `<UTC timestamp>_<trace ID>.jsonl`.
 A long-running process can create multiple files as successive operations settle.
 The trace directory is restricted to the current user with mode `0700`, and each trace file uses mode `0600` on POSIX systems.
 
-Tools can discover a workspace's traces by scanning its trace directory for `.jsonl` files and validating them with the harness trace reader. Trace directories are intentionally separate: sessions in the same workspace contribute to the same evidence stream, while another workspace has independent invocation ordering, token estimates, and evolution jobs.
+Tools can discover a workspace's traces by scanning its trace directory for `.jsonl` files and validating them with the harness trace reader. Trace directories are intentionally separate: sessions in the same workspace contribute to the same evidence stream, while another workspace has independent invocation ordering, reported token totals, and evolution jobs.
 The trace header identifies the producing Diffex build and runtime.
 Session attachment records identify every referenced session ID, path, format, and transition reason.
 

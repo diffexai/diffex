@@ -8,6 +8,7 @@
 
 ### Changed
 
+- Lowered the automatic evolution threshold to 400,000 tokens and based eligibility on provider-reported assistant input and output usage instead of serialized evidence estimates.
 - Partitioned evolution traces, invocation and token accounting, jobs, candidate work, and harness selection by workspace while sharing them across sessions in the same workspace.
 - Softened the bash tool's `PI_*` environment guideline in an attempt to reduce unnecessary inspection commands ([#7128](https://github.com/earendil-works/pi/issues/7128)).
 - Reduced worst-case automatic terminal theme detection delay from 200 ms to 100 ms by probing color-scheme and background support concurrently.

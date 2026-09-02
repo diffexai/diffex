@@ -29,12 +29,12 @@ The footer identifies the active harness and shows background evolution activity
 
 When evolution is enabled, automatic work considers only invocation evidence accumulated by the active workspace and requires all of the following:
 
-- more than 600,000 estimated unprocessed evidence tokens;
+- more than 400,000 reported input and output tokens from unprocessed assistant messages;
 - at least three eligible settled invocations;
 - no blocking job;
 - a 20-minute cooldown after the previous automatic run.
 
-Evolution model calls use the configured provider and may consume provider quota. Manual `/evolve` work uses the same frozen evidence and validation boundaries.
+The token total is the sum of provider-reported input and output usage shown after assistant responses. It does not estimate serialized evidence size or add cache-read and cache-write usage. Evolution model calls use the configured provider and may consume provider quota. Manual `/evolve` work uses the same frozen evidence and validation boundaries.
 
 ## Validation and security
 
@@ -52,7 +52,7 @@ Evolution state is stored beneath the effective agent directory:
 - `harness-state/versions/` contains shared immutable revisions;
 - `harness-state/selections/` contains independent selected pointers keyed by workspace identity.
 
-Sessions resolved to the same workspace identity share evidence totals, jobs, candidates, and harness selection. Different workspace identities never contribute traces, invocation counts, token estimates, or jobs to each other. A process that switches to a session in another workspace rotates its trace destination before attaching the replacement session.
+Sessions resolved to the same workspace identity share evidence totals, jobs, candidates, and harness selection. Different workspace identities never contribute traces, invocation counts, token totals, or jobs to each other. A process that switches to a session in another workspace rotates its trace destination before attaching the replacement session.
 
 Interrupted jobs and candidate work resume from durable checkpoints. Writer retries use stable idempotency keys, leases, exact base revisions, and compare-and-swap selection. Skill rollback follows immutable ancestry to the candidate's application boundary and selects its existing pre-activation revision; it does not mutate historical revisions.
 
