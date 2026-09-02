@@ -256,6 +256,81 @@ describe("EvolutionFooterStatus", () => {
 		status.dispose();
 	});
 
+	it("reloads harness metadata when another process changes the selected version", async () => {
+		let activeVersion: HarnessVersion = rootVersion;
+		const staleEvolvedInfo: EvolutionHarnessVersionInfo = {
+			version: evolvedVersion,
+			kind: "evolved",
+			evolvedAt: "2026-08-20T12:00:00.000Z",
+			evolvedIn: "/projects/diffex",
+		};
+		const fixture = client(overview(rootVersion), [
+			{ version: rootVersion, kind: "default", evolvedAt: null, evolvedIn: null },
+			staleEvolvedInfo,
+		]);
+		const listHarnessVersionInfo = vi.fn(() => fixture.client.listHarnessVersionInfo());
+		const selected = vi.fn(async (version: string) => {
+			activeVersion = version as HarnessVersion;
+		});
+		const status = new EvolutionFooterStatus({
+			client: { ...fixture.client, listHarnessVersionInfo },
+			getActiveHarnessVersion: () => activeVersion,
+			requestRender: () => {},
+			onSelectedHarnessChange: selected,
+		});
+		await status.refresh();
+		fixture.setOverview(overview(evolvedVersion));
+		const freshEvolvedInfo: EvolutionHarnessVersionInfo = {
+			...staleEvolvedInfo,
+			evolvedAt: "2026-08-20T12:48:00.000Z",
+		};
+		fixture.setVersionInfo([
+			{ version: rootVersion, kind: "default", evolvedAt: null, evolvedIn: null },
+			freshEvolvedInfo,
+		]);
+
+		await status.refresh();
+		await vi.waitFor(() => expect(status.getSnapshot().activeVersionInfo).toEqual(freshEvolvedInfo));
+
+		expect(selected).toHaveBeenCalledWith(evolvedVersion);
+		expect(listHarnessVersionInfo).toHaveBeenCalledTimes(2);
+		status.dispose();
+	});
+
+	it("reloads harness metadata when the active version is absent from the cached list", async () => {
+		let activeVersion: HarnessVersion = rootVersion;
+		const fixture = client(overview(rootVersion), [
+			{ version: rootVersion, kind: "default", evolvedAt: null, evolvedIn: null },
+		]);
+		const listHarnessVersionInfo = vi.fn(() => fixture.client.listHarnessVersionInfo());
+		const status = new EvolutionFooterStatus({
+			client: {
+				...fixture.client,
+				overview: vi.fn().mockRejectedValue(new Error("candidate registry unavailable")),
+				listHarnessVersionInfo,
+			},
+			getActiveHarnessVersion: () => activeVersion,
+			requestRender: () => {},
+		});
+		await status.refresh();
+		activeVersion = evolvedVersion;
+		fixture.setVersionInfo([
+			{ version: rootVersion, kind: "default", evolvedAt: null, evolvedIn: null },
+			{
+				version: evolvedVersion,
+				kind: "evolved",
+				evolvedAt: "2026-08-20T12:48:00.000Z",
+				evolvedIn: "/projects/diffex",
+			},
+		]);
+
+		await status.refresh();
+
+		expect(status.getSnapshot().activeVersionInfo?.version).toBe(evolvedVersion);
+		expect(listHarnessVersionInfo).toHaveBeenCalledTimes(2);
+		status.dispose();
+	});
+
 	it("reloads harness metadata when completion races with an in-flight refresh", async () => {
 		let listener: ((event: EvolutionRuntimeEvent) => void) | undefined;
 		let resolveOverview: ((value: EvolutionOverview) => void) | undefined;

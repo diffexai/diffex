@@ -104,8 +104,15 @@ export class EvolutionFooterStatus {
 	async #refresh(): Promise<void> {
 		try {
 			const versionInfoGeneration = this.#versionInfoGeneration;
+			const activeVersion = this.#getActiveHarnessVersion();
+			const activeVersionInfoMissing =
+				this.#versionInfoLoaded &&
+				activeVersion !== undefined &&
+				!this.#versionInfo.some((info) => info.version === activeVersion);
 			const shouldLoadVersionInfo =
-				versionInfoGeneration !== this.#loadedVersionInfoGeneration || !this.#versionInfoLoaded;
+				versionInfoGeneration !== this.#loadedVersionInfoGeneration ||
+				!this.#versionInfoLoaded ||
+				activeVersionInfoMissing;
 			const [overviewResult, versionInfoResult] = await Promise.allSettled([
 				this.#client.overview(),
 				shouldLoadVersionInfo ? this.#client.listHarnessVersionInfo() : Promise.resolve(this.#versionInfo),
@@ -128,6 +135,10 @@ export class EvolutionFooterStatus {
 					selectedVersion !== this.#selectedHarnessVersion;
 				this.#selectedHarnessVersion = selectedVersion;
 				this.#selectedHarnessVersionLoaded = true;
+				if (selectionChanged) {
+					this.#versionInfoGeneration += 1;
+					this.#refreshAgain = true;
+				}
 				if ((selectionChanged || this.#activateSelectedHarness) && selectedVersion !== null) {
 					this.#activateSelectedHarness = false;
 					await this.#onSelectedHarnessChange?.(selectedVersion);
