@@ -16,7 +16,7 @@ import type { AgentSessionLifecycleObserver } from "./agent-session-lifecycle.ts
 import { formatNoModelsAvailableMessage } from "./auth-guidance.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
 import type { ExtensionRunner, LoadExtensionsResult, SessionStartEvent, ToolDefinition } from "./extensions/index.ts";
-import { loadGlobalHarnessState, resolveHarnessWorkspace } from "./harness-state-runtime.ts";
+import { loadWorkspaceHarnessState, resolveHarnessWorkspace } from "./harness-state-runtime.ts";
 import { convertToLlm } from "./messages.ts";
 import { findInitialModel } from "./model-resolver.ts";
 import { ModelRuntime } from "./model-runtime.ts";
@@ -416,7 +416,7 @@ export async function createInternalAgentSession(
 	const agentDir = options.agentDir ? resolvePath(options.agentDir) : getDefaultAgentDir();
 	const loadedHarnessState = options.harnessStateStore
 		? { store: options.harnessStateStore, bundle: options.harnessVersionBundle, warning: undefined }
-		: await loadGlobalHarnessState(agentDir);
+		: await loadWorkspaceHarnessState(agentDir, workspace.workspace);
 	const subagentOptions = normalizeSubagentOptions(options.subagents);
 	const telemetryContext = options.telemetryContext ?? NOOP_TELEMETRY_CONTEXT;
 	assertNoReservedSubagentTools(options.customTools);

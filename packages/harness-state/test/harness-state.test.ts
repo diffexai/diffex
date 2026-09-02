@@ -744,6 +744,35 @@ describe("HarnessStateStore", () => {
 		expect(await stores[0]!.loadCurrent()).toEqual(root);
 	});
 
+	test("shares selections within a workspace and isolates them across workspaces", async () => {
+		const agentDir = await createTemporaryRoot();
+		const workspaceA = { repositoryId: "global", directoryId: "workspace-a" };
+		const workspaceB = { repositoryId: "global", directoryId: "workspace-b" };
+		const firstWorkspaceAStore = new HarnessStateStore(agentDir, { workspace: workspaceA });
+		const secondWorkspaceAStore = new HarnessStateStore(agentDir, { workspace: workspaceA });
+		const workspaceBStore = new HarnessStateStore(agentDir, { workspace: workspaceB });
+		const [rootA, sharedRootA, rootB] = await Promise.all([
+			firstWorkspaceAStore.initialize(),
+			secondWorkspaceAStore.initialize(),
+			workspaceBStore.initialize(),
+		]);
+
+		expect(sharedRootA.manifest.version).toBe(rootA.manifest.version);
+		expect(rootB.manifest.version).toBe(rootA.manifest.version);
+		const [advancedA, advancedB] = await Promise.all([
+			firstWorkspaceAStore.advance({ memory: "workspace A" }, rootA.manifest.version),
+			workspaceBStore.advance({ memory: "workspace B" }, rootB.manifest.version),
+		]);
+		if (advancedA.status !== "advanced" || advancedB.status !== "advanced") {
+			throw new Error("Expected independent workspace advances to succeed");
+		}
+
+		expect(await secondWorkspaceAStore.loadCurrent()).toEqual(advancedA.bundle);
+		expect(await workspaceBStore.loadCurrent()).toEqual(advancedB.bundle);
+		expect((await firstWorkspaceAStore.listVersions()).currentVersion).toBe(advancedA.bundle.manifest.version);
+		expect((await workspaceBStore.listVersions()).currentVersion).toBe(advancedB.bundle.manifest.version);
+	});
+
 	test("advances lineage, including identical content, and reports stale-base conflicts", async () => {
 		const agentDir = await createTemporaryRoot();
 		const store = new HarnessStateStore(agentDir);

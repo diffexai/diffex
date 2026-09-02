@@ -15,6 +15,7 @@ const MANIFEST_NAME = "manifest.json";
 const CURRENT_NAME = "current.json";
 const STORE_DIRECTORY_NAME = "harness-state";
 const VERSIONS_DIRECTORY_NAME = "versions";
+const SELECTIONS_DIRECTORY_NAME = "selections";
 const LOCK_NAME = ".harness-state.lock";
 const LOCK_STALE_AFTER_MS = 30_000;
 const EVOLUTION_MEMORY_ARTIFACT_KIND = "evolution-memory";
@@ -52,6 +53,17 @@ export const HarnessWorkspaceIdentitySchema = Type.Readonly(
 export interface HarnessWorkspaceIdentity {
 	readonly repositoryId: string;
 	readonly directoryId?: string;
+}
+
+export interface HarnessStateStoreOptions {
+	readonly workspace?: HarnessWorkspaceIdentity;
+}
+
+export function harnessWorkspaceSelectionFileName(workspace: HarnessWorkspaceIdentity): string {
+	if (!Check(HarnessWorkspaceIdentitySchema, workspace)) throw new Error("Invalid harness workspace identity");
+	return `sha256-${createHash("sha256")
+		.update(JSON.stringify([workspace.repositoryId, workspace.directoryId ?? null]))
+		.digest("hex")}.json`;
 }
 
 export function computeHarnessSkillId(workspace: HarnessWorkspaceIdentity, path: string): string {
@@ -965,11 +977,14 @@ export class HarnessStateStore {
 	readonly #currentPath: string;
 	readonly #lockPath: string;
 
-	constructor(agentDir: string) {
+	constructor(agentDir: string, options: HarnessStateStoreOptions = {}) {
 		this.#agentDir = resolve(agentDir);
 		this.#storePath = join(this.#agentDir, STORE_DIRECTORY_NAME);
 		this.#versionsPath = join(this.#storePath, VERSIONS_DIRECTORY_NAME);
-		this.#currentPath = join(this.#storePath, CURRENT_NAME);
+		this.#currentPath =
+			options.workspace === undefined
+				? join(this.#storePath, CURRENT_NAME)
+				: join(this.#storePath, SELECTIONS_DIRECTORY_NAME, harnessWorkspaceSelectionFileName(options.workspace));
 		this.#lockPath = join(this.#agentDir, LOCK_NAME);
 	}
 
@@ -981,6 +996,7 @@ export class HarnessStateStore {
 			throw new Error(`Harness state path "${this.#storePath}" must be a direct directory`);
 		}
 		await mkdir(this.#versionsPath, { recursive: true });
+		await mkdir(dirname(this.#currentPath), { recursive: true });
 		const versionsStats = await lstat(this.#versionsPath);
 		if (!versionsStats.isDirectory() || versionsStats.isSymbolicLink()) {
 			throw new Error(`Harness state path "${this.#versionsPath}" must be a direct directory`);

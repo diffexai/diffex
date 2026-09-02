@@ -34,11 +34,14 @@ export interface LoadedHarnessState {
 }
 
 /**
- * Initialize the global harness store and load its selected revision.
+ * Initialize the shared harness revision store and load this workspace's selected revision.
  * Invalid selected state is deliberately left untouched so `/version` can repair it.
  */
-export async function loadGlobalHarnessState(agentDir: string): Promise<LoadedHarnessState> {
-	const store = new HarnessStateStore(agentDir);
+export async function loadWorkspaceHarnessState(
+	agentDir: string,
+	workspace: HarnessWorkspaceIdentity,
+): Promise<LoadedHarnessState> {
+	const store = new HarnessStateStore(agentDir, { workspace });
 	try {
 		await store.initialize();
 		return { store, bundle: await store.loadCurrent(), warning: undefined };

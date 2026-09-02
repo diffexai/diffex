@@ -6,7 +6,7 @@ import { getAgentDir } from "../config.ts";
 import { resolvePath } from "../utils/paths.ts";
 import type { AgentSessionLifecycleObserver } from "./agent-session-lifecycle.ts";
 import type { SessionStartEvent, ToolDefinition } from "./extensions/index.ts";
-import { loadGlobalHarnessState } from "./harness-state-runtime.ts";
+import { loadWorkspaceHarnessState, resolveHarnessWorkspace } from "./harness-state-runtime.ts";
 import { ModelRuntime } from "./model-runtime.ts";
 import {
 	DefaultResourceLoader,
@@ -160,7 +160,7 @@ export async function createAgentSessionServices(
 	const settingsManager = options.settingsManager ?? SettingsManager.create(cwd, agentDir);
 	const harnessState = options.harnessStateStore
 		? { store: options.harnessStateStore, bundle: options.harnessVersionBundle, warning: undefined }
-		: await loadGlobalHarnessState(agentDir);
+		: await loadWorkspaceHarnessState(agentDir, (await resolveHarnessWorkspace(cwd)).workspace);
 	const resourceLoader = new DefaultResourceLoader({
 		...(options.resourceLoaderOptions ?? {}),
 		cwd,
