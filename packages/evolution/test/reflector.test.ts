@@ -415,7 +415,7 @@ describe("recursive reflector", () => {
 				return {
 					output: {
 						complete: true,
-						lessons: maxItems === 10 ? Array.from({ length: 10 }, () => lesson) : [lesson],
+						lessons: maxItems === 7 ? Array.from({ length: 7 }, () => lesson) : [lesson],
 					},
 					model: { provider: "faux", model: "fixture" },
 				};
@@ -424,8 +424,8 @@ describe("recursive reflector", () => {
 
 		const result = await reflector.reflect(input);
 
-		expect([...observedLimits].sort((left, right) => left - right)).toEqual([3, 5, 10]);
-		expect(result.finalLessonIds).toHaveLength(10);
+		expect([...observedLimits].sort((left, right) => left - right)).toEqual([3, 5, 7]);
+		expect(result.finalLessonIds).toHaveLength(7);
 	});
 
 	it("charges every provider round reported by the model executor", async () => {

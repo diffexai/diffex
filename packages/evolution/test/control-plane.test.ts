@@ -672,6 +672,8 @@ describe("checkpointed evolution pipeline", () => {
 			});
 		const modelKeys: string[] = [];
 		const reflectorCounterReports: unknown[] = [];
+		const curatorFinalLessonIds: string[][] = [];
+		const skillCuratorFinalLessonIds: string[][] = [];
 		const skillCuratorSelections: string[][] = [];
 		const writeKeys = new Set<string>();
 		const activationKeys = new Set<string>();
@@ -728,22 +730,26 @@ describe("checkpointed evolution pipeline", () => {
 						tools: [],
 						signal: input.signal,
 					});
-					const lesson: Lesson = {
-						metadata: metadata("lesson-1", ["materialization-1"], { summary: "Keep narrow changes" }),
-						lessonId: "lesson-1",
-						kind: "successful-strategy",
-						summary: "Keep narrow changes",
-						preconditions: [],
-						observedOutcome: "The change remains focused",
-						evidenceIds: [],
-						counterevidenceIds: [],
-						scope,
-						applicabilityBoundaries: [],
-						uncertainty: null,
-						actionableTakeaway: "Keep changes narrow",
-					};
+					const lessons: Lesson[] = Array.from({ length: 10 }, (_, index) => {
+						const lessonId = `lesson-${index + 1}`;
+						return {
+							metadata: metadata(lessonId, ["materialization-1"], { summary: "Keep narrow changes" }),
+							lessonId,
+							kind: "successful-strategy",
+							summary: "Keep narrow changes",
+							preconditions: [],
+							observedOutcome: "The change remains focused",
+							evidenceIds: [],
+							counterevidenceIds: [],
+							scope,
+							applicabilityBoundaries: [],
+							uncertainty: null,
+							actionableTakeaway: "Keep changes narrow",
+						};
+					});
+					const finalLessonIds = lessons.map((lesson) => lesson.lessonId);
 					const node: ReflectionNode = {
-						metadata: metadata("reflection-1", [lesson.lessonId], { lessonIds: [lesson.lessonId] }),
+						metadata: metadata("reflection-1", finalLessonIds, { lessonIds: finalLessonIds }),
 						nodeId: "reflection-1",
 						kind: "leaf",
 						depth: 0,
@@ -751,29 +757,30 @@ describe("checkpointed evolution pipeline", () => {
 						childNodeIds: [],
 						sliceIds: [],
 						evidenceIds: [],
-						lessonIds: [lesson.lessonId],
-						resultDigest: computeEvolutionContentDigest({ lessonIds: [lesson.lessonId] }),
+						lessonIds: finalLessonIds,
+						resultDigest: computeEvolutionContentDigest({ lessonIds: finalLessonIds }),
 						status: "complete",
 					};
 					const coverageContent = {
 						manifestDigest: input.corpus.metadata.contentDigest,
 						entries: [],
 						rootNodeIds: [node.nodeId],
-						finalLessonIds: [lesson.lessonId],
+						finalLessonIds,
 					};
 					return {
 						nodes: [node],
-						lessons: [lesson],
+						lessons,
 						coverage: {
 							metadata: metadata("coverage-1", [node.nodeId], coverageContent),
 							...coverageContent,
 						},
-						finalLessonIds: [lesson.lessonId],
+						finalLessonIds,
 					};
 				},
 			},
 			curator: {
 				async curate(input) {
+					curatorFinalLessonIds.push([...input.reflection.finalLessonIds]);
 					await input.model.execute({
 						stage: "curator",
 						model: input.input.modelConfiguration,
@@ -835,6 +842,7 @@ describe("checkpointed evolution pipeline", () => {
 			},
 			skillCurator: {
 				async curate(input) {
+					skillCuratorFinalLessonIds.push([...input.reflection.finalLessonIds]);
 					skillCuratorSelections.push(input.selectedMemoryProposals.map((scored) => scored.proposal.proposalId));
 					await input.model.execute({
 						stage: "skill-curator",
@@ -1001,6 +1009,10 @@ describe("checkpointed evolution pipeline", () => {
 		expect(reflectorCounterReports).toEqual([null]);
 		expect(modelKeys).toHaveLength(3);
 		expect(new Set(modelKeys).size).toBe(3);
+		expect(curatorFinalLessonIds).toEqual([["lesson-1", "lesson-2", "lesson-3", "lesson-4", "lesson-5"]]);
+		expect(skillCuratorFinalLessonIds).toEqual([
+			["lesson-1", "lesson-2", "lesson-3", "lesson-4", "lesson-5", "lesson-6", "lesson-7"],
+		]);
 		expect(skillCuratorSelections).toEqual([["proposal-1"]]);
 		const skillCheckpoint = completed.checkpoints.find((checkpoint) => checkpoint.stage === "skill-curating");
 		expect(skillCheckpoint).toMatchObject({

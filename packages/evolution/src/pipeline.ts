@@ -44,6 +44,8 @@ import { computeEvolutionContentDigest, createEvolutionArtifactMetadata } from "
 import type { EvolutionTargetAdapterRegistry } from "./targets.ts";
 
 const PIPELINE_PRODUCER_NAME = "diffex-evolution";
+const MAX_EVOLUTION_MEMORY_CURATOR_LESSONS = 5;
+const MAX_SKILL_CURATOR_LESSONS = 7;
 
 export interface EvolutionPipelineDependencies {
 	readonly version: string;
@@ -253,6 +255,12 @@ function stageFailure(
 function writerFailure(error: unknown, message: string): never {
 	const validationFailure = error instanceof EvolutionWriterValidationError;
 	stageFailure(error, message, validationFailure ? "validation-rejected" : "writer-failed", !validationFailure);
+}
+
+function limitFinalLessons(reflection: ReflectionResult, maximum: number): ReflectionResult {
+	return reflection.finalLessonIds.length <= maximum
+		? reflection
+		: { ...reflection, finalLessonIds: reflection.finalLessonIds.slice(0, maximum) };
 }
 
 export class EvolutionPipeline implements EvolutionStageExecutor {
@@ -603,7 +611,7 @@ export class EvolutionPipeline implements EvolutionStageExecutor {
 						input: context.input,
 						corpus,
 						instructions,
-						reflection,
+						reflection: limitFinalLessons(reflection, MAX_EVOLUTION_MEMORY_CURATOR_LESSONS),
 						model: this.#dependencies.model,
 						idempotencyKey: context.idempotencyKey,
 						signal: context.signal,
@@ -633,7 +641,7 @@ export class EvolutionPipeline implements EvolutionStageExecutor {
 					input: context.input,
 					corpus,
 					instructions,
-					reflection,
+					reflection: limitFinalLessons(reflection, MAX_EVOLUTION_MEMORY_CURATOR_LESSONS),
 					proposals,
 					signal: context.signal,
 				};
@@ -687,7 +695,7 @@ export class EvolutionPipeline implements EvolutionStageExecutor {
 						jobId: context.job.jobId,
 						input: context.input,
 						corpus,
-						reflection,
+						reflection: limitFinalLessons(reflection, MAX_SKILL_CURATOR_LESSONS),
 						selectedMemoryProposals,
 						model: this.#dependencies.model,
 						idempotencyKey: context.idempotencyKey,
