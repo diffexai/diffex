@@ -42,8 +42,10 @@ describe("ToolGroupComponent", () => {
 
 		const active = stripAnsi(group.render(80).join("\n"));
 		expect(active).toContain("Exploring");
-		expect(active).toContain(glyphs.branch);
-		expect(active).toContain(glyphs.end);
+		expect(active).toContain(`${glyphs.rail}  First details`);
+		expect(active).toContain(`${glyphs.rail}  Second details`);
+		expect(active).not.toContain(`${glyphs.rail} ${glyphs.branch}`);
+		expect(active).not.toContain(`${glyphs.rail} ${glyphs.end}`);
 		expect(active.indexOf("First")).toBeLessThan(active.indexOf("Second"));
 		expect(active).not.toContain("Duplicate");
 
@@ -61,7 +63,8 @@ describe("ToolGroupComponent", () => {
 
 		expect(lines[0]).toBe("");
 		expect(lines[1]).toBe(` ${glyphs.start} Exploring`);
-		expect(lines[2]?.startsWith(` ${glyphs.rail} ${glyphs.end}`)).toBe(true);
+		expect(lines[2]?.startsWith(` ${glyphs.rail}  ... Single`)).toBe(true);
+		expect(lines[3]).toBe(` ${glyphs.rail}  Single details`);
 	});
 
 	test("reuses an existing gap before a standalone tool group", () => {
@@ -71,7 +74,8 @@ describe("ToolGroupComponent", () => {
 		const lines = group.render(80).map((line) => stripAnsi(line).trimEnd());
 
 		expect(lines[0]).toBe(` ${glyphs.start} Exploring`);
-		expect(lines[1]?.startsWith(` ${glyphs.rail} ${glyphs.end}`)).toBe(true);
+		expect(lines[1]?.startsWith(` ${glyphs.rail}  ... Single`)).toBe(true);
+		expect(lines[2]).toBe(` ${glyphs.rail}  Single details`);
 	});
 
 	test("continues an assistant activity rail without adding a blank gap", () => {
@@ -82,7 +86,8 @@ describe("ToolGroupComponent", () => {
 
 		expect(lines[0]).toBe(` ${glyphs.rail}`);
 		expect(lines[1]).toBe(` ${glyphs.branch} Exploring`);
-		expect(lines[2]?.startsWith(` ${glyphs.rail} ${glyphs.end}`)).toBe(true);
+		expect(lines[2]?.startsWith(` ${glyphs.rail}  ... Continued`)).toBe(true);
+		expect(lines[3]).toBe(` ${glyphs.rail}  Continued details`);
 	});
 
 	test("joins a user dock with one owned hinge", () => {
@@ -94,7 +99,8 @@ describe("ToolGroupComponent", () => {
 		expect(lines[0]).toBe("");
 		expect(lines[1]).toBe(` ${glyphs.start}${glyphs.separator.repeat(2)}`);
 		expect(lines[2]).toBe(` ${glyphs.branch} Exploring`);
-		expect(lines[3]?.startsWith(` ${glyphs.rail} ${glyphs.end}`)).toBe(true);
+		expect(lines[3]?.startsWith(` ${glyphs.rail}  ... Docked`)).toBe(true);
+		expect(lines[4]).toBe(` ${glyphs.rail}  Docked details`);
 	});
 
 	test("forwards display settings to existing tool components", () => {
