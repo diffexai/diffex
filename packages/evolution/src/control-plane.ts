@@ -41,6 +41,7 @@ import type {
 	EvolutionSnapshotSource,
 	EvolutionStageDirective,
 	EvolutionStageExecutor,
+	SuccessfulMaterialization,
 } from "./ports.ts";
 import {
 	computeEvolutionContentDigest,
@@ -48,6 +49,7 @@ import {
 	createEvolutionArtifactMetadata,
 } from "./provenance.ts";
 import {
+	AUTOMATIC_EVOLUTION_TOKEN_THRESHOLD,
 	type AutomaticEvolutionEligibilityReason,
 	countEvolutionTokens,
 	EVOLUTION_TOKEN_COUNTER_VERSION,
@@ -150,6 +152,21 @@ function isOpenBlockingJob(job: EvolutionJob): boolean {
 
 function rangesOverlap(left: EvolutionJob["evidenceRange"], right: EvolutionJob["evidenceRange"]): boolean {
 	return left.afterCursor < right.throughCursor && right.afterCursor < left.throughCursor;
+}
+
+function automaticEvolutionPrefix(
+	materializations: readonly SuccessfulMaterialization[],
+): readonly SuccessfulMaterialization[] {
+	let selectedCount = 0;
+	let selectedTokens = 0;
+	for (const materialization of materializations) {
+		const tokens = countEvolutionTokens([materialization.invocation]).totalTokens;
+		if (selectedTokens > 0 && selectedTokens + tokens > AUTOMATIC_EVOLUTION_TOKEN_THRESHOLD) break;
+		selectedCount += 1;
+		selectedTokens += tokens;
+		if (selectedTokens >= AUTOMATIC_EVOLUTION_TOKEN_THRESHOLD) break;
+	}
+	return materializations.slice(0, selectedCount);
 }
 
 function stableId(kind: string, value: unknown): string {
@@ -446,25 +463,25 @@ export class EvolutionControlPlane implements EvolutionJobRunner {
 		if (initialLease === null) return { status: "not-created", reason: "scope-busy" };
 		return this.#withHeartbeat(initialLease, request.signal, async (lease, signal) => {
 			const processedCursor = await this.#dependencies.cursors.load(request.scope);
-			const ingestionHighWaterCursor = await this.#dependencies.evidence.highWaterCursor(request.scope);
-			if (!Number.isSafeInteger(ingestionHighWaterCursor) || ingestionHighWaterCursor < processedCursor.sequence) {
+			const availableHighWaterCursor = await this.#dependencies.evidence.highWaterCursor(request.scope);
+			if (!Number.isSafeInteger(availableHighWaterCursor) || availableHighWaterCursor < processedCursor.sequence) {
 				throw new EvolutionExecutionError("Materialization high-water cursor is invalid", {
 					reasonCode: "snapshot-invalid",
 					retryable: false,
 				});
 			}
-			const materializations = await this.#dependencies.evidence.listSuccessful(
+			const availableMaterializations = await this.#dependencies.evidence.listSuccessful(
 				request.scope,
 				processedCursor.sequence,
-				ingestionHighWaterCursor,
+				availableHighWaterCursor,
 			);
 			const seenMaterializations = new Set<string>();
 			let previousCursor = processedCursor.sequence;
-			for (const materialization of materializations) {
+			for (const materialization of availableMaterializations) {
 				if (
 					seenMaterializations.has(materialization.materializationId) ||
 					materialization.ingestionCursor <= previousCursor ||
-					materialization.ingestionCursor > ingestionHighWaterCursor ||
+					materialization.ingestionCursor > availableHighWaterCursor ||
 					computeEvolutionContentDigest(materialization.invocation) !== materialization.contentDigest
 				) {
 					throw new EvolutionExecutionError("Materialization catalog returned an invalid frozen range", {
@@ -476,12 +493,12 @@ export class EvolutionControlPlane implements EvolutionJobRunner {
 				previousCursor = materialization.ingestionCursor;
 			}
 
-			if (materializations.length === 0) {
+			if (availableMaterializations.length === 0) {
 				const excludedThroughCursor =
 					(await this.#dependencies.evidence.excludedThroughCursor?.(
 						request.scope,
 						processedCursor.sequence,
-						ingestionHighWaterCursor,
+						availableHighWaterCursor,
 					)) ?? processedCursor.sequence;
 				if (excludedThroughCursor > processedCursor.sequence) {
 					const commitId = `excluded-${computeEvolutionContentDigest({
@@ -506,22 +523,21 @@ export class EvolutionControlPlane implements EvolutionJobRunner {
 				}
 				return { status: "not-created", reason: "no-new-evidence" };
 			}
-			const evidenceRange = {
-				afterCursor: processedCursor.sequence,
-				throughCursor: ingestionHighWaterCursor,
-			};
 			const scopeJobs = await this.#dependencies.jobs.list(request.scope);
+			const availableEvidenceRange = {
+				afterCursor: processedCursor.sequence,
+				throughCursor: availableHighWaterCursor,
+			};
 			const blocking = scopeJobs.find(
 				(job) =>
 					isOpenBlockingJob(job) &&
-					(rangesOverlap(job.evidenceRange, evidenceRange) ||
+					(rangesOverlap(job.evidenceRange, availableEvidenceRange) ||
 						(request.trigger === "automatic" && job.trigger === "automatic")),
 			);
 			if (blocking !== undefined) {
 				return { status: "not-created", reason: "blocking-job", blockingJobId: blocking.jobId };
 			}
-
-			const tokenCount = countEvolutionTokens(materializations.map((item) => item.invocation));
+			const availableTokenCount = countEvolutionTokens(availableMaterializations.map((item) => item.invocation));
 			if (request.trigger === "automatic") {
 				const previousTerminalAt =
 					scopeJobs
@@ -530,13 +546,29 @@ export class EvolutionControlPlane implements EvolutionJobRunner {
 						.sort()
 						.at(-1) ?? null;
 				const eligibility = evaluateAutomaticEvolutionEligibility({
-					invocationCount: materializations.length,
-					tokens: tokenCount.totalTokens,
+					invocationCount: availableMaterializations.length,
+					tokens: availableTokenCount.totalTokens,
 					now: this.#dependencies.clock.now(),
 					previousAutomaticTerminalAt: previousTerminalAt,
 				});
 				if (!eligibility.eligible) return { status: "not-created", reason: eligibility.reason };
 			}
+			const materializations =
+				request.trigger === "automatic"
+					? automaticEvolutionPrefix(availableMaterializations)
+					: availableMaterializations;
+			const ingestionHighWaterCursor =
+				request.trigger === "automatic"
+					? (materializations.at(-1)?.ingestionCursor ?? processedCursor.sequence)
+					: availableHighWaterCursor;
+			const evidenceRange = {
+				afterCursor: processedCursor.sequence,
+				throughCursor: ingestionHighWaterCursor,
+			};
+			const tokenCount =
+				materializations === availableMaterializations
+					? availableTokenCount
+					: countEvolutionTokens(materializations.map((item) => item.invocation));
 
 			signal.throwIfAborted();
 			const frozen = await this.#dependencies.snapshots.capture(request.scope, signal);

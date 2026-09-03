@@ -29,12 +29,12 @@ The footer identifies the active harness and shows background evolution activity
 
 When evolution is enabled, automatic work considers only invocation evidence accumulated by the active workspace and requires all of the following:
 
-- more than 400,000 reported input and output tokens from unprocessed assistant messages;
+- at least 400,000 reported input and output tokens from unprocessed assistant messages;
 - at least three eligible settled invocations;
 - no blocking job;
 - a 20-minute cooldown after the previous automatic run.
 
-The token total is the sum of provider-reported input and output usage shown after assistant responses. It does not estimate serialized evidence size or add cache-read and cache-write usage. Evolution model calls use the configured provider and may consume provider quota. Manual `/evolve` work uses the same frozen evidence and validation boundaries.
+Each automatic run freezes at most 400,000 tokens of the oldest unprocessed invocation evidence, subject to invocation boundaries. A larger backlog is processed in successive capped batches after each cooldown. A remaining partial batch waits until it reaches 400,000 tokens. The token total is the sum of provider-reported input and output usage shown after assistant responses. It does not estimate serialized evidence size or add cache-read and cache-write usage. Evolution model calls use the configured provider and may consume provider quota. Manual `/evolve` work remains uncapped and uses the same frozen evidence and validation boundaries.
 
 ## Validation and security
 

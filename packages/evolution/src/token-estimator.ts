@@ -81,7 +81,7 @@ export function evaluateAutomaticEvolutionEligibility(
 	if (input.invocationCount < AUTOMATIC_EVOLUTION_MINIMUM_INVOCATIONS) {
 		return { eligible: false, reason: "insufficient-invocations" };
 	}
-	if (input.tokens <= AUTOMATIC_EVOLUTION_TOKEN_THRESHOLD) {
+	if (input.tokens < AUTOMATIC_EVOLUTION_TOKEN_THRESHOLD) {
 		return { eligible: false, reason: "insufficient-tokens" };
 	}
 	if (input.previousAutomaticTerminalAt !== null) {
