@@ -63,7 +63,7 @@ describe("ToolGroupComponent", () => {
 
 		expect(lines[0]).toBe("");
 		expect(lines[1]).toBe(` ${glyphs.start} Exploring`);
-		expect(lines[2]?.startsWith(` ${glyphs.rail}  ... Single`)).toBe(true);
+		expect(lines[2]?.startsWith(` ${glyphs.rail}  ${glyphs.pending} Single`)).toBe(true);
 		expect(lines[3]).toBe(` ${glyphs.rail}  Single details`);
 	});
 
@@ -74,7 +74,7 @@ describe("ToolGroupComponent", () => {
 		const lines = group.render(80).map((line) => stripAnsi(line).trimEnd());
 
 		expect(lines[0]).toBe(` ${glyphs.start} Exploring`);
-		expect(lines[1]?.startsWith(` ${glyphs.rail}  ... Single`)).toBe(true);
+		expect(lines[1]?.startsWith(` ${glyphs.rail}  ${glyphs.pending} Single`)).toBe(true);
 		expect(lines[2]).toBe(` ${glyphs.rail}  Single details`);
 	});
 
@@ -86,7 +86,7 @@ describe("ToolGroupComponent", () => {
 
 		expect(lines[0]).toBe(` ${glyphs.rail}`);
 		expect(lines[1]).toBe(` ${glyphs.branch} Exploring`);
-		expect(lines[2]?.startsWith(` ${glyphs.rail}  ... Continued`)).toBe(true);
+		expect(lines[2]?.startsWith(` ${glyphs.rail}  ${glyphs.pending} Continued`)).toBe(true);
 		expect(lines[3]).toBe(` ${glyphs.rail}  Continued details`);
 	});
 
@@ -99,7 +99,7 @@ describe("ToolGroupComponent", () => {
 		expect(lines[0]).toBe("");
 		expect(lines[1]).toBe(` ${glyphs.start}${glyphs.separator.repeat(2)}`);
 		expect(lines[2]).toBe(` ${glyphs.branch} Exploring`);
-		expect(lines[3]?.startsWith(` ${glyphs.rail}  ... Docked`)).toBe(true);
+		expect(lines[3]?.startsWith(` ${glyphs.rail}  ${glyphs.pending} Docked`)).toBe(true);
 		expect(lines[4]).toBe(` ${glyphs.rail}  Docked details`);
 	});
 
