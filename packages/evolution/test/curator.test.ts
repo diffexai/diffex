@@ -261,30 +261,19 @@ function curatorInput(execute: CuratorInput["model"]["execute"]): CuratorInput {
 }
 
 function novelRelationship(): JsonObject {
-	return { classification: "novel", instructionRefs: [], memoryRefs: [], strengthening: null };
+	return { instructionRefs: [], memoryRefs: [] };
 }
 
 function proposal(
 	action: "ADD" | "DEFER" | "REMOVE" | "REPLACE",
-	target: JsonObject,
+	_target: JsonObject,
 	exactDelta: JsonObject | null,
 	overrides: Readonly<Record<string, unknown>> = {},
-) {
-	return {
-		target,
-		action,
-		exactDelta,
-		expectedBenefit: "Future changes remain focused",
-		acceptanceCriterion: "The guidance is independently addressable",
-		risk: "The guidance could be applied too broadly",
-		rollbackDescription: "Reverse this exact delta",
-		curatorConfidence: 0.85,
-		uncertainty: null,
-		counterexamples: ["Generated files require broad mechanical updates"],
-		conflictingDecisionKeys: [],
-		finding: null,
-		...overrides,
-	};
+): JsonObject {
+	const conflictingDecisionKeys = Array.isArray(overrides.conflictingDecisionKeys)
+		? overrides.conflictingDecisionKeys.filter((value): value is string => typeof value === "string")
+		: [];
+	return { action, exactDelta, conflictingDecisionKeys };
 }
 
 function response(decisions: readonly JsonObject[]): EvolutionModelResponse {
@@ -299,16 +288,9 @@ function decision(
 	return {
 		decisionKey,
 		lessonRefs: ["L1"],
-		relevance: {
-			userTaskOrFailure: "A repository task required a focused change",
-			causalAgentBehavior: "The agent kept the change scoped",
-			futureBehaviorChange: "Keep future changes focused",
-			verifiableExpectedResult: "The resulting diff contains only task-required files",
-			observerDocumentationOnly: false,
-			telemetryFormatOnly: false,
-		},
-		relationship,
-		proposal: proposalValue,
+		instructionRefs: relationship.instructionRefs ?? [],
+		memoryRefs: relationship.memoryRefs ?? [],
+		...(proposalValue ?? {}),
 	};
 }
 
@@ -324,6 +306,21 @@ describe("structured delta curator", () => {
 				expect(request.outputSchema).toMatchObject({
 					$defs: { destination: { properties: { anchor: { enum: [null, "M1"] } } } },
 				});
+				for (const removedField of [
+					"acceptanceCriterion",
+					"counterexamples",
+					"curatorConfidence",
+					"expectedBenefit",
+					"finding",
+					"relevance",
+					"relationship",
+					"risk",
+					"rollbackDescription",
+					"target",
+					"uncertainty",
+				]) {
+					expect(JSON.stringify(request.outputSchema)).not.toContain(`"${removedField}"`);
+				}
 				return Promise.resolve(response([]));
 			}),
 		);
@@ -351,35 +348,18 @@ describe("structured delta curator", () => {
 			decision("valid-add", proposal("ADD", { kind: "evolution-memory" }, addDelta)),
 			decision("valid-remove", proposal("REMOVE", { kind: "evolution-memory" }, removeDelta)),
 			decision("valid-replace", proposal("REPLACE", { kind: "evolution-memory" }, replaceDelta)),
-			decision(
-				"valid-skill-defer",
-				proposal("DEFER", { kind: "skill", skillName: "review" }, null, { finding: "Review needs precision" }),
-			),
-			decision(
-				"valid-source-defer",
-				proposal("DEFER", { kind: "orchestration-source", sourcePath: "src/runner.ts" }, null, {
-					finding: "Runner retries need isolation",
-				}),
-			),
 		];
 		expect(Check(schema, { decisions: validDecisions })).toBe(true);
 		const curator = new StructuredDeltaCurator({ version: "1.2.3" }, { maxResponseAttempts: 1 });
 		await expect(curator.curate(curatorInput(() => Promise.resolve(response(validDecisions))))).resolves.toHaveLength(
-			5,
+			3,
 		);
 
 		const invalidDecisions = [
-			decision("skill-add", proposal("ADD", { kind: "skill", skillName: "review" }, addDelta)),
-			decision(
-				"defer-with-delta",
-				proposal("DEFER", { kind: "skill", skillName: "review" }, addDelta, { finding: "Needs review" }),
-			),
+			decision("defer-with-delta", proposal("DEFER", { kind: "skill", skillName: "review" }, addDelta)),
 			decision("remove-with-add-delta", proposal("REMOVE", { kind: "evolution-memory" }, addDelta)),
-			decision(
-				"add-with-finding",
-				proposal("ADD", { kind: "evolution-memory" }, addDelta, { finding: "Unexpected finding" }),
-			),
-			decision("defer-without-finding", proposal("DEFER", { kind: "skill", skillName: "review" }, null)),
+			{ ...decision("missing-delta", null), action: "ADD", conflictingDecisionKeys: [] },
+			{ ...decision("legacy-wrapper", null), proposal: proposal("ADD", { kind: "evolution-memory" }, addDelta) },
 		];
 		for (const invalidDecision of invalidDecisions) {
 			expect(Check(schema, { decisions: [invalidDecision] })).toBe(false);
@@ -453,6 +433,8 @@ describe("structured delta curator", () => {
 		]);
 		expect(capturedInputs[0]?.control).toMatchObject({
 			additionAnchorReferences: ["M1"],
+			outputContainsOnlyMutationInputsAndReferences: true,
+			targetIsAlwaysEvolutionMemory: true,
 			additionAnchorRule: expect.stringContaining("Sentinels such as end are invalid"),
 			consolidateOverlappingLessons: true,
 			emitOnlyBehaviorChangingProposals: true,
@@ -487,6 +469,13 @@ describe("structured delta curator", () => {
 			exactDelta: {
 				destination: { section: "Evolution memory", anchor: "- Keep focused changes." },
 			},
+			expectedBenefit: "Keep changes focused",
+			acceptanceCriterion: "EVOLVE.md contains exactly one item with content: Keep repository changes focused.",
+			risk: "Apply only within: Repository code changes.",
+			rollbackDescription: "Restore the parent harness revision to remove the added memory item.",
+			curatorConfidence: 0.5,
+			uncertainty: null,
+			counterexamples: [],
 			lessonIds: ["lesson-final"],
 			supportingEvidenceIds: ["support-1"],
 			contradictingEvidenceIds: ["counter-1"],
@@ -642,46 +631,6 @@ describe("structured delta curator", () => {
 		});
 	});
 
-	it("preserves skill and source findings as non-executable deferred proposals", async () => {
-		const curator = new StructuredDeltaCurator({ version: "1.2.3" });
-		const proposals = await curator.curate(
-			curatorInput(() =>
-				Promise.resolve(
-					response([
-						decision(
-							"defer-skill",
-							proposal("DEFER", { kind: "skill", skillName: "review" }, null, {
-								finding: "The review skill needs a narrower verification contract",
-							}),
-						),
-						decision(
-							"defer-source",
-							proposal("DEFER", { kind: "orchestration-source", sourcePath: "src/runner.ts" }, null, {
-								finding: "The runner should isolate retries",
-							}),
-						),
-					]),
-				),
-			),
-		);
-
-		expect(proposals).toEqual([
-			expect.objectContaining({
-				disposition: "deferred",
-				target: { kind: "skill", skillName: "review" },
-				action: "DEFER",
-				exactDelta: null,
-				expectedBaseDigest: null,
-			}),
-			expect.objectContaining({
-				disposition: "deferred",
-				target: { kind: "orchestration-source", sourcePath: "src/runner.ts" },
-				action: "DEFER",
-				exactDelta: null,
-			}),
-		]);
-	});
-
 	it("resolves model decision conflicts to stable proposal IDs", async () => {
 		const addDelta = {
 			operation: "ADD",
@@ -709,28 +658,10 @@ describe("structured delta curator", () => {
 		expect(proposals[0]?.conflictingProposalIds).toEqual([proposals[1]?.proposalId]);
 	});
 
-	it("suppresses duplicate and conflicting decisions and retains strengthening references", async () => {
+	it("derives guidance relationships from direct references", async () => {
 		const input = curatorInput(() =>
 			Promise.resolve(
 				response([
-					decision("duplicate-whole-memory", null, {
-						classification: "duplicate",
-						instructionRefs: [],
-						memoryRefs: ["M0"],
-						strengthening: null,
-					}),
-					decision("duplicate-rule", null, {
-						classification: "duplicate",
-						instructionRefs: ["I1"],
-						memoryRefs: [],
-						strengthening: null,
-					}),
-					decision("conflicting-rule", null, {
-						classification: "conflicts",
-						instructionRefs: ["I1", "I2"],
-						memoryRefs: [],
-						strengthening: null,
-					}),
 					decision(
 						"strengthen-rule",
 						proposal(
@@ -743,12 +674,7 @@ describe("structured delta curator", () => {
 								intendedScope: ["Repository code changes"],
 							},
 						),
-						{
-							classification: "strengthens",
-							instructionRefs: ["I2"],
-							memoryRefs: [],
-							strengthening: { kind: "enforcement", description: "Adds a verification requirement" },
-						},
+						{ instructionRefs: ["I2"], memoryRefs: [] },
 					),
 				]),
 			),
@@ -757,7 +683,6 @@ describe("structured delta curator", () => {
 
 		const proposals = await curator.curate(input);
 
-		expect(proposals).toHaveLength(1);
 		expect(proposals[0]).toMatchObject({
 			instructionRelationship: {
 				classification: "strengthens",
@@ -769,7 +694,7 @@ describe("structured delta curator", () => {
 						contentDigest: input.instructions.documents[1]?.contentDigest,
 					},
 				],
-				strengthening: { kind: "enforcement" },
+				strengthening: null,
 			},
 		});
 	});
@@ -785,7 +710,22 @@ describe("structured delta curator", () => {
 				inputs.push(request.input);
 				calls += 1;
 				if (calls === 1) {
-					return Promise.resolve(response([{ ...decision("invalid", null), lessonRefs: ["L2"], proposal: null }]));
+					return Promise.resolve(
+						response([
+							{
+								...decision("invalid", null),
+								lessonRefs: ["L2"],
+								action: "ADD",
+								exactDelta: {
+									operation: "ADD",
+									destination: { section: null, anchor: null },
+									content: "Keep changes focused.",
+									intendedScope: ["Repository code changes"],
+								},
+								conflictingDecisionKeys: [],
+							},
+						]),
+					);
 				}
 				return Promise.resolve(
 					response([
@@ -835,12 +775,19 @@ describe("structured delta curator", () => {
 							},
 						),
 					),
-					decision("duplicate-without-reference", null, {
-						classification: "duplicate",
-						instructionRefs: [],
-						memoryRefs: [],
-						strengthening: null,
-					}),
+					decision(
+						"wrong-operation",
+						proposal(
+							"REMOVE",
+							{ kind: "evolution-memory" },
+							{
+								operation: "ADD",
+								destination: { section: null, anchor: null },
+								content: "Keep changes focused.",
+								intendedScope: ["Repository code changes"],
+							},
+						),
+					),
 				]).output;
 				try {
 					request.validateOutput?.(invalidOutput);
@@ -855,12 +802,12 @@ describe("structured delta curator", () => {
 		expect(validationError).toMatchObject({
 			name: "CuratorOutputValidationError",
 			message: expect.stringContaining(
-				'Decision "wrong-section" at decisions[0].proposal.exactDelta: ADD anchor "M1" is outside section "Wrong section"',
+				'Decision "wrong-section" at decisions[0].exactDelta: ADD anchor "M1" is outside section "Wrong section"',
 			),
 		});
 		expect(validationError).toMatchObject({
 			message: expect.stringContaining(
-				'Decision "duplicate-without-reference" at decisions[1].relationship: A duplicate relationship must cite an existing entry',
+				'Decision "wrong-operation" at decisions[1].exactDelta: REMOVE exactDelta does not permit field "destination"',
 			),
 		});
 	});
@@ -936,26 +883,29 @@ describe("structured delta curator", () => {
 		expect(JSON.stringify(inputs[1]?.control)).toContain("at most 3 sentences");
 	});
 
-	it("rejects unsupported writer routes after bounded attempts", async () => {
+	it("rejects legacy target fields after bounded attempts", async () => {
 		let calls = 0;
 		const curator = new StructuredDeltaCurator({ version: "1.2.3" });
 		const input = curatorInput(() => {
 			calls += 1;
 			return Promise.resolve(
 				response([
-					decision(
-						"invalid-skill-write",
-						proposal(
-							"ADD",
-							{ kind: "skill", skillName: "review" },
-							{
-								operation: "ADD",
-								destination: { section: "Review", anchor: null },
-								content: "Write directly to the skill.",
-								intendedScope: ["review"],
-							},
+					{
+						...decision(
+							"invalid-target",
+							proposal(
+								"ADD",
+								{ kind: "evolution-memory" },
+								{
+									operation: "ADD",
+									destination: { section: "Review", anchor: null },
+									content: "Write directly to evolution memory.",
+									intendedScope: ["review"],
+								},
+							),
 						),
-					),
+						target: { kind: "evolution-memory" },
+					},
 				]),
 			);
 		});
@@ -1051,42 +1001,6 @@ describe("structured delta curator", () => {
 		});
 		await expect(curator.curate(unknownEvidence)).rejects.toMatchObject({
 			reasonCode: "artifact-corrupt",
-		});
-	});
-
-	it("rejects observer documentation as evolution memory", async () => {
-		const curator = new StructuredDeltaCurator({ version: "1.2.3" }, { maxResponseAttempts: 1 });
-		const candidate = decision(
-			"observer-fact",
-			proposal(
-				"ADD",
-				{ kind: "evolution-memory" },
-				{
-					operation: "ADD",
-					destination: { section: "Diagnostics", anchor: null },
-					content: "Completed spans include a status field.",
-					intendedScope: ["Trace inspection"],
-				},
-			),
-		);
-		const input = curatorInput(() =>
-			Promise.resolve(
-				response([
-					{
-						...candidate,
-						relevance: { ...candidate.relevance, observerDocumentationOnly: true, telemetryFormatOnly: true },
-					},
-				]),
-			),
-		);
-
-		await expect(curator.curate(input)).rejects.toMatchObject({
-			reasonCode: "curation-invalid-response",
-			cause: expect.objectContaining({
-				message: expect.stringContaining(
-					"Observer documentation and telemetry-format facts are not actionable evolution memory",
-				),
-			}),
 		});
 	});
 });
