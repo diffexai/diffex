@@ -380,6 +380,26 @@ export class CombinedAutocompleteProvider implements AutocompleteProvider {
 		prefix: string,
 	): { lines: string[]; cursorLine: number; cursorCol: number } {
 		const currentLine = lines[cursorLine] || "";
+		const commandEnd = currentLine.search(/\s/);
+		const commandTokenEnd = commandEnd === -1 ? currentLine.length : commandEnd;
+		const isSlashCommand =
+			prefix.startsWith("/") &&
+			!prefix.slice(1).includes("/") &&
+			currentLine.startsWith("/") &&
+			cursorCol <= commandTokenEnd;
+		if (isSlashCommand) {
+			const completedCommand = `/${item.value} `;
+			const commandArguments = currentLine.slice(commandTokenEnd).trimStart();
+			const newLines = [...lines];
+			newLines[cursorLine] = completedCommand + commandArguments;
+
+			return {
+				lines: newLines,
+				cursorLine,
+				cursorCol: completedCommand.length,
+			};
+		}
+
 		const beforePrefix = currentLine.slice(0, cursorCol - prefix.length);
 		const afterCursor = currentLine.slice(cursorCol);
 		const isQuotedPrefix = prefix.startsWith('"') || prefix.startsWith('@"');
@@ -387,22 +407,6 @@ export class CombinedAutocompleteProvider implements AutocompleteProvider {
 		const hasTrailingQuoteInItem = item.value.endsWith('"');
 		const adjustedAfterCursor =
 			isQuotedPrefix && hasTrailingQuoteInItem && hasLeadingQuoteAfterCursor ? afterCursor.slice(1) : afterCursor;
-
-		// Check if we're completing a slash command (prefix starts with "/" but NOT a file path)
-		// Slash commands are at the start of the line and don't contain path separators after the first /
-		const isSlashCommand = prefix.startsWith("/") && beforePrefix.trim() === "" && !prefix.slice(1).includes("/");
-		if (isSlashCommand) {
-			// This is a command name completion
-			const newLine = `${beforePrefix}/${item.value} ${adjustedAfterCursor}`;
-			const newLines = [...lines];
-			newLines[cursorLine] = newLine;
-
-			return {
-				lines: newLines,
-				cursorLine,
-				cursorCol: beforePrefix.length + item.value.length + 2, // +2 for "/" and space
-			};
-		}
 
 		// Check if we're completing a file attachment (prefix starts with "@")
 		if (prefix.startsWith("@")) {
