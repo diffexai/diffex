@@ -13,6 +13,7 @@ export {
 	DiffexPathDockHinge,
 	DiffexPathHinge,
 	DiffexPathLabel,
+	DiffexPathNode,
 	DiffexPathRail,
 	DiffexPathSpacer,
 	DiffexPathTerminus,

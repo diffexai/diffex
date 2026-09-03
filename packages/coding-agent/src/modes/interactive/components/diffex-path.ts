@@ -6,14 +6,14 @@ const EXTENDED_HINGE_MIN_COLUMNS = 80;
 export type DiffexPathMarker = "start" | "branch" | "end";
 export type DiffexPathOrigin = "standalone" | "user-dock" | "continued";
 
-export interface DiffexPathLabelOptions {
+export interface DiffexPathNodeOptions {
 	marker: DiffexPathMarker;
 	padding?: number;
-	fill?: boolean;
-	minimumFillWidth?: number;
 	markerColor?: (text: string) => string;
+}
+
+export interface DiffexPathLabelOptions extends DiffexPathNodeOptions {
 	labelColor?: (text: string) => string;
-	ruleColor?: (text: string) => string;
 }
 
 function resolveMarker(marker: DiffexPathMarker): string {
@@ -34,25 +34,16 @@ export function formatDiffexPathPrefix(
 	return `${color(resolveMarker(marker))} `;
 }
 
-export class DiffexPathLabel implements Component {
-	private readonly label: string;
+/** Render one unlabeled point on the shared response path. */
+export class DiffexPathNode implements Component {
 	private readonly marker: DiffexPathMarker;
 	private padding: number;
-	private readonly fill: boolean;
-	private readonly minimumFillWidth: number;
 	private readonly markerColor: (text: string) => string;
-	private readonly labelColor: (text: string) => string;
-	private readonly ruleColor: (text: string) => string;
 
-	constructor(label: string, options: DiffexPathLabelOptions) {
-		this.label = label;
+	constructor(options: DiffexPathNodeOptions) {
 		this.marker = options.marker;
 		this.padding = options.padding ?? 1;
-		this.fill = options.fill ?? false;
-		this.minimumFillWidth = options.minimumFillWidth ?? 72;
 		this.markerColor = options.markerColor ?? ((text) => theme.fg("borderAccent", text));
-		this.labelColor = options.labelColor ?? ((text) => theme.fg("muted", text));
-		this.ruleColor = options.ruleColor ?? ((text) => theme.fg("borderMuted", text));
 	}
 
 	setPadding(padding: number): void {
@@ -66,19 +57,34 @@ export class DiffexPathLabel implements Component {
 	render(width: number): string[] {
 		const safeWidth = Math.max(1, width);
 		const padding = Math.min(Math.max(0, this.padding), Math.max(0, safeWidth - 1));
-		const leftPad = " ".repeat(padding);
-		const glyphs = getGlyphs();
-		const marker = resolveMarker(this.marker);
-		const connector = this.fill ? `${marker}${glyphs.separator}` : marker;
-		let line = `${leftPad}${this.markerColor(connector)} ${this.labelColor(this.label)}`;
+		const line = `${" ".repeat(padding)}${this.markerColor(resolveMarker(this.marker))}`;
+		return [visibleWidth(line) > safeWidth ? truncateToWidth(line, safeWidth, "") : line];
+	}
+}
 
-		if (this.fill && safeWidth >= this.minimumFillWidth) {
-			const remaining = safeWidth - visibleWidth(line);
-			if (remaining >= 2) {
-				line += ` ${this.ruleColor(glyphs.separator.repeat(remaining - 1))}`;
-			}
-		}
+export class DiffexPathLabel implements Component {
+	private readonly label: string;
+	private readonly node: DiffexPathNode;
+	private readonly labelColor: (text: string) => string;
 
+	constructor(label: string, options: DiffexPathLabelOptions) {
+		this.label = label;
+		this.node = new DiffexPathNode(options);
+		this.labelColor = options.labelColor ?? ((text) => theme.fg("muted", text));
+	}
+
+	setPadding(padding: number): void {
+		this.node.setPadding(padding);
+	}
+
+	invalidate(): void {
+		this.node.invalidate();
+	}
+
+	render(width: number): string[] {
+		const safeWidth = Math.max(1, width);
+		const prefix = this.node.render(safeWidth)[0] ?? "";
+		const line = `${prefix} ${this.labelColor(this.label)}`;
 		return [visibleWidth(line) > safeWidth ? truncateToWidth(line, safeWidth, "") : line];
 	}
 }

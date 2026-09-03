@@ -5,6 +5,7 @@ import { getMarkdownTheme, theme } from "../theme/theme.ts";
 import {
 	DiffexPathLabel,
 	type DiffexPathMarker,
+	DiffexPathNode,
 	type DiffexPathOrigin,
 	DiffexPathRail,
 	DiffexPathTerminus,
@@ -169,14 +170,14 @@ export class AssistantMessageComponent extends Container {
 		this.pathContinuesToTools = continuesPathToTools;
 		this.visibleOutput = hasVisibleOutput;
 		let hasRenderedPath = false;
-		let hasRenderedIdentity = false;
+		let hasRenderedAnswerBoundary = false;
 		let pathClosed = false;
 		const firstPathMarker: DiffexPathMarker = this.pathOrigin === "user-dock" ? "branch" : "start";
 
 		for (let i = 0; i < message.content.length; i++) {
 			const content = message.content[i];
 			if (content.type === "text" && content.text.trim()) {
-				if (!hasRenderedIdentity) {
+				if (!hasRenderedAnswerBoundary) {
 					if (hasRenderedPath) {
 						this.contentContainer.addChild(new DiffexPathRail(this.outputPad));
 					}
@@ -194,17 +195,15 @@ export class AssistantMessageComponent extends Container {
 									? "branch"
 									: firstPathMarker;
 					this.contentContainer.addChild(
-						new DiffexPathLabel("Diffex", {
+						new DiffexPathNode({
 							marker,
 							padding: this.outputPad,
-							fill: !hasToolCalls,
 							markerColor: (text) => theme.fg("accent", text),
-							labelColor: (text) => theme.fg("accent", theme.bold(text)),
 						}),
 					);
 					pathClosed = marker === "end";
 					this.contentContainer.addChild(new Spacer(1));
-					hasRenderedIdentity = true;
+					hasRenderedAnswerBoundary = true;
 				} else {
 					this.contentContainer.addChild(new Spacer(1));
 				}
@@ -280,28 +279,26 @@ export class AssistantMessageComponent extends Container {
 			}
 		}
 
-		if (!this.isStreaming && !hasRenderedIdentity && hasVisibleOutput && (!hasToolCalls || hasTerminalNotice)) {
+		if (!this.isStreaming && !hasRenderedAnswerBoundary && hasVisibleOutput && (!hasToolCalls || hasTerminalNotice)) {
 			if (hasRenderedPath) {
 				this.contentContainer.addChild(new DiffexPathRail(this.outputPad));
 			}
 			const marker: DiffexPathMarker = continuesPathToTools ? (hasRenderedPath ? "branch" : firstPathMarker) : "end";
 			this.contentContainer.addChild(
-				new DiffexPathLabel("Diffex", {
+				new DiffexPathNode({
 					marker,
 					padding: this.outputPad,
-					fill: !continuesPathToTools,
 					markerColor: (text) => theme.fg("accent", text),
-					labelColor: (text) => theme.fg("accent", theme.bold(text)),
 				}),
 			);
 			pathClosed = marker === "end";
-			hasRenderedIdentity = true;
-		} else if (!this.isStreaming && !hasToolCalls && hasRenderedIdentity && hasRenderedPath && !pathClosed) {
+			hasRenderedAnswerBoundary = true;
+		} else if (!this.isStreaming && !hasToolCalls && hasRenderedAnswerBoundary && hasRenderedPath && !pathClosed) {
 			this.contentContainer.addChild(new DiffexPathTerminus(this.outputPad));
 		}
 
 		if (message.stopReason === "length") {
-			if (hasRenderedIdentity) {
+			if (hasRenderedAnswerBoundary) {
 				this.contentContainer.addChild(new Spacer(1));
 			}
 			this.contentContainer.addChild(

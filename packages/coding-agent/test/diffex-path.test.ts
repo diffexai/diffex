@@ -4,6 +4,7 @@ import {
 	DiffexPathDockHinge,
 	DiffexPathHinge,
 	DiffexPathLabel,
+	DiffexPathNode,
 	DiffexPathRail,
 	DiffexPathTerminus,
 	formatDiffexPathPrefix,
@@ -42,16 +43,15 @@ describe("Diffex path", () => {
 		expect(stripAnsi(formatDiffexPathPrefix("branch"))).toBe("├ ");
 	});
 
-	test("turns the Diffex endpoint into a responsive rule", () => {
+	test("renders unlabeled output boundaries without a rule", () => {
 		delete process.env.DIFFEX_ASCII;
 		process.env.TERM = "xterm-256color";
-		const endpoint = new DiffexPathLabel("Diffex", { marker: "end", fill: true });
+		const endpoint = new DiffexPathNode({ marker: "end" });
 		const wide = endpoint.render(80)[0] ?? "";
 		const compact = endpoint.render(60)[0] ?? "";
 
-		expect(stripAnsi(wide)).toMatch(/^ ╰─ Diffex ─+$/);
-		expect(visibleWidth(wide)).toBe(80);
-		expect(stripAnsi(compact)).toBe(" ╰─ Diffex");
+		expect(stripAnsi(wide)).toBe(" ╰");
+		expect(stripAnsi(compact)).toBe(" ╰");
 	});
 
 	test("renders the transmitter hinge on the external dock row", () => {
@@ -74,9 +74,7 @@ describe("Diffex path", () => {
 		process.env.DIFFEX_ASCII = "1";
 
 		expect(stripAnsi(new DiffexPathLabel("Reasoning", { marker: "start" }).render(80)[0] ?? "")).toBe(" + Reasoning");
-		expect(stripAnsi(new DiffexPathLabel("Diffex", { marker: "end", fill: true }).render(60)[0] ?? "")).toBe(
-			" \\- Diffex",
-		);
+		expect(stripAnsi(new DiffexPathNode({ marker: "end" }).render(60)[0] ?? "")).toBe(" \\");
 		expect(stripAnsi(new DiffexPathRail().render(80)[0] ?? "")).toBe(" |");
 		const hinge = new DiffexPathHinge();
 		hinge.setExtended(true);
@@ -89,7 +87,7 @@ describe("Diffex path", () => {
 			new DiffexPathDockHinge(),
 			new DiffexPathHinge(),
 			new DiffexPathLabel("A deliberately long activity label", { marker: "branch" }),
-			new DiffexPathLabel("Diffex", { marker: "end", fill: true }),
+			new DiffexPathNode({ marker: "end" }),
 			new DiffexPathRail(),
 			new DiffexPathTerminus(),
 		];

@@ -85,7 +85,7 @@ describe("AssistantMessageComponent", () => {
 		expect(rendered.includes(OSC133_ZONE_FINAL)).toBe(false);
 	});
 
-	test("does not render an empty Diffex identity row for a tool-only message", () => {
+	test("does not render an empty answer boundary for a tool-only message", () => {
 		initTheme("dark");
 		const component = new AssistantMessageComponent(
 			createAssistantMessage([{ type: "toolCall", id: "tool-1", name: "read", arguments: { path: "file.txt" } }]),
@@ -119,7 +119,7 @@ describe("AssistantMessageComponent", () => {
 		);
 		const lines = component.render(80).map((line) => stripAnsi(line).trimEnd());
 
-		expect(lines[0]).toBe(` ${getGlyphs().start} Diffex`);
+		expect(lines[0]).toBe(` ${getGlyphs().start}`);
 		expect(lines.slice(1)).toEqual(["", "   Response was truncated before completion."]);
 		expect(component.continuesPathToTools()).toBe(true);
 	});
@@ -150,7 +150,7 @@ describe("AssistantMessageComponent", () => {
 
 		component.updateContent(message, false);
 		const settled = component.render(60).map((line) => stripAnsi(line).trimEnd());
-		expect(settled.at(-1)).toBe(` ${getGlyphs().end}${getGlyphs().separator} Diffex`);
+		expect(settled.at(-1)).toBe(` ${getGlyphs().end}`);
 	});
 
 	test("joins wide reasoning to a user conduit with a compact fallback", () => {
@@ -200,7 +200,7 @@ describe("AssistantMessageComponent", () => {
 		expect(rendered).toContain("answer");
 	});
 
-	test("drops reasoning into the branded Diffex answer endpoint", () => {
+	test("closes reasoning before the answer without another label or rule", () => {
 		initTheme("dark");
 		const component = new AssistantMessageComponent(
 			createAssistantMessage([
@@ -215,7 +215,7 @@ describe("AssistantMessageComponent", () => {
 			` ${getGlyphs().rail}`,
 			"   brief reasoning",
 			` ${getGlyphs().rail}`,
-			` ${getGlyphs().end}${getGlyphs().separator} Diffex`,
+			` ${getGlyphs().end}`,
 			"",
 			"   final answer",
 		]);
@@ -228,7 +228,7 @@ describe("AssistantMessageComponent", () => {
 				"   brief reasoning",
 				` ${getGlyphs().rail}`,
 			]);
-			expect(lines[4]?.startsWith(` ${getGlyphs().end}${getGlyphs().separator} Diffex `)).toBe(true);
+			expect(lines[4]).toBe(` ${getGlyphs().end}`);
 			expect(lines.slice(5)).toEqual(["", "   final answer"]);
 		}
 	});
@@ -243,11 +243,10 @@ describe("AssistantMessageComponent", () => {
 		);
 
 		const lines = component.render(60).map((line) => stripAnsi(line).trimEnd());
-		const identityIndex = lines.findIndex((line) => line.includes("Diffex"));
+		const answerBoundaryIndex = lines.indexOf(` ${getGlyphs().start}`);
 		const reasoningIndex = lines.findIndex((line) => line.includes("Reasoning"));
 
-		expect(identityIndex).toBeLessThan(reasoningIndex);
-		expect(lines[identityIndex]?.startsWith(` ${getGlyphs().start}${getGlyphs().separator} Diffex`)).toBe(true);
+		expect(answerBoundaryIndex).toBeLessThan(reasoningIndex);
 		expect(lines.at(-1)).toBe(` ${getGlyphs().end}`);
 	});
 
@@ -269,11 +268,11 @@ describe("AssistantMessageComponent", () => {
 			` ${getGlyphs().start} Reasoning ${getGlyphs().bullet} hidden`,
 			` ${getGlyphs().rail}`,
 		]);
-		expect(hiddenLines[2]?.startsWith(` ${getGlyphs().end}${getGlyphs().separator} Diffex `)).toBe(true);
+		expect(hiddenLines[2]).toBe(` ${getGlyphs().end}`);
 		expect(hiddenLines.slice(3)).toEqual(["", "   visible"]);
 
 		const failedLines = failed.render(80).map((line) => stripAnsi(line).trimEnd());
-		expect(failedLines[0]?.startsWith(` ${getGlyphs().end}${getGlyphs().separator} Diffex `)).toBe(true);
+		expect(failedLines[0]).toBe(` ${getGlyphs().end}`);
 		expect(failedLines.slice(1)).toEqual(["", "   Error: provider unavailable"]);
 	});
 
@@ -335,16 +334,16 @@ describe("AssistantMessageComponent", () => {
 		component.updateContent(message, true);
 		const streaming = stripAnsi(component.render(80).join("\n"));
 		expect(streaming).toContain("partial");
-		expect(streaming.match(/Diffex/g)).toHaveLength(1);
-		expect(streaming).toContain(`${getGlyphs().start}${getGlyphs().separator} Diffex`);
+		expect(streaming).not.toContain("Diffex");
+		expect(streaming).toContain(` ${getGlyphs().start}\n`);
 		expect(streaming).not.toContain("responding");
 		expect(streaming).not.toContain("transformed");
 
 		component.updateContent(message, false);
 		const complete = stripAnsi(component.render(80).join("\n"));
 		expect(complete).toContain("partial transformed");
-		expect(complete.match(/Diffex/g)).toHaveLength(1);
-		expect(complete).toContain(`${getGlyphs().end}${getGlyphs().separator} Diffex`);
+		expect(complete).not.toContain("Diffex");
+		expect(complete).toContain(` ${getGlyphs().end}\n`);
 		expect(complete).not.toContain("responding");
 		expect(streamingStates).toEqual([true, false]);
 	});

@@ -223,12 +223,12 @@ function expectUserAssistantGap(context: TestContext, width: number, assistantLa
 
 function expectConnectedTruncationPath(context: TestContext): void {
 	const lines = context.chatContainer.render(80).map((line) => stripAnsi(line).trimEnd());
-	const diffexIndex = lines.indexOf(` ${getGlyphs().branch} Diffex`);
+	const answerBoundaryIndex = lines.indexOf(` ${getGlyphs().branch}`);
 	const noticeIndex = lines.findIndex((line) => line.includes("Response was truncated before completion."));
 	const exploredIndex = lines.findIndex((line) => line.includes("Explor"));
 
-	expect(diffexIndex).toBeGreaterThanOrEqual(0);
-	expect(noticeIndex).toBeGreaterThan(diffexIndex);
+	expect(answerBoundaryIndex).toBeGreaterThanOrEqual(0);
+	expect(noticeIndex).toBeGreaterThan(answerBoundaryIndex);
 	expect(exploredIndex).toBeGreaterThan(noticeIndex);
 	expect(lines[exploredIndex - 1]).toBe(` ${getGlyphs().rail}`);
 	expect(context.chatContainer.children.filter((child) => child instanceof DiffexPathDockHinge)).toHaveLength(1);
@@ -492,7 +492,7 @@ describe("Interactive transcript layout", () => {
 		expect(context.activeToolGroup?.getPathOrigin()).toBe("continued");
 		expect(context.chatContainer.children.some((child) => child instanceof DiffexPathDockHinge)).toBe(false);
 		const lines = context.chatContainer.render(80).map((line) => stripAnsi(line).trimEnd());
-		expect(lines).toContain(` ${getGlyphs().start} Diffex`);
+		expect(lines).toContain(` ${getGlyphs().start}`);
 		expect(lines).toContain(` ${getGlyphs().branch} Exploring`);
 
 		const replayContext = createContext();
@@ -1553,7 +1553,7 @@ describe("Interactive transcript layout", () => {
 		const lines = context.chatContainer.render(80).map((line) => stripAnsi(line).trimEnd());
 		const pathStarts = lines.filter((line) => line.startsWith(` ${getGlyphs().start}`));
 		expect(pathStarts).toHaveLength(1);
-		expect(lines).toContain(` ${getGlyphs().branch} Diffex`);
+		expect(lines).toContain(` ${getGlyphs().branch}`);
 		expect(lines).toContain(` ${getGlyphs().branch} Exploring`);
 	});
 
@@ -1596,10 +1596,8 @@ describe("Interactive transcript layout", () => {
 		const rendered = renderChat(context);
 		const lines = rendered.split("\n").map((line) => line.trimEnd());
 		expect(rendered.indexOf("intervening notice")).toBeLessThan(rendered.indexOf("separate response"));
-		expect(lines.some((line) => line.startsWith(` ${getGlyphs().start}${getGlyphs().separator} Diffex`))).toBe(true);
-		expect(lines.some((line) => line.startsWith(` ${getGlyphs().branch}${getGlyphs().separator} Diffex`))).toBe(
-			false,
-		);
+		expect(lines).toContain(` ${getGlyphs().start}`);
+		expect(lines).not.toContain(` ${getGlyphs().branch}`);
 	});
 
 	test("reuses an existing transcript boundary spacer", () => {
