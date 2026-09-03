@@ -244,7 +244,7 @@ export class ToolExecutionComponent extends Container {
 				return this.result?.isError && !this.isPartial ? this.stateText.render(width) : [];
 			}
 
-			const lines: string[] = this.stateText.render(width);
+			const lines = [...this.stateText.render(width)];
 			if (contentLines.length > 0) {
 				lines.push(...contentLines);
 			}

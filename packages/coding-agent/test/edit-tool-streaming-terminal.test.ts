@@ -131,6 +131,14 @@ describe("streamed edit terminal rendering", () => {
 				expect(settled).not.toContain("running");
 				expect(settled).not.toContain("complete");
 				expectStableComposition(terminal);
+
+				const settledLineCount = terminal.getScrollBuffer().length;
+				for (let render = 0; render < 3; render++) {
+					ui.requestRender();
+					await terminal.waitForRender();
+					expectStableComposition(terminal);
+					expect(terminal.getScrollBuffer()).toHaveLength(settledLineCount);
+				}
 			} finally {
 				ui.stop();
 			}
