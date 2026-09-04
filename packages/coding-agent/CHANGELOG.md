@@ -16,6 +16,7 @@
 
 ### Fixed
 
+- Fixed interrupted skill candidate expansions resetting their two-execution retry budget after restart.
 - Fixed automatic evolution consuming an entire oversized evidence backlog instead of processing capped 400,000-token batches after each cooldown.
 - Fixed opening evolution jobs persisted before reported token accounting crashing the TUI.
 - Fixed the footer showing `Harness unknown` after another process creates or selects a harness revision.
