@@ -133,6 +133,7 @@ export interface SkillReference {
 	harnessRevision?: string;
 	reference: string;
 	group: SkillReferenceGroup;
+	enabled: boolean;
 }
 
 export interface SkillReferenceSnapshot extends SkillReference {
@@ -248,6 +249,7 @@ export function createSkillReferenceSnapshot(skill: Skill): SkillReferenceSnapsh
 				: skill.scope === "workspace"
 					? "installed-workspace"
 					: "installed-global",
+		enabled: !skill.disableModelInvocation,
 		location: skill.filePath,
 		baseDir: skill.baseDir,
 		sourceInfo: skill.sourceInfo,

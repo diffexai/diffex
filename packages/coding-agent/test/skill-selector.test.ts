@@ -17,6 +17,7 @@ const references: SkillReference[] = [
 		scope: "workspace",
 		reference: "<first/>",
 		group: "evolved-workspace",
+		enabled: true,
 	},
 	{
 		skillId: `skill:${"b".repeat(64)}`,
@@ -28,6 +29,7 @@ const references: SkillReference[] = [
 		scope: "workspace",
 		reference: "<second/>",
 		group: "installed-workspace",
+		enabled: true,
 	},
 	{
 		skillId: `skill:${"c".repeat(64)}`,
@@ -39,6 +41,7 @@ const references: SkillReference[] = [
 		scope: "global",
 		reference: "<third/>",
 		group: "installed-global",
+		enabled: true,
 	},
 ];
 
@@ -56,6 +59,7 @@ describe("SkillSelectorComponent", () => {
 			references,
 			() => {},
 			() => {},
+			() => {},
 		);
 		const output = stripAnsi(selector.render(120).join("\n"));
 
@@ -69,6 +73,7 @@ describe("SkillSelectorComponent", () => {
 	it("opens a category and filters its skills by name or description", () => {
 		const selector = new SkillSelectorComponent(
 			references,
+			() => {},
 			() => {},
 			() => {},
 		);
@@ -85,7 +90,12 @@ describe("SkillSelectorComponent", () => {
 
 	it("returns to the category menu before cancelling", () => {
 		const onCancel = vi.fn();
-		const selector = new SkillSelectorComponent(references, () => {}, onCancel);
+		const selector = new SkillSelectorComponent(
+			references,
+			() => {},
+			() => {},
+			onCancel,
+		);
 
 		selector.handleInput("\r");
 		selector.handleInput("\u001b");
@@ -96,24 +106,34 @@ describe("SkillSelectorComponent", () => {
 		expect(onCancel).toHaveBeenCalledOnce();
 	});
 
-	it("keeps selections across categories and returns stable category order", () => {
+	it("toggles skill enablement without changing Enter reference behavior", () => {
 		const onSelect = vi.fn();
-		const selector = new SkillSelectorComponent(references, onSelect, () => {});
+		const onToggle = vi.fn();
+		const selector = new SkillSelectorComponent(references, onSelect, onToggle, () => {});
 
 		selector.handleInput("\r");
-		selector.handleInput(" ");
-		selector.handleInput("\u001b");
-		selector.handleInput("\u001b[B");
-		selector.handleInput("\r");
-		selector.handleInput(" ");
-		selector.handleInput("\r");
+		let output = stripAnsi(selector.render(120).join("\n"));
+		expect(output).toContain("[x] deploy");
+		expect(output).not.toContain("✓");
 
-		expect(onSelect).toHaveBeenCalledWith([references[1], references[2]]);
+		selector.handleInput(" ");
+		output = stripAnsi(selector.render(120).join("\n"));
+		expect(output).toContain("[] deploy");
+		expect(output).not.toContain("✓");
+		expect(onToggle).toHaveBeenCalledWith(expect.objectContaining({ name: "deploy" }), false);
+
+		selector.handleInput("\r");
+		expect(onSelect).toHaveBeenCalledWith([expect.objectContaining({ name: "deploy", enabled: false })]);
 	});
 
-	it("inserts the current skill when no items were toggled", () => {
+	it("inserts the current skill on Enter", () => {
 		const onSelect = vi.fn();
-		const selector = new SkillSelectorComponent(references, onSelect, () => {});
+		const selector = new SkillSelectorComponent(
+			references,
+			onSelect,
+			() => {},
+			() => {},
+		);
 
 		selector.handleInput("\u001b[B");
 		selector.handleInput("\r");
@@ -126,6 +146,7 @@ describe("SkillSelectorComponent", () => {
 	it("propagates focus to search only inside a category", () => {
 		const selector = new SkillSelectorComponent(
 			references,
+			() => {},
 			() => {},
 			() => {},
 		);
@@ -149,10 +170,12 @@ describe("SkillSelectorComponent", () => {
 				scope: "workspace",
 				reference: `<reference-${index}/>`,
 				group: "installed-workspace",
+				enabled: true,
 			}),
 		);
 		const selector = new SkillSelectorComponent(
 			manyReferences,
+			() => {},
 			() => {},
 			() => {},
 		);
@@ -166,7 +189,12 @@ describe("SkillSelectorComponent", () => {
 
 	it("renders an empty search result without applying", () => {
 		const onSelect = vi.fn();
-		const selector = new SkillSelectorComponent(references, onSelect, () => {});
+		const selector = new SkillSelectorComponent(
+			references,
+			onSelect,
+			() => {},
+			() => {},
+		);
 
 		selector.handleInput("\r");
 		selector.handleInput("missing");

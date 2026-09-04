@@ -179,7 +179,7 @@ export const KEYBINDINGS = {
 	},
 	"app.skills.toggle": {
 		defaultKeys: "space",
-		description: "Toggle skill selection",
+		description: "Enable or disable skill",
 	},
 	"app.tree.filter.default": {
 		defaultKeys: "ctrl+d",

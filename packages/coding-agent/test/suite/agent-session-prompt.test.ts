@@ -184,6 +184,48 @@ describe("AgentSession prompt characterization", () => {
 		expect(admittedPrompt).toBe("/skill:test explain this");
 	});
 
+	it("applies skill enablement changes to the next model prompt", async () => {
+		const skillPath = "/workspace/.diffex/skills/focused/SKILL.md";
+		const skill = createSkill({
+			name: "focused",
+			description: "Focused workflow",
+			filePath: skillPath,
+			baseDir: "/workspace/.diffex/skills/focused",
+			sourceInfo: createSyntheticSourceInfo(skillPath, { source: "local", scope: "project" }),
+			content: "---\nname: focused\ndescription: Focused workflow\n---\n\n# Focused",
+		});
+		const resourceLoader = {
+			...createTestResourceLoader(),
+			getSkills: () => ({ skills: [skill], diagnostics: [] }),
+		};
+		const harness = await createHarness({ resourceLoader });
+		harnesses.push(harness);
+		const reference = harness.session.createSkillReferences()[0];
+		if (reference === undefined) throw new Error("Expected a skill reference");
+		expect(reference.enabled).toBe(true);
+		expect(harness.session.setSkillEnabled(reference.skillId, false)).toBe(true);
+		expect(harness.session.createSkillReferences()[0]?.enabled).toBe(false);
+
+		const admittedSystemPrompts: string[] = [];
+		harness.setResponses([
+			(context) => {
+				admittedSystemPrompts.push(context.systemPrompt ?? "");
+				return fauxAssistantMessage("disabled");
+			},
+			(context) => {
+				admittedSystemPrompts.push(context.systemPrompt ?? "");
+				return fauxAssistantMessage("enabled");
+			},
+		]);
+
+		await harness.session.prompt("First prompt");
+		expect(harness.session.setSkillEnabled(reference.skillId, true)).toBe(true);
+		await harness.session.prompt("Second prompt");
+
+		expect(admittedSystemPrompts[0]).not.toContain("<name>focused</name>");
+		expect(admittedSystemPrompts[1]).toContain("<name>focused</name>");
+	});
+
 	it("loads exactly the explicitly referenced skill snapshot and traces its identity", async () => {
 		const tempDir = join(tmpdir(), `diffex-skill-reference-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 		mkdirSync(tempDir, { recursive: true });
@@ -239,6 +281,7 @@ describe("AgentSession prompt characterization", () => {
 		const selected = references.find((reference) => reference.name === "selected");
 		if (!selected) throw new Error("Selected skill reference was not created");
 		expect(selected.group).toBe("installed-workspace");
+		expect(selected.enabled).toBe(false);
 		writeFileSync(selectedPath, "Changed after selection.");
 		let admittedPrompt = "";
 		let admittedSystemPrompt = "";

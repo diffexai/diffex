@@ -17,6 +17,7 @@ const references: SkillReference[] = [
 		scope: "workspace",
 		reference: "<first-reference/>",
 		group: "installed-workspace",
+		enabled: true,
 	},
 	{
 		skillId: `skill:${"b".repeat(64)}`,
@@ -28,11 +29,15 @@ const references: SkillReference[] = [
 		scope: "global",
 		reference: "<second-reference/>",
 		group: "installed-global",
+		enabled: true,
 	},
 ];
 
 interface SkillsModeFixture {
-	session: { createSkillReferences: ReturnType<typeof vi.fn> };
+	session: {
+		createSkillReferences: ReturnType<typeof vi.fn>;
+		setSkillEnabled: ReturnType<typeof vi.fn>;
+	};
 	editor: {
 		getExpandedText: ReturnType<typeof vi.fn>;
 		getText: ReturnType<typeof vi.fn>;
@@ -58,7 +63,10 @@ function createFixture(available: SkillReference[] = references): {
 	let selector: SkillSelectorComponent | undefined;
 	const done = vi.fn();
 	const fixture: SkillsModeFixture = {
-		session: { createSkillReferences: vi.fn(() => available) },
+		session: {
+			createSkillReferences: vi.fn(() => available),
+			setSkillEnabled: vi.fn(() => true),
+		},
 		editor: {
 			getExpandedText: vi.fn(() => "existing draft"),
 			getText: vi.fn(() => "existing draft"),
@@ -105,6 +113,19 @@ describe("InteractiveMode skill selector", () => {
 			"\n\n",
 			"existing draft",
 		]);
+	});
+
+	it("toggles skill enablement without closing or changing the editor", () => {
+		const { fixture, getSelector, done } = createFixture();
+		showSkillsSelector.call(fixture);
+
+		getSelector().handleInput("\r");
+		getSelector().handleInput(" ");
+
+		expect(fixture.session.setSkillEnabled).toHaveBeenCalledWith(references[0]?.skillId, false);
+		expect(done).not.toHaveBeenCalled();
+		expect(fixture.editor.setText).not.toHaveBeenCalled();
+		expect(fixture.editor.setTextWithTokens).not.toHaveBeenCalled();
 	});
 
 	it("cancels without changing the editor", () => {

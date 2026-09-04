@@ -173,11 +173,11 @@ This routing remains configurable through the ordinary action bindings. For exam
 
 ### Skills Selector
 
-Used inside the multi-select skill picker opened via `/skills`.
+Used inside the skill picker opened via `/skills`.
 
 | Keybinding id | Default | Description |
 |--------|---------|-------------|
-| `app.skills.toggle` | `space` | Toggle the current skill without closing the selector |
+| `app.skills.toggle` | `space` | Enable or disable the current skill without closing the selector |
 
 ### Scoped Models Selector
 
