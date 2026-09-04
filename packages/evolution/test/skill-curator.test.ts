@@ -18,10 +18,12 @@ import {
 	type EvolutionLedgerEvent,
 	type EvolutionMemoryProposal,
 	type EvolutionModelRequest,
+	type EvolutionScope,
 	type EvolutionSkillContentArtifact,
 	type JsonObject,
 	type Lesson,
 	measureEvolutionValue,
+	PersistentSkillCandidateRegistry,
 	type ReflectionResult,
 	type ScoredProposal,
 	SKILL_CANDIDATE_CAPSULE_MAX_ESTIMATED_TOKENS,
@@ -31,7 +33,11 @@ import {
 	type SkillCandidateOutline,
 	type SkillCandidateProcedureDraft,
 	type SkillCandidateRegistry,
+	type SkillCandidateRegistryAppendResult,
 	type SkillCandidateRegistryConsolidationInput,
+	type SkillCandidateRegistryEvent,
+	type SkillCandidateRegistrySnapshot,
+	type SkillCandidateRegistryStore,
 	type SkillCurationResult,
 	type SkillCuratorInput,
 	StructuredSkillCurator,
@@ -200,6 +206,24 @@ function memoryLedger(events: EvolutionLedgerEvent[] = []): EvolutionLedger {
 			return events;
 		},
 	};
+}
+
+class MemoryCandidateRegistryStore implements SkillCandidateRegistryStore {
+	readonly events: SkillCandidateRegistryEvent[] = [];
+
+	async loadSkillCandidateRegistry(): Promise<SkillCandidateRegistrySnapshot> {
+		return { revision: this.events.length, events: [...this.events] };
+	}
+
+	async appendSkillCandidateRegistryEvents(
+		_scope: EvolutionScope,
+		expectedRevision: number,
+		events: readonly SkillCandidateRegistryEvent[],
+	): Promise<SkillCandidateRegistryAppendResult> {
+		if (this.events.length !== expectedRevision) return "conflict";
+		this.events.push(...events);
+		return "committed";
+	}
 }
 
 function candidateRegistry(
@@ -849,6 +873,132 @@ describe("StructuredSkillCurator", () => {
 					event.type === "skill-candidate-expansion-failed",
 			),
 		).toHaveLength(3);
+	});
+
+	it("registers assembled successes into one qualified canonical group despite a failed sibling", async () => {
+		const storedSkill = skillArtifact();
+		const artifacts = new FixtureArtifactStore([storedSkill]);
+		const registryStore = new MemoryCandidateRegistryStore();
+		const registry = new PersistentSkillCandidateRegistry({ version: "1", artifacts, store: registryStore });
+		const baseInput = fixtureInput(storedSkill.reference);
+		const source = baseInput.evidenceSources[0];
+		if (source === undefined) throw new Error("Expected an evidence source");
+		const secondSupport = sessionEvidence("support-2", 2, "assistant");
+		const recurringEvidence = [
+			source.invocation.evidence[0]!,
+			{
+				...secondSupport,
+				order: {
+					...secondSupport.order,
+					causalIdentifiers: [{ name: "diffex.task.lineage.id", value: "task-lineage-2" }],
+				},
+			},
+		];
+		const recurringInvocation = { ...source.invocation, evidence: recurringEvidence };
+		const input: EvolutionInputSnapshot = {
+			...baseInput,
+			evidenceSources: [
+				{
+					...source,
+					contentDigest: computeEvolutionContentDigest(recurringInvocation),
+					invocation: recurringInvocation,
+				},
+			],
+		};
+		const recurringLesson: Lesson = {
+			...lesson(),
+			evidenceIds: ["support-1", "support-2"],
+			counterevidenceIds: [],
+		};
+		const recurringReflection: ReflectionResult = {
+			...reflection(),
+			lessons: [recurringLesson],
+		};
+		const recurringCorpus: EvidenceCorpusManifest = {
+			...corpus(),
+			documents: corpus().documents.map((document) => ({
+				...document,
+				evidenceIds: ["support-1", "support-2"],
+			})),
+		};
+		const baseOutline = (outlineOutput().outlines as readonly JsonObject[])[0];
+		if (baseOutline === undefined) throw new Error("Expected an outline fixture");
+		const outlines = {
+			outlines: [
+				{ ...baseOutline, outlineKey: "alpha", proposedName: "alpha-verification" },
+				{ ...baseOutline, outlineKey: "beta", proposedName: "beta-verification" },
+				{ ...baseOutline, outlineKey: "gamma", proposedName: "gamma-verification" },
+			],
+		};
+		const result = await new StructuredSkillCurator({
+			version: "1",
+			artifacts,
+			ledger: memoryLedger(),
+			registry,
+		}).curate({
+			...curatorInput(async (request) => {
+				if ((request.input.control as JsonObject).phase === "outline-discovery") {
+					await request.tools.find((tool) => tool.name === "inspect_skills")?.execute({ skillRefs: ["K1"] });
+					return { output: outlines, model: { provider: "faux", model: "fixture" } };
+				}
+				const outline = request.input.acceptedOutline as JsonObject;
+				return {
+					output: outline.outlineKey === "gamma" ? {} : procedureOutput(),
+					model: { provider: "faux", model: "fixture" },
+				};
+			}, input),
+			corpus: recurringCorpus,
+			reflection: recurringReflection,
+		});
+
+		expect(result).toMatchObject({
+			status: "completed-with-some-failures",
+			candidates: [{ proposedName: "alpha-verification" }, { proposedName: "beta-verification" }],
+			failedExpansions: [{ outlineKey: "gamma" }],
+		});
+		const groups = await registry.list(scope);
+		expect(groups).toHaveLength(1);
+		const group = groups[0];
+		if (group?.canonicalCapsule === null || group === undefined) throw new Error("Expected a canonical group");
+		expect(group).toMatchObject({
+			state: "evidence-qualified",
+			evidence: {
+				supportingEvidenceIds: ["support-1", "support-2"],
+				supportingTaskLineageIds: ["task-lineage-1", "task-lineage-2"],
+				contradictingTaskLineageIds: [],
+			},
+		});
+		expect(group.proposalRevisions).toHaveLength(2);
+		const capsule = await artifacts.get(group.canonicalCapsule);
+		if (!("artifactKind" in capsule) || capsule.artifactKind !== "skill-candidate-group-capsule") {
+			throw new Error("Expected a canonical group capsule");
+		}
+		const baseRevision = group.proposalRevisions.find(
+			(revision) => revision.revisionId === capsule.baseProposalRevisionId,
+		);
+		const baseCandidate = result.candidates.find((candidate) => candidate.candidateId === baseRevision?.candidateId);
+		if (baseCandidate === undefined) throw new Error("Expected the capsule base candidate");
+		expect(capsule.proposalRevisionIds).toEqual(group.proposalRevisions.map((revision) => revision.revisionId));
+		expect(capsule.contract).toEqual({
+			operation: baseCandidate.operation,
+			proposedName: baseCandidate.proposedName,
+			workspace: baseCandidate.workspace,
+			existingSkillIds: baseCandidate.existingSkillIds,
+			skillability: baseCandidate.skillability,
+			trigger: baseCandidate.trigger,
+			preconditions: baseCandidate.preconditions,
+			procedure: baseCandidate.procedure,
+			failureHandling: baseCandidate.failureHandling,
+			applicabilityBoundaries: baseCandidate.applicabilityBoundaries,
+			verificationContract: baseCandidate.verificationContract,
+			memoryRelationship: baseCandidate.memoryRelationship,
+		});
+		expect(capsule.conflicts).toEqual([
+			expect.objectContaining({
+				field: "proposedName",
+				alternatives: [expect.objectContaining({ supportCount: 1 })],
+			}),
+		]);
 	});
 
 	it("truncates oversized inspection requests and tells the model how to fetch the remainder", async () => {
