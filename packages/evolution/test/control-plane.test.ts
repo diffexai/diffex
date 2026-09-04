@@ -749,7 +749,7 @@ describe("durable evolution control plane", () => {
 });
 
 describe("checkpointed evolution pipeline", () => {
-	it("executes isolated stages through writing and activation", async () => {
+	it("activates memory changes while a sibling skill expansion fails", async () => {
 		const artifactProducer: EvolutionArtifactProducer = {
 			name: "fixture-stage",
 			version: "1.0.0",
@@ -1034,6 +1034,16 @@ describe("checkpointed evolution pipeline", () => {
 						),
 						...candidateContent,
 					};
+					const failedOutline = {
+						outlineId: "outline-2",
+						outlineKey: "failed-verification",
+						sourceLessonIds: candidate.sourceLessonIds,
+						operation: candidate.operation,
+						proposedName: "failed-verification",
+						existingSkillIds: candidate.existingSkillIds,
+						skillability: candidate.skillability,
+						memoryRelationship: candidate.memoryRelationship,
+					};
 					const outlineSetContent = {
 						artifactKind: "skill-candidate-outline-set" as const,
 						outlineSetId: "outline-set-1",
@@ -1053,16 +1063,45 @@ describe("checkpointed evolution pipeline", () => {
 								skillability: candidate.skillability,
 								memoryRelationship: candidate.memoryRelationship,
 							},
+							failedOutline,
 						],
 					};
 					return {
-						status: "completed",
+						status: "completed-with-some-failures",
 						outlineSet: {
 							metadata: metadata("outline-set-1", ["lesson-1", "proposal-1"], outlineSetContent),
 							...outlineSetContent,
 						},
 						candidates: [candidate],
-						failedExpansions: [],
+						failedExpansions: [
+							{
+								status: "failed",
+								outlineId: failedOutline.outlineId,
+								outlineKey: failedOutline.outlineKey,
+								diagnostic: {
+									reasonCode: "procedure-draft-invalid",
+									message: "Skill candidate expansion failed after two independent model executions.",
+									attempts: [
+										{
+											attempt: 1,
+											modelRounds: 1,
+											reasonCode: "procedure-draft-invalid",
+											message: "The procedure draft did not satisfy the required contract.",
+											inspectedReferences: { evidenceIds: [], skillIds: [] },
+											invalidFieldPaths: ["steps"],
+										},
+										{
+											attempt: 2,
+											modelRounds: 1,
+											reasonCode: "procedure-draft-invalid",
+											message: "The procedure draft did not satisfy the required contract.",
+											inspectedReferences: { evidenceIds: [], skillIds: [] },
+											invalidFieldPaths: ["completionCondition"],
+										},
+									],
+								},
+							},
+						],
 						deferredFindings: [],
 						proceduralInformationLossFindings: [],
 					};
@@ -1133,17 +1172,18 @@ describe("checkpointed evolution pipeline", () => {
 		const skillCheckpoint = completed.checkpoints.find((checkpoint) => checkpoint.stage === "skill-curating");
 		expect(skillCheckpoint).toMatchObject({
 			state: {
-				skillCurationStatus: "completed",
+				skillCurationStatus: "completed-with-some-failures",
 				outlineSetId: "outline-set-1",
-				outlineIds: ["outline-1"],
+				outlineIds: ["outline-1", "outline-2"],
 				candidateIds: ["skill-candidate-1"],
-				failedCandidateOutlineIds: [],
+				failedCandidateOutlineIds: ["outline-2"],
 				deferredFindingIds: [],
 				proceduralInformationLossFindingIds: [],
 				selectedMemoryProposalIds: ["proposal-1"],
 			},
 		});
 		if (skillCheckpoint === undefined) throw new Error("Expected a skill curation checkpoint");
+		expect(skillCheckpoint.outputArtifacts).toHaveLength(2);
 		expect(await fixture.persistence.get(skillCheckpoint.outputArtifacts[0]!)).toMatchObject({
 			artifactKind: "skill-candidate-outline-set",
 			outlineSetId: "outline-set-1",
