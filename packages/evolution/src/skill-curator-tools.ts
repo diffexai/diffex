@@ -40,9 +40,11 @@ export interface SkillCuratorRecoverableToolDenial {
 
 export interface SkillCuratorToolRegistryOptions {
 	readonly jobId: string;
+	readonly executionId?: string;
 	readonly input: EvolutionInputSnapshot;
 	readonly artifacts: EvolutionArtifactStore;
 	readonly permittedEvidenceIds: readonly string[];
+	readonly permittedSkillIds?: readonly string[];
 	readonly signal?: AbortSignal;
 	readonly audit: (event: SkillCuratorToolAudit) => Promise<void>;
 	readonly maxToolCalls?: number;
@@ -111,7 +113,7 @@ function assertSkillArtifact(
 }
 
 export class SkillCuratorToolRegistry {
-	readonly #jobId: string;
+	readonly #executionId: string;
 	readonly #artifacts: EvolutionArtifactStore;
 	readonly #signal?: AbortSignal;
 	readonly #audit: (event: SkillCuratorToolAudit) => Promise<void>;
@@ -126,7 +128,7 @@ export class SkillCuratorToolRegistry {
 	#toolCalls = 0;
 
 	constructor(options: SkillCuratorToolRegistryOptions) {
-		this.#jobId = options.jobId;
+		this.#executionId = options.executionId ?? options.jobId;
 		this.#artifacts = options.artifacts;
 		this.#signal = options.signal;
 		this.#audit = options.audit;
@@ -172,11 +174,39 @@ export class SkillCuratorToolRegistry {
 			});
 		}
 		this.evidence = new EvolutionModelReferenceCatalog("evidence", evidence);
-		this.skills = new EvolutionModelReferenceCatalog("skill", options.input.skillCatalog);
+		const permittedSkillIds = new Set(
+			options.permittedSkillIds ?? options.input.skillCatalog.map((skill) => skill.skillId),
+		);
+		if (permittedSkillIds.size !== (options.permittedSkillIds?.length ?? permittedSkillIds.size)) {
+			throw new EvolutionExecutionError("Skill Curator skill permissions contain duplicate IDs", {
+				reasonCode: "artifact-corrupt",
+				retryable: false,
+			});
+		}
+		const skills = options.input.skillCatalog.filter((skill) => permittedSkillIds.has(skill.skillId));
+		const missingSkillIds = [...permittedSkillIds].filter(
+			(skillId) => !options.input.skillCatalog.some((skill) => skill.skillId === skillId),
+		);
+		if (missingSkillIds.length > 0) {
+			throw new EvolutionExecutionError("Skill Curator skill permissions cite unavailable skills", {
+				reasonCode: "artifact-corrupt",
+				retryable: false,
+				diagnostics: { missingSkillIds },
+			});
+		}
+		this.skills = new EvolutionModelReferenceCatalog("skill", skills);
 	}
 
 	get recoverableDenials(): readonly SkillCuratorRecoverableToolDenial[] {
 		return this.#recoverableDenials;
+	}
+
+	get inspectedEvidenceIds(): readonly string[] {
+		return [...this.#inspectedEvidenceIds].sort();
+	}
+
+	get inspectedSkillIds(): readonly string[] {
+		return [...this.#inspectedSkillIds].sort();
 	}
 
 	get skillCatalog(): readonly JsonObject[] {
@@ -420,7 +450,7 @@ export class SkillCuratorToolRegistry {
 			throw denial;
 		} finally {
 			await this.#audit({
-				toolCallId: `skill-curator-tool-${this.#jobId}-${String(this.#toolCalls)}`,
+				toolCallId: `skill-curator-tool-${this.#executionId}-${String(this.#toolCalls)}`,
 				toolName,
 				requestDigest: computeEvolutionContentDigest(input),
 				requestedReferences,

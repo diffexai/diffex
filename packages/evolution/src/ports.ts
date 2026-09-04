@@ -145,6 +145,7 @@ export interface SkillCuratorModelRequest {
 	readonly outputSchema: JsonObject;
 	readonly tools: readonly EvolutionModelTool[];
 	readonly validateOutput?: (output: JsonObject) => void;
+	readonly onModelRound?: () => void;
 	readonly signal?: AbortSignal;
 }
 

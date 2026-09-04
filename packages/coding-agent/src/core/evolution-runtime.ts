@@ -260,6 +260,7 @@ export class CodingAgentEvolutionModelExecutor implements EvolutionModelExecutor
 		let lastCorrection: string | null = null;
 		for (let round = 0; round < MAX_MODEL_ROUNDS; round += 1) {
 			request.signal?.throwIfAborted();
+			if (request.stage === "skill-curator") request.onModelRound?.();
 			const waitStartedAt = performance.now();
 			if (request.stage === "reflector") request.onForegroundWaitStart?.();
 			try {
