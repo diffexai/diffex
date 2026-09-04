@@ -418,6 +418,8 @@ export {
 	createSkillCuratorOutputSchema,
 	SKILL_CANDIDATE_CAPSULE_MAX_ESTIMATED_TOKENS,
 	SKILL_CANDIDATE_CAPSULE_MAX_SERIALIZED_BYTES,
+	type SkillCuratorProceduralInformationLossAnalyzer,
+	type SkillCuratorProceduralInformationLossDiagnosticInput,
 	StructuredSkillCurator,
 	type StructuredSkillCuratorDependencies,
 	type StructuredSkillCuratorOptions,

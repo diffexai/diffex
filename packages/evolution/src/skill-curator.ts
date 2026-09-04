@@ -5,6 +5,7 @@ import type {
 	EvolutionSkillCatalogEntry,
 	JsonObject,
 	Lesson,
+	ProceduralInformationLossFinding,
 	ScoredProposal,
 	SkillabilityClassification,
 	SkillCandidate,
@@ -107,10 +108,22 @@ interface EvidenceReferences {
 	readonly taskLineageIds: readonly string[];
 }
 
+export interface SkillCuratorProceduralInformationLossDiagnosticInput {
+	readonly curation: SkillCuratorInput;
+	readonly outlineSet: SkillCandidateOutlineSet;
+}
+
+export interface SkillCuratorProceduralInformationLossAnalyzer {
+	analyze(
+		input: SkillCuratorProceduralInformationLossDiagnosticInput,
+	): Promise<readonly ProceduralInformationLossFinding[]>;
+}
+
 export interface StructuredSkillCuratorDependencies {
 	readonly version: string;
 	readonly artifacts: EvolutionArtifactStore;
 	readonly ledger?: EvolutionLedger;
+	readonly proceduralInformationLossAnalyzer?: SkillCuratorProceduralInformationLossAnalyzer;
 }
 
 export interface StructuredSkillCuratorOptions {
@@ -448,64 +461,66 @@ function parseOutlineOutput(
 	if (!Array.isArray(output.outlines)) throw new Error("Skill Curator outlines must be an array");
 	const seenKeys = new Set<string>();
 	const seenNames = new Set<string>();
-	return output.outlines.map((value, index) => {
-		if (!isRecord(value)) throw new Error(`outlines[${String(index)}] must be an object`);
-		assertOnlyFields(
-			value,
-			[
-				"outlineKey",
-				"lessonRefs",
-				"operation",
-				"proposedName",
-				"existingSkillRefs",
-				"skillability",
-				"memoryRelationship",
-			],
-			`outlines[${String(index)}]`,
-		);
-		const outlineKey = requiredString(value, "outlineKey");
-		if (!DECISION_KEY_PATTERN.test(outlineKey)) throw new Error(`Invalid outline key "${outlineKey}"`);
-		if (seenKeys.has(outlineKey)) throw new Error(`Duplicate outline key "${outlineKey}"`);
-		seenKeys.add(outlineKey);
-		const sourceLessonIds = referenceArray(value.lessonRefs, "lessonRefs", lessons, { allowEmpty: false })
-			.map((lesson) => lesson.lessonId)
-			.sort();
-		const selectedSkills = existingSkills(value.existingSkillRefs, registry, input);
-		const existingSkillIds = selectedSkills.map((skill) => skill.skillId).sort();
-		if (typeof value.operation !== "string" || !OPERATIONS.has(value.operation as SkillCandidateOperation)) {
-			throw new Error(`Unsupported outline operation "${String(value.operation)}"`);
-		}
-		const operation = value.operation as SkillCandidateOperation;
-		assertOperationCardinality(operation, existingSkillIds);
-		const parsedMemoryRelationship = memoryRelationship(value.memoryRelationship, proposals);
-		if (!CANDIDATE_MEMORY_RELATIONSHIPS.has(parsedMemoryRelationship.classification)) {
-			throw new Error(`A ${parsedMemoryRelationship.classification} relationship cannot produce an outline`);
-		}
-		const canonicalMemoryRelationship = {
-			...parsedMemoryRelationship,
-			memoryProposalIds: [...parsedMemoryRelationship.memoryProposalIds].sort(),
-		};
-		const proposedName = requiredString(value, "proposedName");
-		const normalizedName = proposedName.toLowerCase();
-		if (seenNames.has(normalizedName)) throw new Error(`Duplicate proposed skill name "${proposedName}"`);
-		seenNames.add(normalizedName);
-		const content = {
-			outlineKey,
-			sourceLessonIds,
-			operation,
-			proposedName,
-			existingSkillIds,
-			skillability: skillability(value.skillability),
-			memoryRelationship: canonicalMemoryRelationship,
-		};
-		return {
-			outlineId: stableId("skill-candidate-outline", {
-				idempotencyKey: input.idempotencyKey,
-				content,
-			}),
-			...content,
-		};
-	});
+	return output.outlines
+		.map((value, index) => {
+			if (!isRecord(value)) throw new Error(`outlines[${String(index)}] must be an object`);
+			assertOnlyFields(
+				value,
+				[
+					"outlineKey",
+					"lessonRefs",
+					"operation",
+					"proposedName",
+					"existingSkillRefs",
+					"skillability",
+					"memoryRelationship",
+				],
+				`outlines[${String(index)}]`,
+			);
+			const outlineKey = requiredString(value, "outlineKey");
+			if (!DECISION_KEY_PATTERN.test(outlineKey)) throw new Error(`Invalid outline key "${outlineKey}"`);
+			if (seenKeys.has(outlineKey)) throw new Error(`Duplicate outline key "${outlineKey}"`);
+			seenKeys.add(outlineKey);
+			const sourceLessonIds = referenceArray(value.lessonRefs, "lessonRefs", lessons, { allowEmpty: false })
+				.map((lesson) => lesson.lessonId)
+				.sort();
+			const selectedSkills = existingSkills(value.existingSkillRefs, registry, input);
+			const existingSkillIds = selectedSkills.map((skill) => skill.skillId).sort();
+			if (typeof value.operation !== "string" || !OPERATIONS.has(value.operation as SkillCandidateOperation)) {
+				throw new Error(`Unsupported outline operation "${String(value.operation)}"`);
+			}
+			const operation = value.operation as SkillCandidateOperation;
+			assertOperationCardinality(operation, existingSkillIds);
+			const parsedMemoryRelationship = memoryRelationship(value.memoryRelationship, proposals);
+			if (!CANDIDATE_MEMORY_RELATIONSHIPS.has(parsedMemoryRelationship.classification)) {
+				throw new Error(`A ${parsedMemoryRelationship.classification} relationship cannot produce an outline`);
+			}
+			const canonicalMemoryRelationship = {
+				...parsedMemoryRelationship,
+				memoryProposalIds: [...parsedMemoryRelationship.memoryProposalIds].sort(),
+			};
+			const proposedName = requiredString(value, "proposedName");
+			const normalizedName = proposedName.toLowerCase();
+			if (seenNames.has(normalizedName)) throw new Error(`Duplicate proposed skill name "${proposedName}"`);
+			seenNames.add(normalizedName);
+			const content = {
+				outlineKey,
+				sourceLessonIds,
+				operation,
+				proposedName,
+				existingSkillIds,
+				skillability: skillability(value.skillability),
+				memoryRelationship: canonicalMemoryRelationship,
+			};
+			return {
+				outlineId: stableId("skill-candidate-outline", {
+					idempotencyKey: input.idempotencyKey,
+					content,
+				}),
+				...content,
+			};
+		})
+		.sort((left, right) => left.outlineKey.localeCompare(right.outlineKey));
 }
 
 function procedureDraftStep(value: unknown, index: number): SkillCandidateProcedureDraftStep {
@@ -692,8 +707,10 @@ function outlineSet(
 			discoveryIdempotencyKey: input.idempotencyKey,
 			outlines,
 		}),
+		sourceEvolutionJobId: input.jobId,
 		discoveryIdempotencyKey: input.idempotencyKey,
 		inputSnapshotId: input.input.metadata.artifactId,
+		inputSnapshotContentDigest: input.input.metadata.contentDigest,
 		workspace: workspace(input),
 		outlines,
 	};
@@ -1040,6 +1057,7 @@ export class StructuredSkillCurator implements SkillCurator {
 						await this.#checkpointOutlines(input, acceptedOutlines);
 						break;
 					} catch (error) {
+						input.signal?.throwIfAborted();
 						correction = this.#recordFailure(failures, attempt, response, error);
 					}
 				}
@@ -1057,14 +1075,14 @@ export class StructuredSkillCurator implements SkillCurator {
 				}
 			}
 			if (acceptedOutlines.outlines.length === 0) {
-				return {
+				return this.#withProceduralInformationLossDiagnostics(input, {
 					status: "completed",
 					outlineSet: acceptedOutlines,
 					candidates: [],
 					failedExpansions: [],
 					deferredFindings: [],
 					proceduralInformationLossFindings: [],
-				};
+				});
 			}
 			const outlineCatalog = new EvolutionModelReferenceCatalog("outline", acceptedOutlines.outlines);
 			const outputSchema = createSkillCandidateProcedureDraftOutputSchema(outlineCatalog.references);
@@ -1099,15 +1117,19 @@ export class StructuredSkillCurator implements SkillCurator {
 					input.signal,
 				);
 				try {
-					return assembleCandidates(
-						parseProcedureDraftOutput(response.output, outlineCatalog),
-						acceptedOutlines,
+					return await this.#withProceduralInformationLossDiagnostics(
 						input,
-						final,
-						response,
-						this.#dependencies.version,
+						assembleCandidates(
+							parseProcedureDraftOutput(response.output, outlineCatalog),
+							acceptedOutlines,
+							input,
+							final,
+							response,
+							this.#dependencies.version,
+						),
 					);
 				} catch (error) {
+					input.signal?.throwIfAborted();
 					correction = this.#recordFailure(failures, attempt, response, error);
 				}
 			}
@@ -1121,6 +1143,24 @@ export class StructuredSkillCurator implements SkillCurator {
 			);
 		} finally {
 			registry.revoke();
+		}
+	}
+
+	async #withProceduralInformationLossDiagnostics(
+		input: SkillCuratorInput,
+		result: SkillCurationResult,
+	): Promise<SkillCurationResult> {
+		const analyzer = this.#dependencies.proceduralInformationLossAnalyzer;
+		if (analyzer === undefined) return result;
+		try {
+			const findings = await abortable(
+				analyzer.analyze({ curation: input, outlineSet: result.outlineSet }),
+				input.signal,
+			);
+			return { ...result, proceduralInformationLossFindings: findings };
+		} catch {
+			input.signal?.throwIfAborted();
+			return result;
 		}
 	}
 
@@ -1209,35 +1249,99 @@ export class StructuredSkillCurator implements SkillCurator {
 
 	#assertOutlineCheckpoint(input: SkillCuratorInput, accepted: SkillCandidateOutlineSet): void {
 		if (
+			accepted.sourceEvolutionJobId !== input.jobId ||
 			accepted.discoveryIdempotencyKey !== input.idempotencyKey ||
 			accepted.inputSnapshotId !== input.input.metadata.artifactId ||
-			computeEvolutionContentDigest(accepted.workspace) !== computeEvolutionContentDigest(workspace(input))
+			accepted.inputSnapshotContentDigest !== input.input.metadata.contentDigest ||
+			computeEvolutionContentDigest(accepted.workspace) !== computeEvolutionContentDigest(workspace(input)) ||
+			computeEvolutionContentDigest(accepted.metadata.scope) !==
+				computeEvolutionContentDigest(input.input.metadata.scope)
 		) {
 			throw new EvolutionExecutionError("Skill outline checkpoint does not match its frozen input", {
 				reasonCode: "artifact-corrupt",
 				retryable: false,
 			});
 		}
+		const lessons = new Set(finalLessons(input).map((lesson) => lesson.lessonId));
+		const proposals = new Set(selectedMemoryProposals(input).map((scored) => scored.proposal.proposalId));
+		const skills = new Map(input.input.skillCatalog.map((skill) => [skill.skillId, skill]));
 		const seenIds = new Set<string>();
 		const seenKeys = new Set<string>();
-		for (const outline of accepted.outlines) {
-			if (seenIds.has(outline.outlineId) || seenKeys.has(outline.outlineKey)) {
-				throw new EvolutionExecutionError("Skill outline checkpoint contains duplicate identities", {
-					reasonCode: "artifact-corrupt",
-					retryable: false,
-				});
+		const seenNames = new Set<string>();
+		try {
+			for (const outline of accepted.outlines) {
+				if (seenIds.has(outline.outlineId) || seenKeys.has(outline.outlineKey)) {
+					throw new Error("duplicate outline identities");
+				}
+				if (!DECISION_KEY_PATTERN.test(outline.outlineKey)) throw new Error("invalid outline key");
+				const normalizedName = outline.proposedName.trim().toLowerCase();
+				if (normalizedName.length === 0 || seenNames.has(normalizedName)) {
+					throw new Error("invalid or duplicate proposed name");
+				}
+				seenIds.add(outline.outlineId);
+				seenKeys.add(outline.outlineKey);
+				seenNames.add(normalizedName);
+				if (!OPERATIONS.has(outline.operation)) throw new Error("invalid operation");
+				assertOperationCardinality(outline.operation, outline.existingSkillIds);
+				if (!SKILLABILITY_CLASSIFICATIONS.has(outline.skillability.classification)) {
+					throw new Error("invalid skillability classification");
+				}
+				if (!CANDIDATE_MEMORY_RELATIONSHIPS.has(outline.memoryRelationship.classification)) {
+					throw new Error("invalid memory relationship classification");
+				}
+				if (
+					(outline.memoryRelationship.classification === "independent") !==
+					(outline.memoryRelationship.memoryProposalIds.length === 0)
+				) {
+					throw new Error("inconsistent memory relationship references");
+				}
+				if (
+					outline.sourceLessonIds.some((lessonId) => !lessons.has(lessonId)) ||
+					outline.memoryRelationship.memoryProposalIds.some((proposalId) => !proposals.has(proposalId))
+				) {
+					throw new Error("unknown lesson or memory proposal reference");
+				}
+				for (const skillId of outline.existingSkillIds) {
+					const skill = skills.get(skillId);
+					if (
+						skill === undefined ||
+						skill.workspace === null ||
+						skill.workspace.repositoryId !== input.input.repository.repositoryId ||
+						skill.workspace.directoryId !== input.input.repository.directoryId
+					) {
+						throw new Error("unknown or out-of-scope existing skill reference");
+					}
+				}
+				for (const values of [
+					outline.sourceLessonIds,
+					outline.existingSkillIds,
+					outline.memoryRelationship.memoryProposalIds,
+				]) {
+					if (new Set(values).size !== values.length || [...values].sort().join("\0") !== values.join("\0")) {
+						throw new Error("non-canonical outline references");
+					}
+				}
+				const { outlineId: _outlineId, ...content } = outline;
+				if (
+					outline.outlineId !==
+					stableId("skill-candidate-outline", { idempotencyKey: input.idempotencyKey, content })
+				) {
+					throw new Error("invalid outline identity");
+				}
 			}
-			seenIds.add(outline.outlineId);
-			seenKeys.add(outline.outlineKey);
-			const { outlineId: _outlineId, ...content } = outline;
 			if (
-				outline.outlineId !== stableId("skill-candidate-outline", { idempotencyKey: input.idempotencyKey, content })
+				[...accepted.outlines]
+					.sort((left, right) => left.outlineKey.localeCompare(right.outlineKey))
+					.some((outline, index) => outline !== accepted.outlines[index])
 			) {
-				throw new EvolutionExecutionError("Skill outline checkpoint contains an invalid outline identity", {
-					reasonCode: "artifact-corrupt",
-					retryable: false,
-				});
+				throw new Error("non-canonical outline ordering");
 			}
+		} catch (cause) {
+			throw new EvolutionExecutionError("Skill outline checkpoint contains invalid outline content", {
+				reasonCode: "artifact-corrupt",
+				retryable: false,
+				cause,
+			});
 		}
 		const { metadata: _metadata, ...content } = accepted;
 		if (

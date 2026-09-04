@@ -1479,44 +1479,46 @@ describe("coding-agent evolution runtime", () => {
 			}),
 			fauxAssistantMessage(
 				fauxToolCall("submit_evolution_response", {
-					decisions: [
+					outlines: [
 						{
-							decisionKey: "focused-verification",
+							outlineKey: "focused-verification",
 							lessonRefs: ["L1"],
+							operation: "CREATE",
+							proposedName: "focused-verification",
 							existingSkillRefs: [],
-							skillability: {
-								classification: "verification-routine",
-							},
-							memoryRelationship: {
-								classification: "independent",
-								memoryProposalRefs: [],
-							},
-							disposition: "candidate",
-							candidate: {
-								operation: "CREATE",
-								proposedName: "focused-verification",
-								triggerDescription: "A repository change requires focused verification.",
-								positiveTriggers: ["A focused source change is ready for verification."],
-								negativeTriggers: ["No repository files changed."],
-								preconditions: ["A focused verification command exists."],
-								procedureSteps: [{ action: "Run the focused verification command.", condition: null }],
-								requiredTools: ["shell"],
-								environment: ["Repository checkout"],
-								failureHandling: [
-									{
-										signal: "The focused verification command fails.",
-										mitigation: "Inspect the first actionable diagnostic.",
-										recovery: "Correct the issue and rerun focused verification.",
-									},
-								],
-								applicabilityBoundaries: ["Repositories with a focused verification command."],
-								verificationChecks: ["The focused verification command exits successfully."],
-								completionCondition: "Focused verification passes without suppressed failures.",
-							},
-							deferredReason: null,
+							skillability: { classification: "verification-routine" },
+							memoryRelationship: { classification: "independent", memoryProposalRefs: [] },
 						},
 					],
-					proceduralInformationLosses: [],
+				}),
+				{ stopReason: "toolUse" },
+			),
+			fauxAssistantMessage(
+				fauxToolCall("submit_evolution_response", {
+					procedureDrafts: [
+						{
+							outlineRef: "O1",
+							trigger: {
+								description: "A repository change requires focused verification.",
+								positiveExamples: ["A focused source change is ready for verification."],
+								negativeExamples: ["No repository files changed."],
+							},
+							steps: [{ action: "Run the focused verification command.", condition: null }],
+							requiredTools: ["shell"],
+							environment: ["Repository checkout"],
+							failureHandling: [
+								{
+									signal: "The focused verification command fails.",
+									mitigation: "Inspect the first actionable diagnostic.",
+									recovery: "Correct the issue and rerun focused verification.",
+								},
+							],
+							additionalPreconditions: ["A focused verification command exists."],
+							additionalApplicabilityBoundaries: ["Repositories with a focused verification command."],
+							verificationChecks: ["The focused verification command exits successfully."],
+							completionCondition: "Focused verification passes without suppressed failures.",
+						},
+					],
 				}),
 				{ stopReason: "toolUse" },
 			),
@@ -1726,13 +1728,12 @@ describe("coding-agent evolution runtime", () => {
 				const prompt = String(context.messages[0]?.content ?? "");
 				prompts.push(prompt);
 				expect(prompt).toContain(
-					'"objective":"classify-operational-patterns-and-produce-non-executable-skill-candidates"',
+					'"objective":"classify-operational-patterns-and-return-only-compact-skill-candidate-outlines"',
 				);
 				expect(prompt).not.toContain(traceId);
-				return fauxAssistantMessage(
-					fauxToolCall("submit_evolution_response", { decisions: [], proceduralInformationLosses: [] }),
-					{ stopReason: "toolUse" },
-				);
+				return fauxAssistantMessage(fauxToolCall("submit_evolution_response", { outlines: [] }), {
+					stopReason: "toolUse",
+				});
 			},
 		]);
 		const runtime = await createCodingAgentEvolutionRuntime({

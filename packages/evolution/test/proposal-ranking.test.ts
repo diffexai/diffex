@@ -725,8 +725,10 @@ describe("deterministic proposal evidence ranking", () => {
 					const outlineSetContent = {
 						artifactKind: "skill-candidate-outline-set" as const,
 						outlineSetId: "outline-set-1",
+						sourceEvolutionJobId: input.jobId,
 						discoveryIdempotencyKey: input.idempotencyKey,
 						inputSnapshotId: input.input.metadata.artifactId,
+						inputSnapshotContentDigest: input.input.metadata.contentDigest,
 						workspace: {
 							repositoryId: input.input.repository.repositoryId,
 							rootPath: input.input.repository.rootPath,

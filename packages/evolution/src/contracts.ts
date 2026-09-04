@@ -607,8 +607,10 @@ export interface SkillCandidateOutlineSet {
 	readonly artifactKind: "skill-candidate-outline-set";
 	readonly metadata: EvolutionArtifactMetadata;
 	readonly outlineSetId: string;
+	readonly sourceEvolutionJobId: string;
 	readonly discoveryIdempotencyKey: string;
 	readonly inputSnapshotId: string;
+	readonly inputSnapshotContentDigest: string;
 	readonly workspace: SkillCandidateWorkspaceScope;
 	readonly outlines: readonly SkillCandidateOutline[];
 }

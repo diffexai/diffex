@@ -520,8 +520,10 @@ describe("StructuredSkillCurator", () => {
 		});
 		expect(result.outlineSet).toMatchObject({
 			artifactKind: "skill-candidate-outline-set",
+			sourceEvolutionJobId: "job-1",
 			discoveryIdempotencyKey: "job-1:skill-curating",
 			inputSnapshotId: "input-1",
+			inputSnapshotContentDigest: input.metadata.contentDigest,
 			outlines: [
 				{
 					outlineId: expect.stringMatching(/^skill-candidate-outline-/),
@@ -807,6 +809,34 @@ describe("StructuredSkillCurator", () => {
 		expect(Check(schema as TSchema, outlineOutput())).toBe(true);
 	});
 
+	it("keeps optional procedural information loss diagnostics off the candidate success path", async () => {
+		const storedSkill = skillArtifact();
+		const artifacts = new FixtureArtifactStore([storedSkill]);
+		let diagnosticCalls = 0;
+		const curator = new StructuredSkillCurator({
+			version: "1",
+			artifacts,
+			proceduralInformationLossAnalyzer: {
+				async analyze({ outlineSet }) {
+					diagnosticCalls += 1;
+					expect(outlineSet.outlines).toEqual([]);
+					throw new Error("diagnostic unavailable");
+				},
+			},
+		});
+		const input = fixtureInput(storedSkill.reference);
+		const result = await curator.curate(
+			curatorInput(async () => ({ output: { outlines: [] }, model: { provider: "faux", model: "fixture" } }), input),
+		);
+
+		expect(diagnosticCalls).toBe(1);
+		expect(result).toMatchObject({
+			status: "completed",
+			candidates: [],
+			proceduralInformationLossFindings: [],
+		});
+	});
+
 	it("checkpoints outlines and resumes procedure generation without rediscovery", async () => {
 		const storedSkill = skillArtifact();
 		const artifacts = new FixtureArtifactStore([storedSkill]);
@@ -860,6 +890,92 @@ describe("StructuredSkillCurator", () => {
 			name: "EvolutionExecutionError",
 			reasonCode: "skill-curation-invalid-response",
 			retryable: false,
+		});
+	});
+
+	it.each([
+		{
+			name: "CREATE outline with an existing skill",
+			output: {
+				outlines: [{ ...(outlineOutput().outlines as readonly JsonObject[])[0], operation: "CREATE" }],
+			},
+			error: "CREATE outlines cannot cite existing skills",
+		},
+		{
+			name: "UPDATE outline without exactly one existing skill",
+			output: {
+				outlines: [{ ...(outlineOutput().outlines as readonly JsonObject[])[0], existingSkillRefs: [] }],
+			},
+			error: "UPDATE outlines must cite exactly one existing skill",
+		},
+		{
+			name: "independent outline with a memory proposal",
+			output: {
+				outlines: [
+					{
+						...(outlineOutput().outlines as readonly JsonObject[])[0],
+						memoryRelationship: { classification: "independent", memoryProposalRefs: ["P1"] },
+					},
+				],
+			},
+			error: "An independent candidate cannot cite a selected memory proposal",
+		},
+		{
+			name: "duplicate outline keys",
+			output: {
+				outlines: [
+					(outlineOutput().outlines as readonly JsonObject[])[0]!,
+					{
+						...(outlineOutput().outlines as readonly JsonObject[])[0],
+						proposedName: "other-name",
+					},
+				],
+			},
+			error: 'Duplicate outline key "verification-recovery"',
+		},
+	])("rejects $name deterministically", async ({ output, error }) => {
+		const storedSkill = skillArtifact();
+		const artifacts = new FixtureArtifactStore([storedSkill]);
+		const curator = new StructuredSkillCurator({ version: "1", artifacts }, { maxResponseAttempts: 1 });
+		const input = fixtureInput(storedSkill.reference);
+
+		await expect(
+			curator.curate(
+				curatorInput(async (request) => {
+					await request.tools.find((tool) => tool.name === "inspect_skills")?.execute({ skillRefs: ["K1"] });
+					return { output, model: { provider: "faux", model: "fixture" } };
+				}, input),
+			),
+		).rejects.toMatchObject({
+			reasonCode: "skill-curation-invalid-response",
+			diagnostics: { attemptDetails: [{ validationError: error }] },
+		});
+	});
+
+	it("rejects an existing skill outside the candidate workspace", async () => {
+		const storedSkill = skillArtifact();
+		const artifacts = new FixtureArtifactStore([storedSkill]);
+		const curator = new StructuredSkillCurator({ version: "1", artifacts }, { maxResponseAttempts: 1 });
+		const fixture = fixtureInput(storedSkill.reference);
+		const input = { ...fixture, repository: { ...fixture.repository, directoryId: "other-directory" } };
+
+		await expect(
+			curator.curate(
+				curatorInput(async (request) => {
+					await request.tools.find((tool) => tool.name === "inspect_skills")?.execute({ skillRefs: ["K1"] });
+					return { output: outlineOutput(), model: { provider: "faux", model: "fixture" } };
+				}, input),
+			),
+		).rejects.toMatchObject({
+			reasonCode: "skill-curation-invalid-response",
+			diagnostics: {
+				attemptDetails: [
+					{
+						validationError:
+							'Existing skill "installed:workspace:existing-skill" is outside the candidate workspace',
+					},
+				],
+			},
 		});
 	});
 

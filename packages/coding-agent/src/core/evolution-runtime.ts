@@ -875,7 +875,7 @@ class CodingAgentSnapshotSource implements EvolutionSnapshotSource {
 			promptVersions: {
 				reflector: "reflector-v2",
 				curator: "curator-v2",
-				skillCurator: "skill-curator-v2",
+				skillCurator: "skill-curator-v3",
 				skillSynthesizer: "skill-synthesizer-v2",
 				validator: "validator-v1",
 				writer: "writer-v1",
