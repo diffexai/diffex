@@ -1098,6 +1098,7 @@ describe("coding-agent evolution runtime", () => {
 			async waitUntilBackgroundAllowed() {},
 		});
 		const model = harness.getModel();
+		let modelRounds = 0;
 
 		await expect(
 			executor.execute({
@@ -1117,6 +1118,13 @@ describe("coding-agent evolution runtime", () => {
 					properties: { complete: { enum: [true] } },
 				},
 				tools: [],
+				...(stage === "skill-curator"
+					? {
+							onModelRound() {
+								modelRounds += 1;
+							},
+						}
+					: {}),
 			}),
 		).rejects.toMatchObject({
 			name: "EvolutionExecutionError",
@@ -1124,6 +1132,7 @@ describe("coding-agent evolution runtime", () => {
 			retryable: false,
 			diagnostics: { lastCorrection: expect.any(String) },
 		});
+		expect(modelRounds).toBe(stage === "skill-curator" ? 10 : 0);
 	});
 
 	it("isolates transcripts between node executor invocations", async () => {
@@ -1495,30 +1504,25 @@ describe("coding-agent evolution runtime", () => {
 			),
 			fauxAssistantMessage(
 				fauxToolCall("submit_evolution_response", {
-					procedureDrafts: [
+					trigger: {
+						description: "A repository change requires focused verification.",
+						positiveExamples: ["A focused source change is ready for verification."],
+						negativeExamples: ["No repository files changed."],
+					},
+					steps: [{ action: "Run the focused verification command.", condition: null }],
+					requiredTools: ["shell"],
+					environment: ["Repository checkout"],
+					failureHandling: [
 						{
-							outlineRef: "O1",
-							trigger: {
-								description: "A repository change requires focused verification.",
-								positiveExamples: ["A focused source change is ready for verification."],
-								negativeExamples: ["No repository files changed."],
-							},
-							steps: [{ action: "Run the focused verification command.", condition: null }],
-							requiredTools: ["shell"],
-							environment: ["Repository checkout"],
-							failureHandling: [
-								{
-									signal: "The focused verification command fails.",
-									mitigation: "Inspect the first actionable diagnostic.",
-									recovery: "Correct the issue and rerun focused verification.",
-								},
-							],
-							additionalPreconditions: ["A focused verification command exists."],
-							additionalApplicabilityBoundaries: ["Repositories with a focused verification command."],
-							verificationChecks: ["The focused verification command exits successfully."],
-							completionCondition: "Focused verification passes without suppressed failures.",
+							signal: "The focused verification command fails.",
+							mitigation: "Inspect the first actionable diagnostic.",
+							recovery: "Correct the issue and rerun focused verification.",
 						},
 					],
+					additionalPreconditions: ["A focused verification command exists."],
+					additionalApplicabilityBoundaries: ["Repositories with a focused verification command."],
+					verificationChecks: ["The focused verification command exits successfully."],
+					completionCondition: "Focused verification passes without suppressed failures.",
 				}),
 				{ stopReason: "toolUse" },
 			),

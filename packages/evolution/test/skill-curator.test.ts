@@ -386,34 +386,29 @@ function outlineOutput(): JsonObject {
 
 function procedureOutput(positiveTrigger = "A focused test command exits nonzero after a code change."): JsonObject {
 	return {
-		procedureDrafts: [
+		trigger: {
+			description: "A repository verification command fails or produces an ambiguous result.",
+			positiveExamples: [positiveTrigger],
+			negativeExamples: ["The task only asks for an explanation and changes no files."],
+		},
+		steps: [
+			{ action: "Run the focused verification command.", condition: null },
+			{ action: "Inspect the first actionable failure signal.", condition: "The command fails." },
+			{ action: "Apply the evidence-supported correction and rerun verification.", condition: null },
+		],
+		requiredTools: ["shell"],
+		environment: ["Repository checkout"],
+		failureHandling: [
 			{
-				outlineRef: "O1",
-				trigger: {
-					description: "A repository verification command fails or produces an ambiguous result.",
-					positiveExamples: [positiveTrigger],
-					negativeExamples: ["The task only asks for an explanation and changes no files."],
-				},
-				steps: [
-					{ action: "Run the focused verification command.", condition: null },
-					{ action: "Inspect the first actionable failure signal.", condition: "The command fails." },
-					{ action: "Apply the evidence-supported correction and rerun verification.", condition: null },
-				],
-				requiredTools: ["shell"],
-				environment: ["Repository checkout"],
-				failureHandling: [
-					{
-						signal: "The focused command exits nonzero.",
-						mitigation: "Use the first deterministic diagnostic instead of guessing.",
-						recovery: "Correct the failing command or implementation and rerun it.",
-					},
-				],
-				additionalPreconditions: ["A deterministic verification command is available."],
-				additionalApplicabilityBoundaries: ["Only use deterministic project verification commands."],
-				verificationChecks: ["The focused command exits successfully."],
-				completionCondition: "The original verification command passes without suppressing failures.",
+				signal: "The focused command exits nonzero.",
+				mitigation: "Use the first deterministic diagnostic instead of guessing.",
+				recovery: "Correct the failing command or implementation and rerun it.",
 			},
 		],
+		additionalPreconditions: ["A deterministic verification command is available."],
+		additionalApplicabilityBoundaries: ["Only use deterministic project verification commands."],
+		verificationChecks: ["The focused command exits successfully."],
+		completionCondition: "The original verification command passes without suppressing failures.",
 	};
 }
 
@@ -475,7 +470,7 @@ describe("StructuredSkillCurator", () => {
 					};
 				}
 				procedureInput = request.input;
-				expect(request.idempotencyKey).toMatch(/^skill-candidate-procedures-/);
+				expect(request.idempotencyKey).toMatch(/^skill-candidate-expansion-/);
 				const output = procedureOutput();
 				expect(Check(request.outputSchema as TSchema, output)).toBe(true);
 				request.validateOutput?.(output);
@@ -510,13 +505,10 @@ describe("StructuredSkillCurator", () => {
 				returnOnlyNonDerivableProcedureMaterial: true,
 				doNotRepeatIdentityScopeEvidenceProvenanceOrLessonMaterial: true,
 			},
-			acceptedOutlines: [
-				{
-					outlineRef: "O1",
-					outlineKey: "verification-recovery",
-					lessonRefs: ["L1"],
-				},
-			],
+			acceptedOutline: {
+				outlineKey: "verification-recovery",
+				lessonRefs: ["L1"],
+			},
 		});
 		expect(result.outlineSet).toMatchObject({
 			artifactKind: "skill-candidate-outline-set",
@@ -673,6 +665,133 @@ describe("StructuredSkillCurator", () => {
 		]);
 	});
 
+	it("expands outlines independently with bounded concurrency and one fresh retry", async () => {
+		const storedSkill = skillArtifact();
+		const artifacts = new FixtureArtifactStore([storedSkill]);
+		const curator = new StructuredSkillCurator({ version: "1", artifacts }, { maxConcurrentExpansions: 2 });
+		const fixture = fixtureInput(storedSkill.reference);
+		const input: EvolutionInputSnapshot = {
+			...fixture,
+			instructions: [
+				{
+					path: "/repo/AGENTS.md",
+					precedence: 1,
+					content: "Run focused verification after source changes.",
+					contentDigest: computeEvolutionTextDigest("Run focused verification after source changes."),
+				},
+			],
+		};
+		const baseOutline = (outlineOutput().outlines as readonly JsonObject[])[0];
+		if (baseOutline === undefined) throw new Error("Expected an outline fixture");
+		const outlines = {
+			outlines: [
+				{ ...baseOutline, outlineKey: "alpha", proposedName: "alpha-verification" },
+				{ ...baseOutline, outlineKey: "beta", proposedName: "beta-verification" },
+				{ ...baseOutline, outlineKey: "gamma", proposedName: "gamma-verification" },
+			],
+		};
+		const calls = new Map<string, number>();
+		const requestInputs = new Map<string, JsonObject[]>();
+		const idempotencyKeys = new Map<string, string[]>();
+		let active = 0;
+		let maxActive = 0;
+		const result = await curator.curate(
+			curatorInput(async (request) => {
+				if ((request.input.control as JsonObject).phase === "outline-discovery") {
+					await request.tools.find((tool) => tool.name === "inspect_skills")?.execute({ skillRefs: ["K1"] });
+					return { output: outlines, model: { provider: "faux", model: "fixture" } };
+				}
+				if (request.stage !== "skill-curator") throw new Error("Expected a skill curator request");
+				const acceptedOutline = request.input.acceptedOutline as JsonObject;
+				const outlineKey = acceptedOutline.outlineKey as string;
+				const attempt = (calls.get(outlineKey) ?? 0) + 1;
+				calls.set(outlineKey, attempt);
+				requestInputs.set(outlineKey, [...(requestInputs.get(outlineKey) ?? []), request.input]);
+				idempotencyKeys.set(outlineKey, [...(idempotencyKeys.get(outlineKey) ?? []), request.idempotencyKey]);
+				active += 1;
+				maxActive = Math.max(maxActive, active);
+				try {
+					request.onModelRound?.();
+					if (outlineKey === "gamma" && attempt === 2) request.onModelRound?.();
+					await request.tools
+						.find((tool) => tool.name === "inspect_source_evidence")
+						?.execute({ evidenceRefs: ["E1"] });
+					await request.tools.find((tool) => tool.name === "inspect_skills")?.execute({ skillRefs: ["K1"] });
+					await new Promise((resolve) => setTimeout(resolve, 5));
+					return {
+						output: outlineKey === "alpha" || (outlineKey === "beta" && attempt === 2) ? procedureOutput() : {},
+						model: { provider: "faux", model: "fixture" },
+					};
+				} finally {
+					active -= 1;
+				}
+			}, input),
+		);
+
+		expect(maxActive).toBe(2);
+		expect(Object.fromEntries(calls)).toEqual({ alpha: 1, beta: 2, gamma: 2 });
+		expect(result.status).toBe("completed-with-some-failures");
+		expect(result.candidates.map((candidate) => candidate.proposedName)).toEqual([
+			"alpha-verification",
+			"beta-verification",
+		]);
+		expect(result.candidates[1]?.preconditions).toEqual([
+			"The repository has a focused verification command",
+			"A deterministic verification command is available.",
+		]);
+		expect(result.failedExpansions).toMatchObject([
+			{
+				status: "failed",
+				outlineKey: "gamma",
+				diagnostic: {
+					reasonCode: "procedure-draft-invalid",
+					attempts: [
+						{
+							attempt: 1,
+							modelRounds: 1,
+							inspectedReferences: {
+								evidenceIds: ["support-1"],
+								skillIds: ["installed:workspace:existing-skill"],
+							},
+						},
+						{
+							attempt: 2,
+							modelRounds: 2,
+							inspectedReferences: {
+								evidenceIds: ["support-1"],
+								skillIds: ["installed:workspace:existing-skill"],
+							},
+						},
+					],
+				},
+			},
+		]);
+		const expansionInputs = [...requestInputs.values()].flat();
+		expect(expansionInputs).toHaveLength(5);
+		for (const expansionInput of expansionInputs) {
+			expect(expansionInput).toMatchObject({
+				acceptedOutline: { lessonRefs: ["L1"] },
+				lessons: [{ lessonRef: "L1" }],
+				selectedMemoryProposals: [{ memoryProposalRef: "P1", proposalId: "proposal-1" }],
+				repositoryInstructions: [{ path: "/repo/AGENTS.md", content: expect.stringContaining("verification") }],
+				skillCatalog: [{ skillRef: "K1", skillId: "installed:workspace:existing-skill" }],
+			});
+			expect(expansionInput).not.toHaveProperty("acceptedOutlines");
+			expect(expansionInput).not.toHaveProperty("frozenEvolutionMemory");
+		}
+		expect((requestInputs.get("alpha")?.[0]?.control as JsonObject).responseCorrection).toBeUndefined();
+		expect((requestInputs.get("beta")?.[1]?.control as JsonObject).responseCorrection).toMatchObject({
+			reason: expect.stringContaining("trigger must be an object"),
+		});
+		expect((requestInputs.get("gamma")?.[0]?.control as JsonObject).responseCorrection).toBeUndefined();
+		expect((requestInputs.get("gamma")?.[1]?.control as JsonObject).responseCorrection).toMatchObject({
+			reason: expect.stringContaining("trigger must be an object"),
+		});
+		const expansionKeys = [...idempotencyKeys.values()].flat();
+		expect(new Set(expansionKeys).size).toBe(5);
+		expect(expansionKeys.every((key) => /^skill-candidate-expansion-/.test(key))).toBe(true);
+	});
+
 	it("truncates oversized inspection requests and tells the model how to fetch the remainder", async () => {
 		const storedSkill = skillArtifact();
 		const artifacts = new FixtureArtifactStore([storedSkill]);
@@ -770,28 +889,37 @@ describe("StructuredSkillCurator", () => {
 		const curator = new StructuredSkillCurator({ version: "1", artifacts }, { maxResponseAttempts: 1 });
 		const input = fixtureInput(storedSkill.reference);
 
-		await expect(
-			curator.curate(
-				curatorInput(async (request) => {
-					if ((request.input.control as JsonObject).phase === "outline-discovery") {
-						await request.tools
-							.find((tool) => tool.name === "inspect_source_evidence")
-							?.execute({ evidenceRefs: ["E1"], contextAfter: 1 });
-						await request.tools.find((tool) => tool.name === "inspect_skills")?.execute({ skillRefs: ["K1"] });
-						return { output: outlineOutput(), model: { provider: "faux", model: "fixture" } };
-					}
-					return {
-						output: procedureOutput("x".repeat(SKILL_CANDIDATE_CAPSULE_MAX_SERIALIZED_BYTES)),
-						model: { provider: "faux", model: "fixture" },
-					};
-				}, input),
-			),
-		).rejects.toMatchObject({
-			name: "EvolutionExecutionError",
-			reasonCode: "skill-curation-invalid-response",
-			diagnostics: {
-				attemptDetails: [{ validationError: expect.stringContaining("exceeds its") }],
-			},
+		const result = await curator.curate(
+			curatorInput(async (request) => {
+				if ((request.input.control as JsonObject).phase === "outline-discovery") {
+					await request.tools
+						.find((tool) => tool.name === "inspect_source_evidence")
+						?.execute({ evidenceRefs: ["E1"], contextAfter: 1 });
+					await request.tools.find((tool) => tool.name === "inspect_skills")?.execute({ skillRefs: ["K1"] });
+					return { output: outlineOutput(), model: { provider: "faux", model: "fixture" } };
+				}
+				return {
+					output: procedureOutput("x".repeat(SKILL_CANDIDATE_CAPSULE_MAX_SERIALIZED_BYTES)),
+					model: { provider: "faux", model: "fixture" },
+				};
+			}, input),
+		);
+
+		expect(result).toMatchObject({
+			status: "completed",
+			candidates: [],
+			failedExpansions: [
+				{
+					status: "failed",
+					diagnostic: {
+						reasonCode: "candidate-assembly-invalid",
+						attempts: [
+							{ attempt: 1, reasonCode: "candidate-assembly-invalid" },
+							{ attempt: 2, reasonCode: "candidate-assembly-invalid" },
+						],
+					},
+				},
+			],
 		});
 	});
 
@@ -848,18 +976,17 @@ describe("StructuredSkillCurator", () => {
 		};
 		const input = fixtureInput(storedSkill.reference);
 		let discoveryCalls = 0;
-		await expect(
-			new StructuredSkillCurator(dependencies).curate(
-				curatorInput(async (request) => {
-					if ((request.input.control as JsonObject).phase === "outline-discovery") {
-						discoveryCalls += 1;
-						await request.tools.find((tool) => tool.name === "inspect_skills")?.execute({ skillRefs: ["K1"] });
-						return { output: outlineOutput(), model: { provider: "faux", model: "fixture" } };
-					}
-					throw new Error("interrupted after outline checkpoint");
-				}, input),
-			),
-		).rejects.toThrow("interrupted after outline checkpoint");
+		const interrupted = await new StructuredSkillCurator(dependencies).curate(
+			curatorInput(async (request) => {
+				if ((request.input.control as JsonObject).phase === "outline-discovery") {
+					discoveryCalls += 1;
+					await request.tools.find((tool) => tool.name === "inspect_skills")?.execute({ skillRefs: ["K1"] });
+					return { output: outlineOutput(), model: { provider: "faux", model: "fixture" } };
+				}
+				throw new Error("interrupted after outline checkpoint");
+			}, input),
+		);
+		expect(interrupted.failedExpansions).toHaveLength(1);
 
 		const resumed = await new StructuredSkillCurator(dependencies).curate(
 			curatorInput(async (request) => {
@@ -985,7 +1112,7 @@ describe("StructuredSkillCurator", () => {
 			memoryProposalRefs: ["P1"],
 			skillRefs: ["K1"],
 		});
-		const procedureSchema = createSkillCandidateProcedureDraftOutputSchema(["O1"]);
+		const procedureSchema = createSkillCandidateProcedureDraftOutputSchema();
 		expect(findUnsupportedCodexSchemaKeywords(schema)).toEqual([]);
 		expect(findUnsupportedCodexSchemaKeywords(procedureSchema)).toEqual([]);
 		expect(JSON.stringify(schema)).not.toContain('"rationale"');
