@@ -6,6 +6,7 @@ export type EvolutionModelReferenceKind =
 	| "instruction"
 	| "lesson"
 	| "memory"
+	| "outline"
 	| "proposal"
 	| "skill"
 	| "slice";
@@ -16,6 +17,7 @@ const REFERENCE_PREFIXES: Readonly<Record<EvolutionModelReferenceKind, string>> 
 	instruction: "I",
 	lesson: "L",
 	memory: "M",
+	outline: "O",
 	proposal: "P",
 	skill: "K",
 	slice: "S",

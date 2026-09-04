@@ -39,6 +39,7 @@ import type {
 	SkillCandidateExpansionFailed,
 	SkillCandidateGroup,
 	SkillCandidateGroupCapsule,
+	SkillCandidateOutlineSet,
 	SkillCandidatePriorityScore,
 	SkillCandidateRegistryEvent,
 	SkillCandidateRegistrySnapshot,
@@ -73,6 +74,7 @@ export type EvolutionArtifact =
 	| ReflectionNode
 	| ScoredProposal
 	| SkillCandidate
+	| SkillCandidateOutlineSet
 	| SkillCandidateGroupCapsule
 	| SkillCandidatePriorityScore
 	| SkillDraft
@@ -277,6 +279,7 @@ export interface SkillCuratorInput {
 
 export interface SkillCurationResult {
 	readonly status: SkillCurationStatus;
+	readonly outlineSet: SkillCandidateOutlineSet;
 	readonly candidates: readonly SkillCandidate[];
 	readonly failedExpansions: readonly SkillCandidateExpansionFailed[];
 	readonly deferredFindings: readonly DeferredSkillCandidateFinding[];

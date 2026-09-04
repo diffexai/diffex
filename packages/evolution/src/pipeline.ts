@@ -710,11 +710,14 @@ export class EvolutionPipeline implements EvolutionStageExecutor {
 				);
 				return {
 					artifacts: [
+						curation.outlineSet,
 						...curation.candidates,
 						...curation.deferredFindings,
 						...curation.proceduralInformationLossFindings,
 					],
 					state: {
+						outlineSetId: curation.outlineSet.outlineSetId,
+						outlineIds: curation.outlineSet.outlines.map((outline) => outline.outlineId),
 						candidateIds: curation.candidates.map((candidate) => candidate.candidateId),
 						deferredFindingIds: curation.deferredFindings.map((finding) => finding.findingId),
 						proceduralInformationLossFindingIds: curation.proceduralInformationLossFindings.map(

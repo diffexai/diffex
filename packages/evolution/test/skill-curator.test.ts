@@ -6,6 +6,7 @@ import {
 	computeEvolutionContentDigest,
 	computeEvolutionTextDigest,
 	createEvolutionArtifactMetadata,
+	createSkillCandidateProcedureDraftOutputSchema,
 	createSkillCuratorOutputSchema,
 	type EvidenceCorpusManifest,
 	type EvolutionArtifact,
@@ -157,7 +158,7 @@ function skillArtifact(): {
 }
 
 class FixtureArtifactStore implements EvolutionArtifactStore {
-	readonly #artifacts: ReadonlyMap<string, EvolutionArtifact>;
+	readonly #artifacts: Map<string, EvolutionArtifact>;
 
 	constructor(
 		entries: readonly { readonly reference: EvolutionArtifactReference; readonly artifact: EvolutionArtifact }[],
@@ -166,7 +167,12 @@ class FixtureArtifactStore implements EvolutionArtifactStore {
 	}
 
 	async put(artifact: EvolutionArtifact): Promise<EvolutionArtifactReference> {
-		return { artifactId: artifact.metadata.artifactId, contentDigest: computeEvolutionContentDigest(artifact) };
+		const reference = {
+			artifactId: artifact.metadata.artifactId,
+			contentDigest: computeEvolutionContentDigest(artifact),
+		};
+		this.#artifacts.set(reference.contentDigest, artifact);
+		return reference;
 	}
 
 	async get(reference: EvolutionArtifactReference): Promise<EvolutionArtifact> {
@@ -362,50 +368,52 @@ function selectedMemoryProposal(input: EvolutionInputSnapshot): ScoredProposal {
 	};
 }
 
-function candidateOutput(positiveTrigger = "A focused test command exits nonzero after a code change."): JsonObject {
+function outlineOutput(): JsonObject {
 	return {
-		decisions: [
+		outlines: [
 			{
-				decisionKey: "verification-recovery",
+				outlineKey: "verification-recovery",
 				lessonRefs: ["L1"],
+				operation: "UPDATE",
+				proposedName: "verification-recovery",
 				existingSkillRefs: ["K1"],
-				skillability: {
-					classification: "troubleshooting-recovery",
-				},
-				memoryRelationship: {
-					classification: "complements",
-					memoryProposalRefs: ["P1"],
-				},
-				disposition: "candidate",
-				candidate: {
-					operation: "UPDATE",
-					proposedName: "verification-recovery",
-					triggerDescription: "A repository verification command fails or produces an ambiguous result.",
-					positiveTriggers: [positiveTrigger],
-					negativeTriggers: ["The task only asks for an explanation and changes no files."],
-					preconditions: ["A deterministic verification command is available."],
-					procedureSteps: [
-						{ action: "Run the focused verification command.", condition: null },
-						{ action: "Inspect the first actionable failure signal.", condition: "The command fails." },
-						{ action: "Apply the evidence-supported correction and rerun verification.", condition: null },
-					],
-					requiredTools: ["shell"],
-					environment: ["Repository checkout"],
-					failureHandling: [
-						{
-							signal: "The focused command exits nonzero.",
-							mitigation: "Use the first deterministic diagnostic instead of guessing.",
-							recovery: "Correct the failing command or implementation and rerun it.",
-						},
-					],
-					applicabilityBoundaries: ["Only use deterministic project verification commands."],
-					verificationChecks: ["The focused command exits successfully."],
-					completionCondition: "The original verification command passes without suppressing failures.",
-				},
-				deferredReason: null,
+				skillability: { classification: "troubleshooting-recovery" },
+				memoryRelationship: { classification: "complements", memoryProposalRefs: ["P1"] },
 			},
 		],
-		proceduralInformationLosses: [],
+	};
+}
+
+function procedureOutput(positiveTrigger = "A focused test command exits nonzero after a code change."): JsonObject {
+	return {
+		procedureDrafts: [
+			{
+				outlineRef: "O1",
+				trigger: {
+					description: "A repository verification command fails or produces an ambiguous result.",
+					positiveExamples: [positiveTrigger],
+					negativeExamples: ["The task only asks for an explanation and changes no files."],
+				},
+				steps: [
+					{ action: "Run the focused verification command.", condition: null },
+					{ action: "Inspect the first actionable failure signal.", condition: "The command fails." },
+					{ action: "Apply the evidence-supported correction and rerun verification.", condition: null },
+				],
+				requiredTools: ["shell"],
+				environment: ["Repository checkout"],
+				failureHandling: [
+					{
+						signal: "The focused command exits nonzero.",
+						mitigation: "Use the first deterministic diagnostic instead of guessing.",
+						recovery: "Correct the failing command or implementation and rerun it.",
+					},
+				],
+				additionalPreconditions: ["A deterministic verification command is available."],
+				additionalApplicabilityBoundaries: ["Only use deterministic project verification commands."],
+				verificationChecks: ["The focused command exits successfully."],
+				completionCondition: "The original verification command passes without suppressing failures.",
+			},
+		],
 	};
 }
 
@@ -429,7 +437,8 @@ describe("StructuredSkillCurator", () => {
 		const storedSkill = skillArtifact();
 		const artifacts = new FixtureArtifactStore([storedSkill]);
 		const ledger: EvolutionLedgerEvent[] = [];
-		let requestInput: JsonObject | null = null;
+		let discoveryInput: JsonObject | null = null;
+		let procedureInput: JsonObject | null = null;
 		const curator = new StructuredSkillCurator({
 			version: "1",
 			artifacts,
@@ -438,49 +447,55 @@ describe("StructuredSkillCurator", () => {
 		const input = fixtureInput(storedSkill.reference);
 		const result = await curator.curate(
 			curatorInput(async (request: EvolutionModelRequest) => {
-				requestInput = request.input;
 				expect(request.stage).toBe("skill-curator");
-				expect(request.idempotencyKey).toBe("job-1:skill-curating");
-				const evidenceTool = request.tools.find((tool) => tool.name === "inspect_source_evidence");
-				const skillTool = request.tools.find((tool) => tool.name === "inspect_skills");
-				expect(await evidenceTool?.execute({ evidenceRefs: ["E1"], contextAfter: 1 })).toMatchObject({
-					evidence: [
-						{ evidenceRef: "E1", traceId: "trace-1" },
-						{ evidenceRef: "E2", traceId: "trace-1" },
-					],
-				});
-				expect(await skillTool?.execute({ skillRefs: ["K1"] })).toMatchObject({
-					skills: [
-						{ skillId: "installed:workspace:existing-skill", content: expect.stringContaining("workflow") },
-					],
-				});
-				const output = candidateOutput();
+				const phase = (request.input.control as JsonObject).phase;
+				if (phase === "outline-discovery") {
+					discoveryInput = request.input;
+					expect(request.idempotencyKey).toBe("job-1:skill-curating");
+					const evidenceTool = request.tools.find((tool) => tool.name === "inspect_source_evidence");
+					const skillTool = request.tools.find((tool) => tool.name === "inspect_skills");
+					expect(await evidenceTool?.execute({ evidenceRefs: ["E1"], contextAfter: 1 })).toMatchObject({
+						evidence: [
+							{ evidenceRef: "E1", traceId: "trace-1" },
+							{ evidenceRef: "E2", traceId: "trace-1" },
+						],
+					});
+					expect(await skillTool?.execute({ skillRefs: ["K1"] })).toMatchObject({
+						skills: [
+							{ skillId: "installed:workspace:existing-skill", content: expect.stringContaining("workflow") },
+						],
+					});
+					const output = outlineOutput();
+					expect(Check(request.outputSchema as TSchema, output)).toBe(true);
+					request.validateOutput?.(output);
+					return {
+						output,
+						submissionMethod: "response-tool",
+						model: { provider: "faux", model: "fixture" },
+					};
+				}
+				procedureInput = request.input;
+				expect(request.idempotencyKey).toMatch(/^skill-candidate-procedures-/);
+				const output = procedureOutput();
 				expect(Check(request.outputSchema as TSchema, output)).toBe(true);
 				request.validateOutput?.(output);
-				return {
-					output,
-					submissionMethod: "response-tool",
-					model: { provider: "faux", model: "fixture" },
-				};
+				return { output, submissionMethod: "response-tool", model: { provider: "faux", model: "fixture" } };
 			}, input),
 		);
 
-		expect(requestInput).toMatchObject({
+		expect(discoveryInput).toMatchObject({
 			control: {
+				phase: "outline-discovery",
 				globalEvolvedSkillTargetPermitted: false,
-				candidateContainsNoExecutableWriterPayload: true,
-				candidateCapsuleLimits: {
-					serialization: "canonical-json-utf8-v1",
-					maxSerializedBytes: SKILL_CANDIDATE_CAPSULE_MAX_SERIALIZED_BYTES,
-					maxEstimatedTokens: SKILL_CANDIDATE_CAPSULE_MAX_ESTIMATED_TOKENS,
-					preserveWholeStructuredFields: true,
-				},
+				doNotAuthorProcedureMaterial: true,
+				omitDeferredDecisions: true,
+				omitProceduralInformationLossDiagnostics: true,
 				proceduralWorkflowsBelongInSkills: ["ordered-setup", "tool-use", "debugging", "recovery", "verification"],
 				doNotProposeMemoryPointersToSkills: true,
 				memoryRemovalOrReplacementRequiresExplicitProposal: true,
 				memoryRelationshipSemantics: {
 					complements: expect.stringContaining("independently useful"),
-					fallbackUntilActivation: expect.stringContaining("explicit memory proposal"),
+					"fallback-until-activation": expect.stringContaining("explicit memory proposal"),
 					supersedes: expect.stringContaining("memory remains unchanged"),
 				},
 			},
@@ -488,6 +503,34 @@ describe("StructuredSkillCurator", () => {
 			selectedMemoryProposals: [{ memoryProposalRef: "P1", proposalId: "proposal-1" }],
 			frozenEvolutionMemory: { content: input.harness.memory },
 			skillCatalog: [{ skillRef: "K1", skillId: "installed:workspace:existing-skill" }],
+		});
+		expect(procedureInput).toMatchObject({
+			control: {
+				phase: "procedure-generation",
+				returnOnlyNonDerivableProcedureMaterial: true,
+				doNotRepeatIdentityScopeEvidenceProvenanceOrLessonMaterial: true,
+			},
+			acceptedOutlines: [
+				{
+					outlineRef: "O1",
+					outlineKey: "verification-recovery",
+					lessonRefs: ["L1"],
+				},
+			],
+		});
+		expect(result.outlineSet).toMatchObject({
+			artifactKind: "skill-candidate-outline-set",
+			discoveryIdempotencyKey: "job-1:skill-curating",
+			inputSnapshotId: "input-1",
+			outlines: [
+				{
+					outlineId: expect.stringMatching(/^skill-candidate-outline-/),
+					outlineKey: "verification-recovery",
+					sourceLessonIds: ["lesson-final"],
+					existingSkillIds: ["installed:workspace:existing-skill"],
+					memoryRelationship: { classification: "complements", memoryProposalIds: ["proposal-1"] },
+				},
+			],
 		});
 		expect(result.deferredFindings).toEqual([]);
 		expect(result.proceduralInformationLossFindings).toEqual([]);
@@ -611,6 +654,7 @@ describe("StructuredSkillCurator", () => {
 		];
 		const partialResult = {
 			status: "completed-with-some-failures",
+			outlineSet: result.outlineSet,
 			candidates: [candidate],
 			failedExpansions: [failedExpansion],
 			deferredFindings: [],
@@ -620,7 +664,11 @@ describe("StructuredSkillCurator", () => {
 			expansionOutcomes: [{ status: "succeeded" }, { status: "failed" }],
 			partialResult: { status: "completed-with-some-failures" },
 		});
-		expect(ledger.map((event) => event.type)).toEqual(["skill-curator-tool-call", "skill-curator-tool-call"]);
+		expect(ledger.map((event) => event.type)).toEqual([
+			"skill-curator-tool-call",
+			"skill-curator-tool-call",
+			"skill-candidate-outlines-checkpointed",
+		]);
 	});
 
 	it("truncates oversized inspection requests and tells the model how to fetch the remainder", async () => {
@@ -644,15 +692,13 @@ describe("StructuredSkillCurator", () => {
 					evidence: [{ evidenceRef: "E1" }],
 					note: "Only the first 1 of 2 requested references were fetched. Fetch at most 1 per call to inspect the remainder.",
 				});
-				return {
-					output: { decisions: [], proceduralInformationLosses: [] },
-					model: { provider: "faux", model: "fixture" },
-				};
+				return { output: { outlines: [] }, model: { provider: "faux", model: "fixture" } };
 			}, input),
 		);
 
-		expect(result).toEqual({
+		expect(result).toMatchObject({
 			status: "completed",
+			outlineSet: { artifactKind: "skill-candidate-outline-set", outlines: [] },
 			candidates: [],
 			failedExpansions: [],
 			deferredFindings: [],
@@ -665,6 +711,7 @@ describe("StructuredSkillCurator", () => {
 				resolvedEvidenceIds: ["support-1"],
 				denialCode: null,
 			},
+			{ type: "skill-candidate-outlines-checkpointed" },
 		]);
 	});
 
@@ -691,15 +738,13 @@ describe("StructuredSkillCurator", () => {
 					inspectionFinished: true,
 					note: "Inspection is finished because the Skill Curator tool budget is exhausted. Submit a best-effort response now using the information already inspected.",
 				});
-				return {
-					output: { decisions: [], proceduralInformationLosses: [] },
-					model: { provider: "faux", model: "fixture" },
-				};
+				return { output: { outlines: [] }, model: { provider: "faux", model: "fixture" } };
 			}, input),
 		);
 
-		expect(result).toEqual({
+		expect(result).toMatchObject({
 			status: "completed",
+			outlineSet: { artifactKind: "skill-candidate-outline-set", outlines: [] },
 			candidates: [],
 			failedExpansions: [],
 			deferredFindings: [],
@@ -713,6 +758,7 @@ describe("StructuredSkillCurator", () => {
 				requestedReferences: ["E2"],
 				resolvedEvidenceIds: [],
 			},
+			{ type: "skill-candidate-outlines-checkpointed" },
 		]);
 	});
 
@@ -725,12 +771,15 @@ describe("StructuredSkillCurator", () => {
 		await expect(
 			curator.curate(
 				curatorInput(async (request) => {
-					await request.tools
-						.find((tool) => tool.name === "inspect_source_evidence")
-						?.execute({ evidenceRefs: ["E1"], contextAfter: 1 });
-					await request.tools.find((tool) => tool.name === "inspect_skills")?.execute({ skillRefs: ["K1"] });
+					if ((request.input.control as JsonObject).phase === "outline-discovery") {
+						await request.tools
+							.find((tool) => tool.name === "inspect_source_evidence")
+							?.execute({ evidenceRefs: ["E1"], contextAfter: 1 });
+						await request.tools.find((tool) => tool.name === "inspect_skills")?.execute({ skillRefs: ["K1"] });
+						return { output: outlineOutput(), model: { provider: "faux", model: "fixture" } };
+					}
 					return {
-						output: candidateOutput("x".repeat(SKILL_CANDIDATE_CAPSULE_MAX_SERIALIZED_BYTES)),
+						output: procedureOutput("x".repeat(SKILL_CANDIDATE_CAPSULE_MAX_SERIALIZED_BYTES)),
 						model: { provider: "faux", model: "fixture" },
 					};
 				}, input),
@@ -744,90 +793,54 @@ describe("StructuredSkillCurator", () => {
 		});
 	});
 
-	it("preserves redundant guidance as a deferred finding", async () => {
-		const storedSkill = skillArtifact();
-		const artifacts = new FixtureArtifactStore([storedSkill]);
-		const curator = new StructuredSkillCurator({ version: "1", artifacts });
-		const input = fixtureInput(storedSkill.reference);
-		const result = await curator.curate(
-			curatorInput(async (request) => {
-				const output: JsonObject = {
-					decisions: [
-						{
-							decisionKey: "memory-already-covers-guidance",
-							lessonRefs: ["L1"],
-							existingSkillRefs: [],
-							skillability: {
-								classification: "verification-routine",
-							},
-							memoryRelationship: {
-								classification: "redundant",
-								memoryProposalRefs: ["P1"],
-							},
-							disposition: "deferred",
-							candidate: null,
-							deferredReason: "No distinct procedural content remains for a skill.",
-						},
-					],
-					proceduralInformationLosses: [],
-				};
-				request.validateOutput?.(output);
-				return { output, model: { provider: "faux", model: "fixture" } };
-			}, input),
-		);
-
-		expect(result.candidates).toEqual([]);
-		expect(result.deferredFindings).toMatchObject([
-			{
-				artifactKind: "skill-candidate-finding",
-				disposition: "deferred",
-				sourceLessonIds: ["lesson-final"],
-				skillability: { classification: "verification-routine" },
-				memoryRelationship: { classification: "redundant", memoryProposalIds: ["proposal-1"] },
-			},
-		]);
+	it("omits deferred decisions and procedural information loss from discovery", () => {
+		const schema = createSkillCuratorOutputSchema({
+			lessonRefs: ["L1"],
+			memoryProposalRefs: ["P1"],
+			skillRefs: ["K1"],
+		});
+		const serialized = JSON.stringify(schema);
+		expect(serialized).not.toContain("deferred");
+		expect(serialized).not.toContain("proceduralInformationLoss");
+		expect(serialized).not.toContain("triggerDescription");
+		expect(serialized).not.toContain("procedureSteps");
+		expect(Check(schema as TSchema, outlineOutput())).toBe(true);
 	});
 
-	it("persists evidence-grounded procedural information loss without emitting a candidate", async () => {
+	it("checkpoints outlines and resumes procedure generation without rediscovery", async () => {
 		const storedSkill = skillArtifact();
 		const artifacts = new FixtureArtifactStore([storedSkill]);
-		const curator = new StructuredSkillCurator({ version: "1", artifacts });
+		const ledger: EvolutionLedgerEvent[] = [];
+		const dependencies = {
+			version: "1",
+			artifacts,
+			ledger: { append: async (event: EvolutionLedgerEvent) => void ledger.push(event), read: async () => ledger },
+		};
 		const input = fixtureInput(storedSkill.reference);
-		const result = await curator.curate(
+		let discoveryCalls = 0;
+		await expect(
+			new StructuredSkillCurator(dependencies).curate(
+				curatorInput(async (request) => {
+					if ((request.input.control as JsonObject).phase === "outline-discovery") {
+						discoveryCalls += 1;
+						await request.tools.find((tool) => tool.name === "inspect_skills")?.execute({ skillRefs: ["K1"] });
+						return { output: outlineOutput(), model: { provider: "faux", model: "fixture" } };
+					}
+					throw new Error("interrupted after outline checkpoint");
+				}, input),
+			),
+		).rejects.toThrow("interrupted after outline checkpoint");
+
+		const resumed = await new StructuredSkillCurator(dependencies).curate(
 			curatorInput(async (request) => {
-				const evidenceTool = request.tools.find((tool) => tool.name === "inspect_source_evidence");
-				await evidenceTool?.execute({ evidenceRefs: ["E1"], contextAfter: 1 });
-				const output: JsonObject = {
-					decisions: [],
-					proceduralInformationLosses: [
-						{
-							lossKey: "missing-recovery-order",
-							lessonRefs: ["L1"],
-							missing: ["action-order", "mitigation-or-recovery"],
-							supportingEvidenceRefs: ["E1"],
-							explanation:
-								"The evidence contains the recovery order, but the final lesson retains only the conclusion.",
-						},
-					],
-				};
-				request.validateOutput?.(output);
-				return { output, model: { provider: "faux", model: "fixture" } };
+				expect((request.input.control as JsonObject).phase).toBe("procedure-generation");
+				return { output: procedureOutput(), model: { provider: "faux", model: "fixture" } };
 			}, input),
 		);
 
-		expect(result.candidates).toEqual([]);
-		expect(result.proceduralInformationLossFindings).toMatchObject([
-			{
-				artifactKind: "procedural-information-loss",
-				detectedBy: "skill-curator",
-				sourceLessonIds: ["lesson-final"],
-				loss: {
-					missing: ["action-order", "mitigation-or-recovery"],
-					supportingEvidenceIds: ["support-1"],
-				},
-			},
-		]);
-		expect(result.proceduralInformationLossFindings[0]?.metadata.sourceIds).toEqual(["lesson-final", "support-1"]);
+		expect(discoveryCalls).toBe(1);
+		expect(resumed.candidates).toHaveLength(1);
+		expect(ledger.filter((event) => event.type === "skill-candidate-outlines-checkpointed")).toHaveLength(1);
 	});
 
 	it("rejects references to skill content that was not inspected", async () => {
@@ -839,7 +852,7 @@ describe("StructuredSkillCurator", () => {
 		await expect(
 			curator.curate(
 				curatorInput(
-					async () => ({ output: candidateOutput(), model: { provider: "faux", model: "fixture" } }),
+					async () => ({ output: outlineOutput(), model: { provider: "faux", model: "fixture" } }),
 					input,
 				),
 			),
@@ -852,13 +865,15 @@ describe("StructuredSkillCurator", () => {
 
 	it("uses a strict Codex-compatible output schema", () => {
 		const schema = createSkillCuratorOutputSchema({
-			evidenceRefs: ["E1"],
 			lessonRefs: ["L1"],
 			memoryProposalRefs: ["P1"],
 			skillRefs: ["K1"],
 		});
+		const procedureSchema = createSkillCandidateProcedureDraftOutputSchema(["O1"]);
 		expect(findUnsupportedCodexSchemaKeywords(schema)).toEqual([]);
+		expect(findUnsupportedCodexSchemaKeywords(procedureSchema)).toEqual([]);
 		expect(JSON.stringify(schema)).not.toContain('"rationale"');
-		expect(Check(schema as TSchema, candidateOutput())).toBe(true);
+		expect(Check(schema as TSchema, outlineOutput())).toBe(true);
+		expect(Check(procedureSchema as TSchema, procedureOutput())).toBe(true);
 	});
 });

@@ -722,8 +722,25 @@ describe("deterministic proposal evidence ranking", () => {
 					selectedMemoryProposalIds.push(
 						input.selectedMemoryProposals.map((scored) => scored.proposal.proposalId),
 					);
+					const outlineSetContent = {
+						artifactKind: "skill-candidate-outline-set" as const,
+						outlineSetId: "outline-set-1",
+						discoveryIdempotencyKey: input.idempotencyKey,
+						inputSnapshotId: input.input.metadata.artifactId,
+						workspace: {
+							repositoryId: input.input.repository.repositoryId,
+							rootPath: input.input.repository.rootPath,
+							repositoryRevision: input.input.repository.revision,
+							evolutionScope: input.input.metadata.scope,
+						},
+						outlines: [],
+					};
 					return {
 						status: "completed",
+						outlineSet: {
+							metadata: metadata("outline-set-1", [input.input.metadata.artifactId], outlineSetContent),
+							...outlineSetContent,
+						},
 						candidates: [],
 						failedExpansions: [],
 						deferredFindings: [],
@@ -809,7 +826,13 @@ describe("deterministic proposal evidence ranking", () => {
 		expect(selectedMemoryProposalIds).toEqual([[]]);
 		expect(skillCurationResult).toMatchObject({
 			directive: "complete-no-op",
-			state: { candidateIds: [], deferredFindingIds: [], selectedMemoryProposalIds: [] },
+			state: {
+				outlineSetId: "outline-set-1",
+				outlineIds: [],
+				candidateIds: [],
+				deferredFindingIds: [],
+				selectedMemoryProposalIds: [],
+			},
 		});
 	});
 });

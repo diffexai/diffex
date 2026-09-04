@@ -158,6 +158,8 @@ export {
 	type SkillCandidateMemoryRelationship,
 	type SkillCandidateOperation,
 	type SkillCandidateOutline,
+	type SkillCandidateOutlineSet,
+	type SkillCandidateOutlinesCheckpointedLedgerEvent,
 	type SkillCandidatePriorityScore,
 	type SkillCandidatePriorityScoreComponents,
 	type SkillCandidatePriorityScoredEvent,
@@ -412,6 +414,7 @@ export {
 	type SkillCandidateWorkProcessor,
 } from "./skill-candidate-worker.ts";
 export {
+	createSkillCandidateProcedureDraftOutputSchema,
 	createSkillCuratorOutputSchema,
 	SKILL_CANDIDATE_CAPSULE_MAX_ESTIMATED_TOKENS,
 	SKILL_CANDIDATE_CAPSULE_MAX_SERIALIZED_BYTES,

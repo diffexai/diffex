@@ -1030,8 +1030,31 @@ describe("checkpointed evolution pipeline", () => {
 						metadata: metadata("skill-candidate-1", ["lesson-1", "proposal-1"], candidateContent),
 						...candidateContent,
 					};
+					const outlineSetContent = {
+						artifactKind: "skill-candidate-outline-set" as const,
+						outlineSetId: "outline-set-1",
+						discoveryIdempotencyKey: input.idempotencyKey,
+						inputSnapshotId: input.input.metadata.artifactId,
+						workspace: candidate.workspace,
+						outlines: [
+							{
+								outlineId: "outline-1",
+								outlineKey: "focused-verification",
+								sourceLessonIds: candidate.sourceLessonIds,
+								operation: candidate.operation,
+								proposedName: candidate.proposedName,
+								existingSkillIds: candidate.existingSkillIds,
+								skillability: candidate.skillability,
+								memoryRelationship: candidate.memoryRelationship,
+							},
+						],
+					};
 					return {
 						status: "completed",
+						outlineSet: {
+							metadata: metadata("outline-set-1", ["lesson-1", "proposal-1"], outlineSetContent),
+							...outlineSetContent,
+						},
 						candidates: [candidate],
 						failedExpansions: [],
 						deferredFindings: [],
@@ -1104,6 +1127,8 @@ describe("checkpointed evolution pipeline", () => {
 		const skillCheckpoint = completed.checkpoints.find((checkpoint) => checkpoint.stage === "skill-curating");
 		expect(skillCheckpoint).toMatchObject({
 			state: {
+				outlineSetId: "outline-set-1",
+				outlineIds: ["outline-1"],
 				candidateIds: ["skill-candidate-1"],
 				deferredFindingIds: [],
 				proceduralInformationLossFindingIds: [],
@@ -1112,6 +1137,10 @@ describe("checkpointed evolution pipeline", () => {
 		});
 		if (skillCheckpoint === undefined) throw new Error("Expected a skill curation checkpoint");
 		expect(await fixture.persistence.get(skillCheckpoint.outputArtifacts[0]!)).toMatchObject({
+			artifactKind: "skill-candidate-outline-set",
+			outlineSetId: "outline-set-1",
+		});
+		expect(await fixture.persistence.get(skillCheckpoint.outputArtifacts[1]!)).toMatchObject({
 			artifactKind: "skill-candidate",
 			candidateId: "skill-candidate-1",
 			operation: "CREATE",

@@ -603,6 +603,16 @@ export interface SkillCandidateOutline {
 	readonly memoryRelationship: SkillCandidateMemoryRelationship;
 }
 
+export interface SkillCandidateOutlineSet {
+	readonly artifactKind: "skill-candidate-outline-set";
+	readonly metadata: EvolutionArtifactMetadata;
+	readonly outlineSetId: string;
+	readonly discoveryIdempotencyKey: string;
+	readonly inputSnapshotId: string;
+	readonly workspace: SkillCandidateWorkspaceScope;
+	readonly outlines: readonly SkillCandidateOutline[];
+}
+
 export interface SkillCandidateProcedureStep {
 	readonly sequence: number;
 	readonly action: string;
@@ -1801,6 +1811,12 @@ export interface SkillCuratorToolCallLedgerEvent extends EvolutionLedgerEventBas
 	readonly denialCode: string | null;
 }
 
+export interface SkillCandidateOutlinesCheckpointedLedgerEvent extends EvolutionLedgerEventBase {
+	readonly type: "skill-candidate-outlines-checkpointed";
+	readonly idempotencyKey: string;
+	readonly outlineSet: EvolutionArtifactReference;
+}
+
 export interface ReflectorModelCallLedgerEvent extends EvolutionLedgerEventBase {
 	readonly type: "reflector-model-call";
 	readonly modelCallId: string;
@@ -1842,5 +1858,6 @@ export type EvolutionLedgerEvent =
 	| ReflectionNodeCheckpointedLedgerEvent
 	| CuratorToolCallLedgerEvent
 	| SkillCuratorToolCallLedgerEvent
+	| SkillCandidateOutlinesCheckpointedLedgerEvent
 	| ReflectorModelCallLedgerEvent
 	| ReflectorToolCallLedgerEvent;
