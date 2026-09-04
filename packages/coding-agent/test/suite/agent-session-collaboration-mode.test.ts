@@ -450,4 +450,44 @@ describe("AgentSession collaboration mode foundation", () => {
 		expect(extensionToolCalls).toBe(0);
 		expect(getAssistantTexts(harness)).toContain('Tool "request_user_input" is unavailable outside Plan mode.');
 	});
+
+	it("reports unavailable Plan questions as errors when no TUI supports the call", async () => {
+		const harness = await createHarness({ tools: createBaseTools() });
+		harnesses.push(harness);
+		setCollaborationMode(harness.session, "plan");
+		let observedResult: { isError: boolean; text: string } | undefined;
+		harness.setResponses([
+			fauxAssistantMessage(
+				fauxToolCall("request_user_input", {
+					questions: [
+						{
+							id: "scope",
+							header: "Scope",
+							question: "Which scope?",
+							options: [
+								{ label: "Focused", description: "Keep the change focused." },
+								{ label: "Broad", description: "Expand the change." },
+							],
+						},
+					],
+				}),
+				{ stopReason: "toolUse" },
+			),
+			(context) => {
+				const result = [...context.messages].reverse().find((message) => message.role === "toolResult");
+				const text = result?.role === "toolResult" ? result.content.find((part) => part.type === "text")?.text : "";
+				observedResult = { isError: result?.role === "toolResult" && result.isError, text: text ?? "" };
+				return fauxAssistantMessage("continued after unavailable question");
+			},
+		]);
+
+		await harness.session.prompt("ask without an interactive UI");
+
+		expect(observedResult).toEqual({
+			isError: true,
+			text: "request_user_input is unavailable without interactive UI.",
+		});
+		expect(getAssistantTexts(harness)).toContain("continued after unavailable question");
+		expect(getCollaborationMode(harness.session)).toBe("plan");
+	});
 });

@@ -150,11 +150,7 @@ export function createRequestUserInputToolDefinition(): ToolDefinition<
 		async execute(_toolCallId, rawInput, signal, _onUpdate, ctx) {
 			const input = parseRequestUserInput(rawInput);
 			if (ctx.mode !== "tui") {
-				return {
-					content: [{ type: "text", text: "request_user_input is unavailable without interactive UI." }],
-					details: undefined,
-					isError: true,
-				};
+				throw new Error("request_user_input is unavailable without interactive UI.");
 			}
 			if (signal?.aborted) {
 				const details = { status: "cancelled" } as const;

@@ -201,19 +201,15 @@ describe("request_user_input tool", () => {
 
 	it("returns the normal unavailable result without TUI support", async () => {
 		const context = { mode: "print" } as unknown as ExtensionContext;
-		const result = await createRequestUserInputToolDefinition().execute(
-			"question-1",
-			{ questions: [question()] },
-			undefined,
-			undefined,
-			context,
-		);
-
-		expect(result).toEqual({
-			content: [{ type: "text", text: "request_user_input is unavailable without interactive UI." }],
-			details: undefined,
-			isError: true,
-		});
+		await expect(
+			createRequestUserInputToolDefinition().execute(
+				"question-1",
+				{ questions: [question()] },
+				undefined,
+				undefined,
+				context,
+			),
+		).rejects.toThrow("request_user_input is unavailable without interactive UI.");
 	});
 
 	it("renders descriptions and synthetic Other while wrapping narrow output", () => {
