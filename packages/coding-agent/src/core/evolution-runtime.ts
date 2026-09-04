@@ -937,7 +937,17 @@ export async function createCodingAgentEvolutionRuntime(
 	const model = new CodingAgentEvolutionModelExecutor(options.session, options.modelRuntime, priority);
 	const reflector = new RecursiveReflector({ version: VERSION, artifacts: persistence, ledger: persistence });
 	const curator = new StructuredDeltaCurator({ version: VERSION, ledger: persistence });
-	const skillCurator = new StructuredSkillCurator({ version: VERSION, artifacts: persistence, ledger: persistence });
+	const candidateRegistry = new PersistentSkillCandidateRegistry({
+		version: VERSION,
+		artifacts: persistence,
+		store: persistence,
+	});
+	const skillCurator = new StructuredSkillCurator({
+		version: VERSION,
+		artifacts: persistence,
+		ledger: persistence,
+		registry: candidateRegistry,
+	});
 	const ranker = new DeterministicProposalRanker({ version: VERSION });
 	const pipeline = new EvolutionPipeline({
 		version: VERSION,
@@ -987,11 +997,6 @@ export async function createCodingAgentEvolutionRuntime(
 		source: new PollingEvolutionWorkSource(persistence, clock, scope),
 		runner,
 		priority,
-	});
-	const candidateRegistry = new PersistentSkillCandidateRegistry({
-		version: VERSION,
-		artifacts: persistence,
-		store: persistence,
 	});
 	const skillSynthesizer = new StructuredSkillSynthesizer({
 		version: VERSION,

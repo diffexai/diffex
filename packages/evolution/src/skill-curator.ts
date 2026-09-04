@@ -10,8 +10,11 @@ import type {
 	SkillabilityClassification,
 	SkillCandidate,
 	SkillCandidateExpansionAttemptDiagnostic,
+	SkillCandidateExpansionFailedLedgerEvent,
 	SkillCandidateExpansionFailureReasonCode,
+	SkillCandidateExpansionLedgerEvent,
 	SkillCandidateExpansionOutcome,
+	SkillCandidateExpansionSucceededLedgerEvent,
 	SkillCandidateFailureHandling,
 	SkillCandidateMaterialField,
 	SkillCandidateMemoryRelationship,
@@ -31,6 +34,7 @@ import type {
 	EvolutionArtifactStore,
 	EvolutionLedger,
 	EvolutionModelResponse,
+	SkillCandidateRegistry,
 	SkillCurationResult,
 	SkillCurator,
 	SkillCuratorInput,
@@ -122,7 +126,8 @@ export interface SkillCuratorProceduralInformationLossAnalyzer {
 export interface StructuredSkillCuratorDependencies {
 	readonly version: string;
 	readonly artifacts: EvolutionArtifactStore;
-	readonly ledger?: EvolutionLedger;
+	readonly ledger: EvolutionLedger;
+	readonly registry: Pick<SkillCandidateRegistry, "consolidate">;
 	readonly proceduralInformationLossAnalyzer?: SkillCuratorProceduralInformationLossAnalyzer;
 }
 
@@ -1106,6 +1111,78 @@ function expansionAttemptDiagnostic(
 	};
 }
 
+function assertExpansionFailureDiagnostic(diagnostic: SkillCandidateExpansionFailedLedgerEvent["diagnostic"]): void {
+	const reasonCodes = new Set<SkillCandidateExpansionFailureReasonCode>([
+		"candidate-assembly-invalid",
+		"model-call-failed",
+		"procedure-draft-invalid",
+	]);
+	if (
+		!reasonCodes.has(diagnostic.reasonCode) ||
+		diagnostic.message.trim().length === 0 ||
+		diagnostic.attempts.length !== MAX_EXPANSION_ATTEMPTS
+	) {
+		throw new Error("invalid terminal diagnostic");
+	}
+	for (const [index, attempt] of diagnostic.attempts.entries()) {
+		if (
+			attempt.attempt !== index + 1 ||
+			!Number.isSafeInteger(attempt.modelRounds) ||
+			attempt.modelRounds < 0 ||
+			!reasonCodes.has(attempt.reasonCode) ||
+			attempt.message.trim().length === 0 ||
+			new Set(attempt.inspectedReferences.evidenceIds).size !== attempt.inspectedReferences.evidenceIds.length ||
+			new Set(attempt.inspectedReferences.skillIds).size !== attempt.inspectedReferences.skillIds.length ||
+			new Set(attempt.invalidFieldPaths).size !== attempt.invalidFieldPaths.length
+		) {
+			throw new Error("invalid attempt diagnostic");
+		}
+	}
+	if (diagnostic.reasonCode !== diagnostic.attempts[1].reasonCode) {
+		throw new Error("terminal reason does not match the final attempt");
+	}
+}
+
+function assertCheckpointedCandidate(
+	candidate: SkillCandidate,
+	reference: EvolutionArtifactReference,
+	outline: SkillCandidateOutline,
+	acceptedOutlines: SkillCandidateOutlineSet,
+	input: SkillCuratorInput,
+): void {
+	const { metadata, ...content } = candidate;
+	const measured = measureEvolutionValue(content);
+	if (
+		candidate.artifactKind !== "skill-candidate" ||
+		candidate.candidateId !== reference.artifactId ||
+		computeEvolutionContentDigest(candidate) !== reference.contentDigest ||
+		metadata.artifactId !== candidate.candidateId ||
+		metadata.contentDigest !== computeEvolutionContentDigest(content) ||
+		!metadata.sourceIds.includes(acceptedOutlines.outlineSetId) ||
+		!metadata.sourceIds.includes(outline.outlineId) ||
+		computeEvolutionContentDigest(metadata.scope) !== computeEvolutionContentDigest(input.input.metadata.scope) ||
+		computeEvolutionContentDigest(candidate.workspace) !==
+			computeEvolutionContentDigest(acceptedOutlines.workspace) ||
+		candidate.operation !== outline.operation ||
+		candidate.proposedName !== outline.proposedName ||
+		computeEvolutionContentDigest(candidate.existingSkillIds) !==
+			computeEvolutionContentDigest(outline.existingSkillIds) ||
+		computeEvolutionContentDigest(candidate.sourceLessonIds) !==
+			computeEvolutionContentDigest(outline.sourceLessonIds) ||
+		computeEvolutionContentDigest(candidate.skillability) !== computeEvolutionContentDigest(outline.skillability) ||
+		computeEvolutionContentDigest(candidate.memoryRelationship) !==
+			computeEvolutionContentDigest(outline.memoryRelationship) ||
+		candidate.supportingEvidenceIds.length === 0 ||
+		candidate.procedure.steps.length === 0 ||
+		candidate.failureHandling.length === 0 ||
+		candidate.verificationContract.checks.length === 0 ||
+		measured.serializedBytes !== candidate.capsuleSize.serializedBytes ||
+		measured.estimatedTokens !== candidate.capsuleSize.estimatedTokens
+	) {
+		throw new Error("checkpointed candidate does not match its accepted outline");
+	}
+}
+
 export class StructuredSkillCurator implements SkillCurator {
 	readonly #dependencies: StructuredSkillCuratorDependencies;
 	readonly #maxResponseAttempts: number;
@@ -1206,8 +1283,21 @@ export class StructuredSkillCurator implements SkillCurator {
 				proceduralInformationLossFindings: [],
 			});
 		}
-		const outcomes = await mapWithConcurrency(acceptedOutlines.outlines, this.#maxConcurrentExpansions, (outline) =>
-			this.#expandOutline(input, acceptedOutlines, outline, final, selected, producer),
+		const checkpointedOutcomes = await this.#loadExpansionCheckpoints(input, acceptedOutlines);
+		const outcomes = await mapWithConcurrency(
+			acceptedOutlines.outlines,
+			this.#maxConcurrentExpansions,
+			async (outline) => {
+				const checkpointed = checkpointedOutcomes.get(outline.outlineId);
+				if (checkpointed !== undefined) {
+					if (checkpointed.status === "succeeded") {
+						await this.#registerCandidate(input, checkpointed.candidate);
+					}
+					return checkpointed;
+				}
+				const outcome = await this.#expandOutline(input, acceptedOutlines, outline, final, selected, producer);
+				return this.#persistExpansionOutcome(input, acceptedOutlines, outcome);
+			},
 		);
 		const candidates = outcomes.flatMap((outcome) => (outcome.status === "succeeded" ? [outcome.candidate] : []));
 		const failedExpansions = outcomes.flatMap((outcome) => (outcome.status === "failed" ? [outcome] : []));
@@ -1347,6 +1437,150 @@ export class StructuredSkillCurator implements SkillCurator {
 		};
 	}
 
+	async #loadExpansionCheckpoints(
+		input: SkillCuratorInput,
+		acceptedOutlines: SkillCandidateOutlineSet,
+	): Promise<ReadonlyMap<string, SkillCandidateExpansionOutcome>> {
+		const outlines = new Map(acceptedOutlines.outlines.map((outline) => [outline.outlineId, outline]));
+		const events = (await this.#dependencies.ledger.read(input.jobId)).filter(
+			(event): event is SkillCandidateExpansionLedgerEvent =>
+				(event.type === "skill-candidate-expansion-succeeded" ||
+					event.type === "skill-candidate-expansion-failed") &&
+				event.curationIdempotencyKey === input.idempotencyKey,
+		);
+		const outcomes = new Map<string, SkillCandidateExpansionOutcome>();
+		try {
+			for (const event of events) {
+				const outline = outlines.get(event.outlineId);
+				if (
+					outline === undefined ||
+					event.jobId !== input.jobId ||
+					event.outlineKey !== outline.outlineKey ||
+					outcomes.has(event.outlineId)
+				) {
+					throw new Error("ambiguous or mismatched expansion checkpoint");
+				}
+				if (event.type === "skill-candidate-expansion-failed") {
+					assertExpansionFailureDiagnostic(event.diagnostic);
+					outcomes.set(event.outlineId, {
+						status: "failed",
+						outlineId: event.outlineId,
+						outlineKey: event.outlineKey,
+						diagnostic: event.diagnostic,
+					});
+					continue;
+				}
+				if (event.attemptCount !== 1 && event.attemptCount !== 2) {
+					throw new Error("invalid successful attempt count");
+				}
+				const artifact = await this.#dependencies.artifacts.get(event.candidate);
+				if (!("artifactKind" in artifact) || artifact.artifactKind !== "skill-candidate") {
+					throw new Error("successful expansion checkpoint references the wrong artifact type");
+				}
+				assertCheckpointedCandidate(artifact, event.candidate, outline, acceptedOutlines, input);
+				outcomes.set(event.outlineId, {
+					status: "succeeded",
+					outlineId: event.outlineId,
+					outlineKey: event.outlineKey,
+					attemptCount: event.attemptCount,
+					candidate: artifact,
+				});
+			}
+		} catch (cause) {
+			throw new EvolutionExecutionError("Skill candidate expansion checkpoint is corrupt", {
+				reasonCode: "artifact-corrupt",
+				retryable: false,
+				cause,
+			});
+		}
+		return outcomes;
+	}
+
+	async #persistExpansionOutcome(
+		input: SkillCuratorInput,
+		acceptedOutlines: SkillCandidateOutlineSet,
+		outcome: SkillCandidateExpansionOutcome,
+	): Promise<SkillCandidateExpansionOutcome> {
+		const eventId = stableId("ledger-event", {
+			jobId: input.jobId,
+			workKind: "skill-candidate-expansion",
+			curationIdempotencyKey: input.idempotencyKey,
+			outlineId: outcome.outlineId,
+		});
+		const outline = acceptedOutlines.outlines.find((candidate) => candidate.outlineId === outcome.outlineId);
+		if (outline === undefined) throw new Error(`Unknown accepted outline "${outcome.outlineId}"`);
+		if (outcome.status === "succeeded") {
+			const reference = await this.#dependencies.artifacts.put(outcome.candidate);
+			assertCheckpointedCandidate(outcome.candidate, reference, outline, acceptedOutlines, input);
+			const content = {
+				eventId,
+				jobId: input.jobId,
+				type: "skill-candidate-expansion-succeeded" as const,
+				curationIdempotencyKey: input.idempotencyKey,
+				outlineId: outcome.outlineId,
+				outlineKey: outcome.outlineKey,
+				attemptCount: outcome.attemptCount,
+				candidate: reference,
+			};
+			const event: SkillCandidateExpansionSucceededLedgerEvent = {
+				metadata: createEvolutionArtifactMetadata({
+					artifactId: eventId,
+					producer: outcome.candidate.metadata.producer,
+					sourceIds: [acceptedOutlines.outlineSetId, outcome.outlineId, outcome.candidate.candidateId],
+					scope: input.input.metadata.scope,
+					createdAt: input.input.metadata.createdAt,
+					content,
+				}),
+				...content,
+			};
+			await this.#dependencies.ledger.append(event);
+			await this.#registerCandidate(input, outcome.candidate, reference);
+			return outcome;
+		}
+		assertExpansionFailureDiagnostic(outcome.diagnostic);
+		const content = {
+			eventId,
+			jobId: input.jobId,
+			type: "skill-candidate-expansion-failed" as const,
+			curationIdempotencyKey: input.idempotencyKey,
+			outlineId: outcome.outlineId,
+			outlineKey: outcome.outlineKey,
+			diagnostic: outcome.diagnostic,
+		};
+		const event: SkillCandidateExpansionFailedLedgerEvent = {
+			metadata: createEvolutionArtifactMetadata({
+				artifactId: eventId,
+				producer: acceptedOutlines.metadata.producer,
+				sourceIds: [acceptedOutlines.outlineSetId, outcome.outlineId],
+				scope: input.input.metadata.scope,
+				createdAt: input.input.metadata.createdAt,
+				content,
+			}),
+			...content,
+		};
+		await this.#dependencies.ledger.append(event);
+		return outcome;
+	}
+
+	async #registerCandidate(
+		input: SkillCuratorInput,
+		candidate: SkillCandidate,
+		reference?: EvolutionArtifactReference,
+	): Promise<void> {
+		const persisted = reference ?? (await this.#dependencies.artifacts.put(candidate));
+		await this.#dependencies.registry.consolidate({
+			sourceEvolutionJobId: input.jobId,
+			input: input.input,
+			candidates: [{ candidate, reference: persisted }],
+			idempotencyKey: stableId("skill-candidate-registration", {
+				sourceEvolutionJobId: input.jobId,
+				candidate: persisted,
+			}),
+			createdAt: input.input.metadata.createdAt,
+			signal: input.signal,
+		});
+	}
+
 	#toolRegistry(
 		input: SkillCuratorInput,
 		producer: EvolutionArtifactProducer,
@@ -1444,7 +1678,6 @@ export class StructuredSkillCurator implements SkillCurator {
 	}
 
 	async #loadOutlineCheckpoint(input: SkillCuratorInput): Promise<SkillCandidateOutlineSet | null> {
-		if (this.#dependencies.ledger === undefined) return null;
 		const checkpoints = (await this.#dependencies.ledger.read(input.jobId)).filter(
 			(event): event is SkillCandidateOutlinesCheckpointedLedgerEvent =>
 				event.type === "skill-candidate-outlines-checkpointed" && event.idempotencyKey === input.idempotencyKey,
@@ -1585,7 +1818,6 @@ export class StructuredSkillCurator implements SkillCurator {
 
 	async #checkpointOutlines(input: SkillCuratorInput, accepted: SkillCandidateOutlineSet): Promise<void> {
 		const reference = await this.#dependencies.artifacts.put(accepted);
-		if (this.#dependencies.ledger === undefined) return;
 		const eventContent = {
 			eventId: stableId("ledger-event", {
 				jobId: input.jobId,
@@ -1616,7 +1848,6 @@ export class StructuredSkillCurator implements SkillCurator {
 		producer: EvolutionArtifactProducer,
 		audit: SkillCuratorToolAudit,
 	): Promise<void> {
-		if (this.#dependencies.ledger === undefined) return;
 		const eventId = stableId("ledger-event", { jobId: input.jobId, type: "skill-curator-tool-call", audit });
 		const event: SkillCuratorToolCallLedgerEvent = {
 			metadata: createEvolutionArtifactMetadata({

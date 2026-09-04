@@ -575,6 +575,12 @@ export class SkillCandidateRegistryWorker implements SkillCandidateWorkProcessor
 		}
 	}
 
+	async #allSourceJobsCompleted(group: SkillCandidateGroup): Promise<boolean> {
+		const sourceJobIds = [...new Set(group.proposalRevisions.map((revision) => revision.sourceEvolutionJobId))];
+		const sourceJobs = await Promise.all(sourceJobIds.map((jobId) => this.#dependencies.jobs.load(jobId)));
+		return sourceJobs.every((job) => job?.outcome === "completed" && job.stage === "completed");
+	}
+
 	async #isKnownOversizedRequest(
 		group: SkillCandidateGroup,
 		events: readonly SkillCandidateRegistryEvent[],
@@ -671,6 +677,7 @@ export class SkillCandidateRegistryWorker implements SkillCandidateWorkProcessor
 				if (
 					group.canonicalCapsule !== null &&
 					group.state === "evidence-qualified" &&
+					(await this.#allSourceJobsCompleted(group)) &&
 					!(await this.#isKnownOversizedRequest(group, registryEvents))
 				) {
 					synthesisTargets.push(group);

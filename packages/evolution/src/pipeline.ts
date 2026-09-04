@@ -701,6 +701,20 @@ export class EvolutionPipeline implements EvolutionStageExecutor {
 					"skill candidate ID",
 				);
 				assertUniqueIds(
+					curation.failedExpansions.map((failure) => failure.outlineId),
+					"failed skill candidate outline ID",
+				);
+				const expectedCurationStatus =
+					curation.candidates.length > 0 && curation.failedExpansions.length > 0
+						? "completed-with-some-failures"
+						: "completed";
+				if (curation.status !== expectedCurationStatus) {
+					throw new EvolutionExecutionError("Skill curation reported an inconsistent completion status", {
+						reasonCode: "pipeline-invariant",
+						retryable: false,
+					});
+				}
+				assertUniqueIds(
 					curation.deferredFindings.map((finding) => finding.findingId),
 					"deferred skill finding ID",
 				);
@@ -716,9 +730,11 @@ export class EvolutionPipeline implements EvolutionStageExecutor {
 						...curation.proceduralInformationLossFindings,
 					],
 					state: {
+						skillCurationStatus: curation.status,
 						outlineSetId: curation.outlineSet.outlineSetId,
 						outlineIds: curation.outlineSet.outlines.map((outline) => outline.outlineId),
 						candidateIds: curation.candidates.map((candidate) => candidate.candidateId),
+						failedCandidateOutlineIds: curation.failedExpansions.map((failure) => failure.outlineId),
 						deferredFindingIds: curation.deferredFindings.map((finding) => finding.findingId),
 						proceduralInformationLossFindingIds: curation.proceduralInformationLossFindings.map(
 							(finding) => finding.findingId,

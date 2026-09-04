@@ -1819,6 +1819,27 @@ export interface SkillCandidateOutlinesCheckpointedLedgerEvent extends Evolution
 	readonly outlineSet: EvolutionArtifactReference;
 }
 
+interface SkillCandidateExpansionLedgerEventBase extends EvolutionLedgerEventBase {
+	readonly curationIdempotencyKey: string;
+	readonly outlineId: string;
+	readonly outlineKey: string;
+}
+
+export interface SkillCandidateExpansionSucceededLedgerEvent extends SkillCandidateExpansionLedgerEventBase {
+	readonly type: "skill-candidate-expansion-succeeded";
+	readonly attemptCount: 1 | 2;
+	readonly candidate: EvolutionArtifactReference;
+}
+
+export interface SkillCandidateExpansionFailedLedgerEvent extends SkillCandidateExpansionLedgerEventBase {
+	readonly type: "skill-candidate-expansion-failed";
+	readonly diagnostic: SkillCandidateExpansionFailureDiagnostic;
+}
+
+export type SkillCandidateExpansionLedgerEvent =
+	| SkillCandidateExpansionSucceededLedgerEvent
+	| SkillCandidateExpansionFailedLedgerEvent;
+
 export interface ReflectorModelCallLedgerEvent extends EvolutionLedgerEventBase {
 	readonly type: "reflector-model-call";
 	readonly modelCallId: string;
@@ -1861,5 +1882,6 @@ export type EvolutionLedgerEvent =
 	| CuratorToolCallLedgerEvent
 	| SkillCuratorToolCallLedgerEvent
 	| SkillCandidateOutlinesCheckpointedLedgerEvent
+	| SkillCandidateExpansionLedgerEvent
 	| ReflectorModelCallLedgerEvent
 	| ReflectorToolCallLedgerEvent;
