@@ -875,6 +875,50 @@ describe("StructuredSkillCurator", () => {
 		).toHaveLength(3);
 	});
 
+	it("returns no candidates when every independent expansion exhausts its retry budget", async () => {
+		const storedSkill = skillArtifact();
+		const artifacts = new FixtureArtifactStore([storedSkill]);
+		const ledger: EvolutionLedgerEvent[] = [];
+		const registrations: SkillCandidateRegistryConsolidationInput[] = [];
+		const input = fixtureInput(storedSkill.reference);
+		const baseOutline = (outlineOutput().outlines as readonly JsonObject[])[0];
+		if (baseOutline === undefined) throw new Error("Expected an outline fixture");
+		const outlines = {
+			outlines: [
+				{ ...baseOutline, outlineKey: "alpha", proposedName: "alpha-verification" },
+				{ ...baseOutline, outlineKey: "beta", proposedName: "beta-verification" },
+			],
+		};
+		const expansionCalls = new Map<string, number>();
+		const result = await new StructuredSkillCurator({
+			version: "1",
+			artifacts,
+			ledger: memoryLedger(ledger),
+			registry: candidateRegistry(registrations),
+		}).curate(
+			curatorInput(async (request) => {
+				if ((request.input.control as JsonObject).phase === "outline-discovery") {
+					await request.tools.find((tool) => tool.name === "inspect_skills")?.execute({ skillRefs: ["K1"] });
+					return { output: outlines, model: { provider: "faux", model: "fixture" } };
+				}
+				const outline = request.input.acceptedOutline as JsonObject;
+				const outlineKey = outline.outlineKey as string;
+				expansionCalls.set(outlineKey, (expansionCalls.get(outlineKey) ?? 0) + 1);
+				return { output: {}, model: { provider: "faux", model: "fixture" } };
+			}, input),
+		);
+
+		expect(result).toMatchObject({
+			status: "completed",
+			candidates: [],
+			failedExpansions: [{ outlineKey: "alpha" }, { outlineKey: "beta" }],
+		});
+		expect(Object.fromEntries(expansionCalls)).toEqual({ alpha: 2, beta: 2 });
+		expect(registrations).toEqual([]);
+		expect(ledger.filter((event) => event.type === "skill-candidate-expansion-attempt-failed")).toHaveLength(4);
+		expect(ledger.filter((event) => event.type === "skill-candidate-expansion-failed")).toHaveLength(2);
+	});
+
 	it("registers assembled successes into one qualified canonical group despite a failed sibling", async () => {
 		const storedSkill = skillArtifact();
 		const artifacts = new FixtureArtifactStore([storedSkill]);
