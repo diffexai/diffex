@@ -651,10 +651,12 @@ describe("EvolutionMenuComponent", () => {
 		});
 		const fixture = client(overview());
 		fixture.listJobs.mockResolvedValue([summary]);
+		const successfulCandidate = skillCandidateDetail().summary;
 		fixture.jobDetailCall.mockResolvedValue(
 			jobDetail({
 				...summary,
 				candidateGeneration,
+				skillCandidates: [successfulCandidate],
 				skillCandidateExpansionFailures: [
 					{
 						outlineId: "outline-1",
@@ -708,6 +710,7 @@ describe("EvolutionMenuComponent", () => {
 		expect(output).toContain("Analysis: completed");
 		expect(output).not.toContain("Candidate generation:");
 		expect(output).toContain("Candidate error: Skill synthesis failed for candidate group group-1");
+		expect(output).toContain(`Skill ${successfulCandidate.proposedName} - accepted`);
 		expect(output).toContain(
 			"Skill verification-recovery - Procedure generation failed after two attempts. [failed]",
 		);
