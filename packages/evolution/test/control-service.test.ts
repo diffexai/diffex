@@ -558,7 +558,11 @@ describe("evolution control service", () => {
 
 	it("separates analysis completion from asynchronous candidate generation outcomes", async () => {
 		const timestamp = "2026-08-20T00:00:00.000Z";
-		const candidateJob = (jobId: string): EvolutionJob =>
+		const candidateJob = (
+			jobId: string,
+			candidateIds: readonly string[] = [`candidate-${jobId}`],
+			failedCandidateOutlineIds: readonly string[] = [],
+		): EvolutionJob =>
 			({
 				metadata: { scope },
 				jobId,
@@ -572,7 +576,7 @@ describe("evolution control service", () => {
 				checkpoints: [
 					{
 						stage: "skill-curating",
-						state: { candidateIds: [`candidate-${jobId}`] },
+						state: { candidateIds, failedCandidateOutlineIds },
 						outputArtifacts: [],
 						completedAt: timestamp,
 					},
@@ -590,6 +594,8 @@ describe("evolution control service", () => {
 			candidateJob("completed"),
 			candidateJob("partial"),
 			candidateJob("failed"),
+			candidateJob("expansion-partial", ["candidate-expansion-partial"], ["outline-failed"]),
+			candidateJob("expansion-failed", [], ["outline-first", "outline-second"]),
 		];
 		const event = (registrySequence: number, value: Readonly<Record<string, unknown>>): SkillCandidateRegistryEvent =>
 			({
@@ -630,6 +636,12 @@ describe("evolution control service", () => {
 				message: "candidate validation exhausted retries",
 				retryNotBefore: null,
 				diagnostics: [{ groupId: "group-failed" }],
+			}),
+			event(5, {
+				type: "skill-candidate-work-checkpointed",
+				sourceEvolutionJobId: "expansion-partial",
+				attempt: 1,
+				stage: "completed",
 			}),
 		];
 		const group = (groupId: string, sourceEvolutionJobId: string, state: SkillCandidateGroup["state"]) =>
@@ -678,6 +690,20 @@ describe("evolution control service", () => {
 				failureMessage: "candidate validation exhausted retries",
 			},
 		});
+		expect(summaries.get("expansion-partial")).toMatchObject({
+			candidateGeneration: {
+				status: "partial-failure",
+				stage: "completed",
+				failureMessage: "1 skill candidate expansion failed",
+			},
+		});
+		expect(summaries.get("expansion-failed")).toMatchObject({
+			candidateGeneration: {
+				status: "failed",
+				stage: null,
+				failureMessage: "2 skill candidate expansions failed",
+			},
+		});
 	});
 
 	it("exposes candidate evidence from legacy snapshots and gates activation and rollback", async () => {
@@ -686,6 +712,35 @@ describe("evolution control service", () => {
 		const draftReference = { artifactId: "draft-1", contentDigest: `sha256:${"3".repeat(64)}` };
 		const validationReference = { artifactId: "validation-1", contentDigest: `sha256:${"4".repeat(64)}` };
 		const evaluationReference = { artifactId: "evaluation-1", contentDigest: `sha256:${"5".repeat(64)}` };
+		const expansionFailure = {
+			type: "skill-candidate-expansion-failed",
+			outlineId: "outline-failed",
+			outlineKey: "failed-verification",
+			proposedName: "failed-verification",
+			operation: "CREATE",
+			diagnostic: {
+				reasonCode: "procedure-draft-invalid",
+				message: "Skill candidate expansion failed after two independent model executions.",
+				attempts: [
+					{
+						attempt: 1,
+						modelRounds: 1,
+						reasonCode: "procedure-draft-invalid",
+						message: "The procedure draft did not satisfy the required contract.",
+						inspectedReferences: { evidenceIds: ["evidence-1"], skillIds: [] },
+						invalidFieldPaths: ["completionCondition"],
+					},
+					{
+						attempt: 2,
+						modelRounds: 2,
+						reasonCode: "procedure-draft-invalid",
+						message: "The procedure draft did not satisfy the required contract.",
+						inspectedReferences: { evidenceIds: ["evidence-1"], skillIds: [] },
+						invalidFieldPaths: ["verificationChecks"],
+					},
+				],
+			},
+		} as unknown as EvolutionLedgerEvent;
 		const candidate = {
 			artifactKind: "skill-candidate",
 			metadata: { createdAt: "2026-08-20T00:00:00.000Z" },
@@ -875,7 +930,7 @@ describe("evolution control service", () => {
 				}),
 				selectVersionIfCurrent,
 			},
-			ledger: { read: async () => [] },
+			ledger: { read: async () => [expansionFailure] },
 			skillCandidates: { list: async () => [group] },
 			skillActivation: { activate },
 			observedHarnessVersion: () => input.expectedHarnessBaseVersion,
@@ -883,6 +938,20 @@ describe("evolution control service", () => {
 
 		expect(await service.getJob(job.jobId)).toMatchObject({
 			observability: { evidenceTokens: 10 },
+			skillCandidateExpansionFailures: [
+				{
+					outlineId: "outline-failed",
+					proposedName: "failed-verification",
+					operation: "CREATE",
+					diagnostic: {
+						reasonCode: "procedure-draft-invalid",
+						attempts: [
+							{ attempt: 1, modelRounds: 1 },
+							{ attempt: 2, modelRounds: 2 },
+						],
+					},
+				},
+			],
 			skillCandidates: [
 				{
 					candidateId: candidate.candidateId,

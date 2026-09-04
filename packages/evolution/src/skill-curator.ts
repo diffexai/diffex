@@ -1452,10 +1452,24 @@ export class StructuredSkillCurator implements SkillCurator {
 		try {
 			for (const event of events) {
 				const outline = outlines.get(event.outlineId);
+				const { metadata, ...content } = event;
+				const expectedEventId = stableId("ledger-event", {
+					jobId: input.jobId,
+					workKind: "skill-candidate-expansion",
+					curationIdempotencyKey: input.idempotencyKey,
+					outlineId: event.outlineId,
+				});
 				if (
 					outline === undefined ||
+					event.eventId !== expectedEventId ||
+					metadata.artifactId !== event.eventId ||
+					metadata.contentDigest !== computeEvolutionContentDigest(content) ||
+					computeEvolutionContentDigest(metadata.scope) !==
+						computeEvolutionContentDigest(input.input.metadata.scope) ||
 					event.jobId !== input.jobId ||
 					event.outlineKey !== outline.outlineKey ||
+					event.proposedName !== outline.proposedName ||
+					event.operation !== outline.operation ||
 					outcomes.has(event.outlineId)
 				) {
 					throw new Error("ambiguous or mismatched expansion checkpoint");
@@ -1519,6 +1533,8 @@ export class StructuredSkillCurator implements SkillCurator {
 				curationIdempotencyKey: input.idempotencyKey,
 				outlineId: outcome.outlineId,
 				outlineKey: outcome.outlineKey,
+				proposedName: outline.proposedName,
+				operation: outline.operation,
 				attemptCount: outcome.attemptCount,
 				candidate: reference,
 			};
@@ -1545,6 +1561,8 @@ export class StructuredSkillCurator implements SkillCurator {
 			curationIdempotencyKey: input.idempotencyKey,
 			outlineId: outcome.outlineId,
 			outlineKey: outcome.outlineKey,
+			proposedName: outline.proposedName,
+			operation: outline.operation,
 			diagnostic: outcome.diagnostic,
 		};
 		const event: SkillCandidateExpansionFailedLedgerEvent = {

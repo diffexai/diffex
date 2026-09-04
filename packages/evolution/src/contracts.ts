@@ -1823,6 +1823,8 @@ interface SkillCandidateExpansionLedgerEventBase extends EvolutionLedgerEventBas
 	readonly curationIdempotencyKey: string;
 	readonly outlineId: string;
 	readonly outlineKey: string;
+	readonly proposedName: string;
+	readonly operation: SkillCandidateOperation;
 }
 
 export interface SkillCandidateExpansionSucceededLedgerEvent extends SkillCandidateExpansionLedgerEventBase {

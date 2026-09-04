@@ -1027,7 +1027,11 @@ describe("checkpointed evolution pipeline", () => {
 						},
 					};
 					const candidate: SkillCandidate = {
-						metadata: metadata("skill-candidate-1", ["lesson-1", "proposal-1"], candidateContent),
+						metadata: metadata(
+							"skill-candidate-1",
+							["outline-set-1", "outline-1", "lesson-1", "proposal-1"],
+							candidateContent,
+						),
 						...candidateContent,
 					};
 					const outlineSetContent = {
@@ -1129,9 +1133,11 @@ describe("checkpointed evolution pipeline", () => {
 		const skillCheckpoint = completed.checkpoints.find((checkpoint) => checkpoint.stage === "skill-curating");
 		expect(skillCheckpoint).toMatchObject({
 			state: {
+				skillCurationStatus: "completed",
 				outlineSetId: "outline-set-1",
 				outlineIds: ["outline-1"],
 				candidateIds: ["skill-candidate-1"],
+				failedCandidateOutlineIds: [],
 				deferredFindingIds: [],
 				proceduralInformationLossFindingIds: [],
 				selectedMemoryProposalIds: ["proposal-1"],

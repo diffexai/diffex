@@ -772,6 +772,42 @@ describe("skill candidate registry worker", () => {
 		]);
 	});
 
+	it("waits for every source evolution job before synthesizing a registered group", async () => {
+		const data = fixture();
+		const candidateReference = data.job.checkpoints[0]?.outputArtifacts[0];
+		if (candidateReference === undefined) throw new Error("Expected candidate reference");
+		const group = qualifiedGroup(candidateReference);
+		const pendingJob = {
+			...data.job,
+			jobId: "job-pending-source",
+			stage: "skill-curating" as const,
+			outcome: "active" as const,
+		};
+		data.jobs.jobs.push(pendingJob);
+		data.registry.groups.push({
+			...group,
+			proposalRevisions: [
+				...group.proposalRevisions,
+				{
+					...group.proposalRevisions[0]!,
+					revisionId: "proposal-revision-pending",
+					sourceEvolutionJobId: pendingJob.jobId,
+				},
+			],
+		});
+
+		await data.worker.process(data.job.jobId);
+		expect(data.synthesisRequests).toEqual([]);
+
+		data.jobs.jobs.splice(data.jobs.jobs.indexOf(pendingJob), 1, {
+			...pendingJob,
+			stage: "completed",
+			outcome: "completed",
+		});
+		await data.worker.process(pendingJob.jobId);
+		expect(data.synthesisRequests).toHaveLength(1);
+	});
+
 	it("isolates three synthesis inputs while parking an oversized group", async () => {
 		const data = fixture(true);
 		const candidateReference = data.job.checkpoints[0]?.outputArtifacts[0];

@@ -704,6 +704,25 @@ export class EvolutionPipeline implements EvolutionStageExecutor {
 					curation.failedExpansions.map((failure) => failure.outlineId),
 					"failed skill candidate outline ID",
 				);
+				const outlineIds = new Set(curation.outlineSet.outlines.map((outline) => outline.outlineId));
+				const successfulOutlineIds = curation.candidates.map((candidate) =>
+					candidate.metadata.sourceIds.filter((sourceId) => outlineIds.has(sourceId)),
+				);
+				const terminalOutlineIds = [
+					...successfulOutlineIds.flat(),
+					...curation.failedExpansions.map((failure) => failure.outlineId),
+				];
+				if (
+					successfulOutlineIds.some((ids) => ids.length !== 1) ||
+					terminalOutlineIds.length !== outlineIds.size ||
+					new Set(terminalOutlineIds).size !== outlineIds.size ||
+					terminalOutlineIds.some((outlineId) => !outlineIds.has(outlineId))
+				) {
+					throw new EvolutionExecutionError("Skill curation did not report exactly one outcome per outline", {
+						reasonCode: "pipeline-invariant",
+						retryable: false,
+					});
+				}
 				const expectedCurationStatus =
 					curation.candidates.length > 0 && curation.failedExpansions.length > 0
 						? "completed-with-some-failures"

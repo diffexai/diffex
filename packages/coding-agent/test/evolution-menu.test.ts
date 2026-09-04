@@ -104,6 +104,7 @@ function jobDetail(overrides: Partial<EvolutionJobDetail> = {}): EvolutionJobDet
 		},
 		...overrides,
 		skillCandidates: overrides.skillCandidates ?? [],
+		skillCandidateExpansionFailures: overrides.skillCandidateExpansionFailures ?? [],
 	};
 }
 
@@ -654,6 +655,36 @@ describe("EvolutionMenuComponent", () => {
 			jobDetail({
 				...summary,
 				candidateGeneration,
+				skillCandidateExpansionFailures: [
+					{
+						outlineId: "outline-1",
+						outlineKey: "verification-recovery",
+						proposedName: "verification-recovery",
+						operation: "CREATE",
+						diagnostic: {
+							reasonCode: "procedure-draft-invalid",
+							message: "Procedure generation failed after two attempts.",
+							attempts: [
+								{
+									attempt: 1,
+									modelRounds: 1,
+									reasonCode: "procedure-draft-invalid",
+									message: "The procedure draft did not satisfy the required contract.",
+									inspectedReferences: { evidenceIds: ["evidence-1"], skillIds: [] },
+									invalidFieldPaths: ["completionCondition"],
+								},
+								{
+									attempt: 2,
+									modelRounds: 1,
+									reasonCode: "procedure-draft-invalid",
+									message: "The procedure draft did not satisfy the required contract.",
+									inspectedReferences: { evidenceIds: ["evidence-1"], skillIds: [] },
+									invalidFieldPaths: ["verificationChecks"],
+								},
+							],
+						},
+					},
+				],
 			}),
 		);
 		const component = new EvolutionMenuComponent(
@@ -677,6 +708,9 @@ describe("EvolutionMenuComponent", () => {
 		expect(output).toContain("Analysis: completed");
 		expect(output).not.toContain("Candidate generation:");
 		expect(output).toContain("Candidate error: Skill synthesis failed for candidate group group-1");
+		expect(output).toContain(
+			"Skill verification-recovery - Procedure generation failed after two attempts. [failed]",
+		);
 		component.dispose();
 	});
 

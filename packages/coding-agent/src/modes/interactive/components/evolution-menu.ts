@@ -953,8 +953,18 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 								candidateId: candidate.candidateId,
 							}),
 					})),
+					...this.#job.skillCandidateExpansionFailures.map((failure) => ({
+						label: `Skill ${failure.proposedName} - ${failure.diagnostic.message}`,
+						enabled: false,
+						status: "failed",
+						select: () => {},
+					})),
 				]);
-				if (this.#job.proposals.length === 0 && this.#job.skillCandidates.length === 0) {
+				if (
+					this.#job.proposals.length === 0 &&
+					this.#job.skillCandidates.length === 0 &&
+					this.#job.skillCandidateExpansionFailures.length === 0
+				) {
 					this.#addLine("No proposals or skill candidates emitted", "muted");
 				}
 			} else if (view.kind === "proposal" && this.#proposal) {

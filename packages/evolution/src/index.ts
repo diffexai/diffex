@@ -252,6 +252,7 @@ export {
 	type EvolutionSkillActivationResult,
 	type EvolutionSkillCandidateDetail,
 	type EvolutionSkillCandidateExistingContent,
+	type EvolutionSkillCandidateExpansionFailure,
 	type EvolutionSkillCandidateSummary,
 	type EvolutionStageLatency,
 	type EvolutionStartResult,

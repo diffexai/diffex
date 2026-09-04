@@ -23,6 +23,7 @@ import type {
 	HarnessActivationReceipt,
 	ScoredProposal,
 	SkillCandidate,
+	SkillCandidateExpansionFailureDiagnostic,
 	SkillCandidateGroup,
 	SkillCandidateOperation,
 	SkillCandidateRegistryEvent,
@@ -144,6 +145,14 @@ export interface EvolutionSkillCandidateSummary {
 	readonly latestReasonCodes: readonly string[];
 }
 
+export interface EvolutionSkillCandidateExpansionFailure {
+	readonly outlineId: string;
+	readonly outlineKey: string;
+	readonly proposedName: string;
+	readonly operation: SkillCandidateOperation;
+	readonly diagnostic: SkillCandidateExpansionFailureDiagnostic;
+}
+
 export interface EvolutionSkillCandidateExistingContent {
 	readonly skillId: string;
 	readonly name: string;
@@ -197,6 +206,7 @@ export interface EvolutionJobDetail extends EvolutionJobSummary {
 	readonly proposalIds: readonly string[];
 	readonly proposals: readonly EvolutionProposal[];
 	readonly skillCandidates: readonly EvolutionSkillCandidateSummary[];
+	readonly skillCandidateExpansionFailures: readonly EvolutionSkillCandidateExpansionFailure[];
 	readonly observability: EvolutionJobObservability;
 }
 
@@ -334,10 +344,14 @@ function candidateGenerationSummary(
 	groups: readonly SkillCandidateGroup[],
 	events: readonly SkillCandidateRegistryEvent[],
 ): EvolutionCandidateGenerationSummary {
-	const candidateIds = stringArray(
-		job.checkpoints.find((checkpoint) => checkpoint.stage === "skill-curating")?.state.candidateIds,
-	);
-	if (job.outcome !== "completed" || candidateIds.length === 0) {
+	const skillCheckpoint = job.checkpoints.find((checkpoint) => checkpoint.stage === "skill-curating");
+	const candidateIds = stringArray(skillCheckpoint?.state.candidateIds);
+	const failedOutlineIds = stringArray(skillCheckpoint?.state.failedCandidateOutlineIds);
+	const expansionFailureMessage =
+		failedOutlineIds.length === 0
+			? null
+			: `${String(failedOutlineIds.length)} skill candidate expansion${failedOutlineIds.length === 1 ? "" : "s"} failed`;
+	if (job.outcome !== "completed" || (candidateIds.length === 0 && failedOutlineIds.length === 0)) {
 		return {
 			status: "not-applicable",
 			stage: null,
@@ -345,6 +359,16 @@ function candidateGenerationSummary(
 			attempt: 0,
 			retryNotBefore: null,
 			failureMessage: null,
+		};
+	}
+	if (candidateIds.length === 0) {
+		return {
+			status: "failed",
+			stage: null,
+			updatedAt: skillCheckpoint?.completedAt ?? null,
+			attempt: 0,
+			retryNotBefore: null,
+			failureMessage: expansionFailureMessage,
 		};
 	}
 	const workEvents = events
@@ -359,20 +383,25 @@ function candidateGenerationSummary(
 		return {
 			status: "waiting",
 			stage: null,
-			updatedAt: null,
+			updatedAt: skillCheckpoint?.completedAt ?? null,
 			attempt: 0,
 			retryNotBefore: null,
-			failureMessage: null,
+			failureMessage: expansionFailureMessage,
 		};
 	}
 	if (latest.type === "skill-candidate-work-checkpointed") {
 		return {
-			status: latest.stage === "completed" ? "completed" : "processing",
+			status:
+				latest.stage === "completed"
+					? failedOutlineIds.length > 0
+						? "partial-failure"
+						: "completed"
+					: "processing",
 			stage: latest.stage,
 			updatedAt: latest.metadata.createdAt,
 			attempt: latest.attempt,
 			retryNotBefore: null,
-			failureMessage: null,
+			failureMessage: expansionFailureMessage,
 		};
 	}
 	if (latest.retryNotBefore !== null) {
@@ -392,9 +421,10 @@ function candidateGenerationSummary(
 		...relatedGroups.filter((group) => group.state === "synthesis-failed").map((group) => group.groupId),
 		...(latest.diagnostics ?? []).flatMap((diagnostic) => diagnostic.groupId ?? []),
 	]);
+	const hasSuccessfulCandidate = relatedGroups.some((group) => !failedGroupIds.has(group.groupId));
 	return {
 		status:
-			failedGroupIds.size > 0 && relatedGroups.some((group) => !failedGroupIds.has(group.groupId))
+			(failedGroupIds.size > 0 || failedOutlineIds.length > 0) && hasSuccessfulCandidate
 				? "partial-failure"
 				: "failed",
 		stage: latest.stage ?? null,
@@ -844,6 +874,24 @@ export class EvolutionControlService {
 		if (input === undefined) throw new Error(`Evolution job "${jobId}" has no input snapshot`);
 		const scored = artifacts.filter(isScoredProposal);
 		const skillCandidates = artifacts.filter(isSkillCandidate);
+		const skillCandidateExpansionFailures = events
+			.flatMap((event): EvolutionSkillCandidateExpansionFailure[] =>
+				event.type === "skill-candidate-expansion-failed"
+					? [
+							{
+								outlineId: event.outlineId,
+								outlineKey: event.outlineKey,
+								proposedName: event.proposedName,
+								operation: event.operation,
+								diagnostic: event.diagnostic,
+							},
+						]
+					: [],
+			)
+			.sort(
+				(left, right) =>
+					left.proposedName.localeCompare(right.proposedName) || left.outlineId.localeCompare(right.outlineId),
+			);
 		const candidateGroups = candidateState.groups;
 		const discoveredSlices = new Set(
 			artifacts.flatMap((artifact) => ("sliceIds" in artifact ? stringArray(artifact.sliceIds) : [])),
@@ -956,6 +1004,7 @@ export class EvolutionControlService {
 			skillCandidates: skillCandidates.map((candidate) =>
 				candidateSummary(candidate, candidateGroup(candidateGroups, candidate.candidateId)),
 			),
+			skillCandidateExpansionFailures,
 			observability: {
 				queueAgeMs,
 				stageLatencies,
