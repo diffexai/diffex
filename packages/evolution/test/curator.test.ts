@@ -330,7 +330,9 @@ describe("structured delta curator", () => {
 		const schema = createCuratorOutputSchema({
 			instructionRefs: ["I1", "I2"],
 			lessonRefs: ["L1"],
-			memoryRefs: ["M1"],
+			allMemoryRefs: ["M1"],
+			removableMemoryRefs: ["M1"],
+			memoryOperations: ["ADD", "REMOVE", "REPLACE"],
 		}) as TSchema;
 		const addDelta = {
 			operation: "ADD",

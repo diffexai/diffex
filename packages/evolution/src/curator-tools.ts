@@ -16,6 +16,16 @@ export interface CuratorMemoryBinding {
 	readonly block: EvolutionMemoryBlock;
 }
 
+export type CuratorMemoryOperation = "ADD" | "REMOVE" | "REPLACE";
+
+export interface CuratorCapabilities {
+	readonly instructionRefs: readonly string[];
+	readonly lessonRefs: readonly string[];
+	readonly allMemoryRefs: readonly string[];
+	readonly removableMemoryRefs: readonly string[];
+	readonly memoryOperations: readonly CuratorMemoryOperation[];
+}
+
 export interface CuratorToolAudit {
 	readonly toolCallId: string;
 	readonly toolName: "inspect_existing_guidance" | "inspect_lessons";
@@ -47,6 +57,12 @@ function schema(properties: JsonObject, required: readonly string[]): JsonObject
 	return { type: "object", additionalProperties: false, properties, required };
 }
 
+function referenceArraySchema(values: readonly string[], minItems: number): JsonObject {
+	return values.length === 0
+		? { type: "array", maxItems: 0, items: { type: "string" } }
+		: { type: "array", minItems, items: { type: "string", enum: values } };
+}
+
 function preview(value: string): string {
 	const normalized = value.trim().replace(/\s+/gu, " ");
 	return normalized.length <= 200 ? normalized : `${normalized.slice(0, 197)}...`;
@@ -62,6 +78,7 @@ export class CuratorToolRegistry {
 	readonly lessons: EvolutionModelReferenceCatalog<Lesson>;
 	readonly instructions: EvolutionModelReferenceCatalog<InstructionDocumentSnapshot>;
 	readonly memory: EvolutionModelReferenceCatalog<CuratorMemoryBinding>;
+	readonly capabilities: CuratorCapabilities;
 	#revoked = false;
 	#toolCalls = 0;
 
@@ -99,6 +116,16 @@ export class CuratorToolRegistry {
 				block: blocks[index] as EvolutionMemoryBlock,
 			})),
 		);
+		const removableMemoryRefs = this.memory.entries
+			.filter(({ value }) => value.item.ledger.origin === "evolution")
+			.map(({ ref }) => ref);
+		this.capabilities = {
+			instructionRefs: this.instructions.references,
+			lessonRefs: this.lessons.references,
+			allMemoryRefs: this.memory.references,
+			removableMemoryRefs,
+			memoryOperations: removableMemoryRefs.length === 0 ? ["ADD"] : ["ADD", "REMOVE", "REPLACE"],
+		};
 	}
 
 	get recoverableDenials(): readonly CuratorRecoverableToolDenial[] {
@@ -141,42 +168,28 @@ export class CuratorToolRegistry {
 	}
 
 	get tools(): readonly EvolutionModelTool[] {
+		const guidanceProperties: JsonObject = {
+			...(this.capabilities.instructionRefs.length === 0
+				? {}
+				: { instructionRefs: referenceArraySchema(this.capabilities.instructionRefs, 1) }),
+			memoryRefs: referenceArraySchema(["M0", ...this.capabilities.allMemoryRefs], 1),
+		};
 		return [
 			{
 				name: "inspect_lessons",
 				description: "Inspect complete final lesson content.",
-				inputSchema: schema(
-					{
-						lessonRefs: {
-							type: "array",
-							minItems: 1,
-							items: { type: "string", enum: this.lessons.references },
-						},
-					},
-					["lessonRefs"],
-				),
+				inputSchema: schema({ lessonRefs: referenceArraySchema(this.capabilities.lessonRefs, 1) }, ["lessonRefs"]),
 				execute: (input) => this.#inspectLessons(input),
 			},
 			{
 				name: "inspect_existing_guidance",
 				description: "Inspect complete applicable instructions, rendered memory, or active memory items.",
 				inputSchema: {
-					...schema(
-						{
-							instructionRefs: {
-								type: "array",
-								minItems: 1,
-								items: { type: "string", enum: this.instructions.references },
-							},
-							memoryRefs: {
-								type: "array",
-								minItems: 1,
-								items: { type: "string", enum: ["M0", ...this.memory.references] },
-							},
-						},
-						[],
-					),
-					anyOf: [{ required: ["instructionRefs"] }, { required: ["memoryRefs"] }],
+					...schema(guidanceProperties, []),
+					anyOf: [
+						...(this.capabilities.instructionRefs.length === 0 ? [] : [{ required: ["instructionRefs"] }]),
+						{ required: ["memoryRefs"] },
+					],
 				},
 				execute: (input) => this.#inspectExistingGuidance(input),
 			},
@@ -213,7 +226,10 @@ export class CuratorToolRegistry {
 
 	async #inspectExistingGuidance(input: JsonObject): Promise<JsonObject> {
 		return this.#execute("inspect_existing_guidance", input, () => {
-			this.#assertAllowedFields(input, ["instructionRefs", "memoryRefs"]);
+			this.#assertAllowedFields(
+				input,
+				this.capabilities.instructionRefs.length === 0 ? ["memoryRefs"] : ["instructionRefs", "memoryRefs"],
+			);
 			const instructionRefs = input.instructionRefs ?? [];
 			const memoryRefs = input.memoryRefs ?? [];
 			if (!Array.isArray(instructionRefs) || !Array.isArray(memoryRefs)) {

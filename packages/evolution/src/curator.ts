@@ -16,7 +16,7 @@ import type {
 	JsonObject,
 	Lesson,
 } from "./contracts.ts";
-import { type CuratorToolAudit, CuratorToolRegistry } from "./curator-tools.ts";
+import { type CuratorCapabilities, type CuratorToolAudit, CuratorToolRegistry } from "./curator-tools.ts";
 import { EvolutionExecutionError } from "./errors.ts";
 import {
 	assertEvolutionMemoryLessonContent,
@@ -29,19 +29,12 @@ import { computeEvolutionContentDigest, createEvolutionArtifactMetadata } from "
 const DEFAULT_MAX_RESPONSE_ATTEMPTS = 2;
 const PROPOSAL_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 
-interface CuratorSchemaReferences {
-	readonly instructionRefs: readonly string[];
-	readonly lessonRefs: readonly string[];
-	readonly memoryRefs: readonly string[];
-}
-
-export function createCuratorOutputSchema(references: CuratorSchemaReferences): JsonObject {
+export function createCuratorOutputSchema(capabilities: CuratorCapabilities): JsonObject {
 	const stringArray = { type: "array", items: { type: "string", minLength: 1 } };
-	const referenceArraySchema = (values: readonly string[], minItems = 0): JsonObject => ({
-		type: "array",
-		minItems,
-		items: { type: "string", enum: values },
-	});
+	const referenceArraySchema = (values: readonly string[], minItems = 0): JsonObject =>
+		values.length === 0
+			? { type: "array", maxItems: 0, items: { type: "string" } }
+			: { type: "array", minItems, items: { type: "string", enum: values } };
 	const decisionRequired = [
 		"decisionKey",
 		"lessonRefs",
@@ -53,9 +46,9 @@ export function createCuratorOutputSchema(references: CuratorSchemaReferences): 
 	];
 	const decisionProperties = {
 		decisionKey: { type: "string", minLength: 1 },
-		lessonRefs: referenceArraySchema(references.lessonRefs, 1),
-		instructionRefs: referenceArraySchema(references.instructionRefs),
-		memoryRefs: referenceArraySchema(["M0", ...references.memoryRefs]),
+		lessonRefs: referenceArraySchema(capabilities.lessonRefs, 1),
+		instructionRefs: referenceArraySchema(capabilities.instructionRefs),
+		memoryRefs: referenceArraySchema(["M0", ...capabilities.allMemoryRefs]),
 		conflictingDecisionKeys: stringArray,
 	};
 	const decisionVariant = (action: ProposalDraft["action"], exactDelta: JsonObject): JsonObject => ({
@@ -68,6 +61,53 @@ export function createCuratorOutputSchema(references: CuratorSchemaReferences): 
 			exactDelta,
 		},
 	});
+	const removalDefinitions: JsonObject =
+		capabilities.removableMemoryRefs.length === 0
+			? {}
+			: {
+					addition: {
+						type: "object",
+						additionalProperties: false,
+						required: ["content", "intendedScope"],
+						properties: {
+							content: {
+								type: "string",
+								minLength: 1,
+								description: "Lesson prose of at most three sentences. Omit the deterministic Lesson number.",
+							},
+							intendedScope: stringArray,
+						},
+					},
+					removal: {
+						type: "object",
+						additionalProperties: false,
+						required: ["memoryRef", "reason"],
+						properties: {
+							memoryRef: { type: "string", enum: capabilities.removableMemoryRefs },
+							reason: { type: "string", minLength: 1 },
+						},
+					},
+					removeDelta: {
+						type: "object",
+						additionalProperties: false,
+						required: ["operation", "memoryRef", "reason"],
+						properties: {
+							operation: { enum: ["REMOVE"] },
+							memoryRef: { type: "string", enum: capabilities.removableMemoryRefs },
+							reason: { type: "string", minLength: 1 },
+						},
+					},
+					replaceDelta: {
+						type: "object",
+						additionalProperties: false,
+						required: ["operation", "removal", "addition"],
+						properties: {
+							operation: { enum: ["REPLACE"] },
+							removal: { $ref: "#/$defs/removal" },
+							addition: { $ref: "#/$defs/addition" },
+						},
+					},
+				};
 	return {
 		$defs: {
 			destination: {
@@ -77,32 +117,10 @@ export function createCuratorOutputSchema(references: CuratorSchemaReferences): 
 				properties: {
 					section: { type: ["string", "null"] },
 					anchor: {
-						enum: [null, ...references.memoryRefs],
+						enum: [null, ...capabilities.allMemoryRefs],
 						description:
 							"Existing memory item reference to insert after, null to append within a named section, or null with a null section to append globally.",
 					},
-				},
-			},
-			addition: {
-				type: "object",
-				additionalProperties: false,
-				required: ["content", "intendedScope"],
-				properties: {
-					content: {
-						type: "string",
-						minLength: 1,
-						description: "Lesson prose of at most three sentences. Omit the deterministic Lesson number.",
-					},
-					intendedScope: stringArray,
-				},
-			},
-			removal: {
-				type: "object",
-				additionalProperties: false,
-				required: ["memoryRef", "reason"],
-				properties: {
-					memoryRef: { type: "string", enum: references.memoryRefs },
-					reason: { type: "string", minLength: 1 },
 				},
 			},
 			addDelta: {
@@ -120,32 +138,13 @@ export function createCuratorOutputSchema(references: CuratorSchemaReferences): 
 					intendedScope: stringArray,
 				},
 			},
-			removeDelta: {
-				type: "object",
-				additionalProperties: false,
-				required: ["operation", "memoryRef", "reason"],
-				properties: {
-					operation: { enum: ["REMOVE"] },
-					memoryRef: { type: "string", enum: references.memoryRefs },
-					reason: { type: "string", minLength: 1 },
-				},
-			},
-			replaceDelta: {
-				type: "object",
-				additionalProperties: false,
-				required: ["operation", "removal", "addition"],
-				properties: {
-					operation: { enum: ["REPLACE"] },
-					removal: { $ref: "#/$defs/removal" },
-					addition: { $ref: "#/$defs/addition" },
-				},
-			},
+			...removalDefinitions,
 			decision: {
-				anyOf: [
-					decisionVariant("ADD", { $ref: "#/$defs/addDelta" }),
-					decisionVariant("REMOVE", { $ref: "#/$defs/removeDelta" }),
-					decisionVariant("REPLACE", { $ref: "#/$defs/replaceDelta" }),
-				],
+				anyOf: capabilities.memoryOperations.map((operation) =>
+					decisionVariant(operation, {
+						$ref: `#/$defs/${operation === "ADD" ? "addDelta" : operation === "REMOVE" ? "removeDelta" : "replaceDelta"}`,
+					}),
+				),
 			},
 		},
 		type: "object",
@@ -384,7 +383,12 @@ function addition(value: unknown, registry: CuratorToolRegistry): EvolutionMemor
 	};
 }
 
-function removal(value: unknown, registry: CuratorToolRegistry, nested: boolean): EvolutionMemoryRemoveDelta {
+function removal(
+	value: unknown,
+	registry: CuratorToolRegistry,
+	capabilities: CuratorCapabilities,
+	nested: boolean,
+): EvolutionMemoryRemoveDelta {
 	if (!isRecord(value)) throw new Error("REMOVE exactDelta must be an object");
 	assertOnlyFields(
 		value,
@@ -393,6 +397,14 @@ function removal(value: unknown, registry: CuratorToolRegistry, nested: boolean)
 	);
 	if (!nested && value.operation !== "REMOVE") throw new Error("REMOVE exactDelta operation must be REMOVE");
 	const reference = requiredString(value, "memoryRef");
+	if (!capabilities.removableMemoryRefs.includes(reference)) {
+		throw new EvolutionModelReferenceError(
+			"memoryRef",
+			[reference],
+			capabilities.removableMemoryRefs,
+			"contains a non-removable or unknown reference",
+		);
+	}
 	const binding = registry.memory.resolve(reference, "memoryRef");
 	return {
 		operation: "REMOVE",
@@ -402,11 +414,15 @@ function removal(value: unknown, registry: CuratorToolRegistry, nested: boolean)
 	};
 }
 
-function replacement(value: unknown, registry: CuratorToolRegistry): EvolutionMemoryReplaceDelta {
+function replacement(
+	value: unknown,
+	registry: CuratorToolRegistry,
+	capabilities: CuratorCapabilities,
+): EvolutionMemoryReplaceDelta {
 	if (!isRecord(value)) throw new Error("REPLACE exactDelta must be an object");
 	assertOnlyFields(value, ["operation", "removal", "addition"], "REPLACE exactDelta");
 	if (value.operation !== "REPLACE") throw new Error("REPLACE exactDelta operation must be REPLACE");
-	const parsedRemoval = removal(value.removal, registry, true);
+	const parsedRemoval = removal(value.removal, registry, capabilities, true);
 	if (!isRecord(value.addition)) throw new Error("REPLACE addition must be an object");
 	assertOnlyFields(value.addition, ["content", "intendedScope"], "REPLACE addition");
 	const content = requiredString(value.addition, "content");
@@ -422,19 +438,31 @@ function replacement(value: unknown, registry: CuratorToolRegistry): EvolutionMe
 	};
 }
 
-function delta(value: unknown, action: ProposalDraft["action"], registry: CuratorToolRegistry): EvolutionMemoryDelta {
+function delta(
+	value: unknown,
+	action: ProposalDraft["action"],
+	registry: CuratorToolRegistry,
+	capabilities: CuratorCapabilities,
+): EvolutionMemoryDelta {
 	if (action === "ADD") return addition(value, registry);
-	if (action === "REMOVE") return removal(value, registry, false);
-	return replacement(value, registry);
+	if (action === "REMOVE") return removal(value, registry, capabilities, false);
+	return replacement(value, registry, capabilities);
 }
 
-function proposalDraft(value: Readonly<Record<string, unknown>>, registry: CuratorToolRegistry): ProposalDraft {
+function proposalDraft(
+	value: Readonly<Record<string, unknown>>,
+	registry: CuratorToolRegistry,
+	capabilities: CuratorCapabilities,
+): ProposalDraft {
 	const decisionKey = atPath("decisionKey", () => requiredString(value, "decisionKey"));
 	const selectedLessons = atPath("lessonRefs", () =>
 		referenceArray(value.lessonRefs, "lessonRefs", registry.lessons, { allowEmpty: false }),
 	);
 	const action = atPath("action", () => {
-		if (value.action !== "ADD" && value.action !== "REMOVE" && value.action !== "REPLACE") {
+		if (
+			(value.action !== "ADD" && value.action !== "REMOVE" && value.action !== "REPLACE") ||
+			!capabilities.memoryOperations.includes(value.action)
+		) {
 			throw new Error(`Unsupported proposal action "${String(value.action)}"`);
 		}
 		return value.action;
@@ -444,7 +472,7 @@ function proposalDraft(value: Readonly<Record<string, unknown>>, registry: Curat
 		lessonIds: selectedLessons.map((lesson) => lesson.lessonId),
 		relationship: guidanceRelationship(value.instructionRefs, value.memoryRefs, registry),
 		action,
-		exactDelta: atPath("exactDelta", () => delta(value.exactDelta, action, registry)),
+		exactDelta: atPath("exactDelta", () => delta(value.exactDelta, action, registry, capabilities)),
 		conflictingDecisionKeys: atPath("conflictingDecisionKeys", () =>
 			stringArray(value.conflictingDecisionKeys, "conflictingDecisionKeys"),
 		),
@@ -518,7 +546,11 @@ function assertLessonEvidence(lessons: readonly Lesson[], index: ReadonlyMap<str
 	}
 }
 
-function parseDecisions(output: JsonObject, registry: CuratorToolRegistry): readonly ProposalDraft[] {
+function parseDecisions(
+	output: JsonObject,
+	registry: CuratorToolRegistry,
+	capabilities: CuratorCapabilities,
+): readonly ProposalDraft[] {
 	assertOnlyFields(output, ["decisions"], "Curator response");
 	if (!Array.isArray(output.decisions)) throw new Error("Curator response decisions must be an array");
 	const seenDecisionKeys = new Set<string>();
@@ -549,7 +581,7 @@ function parseDecisions(output: JsonObject, registry: CuratorToolRegistry): read
 				return parsed;
 			});
 			seenDecisionKeys.add(decisionKey);
-			const draft = proposalDraft(value, registry);
+			const draft = proposalDraft(value, registry, capabilities);
 			drafts.push(draft);
 			draftIndexes.set(draft.decisionKey, index);
 		} catch (error) {
@@ -785,7 +817,12 @@ function proposalsFromDrafts(
 	});
 }
 
-function modelInput(input: CuratorInput, registry: CuratorToolRegistry, responseCorrection: string | null): JsonObject {
+function modelInput(
+	input: CuratorInput,
+	registry: CuratorToolRegistry,
+	capabilities: CuratorCapabilities,
+	responseCorrection: string | null,
+): JsonObject {
 	return {
 		control: {
 			objective: "curate-evolution-memory-deltas",
@@ -803,8 +840,9 @@ function modelInput(input: CuratorInput, registry: CuratorToolRegistry, response
 			omitObserverDocumentation: true,
 			omitTelemetryFormatFacts: true,
 			routeUsefulTelemetryFactsToDebuggingDocumentation: true,
-			memoryOperations: ["ADD", "REMOVE", "REPLACE"],
-			additionAnchorReferences: registry.memory.references,
+			memoryOperations: capabilities.memoryOperations,
+			additionAnchorReferences: capabilities.allMemoryRefs,
+			removableMemoryReferences: capabilities.removableMemoryRefs,
 			additionAnchorRule:
 				"Use an existing memoryRef to insert after that item, null to append within a named section, or null with a null section to append globally. Sentinels such as end are invalid.",
 			maxEvolutionMemoryLessonSentences: EVOLUTION_MEMORY_MAX_LESSON_SENTENCES,
@@ -875,13 +913,10 @@ export class StructuredDeltaCurator implements Curator {
 			signal: input.signal,
 			audit: (audit) => this.#auditTool(input, producer, audit),
 		});
-		const schema = createCuratorOutputSchema({
-			instructionRefs: registry.instructions.references,
-			lessonRefs: registry.lessons.references,
-			memoryRefs: registry.memory.references,
-		});
+		const capabilities = registry.capabilities;
+		const schema = createCuratorOutputSchema(capabilities);
 		const validateOutput = (output: JsonObject): void => {
-			parseDecisions(output, registry);
+			parseDecisions(output, registry, capabilities);
 		};
 		let lastError: unknown = null;
 		let responseCorrection: string | null = null;
@@ -896,7 +931,7 @@ export class StructuredDeltaCurator implements Curator {
 						model: input.input.modelConfiguration,
 						promptVersion: input.input.promptVersions.curator,
 						idempotencyKey: input.idempotencyKey,
-						input: modelInput(input, registry, responseCorrection),
+						input: modelInput(input, registry, capabilities, responseCorrection),
 						outputSchema: schema,
 						tools: registry.tools,
 						validateOutput,
@@ -905,7 +940,7 @@ export class StructuredDeltaCurator implements Curator {
 					input.signal,
 				);
 				try {
-					const drafts = parseDecisions(response.output, registry);
+					const drafts = parseDecisions(response.output, registry, capabilities);
 					return proposalsFromDrafts(drafts, input, lessons, response, this.#dependencies.version);
 				} catch (error) {
 					lastError = error;
