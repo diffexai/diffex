@@ -423,10 +423,12 @@ interface SubagentCoordination {
 interface PromptReservation {
 	readonly signaled: boolean;
 	readonly collaborationMode: CollaborationMode;
+	readonly collaborationState?: CollaborationModeState;
 	agentStarted: boolean;
 }
 
 interface CollaborationModeState {
+	readonly mode: CollaborationMode;
 	readonly baseSystemPrompt: string;
 	readonly baseSystemPromptOptions: BuildSystemPromptOptions;
 	readonly effectiveSystemPrompt: string;
@@ -549,7 +551,9 @@ export class AgentSession {
 	private _requestedToolNames: string[] = [];
 	private _collaborationMode: CollaborationMode = "default";
 	private _activeRunCollaborationMode: CollaborationMode | undefined;
+	private _activeRunCollaborationState: CollaborationModeState | undefined;
 	private _collaborationModeTransitionInProgress = false;
+	private _manualCompactionOperations = 0;
 	private readonly _subagentController: SubagentController | undefined;
 	private readonly _harnessStateStore: HarnessStateStore | undefined;
 	private readonly _workspaceIdentity: HarnessWorkspaceIdentity | undefined;
@@ -708,13 +712,11 @@ export class AgentSession {
 	 * happens here instead of in wrappers.
 	 */
 	private _installAgentToolHooks(): void {
-		this.agent.beforeToolCall = async ({ toolCall, args }) => {
+		this.agent.beforeToolCall = async ({ toolCall, args, context }) => {
 			if (this._activeRunCollaborationMode === "plan") {
-				const activeTool = this.agent.state.tools.find((tool) => tool.name === toolCall.name);
-				if (
-					!(PLAN_MODE_TOOL_NAMES as readonly string[]).includes(toolCall.name) ||
-					activeTool !== this._baseToolRegistry.get(toolCall.name)
-				) {
+				const capturedTool = this._activeRunCollaborationState?.tools.find((tool) => tool.name === toolCall.name);
+				const activeTool = context.tools?.find((tool) => tool.name === toolCall.name);
+				if (!(PLAN_MODE_TOOL_NAMES as readonly string[]).includes(toolCall.name) || activeTool !== capturedTool) {
 					return {
 						block: true,
 						reason: `Tool "${toolCall.name}" is unavailable in Plan mode.`,
@@ -790,11 +792,13 @@ export class AgentSession {
 				...previousSnapshot,
 				context: {
 					...previousContext,
-					systemPrompt: this._deriveEffectivePrompt(
-						this._systemPromptOverride ?? this._baseSystemPrompt,
-						this._activeRunCollaborationMode ?? this._collaborationMode,
-					),
-					tools: this.agent.state.tools.slice(),
+					systemPrompt:
+						this._activeRunCollaborationState?.effectiveSystemPrompt ??
+						this._deriveEffectivePrompt(
+							this._systemPromptOverride ?? this._baseSystemPrompt,
+							this._activeRunCollaborationMode ?? this._collaborationMode,
+						),
+					tools: (this._activeRunCollaborationState?.tools ?? this.agent.state.tools).slice(),
 				},
 				model: this.agent.state.model,
 				thinkingLevel: this.agent.state.thinkingLevel,
@@ -1342,7 +1346,8 @@ export class AgentSession {
 	}
 
 	getToolDefinition(name: string): ToolDefinition | undefined {
-		return this._effectiveToolDefinitions.get(name)?.definition;
+		return (this._activeRunCollaborationState?.effectiveToolDefinitions ?? this._effectiveToolDefinitions).get(name)
+			?.definition;
 	}
 
 	[CHANGE_COLLABORATION_MODE](mode: CollaborationMode, persist: boolean): CollaborationModeTransitionResult {
@@ -1472,6 +1477,7 @@ export class AgentSession {
 	 */
 	setActiveToolsByName(toolNames: string[]): void {
 		this._requestedToolNames = [...new Set(toolNames.filter((name) => this._toolRegistry.has(name)))];
+		if (this._activeRunCollaborationMode === "plan") return;
 		this._installCollaborationModeState(
 			this._deriveCollaborationModeState(this._activeRunCollaborationMode ?? this._collaborationMode),
 		);
@@ -1480,6 +1486,7 @@ export class AgentSession {
 	/** Whether compaction or branch summarization is currently running */
 	get isCompacting(): boolean {
 		return (
+			this._manualCompactionOperations > 0 ||
 			this._autoCompactionAbortController !== undefined ||
 			this._compactionAbortController !== undefined ||
 			this._branchSummaryAbortController !== undefined
@@ -1751,6 +1758,7 @@ export class AgentSession {
 			definitions,
 		);
 		return {
+			mode,
 			baseSystemPrompt: prompt,
 			baseSystemPromptOptions: options,
 			effectiveSystemPrompt: this._deriveEffectivePrompt(this._systemPromptOverride ?? prompt, mode),
@@ -1765,6 +1773,18 @@ export class AgentSession {
 		this._effectiveToolDefinitions = state.effectiveToolDefinitions;
 		this.agent.state.tools = state.tools;
 		this.agent.state.systemPrompt = state.effectiveSystemPrompt;
+	}
+
+	private _capturePlanAdmissionState(): CollaborationModeState | undefined {
+		if (this._collaborationMode !== "plan") return undefined;
+		return {
+			mode: "plan",
+			baseSystemPrompt: this._baseSystemPrompt,
+			baseSystemPromptOptions: this._baseSystemPromptOptions,
+			effectiveSystemPrompt: this.agent.state.systemPrompt,
+			effectiveToolDefinitions: new Map(this._effectiveToolDefinitions),
+			tools: this.agent.state.tools.slice(),
+		};
 	}
 
 	private _appendSubagentDelegatedMessageTrustGuidance(systemPrompt: string): string {
@@ -1848,9 +1868,12 @@ export class AgentSession {
 	private async _runAgentPrompt(
 		messages: AgentMessage | AgentMessage[],
 		collaborationMode: CollaborationMode = this._collaborationMode,
+		collaborationState?: CollaborationModeState,
 	): Promise<void> {
 		this._agentRunAborted = false;
 		this._activeRunCollaborationMode = collaborationMode;
+		this._activeRunCollaborationState = collaborationState;
+		if (collaborationState) this._installCollaborationModeState(collaborationState);
 		this._isAgentRunActive = true;
 		try {
 			let firstRun = true;
@@ -1879,6 +1902,7 @@ export class AgentSession {
 		} finally {
 			this._systemPromptOverride = undefined;
 			this._activeRunCollaborationMode = undefined;
+			this._activeRunCollaborationState = undefined;
 			this._installCollaborationModeState(this._deriveCollaborationModeState(this._collaborationMode));
 			this._flushPendingBashMessages();
 			await this._emitAgentSettled();
@@ -2130,6 +2154,7 @@ export class AgentSession {
 		const reservation: PromptReservation = {
 			signaled: signal !== undefined,
 			collaborationMode: this._collaborationMode,
+			collaborationState: this._capturePlanAdmissionState(),
 			agentStarted: false,
 		};
 		this._promptReservations.add(reservation);
@@ -2154,7 +2179,14 @@ export class AgentSession {
 		};
 		try {
 			return this._traceOperation("prompt", (operationSpan) =>
-				this._prompt(text, options, releaseUnsignaledPreflight, operationSpan, reservation.collaborationMode),
+				this._prompt(
+					text,
+					options,
+					releaseUnsignaledPreflight,
+					operationSpan,
+					reservation.collaborationMode,
+					reservation.collaborationState,
+				),
 			).finally(cleanup);
 		} catch (error) {
 			cleanup();
@@ -2168,8 +2200,16 @@ export class AgentSession {
 		releaseUnsignaledPreflight: () => void,
 		operationSpan: CodingAgentTelemetrySpan<"diffex.coding_agent.operation">,
 		collaborationMode: CollaborationMode,
+		collaborationState: CollaborationModeState | undefined,
 	): Promise<void> {
-		await this._promptAfterReservation(text, options, releaseUnsignaledPreflight, operationSpan, collaborationMode);
+		await this._promptAfterReservation(
+			text,
+			options,
+			releaseUnsignaledPreflight,
+			operationSpan,
+			collaborationMode,
+			collaborationState,
+		);
 	}
 
 	private async _promptAfterReservation(
@@ -2178,6 +2218,7 @@ export class AgentSession {
 		releaseUnsignaledPreflight: () => void,
 		operationSpan: CodingAgentTelemetrySpan<"diffex.coding_agent.operation">,
 		collaborationMode: CollaborationMode,
+		collaborationState: CollaborationModeState | undefined,
 	): Promise<void> {
 		if (this._harnessSwitchInProgress) {
 			throw new Error("Cannot submit a prompt while a harness version switch is in progress.");
@@ -2343,8 +2384,8 @@ export class AgentSession {
 			const result = await this._extensionRunner.emitBeforeAgentStart(
 				expandedText,
 				currentImages,
-				this._baseSystemPrompt,
-				this._baseSystemPromptOptions,
+				collaborationState?.baseSystemPrompt ?? this._baseSystemPrompt,
+				collaborationState?.baseSystemPromptOptions ?? this._baseSystemPromptOptions,
 			);
 			signal?.throwIfAborted();
 			// Flush pending bash history only after cancellable preflight has completed.
@@ -2370,10 +2411,23 @@ export class AgentSession {
 				// Ensure we're using the base prompt (in case previous turn had modifications)
 				this._systemPromptOverride = undefined;
 			}
-			this.agent.state.systemPrompt = this._deriveEffectivePrompt(
-				this._systemPromptOverride ?? this._baseSystemPrompt,
-				collaborationMode,
-			);
+			let effectiveSystemPrompt: string;
+			if (collaborationState) {
+				collaborationState = {
+					...collaborationState,
+					effectiveSystemPrompt: this._deriveEffectivePrompt(
+						this._systemPromptOverride ?? collaborationState.baseSystemPrompt,
+						collaborationMode,
+					),
+				};
+				effectiveSystemPrompt = collaborationState.effectiveSystemPrompt;
+			} else {
+				effectiveSystemPrompt = this._deriveEffectivePrompt(
+					this._systemPromptOverride ?? this._baseSystemPrompt,
+					collaborationMode,
+				);
+				this.agent.state.systemPrompt = effectiveSystemPrompt;
+			}
 			activeSkillTrace = {
 				operationSpan,
 				skills: this._recordSkillAdmission(
@@ -2381,7 +2435,7 @@ export class AgentSession {
 					availableSkills,
 					referencedSkills,
 					forceLoadedSkills,
-					this.agent.state.systemPrompt,
+					effectiveSystemPrompt,
 				),
 			};
 		} catch (error) {
@@ -2432,7 +2486,7 @@ export class AgentSession {
 		this._releaseIdleSubagentEscalationsForSelectedBranch();
 		this._activeSkillTrace = activeSkillTrace;
 		try {
-			await this._runAgentPrompt(messages, collaborationMode);
+			await this._runAgentPrompt(messages, collaborationMode, collaborationState);
 		} finally {
 			if (this._activeSkillTrace === activeSkillTrace) this._activeSkillTrace = undefined;
 		}
@@ -3122,9 +3176,12 @@ export class AgentSession {
 	 * @param customInstructions Optional instructions for the compaction summary
 	 */
 	compact(customInstructions?: string): Promise<CompactionResult> {
+		this._manualCompactionOperations++;
 		return this._runOwnedOperation(() =>
 			this._traceOperation("compaction", (telemetryContext) => this._compact(customInstructions, telemetryContext)),
-		);
+		).finally(() => {
+			this._manualCompactionOperations--;
+		});
 	}
 
 	private async _compact(customInstructions?: string, telemetryContext?: TelemetryContext): Promise<CompactionResult> {
@@ -3690,6 +3747,7 @@ export class AgentSession {
 		};
 
 		this._resourceLoader.extendResources(extensionPaths);
+		if (this._activeRunCollaborationMode === "plan") return;
 		this._installCollaborationModeState(
 			this._deriveCollaborationModeState(this._activeRunCollaborationMode ?? this._collaborationMode),
 		);

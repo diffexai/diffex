@@ -16,6 +16,7 @@ import {
 import type { ExtensionFactory } from "../../src/core/extensions/index.ts";
 import { SessionManager } from "../../src/core/session-manager.ts";
 import * as publicApi from "../../src/index.ts";
+import { createTestExtensionsResult, createTestResourceLoader } from "../utilities.ts";
 import { createHarness, getAssistantTexts, type Harness } from "./harness.ts";
 
 function createTool(name: string, output = name, onExecute?: () => void): AgentTool {
@@ -213,6 +214,91 @@ describe("AgentSession collaboration mode foundation", () => {
 		expect(harness.session.systemPrompt.split(PLAN_MODE_SYSTEM_PROMPT)).toHaveLength(2);
 	});
 
+	it("freezes the admitted Plan prompt and exact tool implementations through preflight and continuations", async () => {
+		let currentSystemPrompt = "admission-owned prompt";
+		let signalInputStarted: (() => void) | undefined;
+		let releaseInput: (() => void) | undefined;
+		let refreshTools = (): void => {
+			throw new Error("Extension did not initialize");
+		};
+		const inputStarted = new Promise<void>((resolve) => {
+			signalInputStarted = resolve;
+		});
+		const inputGate = new Promise<void>((resolve) => {
+			releaseInput = resolve;
+		});
+		const extensionsResult = await createTestExtensionsResult([
+			(pi) => {
+				refreshTools = () => {
+					pi.registerTool({
+						name: "late_tool",
+						label: "Late tool",
+						description: "Registered after Plan admission",
+						parameters: Type.Object({}),
+						execute: async () => ({ content: [{ type: "text", text: "late" }], details: {} }),
+					});
+				};
+				pi.on("input", async () => {
+					signalInputStarted?.();
+					await inputGate;
+					return { action: "continue" };
+				});
+				pi.on("before_agent_start", (event) => ({
+					systemPrompt: `${event.systemPrompt}\n\nextension-owned admission prompt`,
+				}));
+			},
+		]);
+		const baseResourceLoader = createTestResourceLoader({ extensionsResult });
+		const resourceLoader = {
+			...baseResourceLoader,
+			getSystemPrompt: () => currentSystemPrompt,
+		};
+		const harness = await createHarness({ tools: createBaseTools(), resourceLoader });
+		harnesses.push(harness);
+		setCollaborationMode(harness.session, "plan");
+		const admittedTools = harness.session.agent.state.tools.slice();
+		const providerPrompts: string[] = [];
+		const providerTools: object[][] = [];
+		harness.setResponses([
+			(context) => {
+				providerPrompts.push(context.systemPrompt ?? "");
+				providerTools.push(context.tools ?? []);
+				return fauxAssistantMessage(fauxToolCall("read", {}), { stopReason: "toolUse" });
+			},
+			(context) => {
+				providerPrompts.push(context.systemPrompt ?? "");
+				providerTools.push(context.tools ?? []);
+				return fauxAssistantMessage("planned");
+			},
+		]);
+
+		const prompt = harness.session.prompt("make a stable plan");
+		await inputStarted;
+		currentSystemPrompt = "next-run prompt";
+		refreshTools();
+		harness.session.setActiveToolsByName(["bash"]);
+		releaseInput?.();
+		await prompt;
+
+		expect(providerPrompts).toHaveLength(2);
+		for (const providerPrompt of providerPrompts) {
+			expect(providerPrompt).toContain("admission-owned prompt");
+			expect(providerPrompt).toContain("extension-owned admission prompt");
+			expect(providerPrompt).not.toContain("next-run prompt");
+			expect(providerPrompt.split(PLAN_MODE_SYSTEM_PROMPT)).toHaveLength(2);
+		}
+		expect(providerTools).toHaveLength(2);
+		for (const tools of providerTools) {
+			expect(tools).toHaveLength(admittedTools.length);
+			expect(tools.every((tool, index) => tool === admittedTools[index])).toBe(true);
+		}
+		expect(getAssistantTexts(harness)).toContain("planned");
+		expect(harness.session.systemPrompt).toContain("next-run prompt");
+
+		setCollaborationMode(harness.session, "default");
+		expect(harness.session.getActiveToolNames()).toEqual(["bash"]);
+	});
+
 	it.each(["isStreaming", "isCompacting", "isRetrying", "isBashRunning"] as const)(
 		"rejects a mode change while %s is true",
 		async (property) => {
@@ -224,6 +310,30 @@ describe("AgentSession collaboration mode foundation", () => {
 			expect(resolveCollaborationMode(harness.sessionManager)).toBe("default");
 		},
 	);
+
+	it("rejects a mode change from the synchronous start of manual compaction", async () => {
+		const harness = await createHarness({ tools: createBaseTools() });
+		harnesses.push(harness);
+		let signalAbortStarted: (() => void) | undefined;
+		let releaseAbort: (() => void) | undefined;
+		const abortStarted = new Promise<void>((resolve) => {
+			signalAbortStarted = resolve;
+		});
+		const abortGate = new Promise<void>((resolve) => {
+			releaseAbort = resolve;
+		});
+		vi.spyOn(harness.session, "abort").mockImplementation(async () => {
+			signalAbortStarted?.();
+			await abortGate;
+		});
+
+		const compaction = harness.session.compact();
+		await abortStarted;
+		expect(setCollaborationMode(harness.session, "plan")).toEqual({ status: "busy", mode: "default" });
+		releaseAbort?.();
+		await expect(compaction).rejects.toThrow("Nothing to compact");
+		expect(resolveCollaborationMode(harness.sessionManager)).toBe("default");
+	});
 
 	it("blocks a stale disallowed Plan call before extension hooks", async () => {
 		let bashExecutions = 0;
