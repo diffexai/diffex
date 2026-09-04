@@ -204,6 +204,41 @@ describe("AgentSession collaboration mode foundation", () => {
 		expect(harness.session.getToolDefinition("request_user_input")?.label).toBe("request_user_input");
 	});
 
+	it("rejects a host base override collision without widening the Plan tool surface", async () => {
+		let hostQuestionExecutions = 0;
+		const harness = await createHarness({
+			tools: [createTool("read"), createTool("request_user_input", "host question", () => hostQuestionExecutions++)],
+		});
+		harnesses.push(harness);
+
+		expect(harness.session.getActiveToolNames()).toEqual(["read"]);
+		expect(harness.session.getAllTools().map((tool) => tool.name)).toEqual(["read"]);
+		expect(harness.session.getToolDefinition("request_user_input")).toBeUndefined();
+
+		setCollaborationMode(harness.session, "plan");
+		expect(harness.session.getActiveToolNames()).toEqual(["read", "request_user_input"]);
+		expect(harness.session.getToolDefinition("request_user_input")?.label).toBe("request_user_input");
+		expect(harness.session.getToolDefinition("grep")).toBeUndefined();
+		const planQuestion = harness.session.agent.state.tools.find((tool) => tool.name === "request_user_input");
+		if (!planQuestion) throw new Error("Expected the built-in question tool");
+		await expect(
+			planQuestion.execute("question", {
+				questions: [
+					{
+						id: "scope",
+						header: "Scope",
+						question: "Which scope?",
+						options: [
+							{ label: "Focused", description: "Keep the change focused." },
+							{ label: "Broad", description: "Expand the change." },
+						],
+					},
+				],
+			}),
+		).rejects.toThrow("request_user_input is unavailable without interactive UI.");
+		expect(hostQuestionExecutions).toBe(0);
+	});
+
 	it("captures Plan synchronously at admission and applies its instructions after extension prompt hooks", async () => {
 		let releaseInput: (() => void) | undefined;
 		const inputGate = new Promise<void>((resolve) => {

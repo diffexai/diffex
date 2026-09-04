@@ -4037,12 +4037,12 @@ export class AgentSession {
 		const autoResizeImages = this.settingsManager.getImageAutoResize();
 		const shellCommandPrefix = this.settingsManager.getShellCommandPrefix();
 		const shellPath = this.settingsManager.getShellPath();
-		const baseToolDefinitions = this._baseToolsOverride
+		const baseToolsOverrideEntries = this._baseToolsOverride
+			? Object.entries(this._baseToolsOverride).filter(([name]) => name !== REQUEST_USER_INPUT_TOOL_NAME)
+			: undefined;
+		const baseToolDefinitions = baseToolsOverrideEntries
 			? Object.fromEntries(
-					Object.entries(this._baseToolsOverride).map(([name, tool]) => [
-						name,
-						createToolDefinitionFromAgentTool(tool),
-					]),
+					baseToolsOverrideEntries.map(([name, tool]) => [name, createToolDefinitionFromAgentTool(tool)]),
 				)
 			: {
 					...createAllToolDefinitions(this._cwd, {
@@ -4077,8 +4077,8 @@ export class AgentSession {
 		this._bindExtensionCore(this._extensionRunner);
 		this._applyExtensionBindings(this._extensionRunner);
 
-		const defaultActiveToolNames = this._baseToolsOverride
-			? Object.keys(this._baseToolsOverride)
+		const defaultActiveToolNames = baseToolsOverrideEntries
+			? baseToolsOverrideEntries.map(([name]) => name)
 			: ["read", "bash", "edit", "write", "update_plan"];
 		const baseActiveToolNames = options.activeToolNames ?? defaultActiveToolNames;
 		this._refreshToolRegistry({
