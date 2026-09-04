@@ -10,6 +10,7 @@ import type {
 	SkillabilityClassification,
 	SkillCandidate,
 	SkillCandidateExpansionAttemptDiagnostic,
+	SkillCandidateExpansionAttemptFailedLedgerEvent,
 	SkillCandidateExpansionFailedLedgerEvent,
 	SkillCandidateExpansionFailureReasonCode,
 	SkillCandidateExpansionLedgerEvent,
@@ -110,6 +111,11 @@ interface EvidenceReferences {
 	readonly supportingTraceIds: readonly string[];
 	readonly contradictingTraceIds: readonly string[];
 	readonly taskLineageIds: readonly string[];
+}
+
+interface SkillCandidateExpansionCheckpoints {
+	readonly outcomes: ReadonlyMap<string, SkillCandidateExpansionOutcome>;
+	readonly failedAttempts: ReadonlyMap<string, readonly SkillCandidateExpansionAttemptDiagnostic[]>;
 }
 
 export interface SkillCuratorProceduralInformationLossDiagnosticInput {
@@ -1111,36 +1117,46 @@ function expansionAttemptDiagnostic(
 	};
 }
 
-function assertExpansionFailureDiagnostic(diagnostic: SkillCandidateExpansionFailedLedgerEvent["diagnostic"]): void {
+function assertExpansionAttemptDiagnostic(
+	diagnostic: SkillCandidateExpansionAttemptDiagnostic,
+	expectedAttempt: 1 | 2,
+): void {
 	const reasonCodes = new Set<SkillCandidateExpansionFailureReasonCode>([
 		"candidate-assembly-invalid",
 		"model-call-failed",
 		"procedure-draft-invalid",
 	]);
 	if (
+		diagnostic.attempt !== expectedAttempt ||
+		!Number.isSafeInteger(diagnostic.modelRounds) ||
+		diagnostic.modelRounds < 0 ||
 		!reasonCodes.has(diagnostic.reasonCode) ||
 		diagnostic.message.trim().length === 0 ||
-		diagnostic.attempts.length !== MAX_EXPANSION_ATTEMPTS
+		new Set(diagnostic.inspectedReferences.evidenceIds).size !== diagnostic.inspectedReferences.evidenceIds.length ||
+		new Set(diagnostic.inspectedReferences.skillIds).size !== diagnostic.inspectedReferences.skillIds.length ||
+		new Set(diagnostic.invalidFieldPaths).size !== diagnostic.invalidFieldPaths.length
 	) {
+		throw new Error("invalid attempt diagnostic");
+	}
+}
+
+function assertExpansionFailureDiagnostic(diagnostic: SkillCandidateExpansionFailedLedgerEvent["diagnostic"]): void {
+	if (diagnostic.message.trim().length === 0 || diagnostic.attempts.length !== MAX_EXPANSION_ATTEMPTS) {
 		throw new Error("invalid terminal diagnostic");
 	}
-	for (const [index, attempt] of diagnostic.attempts.entries()) {
-		if (
-			attempt.attempt !== index + 1 ||
-			!Number.isSafeInteger(attempt.modelRounds) ||
-			attempt.modelRounds < 0 ||
-			!reasonCodes.has(attempt.reasonCode) ||
-			attempt.message.trim().length === 0 ||
-			new Set(attempt.inspectedReferences.evidenceIds).size !== attempt.inspectedReferences.evidenceIds.length ||
-			new Set(attempt.inspectedReferences.skillIds).size !== attempt.inspectedReferences.skillIds.length ||
-			new Set(attempt.invalidFieldPaths).size !== attempt.invalidFieldPaths.length
-		) {
-			throw new Error("invalid attempt diagnostic");
-		}
-	}
+	assertExpansionAttemptDiagnostic(diagnostic.attempts[0], 1);
+	assertExpansionAttemptDiagnostic(diagnostic.attempts[1], 2);
 	if (diagnostic.reasonCode !== diagnostic.attempts[1].reasonCode) {
 		throw new Error("terminal reason does not match the final attempt");
 	}
+}
+
+function expansionCorrection(diagnostic: SkillCandidateExpansionAttemptDiagnostic): string {
+	return diagnostic.reasonCode === "procedure-draft-invalid"
+		? "The previous procedure draft did not satisfy the required contract. Return every required field."
+		: diagnostic.reasonCode === "candidate-assembly-invalid"
+			? "The previous procedure draft could not be assembled within the complete candidate contract."
+			: "The previous model execution failed before returning a valid procedure draft.";
 }
 
 function assertCheckpointedCandidate(
@@ -1283,19 +1299,27 @@ export class StructuredSkillCurator implements SkillCurator {
 				proceduralInformationLossFindings: [],
 			});
 		}
-		const checkpointedOutcomes = await this.#loadExpansionCheckpoints(input, acceptedOutlines);
+		const expansionCheckpoints = await this.#loadExpansionCheckpoints(input, acceptedOutlines);
 		const outcomes = await mapWithConcurrency(
 			acceptedOutlines.outlines,
 			this.#maxConcurrentExpansions,
 			async (outline) => {
-				const checkpointed = checkpointedOutcomes.get(outline.outlineId);
+				const checkpointed = expansionCheckpoints.outcomes.get(outline.outlineId);
 				if (checkpointed !== undefined) {
 					if (checkpointed.status === "succeeded") {
 						await this.#registerCandidate(input, checkpointed.candidate);
 					}
 					return checkpointed;
 				}
-				const outcome = await this.#expandOutline(input, acceptedOutlines, outline, final, selected, producer);
+				const outcome = await this.#expandOutline(
+					input,
+					acceptedOutlines,
+					outline,
+					final,
+					selected,
+					producer,
+					expansionCheckpoints.failedAttempts.get(outline.outlineId) ?? [],
+				);
 				return this.#persistExpansionOutcome(input, acceptedOutlines, outcome);
 			},
 		);
@@ -1318,6 +1342,7 @@ export class StructuredSkillCurator implements SkillCurator {
 		lessons: readonly Lesson[],
 		proposals: readonly ScoredProposal[],
 		producer: EvolutionArtifactProducer,
+		checkpointedAttempts: readonly SkillCandidateExpansionAttemptDiagnostic[],
 	): Promise<SkillCandidateExpansionOutcome> {
 		const lessonIds = new Set(outline.sourceLessonIds);
 		const proposalIds = new Set(outline.memoryRelationship.memoryProposalIds);
@@ -1335,9 +1360,9 @@ export class StructuredSkillCurator implements SkillCurator {
 		const permittedEvidence = unique(
 			selectedLessons.flatMap((lesson) => [...lesson.evidenceIds, ...lesson.counterevidenceIds]),
 		);
-		const attempts: SkillCandidateExpansionAttemptDiagnostic[] = [];
-		let correction: string | null = null;
-		for (let attempt = 1; attempt <= MAX_EXPANSION_ATTEMPTS; attempt += 1) {
+		const attempts: SkillCandidateExpansionAttemptDiagnostic[] = [...checkpointedAttempts];
+		let correction: string | null = attempts.at(-1) === undefined ? null : expansionCorrection(attempts.at(-1)!);
+		for (let attempt = attempts.length + 1; attempt <= MAX_EXPANSION_ATTEMPTS; attempt += 1) {
 			const attemptNumber = attempt as 1 | 2;
 			const attemptIdempotencyKey = stableId("skill-candidate-expansion", {
 				jobId: input.jobId,
@@ -1376,21 +1401,29 @@ export class StructuredSkillCurator implements SkillCurator {
 					input.signal?.throwIfAborted();
 					throwIfStageWideFailure(error);
 					const reasonCode = expansionFailureReason(error);
-					attempts.push(expansionAttemptDiagnostic(attemptNumber, modelRounds, reasonCode, error, registry));
+					const diagnostic = expansionAttemptDiagnostic(attemptNumber, modelRounds, reasonCode, error, registry);
+					await this.#checkpointExpansionAttempt(input, acceptedOutlines, outline, diagnostic);
+					attempts.push(diagnostic);
 					correction =
 						reasonCode === "procedure-draft-invalid" && error instanceof Error
 							? error.message
-							: "The previous model execution failed before returning a valid procedure draft.";
+							: expansionCorrection(diagnostic);
 					continue;
 				}
 				let draft: SkillCandidateProcedureDraft;
 				try {
 					draft = parseProcedureDraftOutput(response.output);
 				} catch (error) {
-					attempts.push(
-						expansionAttemptDiagnostic(attemptNumber, modelRounds, "procedure-draft-invalid", error, registry),
+					const diagnostic = expansionAttemptDiagnostic(
+						attemptNumber,
+						modelRounds,
+						"procedure-draft-invalid",
+						error,
+						registry,
 					);
-					correction = error instanceof Error ? error.message : "Procedure draft validation failed";
+					await this.#checkpointExpansionAttempt(input, acceptedOutlines, outline, diagnostic);
+					attempts.push(diagnostic);
+					correction = error instanceof Error ? error.message : expansionCorrection(diagnostic);
 					continue;
 				}
 				try {
@@ -1411,10 +1444,16 @@ export class StructuredSkillCurator implements SkillCurator {
 					};
 				} catch (error) {
 					throwIfStageWideFailure(error);
-					attempts.push(
-						expansionAttemptDiagnostic(attemptNumber, modelRounds, "candidate-assembly-invalid", error, registry),
+					const diagnostic = expansionAttemptDiagnostic(
+						attemptNumber,
+						modelRounds,
+						"candidate-assembly-invalid",
+						error,
+						registry,
 					);
-					correction = error instanceof Error ? error.message : "Candidate assembly failed";
+					await this.#checkpointExpansionAttempt(input, acceptedOutlines, outline, diagnostic);
+					attempts.push(diagnostic);
+					correction = error instanceof Error ? error.message : expansionCorrection(diagnostic);
 				}
 			} finally {
 				registry.revoke();
@@ -1440,25 +1479,36 @@ export class StructuredSkillCurator implements SkillCurator {
 	async #loadExpansionCheckpoints(
 		input: SkillCuratorInput,
 		acceptedOutlines: SkillCandidateOutlineSet,
-	): Promise<ReadonlyMap<string, SkillCandidateExpansionOutcome>> {
+	): Promise<SkillCandidateExpansionCheckpoints> {
 		const outlines = new Map(acceptedOutlines.outlines.map((outline) => [outline.outlineId, outline]));
 		const events = (await this.#dependencies.ledger.read(input.jobId)).filter(
 			(event): event is SkillCandidateExpansionLedgerEvent =>
-				(event.type === "skill-candidate-expansion-succeeded" ||
+				(event.type === "skill-candidate-expansion-attempt-failed" ||
+					event.type === "skill-candidate-expansion-succeeded" ||
 					event.type === "skill-candidate-expansion-failed") &&
 				event.curationIdempotencyKey === input.idempotencyKey,
 		);
 		const outcomes = new Map<string, SkillCandidateExpansionOutcome>();
+		const failedAttempts = new Map<string, SkillCandidateExpansionAttemptDiagnostic[]>();
 		try {
 			for (const event of events) {
 				const outline = outlines.get(event.outlineId);
 				const { metadata, ...content } = event;
-				const expectedEventId = stableId("ledger-event", {
-					jobId: input.jobId,
-					workKind: "skill-candidate-expansion",
-					curationIdempotencyKey: input.idempotencyKey,
-					outlineId: event.outlineId,
-				});
+				const expectedEventId =
+					event.type === "skill-candidate-expansion-attempt-failed"
+						? stableId("ledger-event", {
+								jobId: input.jobId,
+								workKind: "skill-candidate-expansion-attempt",
+								curationIdempotencyKey: input.idempotencyKey,
+								outlineId: event.outlineId,
+								attempt: event.diagnostic.attempt,
+							})
+						: stableId("ledger-event", {
+								jobId: input.jobId,
+								workKind: "skill-candidate-expansion",
+								curationIdempotencyKey: input.idempotencyKey,
+								outlineId: event.outlineId,
+							});
 				if (
 					outline === undefined ||
 					event.eventId !== expectedEventId ||
@@ -1469,11 +1519,21 @@ export class StructuredSkillCurator implements SkillCurator {
 					event.jobId !== input.jobId ||
 					event.outlineKey !== outline.outlineKey ||
 					event.proposedName !== outline.proposedName ||
-					event.operation !== outline.operation ||
-					outcomes.has(event.outlineId)
+					event.operation !== outline.operation
 				) {
 					throw new Error("ambiguous or mismatched expansion checkpoint");
 				}
+				if (event.type === "skill-candidate-expansion-attempt-failed") {
+					assertExpansionAttemptDiagnostic(event.diagnostic, event.diagnostic.attempt);
+					const attempts = failedAttempts.get(event.outlineId) ?? [];
+					if (attempts.some((diagnostic) => diagnostic.attempt === event.diagnostic.attempt)) {
+						throw new Error("duplicate expansion attempt checkpoint");
+					}
+					attempts.push(event.diagnostic);
+					failedAttempts.set(event.outlineId, attempts);
+					continue;
+				}
+				if (outcomes.has(event.outlineId)) throw new Error("duplicate terminal expansion checkpoint");
 				if (event.type === "skill-candidate-expansion-failed") {
 					assertExpansionFailureDiagnostic(event.diagnostic);
 					outcomes.set(event.outlineId, {
@@ -1500,6 +1560,22 @@ export class StructuredSkillCurator implements SkillCurator {
 					candidate: artifact,
 				});
 			}
+			for (const [outlineId, attempts] of failedAttempts) {
+				attempts.sort((left, right) => left.attempt - right.attempt);
+				if (attempts.some((diagnostic, index) => diagnostic.attempt !== index + 1)) {
+					throw new Error("expansion attempt checkpoints are not contiguous");
+				}
+				const outcome = outcomes.get(outlineId);
+				if (
+					outcome?.status === "failed" &&
+					computeEvolutionContentDigest(outcome.diagnostic.attempts) !== computeEvolutionContentDigest(attempts)
+				) {
+					throw new Error("terminal expansion checkpoint conflicts with attempt history");
+				}
+				if (outcome?.status === "succeeded" && outcome.attemptCount !== attempts.length + 1) {
+					throw new Error("successful expansion checkpoint conflicts with attempt history");
+				}
+			}
 		} catch (cause) {
 			throw new EvolutionExecutionError("Skill candidate expansion checkpoint is corrupt", {
 				reasonCode: "artifact-corrupt",
@@ -1507,7 +1583,46 @@ export class StructuredSkillCurator implements SkillCurator {
 				cause,
 			});
 		}
-		return outcomes;
+		return { outcomes, failedAttempts };
+	}
+
+	async #checkpointExpansionAttempt(
+		input: SkillCuratorInput,
+		acceptedOutlines: SkillCandidateOutlineSet,
+		outline: SkillCandidateOutline,
+		diagnostic: SkillCandidateExpansionAttemptDiagnostic,
+	): Promise<void> {
+		assertExpansionAttemptDiagnostic(diagnostic, diagnostic.attempt);
+		const eventId = stableId("ledger-event", {
+			jobId: input.jobId,
+			workKind: "skill-candidate-expansion-attempt",
+			curationIdempotencyKey: input.idempotencyKey,
+			outlineId: outline.outlineId,
+			attempt: diagnostic.attempt,
+		});
+		const content = {
+			eventId,
+			jobId: input.jobId,
+			type: "skill-candidate-expansion-attempt-failed" as const,
+			curationIdempotencyKey: input.idempotencyKey,
+			outlineId: outline.outlineId,
+			outlineKey: outline.outlineKey,
+			proposedName: outline.proposedName,
+			operation: outline.operation,
+			diagnostic,
+		};
+		const event: SkillCandidateExpansionAttemptFailedLedgerEvent = {
+			metadata: createEvolutionArtifactMetadata({
+				artifactId: eventId,
+				producer: acceptedOutlines.metadata.producer,
+				sourceIds: [acceptedOutlines.outlineSetId, outline.outlineId],
+				scope: input.input.metadata.scope,
+				createdAt: input.input.metadata.createdAt,
+				content,
+			}),
+			...content,
+		};
+		await this.#dependencies.ledger.append(event);
 	}
 
 	async #persistExpansionOutcome(

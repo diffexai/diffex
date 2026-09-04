@@ -135,6 +135,7 @@ export {
 	type SkillCandidateEvaluationRecordedEvent,
 	type SkillCandidateEvidenceContribution,
 	type SkillCandidateExpansionAttemptDiagnostic,
+	type SkillCandidateExpansionAttemptFailedLedgerEvent,
 	type SkillCandidateExpansionFailed,
 	type SkillCandidateExpansionFailedLedgerEvent,
 	type SkillCandidateExpansionFailureDiagnostic,

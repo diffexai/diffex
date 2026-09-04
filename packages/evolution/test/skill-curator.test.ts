@@ -1078,6 +1078,68 @@ describe("StructuredSkillCurator", () => {
 		expect(ledger.filter((event) => event.type === "skill-candidate-expansion-failed")).toHaveLength(1);
 	});
 
+	it("resumes an interrupted expansion without resetting its retry budget", async () => {
+		const storedSkill = skillArtifact();
+		const artifacts = new FixtureArtifactStore([storedSkill]);
+		const events: EvolutionLedgerEvent[] = [];
+		const durableLedger = memoryLedger(events);
+		let interruptAttemptCheckpoint = true;
+		const interruptedLedger: EvolutionLedger = {
+			async append(event) {
+				await durableLedger.append(event);
+				if (interruptAttemptCheckpoint && event.type === "skill-candidate-expansion-attempt-failed") {
+					interruptAttemptCheckpoint = false;
+					throw new Error("attempt checkpoint acknowledgement lost");
+				}
+			},
+			read: (jobId) => durableLedger.read(jobId),
+		};
+		const input = fixtureInput(storedSkill.reference);
+		let discoveryCalls = 0;
+		let expansionCalls = 0;
+		const execute: SkillCuratorInput["model"]["execute"] = async (request) => {
+			if ((request.input.control as JsonObject).phase === "outline-discovery") {
+				discoveryCalls += 1;
+				await request.tools.find((tool) => tool.name === "inspect_skills")?.execute({ skillRefs: ["K1"] });
+				return { output: outlineOutput(), model: { provider: "faux", model: "fixture" } };
+			}
+			expansionCalls += 1;
+			return { output: {}, model: { provider: "faux", model: "fixture" } };
+		};
+
+		await expect(
+			new StructuredSkillCurator({
+				version: "1",
+				artifacts,
+				ledger: interruptedLedger,
+				registry: candidateRegistry(),
+			}).curate(curatorInput(execute, input)),
+		).rejects.toThrow("attempt checkpoint acknowledgement lost");
+		expect(expansionCalls).toBe(1);
+
+		const resumed = await new StructuredSkillCurator({
+			version: "1",
+			artifacts,
+			ledger: durableLedger,
+			registry: candidateRegistry(),
+		}).curate(curatorInput(execute, input));
+
+		expect(discoveryCalls).toBe(1);
+		expect(expansionCalls).toBe(2);
+		expect(resumed).toMatchObject({
+			status: "completed",
+			candidates: [],
+			failedExpansions: [
+				{
+					status: "failed",
+					diagnostic: { attempts: [{ attempt: 1 }, { attempt: 2 }] },
+				},
+			],
+		});
+		expect(events.filter((event) => event.type === "skill-candidate-expansion-attempt-failed")).toHaveLength(2);
+		expect(events.filter((event) => event.type === "skill-candidate-expansion-failed")).toHaveLength(1);
+	});
+
 	it("restores a successful expansion and idempotently registers it after restart", async () => {
 		const storedSkill = skillArtifact();
 		const artifacts = new FixtureArtifactStore([storedSkill]);

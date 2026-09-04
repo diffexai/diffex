@@ -1827,6 +1827,11 @@ interface SkillCandidateExpansionLedgerEventBase extends EvolutionLedgerEventBas
 	readonly operation: SkillCandidateOperation;
 }
 
+export interface SkillCandidateExpansionAttemptFailedLedgerEvent extends SkillCandidateExpansionLedgerEventBase {
+	readonly type: "skill-candidate-expansion-attempt-failed";
+	readonly diagnostic: SkillCandidateExpansionAttemptDiagnostic;
+}
+
 export interface SkillCandidateExpansionSucceededLedgerEvent extends SkillCandidateExpansionLedgerEventBase {
 	readonly type: "skill-candidate-expansion-succeeded";
 	readonly attemptCount: 1 | 2;
@@ -1839,6 +1844,7 @@ export interface SkillCandidateExpansionFailedLedgerEvent extends SkillCandidate
 }
 
 export type SkillCandidateExpansionLedgerEvent =
+	| SkillCandidateExpansionAttemptFailedLedgerEvent
 	| SkillCandidateExpansionSucceededLedgerEvent
 	| SkillCandidateExpansionFailedLedgerEvent;
 
