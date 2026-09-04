@@ -1206,6 +1206,7 @@ export type SkillCandidateWorkStage =
 	| "synthesizing"
 	| "validating"
 	| "evaluating"
+	| "activating"
 	| "completed";
 
 export interface SkillCandidateWorkCheckpointedEvent extends SkillCandidateRegistryEventBase {
@@ -1517,6 +1518,7 @@ export interface SkillMutationBatch {
 	readonly expectedBaseVersion: HarnessVersion;
 	readonly workspace: EvolutionSkillWorkspaceIdentity;
 	readonly mutations: readonly SkillMutation[];
+	readonly allowSkillInventoryRebase?: boolean;
 }
 
 export type SkillMutationExactDiff = JsonObject & {

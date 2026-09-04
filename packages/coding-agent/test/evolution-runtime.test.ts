@@ -1571,19 +1571,23 @@ describe("coding-agent evolution runtime", () => {
 				},
 				{ timeout: 8_000, interval: 20 },
 			);
+			await vi.waitFor(
+				async () => expect((await store.loadCurrent()).manifest.version).not.toBe(root.manifest.version),
+				{ timeout: 8_000, interval: 20 },
+			);
+			const activatedHarnessVersion = (await store.loadCurrent()).manifest.version;
 			const candidate = await runtime.control.getSkillCandidate(started.job.jobId, candidateId);
 			expect(candidate).toMatchObject({
 				summary: { state: "accepted" },
 				validation: { disposition: "accepted", validatedHarnessVersion: root.manifest.version },
 				evaluation: null,
-				activationAvailable: true,
+				targetHarnessVersion: activatedHarnessVersion,
+				activationAvailable: false,
 			});
 
-			const activation = await runtime.control.activateSkillCandidate(started.job.jobId, candidateId);
-			expect((await store.loadCurrent()).manifest.version).toBe(activation.targetHarnessVersion);
 			expect(harness.session.activeHarnessVersion).toBe(root.manifest.version);
 			expect(await peerRuntime.control.overview()).toMatchObject({
-				currentHarnessVersion: activation.targetHarnessVersion,
+				currentHarnessVersion: activatedHarnessVersion,
 				observedHarnessVersion: root.manifest.version,
 				nextPromptWillRefresh: true,
 			});
@@ -1597,7 +1601,7 @@ describe("coding-agent evolution runtime", () => {
 			]);
 			await harness.session.prompt("Use focused verification for this change.");
 
-			expect(harness.session.activeHarnessVersion).toBe(activation.targetHarnessVersion);
+			expect(harness.session.activeHarnessVersion).toBe(activatedHarnessVersion);
 			expect(exposedPrompt).toContain("<name>focused-verification</name>");
 			expect(exposedPrompt).toContain(
 				"A repository change requires focused verification. Use when a focused source change is ready for verification.",
@@ -1606,18 +1610,18 @@ describe("coding-agent evolution runtime", () => {
 				expect.objectContaining({
 					name: "focused-verification",
 					sourceKind: "evolved",
-					harnessRevision: activation.targetHarnessVersion,
+					harnessRevision: activatedHarnessVersion,
 				}),
 			]);
 
 			await expect(runtime.control.getSkillCandidate(started.job.jobId, candidateId)).resolves.toMatchObject({
-				targetHarnessVersion: activation.targetHarnessVersion,
+				targetHarnessVersion: activatedHarnessVersion,
 				rollbackTargetHarnessVersion: root.manifest.version,
 				rollbackAvailable: true,
 				activationAvailable: false,
 			});
 			await expect(runtime.control.rollbackSkillCandidate(started.job.jobId, candidateId)).resolves.toMatchObject({
-				fromHarnessVersion: activation.targetHarnessVersion,
+				fromHarnessVersion: activatedHarnessVersion,
 				toHarnessVersion: root.manifest.version,
 			});
 			expect((await store.loadCurrent()).manifest.version).toBe(root.manifest.version);

@@ -835,7 +835,7 @@ describe("EvolutionMenuComponent", () => {
 		component.dispose();
 	});
 
-	it("reviews candidate provenance, draft, validation, evaluation, and confirms activation", async () => {
+	it("reviews candidate provenance, draft, validation, and evaluation without manual activation", async () => {
 		const detail = skillCandidateDetail();
 		const fixture = client(overview());
 		fixture.listJobs.mockResolvedValue([job()]);
@@ -887,7 +887,8 @@ describe("EvolutionMenuComponent", () => {
 		expect(output).toContain("Draft diff [completed]");
 		expect(output).toContain("Validation [completed]");
 		expect(output).toContain("Evaluation [completed]");
-		expect(output).toContain("Activate");
+		expect(output).not.toContain("Activate");
+		expect(output).not.toContain("Rollback [unavailable]");
 
 		component.handleInput("\n");
 		await vi.waitFor(() =>
@@ -917,22 +918,12 @@ describe("EvolutionMenuComponent", () => {
 		expect(output).toContain("retrieval: passed");
 		expect(output).toContain("Negative regressions: 0");
 
-		component.handleInput("\u001b");
-		for (let index = 0; index < 5; index += 1) component.handleInput("\u001b[B");
-		component.handleInput("\n");
-		await vi.waitFor(() =>
-			expect(stripAnsi(component.render(180).join("\n"))).toContain("Activate focused-verification?"),
-		);
 		expect(fixture.activateSkillCandidate).not.toHaveBeenCalled();
-		component.handleInput("\n");
-		await vi.waitFor(() => expect(fixture.activateSkillCandidate).toHaveBeenCalledWith("job-active", "candidate-1"));
-		await vi.waitFor(() =>
-			expect(status).toHaveBeenCalledWith(expect.stringContaining("Evolved skill activated in sha256:"), false),
-		);
+		expect(status).not.toHaveBeenCalled();
 		component.dispose();
 	});
 
-	it("labels skipped skill evaluation without blocking explicit activation", async () => {
+	it("omits skipped skill evaluation and unavailable actions", async () => {
 		const baseDetail = skillCandidateDetail();
 		const detail = skillCandidateDetail({
 			evaluation: null,
@@ -966,9 +957,9 @@ describe("EvolutionMenuComponent", () => {
 		await vi.waitFor(() => expect(fixture.skillCandidateDetailCall).toHaveBeenCalledOnce());
 
 		const output = stripAnsi(component.render(180).join("\n"));
-		expect(output).toContain("Evaluation [skipped]");
-		expect(output).toContain("Activate");
-		expect(output).not.toContain("Activate [unavailable]");
+		expect(output).not.toContain("Evaluation [skipped]");
+		expect(output).not.toContain("Activate");
+		expect(output).not.toContain("Rollback [unavailable]");
 		component.dispose();
 	});
 

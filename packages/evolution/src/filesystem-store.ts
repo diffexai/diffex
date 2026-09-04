@@ -84,6 +84,7 @@ const SKILL_CANDIDATE_WORK_STAGES = new Set([
 	"synthesizing",
 	"validating",
 	"evaluating",
+	"activating",
 	"completed",
 ]);
 const SKILL_LIFECYCLE_SIGNALS = new Set(["helpful", "harmful", "neutral", "unknown"]);

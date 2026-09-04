@@ -11,11 +11,11 @@ Use `/evolve` to:
 - inspect memory proposals and their evidence;
 - distinguish analysis completion from waiting, retrying, completed, partially failed, or failed candidate generation;
 - inspect each skill candidate's registry state, latest transition time and reason, readable supporting and contradicting evidence, textual draft diff, deterministic validation, and retrieval/behavior evaluation when available;
-- activate a skill candidate after deterministic validation succeeds and any available persisted evaluation is accepted;
+- inspect automatic skill activation after deterministic validation succeeds and any available persisted evaluation is accepted;
 - inspect target revisions and roll back an activated evolved skill to its pre-activation revision, even when later descendants preserved it;
 - enable or disable future tracing and evolution work.
 
-Skill activation always requires explicit confirmation. Automatic skill activation is not enabled. Retrieval and behavior evaluation is temporarily skipped when no evaluator is configured; the candidate history and UI record that no evaluation ran. In that case, deterministic structure, provenance, scope, security, and inventory validation still must pass before activation becomes available. If harness memory changes after validation while the validated skill inventory remains identical, activation automatically rebases the candidate onto the selected revision and preserves its memory. Skill-inventory changes remain conflicts because they require fresh validation.
+Accepted skill candidates activate automatically once deterministic validation and any configured retrieval and behavior evaluation finish. Retrieval and behavior evaluation is temporarily skipped when no evaluator is configured; in that case, deterministic structure, provenance, scope, security, and inventory validation still must pass before automatic activation. If harness memory changes after validation, activation automatically rebases the candidate onto the selected revision and preserves its memory. Automatic activation may also rebase over unrelated evolved-skill changes after rechecking the candidate's exact source and target paths; conflicting skill changes remain blocked.
 
 Use `/version` to inspect compatible revisions for the current workspace and select one. Selection validates the complete bundle. A revision with corrupt, unsupported, or workspace-mismatched artifacts is not activated.
 

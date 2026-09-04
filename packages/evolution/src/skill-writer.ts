@@ -91,6 +91,7 @@ export interface SkillWriterBuildInput {
 	readonly groupId: string;
 	readonly createdAt: string;
 	readonly signal?: AbortSignal;
+	readonly allowSkillInventoryRebase?: boolean;
 }
 
 export interface SkillWriterContext {
@@ -529,6 +530,7 @@ export class SkillWriter {
 		source: AcceptedSkillMutationSource,
 		base: HarnessVersionBundle,
 		validatedBase: HarnessVersionBundle,
+		allowSkillInventoryRebase = false,
 	): SkillMutation {
 		const { group, draft, validation, evaluation } = source;
 		if (
@@ -544,7 +546,8 @@ export class SkillWriter {
 			draft.workspace.evolutionScope.scopeId !== group.profile.workspace.evolutionScope.scopeId ||
 			validation.validatedHarnessVersion !== validatedBase.manifest.version ||
 			(evaluation !== null && evaluation.harnessVersion !== validatedBase.manifest.version) ||
-			serializedSkills(base.state.skills) !== serializedSkills(validatedBase.state.skills)
+			(!allowSkillInventoryRebase &&
+				serializedSkills(base.state.skills) !== serializedSkills(validatedBase.state.skills))
 		) {
 			throw new EvolutionExecutionError(
 				"Accepted skill candidate does not match the active workspace and compatible harness base",
@@ -649,6 +652,7 @@ export class SkillWriter {
 	async #mutationForBase(
 		source: AcceptedSkillMutationSource,
 		base: HarnessVersionBundle,
+		allowSkillInventoryRebase = false,
 	): Promise<{ readonly mutation: SkillMutation; readonly validatedBase: HarnessVersionBundle }> {
 		if (
 			source.evaluation !== null &&
@@ -662,7 +666,10 @@ export class SkillWriter {
 		const validatedBase = await this.#dependencies.harnessState.loadVersion(
 			source.validation.validatedHarnessVersion,
 		);
-		return { mutation: this.#mutationFor(source, base, validatedBase), validatedBase };
+		return {
+			mutation: this.#mutationFor(source, base, validatedBase, allowSkillInventoryRebase),
+			validatedBase,
+		};
 	}
 
 	async buildMutationBatch(input: SkillWriterBuildInput): Promise<SkillMutationBatch> {
@@ -670,7 +677,7 @@ export class SkillWriter {
 		if (!Number.isFinite(Date.parse(input.createdAt))) throw new Error("Skill mutation batch time must be valid");
 		const base = await this.#dependencies.harnessState.loadCurrent();
 		const source = await this.#acceptedSource(input.scope, input.groupId);
-		const { mutation } = await this.#mutationForBase(source, base);
+		const { mutation } = await this.#mutationForBase(source, base, input.allowSkillInventoryRebase);
 		const content = {
 			batchId: stableId("skill-mutation-batch", {
 				groupId: input.groupId,
@@ -681,6 +688,7 @@ export class SkillWriter {
 			expectedBaseVersion: base.manifest.version,
 			workspace: mutation.workspace,
 			mutations: [mutation],
+			...(input.allowSkillInventoryRebase ? { allowSkillInventoryRebase: true } : {}),
 		};
 		return {
 			metadata: createEvolutionArtifactMetadata({
@@ -698,6 +706,30 @@ export class SkillWriter {
 			}),
 			...content,
 		};
+	}
+
+	async activateAcceptedGroup(
+		input: Omit<SkillWriterBuildInput, "allowSkillInventoryRebase">,
+		context: SkillWriterContext,
+	): Promise<HarnessActivationReceipt | null> {
+		input.signal?.throwIfAborted();
+		context.signal?.throwIfAborted();
+		assertWriterContext(context);
+		await this.#dependencies.leases.assertHeld(context.lease);
+		const source = await this.#acceptedSource(input.scope, input.groupId);
+		const validatedBase = await this.#dependencies.harnessState.loadVersion(
+			source.validation.validatedHarnessVersion,
+		);
+		const validatedMutation = this.#mutationFor(source, validatedBase, validatedBase);
+		const current = await this.#dependencies.harnessState.loadCurrent();
+		if (this.#mutationIsApplied(current, validatedMutation)) return null;
+
+		const batch = await this.buildMutationBatch({
+			...input,
+			allowSkillInventoryRebase: true,
+		});
+		const writeReceipt = await this.write(batch, context);
+		return this.activate(batch, writeReceipt, context);
 	}
 
 	async #assertBatch(batch: SkillMutationBatch): Promise<{
@@ -720,7 +752,11 @@ export class SkillWriter {
 		assertSafeId(mutation.mutationId, "skill mutation ID");
 		const base = await this.#dependencies.harnessState.loadVersion(batch.expectedBaseVersion);
 		const source = await this.#acceptedSource(batch.metadata.scope, mutation.groupId);
-		const { mutation: expected, validatedBase } = await this.#mutationForBase(source, base);
+		const { mutation: expected, validatedBase } = await this.#mutationForBase(
+			source,
+			base,
+			batch.allowSkillInventoryRebase,
+		);
 		if (serializeEvolutionValue(mutation) !== serializeEvolutionValue(expected)) {
 			throw new Error(`Skill mutation batch "${batch.batchId}" does not match its accepted candidate`);
 		}
@@ -788,7 +824,7 @@ export class SkillWriter {
 				targetVersion = actualCurrent;
 				continue;
 			}
-			const rebasedMutation = this.#mutationFor(source, current, validatedBase);
+			const rebasedMutation = this.#mutationFor(source, current, validatedBase, batch.allowSkillInventoryRebase);
 			if (serializeEvolutionValue(rebasedMutation) !== serializeEvolutionValue(mutation)) {
 				throw new Error(`Skill mutation batch "${batch.batchId}" changed while rebasing`);
 			}

@@ -1013,6 +1013,43 @@ export async function createCodingAgentEvolutionRuntime(
 		clock,
 		statePath: join(storageRoot, "skill-writer"),
 	});
+	const activateAcceptedSkillGroups = async (
+		activationScope: EvolutionScope,
+		sourceEvolutionJobId: string,
+		groupIds: readonly string[],
+		signal?: AbortSignal,
+	): Promise<void> => {
+		const sourceJob = await persistence.load(sourceEvolutionJobId);
+		if (sourceJob === null) throw new Error(`Unknown evolution job "${sourceEvolutionJobId}"`);
+		for (const groupId of groupIds) {
+			signal?.throwIfAborted();
+			const lease = await persistence.acquire(
+				"writer",
+				"global",
+				`skill-auto-activation-${randomUUID()}`,
+				clock.now(),
+				SKILL_ACTIVATION_LEASE_TTL_MS,
+			);
+			if (lease === null) throw new Error("Another harness writer is active");
+			try {
+				await skillWriter.activateAcceptedGroup(
+					{
+						scope: activationScope,
+						groupId,
+						createdAt: sourceJob.terminalAt ?? sourceJob.updatedAt,
+						signal,
+					},
+					{
+						idempotencyKey: `skill-auto-activate-${sourceEvolutionJobId}-${groupId}`,
+						lease,
+						signal,
+					},
+				);
+			} finally {
+				await persistence.release(lease);
+			}
+		}
+	};
 	const skillValidator = new DeterministicSkillDraftValidator({
 		version: VERSION,
 		artifacts: persistence,
@@ -1045,6 +1082,7 @@ export async function createCodingAgentEvolutionRuntime(
 			validator: skillValidator,
 			evaluator: options.skillEvaluator,
 			model,
+			activateAcceptedGroups: activateAcceptedSkillGroups,
 		}),
 		priority,
 	});
