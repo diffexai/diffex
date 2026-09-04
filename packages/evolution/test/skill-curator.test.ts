@@ -24,6 +24,11 @@ import {
 	type ScoredProposal,
 	SKILL_CANDIDATE_CAPSULE_MAX_ESTIMATED_TOKENS,
 	SKILL_CANDIDATE_CAPSULE_MAX_SERIALIZED_BYTES,
+	type SkillCandidateExpansionFailed,
+	type SkillCandidateExpansionOutcome,
+	type SkillCandidateOutline,
+	type SkillCandidateProcedureDraft,
+	type SkillCurationResult,
 	type SkillCuratorInput,
 	StructuredSkillCurator,
 } from "../src/index.ts";
@@ -543,6 +548,78 @@ describe("StructuredSkillCurator", () => {
 		expect(candidate.capsuleSize.estimatedTokens).toBeLessThanOrEqual(SKILL_CANDIDATE_CAPSULE_MAX_ESTIMATED_TOKENS);
 		expect(JSON.stringify(candidate)).not.toContain("exactDelta");
 		expect(JSON.stringify(candidate)).not.toContain("sourceProceduralObservationIds");
+		expect(result.status).toBe("completed");
+		expect(result.failedExpansions).toEqual([]);
+
+		const outline = {
+			outlineId: "skill-candidate-outline-1",
+			outlineKey: "verification-recovery",
+			sourceLessonIds: ["lesson-final"],
+			operation: "UPDATE",
+			proposedName: "verification-recovery",
+			existingSkillIds: ["installed:workspace:existing-skill"],
+			skillability: { classification: "troubleshooting-recovery" },
+			memoryRelationship: { classification: "complements", memoryProposalIds: ["proposal-1"] },
+		} satisfies SkillCandidateOutline;
+		const procedureDraft = {
+			trigger: candidate.trigger,
+			steps: candidate.procedure.steps.map(({ action, condition }) => ({ action, condition })),
+			requiredTools: candidate.procedure.requiredTools,
+			environment: candidate.procedure.environment,
+			failureHandling: candidate.failureHandling,
+			additionalPreconditions: ["A deterministic verification command is available."],
+			additionalApplicabilityBoundaries: ["Only use deterministic project verification commands."],
+			verificationChecks: candidate.verificationContract.checks,
+			completionCondition: candidate.verificationContract.completionCondition,
+		} satisfies SkillCandidateProcedureDraft;
+		const failedExpansion = {
+			status: "failed",
+			outlineId: outline.outlineId,
+			outlineKey: outline.outlineKey,
+			diagnostic: {
+				reasonCode: "procedure-draft-invalid",
+				message: "Procedure draft validation failed after two attempts.",
+				attempts: [
+					{
+						attempt: 1,
+						modelRounds: 1,
+						reasonCode: "procedure-draft-invalid",
+						message: "Missing completion condition.",
+						inspectedReferences: { evidenceIds: ["support-1"], skillIds: [] },
+						invalidFieldPaths: ["verificationContract.completionCondition"],
+					},
+					{
+						attempt: 2,
+						modelRounds: 1,
+						reasonCode: "procedure-draft-invalid",
+						message: "Missing verification checks.",
+						inspectedReferences: { evidenceIds: ["support-1"], skillIds: [] },
+						invalidFieldPaths: ["verificationContract.checks"],
+					},
+				],
+			},
+		} satisfies SkillCandidateExpansionFailed;
+		const expansionOutcomes: readonly SkillCandidateExpansionOutcome[] = [
+			{
+				status: "succeeded",
+				outlineId: outline.outlineId,
+				outlineKey: outline.outlineKey,
+				attemptCount: 1,
+				candidate,
+			},
+			failedExpansion,
+		];
+		const partialResult = {
+			status: "completed-with-some-failures",
+			candidates: [candidate],
+			failedExpansions: [failedExpansion],
+			deferredFindings: [],
+			proceduralInformationLossFindings: [],
+		} satisfies SkillCurationResult;
+		expect({ outline, procedureDraft, expansionOutcomes, partialResult }).toMatchObject({
+			expansionOutcomes: [{ status: "succeeded" }, { status: "failed" }],
+			partialResult: { status: "completed-with-some-failures" },
+		});
 		expect(ledger.map((event) => event.type)).toEqual(["skill-curator-tool-call", "skill-curator-tool-call"]);
 	});
 
@@ -574,7 +651,13 @@ describe("StructuredSkillCurator", () => {
 			}, input),
 		);
 
-		expect(result).toEqual({ candidates: [], deferredFindings: [], proceduralInformationLossFindings: [] });
+		expect(result).toEqual({
+			status: "completed",
+			candidates: [],
+			failedExpansions: [],
+			deferredFindings: [],
+			proceduralInformationLossFindings: [],
+		});
 		expect(ledger).toMatchObject([
 			{
 				type: "skill-curator-tool-call",
@@ -615,7 +698,13 @@ describe("StructuredSkillCurator", () => {
 			}, input),
 		);
 
-		expect(result).toEqual({ candidates: [], deferredFindings: [], proceduralInformationLossFindings: [] });
+		expect(result).toEqual({
+			status: "completed",
+			candidates: [],
+			failedExpansions: [],
+			deferredFindings: [],
+			proceduralInformationLossFindings: [],
+		});
 		expect(ledger).toMatchObject([
 			{ type: "skill-curator-tool-call", denialCode: null, resolvedEvidenceIds: ["support-1"] },
 			{
@@ -769,6 +858,7 @@ describe("StructuredSkillCurator", () => {
 			skillRefs: ["K1"],
 		});
 		expect(findUnsupportedCodexSchemaKeywords(schema)).toEqual([]);
+		expect(JSON.stringify(schema)).not.toContain('"rationale"');
 		expect(Check(schema as TSchema, candidateOutput())).toBe(true);
 	});
 });

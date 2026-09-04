@@ -919,7 +919,13 @@ function resultsFromDrafts(
 			};
 		},
 	);
-	return { candidates, deferredFindings, proceduralInformationLossFindings };
+	return {
+		status: "completed",
+		candidates,
+		failedExpansions: [],
+		deferredFindings,
+		proceduralInformationLossFindings,
+	};
 }
 
 function modelInput(

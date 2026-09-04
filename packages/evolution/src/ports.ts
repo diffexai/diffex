@@ -36,11 +36,13 @@ import type {
 	ScoredProposal,
 	SkillBehaviorEvaluationOutcome,
 	SkillCandidate,
+	SkillCandidateExpansionFailed,
 	SkillCandidateGroup,
 	SkillCandidateGroupCapsule,
 	SkillCandidatePriorityScore,
 	SkillCandidateRegistryEvent,
 	SkillCandidateRegistrySnapshot,
+	SkillCurationStatus,
 	SkillDraft,
 	SkillDraftValidationReport,
 	SkillEvaluationCase,
@@ -274,7 +276,9 @@ export interface SkillCuratorInput {
 }
 
 export interface SkillCurationResult {
+	readonly status: SkillCurationStatus;
 	readonly candidates: readonly SkillCandidate[];
+	readonly failedExpansions: readonly SkillCandidateExpansionFailed[];
 	readonly deferredFindings: readonly DeferredSkillCandidateFinding[];
 	readonly proceduralInformationLossFindings: readonly ProceduralInformationLossFinding[];
 }

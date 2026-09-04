@@ -1031,7 +1031,9 @@ describe("checkpointed evolution pipeline", () => {
 						...candidateContent,
 					};
 					return {
+						status: "completed",
 						candidates: [candidate],
+						failedExpansions: [],
 						deferredFindings: [],
 						proceduralInformationLossFindings: [],
 					};
