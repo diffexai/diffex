@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fauxAssistantMessage } from "@earendil-works/diffex-ai";
 import { type Component, Container } from "@earendil-works/diffex-tui";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
@@ -10,7 +13,7 @@ import {
 	setCollaborationMode,
 } from "../src/core/collaboration-mode.ts";
 import { KeybindingsManager } from "../src/core/keybindings.ts";
-import type { SessionManager } from "../src/core/session-manager.ts";
+import { SessionManager } from "../src/core/session-manager.ts";
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.ts";
 import { initTheme } from "../src/modes/interactive/theme/theme.ts";
 import { createHarness, getUserTexts, type Harness } from "./suite/harness.ts";
@@ -25,9 +28,10 @@ type ControlContext = {
 	defaultEditor: { onSubmit?: (text: string) => Promise<void> };
 	editor: TestEditor;
 	pendingUserInputs: string[];
+	directBashCommandsInProgress: number;
 	onInputCallback?: (text: string) => void;
-	showCollaborationModeStatus: ReturnType<typeof vi.fn>;
-	showError: ReturnType<typeof vi.fn>;
+	showCollaborationModeStatus: ReturnType<typeof vi.fn<(message: string) => void>>;
+	showError: ReturnType<typeof vi.fn<(message: string) => void>>;
 	flushPendingBashComponents: ReturnType<typeof vi.fn>;
 	isExtensionCommand: ReturnType<typeof vi.fn>;
 	queueCompactionMessage: ReturnType<typeof vi.fn>;
@@ -42,6 +46,14 @@ type InteractiveModePrivate = {
 		handlePlanCommand: (text: string) => Promise<void>;
 	}): void;
 	handlePlanCommand(this: ControlContext, originalText: string): Promise<void>;
+	handleBashCommand(
+		this: {
+			directBashCommandsInProgress: number;
+			runBashCommand: (command: string, excludeFromContext: boolean) => Promise<void>;
+		},
+		command: string,
+		excludeFromContext?: boolean,
+	): Promise<void>;
 	restoreCurrentCollaborationMode(this: { session: AgentSession }): void;
 	showCollaborationModeStatus(
 		this: {
@@ -57,6 +69,7 @@ type InteractiveModePrivate = {
 	): void;
 	toggleCollaborationMode(this: {
 		session: AgentSession;
+		directBashCommandsInProgress?: number;
 		showCollaborationModeStatus: (message: string) => void;
 		showError: (message: string) => void;
 	}): void;
@@ -90,6 +103,7 @@ function createControlContext(session: AgentSession): ControlContext {
 			addToHistory: vi.fn(),
 		},
 		pendingUserInputs: [],
+		directBashCommandsInProgress: 0,
 		showCollaborationModeStatus: vi.fn(),
 		showError: vi.fn(),
 		flushPendingBashComponents: vi.fn(),
@@ -235,6 +249,65 @@ describe("Interactive Plan mode controls", () => {
 			expect(context.showCollaborationModeStatus).toHaveBeenCalledWith("Cannot switch modes while Diffex is busy.");
 		},
 	);
+
+	it("rejects mode controls throughout direct Bash extension handling", async () => {
+		const harness = await createHarness();
+		harnesses.push(harness);
+		const context = createControlContext(harness.session);
+		context.directBashCommandsInProgress = 1;
+
+		await prototype.handlePlanCommand.call(context, "/plan retry after bash");
+		prototype.toggleCollaborationMode.call({
+			session: context.session,
+			directBashCommandsInProgress: context.directBashCommandsInProgress,
+			showCollaborationModeStatus: (message) => context.showCollaborationModeStatus(message),
+			showError: (message) => context.showError(message),
+		});
+
+		expect(getCollaborationMode(harness.session)).toBe("default");
+		expect(getModeEntries(harness.sessionManager)).toHaveLength(0);
+		expect(context.editor.setText).toHaveBeenCalledWith("/plan retry after bash");
+		expect(context.editor.addToHistory).not.toHaveBeenCalled();
+		expect(context.showCollaborationModeStatus).toHaveBeenCalledTimes(2);
+		expect(context.showCollaborationModeStatus).toHaveBeenCalledWith("Cannot switch modes while Diffex is busy.");
+	});
+
+	it("clears the direct Bash mode-switch guard after asynchronous handler errors", async () => {
+		let rejectBash: ((reason: Error) => void) | undefined;
+		const bash = new Promise<void>((_resolve, reject) => {
+			rejectBash = reject;
+		});
+		const context = {
+			directBashCommandsInProgress: 0,
+			runBashCommand: vi.fn(() => bash),
+		};
+
+		const execution = prototype.handleBashCommand.call(context, "failing command");
+		expect(context.directBashCommandsInProgress).toBe(1);
+		rejectBash?.(new Error("extension failure"));
+		await expect(execution).rejects.toThrow("extension failure");
+
+		expect(context.directBashCommandsInProgress).toBe(0);
+		expect(context.runBashCommand).toHaveBeenCalledWith("failing command", false);
+	});
+
+	it("preserves /plan text and Default mode when persistence fails", async () => {
+		const sessionDir = mkdtempSync(join(tmpdir(), "diffex-plan-controls-atomic-"));
+		const sessionManager = SessionManager.create(process.cwd(), sessionDir);
+		sessionManager.appendMessage(fauxAssistantMessage("seed"));
+		const harness = await createHarness({ sessionManager });
+		harnesses.push(harness);
+		rmSync(sessionDir, { recursive: true, force: true });
+		const context = createControlContext(harness.session);
+
+		await prototype.handlePlanCommand.call(context, "/plan keep this request");
+
+		expect(getCollaborationMode(harness.session)).toBe("default");
+		expect(getModeEntries(sessionManager)).toHaveLength(0);
+		expect(context.editor.setText).toHaveBeenCalledWith("/plan keep this request");
+		expect(context.editor.addToHistory).not.toHaveBeenCalled();
+		expect(context.showError).toHaveBeenCalledOnce();
+	});
 
 	it("routes already-active Plan requests through steering without persisting again", async () => {
 		const harness = await createHarness();

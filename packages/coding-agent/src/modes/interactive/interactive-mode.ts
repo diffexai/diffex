@@ -567,6 +567,7 @@ export class InteractiveMode {
 
 	// Track current bash execution component
 	private bashComponent: BashExecutionComponent | undefined = undefined;
+	private directBashCommandsInProgress = 0;
 
 	// Track pending bash components (shown in pending area, moved to chat on submit)
 	private pendingBashComponents: BashExecutionComponent[] = [];
@@ -3489,6 +3490,11 @@ export class InteractiveMode {
 			}
 			return;
 		}
+		if (this.directBashCommandsInProgress > 0) {
+			this.editor.setText(originalText);
+			this.showCollaborationModeStatus("Cannot switch modes while Diffex is busy.");
+			return;
+		}
 
 		try {
 			const result = setCollaborationMode(this.session, "plan");
@@ -4555,6 +4561,10 @@ export class InteractiveMode {
 	}
 
 	private toggleCollaborationMode(): void {
+		if (this.directBashCommandsInProgress > 0) {
+			this.showCollaborationModeStatus("Cannot switch modes while Diffex is busy.");
+			return;
+		}
 		const mode: CollaborationMode = getCollaborationMode(this.session) === "plan" ? "default" : "plan";
 		try {
 			const result = setCollaborationMode(this.session, mode);
@@ -7114,6 +7124,15 @@ export class InteractiveMode {
 	}
 
 	private async handleBashCommand(command: string, excludeFromContext = false): Promise<void> {
+		this.directBashCommandsInProgress++;
+		try {
+			await this.runBashCommand(command, excludeFromContext);
+		} finally {
+			this.directBashCommandsInProgress--;
+		}
+	}
+
+	private async runBashCommand(command: string, excludeFromContext: boolean): Promise<void> {
 		const extensionRunner = this.session.extensionRunner;
 
 		// Emit user_bash event to let extensions intercept
