@@ -1486,12 +1486,10 @@ describe("coding-agent evolution runtime", () => {
 							existingSkillRefs: [],
 							skillability: {
 								classification: "verification-routine",
-								rationale: "The evidence describes a repeatable verification procedure.",
 							},
 							memoryRelationship: {
 								classification: "independent",
 								memoryProposalRefs: [],
-								rationale: "The procedure is on-demand rather than always-on guidance.",
 							},
 							disposition: "candidate",
 							candidate: {

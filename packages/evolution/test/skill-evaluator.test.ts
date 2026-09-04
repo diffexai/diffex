@@ -96,7 +96,6 @@ function candidate(candidateId: string, lineageId: string, traceId: string): Ski
 		taskLineageIds: [lineageId],
 		skillability: {
 			classification: "verification-routine" as const,
-			rationale: "The evidence describes a repeatable verification routine.",
 		},
 		trigger: {
 			description: "A repository change requires focused verification.",
@@ -115,7 +114,6 @@ function candidate(candidateId: string, lineageId: string, traceId: string): Ski
 		memoryRelationship: {
 			classification: "independent" as const,
 			memoryProposalIds: [],
-			rationale: "The procedure is independent.",
 		},
 		capsuleSize: {
 			serialization: "canonical-json-utf8-v1" as const,

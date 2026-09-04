@@ -173,16 +173,14 @@ export function createSkillCuratorOutputSchema(references: SkillCuratorSchemaRef
 		{
 			classification: { enum: [...MEMORY_RELATIONSHIPS] },
 			memoryProposalRefs: referenceArraySchema(references.memoryProposalRefs),
-			rationale: { type: "string", minLength: 1 },
 		},
-		["classification", "memoryProposalRefs", "rationale"],
+		["classification", "memoryProposalRefs"],
 	);
 	const skillability = schema(
 		{
 			classification: { enum: [...SKILLABILITY_CLASSIFICATIONS] },
-			rationale: { type: "string", minLength: 1 },
 		},
-		["classification", "rationale"],
+		["classification"],
 	);
 	const candidate = schema(
 		{
@@ -427,17 +425,14 @@ function selectedMemoryProposals(input: SkillCuratorInput): readonly ScoredPropo
 
 function skillability(value: unknown): SkillCandidate["skillability"] {
 	if (!isRecord(value)) throw new Error("skillability must be an object");
-	assertOnlyFields(value, ["classification", "rationale"], "skillability");
+	assertOnlyFields(value, ["classification"], "skillability");
 	if (
 		typeof value.classification !== "string" ||
 		!SKILLABILITY_CLASSIFICATIONS.has(value.classification as SkillabilityClassification)
 	) {
 		throw new Error(`Unsupported skillability classification "${String(value.classification)}"`);
 	}
-	return {
-		classification: value.classification as SkillabilityClassification,
-		rationale: requiredString(value, "rationale"),
-	};
+	return { classification: value.classification as SkillabilityClassification };
 }
 
 function memoryRelationship(
@@ -445,7 +440,7 @@ function memoryRelationship(
 	proposals: EvolutionModelReferenceCatalog<ScoredProposal>,
 ): SkillCandidateMemoryRelationship {
 	if (!isRecord(value)) throw new Error("memoryRelationship must be an object");
-	assertOnlyFields(value, ["classification", "memoryProposalRefs", "rationale"], "memoryRelationship");
+	assertOnlyFields(value, ["classification", "memoryProposalRefs"], "memoryRelationship");
 	if (
 		typeof value.classification !== "string" ||
 		!MEMORY_RELATIONSHIPS.has(value.classification as SkillMemoryRelationshipClassification)
@@ -463,7 +458,6 @@ function memoryRelationship(
 	return {
 		classification,
 		memoryProposalIds: selected.map((proposal) => proposal.proposal.proposalId),
-		rationale: requiredString(value, "rationale"),
 	};
 }
 

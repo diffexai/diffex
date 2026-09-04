@@ -242,7 +242,6 @@ function candidate(
 		taskLineageIds: [...supportingEvidenceIds, ...contradictingEvidenceIds].map((id) => `task-${id}`),
 		skillability: {
 			classification: "verification-routine" as const,
-			rationale: "The procedure has a deterministic outcome.",
 		},
 		trigger: {
 			description: "A focused repository change needs deterministic verification.",
@@ -270,7 +269,6 @@ function candidate(
 		memoryRelationship: {
 			classification: "independent" as const,
 			memoryProposalIds: [],
-			rationale: "The workflow is not always-on guidance.",
 		},
 		capsuleSize: {
 			serialization: "canonical-json-utf8-v1" as const,

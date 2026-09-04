@@ -126,7 +126,6 @@ async function writerFixture(options: WriterFixtureOptions) {
 	const memoryRelationship = options.memoryRelationship ?? {
 		classification: "independent" as const,
 		memoryProposalIds: [],
-		rationale: "The skill procedure is independent from evolution memory.",
 	};
 	const candidateBody = {
 		artifactKind: "skill-candidate" as const,
@@ -172,7 +171,7 @@ async function writerFixture(options: WriterFixtureOptions) {
 		supportingTraceIds: ["trace-1"],
 		contradictingTraceIds: [],
 		taskLineageIds: ["task-1", "task-2"],
-		skillability: { classification: "ordered-workflow" as const, rationale: "The actions are ordered." },
+		skillability: { classification: "ordered-workflow" as const },
 		trigger: {
 			description: "A fixture task needs an evolved procedure.",
 			positiveExamples: ["A fixture task is ready."],
@@ -511,7 +510,6 @@ describe("skill writer", () => {
 			memoryRelationship: {
 				classification: testCase.classification,
 				memoryProposalIds: ["memory-proposal-1"],
-				rationale: "The relationship is evidence-grounded.",
 			},
 		});
 		const batch = await data.writer.buildMutationBatch({ scope, groupId: data.group.groupId, createdAt: now });
@@ -541,7 +539,6 @@ describe("skill writer", () => {
 				memoryRelationship: {
 					classification,
 					memoryProposalIds: ["memory-proposal-1"],
-					rationale: "The guidance must not activate.",
 				},
 			});
 

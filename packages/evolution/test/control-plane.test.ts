@@ -990,7 +990,6 @@ describe("checkpointed evolution pipeline", () => {
 						taskLineageIds: [],
 						skillability: {
 							classification: "verification-routine" as const,
-							rationale: "The lesson describes a reusable verification routine.",
 						},
 						trigger: {
 							description: "A focused repository change requires verification.",
@@ -1018,7 +1017,6 @@ describe("checkpointed evolution pipeline", () => {
 						memoryRelationship: {
 							classification: "complements" as const,
 							memoryProposalIds: ["proposal-1"],
-							rationale: "Memory keeps the constraint while the skill preserves the procedure.",
 						},
 						capsuleSize: {
 							serialization: "canonical-json-utf8-v1" as const,

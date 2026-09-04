@@ -209,7 +209,6 @@ function candidate(options: {
 		taskLineageIds: options.taskLineageIds,
 		skillability: {
 			classification: "verification-routine" as const,
-			rationale: "The evidence describes a repeatable verification routine.",
 		},
 		trigger: {
 			description: options.trigger ?? "A repository change requires focused verification.",
@@ -255,7 +254,6 @@ function candidate(options: {
 		memoryRelationship: {
 			classification: "independent" as const,
 			memoryProposalIds: [],
-			rationale: "The procedure is distinct from selected memory guidance.",
 		},
 		capsuleSize: {
 			serialization: "canonical-json-utf8-v1" as const,

@@ -586,7 +586,6 @@ export interface SkillCandidateWorkspaceScope {
 export interface SkillCandidateMemoryRelationship {
 	readonly classification: SkillMemoryRelationshipClassification;
 	readonly memoryProposalIds: readonly string[];
-	readonly rationale: string;
 }
 
 export interface SkillCandidateProcedureStep {
@@ -652,7 +651,6 @@ export interface SkillCandidate {
 	readonly taskLineageIds: readonly string[];
 	readonly skillability: {
 		readonly classification: SkillabilityClassification;
-		readonly rationale: string;
 	};
 	readonly trigger: {
 		readonly description: string;

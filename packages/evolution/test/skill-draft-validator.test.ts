@@ -205,7 +205,6 @@ function candidate(input: EvolutionInputSnapshot): SkillCandidate {
 		taskLineageIds: ["task-a", "task-b"],
 		skillability: {
 			classification: "verification-routine" as const,
-			rationale: "The procedure has deterministic outcomes.",
 		},
 		trigger: {
 			description: "A focused repository change needs verification.",
@@ -240,7 +239,6 @@ function candidate(input: EvolutionInputSnapshot): SkillCandidate {
 		memoryRelationship: {
 			classification: "independent" as const,
 			memoryProposalIds: [],
-			rationale: "The workflow is distinct from selected memory guidance.",
 		},
 		capsuleSize: {
 			serialization: "canonical-json-utf8-v1" as const,

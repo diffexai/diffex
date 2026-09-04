@@ -366,12 +366,10 @@ function candidateOutput(positiveTrigger = "A focused test command exits nonzero
 				existingSkillRefs: ["K1"],
 				skillability: {
 					classification: "troubleshooting-recovery",
-					rationale: "The evidence connects an observable failure to a repeatable recovery and check.",
 				},
 				memoryRelationship: {
 					classification: "complements",
 					memoryProposalRefs: ["P1"],
-					rationale: "Memory keeps the invariant while the skill preserves the recovery procedure.",
 				},
 				disposition: "candidate",
 				candidate: {
@@ -672,12 +670,10 @@ describe("StructuredSkillCurator", () => {
 							existingSkillRefs: [],
 							skillability: {
 								classification: "verification-routine",
-								rationale: "The lesson describes a repeatable verification routine.",
 							},
 							memoryRelationship: {
 								classification: "redundant",
 								memoryProposalRefs: ["P1"],
-								rationale: "The selected memory proposal already contains the complete routine.",
 							},
 							disposition: "deferred",
 							candidate: null,
