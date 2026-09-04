@@ -149,7 +149,12 @@ import { type EvolutionMenuClient, EvolutionMenuComponent } from "./components/e
 import { ExtensionEditorComponent } from "./components/extension-editor.ts";
 import { ExtensionInputComponent } from "./components/extension-input.ts";
 import { ExtensionSelectorComponent } from "./components/extension-selector.ts";
-import { FooterComponent, formatCwdForFooter, formatTokens } from "./components/footer.ts";
+import {
+	CustomFooterPlanModeIndicator,
+	FooterComponent,
+	formatCwdForFooter,
+	formatTokens,
+} from "./components/footer.ts";
 import { formatHarnessVersionLabel } from "./components/harness-version-display.ts";
 import {
 	createHarnessVersionSelectorItems,
@@ -598,6 +603,7 @@ export class InteractiveMode {
 	private extensionWidgetsBelow = new Map<string, Component & { dispose?(): void }>();
 	private widgetContainerAbove!: Container;
 	private widgetContainerBelow!: Container;
+	private customFooterPlanModeIndicator: CustomFooterPlanModeIndicator;
 
 	// Custom footer from extension (undefined = use built-in footer)
 	private customFooter: (Component & { dispose?(): void }) | undefined = undefined;
@@ -666,6 +672,9 @@ export class InteractiveMode {
 		this.statusContainer = new Container();
 		this.widgetContainerAbove = new Container();
 		this.widgetContainerBelow = new Container();
+		this.customFooterPlanModeIndicator = new CustomFooterPlanModeIndicator(
+			() => this.customFooter !== undefined && getCollaborationMode(this.session) === "plan",
+		);
 		this.keybindings = KeybindingsManager.create();
 		setKeybindings(this.keybindings);
 		const editorPaddingX = this.settingsManager.getEditorPaddingX();
@@ -2607,7 +2616,12 @@ export class InteractiveMode {
 	 */
 	private renderWidgets(): void {
 		if (!this.widgetContainerAbove || !this.widgetContainerBelow) return;
-		this.renderWidgetContainer(this.widgetContainerAbove, this.extensionWidgetsAbove, true);
+		this.renderWidgetContainer(
+			this.widgetContainerAbove,
+			this.extensionWidgetsAbove,
+			true,
+			this.customFooterPlanModeIndicator,
+		);
 		this.renderWidgetContainer(this.widgetContainerBelow, this.extensionWidgetsBelow, false);
 		this.ui.requestRender();
 	}
@@ -2616,18 +2630,22 @@ export class InteractiveMode {
 		container: Container,
 		widgets: Map<string, Component & { dispose?(): void }>,
 		leadingSpacer: boolean,
+		trailingComponent?: Component,
 	): void {
 		container.clear();
 
-		if (widgets.size === 0) {
+		if (widgets.size === 0 && !trailingComponent) {
 			return;
 		}
 
-		if (leadingSpacer) {
+		if (leadingSpacer && widgets.size > 0) {
 			container.addChild(new Spacer(1));
 		}
 		for (const component of widgets.values()) {
 			container.addChild(component);
+		}
+		if (trailingComponent) {
+			container.addChild(trailingComponent);
 		}
 	}
 
@@ -6965,7 +6983,8 @@ export class InteractiveMode {
 		const clear = this.getAppKeyDisplay("app.clear");
 		const exit = this.getAppKeyDisplay("app.exit");
 		const suspend = this.getAppKeyDisplay("app.suspend");
-		const cycleThinkingLevel = this.getAppKeyDisplay("app.thinking.cycle");
+		const modeToggle = this.getAppKeyDisplay("app.mode.toggle") || "Unbound";
+		const cycleThinkingLevel = this.getAppKeyDisplay("app.thinking.cycle") || "Unbound";
 		const cycleModelForward = this.getAppKeyDisplay("app.model.cycleForward");
 		const selectModel = this.getAppKeyDisplay("app.model.select");
 		const expandTools = this.getAppKeyDisplay("app.tools.expand");
@@ -7010,6 +7029,7 @@ export class InteractiveMode {
 | \`${clear}\` | Clear editor (first) / exit (second) |
 | \`${exit}\` | Exit (when editor is empty) |
 | \`${suspend}\` | Suspend to background |
+| \`${modeToggle}\` | Toggle collaboration mode |
 | \`${cycleThinkingLevel}\` | Cycle thinking level |
 | \`${cycleModelForward}\` / \`${cycleModelBackward}\` | Cycle models |
 | \`${selectModel}\` | Open model selector |
