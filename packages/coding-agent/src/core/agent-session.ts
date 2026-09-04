@@ -152,6 +152,7 @@ import { type BuildSystemPromptOptions, buildSystemPrompt } from "./system-promp
 import { type CodingAgentTelemetrySpan, startCodingAgentSpan } from "./telemetry.ts";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts";
 import { createAllToolDefinitions } from "./tools/index.ts";
+import { createRequestUserInputToolDefinition, REQUEST_USER_INPUT_TOOL_NAME } from "./tools/request-user-input.ts";
 import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapper.ts";
 import { addUsageToTotals, createUsageTotals } from "./usage-totals.ts";
 
@@ -523,6 +524,8 @@ export class AgentSession {
 	private _customTools: ToolDefinition[];
 	private _baseToolDefinitions: Map<string, ToolDefinition> = new Map();
 	private _baseToolRegistry: Map<string, AgentTool> = new Map();
+	private _requestUserInputDefinition: ToolDefinition | undefined;
+	private _requestUserInputTool: AgentTool | undefined;
 	private _cwd: string;
 	private _extensionRunnerRef?: { current?: ExtensionRunner };
 	private _initialActiveToolNames?: string[];
@@ -713,6 +716,12 @@ export class AgentSession {
 	 */
 	private _installAgentToolHooks(): void {
 		this.agent.beforeToolCall = async ({ toolCall, args, context }) => {
+			if (toolCall.name === REQUEST_USER_INPUT_TOOL_NAME && this._activeRunCollaborationMode !== "plan") {
+				return {
+					block: true,
+					reason: `Tool "${REQUEST_USER_INPUT_TOOL_NAME}" is unavailable outside Plan mode.`,
+				};
+			}
 			if (this._activeRunCollaborationMode === "plan") {
 				const capturedTool = this._activeRunCollaborationState?.tools.find((tool) => tool.name === toolCall.name);
 				const activeTool = context.tools?.find((tool) => tool.name === toolCall.name);
@@ -1736,8 +1745,12 @@ export class AgentSession {
 			definitions = new Map();
 			tools = [];
 			for (const name of PLAN_MODE_TOOL_NAMES) {
-				const tool = this._baseToolRegistry.get(name);
-				const definition = this._baseToolDefinitions.get(name);
+				const tool =
+					name === REQUEST_USER_INPUT_TOOL_NAME ? this._requestUserInputTool : this._baseToolRegistry.get(name);
+				const definition =
+					name === REQUEST_USER_INPUT_TOOL_NAME
+						? this._requestUserInputDefinition
+						: this._baseToolDefinitions.get(name);
 				if (!tool || !definition) continue;
 				tools.push(tool);
 				definitions.set(name, {
@@ -3937,7 +3950,7 @@ export class AgentSession {
 				definition,
 				sourceInfo: createSyntheticSourceInfo(`<sdk:${definition.name}>`, { source: "sdk" }),
 			})),
-		].filter((tool) => isAllowedTool(tool.definition.name));
+		].filter((tool) => tool.definition.name !== REQUEST_USER_INPUT_TOOL_NAME && isAllowedTool(tool.definition.name));
 		const definitionRegistry = new Map<string, ToolDefinitionEntry>(
 			Array.from(this._baseToolDefinitions.entries())
 				.filter(([name]) => isAllowedTool(name))
@@ -3968,6 +3981,22 @@ export class AgentSession {
 			runner,
 		);
 		this._baseToolRegistry = new Map(wrappedBuiltInTools.map((tool) => [tool.name, tool]));
+		this._requestUserInputDefinition = isAllowedTool(REQUEST_USER_INPUT_TOOL_NAME)
+			? (createRequestUserInputToolDefinition() as ToolDefinition)
+			: undefined;
+		this._requestUserInputTool = this._requestUserInputDefinition
+			? wrapRegisteredTools(
+					[
+						{
+							definition: this._requestUserInputDefinition,
+							sourceInfo: createSyntheticSourceInfo(`<builtin:${REQUEST_USER_INPUT_TOOL_NAME}>`, {
+								source: "builtin",
+							}),
+						},
+					],
+					runner,
+				)[0]
+			: undefined;
 
 		const toolRegistry = new Map(wrappedBuiltInTools.map((tool) => [tool.name, tool]));
 		for (const tool of wrappedExtensionTools as AgentTool[]) {

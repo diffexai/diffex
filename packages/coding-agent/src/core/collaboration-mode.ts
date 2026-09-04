@@ -16,7 +16,7 @@ export interface CollaborationModeController {
 }
 
 export const COLLABORATION_MODE_CUSTOM_TYPE = "diffex.collaboration-mode";
-export const PLAN_MODE_TOOL_NAMES = ["read", "grep", "find", "ls"] as const;
+export const PLAN_MODE_TOOL_NAMES = ["read", "grep", "find", "ls", "request_user_input"] as const;
 
 export const PLAN_MODE_SYSTEM_PROMPT = `You are in Plan mode. Follow these requirements throughout the logical run:
 - Inspect the available evidence before asking questions. Distinguish facts you can discover from preferences only the user can decide.
