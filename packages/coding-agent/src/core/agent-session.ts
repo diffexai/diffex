@@ -114,6 +114,7 @@ import {
 	wrapRegisteredTools,
 } from "./extensions/index.ts";
 import { emitSessionShutdownEvent } from "./extensions/runner.ts";
+import { parseFinalizedPlanResponse } from "./finalized-plan.ts";
 import type { BashExecutionMessage, CustomMessage } from "./messages.ts";
 import { ModelRegistry } from "./model-registry.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
@@ -237,7 +238,7 @@ export type AgentSessionEvent =
 			messages: AgentMessage[];
 			willRetry: boolean;
 	  }
-	| { type: "agent_settled" }
+	| { type: "agent_settled"; planHandoff?: { readonly plan: string } }
 	| {
 			type: "queue_update";
 			steering: readonly string[];
@@ -555,6 +556,7 @@ export class AgentSession {
 	private _collaborationMode: CollaborationMode = "default";
 	private _activeRunCollaborationMode: CollaborationMode | undefined;
 	private _activeRunCollaborationState: CollaborationModeState | undefined;
+	private _latestFinalizedPlan: string | undefined;
 	private _collaborationModeTransitionInProgress = false;
 	private _manualCompactionOperations = 0;
 	private readonly _subagentController: SubagentController | undefined;
@@ -909,11 +911,11 @@ export class AgentSession {
 		resolve();
 	}
 
-	private async _emitAgentSettled(): Promise<void> {
+	private async _emitAgentSettled(planHandoff?: { readonly plan: string }): Promise<void> {
 		this._isAgentRunActive = false;
 		try {
 			await this._extensionRunner.emit({ type: "agent_settled" });
-			this._emit({ type: "agent_settled" });
+			this._emit({ type: "agent_settled", ...(planHandoff ? { planHandoff } : {}) });
 		} finally {
 			this._resolveIdleWaitIfIdle();
 		}
@@ -940,6 +942,7 @@ export class AgentSession {
 		// When a user message starts, check if it's from either queue and remove it BEFORE emitting
 		// This ensures the UI sees the updated queue state
 		if (event.type === "message_start" && event.message.role === "user") {
+			this._latestFinalizedPlan = undefined;
 			this._subagentController?.beginCoordinationCycle();
 			this._overflowRecoveryAttempted = false;
 			const messageText = contentText(event.message.content, "");
@@ -962,6 +965,21 @@ export class AgentSession {
 
 		// Emit to extensions first
 		await this._emitExtensionEvent(event);
+		if (
+			event.type === "message_end" &&
+			event.message.role === "assistant" &&
+			event.message.stopReason !== "pending" &&
+			event.message.stopReason !== "toolUse"
+		) {
+			this._latestFinalizedPlan = undefined;
+			if (this._activeRunCollaborationMode === "plan") {
+				const finalizedPlan = parseFinalizedPlanResponse(event.message);
+				if (finalizedPlan) {
+					this._replaceMessageInPlace(event.message, finalizedPlan.message);
+					this._latestFinalizedPlan = finalizedPlan.plan;
+				}
+			}
+		}
 
 		// Notify all listeners
 		this._emit(event.type === "agent_end" ? { ...event, willRetry: this._willRetryAfterAgentEnd(event) } : event);
@@ -1884,6 +1902,7 @@ export class AgentSession {
 		collaborationState?: CollaborationModeState,
 	): Promise<void> {
 		this._agentRunAborted = false;
+		this._latestFinalizedPlan = undefined;
 		this._activeRunCollaborationMode = collaborationMode;
 		this._activeRunCollaborationState = collaborationState;
 		if (collaborationState) this._installCollaborationModeState(collaborationState);
@@ -1913,12 +1932,17 @@ export class AgentSession {
 				this._isAgentRunActive = true;
 			}
 		} finally {
+			const planHandoff =
+				this._activeRunCollaborationMode === "plan" && this._latestFinalizedPlan !== undefined
+					? { plan: this._latestFinalizedPlan }
+					: undefined;
+			this._latestFinalizedPlan = undefined;
 			this._systemPromptOverride = undefined;
 			this._activeRunCollaborationMode = undefined;
 			this._activeRunCollaborationState = undefined;
 			this._installCollaborationModeState(this._deriveCollaborationModeState(this._collaborationMode));
 			this._flushPendingBashMessages();
-			await this._emitAgentSettled();
+			await this._emitAgentSettled(planHandoff);
 		}
 	}
 
