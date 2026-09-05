@@ -2,14 +2,14 @@ import { fauxAssistantMessage } from "@earendil-works/diffex-ai";
 import type { Component, EditorComponent } from "@earendil-works/diffex-tui";
 import { type Container, Text } from "@earendil-works/diffex-tui";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import type { AgentSession } from "../src/core/agent-session.ts";
+import type { AgentSession, AgentSessionEvent } from "../src/core/agent-session.ts";
 import type { AgentSessionRuntime } from "../src/core/agent-session-runtime.ts";
 import { getCollaborationMode, setCollaborationMode } from "../src/core/collaboration-mode.ts";
 import { ExtensionSelectorComponent } from "../src/modes/interactive/components/extension-selector.ts";
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.ts";
 import { initTheme } from "../src/modes/interactive/theme/theme.ts";
 import { stripAnsi } from "../src/utils/ansi.ts";
-import { createHarness, getUserTexts, type Harness } from "./suite/harness.ts";
+import { createHarness, getUserTexts, type Harness, type HarnessOptions } from "./suite/harness.ts";
 
 type PlanHandoff = { readonly plan: string };
 
@@ -21,25 +21,12 @@ type InteractiveModePrivate = {
 	pendingUserInputs: string[];
 	compactionQueuedMessages: Array<{ text: string; mode: "steer" | "followUp" }>;
 	isInitialized: boolean;
+	directBashCommandsInProgress: number;
+	handleBashCommand(command: string): Promise<void>;
+	implementSettledPlan(): Promise<void>;
 	handleSettledPlanHandoff(planHandoff?: PlanHandoff): void;
 	setupEditorSubmitHandler(): void;
-	handleEvent(
-		event:
-			| {
-					type: "agent_end";
-					messages: [];
-					willRetry: false;
-			  }
-			| {
-					type: "agent_settled";
-					planHandoff?: PlanHandoff;
-			  }
-			| {
-					type: "queue_update";
-					steering: readonly string[];
-					followUp: readonly string[];
-			  },
-	): Promise<void>;
+	handleEvent(event: AgentSessionEvent): Promise<void>;
 	showSelector(create: (done: () => void) => { component: Component; focus: Component }): void;
 	showExtensionCustom<T>(
 		factory: (tui: unknown, theme: unknown, keybindings: unknown, done: (result: T) => void) => Component,
@@ -110,8 +97,8 @@ describe("Interactive Plan implementation handoff", () => {
 		while (harnesses.length > 0) await harnesses.pop()?.cleanup();
 	});
 
-	async function setup(tuiMode: "regular" | "fullscreen" = "regular") {
-		const harness = await createHarness();
+	async function setup(tuiMode: "regular" | "fullscreen" = "regular", options: HarnessOptions = {}) {
+		const harness = await createHarness(options);
 		harnesses.push(harness);
 		setCollaborationMode(harness.session, "plan");
 		const created = createMode(harness, tuiMode);
@@ -184,6 +171,108 @@ describe("Interactive Plan implementation handoff", () => {
 		expect(showError).toHaveBeenCalledWith("submission failed");
 	});
 
+	it.each(["regular", "fullscreen"] as const)(
+		"defers handoff through an awaited user_bash hook and rejects acceptance in %s mode",
+		async (tuiMode) => {
+			let releaseBash = () => {};
+			const bashGate = new Promise<void>((resolve) => {
+				releaseBash = resolve;
+			});
+			const { harness, privateMode: state } = await setup(tuiMode, {
+				extensionFactories: [
+					(pi) => {
+						pi.on("user_bash", async () => {
+							await bashGate;
+							return { result: { output: "intercepted", exitCode: 0, cancelled: false, truncated: false } };
+						});
+					},
+				],
+			});
+			await harness.session.bindExtensions({});
+			const prompt = vi.spyOn(harness.session, "prompt");
+			const bash = state.handleBashCommand("intercepted command");
+			try {
+				expect(state.directBashCommandsInProgress).toBe(1);
+				expect(harness.session.isBashRunning).toBe(false);
+				state.handleSettledPlanHandoff(planHandoff);
+				await state.implementSettledPlan();
+				expect(getCollaborationMode(harness.session)).toBe("plan");
+				expect(prompt).not.toHaveBeenCalled();
+				expect(state.pendingPlanHandoff).toEqual(planHandoff);
+				expect(state.editorContainer.children).toEqual([state.editor]);
+			} finally {
+				releaseBash();
+				await bash;
+			}
+			await vi.waitFor(() => expect(renderEditorSurface(state)).toContain("Implement this plan?"));
+			harness.setResponses([fauxAssistantMessage("implemented")]);
+			activeSelector(state).handleInput("\r");
+			await vi.waitFor(() => expect(getUserTexts(harness)).toContain("Implement the plan."));
+			await harness.session.waitForIdle();
+			expect(prompt).toHaveBeenCalledExactlyOnceWith("Implement the plan.");
+		},
+	);
+
+	it.each(["isStreaming", "isCompacting", "isRetrying", "isBashRunning"] as const)(
+		"rechecks %s on acceptance and preserves the offer until idle",
+		async (property) => {
+			const { harness, privateMode: state } = await setup();
+			const prompt = vi.spyOn(harness.session, "prompt").mockResolvedValue(undefined);
+			state.handleSettledPlanHandoff(planHandoff);
+			const busy = vi.spyOn(harness.session, property, "get").mockReturnValue(true);
+			activeSelector(state).handleInput("\r");
+			expect(getCollaborationMode(harness.session)).toBe("plan");
+			expect(prompt).not.toHaveBeenCalled();
+			expect(state.pendingPlanHandoff).toEqual(planHandoff);
+			expect(state.editorContainer.children).toEqual([state.editor]);
+			busy.mockReturnValue(false);
+			await vi.waitFor(() => expect(renderEditorSurface(state)).toContain("Implement this plan?"));
+			activeSelector(state).handleInput("\r");
+			expect(prompt).toHaveBeenCalledExactlyOnceWith("Implement the plan.");
+		},
+	);
+
+	it.each(["visible", "deferred"] as const)(
+		"discards a %s offer when an extension starts a new run",
+		async (presentation) => {
+			const { harness, privateMode: state } = await setup();
+			state.isInitialized = true;
+			const unsubscribe = harness.session.subscribe((event) => state.handleEvent(event));
+			let closeModal = () => {};
+			if (presentation === "deferred") {
+				state.showSelector((done) => {
+					closeModal = done;
+					const modal = new Text("UNRELATED MODAL");
+					return { component: modal, focus: modal };
+				});
+			}
+			state.handleSettledPlanHandoff(planHandoff);
+			let releaseResponse = () => {};
+			const responseGate = new Promise<void>((resolve) => {
+				releaseResponse = resolve;
+			});
+			harness.setResponses([
+				async () => {
+					await responseGate;
+					return fauxAssistantMessage("new response without a final plan");
+				},
+			]);
+			const run = harness.session.prompt("new extension request", { source: "extension" });
+			try {
+				await vi.waitFor(() => expect(harness.session.isStreaming).toBe(true));
+				closeModal();
+				expect(state.pendingPlanHandoff).toBeUndefined();
+				expect(state.editorContainer.children).toEqual([state.editor]);
+			} finally {
+				releaseResponse();
+				await run;
+				unsubscribe();
+			}
+			expect(state.pendingPlanHandoff).toBeUndefined();
+			expect(getUserTexts(harness)).toEqual(["new extension request"]);
+		},
+	);
+
 	it("defers one latest offer across the structured custom-modal surface", async () => {
 		const { privateMode: state } = await setup();
 		let closeModal: (value: string) => void = () => {
@@ -204,6 +293,25 @@ describe("Interactive Plan implementation handoff", () => {
 		await modalPromise;
 		await vi.waitFor(() => expect(renderEditorSurface(state)).toContain("Implement this plan?"));
 		expect(state.pendingPlanHandoff).toEqual({ plan: "latest" });
+	});
+
+	it("does not let a disposed selector accept or dismiss a newer offer", async () => {
+		const { harness, privateMode: state } = await setup();
+		const prompt = vi.spyOn(harness.session, "prompt").mockResolvedValue(undefined);
+		state.handleSettledPlanHandoff(planHandoff);
+		const staleSelector = activeSelector(state);
+		const latest = { plan: "a newer plan" };
+		state.handleSettledPlanHandoff(latest);
+
+		staleSelector.handleInput("\r");
+		staleSelector.handleInput("\x1b");
+
+		expect(prompt).not.toHaveBeenCalled();
+		expect(getCollaborationMode(harness.session)).toBe("plan");
+		expect(state.pendingPlanHandoff).toBe(latest);
+		expect(activeSelector(state)).not.toBe(staleSelector);
+		activeSelector(state).handleInput("\r");
+		expect(prompt).toHaveBeenCalledExactlyOnceWith("Implement the plan.");
 	});
 
 	it("defers a visible offer when an unrelated selector takes focus", async () => {

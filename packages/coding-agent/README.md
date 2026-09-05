@@ -235,6 +235,8 @@ The official response must contain exactly one non-empty plan between standalone
 
 Plan mode is an interactive branch preference. Resume, fork, and `/tree` navigation restore the newest matching mode entry on the selected branch when it is valid; new sessions, malformed newest matching entries, and non-interactive print, JSON, RPC, and SDK use remain in Default. Historical plans never replay the implementation offer. `update_plan` is a separate execution-time progress checklist and does not enter or leave Plan mode.
 
+Mode changes use normal lazy session saving: toggling in a new disk-backed session remains in memory until its first assistant message is saved or the session is explicitly persisted. Starting a new run discards an older implementation offer, including when an extension starts the run. Temporary busy activity defers the offer and blocks acceptance until idle, including awaited direct-Bash extension hooks. See [Plan mode details](docs/usage.md#plan-mode).
+
 ### Message Queue
 
 Submit messages while the agent is working:

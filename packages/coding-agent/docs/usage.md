@@ -87,6 +87,8 @@ Tool allowlists and exclusions still apply, so a filtered or unavailable tool is
 
 This restriction is a model-tool boundary, not a filesystem security sandbox. Direct user `!` commands, extension event side effects, operating-system permissions, and external processes remain outside it.
 
+Each logical run captures its collaboration mode. Plan runs also retain their admitted planning prompt and exact trusted tool implementations through continuations and retries. Default mode keeps its existing dynamic prompt and tool refresh behavior.
+
 ### Structured questions
 
 For a material choice that fits meaningful alternatives, the model can use `request_user_input` with one to three questions. Each question shows two or three mutually exclusive model-supplied choices with descriptions and one Diffex-supplied **Other** choice. The recommended alternative appears first with `(Recommended)` in its label. Selecting **Other** opens free-form input; blank answers are rejected. Answers are preserved while moving among questions, and submission becomes available after every question is answered.
@@ -112,13 +114,17 @@ After the latest eligible live response settles, Diffex offers exactly:
 - **Implement the plan** - switch to Default and submit `Implement the plan.` in the same session
 - **Stay in Plan mode** - dismiss the offer without changing mode
 
-Steering, follow-up, next-turn, or compaction-queued input permanently suppresses that completion's offer and continues through the existing queue path. An unrelated modal defers at most one offer until it closes. A user submission, navigation, session replacement, or mode change clears a deferred offer, and historical plans do not replay it.
+Steering, follow-up, next-turn, or compaction-queued input permanently suppresses that completion's offer and continues through the existing queue path. An unrelated modal defers at most one offer until it closes. A user submission, navigation, session replacement, mode change, or new model run (including an extension-submitted run) clears the older offer, and historical plans do not replay it.
+
+Diffex rechecks activity before showing or accepting the offer. Temporary activity defers it until idle; accepting during a busy operation does not change mode or submit the implementation message. This includes the entire direct Bash command, even while an extension's `user_bash` hook is still awaiting its result.
 
 If the fixed implementation submission fails after switching modes, Diffex stays in Default, shows the error, and restores exactly `Implement the plan.` to the editor for retry. It does not roll back to Plan mode.
 
 ### Persistence and scope
 
 Collaboration mode is stored as an interactive preference on the selected session branch. Interactive resume, fork, and `/tree` navigation inspect the newest matching preference on that branch and restore it when valid. A new session, a branch without a preference, or a malformed newest matching preference uses Default without reviving an older entry.
+
+Mode entries follow normal lazy session saving. In a new disk-backed session, toggling modes alone does not create the session file: the preference remains in memory until the first assistant message is saved or the session is explicitly persisted. Once the file exists, subsequent mode changes are written immediately. Ephemeral sessions remain in memory only.
 
 Print, JSON, RPC, and SDK invocations always use Default and do not overwrite the saved interactive preference. User wording alone cannot change collaboration mode.
 

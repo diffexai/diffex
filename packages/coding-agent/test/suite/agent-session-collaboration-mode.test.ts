@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentTool } from "@earendil-works/diffex-agent-core";
@@ -98,6 +98,30 @@ describe("AgentSession collaboration mode foundation", () => {
 		expect(getCollaborationMode(harness.session)).toBe("default");
 		expect(harness.session.getActiveToolNames()).toContain("bash");
 		expect(resolveCollaborationMode(sessionManager)).toBe("default");
+	});
+
+	it("saves a new session's mode preference lazily with its first assistant message", async () => {
+		const sessionDir = mkdtempSync(join(tmpdir(), "diffex-plan-mode-lazy-"));
+		try {
+			const sessionManager = SessionManager.create(process.cwd(), sessionDir);
+			const harness = await createHarness({ sessionManager, tools: createBaseTools() });
+			harnesses.push(harness);
+			const sessionFile = sessionManager.getSessionFile();
+			if (!sessionFile) throw new Error("Expected a disk-backed session path");
+
+			setCollaborationMode(harness.session, "plan");
+			expect(resolveCollaborationMode(sessionManager)).toBe("plan");
+			expect(existsSync(sessionFile)).toBe(false);
+
+			sessionManager.appendMessage(fauxAssistantMessage("first response"));
+			expect(existsSync(sessionFile)).toBe(true);
+			expect(resolveCollaborationMode(SessionManager.open(sessionFile))).toBe("plan");
+
+			setCollaborationMode(harness.session, "default");
+			expect(resolveCollaborationMode(SessionManager.open(sessionFile))).toBe("default");
+		} finally {
+			rmSync(sessionDir, { recursive: true, force: true });
+		}
 	});
 
 	it("uses only trusted filtered base tools in Plan and restores the latest requested Default tools", async () => {
