@@ -1324,32 +1324,33 @@ export class AgentSession {
 	 * Conversation history and unrelated resources remain unchanged.
 	 */
 	async switchHarnessVersion(version: HarnessVersion): Promise<void> {
-		if (version === this.activeHarnessVersion) {
-			return;
-		}
 		if (!this._harnessStateStore) {
+			if (version === this.activeHarnessVersion) return;
 			throw new Error("Harness version switching is unavailable for this session.");
 		}
 		if (this._harnessSwitchInProgress) {
 			throw new Error("Cannot switch harness versions while another switch is in progress.");
-		}
-		if (this._promptAdmissionInProgress) {
-			throw new Error("Cannot switch harness versions while a prompt is being admitted.");
-		}
-		if (this.isStreaming) {
-			throw new Error("Cannot switch harness versions while a response is streaming.");
-		}
-		if (this.isCompacting) {
-			throw new Error("Cannot switch harness versions while compaction is in progress.");
-		}
-		if (this.isBashRunning) {
-			throw new Error("Cannot switch harness versions while a bash command is running.");
 		}
 
 		this._harnessSwitchInProgress = true;
 		try {
 			const listing = await this._harnessStateStore.listVersions();
 			const target = listing.versions.find((bundle) => bundle.manifest.version === version);
+			// Background activation can move the shared pointer without changing this session's pinned bundle.
+			if (target && version === this.activeHarnessVersion && version === listing.currentVersion) return;
+
+			if (this._promptAdmissionInProgress) {
+				throw new Error("Cannot switch harness versions while a prompt is being admitted.");
+			}
+			if (this.isStreaming) {
+				throw new Error("Cannot switch harness versions while a response is streaming.");
+			}
+			if (this.isCompacting) {
+				throw new Error("Cannot switch harness versions while compaction is in progress.");
+			}
+			if (this.isBashRunning) {
+				throw new Error("Cannot switch harness versions while a bash command is running.");
+			}
 			if (!target) {
 				const diagnostic = listing.diagnostics.find((entry) => entry.version === version);
 				throw new Error(
@@ -1359,7 +1360,11 @@ export class AgentSession {
 				);
 			}
 
-			await this._activateHarnessBundle(target, () => this._harnessStateStore!.selectVersion(version));
+			if (version === this.activeHarnessVersion) {
+				await this._harnessStateStore.selectVersion(version);
+			} else {
+				await this._activateHarnessBundle(target, () => this._harnessStateStore!.selectVersion(version));
+			}
 		} finally {
 			this._harnessSwitchInProgress = false;
 		}

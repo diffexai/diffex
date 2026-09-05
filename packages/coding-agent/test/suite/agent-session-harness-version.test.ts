@@ -1,22 +1,23 @@
 import { createHash } from "node:crypto";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { InMemoryTelemetryContext } from "@earendil-works/diffex-agent-core";
-import { fauxAssistantMessage } from "@earendil-works/diffex-ai";
+import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/diffex-ai";
 import {
 	computeHarnessSkillPackageVersion,
 	computeHarnessVersion,
 	HARNESS_VERSION_SCHEMA_VERSION,
 	HarnessStateStore,
 	type HarnessVersion,
+	type HarnessVersionBundle,
 	type HarnessVersionMetadata,
 	type HarnessWorkspaceIdentity,
 	harnessVersionDirectoryName,
 } from "@earendil-works/diffex-harness-state";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { resolveHarnessWorkspace } from "../../src/core/harness-state-runtime.ts";
-import { createHarness, type Harness } from "./harness.ts";
+import { createHarness, getMessageText, type Harness } from "./harness.ts";
 
 describe("AgentSession harness revisions", () => {
 	const harnesses: Harness[] = [];
@@ -53,6 +54,72 @@ describe("AgentSession harness revisions", () => {
 		});
 		harnesses.push(harness);
 		return { harness, store, rootVersion: root.manifest.version, telemetry, agentDir };
+	}
+
+	async function createSkillRevisionChain() {
+		const context = await createVersionedHarness();
+		const { harness, store, rootVersion } = context;
+		const { workspace } = await resolveHarnessWorkspace(harness.tempDir);
+		const memory = "Lesson 1: Preserve the complete selected skill inventory.\n";
+		const skills = ["alpha-review", "beta-review", "gamma-review"].map((name) => ({
+			path: `skills/${name}/SKILL.md`,
+			content: `---\nname: ${name}\ndescription: Original ${name} procedure.\n---\n\n# Original ${name}\n`,
+			workspace,
+		}));
+		const one = await store.saveVersion({ memory, skills: skills.slice(0, 1) }, rootVersion);
+		const two = await store.saveVersion({ memory, skills: skills.slice(0, 2) }, one.manifest.version);
+		const three = await store.saveVersion({ memory, skills }, two.manifest.version);
+		const updated = await store.saveVersion(
+			{
+				memory,
+				skills: skills.map((skill) =>
+					skill.path === "skills/alpha-review/SKILL.md"
+						? { ...skill, content: skill.content.replaceAll("Original", "Updated") }
+						: skill,
+				),
+			},
+			three.manifest.version,
+		);
+		const revisions = [one, two, three, updated];
+		expect(revisions.map((bundle) => bundle.state.skills.length)).toEqual([1, 2, 3, 3]);
+		expect(new Set(revisions.map((bundle) => bundle.manifest.version)).size).toBe(4);
+		for (const bundle of revisions) {
+			expect(bundle.state.memory).toBe(memory);
+			expect(bundle.manifest.metadata).toEqual(one.manifest.metadata);
+			expect(bundle.manifest.artifacts.find((artifact) => artifact.kind === "evolution-memory")?.contentHash).toBe(
+				contentHash(memory),
+			);
+		}
+		return { ...context, one, two, three, updated, revisions };
+	}
+
+	function createGate() {
+		let release: (() => void) | undefined;
+		const promise = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		return { promise, resolve: () => release?.() };
+	}
+
+	function expectRevisionPrompt(prompt: string, bundle: HarnessVersionBundle): void {
+		expect(prompt).toContain(
+			`<evolution_memory version="${bundle.manifest.version}">\n${bundle.state.memory}\n</evolution_memory>`,
+		);
+		const catalogs = [...prompt.matchAll(/<available_skills>([\s\S]*?)<\/available_skills>/g)];
+		expect(catalogs).toHaveLength(1);
+		const entries = [...(catalogs[0]?.[1] ?? "").matchAll(/<skill>([\s\S]*?)<\/skill>/g)];
+		expect(entries.map((entry) => entry[1]?.trim())).toEqual(
+			bundle.state.skills.map(
+				(skill) =>
+					`<name>${skill.name}</name>\n    <description>${skill.description}</description>\n    <location>${skill.filePath}</location>`,
+			),
+		);
+		for (const skill of bundle.state.skills) {
+			expect(skill.filePath).toContain(
+				join("harness-state", "versions", harnessVersionDirectoryName(bundle.manifest.version)),
+			);
+			expect(readFileSync(skill.filePath, "utf8")).toBe(skill.content);
+		}
 	}
 
 	function contentHash(content: string): HarnessVersion {
@@ -279,6 +346,239 @@ describe("AgentSession harness revisions", () => {
 		expect(providerPrompts[1]).not.toContain("<name>manual-review</name>");
 		expect(harness.session.createSkillReferences()).toEqual([]);
 	});
+
+	it("selects complete skill-only descendants and restores exact ancestor catalogs in provider prompts", async () => {
+		const { harness, store, one, two, three, updated, revisions } = await createSkillRevisionChain();
+		const selections = [one, two, three, updated, one, two, updated];
+		const providerPrompts: string[] = [];
+		harness.setResponses(
+			selections.map(() => (context) => {
+				providerPrompts.push(context.systemPrompt ?? "");
+				return fauxAssistantMessage("selected revision observed");
+			}),
+		);
+
+		for (const [index, selected] of selections.entries()) {
+			// This is the selection API used by the interactive /version selector.
+			await harness.session.switchHarnessVersion(selected.manifest.version);
+			expect((await store.loadCurrent()).manifest.version).toBe(selected.manifest.version);
+			await harness.session.prompt(`observe selection ${index}`);
+
+			expect(providerPrompts).toHaveLength(index + 1);
+			const prompt = providerPrompts[index] ?? "";
+			expectRevisionPrompt(prompt, selected);
+			for (const other of revisions.filter((bundle) => bundle !== selected)) {
+				expect(prompt).not.toContain(harnessVersionDirectoryName(other.manifest.version));
+			}
+			expect(harness.session.createSkillReferences()).toEqual(
+				selected.state.skills.map((skill) =>
+					expect.objectContaining({
+						name: skill.name,
+						description: skill.description,
+						sourceKind: "evolved",
+						harnessRevision: selected.manifest.version,
+						version: skill.packageVersion,
+						contentDigest: skill.contentHash,
+					}),
+				),
+			);
+		}
+		expect(updated.state.skills[0]?.packageVersion).not.toBe(three.state.skills[0]?.packageVersion);
+		expect(updated.state.skills.slice(1).map((skill) => skill.packageVersion)).toEqual(
+			three.state.skills.slice(1).map((skill) => skill.packageVersion),
+		);
+		expect(harness.getPendingResponseCount()).toBe(0);
+	});
+
+	it("reselects the in-memory ancestor after the shared pointer advances to three skills", async () => {
+		const { harness, store, one, three } = await createSkillRevisionChain();
+		await harness.session.switchHarnessVersion(one.manifest.version);
+		const activeBundle = harness.session.harnessVersionBundle;
+		const setEvolvedSkills = vi.spyOn(harness.session.resourceLoader, "setEvolvedSkills");
+		await store.selectVersion(three.manifest.version);
+		expect(harness.session.activeHarnessVersion).toBe(one.manifest.version);
+		let providerPrompt = "";
+		harness.setResponses([
+			(context) => {
+				providerPrompt = context.systemPrompt ?? "";
+				return fauxAssistantMessage("ancestor remains selected");
+			},
+		]);
+
+		await harness.session.switchHarnessVersion(one.manifest.version);
+
+		expect((await store.loadCurrent()).manifest.version).toBe(one.manifest.version);
+		expect(harness.session.harnessVersionBundle).toBe(activeBundle);
+		expect(setEvolvedSkills).not.toHaveBeenCalled();
+		await harness.session.prompt("observe the explicitly reselected ancestor");
+		expectRevisionPrompt(providerPrompt, one);
+		expect(harness.getPendingResponseCount()).toBe(0);
+	});
+
+	it("does not reactivate or rewrite an already active and selected revision", async () => {
+		const { harness, store, one } = await createSkillRevisionChain();
+		await harness.session.switchHarnessVersion(one.manifest.version);
+		const activeBundle = harness.session.harnessVersionBundle;
+		const selectVersion = vi.spyOn(store, "selectVersion");
+		const setEvolvedSkills = vi.spyOn(harness.session.resourceLoader, "setEvolvedSkills");
+
+		await harness.session.switchHarnessVersion(one.manifest.version);
+
+		expect(selectVersion).not.toHaveBeenCalled();
+		expect(setEvolvedSkills).not.toHaveBeenCalled();
+		expect(harness.session.harnessVersionBundle).toBe(activeBundle);
+	});
+
+	it.each([
+		{ property: "isStreaming", message: "while a response is streaming" },
+		{ property: "isCompacting", message: "while compaction is in progress" },
+		{ property: "isBashRunning", message: "while a bash command is running" },
+	] as const)("rejects stale same-version reselection while $property", async ({ property, message }) => {
+		const { harness, store, one, three } = await createSkillRevisionChain();
+		await harness.session.switchHarnessVersion(one.manifest.version);
+		await store.selectVersion(three.manifest.version);
+		vi.spyOn(harness.session, property, "get").mockReturnValue(true);
+
+		await expect(harness.session.switchHarnessVersion(one.manifest.version)).rejects.toThrow(message);
+		expect((await store.loadCurrent()).manifest.version).toBe(three.manifest.version);
+		expect(harness.session.activeHarnessVersion).toBe(one.manifest.version);
+	});
+
+	it("blocks prompt admission while checking a same-version reselection", async () => {
+		const { harness, store, one, three } = await createSkillRevisionChain();
+		await harness.session.switchHarnessVersion(one.manifest.version);
+		await store.selectVersion(three.manifest.version);
+		const listing = await store.listVersions();
+		const started = createGate();
+		const release = createGate();
+		vi.spyOn(store, "listVersions").mockImplementation(async () => {
+			started.resolve();
+			await release.promise;
+			return listing;
+		});
+
+		const switching = harness.session.switchHarnessVersion(one.manifest.version);
+		try {
+			await started.promise;
+			await expect(harness.session.prompt("must not observe the descendant")).rejects.toThrow(
+				"Cannot submit a prompt while a harness version switch is in progress.",
+			);
+			await expect(harness.session.switchHarnessVersion(three.manifest.version)).rejects.toThrow(
+				"Cannot switch harness versions while another switch is in progress.",
+			);
+		} finally {
+			release.resolve();
+			await switching;
+		}
+		expect((await store.loadCurrent()).manifest.version).toBe(one.manifest.version);
+	});
+
+	it("pins in-flight tool continuations across a skill-only selection change", async () => {
+		const { harness, store, one, updated } = await createSkillRevisionChain();
+		await harness.session.switchHarnessVersion(one.manifest.version);
+		const [skill] = one.state.skills;
+		if (!skill) throw new Error("Expected the ancestor skill");
+		const started = createGate();
+		const release = createGate();
+		const providerPrompts: string[] = [];
+		let readResult = "";
+		harness.setResponses([
+			async (context) => {
+				providerPrompts.push(context.systemPrompt ?? "");
+				started.resolve();
+				await release.promise;
+				return fauxAssistantMessage(fauxToolCall("read", { path: skill.filePath }), { stopReason: "toolUse" });
+			},
+			(context) => {
+				providerPrompts.push(context.systemPrompt ?? "");
+				readResult = getMessageText(context.messages.find((message) => message.role === "toolResult"));
+				return fauxAssistantMessage("original request finished");
+			},
+			(context) => {
+				providerPrompts.push(context.systemPrompt ?? "");
+				return fauxAssistantMessage("fresh request finished");
+			},
+		]);
+
+		const inFlight = harness.session.prompt("read the ancestor skill");
+		try {
+			await started.promise;
+			// Another session can change the shared selection while this session is streaming.
+			await store.selectVersion(updated.manifest.version);
+			expect(harness.session.activeHarnessVersion).toBe(one.manifest.version);
+		} finally {
+			release.resolve();
+			await inFlight;
+		}
+		await harness.session.prompt("observe the fresh selection");
+
+		expect(providerPrompts).toHaveLength(3);
+		expectRevisionPrompt(providerPrompts[0] ?? "", one);
+		expectRevisionPrompt(providerPrompts[1] ?? "", one);
+		expect(readResult).toContain("# Original alpha-review");
+		expectRevisionPrompt(providerPrompts[2] ?? "", updated);
+		expect(harness.session.activeHarnessVersion).toBe(updated.manifest.version);
+		expect(harness.getPendingResponseCount()).toBe(0);
+	});
+
+	it.each(["steer", "followUp"] as const)(
+		"pins an admitted %s request's complete catalog and explicit skill across a skill-only selection change",
+		async (streamingBehavior) => {
+			const { harness, store, one, updated } = await createSkillRevisionChain();
+			await harness.session.switchHarnessVersion(one.manifest.version);
+			const [reference] = harness.session.createSkillReferences();
+			if (!reference) throw new Error("Expected the ancestor skill reference");
+			const started = createGate();
+			const release = createGate();
+			const providerPrompts: string[] = [];
+			const userMessages: string[] = [];
+			harness.setResponses([
+				async (context) => {
+					providerPrompts.push(context.systemPrompt ?? "");
+					started.resolve();
+					await release.promise;
+					return fauxAssistantMessage("original request finished");
+				},
+				(context) => {
+					providerPrompts.push(context.systemPrompt ?? "");
+					userMessages.push(getMessageText(context.messages.filter((message) => message.role === "user").at(-1)));
+					return fauxAssistantMessage("queued request finished");
+				},
+				(context) => {
+					providerPrompts.push(context.systemPrompt ?? "");
+					userMessages.push(getMessageText(context.messages.filter((message) => message.role === "user").at(-1)));
+					return fauxAssistantMessage("fresh request finished");
+				},
+			]);
+
+			const inFlight = harness.session.prompt("start with the ancestor");
+			try {
+				await started.promise;
+				await harness.session.prompt(`${reference.reference}\n\nqueued review`, { streamingBehavior });
+				expect(harness.session.pendingMessageCount).toBe(1);
+				await store.selectVersion(updated.manifest.version);
+				expect(harness.session.activeHarnessVersion).toBe(one.manifest.version);
+			} finally {
+				release.resolve();
+				await inFlight;
+			}
+			expect(harness.session.pendingMessageCount).toBe(0);
+			await harness.session.prompt("fresh review");
+
+			expect(providerPrompts).toHaveLength(3);
+			expectRevisionPrompt(providerPrompts[0] ?? "", one);
+			expectRevisionPrompt(providerPrompts[1] ?? "", one);
+			expect(userMessages[0]).toContain("queued review");
+			expect(userMessages[0]).toContain("# Original alpha-review");
+			expect(userMessages[0]).toContain(`version="${reference.version}"`);
+			expect(userMessages[0]).toContain(`harness-revision="${one.manifest.version}"`);
+			expect(userMessages[0]).not.toContain("Updated");
+			expectRevisionPrompt(providerPrompts[2] ?? "", updated);
+			expect(userMessages[1]).toBe("fresh review");
+			expect(harness.session.activeHarnessVersion).toBe(updated.manifest.version);
+			expect(harness.getPendingResponseCount()).toBe(0);
+		},
+	);
 
 	it("rejects an evolved reference after the selected harness changes", async () => {
 		const { harness, store, rootVersion } = await createVersionedHarness();
