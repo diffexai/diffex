@@ -136,15 +136,18 @@ This routing remains configurable through the ordinary action bindings. For exam
 | `app.session.delete` | `ctrl+d` | Delete session |
 | `app.session.deleteNoninvasive` | `ctrl+backspace` | Delete session when query is empty |
 
-### Models and Thinking
+### Collaboration Modes, Models, and Thinking
 
 | Keybinding id | Default | Description |
 |--------|---------|-------------|
+| `app.mode.toggle` | `shift+tab` | Toggle Default and Plan collaboration modes |
 | `app.model.select` | `ctrl+l` | Open model selector |
 | `app.model.cycleForward` | `ctrl+p` | Cycle to next model |
 | `app.model.cycleBackward` | `shift+ctrl+p` | Cycle to previous model |
-| `app.thinking.cycle` | `shift+tab` | Cycle thinking level |
+| `app.thinking.cycle` | *(none)* | Cycle thinking level |
 | `app.thinking.toggle` | `ctrl+t` | Collapse or expand thinking blocks |
+
+Shift+Tab enters or leaves interactive Plan mode. Thinking level remains selectable through `/settings`; bind `app.thinking.cycle` explicitly if you also want a shortcut for cycling it.
 
 ### Display and Message Queue
 

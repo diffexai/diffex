@@ -14,7 +14,7 @@
 
 Diffex is a minimal terminal coding harness. Adapt Diffex to your workflows, not the other way around, without having to fork and modify Diffex internals. Extend it with TypeScript [Extensions](#extensions), [Skills](#skills), [Prompt Templates](#prompt-templates), and [Themes](#themes). Put your extensions, skills, prompt templates, and themes in [Diffex Packages](#diffex-packages) and share them with others via npm or git.
 
-Diffex ships with powerful defaults, including session-scoped sub-agents, but skips features like plan mode. You can ask Diffex to build other workflows or install a third party Diffex package that matches them.
+Diffex ships with powerful defaults, including session-scoped sub-agents and an interactive Plan mode. You can adapt or replace workflows with extensions and third-party Diffex packages.
 
 Diffex runs in four modes: interactive, print or JSON, RPC for process integration, and an SDK for embedding in your own apps.
 
@@ -42,6 +42,7 @@ Example upstream `pi-mono` work sessions are published here:
   - [Editor](#editor)
   - [Commands](#commands)
   - [Keyboard Shortcuts](#keyboard-shortcuts)
+  - [Plan Mode](#plan-mode)
   - [Message Queue](#message-queue)
 - [Sessions](#sessions)
   - [Branching](#branching)
@@ -175,6 +176,7 @@ Type `/` in the editor to trigger commands. [Extensions](#extensions) can regist
 | `/model` | Switch models |
 | `/scoped-models` | Enable/disable models for Ctrl+P cycling |
 | `/settings` | Thinking level, theme, installed skills, message delivery, transport |
+| `/plan [request]` | Enter Plan mode, optionally submitting a planning request |
 | [`/skills`](docs/skills.md#skill-commands) | Search and reference one or more skills in the editor |
 | [`/evolve`](docs/evolution.md) | Inspect and control harness evolution and generated skills |
 | [`/version`](docs/evolution.md#controls) | Select the active harness revision |
@@ -214,10 +216,24 @@ See `/hotkeys` for the full list. Customize via `~/.diffex/agent/keybindings.jso
 | Escape twice | Open `/tree` |
 | Ctrl+L | Open model selector |
 | Ctrl+P / Shift+Ctrl+P | Cycle scoped models forward/backward |
-| Shift+Tab | Cycle thinking level |
+| Shift+Tab | Toggle Default and Plan collaboration modes |
 | Ctrl+O | Collapse/expand tool output |
 | Ctrl+T | Collapse/expand thinking blocks |
 | Ctrl+X | Copy the last assistant message |
+
+Thinking-level cycling has no default shortcut. Use `/settings` or bind `app.thinking.cycle` in `keybindings.json`.
+
+### Plan Mode
+
+Plan mode is an interactive, evidence-first workflow for producing a decision-complete implementation plan without carrying it out. Press Shift+Tab or run `/plan`; `/plan <request>` enters Plan mode and submits the request. The footer identifies the active mode.
+
+The model first inspects available evidence and distinguishes discoverable facts from preferences only you can decide. Its model-visible tools are restricted to the invocation's allowed, trusted pre-extension implementations of `read`, `grep`, `find`, and `ls`, plus `request_user_input` when permitted. Mutating, extension, custom, and execution-time tools such as `bash`, `edit`, `write`, and `update_plan` are unavailable. This is a model-tool boundary, not a filesystem sandbox: direct `!` commands and extension side effects remain outside it.
+
+For material choices, `request_user_input` can show one to three questions. Each has two or three choices plus **Other** for a free-form answer. Answer every question to submit, or cancel to return a non-fatal cancellation result while staying in Plan mode. If the tool is filtered out or a choice list is unsuitable, the model asks an ordinary conversational question instead.
+
+The official response must contain exactly one non-empty plan between standalone `<proposed_plan>` and `</proposed_plan>` lines outside fenced code. On a valid completed response, Diffex removes only those tag lines and stores and displays the remaining Markdown normally. After the run settles, choose **Implement the plan** to switch to Default and submit `Implement the plan.` in the same session, or **Stay in Plan mode** to dismiss the offer. Queued input suppresses the offer; an unrelated modal defers it. If implementation submission fails, Diffex remains in Default and restores the exact submission text to the editor.
+
+Plan mode is an interactive branch preference. Resume, fork, and `/tree` navigation restore the newest matching mode entry on the selected branch when it is valid; new sessions, malformed newest matching entries, and non-interactive print, JSON, RPC, and SDK use remain in Default. Historical plans never replay the implementation offer. `update_plan` is a separate execution-time progress checklist and does not enter or leave Plan mode.
 
 ### Message Queue
 
@@ -243,6 +259,8 @@ Configure delivery in [settings](docs/settings.md): `steeringMode` and `followUp
 Sessions are stored as JSONL files with a tree structure. Each entry has an `id` and `parentId`, enabling in-place branching without creating new files. See [docs/session-format.md](docs/session-format.md) for file format.
 
 The built-in `update_plan` checklist records the latest checklist state in the session. When an unfinished checklist exists after opening or resuming a session, or after successful compaction, Diffex restores it once as hidden context for the next model request. This is not a workflow engine: it does not schedule, execute, gate, verify, or prove work.
+
+The selected collaboration mode is stored separately as an interactive branch preference. Resume, fork, and `/tree` navigation restore it from the selected branch; non-interactive modes always use Default and do not overwrite that preference.
 
 ### Management
 
@@ -391,7 +409,7 @@ The default export can also be `async`. Diffex waits for async extension factori
 
 **What's possible:**
 - Custom tools (or replace built-in tools entirely)
-- Alternative sub-agent workflows and plan mode
+- Alternative sub-agent and planning workflows
 - Custom compaction and summarization
 - Permission gates and path protection
 - Custom editors and UI components
@@ -508,7 +526,7 @@ Diffex is aggressively extensible so it doesn't have to dictate your workflow. F
 
 **No permission popups.** Run in a container, or build your own confirmation flow with [extensions](#extensions) inline with your environment and security requirements.
 
-**No plan mode.** The built-in `update_plan` tool is only a lightweight progress checklist. For approval workflows, read-only planning phases, or richer planning modes, write plans to files, build an [extension](#extensions), or install a package.
+**Focused Plan mode.** Interactive Plan mode provides read-only planning, structured clarification, and an explicit same-session implementation handoff. The separate `update_plan` tool remains a lightweight execution progress checklist. Build an [extension](#extensions) or install a package for different approval or planning workflows.
 
 **No persistent built-in to-dos.** Use a TODO.md file, or build your own with [extensions](#extensions).
 
