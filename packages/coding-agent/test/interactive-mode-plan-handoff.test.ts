@@ -40,6 +40,7 @@ type InteractiveModePrivate = {
 	completeTranscriptTurn(): void;
 	flushTranscriptBoundary(): void;
 	showError(error: string): void;
+	checkShutdownRequested(): Promise<void>;
 };
 
 type RuntimeCallbacks = {
@@ -349,6 +350,133 @@ describe("Interactive Plan implementation handoff", () => {
 			activity[property] = false;
 		}
 		await vi.waitFor(() => expect(renderEditorSurface(state)).toContain("Implement this plan?"));
+	});
+
+	it.each(["visible", "deferred"] as const)(
+		"invalidates a %s offer before a custom-message run awaits agent_start",
+		async (presentation) => {
+			let releaseStart = () => {};
+			const startGate = new Promise<void>((resolve) => {
+				releaseStart = resolve;
+			});
+			let markStarted = () => {};
+			const started = new Promise<void>((resolve) => {
+				markStarted = resolve;
+			});
+			let triggerRun = () => {};
+			const { harness, privateMode: state } = await setup("regular", {
+				extensionFactories: [
+					(pi) => {
+						triggerRun = () => {
+							pi.sendMessage(
+								{ customType: "new_request", content: "new request", display: true },
+								{ triggerTurn: true },
+							);
+						};
+						pi.on("agent_start", async () => {
+							markStarted();
+							await startGate;
+						});
+					},
+				],
+			});
+			state.isInitialized = true;
+			state.subscribeToAgent();
+			let closeModal = () => {};
+			if (presentation === "deferred") {
+				state.showSelector((done) => {
+					closeModal = done;
+					const component = new Text("UNRELATED MODAL");
+					return { component, focus: component };
+				});
+			}
+			state.handleSettledPlanHandoff(planHandoff);
+			harness.setResponses([fauxAssistantMessage("new ordinary answer")]);
+			triggerRun();
+			try {
+				await started;
+				expect(harness.session.isStreaming).toBe(true);
+				expect(state.pendingPlanHandoff).toBeUndefined();
+				closeModal();
+				expect(state.editorContainer.children).toEqual([state.editor]);
+			} finally {
+				releaseStart();
+				await harness.session.waitForIdle();
+			}
+		},
+	);
+
+	it.each(["plan", "ordinary", "handled"] as const)(
+		"does not revive a delayed settlement after a newer %s request",
+		async (response) => {
+			let releaseSettled = () => {};
+			const settledGate = new Promise<void>((resolve) => {
+				releaseSettled = resolve;
+			});
+			let markSettled = () => {};
+			const settled = new Promise<void>((resolve) => {
+				markSettled = resolve;
+			});
+			let firstSettlement = true;
+			const { harness, privateMode: state } = await setup("regular", {
+				extensionFactories: [
+					(pi) => {
+						pi.on("input", () => ({ action: response === "handled" ? "handled" : "continue" }));
+						pi.on("agent_settled", async () => {
+							if (!firstSettlement) return;
+							firstSettlement = false;
+							markSettled();
+							await settledGate;
+						});
+					},
+				],
+			});
+			state.isInitialized = true;
+			state.subscribeToAgent();
+			harness.setResponses([
+				fauxAssistantMessage("<proposed_plan>\nolder plan\n</proposed_plan>"),
+				fauxAssistantMessage(response === "plan" ? "<proposed_plan>\nnewer plan\n</proposed_plan>" : "ordinary"),
+			]);
+			const oldRun = harness.session.sendCustomMessage(
+				{ customType: "new_request", content: "old request", display: true },
+				{ triggerTurn: true },
+			);
+			try {
+				await settled;
+				await harness.session.prompt("newer request", { source: "extension" });
+			} finally {
+				releaseSettled();
+				await oldRun;
+			}
+			expect(state.pendingPlanHandoff?.plan.trim()).toBe(response === "plan" ? "newer plan" : undefined);
+			expect(harness.eventsOfType("agent_settled")).toHaveLength(response === "handled" ? 1 : 2);
+		},
+	);
+
+	it("rechecks settlement validity after the TUI's awaited shutdown check", async () => {
+		const { harness, privateMode: state } = await setup();
+		state.isInitialized = true;
+		state.subscribeToAgent();
+		let releaseCheck = () => {};
+		const checkGate = new Promise<void>((resolve) => {
+			releaseCheck = resolve;
+		});
+		vi.spyOn(state, "checkShutdownRequested").mockImplementationOnce(async () => checkGate);
+		harness.setResponses([
+			fauxAssistantMessage("<proposed_plan>\nolder plan\n</proposed_plan>"),
+			fauxAssistantMessage("<proposed_plan>\nnewer plan\n</proposed_plan>"),
+		]);
+		try {
+			await harness.session.prompt("older request");
+			await harness.session.prompt("newer request");
+			expect(state.pendingPlanHandoff?.plan.trim()).toBe("newer plan");
+		} finally {
+			releaseCheck();
+			await checkGate;
+		}
+		await Promise.resolve();
+		expect(state.pendingPlanHandoff?.plan.trim()).toBe("newer plan");
+		expect(harness.eventsOfType("agent_settled")).toHaveLength(2);
 	});
 
 	it("unsubscribes admission invalidation when the interactive mode stops", async () => {

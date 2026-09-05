@@ -72,6 +72,7 @@ import {
 	type CollaborationModeTransitionResult,
 	getCollaborationMode,
 	isCollaborationModeBusy,
+	planHandoffSettlementGuards,
 	restoreCollaborationMode,
 	setCollaborationMode,
 	subscribePromptAdmission,
@@ -3769,7 +3770,9 @@ export class InteractiveMode {
 
 			case "agent_settled":
 				await this.checkShutdownRequested();
-				this.handleSettledPlanHandoff(event.planHandoff);
+				if (planHandoffSettlementGuards.get(event)?.() !== false) {
+					this.handleSettledPlanHandoff(event.planHandoff);
+				}
 				break;
 
 			case "subagent_wait_start":

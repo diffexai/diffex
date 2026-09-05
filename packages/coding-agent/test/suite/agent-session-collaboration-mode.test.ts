@@ -436,6 +436,27 @@ describe("AgentSession collaboration mode foundation", () => {
 		expect(harness.session.getActiveToolNames()).toEqual(["bash"]);
 	});
 
+	it("captures trusted Plan tools when an extension custom message starts the logical run", async () => {
+		let reads = 0;
+		const harness = await createHarness({ tools: [createTool("read", "trusted read", () => reads++)] });
+		harnesses.push(harness);
+		setCollaborationMode(harness.session, "plan");
+		const admittedTools = harness.session.agent.state.tools.slice();
+		harness.setResponses([
+			fauxAssistantMessage(fauxToolCall("read", {}), { stopReason: "toolUse" }),
+			(context) => {
+				expect(context.tools?.every((tool, index) => tool === admittedTools[index])).toBe(true);
+				return fauxAssistantMessage("planned");
+			},
+		]);
+		await harness.session.sendCustomMessage(
+			{ customType: "new_request", content: "inspect the repository", display: true },
+			{ triggerTurn: true },
+		);
+		expect(reads).toBe(1);
+		expect(getAssistantTexts(harness)).toContain("planned");
+	});
+
 	it.each(["isStreaming", "isCompacting", "isRetrying", "isBashRunning"] as const)(
 		"rejects a mode change while %s is true",
 		async (property) => {

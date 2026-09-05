@@ -12,6 +12,9 @@ export const CHANGE_COLLABORATION_MODE: unique symbol = Symbol("changeCollaborat
 export const IS_COLLABORATION_MODE_BUSY: unique symbol = Symbol("isCollaborationModeBusy");
 export const SUBSCRIBE_PROMPT_ADMISSION: unique symbol = Symbol("subscribePromptAdmission");
 
+/** Ephemeral TUI validity checks kept off public session events and serialized protocols. */
+export const planHandoffSettlementGuards = new WeakMap<object, () => boolean>();
+
 export interface CollaborationModeController {
 	[GET_COLLABORATION_MODE](): CollaborationMode;
 	[CHANGE_COLLABORATION_MODE](mode: CollaborationMode, persist: boolean): CollaborationModeTransitionResult;
