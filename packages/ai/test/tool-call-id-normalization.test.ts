@@ -12,7 +12,7 @@
 
 import { Type } from "typebox";
 import { describe, expect, it } from "vitest";
-import { completeSimple, getEnvApiKey, getModel } from "../src/compat.ts";
+import { completeSimple, getEnvApiKey, getModel, getModels } from "../src/compat.ts";
 import type { AssistantMessage, Message, Tool, ToolResultMessage } from "../src/types.ts";
 import { resolveApiKey } from "./oauth.ts";
 
@@ -32,20 +32,34 @@ const echoTool: Tool<typeof echoToolSchema> = {
 	parameters: echoToolSchema,
 };
 
+// The regression depends on the Responses API, not a particular model ID.
+// Copilot retires models from the generated catalog independently of this test.
+function getCopilotResponsesModel() {
+	const model = getModels("github-copilot").find((candidate) => candidate.api === "openai-responses");
+	if (!model) throw new Error("No GitHub Copilot model using openai-responses is available");
+	return model;
+}
+
 /**
  * Test 1: Live cross-provider handoff
  *
- * 1. Use github-copilot gpt-5.2-codex to generate a tool call
+ * 1. Use a github-copilot Responses API model to generate a tool call
  * 2. Switch to openrouter openai/gpt-5.2-codex and complete
  * 3. Switch to openai-codex gpt-5.5 and complete
  *
  * Both should succeed without "call_id too long" errors.
  */
 describe("Tool Call ID Normalization - Live Handoff", () => {
+	it("selects a Copilot Responses API model from the current catalog without credentials", () => {
+		const model = getCopilotResponsesModel();
+		expect(model.provider).toBe("github-copilot");
+		expect(model.api).toBe("openai-responses");
+	});
+
 	it.skipIf(!copilotToken || !openrouterKey)(
 		"github-copilot -> openrouter should normalize pipe-separated IDs",
 		async () => {
-			const copilotModel = getModel("github-copilot", "gpt-5.2-codex");
+			const copilotModel = getCopilotResponsesModel();
 			const openrouterModel = getModel("openrouter", "openai/gpt-5.2-codex");
 
 			// Step 1: Generate tool call with github-copilot
@@ -115,7 +129,7 @@ describe("Tool Call ID Normalization - Live Handoff", () => {
 	it.skipIf(!copilotToken || !codexToken)(
 		"github-copilot -> openai-codex should normalize pipe-separated IDs",
 		async () => {
-			const copilotModel = getModel("github-copilot", "gpt-5.2-codex");
+			const copilotModel = getCopilotResponsesModel();
 			const codexModel = getModel("openai-codex", "gpt-5.5");
 
 			// Step 1: Generate tool call with github-copilot
