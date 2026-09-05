@@ -1,4 +1,4 @@
-import type { EvolutionHarnessVersionInfo } from "#evolution";
+import { type EvolutionHarnessVersionInfo, parseEvolutionMemoryBlocks } from "#evolution";
 
 export function sanitizeDisplayText(value: string): string {
 	return value.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, " ");
@@ -27,7 +27,38 @@ export function formatHarnessVersionLabel(
 
 	const evolvedAt = info.evolvedAt === null ? "" : ` ${formatEvolutionTimestamp(info.evolvedAt, now)}`;
 	const evolvedIn = info.evolvedIn === null ? "" : `: ${sanitizeDisplayText(info.evolvedIn)}`;
-	return `${current}Evolved Diffex Agent${evolvedAt}${evolvedIn}`;
+	const origin = info.origin === "skill" ? " [skill activation]" : "";
+	return `${current}Evolved Diffex Agent${evolvedAt}${evolvedIn}${origin}`;
+}
+
+export function countHarnessMemoryLessons(memory: string): number | undefined {
+	try {
+		return parseEvolutionMemoryBlocks(memory).filter((block) =>
+			/^(?: {0,3}(?:[-+*]|\d+[.)])[ \t]+)?Lesson[ \t]+[1-9]\d*[ \t]*:/i.test(block.content),
+		).length;
+	} catch {
+		return undefined;
+	}
+}
+
+export function formatHarnessVersionInventory(memory: string | undefined, skillCount: number | undefined): string {
+	const lessons = memory === undefined ? "?" : (countHarnessMemoryLessons(memory) ?? "?");
+	return `${lessons} lessons · ${skillCount ?? "?"} skills`;
+}
+
+export function formatHarnessVersionPickerLabel(
+	info: EvolutionHarnessVersionInfo,
+	currentVersion: string | null | undefined,
+	memory: string | undefined,
+	skillCount: number | undefined,
+	now = new Date(),
+): string {
+	const hash = sanitizeDisplayText(info.version.replace(/^sha256:/, "").slice(0, 12));
+	const timestamp = Number.isFinite(Date.parse(info.evolvedAt ?? ""))
+		? formatEvolutionTimestamp(info.evolvedAt, now)
+		: "unknown time";
+	const current = info.version === currentVersion ? " [current]" : "";
+	return `${timestamp} · ${formatHarnessVersionInventory(memory, skillCount)} · ${hash}${current}`;
 }
 
 export function formatHarnessVersionReference(
