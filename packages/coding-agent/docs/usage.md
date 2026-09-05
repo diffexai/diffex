@@ -116,7 +116,7 @@ After the latest eligible live response settles, Diffex offers exactly:
 
 Steering, follow-up, next-turn, or compaction-queued input permanently suppresses that completion's offer and continues through the existing queue path. An unrelated modal defers at most one offer until it closes. A user submission, navigation, session replacement, mode change, or new model run (including an extension-submitted run) clears the older offer, and historical plans do not replay it.
 
-Diffex rechecks activity before showing or accepting the offer. Temporary activity defers it until idle; accepting during a busy operation does not change mode or submit the implementation message. This includes the entire direct Bash command, even while an extension's `user_bash` hook is still awaiting its result.
+Diffex clears the older offer synchronously when a new prompt is admitted, before any awaited input hook or model startup, even if an extension handles the request without starting a model run. It rechecks the complete mode-transition busy state before showing or accepting an offer. Temporary activity defers it until idle; accepting during a busy operation does not change mode or submit the implementation message. This includes prompt admission, harness switching, and the entire direct Bash command, even while an extension's `user_bash` hook is still awaiting its result.
 
 If the fixed implementation submission fails after switching modes, Diffex stays in Default, shows the error, and restores exactly `Implement the plan.` to the editor for retry. It does not roll back to Plan mode.
 

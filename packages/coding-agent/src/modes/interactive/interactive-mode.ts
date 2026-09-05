@@ -71,8 +71,10 @@ import {
 	type CollaborationMode,
 	type CollaborationModeTransitionResult,
 	getCollaborationMode,
+	isCollaborationModeBusy,
 	restoreCollaborationMode,
 	setCollaborationMode,
+	subscribePromptAdmission,
 } from "../../core/collaboration-mode.ts";
 import { type DiffexAccountAuth, HostedDiffexAccountAuth } from "../../core/diffex-account-auth.ts";
 import type {
@@ -3555,9 +3557,14 @@ export class InteractiveMode {
 	}
 
 	private subscribeToAgent(): void {
-		this.unsubscribe = this.session.subscribe(async (event) => {
+		const unsubscribeAdmission = subscribePromptAdmission(this.session, () => this.clearPlanHandoff());
+		const unsubscribeAgent = this.session.subscribe(async (event) => {
 			await this.handleEvent(event);
 		});
+		this.unsubscribe = () => {
+			unsubscribeAdmission();
+			unsubscribeAgent();
+		};
 	}
 
 	private async handleEvent(event: AgentSessionEvent): Promise<void> {
@@ -5023,13 +5030,7 @@ export class InteractiveMode {
 			this.clearPlanHandoff();
 			return;
 		}
-		if (
-			this.directBashCommandsInProgress > 0 ||
-			this.session.isStreaming ||
-			this.session.isCompacting ||
-			this.session.isRetrying ||
-			this.session.isBashRunning
-		) {
+		if (this.directBashCommandsInProgress > 0 || isCollaborationModeBusy(this.session)) {
 			// Some busy operations finish without a TUI event. Retain one offer
 			// and recheck until idle, invalidated, or stopped.
 			this.schedulePendingPlanHandoff(100);

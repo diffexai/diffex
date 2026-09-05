@@ -26,6 +26,8 @@ type InteractiveModePrivate = {
 	implementSettledPlan(): Promise<void>;
 	handleSettledPlanHandoff(planHandoff?: PlanHandoff): void;
 	setupEditorSubmitHandler(): void;
+	subscribeToAgent(): void;
+	maybeShowPendingPlanHandoff(): void;
 	handleEvent(event: AgentSessionEvent): Promise<void>;
 	showSelector(create: (done: () => void) => { component: Component; focus: Component }): void;
 	showExtensionCustom<T>(
@@ -272,6 +274,92 @@ describe("Interactive Plan implementation handoff", () => {
 			expect(getUserTexts(harness)).toEqual(["new extension request"]);
 		},
 	);
+
+	it.each([
+		["visible", "continue"],
+		["deferred", "continue"],
+		["visible", "handled"],
+		["deferred", "handled"],
+	] as const)("invalidates a %s offer at admission even if input is %s", async (presentation, action) => {
+		let releaseInput = () => {};
+		let inputStarted = false;
+		const inputGate = new Promise<void>((resolve) => {
+			releaseInput = resolve;
+		});
+		const { harness, privateMode: state } = await setup("regular", {
+			extensionFactories: [
+				(pi) => {
+					pi.on("input", async () => {
+						inputStarted = true;
+						await inputGate;
+						return { action };
+					});
+				},
+			],
+		});
+		state.isInitialized = true;
+		state.subscribeToAgent();
+		let closeModal = () => {};
+		if (presentation === "deferred") {
+			state.showSelector((done) => {
+				closeModal = done;
+				const component = new Text("UNRELATED MODAL");
+				return { component, focus: component };
+			});
+		}
+		state.handleSettledPlanHandoff(planHandoff);
+		harness.setResponses([fauxAssistantMessage("<proposed_plan>\nnew plan\n</proposed_plan>")]);
+		const run = harness.session.prompt("new extension request", { source: "extension" });
+		try {
+			expect(state.pendingPlanHandoff).toBeUndefined();
+			if (presentation === "visible") expect(state.editorContainer.children).toEqual([state.editor]);
+			else expect(renderEditorSurface(state)).toContain("UNRELATED MODAL");
+			await vi.waitFor(() => expect(inputStarted).toBe(true));
+			expect(harness.session.isStreaming).toBe(false);
+			expect(setCollaborationMode(harness.session, "default").status).toBe("busy");
+			closeModal();
+			state.maybeShowPendingPlanHandoff();
+			expect(state.editorContainer.children).toEqual([state.editor]);
+		} finally {
+			releaseInput();
+			await run;
+		}
+		if (action === "continue") {
+			await vi.waitFor(() => expect(renderEditorSurface(state)).toContain("Implement this plan?"));
+			expect(state.pendingPlanHandoff?.plan.trim()).toBe("new plan");
+		} else {
+			expect(state.pendingPlanHandoff).toBeUndefined();
+			expect(state.editorContainer.children).toEqual([state.editor]);
+		}
+	});
+
+	it.each([
+		"_promptAdmissionInProgress",
+		"_harnessSwitchInProgress",
+		"_collaborationModeTransitionInProgress",
+	] as const)("defers presentation throughout the core %s guard", async (property) => {
+		const { harness, privateMode: state } = await setup();
+		const activity = harness.session as unknown as Record<typeof property, boolean>;
+		activity[property] = true;
+		try {
+			state.handleSettledPlanHandoff(planHandoff);
+			expect(state.pendingPlanHandoff).toEqual(planHandoff);
+			expect(state.editorContainer.children).toEqual([state.editor]);
+		} finally {
+			activity[property] = false;
+		}
+		await vi.waitFor(() => expect(renderEditorSurface(state)).toContain("Implement this plan?"));
+	});
+
+	it("unsubscribes admission invalidation when the interactive mode stops", async () => {
+		const { harness, mode, privateMode: state } = await setup();
+		state.subscribeToAgent();
+		const clearHandoff = vi.spyOn(state, "clearPlanHandoff");
+		mode.stop();
+		harness.setResponses([fauxAssistantMessage("no interactive listener")]);
+		await harness.session.prompt("request after UI shutdown");
+		expect(clearHandoff).not.toHaveBeenCalled();
+	});
 
 	it("defers one latest offer across the structured custom-modal surface", async () => {
 		const { privateMode: state } = await setup();

@@ -69,8 +69,10 @@ import {
 	type CollaborationMode,
 	type CollaborationModeTransitionResult,
 	GET_COLLABORATION_MODE,
+	IS_COLLABORATION_MODE_BUSY,
 	PLAN_MODE_SYSTEM_PROMPT,
 	PLAN_MODE_TOOL_NAMES,
+	SUBSCRIBE_PROMPT_ADMISSION,
 } from "./collaboration-mode.ts";
 import {
 	type CompactionResult,
@@ -568,6 +570,7 @@ export class AgentSession {
 	private readonly _lifecycleObserver: AgentSessionLifecycleObserver | undefined;
 	private _harnessSwitchInProgress = false;
 	private _promptAdmissionInProgress = false;
+	private readonly _promptAdmissionListeners = new Set<() => void>();
 	private _subagentCoordination: SubagentCoordination | undefined;
 	private _pendingSubagentEscalationEnvelope: PendingSubagentEscalationEnvelope | undefined;
 	private readonly _pendingIdleSubagentEscalations = new Map<string, number>();
@@ -1292,6 +1295,7 @@ export class AgentSession {
 			failures.push(error);
 		}
 		this._eventListeners = [];
+		this._promptAdmissionListeners.clear();
 		try {
 			cleanupSessionResources(this.sessionId);
 		} catch (error) {
@@ -1377,9 +1381,15 @@ export class AgentSession {
 			?.definition;
 	}
 
-	[CHANGE_COLLABORATION_MODE](mode: CollaborationMode, persist: boolean): CollaborationModeTransitionResult {
-		if (mode === this._collaborationMode) return { status: "unchanged", mode };
-		if (
+	[SUBSCRIBE_PROMPT_ADMISSION](listener: () => void): () => void {
+		this._promptAdmissionListeners.add(listener);
+		return () => {
+			this._promptAdmissionListeners.delete(listener);
+		};
+	}
+
+	[IS_COLLABORATION_MODE_BUSY](): boolean {
+		return (
 			this._collaborationModeTransitionInProgress ||
 			this._promptAdmissionInProgress ||
 			this._harnessSwitchInProgress ||
@@ -1387,7 +1397,12 @@ export class AgentSession {
 			this.isRetrying ||
 			this.isCompacting ||
 			this.isBashRunning
-		) {
+		);
+	}
+
+	[CHANGE_COLLABORATION_MODE](mode: CollaborationMode, persist: boolean): CollaborationModeTransitionResult {
+		if (mode === this._collaborationMode) return { status: "unchanged", mode };
+		if (this[IS_COLLABORATION_MODE_BUSY]()) {
 			return { status: "busy", mode: this._collaborationMode };
 		}
 
@@ -2215,6 +2230,9 @@ export class AgentSession {
 			if (reservesAdmission) this._promptAdmissionInProgress = false;
 		};
 		try {
+			if (reservesAdmission) {
+				for (const listener of this._promptAdmissionListeners) listener();
+			}
 			return this._traceOperation("prompt", (operationSpan) =>
 				this._prompt(
 					text,

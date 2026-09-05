@@ -17,7 +17,7 @@
 
 ### Fixed
 
-- Fixed Plan implementation handoffs bypassing awaited direct-Bash hooks, losing busy-rejected offers, and retaining stale offers when an extension starts a new run.
+- Fixed Plan implementation handoffs bypassing awaited direct-Bash hooks, losing busy-rejected offers, and retaining stale offers when an extension admits a new prompt, including before streaming starts.
 - Fixed opening evolution jobs persisted before reported token accounting crashing the TUI.
 - Fixed the footer showing `Harness unknown` after another process creates or selects a harness revision.
 - Fixed extension TUI method wrappers recursing indefinitely when delegating to the original method ([#7731](https://github.com/earendil-works/pi/issues/7731)).

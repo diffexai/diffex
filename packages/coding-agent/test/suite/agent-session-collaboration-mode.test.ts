@@ -8,10 +8,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	COLLABORATION_MODE_CUSTOM_TYPE,
 	getCollaborationMode,
+	isCollaborationModeBusy,
 	PLAN_MODE_SYSTEM_PROMPT,
 	resolveCollaborationMode,
 	restoreCollaborationMode,
 	setCollaborationMode,
+	subscribePromptAdmission,
 } from "../../src/core/collaboration-mode.ts";
 import type { ExtensionFactory } from "../../src/core/extensions/index.ts";
 import { SessionManager } from "../../src/core/session-manager.ts";
@@ -74,6 +76,8 @@ describe("AgentSession collaboration mode foundation", () => {
 
 		expect(publicApi).not.toHaveProperty("setCollaborationMode");
 		expect(publicApi).not.toHaveProperty("restoreCollaborationMode");
+		expect(publicApi).not.toHaveProperty("isCollaborationModeBusy");
+		expect(publicApi).not.toHaveProperty("subscribePromptAdmission");
 		expect(getCollaborationMode(harness.session)).toBe("default");
 		expect(harness.session.getActiveToolNames()).toContain("bash");
 
@@ -84,6 +88,48 @@ describe("AgentSession collaboration mode foundation", () => {
 				.getBranch()
 				.filter((entry) => entry.type === "custom" && entry.customType === COLLABORATION_MODE_CUSTOM_TYPE),
 		).toHaveLength(1);
+	});
+
+	it("notifies admission synchronously under the busy guard and supports unsubscribe", async () => {
+		const order: string[] = [];
+		const harness = await createHarness({
+			extensionFactories: [
+				(pi) => {
+					pi.on("input", () => {
+						order.push("input");
+						return { action: "handled" };
+					});
+				},
+			],
+		});
+		harnesses.push(harness);
+		const unsubscribe = subscribePromptAdmission(harness.session, () => {
+			order.push("admission");
+			expect(isCollaborationModeBusy(harness.session)).toBe(true);
+			expect(setCollaborationMode(harness.session, "plan").status).toBe("busy");
+		});
+		const prompt = harness.session.prompt("first request", { source: "extension" });
+		expect(order).toEqual(["admission"]);
+		await prompt;
+		expect(order).toEqual(["admission", "input"]);
+		expect(isCollaborationModeBusy(harness.session)).toBe(false);
+		unsubscribe();
+		await harness.session.prompt("second request", { source: "extension" });
+		expect(order).toEqual(["admission", "input", "input"]);
+	});
+
+	it("releases admission if an internal listener throws", async () => {
+		const harness = await createHarness();
+		harnesses.push(harness);
+		const unsubscribe = subscribePromptAdmission(harness.session, () => {
+			throw new Error("listener failed");
+		});
+		await expect(harness.session.prompt("request")).rejects.toThrow("listener failed");
+		expect(isCollaborationModeBusy(harness.session)).toBe(false);
+		unsubscribe();
+		harness.setResponses([fauxAssistantMessage("recovered")]);
+		await harness.session.prompt("retry");
+		expect(getAssistantTexts(harness)).toContain("recovered");
 	});
 
 	it("installs a mode only after its session entry persists", async () => {
