@@ -347,6 +347,10 @@ describe("evolution control service", () => {
 			{ memory, skills: [{ ...skill("foreign"), workspace: { ...workspace, directoryId: "elsewhere" } }] },
 			first.manifest.version,
 		);
+		const stagedMemory = await harnesses.saveVersion(
+			{ memory: "Lesson 2: Staged but not activated.\n", skills: [] },
+			initial.manifest.version,
+		);
 		const unknownMemory = await harnesses.saveVersion(
 			{ memory: "Unattributed foreign memory.", skills: [] },
 			initial.manifest.version,
@@ -390,7 +394,31 @@ describe("evolution control service", () => {
 			harnesses,
 			jobs: { list: async () => [job] },
 			artifacts: { get: getInput },
-			ledger: { read: async () => [{ type: "harness-activated", resultingHarnessVersion: first.manifest.version }] },
+			ledger: {
+				read: async () => [
+					{ type: "harness-activated", resultingHarnessVersion: first.manifest.version },
+					{
+						type: "mutation-written",
+						writeResult: {
+							status: "written",
+							output: {
+								resultingHarnessVersion: stagedMemory.manifest.version,
+								expectedBaseVersion: initial.manifest.version,
+							},
+						},
+					},
+					{
+						type: "mutation-written",
+						writeResult: {
+							status: "failed",
+							output: {
+								resultingHarnessVersion: unknownMemory.manifest.version,
+								expectedBaseVersion: initial.manifest.version,
+							},
+						},
+					},
+				],
+			},
 			skillActivationReceipts: {
 				listActivationReceipts: async () => [
 					receipt(third.manifest.version, "2026-08-20T20:38:01.000Z"),
@@ -412,6 +440,7 @@ describe("evolution control service", () => {
 				second.manifest.version,
 				third.manifest.version,
 				updated.manifest.version,
+				stagedMemory.manifest.version,
 			]),
 		);
 		expect(
@@ -430,6 +459,12 @@ describe("evolution control service", () => {
 			origin: "memory",
 		});
 		expect(info.get(second.manifest.version)).toMatchObject({ kind: "evolved", evolvedAt: null });
+		expect(info.get(stagedMemory.manifest.version)).toEqual({
+			version: stagedMemory.manifest.version,
+			kind: "evolved",
+			evolvedAt: null,
+			evolvedIn: null,
+		});
 		expect(info.get(third.manifest.version)).toMatchObject({
 			evolvedAt: "2026-08-20T20:38:01.000Z",
 			origin: "skill",
@@ -442,6 +477,14 @@ describe("evolution control service", () => {
 			false,
 		);
 		expect(await readFile(manifestPath, "utf8")).toBe(manifestBefore);
+
+		// Merely observing a foreign base in a local job is not workspace ownership.
+		getInput.mockResolvedValue({ ...input, expectedHarnessBaseVersion: unknownMemory.manifest.version });
+		expect(
+			(await service.listCurrentDirectoryHarnessVersions()).versions.some(
+				(bundle) => bundle.manifest.version === unknownMemory.manifest.version,
+			),
+		).toBe(false);
 
 		getInput.mockRejectedValue(new Error("Historical input unavailable"));
 		const withoutInput = await service.listCurrentDirectoryHarnessVersions();

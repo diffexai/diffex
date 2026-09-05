@@ -788,9 +788,21 @@ export class EvolutionControlService {
 					? null
 					: input.repository.repositoryId === this.#dependencies.scope.repositoryId &&
 						(await this.#repositoryMatchesCurrentDirectory(input.repository));
-			// Frozen local inputs also establish memory provenance when a display receipt is missing.
-			if (matches && input !== null) localMemory.add(input.expectedHarnessBaseVersion);
 			for (const activation of events) {
+				if (activation.type === "mutation-written" && activation.writeResult.status === "written") {
+					const output = activation.writeResult.output;
+					const version = output?.resultingHarnessVersion;
+					if (
+						typeof version === "string" &&
+						output?.expectedBaseVersion === input?.expectedHarnessBaseVersion &&
+						bundles.get(version)?.manifest.base === output?.expectedBaseVersion
+					) {
+						// A successfully staged bundle can be selected before activation. Do not
+						// invent an activation timestamp or conflate writing with activation.
+						if (matches === true) localMemory.add(version);
+						if (matches === false) foreignMemory.add(version);
+					}
+				}
 				if (activation.type !== "harness-activated") continue;
 				if (matches === true) localMemory.add(activation.resultingHarnessVersion);
 				if (matches === false) foreignMemory.add(activation.resultingHarnessVersion);
