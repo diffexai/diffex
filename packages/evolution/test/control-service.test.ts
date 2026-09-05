@@ -1,7 +1,12 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { HarnessStateStore, type HarnessVersion, type HarnessVersionList } from "@earendil-works/diffex-harness-state";
+import {
+	HarnessStateStore,
+	type HarnessVersion,
+	type HarnessVersionList,
+	harnessVersionDirectoryName,
+} from "@earendil-works/diffex-harness-state";
 import type { MaterializedEvidence, MaterializedInvocation } from "@earendil-works/diffex-harness-trace";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -22,6 +27,7 @@ import {
 	type EvolutionSnapshotContext,
 	type EvolutionStageExecutor,
 	FileEvolutionPersistence,
+	type HarnessActivationReceipt,
 	PollingEvolutionWorkSource,
 	type SkillCandidate,
 	type SkillCandidateGroup,
@@ -240,6 +246,7 @@ describe("evolution control service", () => {
 				updatedAt: `2026-08-2${index + 1}T12:00:00.000Z`,
 				terminalAt: `2026-08-2${index + 1}T12:00:00.000Z`,
 				resultingHarnessVersion: version,
+				checkpoints: [],
 			} as unknown as EvolutionJob & { readonly resultingHarnessVersion: HarnessVersion };
 		});
 		const repositories = [
@@ -261,7 +268,7 @@ describe("evolution control service", () => {
 		const versionList = {
 			versions: versions.map(({ version, base }) => ({
 				manifest: { version, base },
-				state: { memory: "" },
+				state: { memory: "", skills: [] },
 			})),
 			diagnostics: [],
 			currentVersion: rootVersion,
@@ -299,8 +306,8 @@ describe("evolution control service", () => {
 
 		expect((await service.listCurrentDirectoryHarnessVersionInfo()).map((info) => info.version)).toEqual([
 			rootVersion,
-			legacyVersion,
 			renamedDirectoryVersion,
+			legacyVersion,
 		]);
 		expect((await service.listHarnessVersionInfo()).map((info) => info.version)).toEqual([
 			rootVersion,
@@ -309,6 +316,143 @@ describe("evolution control service", () => {
 			legacyVersion,
 		]);
 		expect(containsRevision).toHaveBeenCalledWith("c".repeat(40));
+	});
+
+	it("lists validated skill descendants without display metadata and excludes corrupt and foreign bundles", async () => {
+		const root = await mkdtemp(join(tmpdir(), "diffex-version-catalog-"));
+		temporaryDirectories.push(root);
+		const harnesses = new HarnessStateStore(root);
+		const initial = await harnesses.initialize();
+		const workspace = { repositoryId: scope.repositoryId, directoryId: "directory-1" };
+		const skill = (name: string, content = "Run focused checks.") => ({
+			path: `skills/${name}/SKILL.md`,
+			content: `---\nname: ${name}\ndescription: Verify ${name}.\n---\n${content}\n`,
+			workspace,
+		});
+		const memory = "Lesson 1: Verify the exact revision.\n";
+		const first = await harnesses.saveVersion({ memory, skills: [skill("one")] }, initial.manifest.version);
+		const second = await harnesses.saveVersion(
+			{ memory, skills: [skill("one"), skill("two")] },
+			first.manifest.version,
+		);
+		const third = await harnesses.saveVersion(
+			{ memory, skills: [skill("one"), skill("two"), skill("three")] },
+			second.manifest.version,
+		);
+		const updated = await harnesses.saveVersion(
+			{ memory, skills: [skill("one", "Updated checks."), skill("two"), skill("three")] },
+			third.manifest.version,
+		);
+		const foreign = await harnesses.saveVersion(
+			{ memory, skills: [{ ...skill("foreign"), workspace: { ...workspace, directoryId: "elsewhere" } }] },
+			first.manifest.version,
+		);
+		const unknownMemory = await harnesses.saveVersion(
+			{ memory: "Unattributed foreign memory.", skills: [] },
+			initial.manifest.version,
+		);
+		const corrupt = await harnesses.saveVersion({ memory, skills: [skill("broken")] }, first.manifest.version);
+		await writeFile(
+			join(root, "harness-state", "versions", harnessVersionDirectoryName(corrupt.manifest.version), "EVOLVE.md"),
+			"corrupt",
+		);
+		await harnesses.selectVersion(first.manifest.version);
+		const manifestPath = join(
+			root,
+			"harness-state",
+			"versions",
+			harnessVersionDirectoryName(third.manifest.version),
+			"manifest.json",
+		);
+		const manifestBefore = await readFile(manifestPath, "utf8");
+		const input = {
+			ingestionHighWaterCursor: 0,
+			evidenceSources: [],
+			harness: {},
+			expectedHarnessBaseVersion: initial.manifest.version,
+			repository: { ...workspace, rootPath: "/repo", revision: "abc" },
+		} as unknown as EvolutionInputSnapshot;
+		const job = {
+			jobId: "memory-job",
+			inputSnapshot: { artifactId: "input", contentDigest: "digest" },
+			terminalAt: "2026-08-20T20:35:00.000Z",
+			updatedAt: "2026-08-20T20:35:00.000Z",
+			checkpoints: [{ stage: "activating", completedAt: "2026-08-20T20:33:00.000Z" }],
+		} as unknown as EvolutionJob;
+		const receipt = (version: string, createdAt: string): HarnessActivationReceipt =>
+			({
+				metadata: { scope, createdAt },
+				result: { status: "activated", resultingHarnessVersion: version },
+			}) as HarnessActivationReceipt;
+		const getInput = vi.fn(async () => input);
+		const service = new EvolutionControlService({
+			scope,
+			harnesses,
+			jobs: { list: async () => [job] },
+			artifacts: { get: getInput },
+			ledger: { read: async () => [{ type: "harness-activated", resultingHarnessVersion: first.manifest.version }] },
+			skillActivationReceipts: {
+				listActivationReceipts: async () => [
+					receipt(third.manifest.version, "2026-08-20T20:38:01.000Z"),
+					receipt(updated.manifest.version, "2026-08-20T20:39:00.000Z"),
+					receipt(corrupt.manifest.version, "2026-08-20T20:40:00.000Z"),
+				],
+			},
+			currentDirectory: {
+				directoryId: workspace.directoryId,
+				rootPath: "/repo",
+				containsRevision: async () => false,
+			},
+		} as unknown as EvolutionControlServiceDependencies);
+		const listing = await service.listCurrentDirectoryHarnessVersions();
+		expect(new Set(listing.versions.map((bundle) => bundle.manifest.version))).toEqual(
+			new Set([
+				initial.manifest.version,
+				first.manifest.version,
+				second.manifest.version,
+				third.manifest.version,
+				updated.manifest.version,
+			]),
+		);
+		expect(
+			listing.versions.some((bundle) =>
+				[foreign.manifest.version, unknownMemory.manifest.version, corrupt.manifest.version].includes(
+					bundle.manifest.version,
+				),
+			),
+		).toBe(false);
+		expect(listing.diagnostics).toContainEqual(expect.objectContaining({ version: corrupt.manifest.version }));
+		const info = new Map(
+			(await service.listCurrentDirectoryHarnessVersionInfo()).map((entry) => [entry.version, entry]),
+		);
+		expect(info.get(first.manifest.version)).toMatchObject({
+			evolvedAt: "2026-08-20T20:33:00.000Z",
+			origin: "memory",
+		});
+		expect(info.get(second.manifest.version)).toMatchObject({ kind: "evolved", evolvedAt: null });
+		expect(info.get(third.manifest.version)).toMatchObject({
+			evolvedAt: "2026-08-20T20:38:01.000Z",
+			origin: "skill",
+		});
+		expect(info.get(updated.manifest.version)).toMatchObject({
+			evolvedAt: "2026-08-20T20:39:00.000Z",
+			origin: "skill",
+		});
+		expect((await service.listHarnessVersionInfo()).some((entry) => entry.version === corrupt.manifest.version)).toBe(
+			false,
+		);
+		expect(await readFile(manifestPath, "utf8")).toBe(manifestBefore);
+
+		getInput.mockRejectedValue(new Error("Historical input unavailable"));
+		const withoutInput = await service.listCurrentDirectoryHarnessVersions();
+		expect(withoutInput.versions.map((bundle) => bundle.manifest.version)).toEqual(
+			expect.arrayContaining([third.manifest.version, updated.manifest.version]),
+		);
+		expect(
+			(await service.listCurrentDirectoryHarnessVersionInfo()).find(
+				(entry) => entry.version === third.manifest.version,
+			),
+		).toMatchObject({ origin: "skill" });
 	});
 
 	it("uses only eligible materializations for totals and frozen input", async () => {

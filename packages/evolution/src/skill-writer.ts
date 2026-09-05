@@ -1,4 +1,5 @@
-import { link, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import type { Dirent } from "node:fs";
+import { link, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import {
 	computeHarnessSkillId,
@@ -33,6 +34,7 @@ import type {
 	SkillMutationWriteOutput,
 	SkillPackageFile,
 } from "./contracts.ts";
+import { EVOLUTION_SCHEMA_VERSION } from "./contracts.ts";
 import { EvolutionExecutionError } from "./errors.ts";
 import type {
 	EvolutionArtifact,
@@ -113,6 +115,14 @@ export interface SkillWriterDependencies {
 
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isNonEmptyString(value: unknown): value is string {
+	return typeof value === "string" && value.trim() !== "";
+}
+
+function isDigest(value: unknown): value is string {
+	return typeof value === "string" && /^sha256:[a-f0-9]{64}$/.test(value);
 }
 
 function contentWithoutMetadata<T extends { readonly metadata: unknown }>(value: T): Omit<T, "metadata"> {
@@ -378,24 +388,80 @@ export class SkillWriter {
 			!isRecord(parsed) ||
 			parsed.schemaVersion !== ACTIVATION_SCHEMA_VERSION ||
 			parsed.batchId !== batchId ||
-			typeof parsed.batchHash !== "string" ||
-			typeof parsed.writeReceiptDigest !== "string" ||
-			typeof parsed.activationIdempotencyKey !== "string" ||
+			!isDigest(parsed.batchHash) ||
+			!isDigest(parsed.writeReceiptDigest) ||
+			!isNonEmptyString(parsed.activationIdempotencyKey) ||
 			!isRecord(parsed.receipt)
 		) {
 			throw new Error(`Skill writer activation for "${batchId}" is invalid`);
 		}
-		const activation = parsed as unknown as StoredSkillWriterActivation;
+		const { receipt } = parsed;
+		const { metadata, result } = receipt;
 		if (
-			activation.receipt.batchId !== batchId ||
-			activation.receipt.idempotencyKey !== activation.activationIdempotencyKey ||
-			activation.receipt.result.batchId !== batchId ||
-			activation.receipt.result.status !== "activated" ||
-			activation.receipt.metadata.contentDigest !== computeEvolutionContentDigest(receiptContent(activation.receipt))
+			receipt.batchId !== batchId ||
+			receipt.idempotencyKey !== parsed.activationIdempotencyKey ||
+			!isRecord(result) ||
+			result.batchId !== batchId ||
+			result.status !== "activated" ||
+			!isDigest(result.resultingHarnessVersion) ||
+			(result.message !== null && typeof result.message !== "string") ||
+			!isRecord(metadata) ||
+			metadata.schemaVersion !== EVOLUTION_SCHEMA_VERSION ||
+			metadata.artifactId !==
+				stableId("skill-activation-receipt", { batchId, idempotencyKey: receipt.idempotencyKey }) ||
+			!isRecord(metadata.scope) ||
+			!isNonEmptyString(metadata.scope.repositoryId) ||
+			!isNonEmptyString(metadata.scope.scopeId) ||
+			typeof metadata.createdAt !== "string" ||
+			!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(metadata.createdAt) ||
+			!Number.isFinite(Date.parse(metadata.createdAt)) ||
+			!Array.isArray(metadata.sourceIds) ||
+			!metadata.sourceIds.every(isNonEmptyString) ||
+			!metadata.sourceIds.includes(batchId) ||
+			!isRecord(metadata.producer) ||
+			metadata.producer.name !== "diffex-evolution-skill-writer" ||
+			!isNonEmptyString(metadata.producer.version) ||
+			metadata.producer.promptVersion !== null ||
+			metadata.producer.model !== null
 		) {
 			throw new Error(`Skill writer activation for "${batchId}" has an invalid receipt`);
 		}
+		const activation = parsed as unknown as StoredSkillWriterActivation;
+		if (metadata.contentDigest !== computeEvolutionContentDigest(receiptContent(activation.receipt))) {
+			throw new Error(`Skill writer activation for "${batchId}" has an invalid receipt digest`);
+		}
 		return activation;
+	}
+
+	/** Lists persisted activations oldest first, with batch IDs breaking timestamp ties. Does not select a bundle. */
+	async listActivationReceipts(scope: EvolutionScope): Promise<readonly HarnessActivationReceipt[]> {
+		let entries: Dirent[];
+		try {
+			entries = await readdir(this.#activationPath, { withFileTypes: true });
+		} catch (error) {
+			if (error instanceof Error && "code" in error && error.code === "ENOENT") return [];
+			throw error;
+		}
+		const receipts: HarnessActivationReceipt[] = [];
+		for (const entry of entries) {
+			if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
+			try {
+				const activation = await this.#loadActivation(entry.name.slice(0, -".json".length));
+				if (
+					activation !== null &&
+					activation.receipt.metadata.scope.repositoryId === scope.repositoryId &&
+					activation.receipt.metadata.scope.scopeId === scope.scopeId
+				) {
+					receipts.push(activation.receipt);
+				}
+			} catch {
+				// A corrupt or unreadable immutable record must not hide other activations.
+			}
+		}
+		return receipts.sort((left, right) => {
+			const timeDifference = Date.parse(left.metadata.createdAt) - Date.parse(right.metadata.createdAt);
+			return timeDifference || (left.batchId < right.batchId ? -1 : left.batchId > right.batchId ? 1 : 0);
+		});
 	}
 
 	async #acceptedSource(scope: EvolutionScope, groupId: string): Promise<AcceptedSkillMutationSource> {

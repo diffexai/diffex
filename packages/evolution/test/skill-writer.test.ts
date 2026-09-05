@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -26,6 +26,7 @@ import {
 	type SkillDraftValidationReport,
 	type SkillEvaluationReport,
 	SkillWriter,
+	type SkillWriterDependencies,
 } from "../src/index.ts";
 import { synthesisRequestFixture } from "./synthesis-request-fixture.ts";
 
@@ -376,7 +377,7 @@ async function writerFixture(options: WriterFixtureOptions) {
 	const persistence = new FileEvolutionPersistence(join(root, "evolution"));
 	const lease = await persistence.acquire("writer", "global", "writer-1", new Date().toISOString(), 60_000);
 	if (lease === null) throw new Error("Expected writer lease");
-	const writer = new SkillWriter({
+	const dependencies: SkillWriterDependencies = {
 		version: "writer-1",
 		workspace,
 		harnessState,
@@ -385,8 +386,9 @@ async function writerFixture(options: WriterFixtureOptions) {
 		leases: persistence,
 		clock: { now: () => now },
 		statePath: join(root, "writer-state"),
-	});
-	return { base, draft, group, groups, harnessState, lease, persistence, root, writer };
+	};
+	const writer = new SkillWriter(dependencies);
+	return { base, dependencies, draft, group, groups, harnessState, lease, persistence, root, writer };
 }
 
 describe("skill writer", () => {
@@ -446,6 +448,134 @@ describe("skill writer", () => {
 		expect(current.manifest.base).toBe(data.base.manifest.version);
 		expect(current.state.memory).toBe(data.base.state.memory);
 		expect(current.state.skills.map((skill) => skill.name).sort()).toEqual([...testCase.expectedNames].sort());
+
+		const activationPath = join(data.root, "writer-state", "activations", `${batch.batchId}.json`);
+		const persisted = await readFile(activationPath, "utf8");
+		const freshWriter = new SkillWriter(data.dependencies);
+		expect(await freshWriter.listActivationReceipts(scope)).toEqual([activation]);
+		expect(await freshWriter.listActivationReceipts({ ...scope, repositoryId: "foreign" })).toEqual([]);
+		expect(await freshWriter.listActivationReceipts({ ...scope, scopeId: "foreign" })).toEqual([]);
+		expect(await readFile(activationPath, "utf8")).toBe(persisted);
+		expect(await data.harnessState.loadCurrent()).toEqual(current);
+	});
+
+	it("lists missing activation directories without creating writer state", async () => {
+		const data = await writerFixture({ operation: "CREATE", proposedName: "created-skill" });
+		expect(await data.writer.listActivationReceipts(scope)).toEqual([]);
+		await expect(readdir(data.dependencies.statePath)).rejects.toMatchObject({ code: "ENOENT" });
+		expect(await data.harnessState.loadCurrent()).toEqual(data.base);
+	});
+
+	it("skips individual corrupt and foreign receipts without rewriting immutable records", async () => {
+		const data = await writerFixture({ operation: "CREATE", proposedName: "created-skill" });
+		const activation = await data.writer.activateAcceptedGroup(
+			{ scope, groupId: data.group.groupId, createdAt: now },
+			{ idempotencyKey: "activate-1", lease: data.lease },
+		);
+		if (activation === null) throw new Error("Expected activation");
+		const activationDirectory = join(data.dependencies.statePath, "activations");
+		const persisted = await readFile(join(activationDirectory, `${activation.batchId}.json`), "utf8");
+		const record: Record<string, unknown> = JSON.parse(persisted);
+		const other = await writerFixture({
+			operation: "UPDATE",
+			existingNames: ["old-skill"],
+			proposedName: "updated-skill",
+		});
+		const otherActivation = await other.writer.activateAcceptedGroup(
+			{ scope, groupId: other.group.groupId, createdAt: now },
+			{ idempotencyKey: "activate-2", lease: other.lease },
+		);
+		if (otherActivation === null) throw new Error("Expected another activation");
+		const otherPersisted = await readFile(
+			join(other.dependencies.statePath, "activations", `${otherActivation.batchId}.json`),
+			"utf8",
+		);
+		const malformed: readonly Readonly<Record<string, unknown>>[] = [
+			{ result: null },
+			{ result: [] },
+			{ result: { ...activation.result, status: "failed" } },
+			{ result: { ...activation.result, resultingHarnessVersion: null } },
+			{ result: { ...activation.result, resultingHarnessVersion: "not-a-version" } },
+			{ result: { ...activation.result, message: {} } },
+			{ metadata: null },
+			{ metadata: { ...activation.metadata, scope: null } },
+			{ metadata: { ...activation.metadata, scope: { repositoryId: 1, scopeId: "repository" } } },
+			{ metadata: { ...activation.metadata, scope: { repositoryId: "diffex", scopeId: [] } } },
+			{ metadata: { ...activation.metadata, createdAt: 0 } },
+			{ metadata: { ...activation.metadata, createdAt: "not-a-time" } },
+			{ metadata: { ...activation.metadata, createdAt: "2026-99-29T12:00:00.000Z" } },
+			{ metadata: { ...activation.metadata, createdAt: "0" } },
+			{ metadata: { ...activation.metadata, contentDigest: `sha256:${"0".repeat(64)}` } },
+			{ metadata: { ...activation.metadata, schemaVersion: 99 } },
+			{ metadata: { ...activation.metadata, artifactId: {} } },
+			{ metadata: { ...activation.metadata, sourceIds: [null] } },
+			{ metadata: { ...activation.metadata, producer: null } },
+			{ metadata: { ...activation.metadata, producer: { ...activation.metadata.producer, version: 1 } } },
+			{ metadata: { ...activation.metadata, scope: { ...scope, repositoryId: "foreign" } } },
+			{ metadata: { ...activation.metadata, scope: { ...scope, scopeId: "foreign" } } },
+		];
+		for (const [index, changes] of malformed.entries()) {
+			// Preserve a valid content digest so malformed result shapes cannot hide behind a digest mismatch.
+			const content = {
+				batchId: activation.batchId,
+				idempotencyKey: activation.idempotencyKey,
+				result: "result" in changes ? changes.result : activation.result,
+			};
+			const receipt = {
+				...content,
+				metadata: { ...activation.metadata, contentDigest: computeEvolutionContentDigest(content) },
+				...changes,
+			};
+			const badDirectory = join(data.root, `malformed-${index}`, "activations");
+			await mkdir(badDirectory, { recursive: true });
+			// The valid record must remain visible alongside an independently invalid record.
+			await writeFile(join(badDirectory, `${activation.batchId}.json`), JSON.stringify({ ...record, receipt }));
+			await writeFile(join(badDirectory, `${otherActivation.batchId}.json`), otherPersisted);
+			const badWriter = new SkillWriter({ ...data.dependencies, statePath: join(data.root, `malformed-${index}`) });
+			expect(await badWriter.listActivationReceipts(scope), `malformed receipt ${index}`).toEqual([otherActivation]);
+		}
+		await writeFile(join(activationDirectory, "corrupt.json"), "{broken");
+		await writeFile(join(activationDirectory, "wrong-batch.json"), persisted);
+		await writeFile(join(activationDirectory, "bad name.json"), persisted);
+		await writeFile(join(activationDirectory, "unrelated.txt"), persisted);
+		await mkdir(join(activationDirectory, "directory.json"));
+		await symlink(join(activationDirectory, `${activation.batchId}.json`), join(activationDirectory, "link.json"));
+		const freshWriter = new SkillWriter(data.dependencies);
+		expect(await freshWriter.listActivationReceipts(scope)).toEqual([activation]);
+		expect(await readFile(join(activationDirectory, `${activation.batchId}.json`), "utf8")).toBe(persisted);
+		expect(await readFile(join(activationDirectory, "corrupt.json"), "utf8")).toBe("{broken");
+	});
+
+	it("sorts persisted activations by time and then batch ID", async () => {
+		const destination = await writerFixture({ operation: "CREATE", proposedName: "destination" });
+		const activationDirectory = join(destination.dependencies.statePath, "activations");
+		await mkdir(activationDirectory, { recursive: true });
+		const activations = [];
+		for (const [index, createdAt] of ["2026-08-30T12:00:00.000Z", now, now].entries()) {
+			const data = await writerFixture({ operation: "CREATE", proposedName: `skill-${index}` });
+			const writer = new SkillWriter({ ...data.dependencies, clock: { now: () => createdAt } });
+			const activation = await writer.activateAcceptedGroup(
+				{ scope, groupId: data.group.groupId, createdAt },
+				{ idempotencyKey: `activate-${index}`, lease: data.lease },
+			);
+			if (activation === null) throw new Error("Expected activation");
+			activations.push(activation);
+			await writeFile(
+				join(activationDirectory, `${activation.batchId}.json`),
+				await readFile(join(data.dependencies.statePath, "activations", `${activation.batchId}.json`)),
+			);
+		}
+		const freshWriter = new SkillWriter(destination.dependencies);
+		const receipts = await freshWriter.listActivationReceipts(scope);
+		expect(receipts.map((receipt) => receipt.batchId)).toEqual([
+			...activations
+				.slice(1)
+				.map((receipt) => receipt.batchId)
+				.sort(),
+			activations[0]?.batchId,
+		]);
+		expect(await freshWriter.listActivationReceipts(scope)).toEqual(receipts);
+		expect(await destination.harnessState.loadCurrent()).toEqual(destination.base);
 	});
 
 	it("stages and activates a deterministically validated mutation when evaluation is skipped", async () => {

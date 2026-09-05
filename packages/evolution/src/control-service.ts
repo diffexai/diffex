@@ -105,6 +105,7 @@ export interface EvolutionHarnessVersionInfo {
 	readonly kind: "default" | "evolved";
 	readonly evolvedAt: string | null;
 	readonly evolvedIn: string | null;
+	readonly origin?: "memory" | "skill";
 }
 
 export interface EvolutionRollbackAction {
@@ -267,6 +268,9 @@ export interface EvolutionControlServiceDependencies {
 	readonly skillCandidates?: SkillCandidateRegistry;
 	readonly skillCandidateRegistryStore?: SkillCandidateRegistryStore;
 	readonly skillActivation?: EvolutionSkillActivationControl;
+	readonly skillActivationReceipts?: {
+		listActivationReceipts(scope: EvolutionScope): Promise<readonly HarnessActivationReceipt[]>;
+	};
 	readonly observedHarnessVersion: () => HarnessVersion | undefined;
 	readonly currentDirectory: {
 		readonly directoryId: string;
@@ -732,62 +736,133 @@ export class EvolutionControlService {
 		return this.#dependencies.currentDirectory.containsRevision(repository.revision);
 	}
 
-	async #listHarnessVersionInfo(currentDirectoryOnly: boolean): Promise<readonly EvolutionHarnessVersionInfo[]> {
-		const [versions, jobs] = await Promise.all([
+	async #harnessVersionCatalog(): Promise<{
+		readonly listing: HarnessVersionList;
+		readonly info: readonly EvolutionHarnessVersionInfo[];
+		readonly compatible: ReadonlySet<HarnessVersion>;
+	}> {
+		const [listing, jobs, skillReceipts] = await Promise.all([
 			this.#dependencies.harnesses.listVersions(),
 			this.#dependencies.jobs.list(this.#dependencies.scope),
+			this.#dependencies.skillActivationReceipts?.listActivationReceipts(this.#dependencies.scope) ??
+				Promise.resolve([]),
 		]);
+		const bundles = new Map(listing.versions.map((bundle) => [bundle.manifest.version, bundle]));
 		const info = new Map<HarnessVersion, EvolutionHarnessVersionInfo>(
-			versions.versions
-				.filter((bundle) => !currentDirectoryOnly || bundle.manifest.base === null)
-				.map((bundle) => [
-					bundle.manifest.version,
-					{
-						version: bundle.manifest.version,
-						kind: bundle.manifest.base === null ? "default" : "evolved",
-						evolvedAt: null,
-						evolvedIn: null,
-					},
-				]),
+			listing.versions.map((bundle) => [
+				bundle.manifest.version,
+				{
+					version: bundle.manifest.version,
+					kind: bundle.manifest.base === null ? "default" : "evolved",
+					evolvedAt: null,
+					evolvedIn: null,
+				},
+			]),
 		);
-		const activations = await Promise.all(
-			jobs.map(async (job) => ({
-				job,
-				activation: await this.#dependencies.ledger.read(job.jobId).then(harnessActivation),
-			})),
-		);
-		activations.sort(
-			(left, right) =>
-				(right.job.terminalAt ?? right.job.updatedAt).localeCompare(left.job.terminalAt ?? left.job.updatedAt) ||
-				right.job.jobId.localeCompare(left.job.jobId),
-		);
-
-		for (const { job, activation } of activations) {
-			if (activation === null) continue;
-			const existing = info.get(activation.resultingHarnessVersion);
-			if (!currentDirectoryOnly && existing !== undefined && existing.evolvedAt !== null) continue;
-			const inputArtifact = await this.#dependencies.artifacts.get(job.inputSnapshot).catch(() => null);
+		const localMemory = new Set<HarnessVersion>();
+		const foreignMemory = new Set<HarnessVersion>();
+		const record = (
+			version: HarnessVersion,
+			timestamp: string | null,
+			origin: "memory" | "skill",
+			root: string | null,
+		) => {
+			const existing = info.get(version);
+			if (existing === undefined) return; // Receipts never introduce invalid or missing bundles.
+			const evolvedAt = timestamp !== null && Number.isFinite(Date.parse(timestamp)) ? timestamp : null;
+			if (
+				existing.evolvedAt !== null &&
+				(evolvedAt === null || Date.parse(existing.evolvedAt) >= Date.parse(evolvedAt))
+			)
+				return;
+			info.set(version, { ...existing, evolvedAt, evolvedIn: root, origin });
+		};
+		for (const job of [...jobs].sort((left, right) => left.jobId.localeCompare(right.jobId))) {
+			const [inputArtifact, events] = await Promise.all([
+				this.#dependencies.artifacts.get(job.inputSnapshot).catch(() => null),
+				this.#dependencies.ledger.read(job.jobId).catch(() => []),
+			]);
 			const input = inputArtifact !== null && isInputSnapshot(inputArtifact) ? inputArtifact : null;
-			if (input === null) continue;
-			if (currentDirectoryOnly && !(await this.#repositoryMatchesCurrentDirectory(input.repository))) continue;
-			if (existing !== undefined && existing.evolvedAt !== null) continue;
-			info.set(activation.resultingHarnessVersion, {
-				version: activation.resultingHarnessVersion,
-				kind: "evolved",
-				evolvedAt: job.terminalAt ?? job.updatedAt,
-				evolvedIn: input.repository.rootPath,
-			});
+			const matches =
+				input === null
+					? null
+					: input.repository.repositoryId === this.#dependencies.scope.repositoryId &&
+						(await this.#repositoryMatchesCurrentDirectory(input.repository));
+			// Frozen local inputs also establish memory provenance when a display receipt is missing.
+			if (matches && input !== null) localMemory.add(input.expectedHarnessBaseVersion);
+			for (const activation of events) {
+				if (activation.type !== "harness-activated") continue;
+				if (matches === true) localMemory.add(activation.resultingHarnessVersion);
+				if (matches === false) foreignMemory.add(activation.resultingHarnessVersion);
+				// Historical memory receipt metadata uses the frozen input time. The activation
+				// checkpoint records the actual stage completion, unlike the later job completion.
+				const activatedAt =
+					job.checkpoints.find((checkpoint) => checkpoint.stage === "activating")?.completedAt ??
+					job.terminalAt ??
+					job.updatedAt;
+				record(activation.resultingHarnessVersion, activatedAt, "memory", input?.repository.rootPath ?? null);
+			}
 		}
-
-		return [...info.values()];
+		for (const receipt of skillReceipts) {
+			if (
+				receipt.metadata.scope.repositoryId !== this.#dependencies.scope.repositoryId ||
+				receipt.metadata.scope.scopeId !== this.#dependencies.scope.scopeId ||
+				receipt.result.status !== "activated" ||
+				receipt.result.resultingHarnessVersion === null
+			)
+				continue;
+			// A validated, scoped activation receipt establishes provenance even if an
+			// ancestor or its descriptive job artifacts are no longer available.
+			localMemory.add(receipt.result.resultingHarnessVersion);
+			record(
+				receipt.result.resultingHarnessVersion,
+				receipt.metadata.createdAt,
+				"skill",
+				this.#dependencies.currentDirectory.rootPath,
+			);
+		}
+		const compatible = new Set<HarnessVersion>();
+		const rejected = new Set<HarnessVersion>();
+		const visiting = new Set<HarnessVersion>();
+		const isCompatible = (version: HarnessVersion): boolean => {
+			if (compatible.has(version)) return true;
+			if (rejected.has(version) || visiting.has(version)) return false;
+			const bundle = bundles.get(version);
+			if (bundle === undefined) return false;
+			visiting.add(version);
+			const skillsMatch = bundle.state.skills.every(
+				(skill) =>
+					skill.workspace.repositoryId === this.#dependencies.scope.repositoryId &&
+					skill.workspace.directoryId === this.#dependencies.currentDirectory.directoryId,
+			);
+			const parent = bundle.manifest.base === null ? undefined : bundles.get(bundle.manifest.base);
+			const memoryMatches =
+				!foreignMemory.has(version) &&
+				(localMemory.has(version) ||
+					(bundle.manifest.base === null && bundle.state.memory === "") ||
+					(parent !== undefined &&
+						parent.state.memory === bundle.state.memory &&
+						isCompatible(parent.manifest.version)));
+			visiting.delete(version);
+			(skillsMatch && memoryMatches ? compatible : rejected).add(version);
+			return skillsMatch && memoryMatches;
+		};
+		for (const version of bundles.keys()) isCompatible(version);
+		return { listing, info: [...info.values()], compatible };
 	}
 
-	listHarnessVersionInfo(): Promise<readonly EvolutionHarnessVersionInfo[]> {
-		return this.#listHarnessVersionInfo(false);
+	async listHarnessVersionInfo(): Promise<readonly EvolutionHarnessVersionInfo[]> {
+		return (await this.#harnessVersionCatalog()).info;
 	}
 
-	listCurrentDirectoryHarnessVersionInfo(): Promise<readonly EvolutionHarnessVersionInfo[]> {
-		return this.#listHarnessVersionInfo(true);
+	async listCurrentDirectoryHarnessVersionInfo(): Promise<readonly EvolutionHarnessVersionInfo[]> {
+		const catalog = await this.#harnessVersionCatalog();
+		return catalog.info.filter((info) => catalog.compatible.has(info.version));
+	}
+
+	async listCurrentDirectoryHarnessVersions(): Promise<HarnessVersionList> {
+		const { listing, compatible } = await this.#harnessVersionCatalog();
+		return { ...listing, versions: listing.versions.filter((bundle) => compatible.has(bundle.manifest.version)) };
 	}
 
 	async #start(trigger: "automatic" | "manual"): Promise<EvolutionStartResult> {

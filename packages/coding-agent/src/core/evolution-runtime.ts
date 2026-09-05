@@ -1100,6 +1100,7 @@ export async function createCodingAgentEvolutionRuntime(
 		progress,
 		skillCandidates: candidateRegistry,
 		skillCandidateRegistryStore: persistence,
+		skillActivationReceipts: skillWriter,
 		skillActivation: {
 			async activate(activationScope, groupId) {
 				const lease = await persistence.acquire(
@@ -1255,6 +1256,10 @@ export class EvolutionRuntimeCoordinator implements AgentSessionLifecycleObserve
 
 	listCurrentDirectoryHarnessVersionInfo(): Promise<readonly EvolutionHarnessVersionInfo[]> {
 		return this.#control().listCurrentDirectoryHarnessVersionInfo();
+	}
+
+	listCurrentDirectoryHarnessVersions() {
+		return this.#control().listCurrentDirectoryHarnessVersions();
 	}
 
 	jobDetail(jobId: string): Promise<EvolutionJobDetail> {
