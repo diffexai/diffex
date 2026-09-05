@@ -1299,10 +1299,11 @@ describe("automatic evolution policy", () => {
 		).toEqual({ eligible: false, reason: "insufficient-invocations" });
 	});
 
-	it("enforces the cooldown until the full interval has elapsed", () => {
+	it("enforces a ten-minute cooldown, becoming eligible exactly at ten minutes", () => {
 		const previous = "2026-08-19T12:00:00.000Z";
-		const beforeCooldown = new Date(Date.parse(previous) + AUTOMATIC_EVOLUTION_COOLDOWN_MS - 1).toISOString();
-		const atCooldown = new Date(Date.parse(previous) + AUTOMATIC_EVOLUTION_COOLDOWN_MS).toISOString();
+		const beforeCooldown = "2026-08-19T12:09:59.999Z";
+		const atCooldown = "2026-08-19T12:10:00.000Z";
+		expect(AUTOMATIC_EVOLUTION_COOLDOWN_MS).toBe(600_000);
 		const input = {
 			invocationCount: 3,
 			tokens: AUTOMATIC_EVOLUTION_TOKEN_THRESHOLD + 1,

@@ -5,7 +5,7 @@ export const EVOLUTION_TOKEN_ESTIMATOR_VERSION = "canonical-json-utf8-v1" as con
 export const EVOLUTION_TOKEN_COUNTER_VERSION = "reported-assistant-usage-v1" as const;
 export const AUTOMATIC_EVOLUTION_TOKEN_THRESHOLD = 400_000;
 export const AUTOMATIC_EVOLUTION_MINIMUM_INVOCATIONS = 3;
-export const AUTOMATIC_EVOLUTION_COOLDOWN_MS = 20 * 60 * 1_000;
+export const AUTOMATIC_EVOLUTION_COOLDOWN_MS = 10 * 60 * 1_000;
 
 const CHARACTERS_PER_ESTIMATED_TOKEN = 4;
 

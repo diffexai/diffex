@@ -32,7 +32,7 @@ When evolution is enabled, automatic work considers only invocation evidence acc
 - at least 400,000 reported input and output tokens from unprocessed assistant messages;
 - at least three eligible settled invocations;
 - no blocking job;
-- a 20-minute cooldown after the previous automatic run.
+- a 10-minute cooldown after the previous automatic run.
 
 Each automatic run freezes the oldest unprocessed invocation evidence up to the same 400,000-token trigger threshold, including the complete invocation that reaches or crosses it. This can exceed 400,000 tokens only to preserve that invocation boundary, including when a single invocation exceeds the threshold. Later invocations remain unprocessed. A larger backlog is processed in successive threshold-sized batches after each cooldown, not all at once. A remaining partial batch waits until it reaches 400,000 tokens. The token total is the sum of provider-reported input and output usage shown after assistant responses. It does not estimate serialized evidence size or add cache-read and cache-write usage. Evolution model calls use the configured provider and may consume provider quota. Manual `/evolve` work remains uncapped and uses the same frozen evidence and validation boundaries.
 
