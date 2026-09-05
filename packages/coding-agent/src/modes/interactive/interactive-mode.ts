@@ -514,6 +514,9 @@ export class InteractiveMode {
 	private editorContainer: Container;
 	private activeSelectorToken?: object;
 	private activeSelectorDispose?: () => void;
+	private pendingPlanHandoff?: { readonly plan: string };
+	private dismissPlanHandoffSelector?: () => void;
+	private planHandoffCheckScheduled = false;
 	private footer: FooterComponent;
 	private footerContainer: Container;
 	private footerDataProvider: FooterDataProvider;
@@ -646,9 +649,11 @@ export class InteractiveMode {
 		this.options = { ...options, tuiMode };
 		this.autoTrustOnReloadCwd = options.autoTrustOnReloadCwd;
 		this.runtimeHost.setBeforeSessionInvalidate(() => {
+			this.clearPlanHandoff();
 			this.resetExtensionUI();
 		});
 		this.runtimeHost.setRebindSession(async () => {
+			this.clearPlanHandoff();
 			this.restoreCurrentCollaborationMode();
 			await this.rebindCurrentSession({ renderBeforeBind: true });
 		});
@@ -1970,6 +1975,7 @@ export class InteractiveMode {
 					}
 				},
 				navigateTree: async (targetId, options) => {
+					this.clearPlanHandoff();
 					const result = await this.session.navigateTree(targetId, {
 						summarize: options?.summarize,
 						customInstructions: options?.customInstructions,
@@ -2080,6 +2086,7 @@ export class InteractiveMode {
 	}
 
 	private renderCurrentSessionState(): void {
+		this.clearPlanHandoff();
 		this.loadedResourcesContainer.clear();
 		this.chatContainer.clear();
 		this.pendingMessagesContainer.clear();
@@ -2869,6 +2876,7 @@ export class InteractiveMode {
 		this.extensionSelector = undefined;
 		this.ui.setFocus(this.editor);
 		this.ui.requestRender();
+		this.schedulePendingPlanHandoff?.();
 	}
 
 	/**
@@ -2945,6 +2953,7 @@ export class InteractiveMode {
 		this.extensionInput = undefined;
 		this.ui.setFocus(this.editor);
 		this.ui.requestRender();
+		this.schedulePendingPlanHandoff?.();
 	}
 
 	/**
@@ -2986,6 +2995,7 @@ export class InteractiveMode {
 		this.extensionEditor = undefined;
 		this.ui.setFocus(this.editor);
 		this.ui.requestRender();
+		this.schedulePendingPlanHandoff?.();
 	}
 
 	/**
@@ -3060,6 +3070,7 @@ export class InteractiveMode {
 		this.editorContainer.addChild(this.editor as Component);
 		this.ui.setFocus(this.editor as Component);
 		this.ui.requestRender();
+		this.schedulePendingPlanHandoff?.();
 	}
 
 	/**
@@ -3098,6 +3109,7 @@ export class InteractiveMode {
 			this.editor.setText(savedText);
 			this.ui.setFocus(this.editor);
 			this.ui.requestRender();
+			this.schedulePendingPlanHandoff?.();
 		};
 
 		return new Promise((resolve, reject) => {
@@ -3107,8 +3119,10 @@ export class InteractiveMode {
 			const close = (result: T) => {
 				if (closed) return;
 				closed = true;
-				if (isOverlay) this.ui.hideOverlay();
-				else restoreEditor();
+				if (isOverlay) {
+					this.ui.hideOverlay();
+					this.schedulePendingPlanHandoff?.();
+				} else restoreEditor();
 				// Note: both branches above already call requestRender
 				resolve(result);
 				try {
@@ -3291,6 +3305,7 @@ export class InteractiveMode {
 		this.defaultEditor.onSubmit = async (text: string) => {
 			text = text.trim();
 			if (!text) return;
+			this.clearPlanHandoff?.();
 
 			if (text.startsWith("!")) {
 				const isExcluded = text.startsWith("!!");
@@ -3521,6 +3536,7 @@ export class InteractiveMode {
 				this.showCollaborationModeStatus("Cannot switch modes while Diffex is busy.");
 				return;
 			}
+			this.clearPlanHandoff?.();
 		} catch (error) {
 			this.editor.setText(originalText);
 			this.showError(error instanceof Error ? error.message : String(error));
@@ -3580,6 +3596,9 @@ export class InteractiveMode {
 				break;
 
 			case "queue_update":
+				if (event.steering.length > 0 || event.followUp.length > 0) {
+					this.clearPlanHandoff();
+				}
 				this.updatePendingMessagesDisplay();
 				this.ui.requestRender();
 				break;
@@ -3737,6 +3756,7 @@ export class InteractiveMode {
 
 			case "agent_settled":
 				await this.checkShutdownRequested();
+				this.handleSettledPlanHandoff(event.planHandoff);
 				break;
 
 			case "subagent_wait_start":
@@ -4520,6 +4540,7 @@ export class InteractiveMode {
 	private async handleFollowUp(): Promise<void> {
 		const text = (this.editor.getExpandedText?.() ?? this.editor.getText()).trim();
 		if (!text) return;
+		this.clearPlanHandoff?.();
 
 		// Queue input during compaction (extension commands execute immediately)
 		if (this.session.isCompacting) {
@@ -4590,6 +4611,7 @@ export class InteractiveMode {
 				this.showCollaborationModeStatus("Cannot switch modes while Diffex is busy.");
 				return;
 			}
+			this.clearPlanHandoff?.();
 			this.showCollaborationModeStatus(`Mode: ${result.mode === "plan" ? "Plan" : "Default"}`);
 		} catch (error) {
 			this.showError(error instanceof Error ? error.message : String(error));
@@ -4841,6 +4863,7 @@ export class InteractiveMode {
 	}
 
 	private queueCompactionMessage(text: string, mode: "steer" | "followUp"): void {
+		this.clearPlanHandoff?.();
 		this.compactionQueuedMessages.push({ text, mode });
 		this.editor.addToHistory?.(text);
 		this.editor.setText("");
@@ -4953,10 +4976,110 @@ export class InteractiveMode {
 	// Selectors
 	// =========================================================================
 
+	private hasQueuedPlanHandoffInput(): boolean {
+		const { steering, followUp } = this.getAllQueuedMessages();
+		return steering.length > 0 || followUp.length > 0 || this.pendingUserInputs.length > 0;
+	}
+
+	private isPlanHandoffModalBlocked(): boolean {
+		return (
+			this.renderer.hasOverlayEntries ||
+			this.editorContainer.children.length !== 1 ||
+			this.editorContainer.children[0] !== this.editor
+		);
+	}
+
+	private clearPlanHandoff(): void {
+		this.pendingPlanHandoff = undefined;
+		const dismiss = this.dismissPlanHandoffSelector;
+		this.dismissPlanHandoffSelector = undefined;
+		dismiss?.();
+	}
+
+	private schedulePendingPlanHandoff(): void {
+		if (!this.pendingPlanHandoff || this.planHandoffCheckScheduled) return;
+		this.planHandoffCheckScheduled = true;
+		setTimeout(() => {
+			this.planHandoffCheckScheduled = false;
+			this.maybeShowPendingPlanHandoff();
+		}, 0);
+	}
+
+	private handleSettledPlanHandoff(planHandoff?: { readonly plan: string }): void {
+		this.clearPlanHandoff();
+		if (!planHandoff || getCollaborationMode(this.session) !== "plan" || this.hasQueuedPlanHandoffInput()) {
+			return;
+		}
+		this.pendingPlanHandoff = planHandoff;
+		this.maybeShowPendingPlanHandoff();
+	}
+
+	private maybeShowPendingPlanHandoff(): void {
+		if (!this.pendingPlanHandoff) return;
+		if (getCollaborationMode(this.session) !== "plan" || this.hasQueuedPlanHandoffInput()) {
+			this.clearPlanHandoff();
+			return;
+		}
+		if (this.isPlanHandoffModalBlocked()) return;
+		if (this.dismissPlanHandoffSelector) return;
+
+		let finish = () => {};
+		this.showSelector((done) => {
+			finish = () => {
+				this.dismissPlanHandoffSelector = undefined;
+				done();
+			};
+			const selector = new ExtensionSelectorComponent(
+				"Implement this plan?",
+				["Implement the plan", "Stay in Plan mode"],
+				(option) => {
+					this.pendingPlanHandoff = undefined;
+					finish();
+					if (option === "Implement the plan") {
+						void this.implementSettledPlan();
+					}
+				},
+				() => {
+					this.pendingPlanHandoff = undefined;
+					finish();
+				},
+				{ tui: this.ui, onToggleToolsExpanded: () => this.toggleToolOutputExpansion() },
+			);
+			return { component: selector, focus: selector, dispose: () => selector.dispose() };
+		});
+		this.dismissPlanHandoffSelector = finish;
+	}
+
+	private async implementSettledPlan(): Promise<void> {
+		const implementationPrompt = "Implement the plan.";
+		const session = this.session;
+		try {
+			const result = setCollaborationMode(session, "default");
+			if (result.status === "busy") {
+				this.showError("Cannot switch modes while Diffex is busy.");
+				return;
+			}
+			this.showCollaborationModeStatus("Mode: Default");
+		} catch (error) {
+			this.showError(error instanceof Error ? error.message : String(error));
+			return;
+		}
+
+		this.editor.addToHistory?.(implementationPrompt);
+		this.editor.setText("");
+		try {
+			await session.prompt(implementationPrompt);
+		} catch (error) {
+			this.editor.setText(implementationPrompt);
+			this.showError(error instanceof Error ? error.message : String(error));
+		}
+	}
+
 	private disposeActiveSelector(): void {
 		const dispose = this.activeSelectorDispose;
 		this.activeSelectorToken = undefined;
 		this.activeSelectorDispose = undefined;
+		this.dismissPlanHandoffSelector = undefined;
 		dispose?.();
 	}
 
@@ -4977,6 +5100,7 @@ export class InteractiveMode {
 			this.editorContainer.clear();
 			this.editorContainer.addChild(this.editor);
 			this.ui.setFocus(this.editor);
+			this.schedulePendingPlanHandoff?.();
 		};
 		const created = create(done);
 		dispose = created.dispose;
@@ -5672,6 +5796,7 @@ export class InteractiveMode {
 			const selector = new UserMessageSelectorComponent(
 				userMessages.map((m) => ({ id: m.entryId, text: m.text })),
 				async (entryId) => {
+					this.clearPlanHandoff();
 					done();
 					try {
 						const result = await this.runtimeHost.fork(entryId);
@@ -5739,6 +5864,7 @@ export class InteractiveMode {
 						this.showStatus("Already at this point");
 						return;
 					}
+					this.clearPlanHandoff();
 
 					// Ask about summarization
 					done(); // Close selector first
@@ -5901,6 +6027,7 @@ export class InteractiveMode {
 		sessionPath: string,
 		options?: Parameters<ExtensionCommandContext["switchSession"]>[1],
 	): Promise<{ cancelled: boolean }> {
+		this.clearPlanHandoff();
 		this.clearStatusIndicator();
 		try {
 			const result = await this.runtimeHost.switchSession(sessionPath, {
@@ -6241,6 +6368,7 @@ export class InteractiveMode {
 			this.editorContainer.addChild(this.editor);
 			this.ui.setFocus(this.editor);
 			this.ui.requestRender();
+			this.schedulePendingPlanHandoff?.();
 		};
 
 		try {
@@ -6340,6 +6468,7 @@ export class InteractiveMode {
 			this.editorContainer.addChild(this.editor);
 			this.ui.setFocus(this.editor);
 			this.ui.requestRender();
+			this.schedulePendingPlanHandoff?.();
 		};
 
 		const dialog = new LoginDialogComponent(
@@ -6387,6 +6516,7 @@ export class InteractiveMode {
 			this.editorContainer.addChild(this.editor);
 			this.ui.setFocus(this.editor);
 			this.ui.requestRender();
+			this.schedulePendingPlanHandoff?.();
 		};
 
 		try {
@@ -6501,6 +6631,7 @@ export class InteractiveMode {
 			this.editorContainer.addChild(this.editor);
 			this.ui.setFocus(this.editor);
 			this.ui.requestRender();
+			this.schedulePendingPlanHandoff?.();
 		};
 
 		try {
@@ -6562,6 +6693,7 @@ export class InteractiveMode {
 			this.editorContainer.addChild(editor);
 			this.ui.setFocus(editor);
 			this.ui.requestRender();
+			this.schedulePendingPlanHandoff?.();
 		};
 
 		let chatRestoredBeforeSessionStart = false;
@@ -6737,6 +6869,7 @@ export class InteractiveMode {
 			this.editorContainer.clear();
 			this.editorContainer.addChild(this.editor);
 			this.ui.setFocus(this.editor);
+			this.schedulePendingPlanHandoff?.();
 			try {
 				fs.unlinkSync(tmpFile);
 			} catch {
@@ -7250,6 +7383,7 @@ export class InteractiveMode {
 	}
 
 	stop(): void {
+		this.pendingPlanHandoff = undefined;
 		this.disposeActiveSelector();
 		if (this.settingsManager.getShowTerminalProgress()) {
 			this.ui.terminal.setProgress(false);
