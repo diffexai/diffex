@@ -495,8 +495,8 @@ describe("durable evolution control plane", () => {
 		});
 	});
 
-	it("processes an automatic backlog in threshold-sized cursor ranges", async () => {
-		const materializations = Array.from({ length: 20 }, (_, index) => materialization(index + 1, 49_999, 1));
+	it("processes evidence accumulated during cooldown in threshold-sized cursor ranges", async () => {
+		const materializations = Array.from({ length: 8 }, (_, index) => materialization(index + 1, 49_999, 1));
 		const fixture = await controlPlaneFixture(new RecordingExecutor({ noOp: true }), materializations);
 
 		const first = await fixture.controlPlane.createJob({ scope, trigger: "automatic" });
@@ -513,6 +513,14 @@ describe("durable evolution control plane", () => {
 		});
 		expect(firstSnapshot.evidenceSources.map((source) => source.ingestionCursor)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
 		await fixture.controlPlane.runJob(first.job.jobId);
+
+		// One million new tokens arrive during cooldown; the next job must not consume them all.
+		materializations.push(...Array.from({ length: 20 }, (_, index) => materialization(index + 9, 49_999, 1)));
+		await expect(fixture.controlPlane.createJob({ scope, trigger: "automatic" })).resolves.toEqual({
+			status: "not-created",
+			reason: "cooldown-active",
+		});
+		expect(await fixture.persistence.load(scope)).toMatchObject({ sequence: 8 });
 
 		fixture.clock.advance(AUTOMATIC_EVOLUTION_COOLDOWN_MS);
 		const second = await fixture.controlPlane.createJob({ scope, trigger: "automatic" });
@@ -532,14 +540,11 @@ describe("durable evolution control plane", () => {
 		]);
 		await fixture.controlPlane.runJob(second.job.jobId);
 
-		fixture.clock.advance(AUTOMATIC_EVOLUTION_COOLDOWN_MS);
 		await expect(fixture.controlPlane.createJob({ scope, trigger: "automatic" })).resolves.toEqual({
 			status: "not-created",
-			reason: "insufficient-tokens",
+			reason: "cooldown-active",
 		});
-		expect(await fixture.persistence.load(scope)).toMatchObject({ sequence: 16 });
-
-		materializations.push(...Array.from({ length: 4 }, (_, index) => materialization(index + 21, 49_999, 1)));
+		fixture.clock.advance(AUTOMATIC_EVOLUTION_COOLDOWN_MS);
 		const third = await fixture.controlPlane.createJob({ scope, trigger: "automatic" });
 		expect(third).toMatchObject({
 			status: "created",
@@ -557,28 +562,55 @@ describe("durable evolution control plane", () => {
 		]);
 		await fixture.controlPlane.runJob(third.job.jobId);
 		expect(await fixture.persistence.load(scope)).toMatchObject({ sequence: 24 });
+
+		fixture.clock.advance(AUTOMATIC_EVOLUTION_COOLDOWN_MS);
+		await expect(fixture.controlPlane.createJob({ scope, trigger: "automatic" })).resolves.toEqual({
+			status: "not-created",
+			reason: "insufficient-tokens",
+		});
+		expect(await fixture.persistence.load(scope)).toMatchObject({ sequence: 24 });
+
+		materializations.push(...Array.from({ length: 4 }, (_, index) => materialization(index + 29, 49_999, 1)));
+		const fourth = await fixture.controlPlane.createJob({ scope, trigger: "automatic" });
+		expect(fourth).toMatchObject({
+			status: "created",
+			job: { evidenceRange: { afterCursor: 24, throughCursor: 32 } },
+		});
+		if (fourth.status !== "created") throw new Error("Expected the fourth automatic evolution job");
+		expect(await fixture.persistence.get(fourth.job.inputSnapshot)).toMatchObject({
+			tokenMeasurement: { totalTokens: AUTOMATIC_EVOLUTION_TOKEN_THRESHOLD },
+		});
+		await fixture.controlPlane.runJob(fourth.job.jobId);
+		expect(await fixture.persistence.load(scope)).toMatchObject({ sequence: 32 });
 	});
 
-	it("does not cross the automatic token cap at an invocation boundary", async () => {
-		const materializations = [
-			materialization(1, 129_999, 1),
-			materialization(2, 129_999, 1),
-			materialization(3, 129_999, 1),
-			materialization(4, 99_999, 1),
-		];
-		const fixture = await controlPlaneFixture(new RecordingExecutor(), materializations);
+	it.each([
+		{ tokens: [130_000, 130_000, 130_000, 100_000, 50_000], count: 4, total: 490_000 },
+		{ tokens: [450_000, 100_000, 100_000], count: 1, total: 450_000 },
+		{ tokens: [0, 0, 450_000, 100_000], count: 3, total: 450_000 },
+		{ tokens: [0, 200_000, 200_000, 0, 100_000], count: 3, total: 400_000 },
+	])("stops at the first whole invocation reaching the threshold: $tokens", async ({ tokens, count, total }) => {
+		const materializations = tokens.map((tokens, index) => materialization(index + 1, tokens, 0));
+		const fixture = await controlPlaneFixture(new RecordingExecutor({ noOp: true }), materializations);
 
 		const created = await fixture.controlPlane.createJob({ scope, trigger: "automatic" });
 
 		expect(created).toMatchObject({
 			status: "created",
-			job: { evidenceRange: { afterCursor: 0, throughCursor: 3 } },
+			job: { evidenceRange: { afterCursor: 0, throughCursor: count } },
 		});
 		if (created.status !== "created") throw new Error("Expected an automatic evolution job");
-		expect(await fixture.persistence.get(created.job.inputSnapshot)).toMatchObject({
-			ingestionHighWaterCursor: 3,
-			tokenMeasurement: { totalTokens: 390_000 },
+		const snapshot = await fixture.persistence.get(created.job.inputSnapshot);
+		if (!("evidenceSources" in snapshot)) throw new Error("Expected an automatic input snapshot");
+		expect(snapshot).toMatchObject({
+			ingestionHighWaterCursor: count,
+			tokenMeasurement: { totalTokens: total },
 		});
+		expect(snapshot.evidenceSources.map((source) => source.invocation)).toEqual(
+			materializations.slice(0, count).map((item) => item.invocation),
+		);
+		await fixture.controlPlane.runJob(created.job.jobId);
+		expect(await fixture.persistence.load(scope)).toMatchObject({ sequence: count });
 	});
 
 	it("keeps manual evolution snapshots uncapped", async () => {

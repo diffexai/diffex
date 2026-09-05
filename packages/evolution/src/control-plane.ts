@@ -160,10 +160,9 @@ function automaticEvolutionPrefix(
 	let selectedCount = 0;
 	let selectedTokens = 0;
 	for (const materialization of materializations) {
-		const tokens = countEvolutionTokens([materialization.invocation]).totalTokens;
-		if (selectedTokens > 0 && selectedTokens + tokens > AUTOMATIC_EVOLUTION_TOKEN_THRESHOLD) break;
 		selectedCount += 1;
-		selectedTokens += tokens;
+		selectedTokens += countEvolutionTokens([materialization.invocation]).totalTokens;
+		// Finish the invocation that reaches the trigger threshold, but leave the rest for later runs.
 		if (selectedTokens >= AUTOMATIC_EVOLUTION_TOKEN_THRESHOLD) break;
 	}
 	return materializations.slice(0, selectedCount);

@@ -116,7 +116,7 @@ Set `DIFFEX_SKIP_VERSION_CHECK=1` to disable the upstream compatibility release 
 
 Already-running Diffex processes monitor this setting. A change made by another process is applied to their trace collectors and evolution workers without a restart.
 
-Automatic work requires at least 400,000 provider-reported input and output tokens from unprocessed assistant messages, at least three eligible settled invocations, and a 20-minute cooldown after the previous automatic run. Each automatic run processes at most 400,000 tokens, subject to invocation boundaries; larger backlogs continue in capped batches after each cooldown, while partial batches wait for the threshold. Manual runs remain uncapped. The token total matches the response usage counter and excludes cache-read and cache-write usage. Evolution model calls may consume provider quota. See [Harness Evolution](evolution.md).
+Automatic work requires at least 400,000 provider-reported input and output tokens from unprocessed assistant messages, at least three eligible settled invocations, and a 20-minute cooldown after the previous automatic run. Each automatic run processes the oldest unprocessed evidence through the complete invocation that reaches or crosses the same 400,000-token trigger threshold. Only that final invocation may take the batch over the threshold; later invocations stay queued. Larger backlogs continue in threshold-sized batches after each cooldown, while partial batches wait for the threshold. Manual runs remain uncapped. The token total matches the response usage counter and excludes cache-read and cache-write usage. Evolution model calls may consume provider quota. See [Harness Evolution](evolution.md).
 
 ### Compaction
 
