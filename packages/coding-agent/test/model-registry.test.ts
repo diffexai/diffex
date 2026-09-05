@@ -8,7 +8,7 @@ import type {
 	Model,
 	OpenAICompletionsCompat,
 } from "@earendil-works/diffex-ai/compat";
-import { getApiProvider, getSupportedThinkingLevels } from "@earendil-works/diffex-ai/compat";
+import { getApiProvider, getModels, getSupportedThinkingLevels } from "@earendil-works/diffex-ai/compat";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { AuthStorage } from "../src/core/auth-storage.ts";
 import { clearApiKeyCache, type ModelRegistry, type ProviderConfigInput } from "../src/core/model-registry.ts";
@@ -1858,12 +1858,21 @@ describe("ModelRegistry", () => {
 			});
 
 			test("getAvailable filters GitHub Copilot OAuth models to account picker availability", async () => {
+				// Copilot retires models from the generated catalog independently of this test,
+				// so select the asserted model from the current catalog instead of pinning an id.
+				const copilotPickerModel = getModels("github-copilot").find(
+					(candidate) => candidate.api === "openai-responses",
+				);
+				if (copilotPickerModel === undefined) {
+					throw new Error("GitHub Copilot generated catalog has no openai-responses model");
+				}
+
 				await authStorage.modify("github-copilot", async () => ({
 					type: "oauth",
 					refresh: "github-access-token",
 					access: "tid=test;exp=9999999999;proxy-ep=proxy.individual.githubcopilot.com;",
 					expires: Date.now() + 60_000,
-					availableModelIds: ["gpt-4.1"],
+					availableModelIds: [copilotPickerModel.id],
 				}));
 
 				const registry = await createModelRegistry(authStorage, modelsJsonPath);
@@ -1873,7 +1882,7 @@ describe("ModelRegistry", () => {
 						.getAvailable()
 						.filter((m) => m.provider === "github-copilot")
 						.map((m) => m.id),
-				).toEqual(["gpt-4.1"]);
+				).toEqual([copilotPickerModel.id]);
 			});
 
 			test("getApiKeyAndHeaders resolves authHeader on every request", async () => {
