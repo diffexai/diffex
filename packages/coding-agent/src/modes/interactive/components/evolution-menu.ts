@@ -520,13 +520,6 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 				select: () => this.#confirm("start"),
 			},
 			{
-				label: "View",
-				enabled: evolutionEnabled && overview.activeJob !== null,
-				select: () => {
-					if (overview.activeJob) this.#push({ kind: "job", jobId: overview.activeJob.jobId });
-				},
-			},
-			{
 				label: "Resume",
 				enabled: evolutionEnabled && overview.newestResumableJob !== null && overview.activeJob === null,
 				select: () => this.#confirm("resume"),
@@ -535,11 +528,6 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 				label: "Browse",
 				enabled: evolutionEnabled,
 				select: () => this.#push({ kind: "jobs" }),
-			},
-			{
-				label: "Rollback",
-				enabled: evolutionEnabled && overview.rollbackAction !== null,
-				select: () => this.#confirm("rollback"),
 			},
 			{
 				label: "Cancel",
