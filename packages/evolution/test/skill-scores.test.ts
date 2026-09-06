@@ -1,3 +1,4 @@
+import * as fs from "node:fs/promises";
 import { mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,7 +8,7 @@ import {
 	HarnessStateStore,
 	type HarnessWorkspaceIdentity,
 } from "@earendil-works/diffex-harness-state";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	type EvolutionScope,
 	EvolutionStorageCorruptionError,
@@ -17,11 +18,17 @@ import {
 	type SkillScoreRevision,
 } from "../src/index.ts";
 
+vi.mock("node:fs/promises", async (importOriginal) => {
+	const original = await importOriginal<typeof fs>();
+	return { ...original, rename: vi.fn(original.rename) };
+});
+
 const scope: EvolutionScope = { repositoryId: "repo", scopeId: "repository" };
 const workspace: HarnessWorkspaceIdentity = { repositoryId: "repo", directoryId: "checkout-a" };
 const temporaryDirectories: string[] = [];
 
 afterEach(async () => {
+	vi.restoreAllMocks();
 	await Promise.all(temporaryDirectories.splice(0).map((path) => rm(path, { recursive: true, force: true })));
 });
 
@@ -93,6 +100,34 @@ describe("durable skill scores", () => {
 		expect(await harness.loadCurrent()).toEqual(bundle);
 	});
 
+	it("finishes an interrupted multi-row application on replay after another session scores", async () => {
+		const { harness, store, storePath, revision } = await fixture([skill("first"), skill("second")]);
+		const activeSkills = (await store.loadSkillScores(harness, revision)).map(
+			({ skillId, packageVersion, contentDigest }) => ({ skillId, packageVersion, contentDigest }),
+		);
+		const output = {
+			...revision,
+			sessionId: "session-a",
+			outputId: "1",
+			activeSkills,
+			invokedSkillIds: [],
+			ratings: [],
+		};
+		const { rename } = await vi.importActual<typeof fs>("node:fs/promises");
+		const interrupted = vi
+			.spyOn(fs, "rename")
+			.mockImplementationOnce(rename)
+			.mockRejectedValueOnce(new Error("Interrupted write"));
+		await expect(store.applySkillScoreOutput(harness, output)).rejects.toThrow("Interrupted write");
+		interrupted.mockRestore();
+		const reopened = new FileEvolutionPersistence(storePath);
+		expect((await reopened.loadSkillScores(harness, revision)).map((row) => row.points)).toEqual([-1, 0]);
+		await reopened.applySkillScoreOutput(harness, { ...output, sessionId: "session-b" });
+		expect((await reopened.loadSkillScores(harness, revision)).map((row) => row.points)).toEqual([-2, -1]);
+		await reopened.applySkillScoreOutput(harness, output);
+		expect((await reopened.loadSkillScores(harness, revision)).map((row) => row.points)).toEqual([-2, -2]);
+	});
+
 	it("rejects drift before scoring any row and never rates installed or foreign skills", async () => {
 		const { harness, store, revision } = await fixture([
 			skill("verify"),
@@ -125,6 +160,11 @@ describe("durable skill scores", () => {
 			await expect(store.applySkillScoreOutput(harness, { ...output, ...patch })).rejects.toThrow();
 			expect(await store.loadSkillScores(harness, revision)).toEqual(initial);
 		}
+		const foreignRevision = { ...revision, workspace: { ...workspace, directoryId: "other" } };
+		const foreign = await store.loadSkillScores(harness, foreignRevision);
+		await store.applySkillScoreOutput(harness, output);
+		expect((await store.loadSkillScores(harness, revision))[0]!.points).toBe(1);
+		expect(await store.loadSkillScores(harness, foreignRevision)).toEqual(foreign);
 	});
 
 	it.each(["entrypoint", "supporting-file"])(

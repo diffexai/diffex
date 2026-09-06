@@ -9,6 +9,7 @@ import {
 } from "@earendil-works/diffex-agent-core";
 import { clampThinkingLevel, type Message, type Model, streamSimple } from "@earendil-works/diffex-ai/compat";
 import type { HarnessStateStore, HarnessVersionBundle } from "@earendil-works/diffex-harness-state";
+import { FileEvolutionPersistence } from "#evolution";
 import { getAgentDir } from "../config.ts";
 import { resolvePath } from "../utils/paths.ts";
 import { AgentSession } from "./agent-session.ts";
@@ -16,7 +17,11 @@ import type { AgentSessionLifecycleObserver } from "./agent-session-lifecycle.ts
 import { formatNoModelsAvailableMessage } from "./auth-guidance.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
 import type { ExtensionRunner, LoadExtensionsResult, SessionStartEvent, ToolDefinition } from "./extensions/index.ts";
-import { loadWorkspaceHarnessState, resolveHarnessWorkspace } from "./harness-state-runtime.ts";
+import {
+	loadWorkspaceHarnessState,
+	resolveEvolutionWorkspaceStateDirectory,
+	resolveHarnessWorkspace,
+} from "./harness-state-runtime.ts";
 import { convertToLlm } from "./messages.ts";
 import { findInitialModel } from "./model-resolver.ts";
 import { ModelRuntime } from "./model-runtime.ts";
@@ -640,6 +645,9 @@ export async function createInternalAgentSession(
 		sessionManager.appendThinkingLevelChange(thinkingLevel);
 	}
 
+	const skillScores = new FileEvolutionPersistence(
+		join(resolveEvolutionWorkspaceStateDirectory(agentDir, workspace.workspace), "evolution"),
+	);
 	const session = new AgentSession({
 		agent,
 		sessionManager,
@@ -661,6 +669,11 @@ export async function createInternalAgentSession(
 		pinHarnessVersion: options.pinHarnessVersion,
 		telemetryContext,
 		lifecycleObserver: options.lifecycleObserver,
+		consumeSkillFeedback: (report) =>
+			skillScores.applySkillScoreOutput(loadedHarnessState.store, {
+				...report,
+				scope: { repositoryId: workspace.workspace.repositoryId, scopeId: workspace.workspace.directoryId! },
+			}),
 	});
 	if (session.activeHarnessVersion) {
 		try {
