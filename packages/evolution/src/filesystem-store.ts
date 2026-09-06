@@ -40,7 +40,9 @@ import { computeEvolutionContentDigest, serializeEvolutionValue } from "./proven
 import {
 	loadScoreableSkills,
 	SKILL_SCORE_SCHEMA_VERSION,
+	SKILL_SCORE_WEIGHTS,
 	type SkillScore,
+	type SkillScoreOutput,
 	type SkillScoreRevision,
 	skillScoreSubject,
 } from "./skill-scores.ts";
@@ -590,6 +592,9 @@ function parseSkillScore(contents: string, path: string): SkillScore {
 		!DIGEST_PATTERN.test(parsed.contentDigest) ||
 		typeof parsed.points !== "number" ||
 		!Number.isFinite(parsed.points) ||
+		!isStringArray(parsed.appliedOutputKeys) ||
+		parsed.appliedOutputKeys.some((key) => !DIGEST_PATTERN.test(key)) ||
+		new Set(parsed.appliedOutputKeys).size !== parsed.appliedOutputKeys.length ||
 		(parsed.lastOutputIdempotencyKey !== null &&
 			(typeof parsed.lastOutputIdempotencyKey !== "string" || parsed.lastOutputIdempotencyKey.trim() === "")) ||
 		(parsed.lastOutputIdempotencyKey === null && parsed.points !== 0)
@@ -1297,6 +1302,9 @@ export class FileEvolutionPersistence
 		) {
 			throw new Error("Skill score update requires a new output idempotency key");
 		}
+		if (serializeEvolutionValue(next.appliedOutputKeys) !== serializeEvolutionValue(previous.appliedOutputKeys)) {
+			throw new Error("Absolute skill score updates cannot change replay keys");
+		}
 		const active = await loadScoreableSkills(harnessState, next);
 		if (!active.some((candidate) => serializeEvolutionValue(skillScoreSubject(candidate)) === subject)) {
 			throw new Error("Skill score subject is not active in the workspace harness revision");
@@ -1307,6 +1315,76 @@ export class FileEvolutionPersistence
 				return "conflict";
 			await this.#atomicReplace(this.#skillScoreFile(next), next);
 			return "committed";
+		});
+	}
+
+	/**
+	 * Apply only validated output-bound feedback, intersected with still-active package versions.
+	 * Each balance and its replay keys share one atomic write. If interrupted between rows,
+	 * replay finishes the remaining rows without double-applying even after intervening outputs.
+	 */
+	async applySkillScoreOutput(harnessState: HarnessStateStore, value: SkillScoreOutput): Promise<void> {
+		const output = structuredClone(value);
+		if (!output.sessionId?.trim() || !output.outputId?.trim()) throw new Error("Invalid skill score output identity");
+		const subjects = await loadScoreableSkills(harnessState, output);
+		const expected = subjects.map(({ skillId, packageVersion, contentDigest }) => ({
+			skillId,
+			packageVersion,
+			contentDigest,
+		}));
+		const ordered = (skills: SkillScoreOutput["activeSkills"]) =>
+			[...skills].sort((a, b) => a.skillId.localeCompare(b.skillId));
+		if (serializeEvolutionValue(ordered(output.activeSkills)) !== serializeEvolutionValue(ordered(expected))) {
+			throw new Error("Skill score output catalog does not match its harness revision");
+		}
+		const invoked = new Set(output.invokedSkillIds);
+		if (
+			invoked.size !== output.invokedSkillIds.length ||
+			[...invoked].some((id) => !subjects.some((skill) => skill.skillId === id))
+		) {
+			throw new Error("Invalid invoked skill score subjects");
+		}
+		const ratings = new Map<string, "helpful" | "harmful">();
+		for (const rating of output.ratings) {
+			if (
+				!invoked.has(rating.skillId) ||
+				ratings.has(rating.skillId) ||
+				(rating.signal !== "helpful" && rating.signal !== "harmful")
+			) {
+				throw new Error("Invalid skill score rating");
+			}
+			ratings.set(rating.skillId, rating.signal);
+		}
+		const key = computeEvolutionContentDigest([output.sessionId, output.outputId]);
+		await this.#withStoreLock(async () => {
+			const currentBundle = await harnessState.loadCurrent();
+			const active = await loadScoreableSkills(harnessState, {
+				...output,
+				harnessRevision: currentBundle.manifest.version,
+			});
+			const activeSubjects = new Set(active.map((skill) => serializeEvolutionValue(skillScoreSubject(skill))));
+			const updates: SkillScore[] = [];
+			for (const subject of subjects) {
+				if (!activeSubjects.has(serializeEvolutionValue(skillScoreSubject(subject)))) continue;
+				const current = (await this.#readSkillScore(subject)) ?? subject;
+				if (current.appliedOutputKeys.includes(key)) continue;
+				const rating = ratings.get(subject.skillId);
+				// Sparse reports may omit invoked skills: absence of a judgment is not non-invocation.
+				const delta = rating
+					? SKILL_SCORE_WEIGHTS[rating]
+					: invoked.has(subject.skillId)
+						? 0
+						: SKILL_SCORE_WEIGHTS.neutral;
+				const next: SkillScore = {
+					...subject,
+					points: current.points + delta,
+					lastOutputIdempotencyKey: key,
+					appliedOutputKeys: [...current.appliedOutputKeys, key],
+				};
+				parseSkillScore(serializeEvolutionValue(next), "skill score output");
+				updates.push(next);
+			}
+			for (const next of updates) await this.#atomicReplace(this.#skillScoreFile(next), next);
 		});
 	}
 

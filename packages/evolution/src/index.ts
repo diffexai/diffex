@@ -454,7 +454,9 @@ export {
 } from "./skill-lifecycle.ts";
 export {
 	SKILL_SCORE_SCHEMA_VERSION,
+	SKILL_SCORE_WEIGHTS,
 	type SkillScore,
+	type SkillScoreOutput,
 	type SkillScoreRevision,
 } from "./skill-scores.ts";
 export {

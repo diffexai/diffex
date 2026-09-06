@@ -6,7 +6,18 @@ import {
 } from "@earendil-works/diffex-harness-state";
 import type { EvolutionScope } from "./contracts.ts";
 
-export const SKILL_SCORE_SCHEMA_VERSION = 1 as const;
+export const SKILL_SCORE_SCHEMA_VERSION = 2 as const;
+
+export const SKILL_SCORE_WEIGHTS = { helpful: 1, harmful: -1.5, neutral: -1 } as const;
+
+export interface SkillScoreOutput extends SkillScoreRevision {
+	readonly sessionId: string;
+	/** Stable persisted output identity, not a process-local turn counter. */
+	readonly outputId: string;
+	readonly activeSkills: readonly Pick<SkillScore, "skillId" | "packageVersion" | "contentDigest">[];
+	readonly invokedSkillIds: readonly string[];
+	readonly ratings: readonly { readonly skillId: string; readonly signal: "helpful" | "harmful" }[];
+}
 
 export interface SkillScoreRevision {
 	readonly scope: EvolutionScope;
@@ -22,6 +33,8 @@ export interface SkillScore extends SkillScoreRevision {
 	readonly contentDigest: HarnessVersion;
 	readonly points: number;
 	readonly lastOutputIdempotencyKey: string | null;
+	/** Retained with the balance so old replays cannot double-apply after other sessions write. */
+	readonly appliedOutputKeys: readonly string[];
 }
 
 /** Revision is provenance, not a reset boundary: unchanged packages retain their scores. */
@@ -65,5 +78,6 @@ export async function loadScoreableSkills(
 			contentDigest: skill.contentHash,
 			points: 0,
 			lastOutputIdempotencyKey: null,
+			appliedOutputKeys: [],
 		}));
 }

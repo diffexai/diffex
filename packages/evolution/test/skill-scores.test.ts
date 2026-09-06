@@ -52,6 +52,123 @@ function first(scores: readonly SkillScore[]): SkillScore {
 }
 
 describe("durable skill scores", () => {
+	it("applies exact weights once across concurrent sessions, reopening, and old replays", async () => {
+		const { harness, bundle, store, storePath, revision } = await fixture([
+			skill("verify"),
+			skill("unused"),
+			skill("harmful"),
+		]);
+		const activeSkills = (await store.loadSkillScores(harness, revision)).map(
+			({ skillId, packageVersion, contentDigest }) => ({ skillId, packageVersion, contentDigest }),
+		);
+		const invokedSkillIds = [activeSkills[0]!.skillId, activeSkills[2]!.skillId];
+		const output = {
+			...revision,
+			sessionId: "session-a",
+			outputId: "1",
+			activeSkills,
+			invokedSkillIds,
+			ratings: [
+				{ skillId: invokedSkillIds[0]!, signal: "helpful" as const },
+				{ skillId: invokedSkillIds[1]!, signal: "harmful" as const },
+			],
+		};
+		await Promise.all([
+			store.applySkillScoreOutput(harness, output),
+			new FileEvolutionPersistence(storePath).applySkillScoreOutput(harness, output),
+		]);
+		expect((await store.loadSkillScores(harness, revision)).map((row) => row.points)).toEqual([1, -1, -1.5]);
+		const empty = { ...output, invokedSkillIds: [], ratings: [] };
+		await Promise.all([
+			store.applySkillScoreOutput(harness, { ...empty, outputId: "2" }),
+			new FileEvolutionPersistence(storePath).applySkillScoreOutput(harness, { ...empty, sessionId: "session-b" }),
+		]);
+		const reopened = new FileEvolutionPersistence(storePath);
+		await reopened.applySkillScoreOutput(harness, output);
+		await reopened.applySkillScoreOutput(harness, { ...empty, outputId: "2" });
+		expect((await reopened.loadSkillScores(harness, revision)).map((row) => row.points)).toEqual([-1, -3, -3.5]);
+		// An invoked skill with no judgment gets neither a rating nor neutral decay.
+		await reopened.applySkillScoreOutput(harness, { ...output, outputId: "3", ratings: [] });
+		expect((await reopened.loadSkillScores(harness, revision)).map((row) => row.points)).toEqual([-1, -4, -3.5]);
+		expect(await harness.loadCurrent()).toEqual(bundle);
+	});
+
+	it("rejects drift before scoring any row and never rates installed or foreign skills", async () => {
+		const { harness, store, revision } = await fixture([
+			skill("verify"),
+			skill("foreign", { ...workspace, directoryId: "other" }),
+		]);
+		const initial = await store.loadSkillScores(harness, revision);
+		const activeSkills = initial.map(({ skillId, packageVersion, contentDigest }) => ({
+			skillId,
+			packageVersion,
+			contentDigest,
+		}));
+		const id = activeSkills[0]!.skillId;
+		const output = {
+			...revision,
+			sessionId: "session-a",
+			outputId: "1",
+			activeSkills,
+			invokedSkillIds: [id],
+			ratings: [{ skillId: id, signal: "helpful" as const }],
+		};
+		for (const patch of [
+			{ activeSkills: [] },
+			{ activeSkills: [{ ...activeSkills[0]!, packageVersion: `sha256:${"a".repeat(64)}` }] },
+			{ invokedSkillIds: ["installed"] },
+			{ invokedSkillIds: [] },
+			{ ratings: [...output.ratings, ...output.ratings] },
+			{ ratings: [{ skillId: "foreign", signal: "helpful" as const }] },
+			{ outputId: " " },
+		]) {
+			await expect(store.applySkillScoreOutput(harness, { ...output, ...patch })).rejects.toThrow();
+			expect(await store.loadSkillScores(harness, revision)).toEqual(initial);
+		}
+	});
+
+	it.each(["entrypoint", "supporting-file"])(
+		"stops pending accrual after UPDATE (%s) or RETIRE and resets only the changed package",
+		async (change) => {
+			const original = { ...skill("verify"), files: [{ path: "check.md", content: "Before" }] };
+			const { harness, bundle, store, revision } = await fixture([original, skill("retire"), skill("keep")]);
+			const activeSkills = (await store.loadSkillScores(harness, revision)).map(
+				({ skillId, packageVersion, contentDigest }) => ({ skillId, packageVersion, contentDigest }),
+			);
+			const output = {
+				...revision,
+				sessionId: "session-a",
+				outputId: "1",
+				activeSkills,
+				invokedSkillIds: [],
+				ratings: [],
+			};
+			await store.applySkillScoreOutput(harness, output);
+			const updated = await harness.saveVersion(
+				{
+					memory: "",
+					skills: [
+						{
+							...original,
+							...(change === "entrypoint"
+								? { content: `${original.content}\nCheck again.` }
+								: { files: [{ path: "check.md", content: "After" }] }),
+						},
+						skill("keep"),
+					],
+				},
+				bundle.manifest.version,
+			);
+			await harness.selectVersion(updated.manifest.version);
+			const nextRevision = { ...revision, harnessRevision: updated.manifest.version };
+			expect((await store.loadSkillScores(harness, nextRevision)).map((row) => row.points)).toEqual([-1, 0]);
+			await store.applySkillScoreOutput(harness, { ...output, outputId: "2" });
+			expect((await store.loadSkillScores(harness, revision)).map((row) => row.points)).toEqual([-2, -1, -1]);
+			expect((await store.loadSkillScores(harness, nextRevision)).map((row) => row.points)).toEqual([-2, 0]);
+			expect(await harness.loadCurrent()).toEqual(updated);
+		},
+	);
+
 	it("initializes exactly the workspace's evolved skills and survives reopening without changing the harness", async () => {
 		const foreign = { ...workspace, directoryId: "checkout-b" };
 		const { root, harness, bundle, store, storePath, revision } = await fixture([
@@ -257,6 +374,10 @@ describe("durable skill scores", () => {
 			JSON.stringify({ ...original, points: 1 }),
 			JSON.stringify(original).replace('"points":0', '"points":1e400'),
 			JSON.stringify({ ...original, schemaVersion: undefined }),
+			JSON.stringify({ ...original, schemaVersion: 1 }),
+			JSON.stringify({ ...original, appliedOutputKeys: undefined }),
+			JSON.stringify({ ...original, appliedOutputKeys: ["invalid"] }),
+			JSON.stringify({ ...original, appliedOutputKeys: [`sha256:${"a".repeat(64)}`, `sha256:${"a".repeat(64)}`] }),
 			JSON.stringify({ ...original, lastOutputIdempotencyKey: undefined }),
 			JSON.stringify({ ...original, lastOutputIdempotencyKey: " " }),
 			JSON.stringify({ ...original, harnessRevision: "not-a-revision" }),
