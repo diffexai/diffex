@@ -248,6 +248,66 @@ describe("coding-agent evolution runtime", () => {
 		}
 	});
 
+	it("uses the configured evolution model instead of the current session model", async () => {
+		const agentDir = join(tmpdir(), `diffex-evolution-model-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+		mkdirSync(agentDir, { recursive: true });
+		temporaryDirectories.push(agentDir);
+		writeFailedOperationTrace(agentDir, "evolution-model-trace");
+		const store = new HarnessStateStore(agentDir);
+		const bundle = await store.initialize();
+		const harness = await createHarness({
+			models: [{ id: "faux-current" }, { id: "faux-evolution" }],
+			harnessStateStore: store,
+			harnessVersionBundle: bundle,
+		});
+		harnesses.push(harness);
+		const calledModels: string[] = [];
+		harness.setResponses([
+			(_context, _options, _state, model) => {
+				calledModels.push(model.id);
+				return fauxAssistantMessage(fauxToolCall("submit_evolution_response", { complete: true, lessons: [] }), {
+					stopReason: "toolUse",
+				});
+			},
+			(_context, _options, _state, model) => {
+				calledModels.push(model.id);
+				return fauxAssistantMessage(fauxToolCall("submit_evolution_response", { decisions: [] }), {
+					stopReason: "toolUse",
+				});
+			},
+			(_context, _options, _state, model) => {
+				calledModels.push(model.id);
+				return fauxAssistantMessage(fauxToolCall("submit_evolution_response", { outlines: [] }), {
+					stopReason: "toolUse",
+				});
+			},
+		]);
+		const evolutionModel = harness.getModel("faux-evolution");
+		if (!evolutionModel) throw new Error("Expected faux evolution model");
+		const runtime = await createCodingAgentEvolutionRuntime({
+			agentDir,
+			cwd: harness.tempDir,
+			session: harness.session,
+			harnessState: store,
+			modelRuntime: harness.session.modelRuntime,
+			resourceLoader: harness.session.resourceLoader,
+			getEvolutionModel: () => ({ provider: evolutionModel.provider, model: evolutionModel.id }),
+		});
+		await runtime.start();
+
+		try {
+			const started = await runtime.control.startManual();
+			if (started.status !== "created") throw new Error("Expected evolution job");
+			await vi.waitFor(
+				async () => expect((await runtime.control.getJob(started.job.jobId)).outcome).toBe("completed"),
+				{ timeout: 5_000, interval: 20 },
+			);
+			expect(calledModels).toEqual(["faux-evolution"]);
+		} finally {
+			await runtime.stop();
+		}
+	});
+
 	it("partitions evidence and jobs across workspace state directories", async () => {
 		const agentDir = join(
 			tmpdir(),

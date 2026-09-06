@@ -21,6 +21,28 @@ describe("model selector", () => {
 		harness = undefined;
 	});
 
+	it("does not change the default model when selecting an evolution model", async () => {
+		harness = await createHarness();
+		const selected = vi.fn();
+		const selector = new ModelSelectorComponent(
+			createFakeTui(),
+			harness.getModel(),
+			harness.settingsManager,
+			harness.session.modelRuntime,
+			[],
+			selected,
+			() => {},
+			undefined,
+			false,
+		);
+
+		selector.handleInput("\n");
+
+		expect(selected).toHaveBeenCalledWith(harness.getModel());
+		expect(harness.settingsManager.getDefaultProvider()).toBeUndefined();
+		expect(harness.settingsManager.getDefaultModel()).toBeUndefined();
+	});
+
 	it("lists every catalog that failed to refresh", async () => {
 		harness = await createHarness();
 		vi.spyOn(harness.session.modelRuntime, "refresh").mockResolvedValue({

@@ -355,7 +355,11 @@ export interface InteractiveModeOptions {
 	/** Diffex account authentication client, injectable for controlled hosts and tests. */
 	diffexAccountAuth?: DiffexAccountAuth;
 	/** Process-owned evolution controls for the current repository runtime. */
-	evolution?: EvolutionMenuClient & { listCurrentDirectoryHarnessVersions(): Promise<HarnessVersionList> };
+	evolution?: EvolutionMenuClient & {
+		listCurrentDirectoryHarnessVersions(): Promise<HarnessVersionList>;
+		getEvolutionModel(): { readonly provider: string; readonly model: string } | undefined;
+		setEvolutionModel(model: { readonly provider: string; readonly model: string }): Promise<void>;
+	};
 	/** Providers that were migrated to auth.json (shows warning) */
 	migratedProviders?: string[];
 	/** Warning message if session model couldn't be restored */
@@ -5254,8 +5258,60 @@ export class InteractiveMode {
 					else this.showStatus(message);
 				},
 				() => this.ui.requestRender(),
+				1_000,
+				{
+					getModel: () => {
+						const model = this.session?.model;
+						return (
+							evolution.getEvolutionModel() ??
+							(model ? { provider: model.provider, model: model.id } : undefined)
+						);
+					},
+					selectModel: () => this.showEvolutionModelSelector(editorText),
+				},
 			);
 			return { component: menu, focus: menu, dispose: () => menu.dispose() };
+		});
+	}
+
+	private showEvolutionModelSelector(editorText: string): void {
+		const evolution = this.options.evolution;
+		if (!evolution) {
+			this.showError("Evolution runtime is unavailable");
+			this.editor.setText(editorText);
+			return;
+		}
+		const configuredModel = evolution.getEvolutionModel();
+		const currentModel = configuredModel
+			? this.session.modelRuntime.getModel(configuredModel.provider, configuredModel.model)
+			: this.session.model;
+		this.showSelector((done) => {
+			const selector = new ModelSelectorComponent(
+				this.ui,
+				currentModel,
+				this.settingsManager,
+				this.session.modelRuntime,
+				this.session.scopedModels,
+				(model) => {
+					void evolution
+						.setEvolutionModel({ provider: model.provider, model: model.id })
+						.then(() => {
+							done();
+							this.showEvolutionMenu(editorText);
+						})
+						.catch((error: unknown) => {
+							done();
+							this.showError(error instanceof Error ? error.message : String(error));
+						});
+				},
+				() => {
+					done();
+					this.showEvolutionMenu(editorText);
+				},
+				undefined,
+				false,
+			);
+			return { component: selector, focus: selector, dispose: () => selector.dispose() };
 		});
 	}
 

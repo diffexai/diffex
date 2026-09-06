@@ -808,6 +808,8 @@ class CodingAgentSnapshotSource implements EvolutionSnapshotSource {
 	readonly #scope: EvolutionScope;
 	readonly #resourceLoader: ResourceLoader;
 	readonly #session: AgentSession;
+	readonly #modelRuntime: ModelRuntime;
+	readonly #getEvolutionModel: () => EvolutionModelSelection | undefined;
 	readonly #writer: EvolutionMemoryWriter;
 
 	constructor(options: {
@@ -816,6 +818,8 @@ class CodingAgentSnapshotSource implements EvolutionSnapshotSource {
 		scope: EvolutionScope;
 		resourceLoader: ResourceLoader;
 		session: AgentSession;
+		modelRuntime: ModelRuntime;
+		getEvolutionModel: () => EvolutionModelSelection | undefined;
 		writer: EvolutionMemoryWriter;
 	}) {
 		this.#cwd = options.cwd;
@@ -823,6 +827,8 @@ class CodingAgentSnapshotSource implements EvolutionSnapshotSource {
 		this.#scope = options.scope;
 		this.#resourceLoader = options.resourceLoader;
 		this.#session = options.session;
+		this.#modelRuntime = options.modelRuntime;
+		this.#getEvolutionModel = options.getEvolutionModel;
 		this.#writer = options.writer;
 	}
 
@@ -843,8 +849,13 @@ class CodingAgentSnapshotSource implements EvolutionSnapshotSource {
 		const harnessVersion = this.#session.activeHarnessVersion;
 		if (harnessVersion === undefined) throw new Error("Evolution requires an active session harness");
 		const harness = await this.#writer.captureSnapshot(harnessVersion);
-		const model = this.#session.model;
-		if (!model) throw new Error("Evolution requires an active model");
+		const selection = this.#getEvolutionModel();
+		const model = selection ? this.#modelRuntime.getModel(selection.provider, selection.model) : this.#session.model;
+		if (!model) {
+			if (selection)
+				throw new Error(`Configured evolution model ${selection.provider}/${selection.model} is unavailable`);
+			throw new Error("Evolution requires an active model");
+		}
 		const instructions = this.#resourceLoader.getAgentsFiles().agentsFiles.map((file, precedence) => ({
 			path: file.path,
 			precedence,
@@ -892,6 +903,11 @@ export interface CodingAgentEvolutionRuntime {
 	stop(): Promise<void>;
 }
 
+export interface EvolutionModelSelection {
+	readonly provider: string;
+	readonly model: string;
+}
+
 export type EvolutionRuntimeEvent =
 	| EvolutionProgressEvent
 	| {
@@ -906,6 +922,7 @@ export interface CreateCodingAgentEvolutionRuntimeOptions {
 	readonly harnessState: HarnessStateStore;
 	readonly modelRuntime: ModelRuntime;
 	readonly resourceLoader: ResourceLoader;
+	readonly getEvolutionModel?: () => EvolutionModelSelection | undefined;
 	/** Optional retrieval and behavior evaluation capability for synthesized skill candidates. */
 	readonly skillEvaluator?: SkillEvaluator;
 }
@@ -978,6 +995,8 @@ export async function createCodingAgentEvolutionRuntime(
 			scope,
 			resourceLoader: options.resourceLoader,
 			session: options.session,
+			modelRuntime: options.modelRuntime,
+			getEvolutionModel: options.getEvolutionModel ?? (() => undefined),
 			writer,
 		}),
 		executor: pipeline,
@@ -1165,6 +1184,8 @@ export class EvolutionRuntimeCoordinator implements AgentSessionLifecycleObserve
 	readonly #trace: InvocationTrace;
 	readonly #getEnabled: () => boolean;
 	readonly #setEnabled: (enabled: boolean) => void | Promise<void>;
+	readonly #getEvolutionModel: () => EvolutionModelSelection | undefined;
+	readonly #setEvolutionModel: (model: EvolutionModelSelection) => void | Promise<void>;
 	readonly #listeners = new Set<(event: EvolutionRuntimeEvent) => void>();
 	#runtime: CodingAgentEvolutionRuntime | null = null;
 	#unsubscribe: (() => void) | null = null;
@@ -1176,6 +1197,8 @@ export class EvolutionRuntimeCoordinator implements AgentSessionLifecycleObserve
 		toggle: {
 			readonly getEnabled: () => boolean;
 			readonly setEnabled: (enabled: boolean) => void | Promise<void>;
+			readonly getEvolutionModel?: () => EvolutionModelSelection | undefined;
+			readonly setEvolutionModel?: (model: EvolutionModelSelection) => void | Promise<void>;
 		} = {
 			getEnabled: () => true,
 			setEnabled: () => {},
@@ -1184,6 +1207,8 @@ export class EvolutionRuntimeCoordinator implements AgentSessionLifecycleObserve
 		this.#trace = trace;
 		this.#getEnabled = toggle.getEnabled;
 		this.#setEnabled = toggle.setEnabled;
+		this.#getEvolutionModel = toggle.getEvolutionModel ?? (() => undefined);
+		this.#setEvolutionModel = toggle.setEvolutionModel ?? (() => {});
 		this.#enabled = toggle.getEnabled();
 	}
 
@@ -1208,6 +1233,14 @@ export class EvolutionRuntimeCoordinator implements AgentSessionLifecycleObserve
 
 	getEnabled(): boolean {
 		return this.#enabled;
+	}
+
+	getEvolutionModel(): EvolutionModelSelection | undefined {
+		return this.#getEvolutionModel();
+	}
+
+	async setEvolutionModel(model: EvolutionModelSelection): Promise<void> {
+		await this.#setEvolutionModel(model);
 	}
 
 	setEnabled(enabled: boolean): Promise<void> {

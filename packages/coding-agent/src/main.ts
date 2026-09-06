@@ -729,6 +729,11 @@ export async function main(args: string[], options?: MainOptions) {
 			startupSettingsManager.setEvolutionEnabled(enabled);
 			await startupSettingsManager.flush();
 		},
+		getEvolutionModel: () => startupSettingsManager.getEvolutionModel(),
+		setEvolutionModel: async (model) => {
+			startupSettingsManager.setEvolutionModel(model);
+			await startupSettingsManager.flush();
+		},
 	});
 	const synchronizeEvolutionSettings = () => {
 		void evolutionCoordinator.setEnabled(startupSettingsManager.getEvolutionEnabled()).catch((error: unknown) => {
@@ -907,6 +912,7 @@ export async function main(args: string[], options?: MainOptions) {
 				harnessState: services.harnessStateStore,
 				modelRuntime,
 				resourceLoader,
+				getEvolutionModel: () => startupSettingsManager.getEvolutionModel(),
 			}),
 		);
 		await invocationTrace.recordDiagnostics(diagnostics);

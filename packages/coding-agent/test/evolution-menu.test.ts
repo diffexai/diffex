@@ -476,7 +476,7 @@ describe("EvolutionMenuComponent", () => {
 		);
 		await vi.waitFor(() => expect(stripAnsi(component.render(180).join("\n"))).toContain("Toggle [on]"));
 
-		for (let index = 0; index < 5; index += 1) component.handleInput("\u001b[B");
+		for (let index = 0; index < 6; index += 1) component.handleInput("\u001b[B");
 		component.handleInput("\n");
 
 		expect(fixture.setEnabled).toHaveBeenCalledWith(false);
@@ -487,6 +487,29 @@ describe("EvolutionMenuComponent", () => {
 		for (const action of ["Refresh", "Evolve", "Resume", "Browse", "Cancel"]) {
 			expect(output).toContain(`${action} [unavailable]`);
 		}
+	});
+
+	it("displays and selects the evolution model", async () => {
+		const fixture = client(overview());
+		const selectModel = vi.fn();
+		const component = new EvolutionMenuComponent(
+			fixture.client,
+			() => {},
+			() => {},
+			() => {},
+			1_000,
+			{
+				getModel: () => ({ provider: "faux", model: "faux-evolution" }),
+				selectModel,
+			},
+		);
+		await vi.waitFor(() => expect(stripAnsi(component.render(180).join("\n"))).toContain("Model [faux-evolution]"));
+
+		for (let index = 0; index < 5; index += 1) component.handleInput("\u001b[B");
+		component.handleInput("\n");
+
+		expect(selectModel).toHaveBeenCalledOnce();
+		component.dispose();
 	});
 
 	it("rebuilds an idle menu when another process disables evolution", async () => {

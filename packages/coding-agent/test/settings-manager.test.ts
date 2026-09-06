@@ -251,11 +251,32 @@ describe("SettingsManager", () => {
 			});
 		});
 
-		it("uses only the global selection", () => {
-			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ evolution: { enabled: false } }));
-			writeFileSync(join(projectDir, ".diffex", "settings.json"), JSON.stringify({ evolution: { enabled: true } }));
+		it("persists a separately selected global evolution model", async () => {
+			const manager = SettingsManager.create(projectDir, agentDir);
 
-			expect(SettingsManager.create(projectDir, agentDir).getEvolutionEnabled()).toBe(false);
+			expect(manager.getEvolutionModel()).toBeUndefined();
+			manager.setEvolutionModel({ provider: "faux", model: "evolution" });
+			await manager.flush();
+
+			expect(SettingsManager.create(projectDir, agentDir).getEvolutionModel()).toEqual({
+				provider: "faux",
+				model: "evolution",
+			});
+		});
+
+		it("uses only the global selection", () => {
+			writeFileSync(
+				join(agentDir, "settings.json"),
+				JSON.stringify({ evolution: { enabled: false, model: { provider: "global", model: "model" } } }),
+			);
+			writeFileSync(
+				join(projectDir, ".diffex", "settings.json"),
+				JSON.stringify({ evolution: { enabled: true, model: { provider: "project", model: "model" } } }),
+			);
+
+			const manager = SettingsManager.create(projectDir, agentDir);
+			expect(manager.getEvolutionEnabled()).toBe(false);
+			expect(manager.getEvolutionModel()).toEqual({ provider: "global", model: "model" });
 		});
 	});
 

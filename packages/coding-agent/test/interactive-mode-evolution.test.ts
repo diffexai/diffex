@@ -20,8 +20,14 @@ interface SubmitFixture {
 }
 
 interface MenuFixture {
-	options: { evolution?: EvolutionMenuClient };
+	options: {
+		evolution?: EvolutionMenuClient & {
+			getEvolutionModel(): { provider: string; model: string } | undefined;
+			setEvolutionModel(model: { provider: string; model: string }): Promise<void>;
+		};
+	};
 	editor: { setText: ReturnType<typeof vi.fn> };
+	runtimeHost: { session: { model: undefined } };
 	ui: { requestRender: ReturnType<typeof vi.fn> };
 	showSelector: (
 		create: (done: () => void) => {
@@ -60,10 +66,12 @@ function overview(): EvolutionOverview {
 	};
 }
 
-function client(): EvolutionMenuClient {
+function client(): NonNullable<MenuFixture["options"]["evolution"]> {
 	return {
 		getEnabled: () => true,
 		setEnabled: vi.fn(async () => {}),
+		getEvolutionModel: () => undefined,
+		setEvolutionModel: vi.fn(async () => {}),
 		subscribe: () => () => {},
 		overview: vi.fn().mockResolvedValue(overview()),
 		listHarnessVersionInfo: vi.fn().mockResolvedValue([]),
@@ -105,6 +113,7 @@ describe("InteractiveMode evolution menu", () => {
 		const fixture: MenuFixture = {
 			options: { evolution: client() },
 			editor: { setText: vi.fn() },
+			runtimeHost: { session: { model: undefined } },
 			ui: { requestRender: vi.fn() },
 			showSelector: (create) => {
 				component = create(done).component;

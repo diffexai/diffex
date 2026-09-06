@@ -65,8 +65,14 @@ export interface WarningSettings {
 	anthropicExtraUsage?: boolean; // default: true
 }
 
+export interface EvolutionModelSettings {
+	provider?: string;
+	model?: string;
+}
+
 export interface EvolutionSettings {
 	enabled?: boolean; // default: true
+	model?: EvolutionModelSettings;
 }
 
 export type DefaultProjectTrust = "ask" | "always" | "never";
@@ -844,6 +850,22 @@ export class SettingsManager {
 		this.globalSettings.evolution ??= {};
 		this.globalSettings.evolution.enabled = enabled;
 		this.markModified("evolution", "enabled");
+		this.save();
+	}
+
+	getEvolutionModel(): { provider: string; model: string } | undefined {
+		const provider = this.globalSettings.evolution?.model?.provider?.trim();
+		const model = this.globalSettings.evolution?.model?.model?.trim();
+		return provider && model ? { provider, model } : undefined;
+	}
+
+	setEvolutionModel(model: { provider: string; model: string }): void {
+		const provider = model.provider.trim();
+		const modelId = model.model.trim();
+		if (!provider || !modelId) throw new Error("Evolution model provider and model are required");
+		this.globalSettings.evolution ??= {};
+		this.globalSettings.evolution.model = { provider, model: modelId };
+		this.markModified("evolution", "model");
 		this.save();
 	}
 

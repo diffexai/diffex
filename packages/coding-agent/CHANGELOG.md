@@ -5,6 +5,7 @@
 ### Added
 
 - Added `pi auth check` provider/model auth preflight with optional credential output ([#7152](https://github.com/earendil-works/pi/issues/7152)).
+- Added an `/evolve` model selector for pinning evolution work to a separately selected model.
 
 ### Changed
 

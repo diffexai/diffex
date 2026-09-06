@@ -68,6 +68,7 @@ export class ModelSelectorComponent extends Container implements Focusable {
 	private readonly refreshAbortController = new AbortController();
 	private refreshTimeout?: ReturnType<typeof setTimeout>;
 	private closed = false;
+	private readonly saveAsDefault: boolean;
 
 	constructor(
 		tui: TUI,
@@ -78,10 +79,12 @@ export class ModelSelectorComponent extends Container implements Focusable {
 		onSelect: (model: Model<any>) => void,
 		onCancel: () => void,
 		initialSearchInput?: string,
+		saveAsDefault = true,
 	) {
 		super();
 
 		this.tui = tui;
+		this.saveAsDefault = saveAsDefault;
 		this.currentModel = currentModel;
 		this.settingsManager = settingsManager;
 		this.modelRuntime = modelRuntime;
@@ -355,8 +358,9 @@ export class ModelSelectorComponent extends Container implements Focusable {
 
 	private handleSelect(model: Model<any>): void {
 		this.dispose();
-		// Save as new default
-		this.settingsManager.setDefaultModelAndProvider(model.provider, model.id);
+		if (this.saveAsDefault) {
+			this.settingsManager.setDefaultModelAndProvider(model.provider, model.id);
+		}
 		this.onSelectCallback(model);
 	}
 
