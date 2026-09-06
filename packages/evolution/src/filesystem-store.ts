@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { Dirent } from "node:fs";
 import { lstat, mkdir, mkdtemp, readdir, readFile, rename, rm, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
+import type { HarnessStateStore } from "@earendil-works/diffex-harness-state";
 import lockfile from "proper-lockfile";
 import type {
 	EvolutionArtifactReference,
@@ -36,6 +37,13 @@ import type {
 	SkillLifecycleObservationStore,
 } from "./ports.ts";
 import { computeEvolutionContentDigest, serializeEvolutionValue } from "./provenance.ts";
+import {
+	loadScoreableSkills,
+	SKILL_SCORE_SCHEMA_VERSION,
+	type SkillScore,
+	type SkillScoreRevision,
+	skillScoreSubject,
+} from "./skill-scores.ts";
 
 const ARTIFACT_FILE_NAME = "artifact.json";
 const STORE_LOCK_STALE_MS = 30_000;
@@ -558,6 +566,39 @@ function parseSkillLifecycleObservation(contents: string, path: string): SkillLi
 	return parsed as unknown as SkillLifecycleObservation;
 }
 
+function parseSkillScore(contents: string, path: string): SkillScore {
+	const parsed = parseJson(contents, path);
+	if (
+		!isRecord(parsed) ||
+		parsed.schemaVersion !== SKILL_SCORE_SCHEMA_VERSION ||
+		!isRecord(parsed.scope) ||
+		typeof parsed.scope.repositoryId !== "string" ||
+		parsed.scope.repositoryId.trim() === "" ||
+		typeof parsed.scope.scopeId !== "string" ||
+		parsed.scope.scopeId.trim() === "" ||
+		!isRecord(parsed.workspace) ||
+		parsed.workspace.repositoryId !== parsed.scope.repositoryId ||
+		(parsed.workspace.directoryId !== undefined &&
+			(typeof parsed.workspace.directoryId !== "string" || parsed.workspace.directoryId.trim() === "")) ||
+		typeof parsed.harnessRevision !== "string" ||
+		!DIGEST_PATTERN.test(parsed.harnessRevision) ||
+		typeof parsed.skillId !== "string" ||
+		!/^skill:[0-9a-f]{64}$/.test(parsed.skillId) ||
+		typeof parsed.packageVersion !== "string" ||
+		!DIGEST_PATTERN.test(parsed.packageVersion) ||
+		typeof parsed.contentDigest !== "string" ||
+		!DIGEST_PATTERN.test(parsed.contentDigest) ||
+		typeof parsed.points !== "number" ||
+		!Number.isFinite(parsed.points) ||
+		(parsed.lastOutputIdempotencyKey !== null &&
+			(typeof parsed.lastOutputIdempotencyKey !== "string" || parsed.lastOutputIdempotencyKey.trim() === "")) ||
+		(parsed.lastOutputIdempotencyKey === null && parsed.points !== 0)
+	) {
+		throw new EvolutionStorageCorruptionError(path, "skill score is invalid or incompatible");
+	}
+	return parsed as unknown as SkillScore;
+}
+
 function parseCancellation(contents: string, path: string, expectedJobId: string): EvolutionCancellationRequest {
 	const parsed = parseJson(contents, path);
 	if (
@@ -639,6 +680,7 @@ export class FileEvolutionPersistence
 	readonly #ledgerPath: string;
 	readonly #skillCandidateRegistryPath: string;
 	readonly #skillLifecycleObservationPath: string;
+	readonly #skillScorePath: string;
 	readonly #storeLockPath: string;
 	readonly #storeLockStaleMs: number;
 	readonly #storeLockUpdateMs: number;
@@ -653,6 +695,7 @@ export class FileEvolutionPersistence
 		this.#ledgerPath = join(this.#rootPath, "ledger");
 		this.#skillCandidateRegistryPath = join(this.#rootPath, "skill-candidates");
 		this.#skillLifecycleObservationPath = join(this.#rootPath, "skill-observations");
+		this.#skillScorePath = join(this.#rootPath, "skill-scores");
 		this.#storeLockPath = join(this.#rootPath, ".store");
 		this.#storeLockStaleMs = options.storeLockStaleMs ?? STORE_LOCK_STALE_MS;
 		this.#storeLockUpdateMs = options.storeLockUpdateMs ?? STORE_LOCK_UPDATE_MS;
@@ -673,6 +716,7 @@ export class FileEvolutionPersistence
 			this.#ledgerPath,
 			this.#skillCandidateRegistryPath,
 			this.#skillLifecycleObservationPath,
+			this.#skillScorePath,
 		]) {
 			await mkdir(path, { recursive: true, mode: 0o700 });
 			const stats = await lstat(path);
@@ -1191,6 +1235,77 @@ export class FileEvolutionPersistence
 					}
 				}
 			}
+			return "committed";
+		});
+	}
+
+	#skillScoreFile(score: SkillScore): string {
+		return join(
+			this.#skillScorePath,
+			`${artifactDirectoryName(computeEvolutionContentDigest(skillScoreSubject(score)))}.json`,
+		);
+	}
+
+	async #readSkillScore(subject: SkillScore): Promise<SkillScore | null> {
+		const path = this.#skillScoreFile(subject);
+		const contents = await this.#readOptional(path);
+		if (contents === null) return null;
+		const score = parseSkillScore(contents, path);
+		if (serializeEvolutionValue(skillScoreSubject(score)) !== serializeEvolutionValue(skillScoreSubject(subject))) {
+			throw new EvolutionStorageCorruptionError(path, "skill score subject does not match its path");
+		}
+		return score;
+	}
+
+	/** Initialize missing subjects at zero and return only this revision's workspace skills. */
+	async loadSkillScores(
+		harnessState: HarnessStateStore,
+		revision: SkillScoreRevision,
+	): Promise<readonly SkillScore[]> {
+		const subjects = await loadScoreableSkills(harnessState, revision);
+		return this.#withStoreLock(async () => {
+			const scores: SkillScore[] = [];
+			for (const subject of subjects) {
+				const existing = await this.#readSkillScore(subject);
+				if (existing === null) await this.#atomicReplace(this.#skillScoreFile(subject), subject);
+				scores.push(existing ?? subject);
+			}
+			return scores;
+		});
+	}
+
+	/**
+	 * Store an absolute balance with compare-and-swap protection. This is not the per-output
+	 * scoring policy or replay ledger; callers must supply a new output key for each update.
+	 * The supplied revision must contain the exact skill version (including package files).
+	 */
+	async saveSkillScore(
+		harnessState: HarnessStateStore,
+		score: SkillScore,
+		expected: SkillScore,
+	): Promise<"committed" | "conflict"> {
+		// Capture caller-owned values before awaiting I/O.
+		const next = parseSkillScore(serializeEvolutionValue(score), "skill score update");
+		const previous = parseSkillScore(serializeEvolutionValue(expected), "expected skill score");
+		const subject = serializeEvolutionValue(skillScoreSubject(next));
+		if (subject !== serializeEvolutionValue(skillScoreSubject(previous))) {
+			throw new Error("Skill score update cannot change its subject");
+		}
+		if (
+			next.lastOutputIdempotencyKey === null ||
+			next.lastOutputIdempotencyKey === previous.lastOutputIdempotencyKey
+		) {
+			throw new Error("Skill score update requires a new output idempotency key");
+		}
+		const active = await loadScoreableSkills(harnessState, next);
+		if (!active.some((candidate) => serializeEvolutionValue(skillScoreSubject(candidate)) === subject)) {
+			throw new Error("Skill score subject is not active in the workspace harness revision");
+		}
+		return this.#withStoreLock(async () => {
+			const current = await this.#readSkillScore(next);
+			if (current === null || serializeEvolutionValue(current) !== serializeEvolutionValue(previous))
+				return "conflict";
+			await this.#atomicReplace(this.#skillScoreFile(next), next);
 			return "committed";
 		});
 	}
