@@ -50,6 +50,18 @@ import {
 	serializeEvolutionValue,
 } from "./provenance.ts";
 
+import type { SkillScore, SkillScoreRevision } from "./skill-scores.ts";
+
+const SKILL_REMOVAL_THRESHOLD = -8;
+const SKILL_RETENTION_CAP = 10;
+type GroomingScore = Pick<SkillScore, "skillId" | "packageVersion" | "contentDigest" | "points">;
+type WriterMutation = Pick<SkillMutation, "mutationId" | "workspace" | "existingSkills" | "skill">;
+interface SkillGroomingBatch extends Omit<SkillMutationBatch, "mutations"> {
+	readonly groomingScores: readonly GroomingScore[];
+	readonly mutations: readonly WriterMutation[];
+}
+type WriterBatch = SkillMutationBatch | SkillGroomingBatch;
+
 const CANDIDATE_SCHEMA_VERSION = 1 as const;
 const ACTIVATION_SCHEMA_VERSION = 1 as const;
 const MAX_ACTIVATION_REBASE_ATTEMPTS = 8;
@@ -798,10 +810,114 @@ export class SkillWriter {
 		return this.activate(batch, writeReceipt, context);
 	}
 
-	async #assertBatch(batch: SkillMutationBatch): Promise<{
+	/** Points-only maintenance: no candidate artifacts or model evaluation are fabricated. */
+	async groom(
+		scope: EvolutionScope,
+		scores: {
+			loadSkillScores(state: HarnessStateStore, revision: SkillScoreRevision): Promise<readonly SkillScore[]>;
+		},
+		context: SkillWriterContext,
+	): Promise<HarnessVersionBundle> {
+		assertWriterContext(context);
+		for (let attempt = 0; attempt < MAX_ACTIVATION_REBASE_ATTEMPTS; attempt += 1) {
+			context.signal?.throwIfAborted();
+			await this.#dependencies.leases.assertHeld(context.lease);
+			const base = await this.#dependencies.harnessState.loadCurrent();
+			const groomingScores = (
+				await scores.loadSkillScores(this.#dependencies.harnessState, {
+					scope,
+					workspace: this.#dependencies.workspace,
+					harnessRevision: base.manifest.version,
+				})
+			)
+				.map(({ skillId, packageVersion, contentDigest, points }) => ({
+					skillId,
+					packageVersion,
+					contentDigest,
+					points,
+				}))
+				.sort((a, b) => (a.skillId < b.skillId ? -1 : a.skillId > b.skillId ? 1 : 0));
+			const mutation = this.#groomingMutation(base, groomingScores);
+			if (mutation.existingSkills.length === 0) return base;
+			const content = {
+				batchId: stableId("skill-grooming", {
+					scope,
+					base: base.manifest.version,
+					groomingScores,
+					idempotencyKey: context.idempotencyKey,
+				}),
+				targetKind: "skill" as const,
+				expectedBaseVersion: base.manifest.version,
+				workspace: this.#dependencies.workspace,
+				mutations: [mutation],
+				groomingScores,
+			};
+			const batch: SkillGroomingBatch = {
+				...content,
+				metadata: createEvolutionArtifactMetadata({
+					artifactId: content.batchId,
+					producer: this.#producer,
+					sourceIds: [],
+					scope,
+					createdAt: this.#dependencies.clock.now(),
+					content,
+				}),
+			};
+			try {
+				const receipt = await this.write(batch, context);
+				const activation = await this.activate(batch, receipt, context);
+				return await this.#dependencies.harnessState.loadVersion(activation.result.resultingHarnessVersion!);
+			} catch (error) {
+				// Recompute against the new catalog and scores, never rebase stale maintenance removals.
+				if (!(error instanceof EvolutionExecutionError) || error.reasonCode !== "harness-base-conflict")
+					throw error;
+			}
+		}
+		throw new EvolutionExecutionError("Harness revision kept changing during skill grooming", {
+			reasonCode: "harness-base-conflict",
+			retryable: true,
+		});
+	}
+
+	#groomingMutation(base: HarnessVersionBundle, scores: readonly GroomingScore[]): WriterMutation {
+		const active = base.state.skills.filter((skill) => sameWorkspace(skill.workspace, this.#dependencies.workspace));
+		const byId = new Map(active.map((skill) => [computeHarnessSkillId(skill.workspace, skill.path), skill]));
+		if (scores.length !== active.length || new Set(scores.map((score) => score.skillId)).size !== active.length) {
+			throw new Error("Skill grooming scores do not match the active workspace inventory");
+		}
+		for (const score of scores) {
+			const skill = byId.get(score.skillId);
+			if (
+				!skill ||
+				skill.contentHash !== score.contentDigest ||
+				skill.packageVersion !== score.packageVersion ||
+				!Number.isFinite(score.points)
+			) {
+				throw new Error("Skill grooming score does not match its active skill digest");
+			}
+		}
+		// Stable, locale-independent skill ID ordering breaks equal-point ties.
+		const ranked = [...scores].sort(
+			(a, b) => a.points - b.points || (a.skillId < b.skillId ? -1 : a.skillId > b.skillId ? 1 : 0),
+		);
+		const thresholdCount = ranked.filter((score) => score.points <= SKILL_REMOVAL_THRESHOLD).length;
+		const removed = ranked.slice(0, Math.max(thresholdCount, ranked.length - SKILL_RETENTION_CAP));
+		return {
+			mutationId: stableId("skill-grooming-retire", { base: base.manifest.version, removed }),
+			workspace: this.#dependencies.workspace,
+			existingSkills: removed.map((score) => ({
+				skillId: score.skillId,
+				path: byId.get(score.skillId)!.path,
+				contentDigest: score.contentDigest,
+			})),
+			skill: null,
+		};
+	}
+
+	async #assertBatch(batch: WriterBatch): Promise<{
 		readonly base: HarnessVersionBundle;
-		readonly mutation: SkillMutation;
-		readonly source: AcceptedSkillMutationSource;
+		readonly mutation: WriterMutation;
+		readonly source: AcceptedSkillMutationSource | null;
 		readonly validatedBase: HarnessVersionBundle;
 	}> {
 		if (
@@ -814,9 +930,19 @@ export class SkillWriter {
 			throw new Error(`Skill mutation batch "${batch.batchId}" is invalid`);
 		}
 		assertSafeId(batch.batchId, "skill mutation batch ID");
+		const base = await this.#dependencies.harnessState.loadVersion(batch.expectedBaseVersion);
+		if ("groomingScores" in batch) {
+			const mutation = this.#groomingMutation(base, batch.groomingScores);
+			if (
+				batch.metadata.scope.repositoryId !== batch.workspace.repositoryId ||
+				serializeEvolutionValue(batch.mutations) !== serializeEvolutionValue([mutation])
+			) {
+				throw new Error("Skill grooming batch does not match its verified scores");
+			}
+			return { base, mutation, source: null, validatedBase: base };
+		}
 		const mutation = batch.mutations[0] as SkillMutation;
 		assertSafeId(mutation.mutationId, "skill mutation ID");
-		const base = await this.#dependencies.harnessState.loadVersion(batch.expectedBaseVersion);
 		const source = await this.#acceptedSource(batch.metadata.scope, mutation.groupId);
 		const { mutation: expected, validatedBase } = await this.#mutationForBase(
 			source,
@@ -829,7 +955,7 @@ export class SkillWriter {
 		return { base, mutation, source, validatedBase };
 	}
 
-	#applyMutation(base: HarnessVersionBundle, mutation: SkillMutation): HarnessSkillInput[] {
+	#applyMutation(base: HarnessVersionBundle, mutation: WriterMutation): HarnessSkillInput[] {
 		const removedPaths = new Set(mutation.existingSkills.map((skill) => skill.path));
 		const after = base.state.skills.filter((skill) => !removedPaths.has(skill.path)).map(skillInput);
 		if (mutation.skill !== null) {
@@ -846,7 +972,7 @@ export class SkillWriter {
 		return sortSkillInputs(after);
 	}
 
-	#mutationIsApplied(bundle: HarnessVersionBundle, mutation: SkillMutation): boolean {
+	#mutationIsApplied(bundle: HarnessVersionBundle, mutation: WriterMutation): boolean {
 		const targetPath = mutation.skill?.path;
 		if (
 			mutation.existingSkills.some(
@@ -868,10 +994,10 @@ export class SkillWriter {
 	}
 
 	async #selectWithCompatibleRebase(
-		batch: SkillMutationBatch,
+		batch: WriterBatch,
 		candidate: StoredSkillWriterCandidate,
-		mutation: SkillMutation,
-		source: AcceptedSkillMutationSource,
+		mutation: WriterMutation,
+		source: AcceptedSkillMutationSource | null,
 		validatedBase: HarnessVersionBundle,
 		lease: EvolutionLeaseToken,
 	): Promise<string> {
@@ -885,6 +1011,12 @@ export class SkillWriter {
 
 			actualCurrent = selection.actualCurrent;
 			const current = await this.#dependencies.harnessState.loadVersion(actualCurrent);
+			if (source === null) {
+				throw new EvolutionExecutionError("Harness changed during skill grooming", {
+					reasonCode: "harness-base-conflict",
+					retryable: true,
+				});
+			}
 			if (this.#mutationIsApplied(current, mutation)) {
 				expectedCurrent = actualCurrent;
 				targetVersion = actualCurrent;
@@ -918,7 +1050,7 @@ export class SkillWriter {
 		});
 	}
 
-	#writeReceipt(batch: SkillMutationBatch, candidate: StoredSkillWriterCandidate): MutationWriteReceipt {
+	#writeReceipt(batch: WriterBatch, candidate: StoredSkillWriterCandidate): MutationWriteReceipt {
 		const result: MutationWriteResult = {
 			batchId: batch.batchId,
 			status: "written",
@@ -942,7 +1074,7 @@ export class SkillWriter {
 		};
 	}
 
-	async write(batch: SkillMutationBatch, context: SkillWriterContext): Promise<MutationWriteReceipt> {
+	async write(batch: WriterBatch, context: SkillWriterContext): Promise<MutationWriteReceipt> {
 		context.signal?.throwIfAborted();
 		assertWriterContext(context);
 		await this.#dependencies.leases.assertHeld(context.lease);
@@ -1012,7 +1144,7 @@ export class SkillWriter {
 	}
 
 	#activationReceipt(
-		batch: SkillMutationBatch,
+		batch: WriterBatch,
 		idempotencyKey: string,
 		result: HarnessActivationResult,
 		createdAt: string,
@@ -1032,7 +1164,7 @@ export class SkillWriter {
 	}
 
 	async activate(
-		batch: SkillMutationBatch,
+		batch: WriterBatch,
 		writeReceipt: MutationWriteReceipt,
 		context: SkillWriterContext,
 	): Promise<HarnessActivationReceipt> {
