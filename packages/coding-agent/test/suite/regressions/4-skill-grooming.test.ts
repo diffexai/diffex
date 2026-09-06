@@ -148,8 +148,7 @@ describe("grooming before evolution snapshots", () => {
 			}
 			return response({ decisions: [] });
 		};
-		harness.setResponses([evolve]);
-		await runtime.start();
+		// Freeze the job without starting workers: no curator/candidate can explain the removals.
 		const started = await runtime.control.startManual();
 		if (started.status !== "created") throw new Error(`Expected evolution job: ${JSON.stringify(started)}`);
 		const groomed = await state.loadCurrent();
@@ -186,17 +185,9 @@ describe("grooming before evolution snapshots", () => {
 			expect(entry.version).toBe(skill.packageVersion);
 			expect(entry.contentDigest).toBe(skill.contentHash);
 		}
-		await vi.waitFor(
-			async () => {
-				const detail = await runtime.control.getJob(job.jobId);
-				expect(detail.outcome, JSON.stringify(detail)).toBe("completed");
-			},
-			{ timeout: 8_000, interval: 20 },
-		);
-		expect(curated).toBe(true);
-		expect(harness.getPendingResponseCount()).toBe(0);
-		await runtime.stop();
-		// A new session and its next model prompt both observe the post-groom catalog.
+		expect(curated).toBe(false);
+		expect((await persistence.loadSkillCandidateRegistry(scope)).events).toEqual([]);
+		// A new session's actual prompt sees the removals before any skill operations can run.
 		const { session: next } = await createAgentSession({
 			...options,
 			sessionManager: SessionManager.inMemory(harness.tempDir),
@@ -213,5 +204,20 @@ describe("grooming before evolution snapshots", () => {
 		]);
 		await next.prompt("Verify again.");
 		expect(harness.getPendingResponseCount()).toBe(0);
+		expect(curated).toBe(false);
+		expect((await persistence.loadSkillCandidateRegistry(scope)).events).toEqual([]);
+		harness.setResponses([evolve]);
+		// Start the real job worker, not startup recovery of this deliberately queued job.
+		runtime.control.start();
+		await vi.waitFor(
+			async () => {
+				const detail = await runtime.control.getJob(job.jobId);
+				expect(detail.outcome, JSON.stringify(detail)).toBe("completed");
+			},
+			{ timeout: 8_000, interval: 20 },
+		);
+		expect(curated).toBe(true);
+		expect(harness.getPendingResponseCount()).toBe(0);
+		await runtime.stop();
 	});
 });
