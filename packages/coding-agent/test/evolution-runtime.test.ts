@@ -354,7 +354,7 @@ describe("coding-agent evolution runtime", () => {
 		await runtimeA.control.cancelJob(started.job.jobId);
 	});
 
-	it("freezes the session harness even when another harness is globally selected", async () => {
+	it("freezes the selected harness without refreshing the session's pinned harness", async () => {
 		const agentDir = join(
 			tmpdir(),
 			`diffex-session-harness-evolution-${Date.now()}-${Math.random().toString(36).slice(2)}`,
@@ -426,8 +426,9 @@ describe("coding-agent evolution runtime", () => {
 		const started = await runtime.control.startManual();
 		if (started.status !== "created") throw new Error("Expected an evolution job");
 		expect((await runtime.control.getJob(started.job.jobId)).baseHarnessVersion).toBe(
-			sessionHarness.manifest.version,
+			globallySelected.manifest.version,
 		);
+		expect(harness.session.activeHarnessVersion).toBe(sessionHarness.manifest.version);
 		expect((await store.loadCurrent()).manifest.version).toBe(globallySelected.manifest.version);
 		await runtime.control.cancelJob(started.job.jobId);
 	});

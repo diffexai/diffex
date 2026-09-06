@@ -12,7 +12,7 @@ import {
 	type Model,
 	type Tool,
 } from "@earendil-works/diffex-ai";
-import type { HarnessStateStore, HarnessVersion } from "@earendil-works/diffex-harness-state";
+import type { HarnessStateStore, HarnessVersion, HarnessVersionBundle } from "@earendil-works/diffex-harness-state";
 import lockfile from "proper-lockfile";
 import type { TSchema } from "typebox";
 import { Check, Errors } from "typebox/value";
@@ -811,6 +811,7 @@ class CodingAgentSnapshotSource implements EvolutionSnapshotSource {
 	readonly #modelRuntime: ModelRuntime;
 	readonly #getEvolutionModel: () => EvolutionModelSelection | undefined;
 	readonly #writer: EvolutionMemoryWriter;
+	readonly #groomHarness: (signal?: AbortSignal) => Promise<HarnessVersionBundle>;
 
 	constructor(options: {
 		cwd: string;
@@ -821,6 +822,7 @@ class CodingAgentSnapshotSource implements EvolutionSnapshotSource {
 		modelRuntime: ModelRuntime;
 		getEvolutionModel: () => EvolutionModelSelection | undefined;
 		writer: EvolutionMemoryWriter;
+		groomHarness: (signal?: AbortSignal) => Promise<HarnessVersionBundle>;
 	}) {
 		this.#cwd = options.cwd;
 		this.#directoryId = options.directoryId;
@@ -830,6 +832,7 @@ class CodingAgentSnapshotSource implements EvolutionSnapshotSource {
 		this.#modelRuntime = options.modelRuntime;
 		this.#getEvolutionModel = options.getEvolutionModel;
 		this.#writer = options.writer;
+		this.#groomHarness = options.groomHarness;
 	}
 
 	async #revision(): Promise<string> {
@@ -846,9 +849,8 @@ class CodingAgentSnapshotSource implements EvolutionSnapshotSource {
 			throw new Error("Evolution snapshot scope does not match the repository runtime");
 		}
 		signal?.throwIfAborted();
-		const harnessVersion = this.#session.activeHarnessVersion;
-		if (harnessVersion === undefined) throw new Error("Evolution requires an active session harness");
-		const harness = await this.#writer.captureSnapshot(harnessVersion);
+		if (this.#session.activeHarnessVersion === undefined)
+			throw new Error("Evolution requires an active session harness");
 		const selection = this.#getEvolutionModel();
 		const model = selection ? this.#modelRuntime.getModel(selection.provider, selection.model) : this.#session.model;
 		if (!model) {
@@ -856,13 +858,20 @@ class CodingAgentSnapshotSource implements EvolutionSnapshotSource {
 				throw new Error(`Configured evolution model ${selection.provider}/${selection.model} is unavailable`);
 			throw new Error("Evolution requires an active model");
 		}
+		// Groom the selected workspace, not the session's potentially stale prompt-bound revision.
+		const selected = await this.#groomHarness(signal);
+		const harness = await this.#writer.captureSnapshot(selected.manifest.version);
 		const instructions = this.#resourceLoader.getAgentsFiles().agentsFiles.map((file, precedence) => ({
 			path: file.path,
 			precedence,
 			content: file.content,
 			contentDigest: computeEvolutionContentDigest(file.content),
 		}));
-		const skills = createEvolutionSkillSnapshots(this.#resourceLoader.getSkills().skills);
+		const skills = createEvolutionSkillSnapshots([
+			...this.#resourceLoader.getSkills().skills.filter((skill) => skill.sourceKind === "installed"),
+			...createEvolvedSkillCatalog(selected, { repositoryId: scope.repositoryId, directoryId: this.#directoryId })
+				.skills,
+		]);
 		return {
 			repository: {
 				repositoryId: scope.repositoryId,
@@ -998,6 +1007,22 @@ export async function createCodingAgentEvolutionRuntime(
 			modelRuntime: options.modelRuntime,
 			getEvolutionModel: options.getEvolutionModel ?? (() => undefined),
 			writer,
+			async groomHarness(signal) {
+				const idempotencyKey = `skill-grooming-${randomUUID()}`;
+				const lease = await persistence.acquire(
+					"writer",
+					"global",
+					idempotencyKey,
+					clock.now(),
+					SKILL_ACTIVATION_LEASE_TTL_MS,
+				);
+				if (lease === null) throw new Error("Another harness writer is active");
+				try {
+					return await skillWriter.groom(scope, persistence, { idempotencyKey, lease, signal });
+				} finally {
+					await persistence.release(lease);
+				}
+			},
 		}),
 		executor: pipeline,
 	});

@@ -34,6 +34,12 @@ Harness selection is resolved at prompt admission. A fresh prompt observes the s
 
 The footer identifies the active harness and shows background evolution activity. `/skills` lists only evolved skills from the active revision whose workspace identity matches the current workspace. Harness selection is workspace-scoped: sessions in the same workspace observe each other's selections at prompt boundaries, while sessions in other workspaces keep their own selected revision.
 
+## Skill retention
+
+Before a new manual or automatic evolution job captures its input, deterministic grooming reads the selected workspace's evolved-skill scores. It retires every package at <= -8 points, then trims the lowest-scoring survivors to at most 10; equal scores are ordered by skill ID. Grooming uses the skill writer's verified write/activate path and writer lease without candidate evaluation. Selection races recompute against the new inventory rather than applying stale removals. A no-op never advances the pointer.
+
+The job freezes memory, skill catalog, package digests, and expected base from the post-groom revision, not the session's potentially older prompt-bound revision. Existing requests remain pinned; subsequent prompts and new sessions observe the groomed selection. Installed skills are unaffected, and historical scores and lifecycle observations are retained.
+
 ## Automatic eligibility
 
 When evolution is enabled, automatic work considers only invocation evidence accumulated by the active workspace and requires all of the following:
