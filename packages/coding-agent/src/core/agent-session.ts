@@ -105,7 +105,7 @@ import {
 	wrapRegisteredTools,
 } from "./extensions/index.ts";
 import { emitSessionShutdownEvent } from "./extensions/runner.ts";
-import type { BashExecutionMessage, CustomMessage } from "./messages.ts";
+import { type BashExecutionMessage, type CustomMessage, convertToLlm } from "./messages.ts";
 import { ModelRegistry } from "./model-registry.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.ts";
@@ -124,6 +124,7 @@ import {
 	type SessionHeader,
 } from "./session-manager.ts";
 import type { SettingsManager } from "./settings-manager.ts";
+import { type SkillFeedbackConsumer, SkillFeedbackTurn } from "./skill-feedback.ts";
 import {
 	createEvolvedSkillCatalog,
 	createSkillReferenceSnapshot,
@@ -330,6 +331,8 @@ export interface AgentSessionConfig {
 	telemetryContext?: TelemetryContext;
 	/** Process-owned observer for durable lifecycle boundaries. */
 	lifecycleObserver?: AgentSessionLifecycleObserver;
+	/** Internal scoring sink only: never forward private reports to extensions, session entries, or traces. */
+	consumeSkillFeedback?: SkillFeedbackConsumer;
 }
 
 export interface ExtensionBindings {
@@ -477,6 +480,9 @@ export class AgentSession {
 	private readonly _skillReferenceSnapshots = new Map<string, SkillReferenceSnapshot>();
 	private readonly _skillEnablementOverrides = new Map<string, boolean>();
 	private _activeSkillTrace: ActiveSkillTrace | undefined;
+	private _skillFeedbackTurn: SkillFeedbackTurn | undefined;
+	private readonly _skillFeedbackReferences = new WeakMap<AgentMessage, readonly SkillReferenceSnapshot[]>();
+	private readonly _consumeSkillFeedback: SkillFeedbackConsumer | undefined;
 
 	// Compaction state
 	private _compactionAbortController: AbortController | undefined = undefined;
@@ -570,6 +576,7 @@ export class AgentSession {
 		);
 		this._telemetryContext = config.telemetryContext ?? NOOP_TELEMETRY_CONTEXT;
 		this._lifecycleObserver = config.lifecycleObserver;
+		this._consumeSkillFeedback = config.consumeSkillFeedback;
 
 		this._armInitialCurrentPlanRestoration();
 
@@ -749,6 +756,20 @@ export class AgentSession {
 				? async (_turn: PrepareNextTurnContext, signal?: AbortSignal) => await this.agent.prepareNextTurn?.(signal)
 				: undefined);
 		this.agent.prepareNextTurnWithContext = async (turn, signal) => {
+			const feedback = this._skillFeedbackTurn;
+			this._skillFeedbackTurn = undefined;
+			const model = this._modelRuntime.getModel(turn.message.provider, turn.message.model);
+			if (feedback && model && (turn.message.stopReason === "stop" || turn.message.stopReason === "toolUse")) {
+				await feedback.report({
+					models: this._modelRuntime,
+					model,
+					context: { systemPrompt: turn.context.systemPrompt, messages: convertToLlm(turn.context.messages) },
+					sessionId: this.sessionId,
+					outputId: this.sessionManager.getLeafId()!,
+					signal,
+					consume: this._consumeSkillFeedback,
+				});
+			}
 			const previousSnapshot = await previousPrepareNextTurnWithContext?.(turn, signal);
 			const previousContext = previousSnapshot?.context ?? turn.context;
 
@@ -876,6 +897,14 @@ export class AgentSession {
 
 	/** Internal handler for agent events - shared by subscribe and reconnect */
 	private _handleAgentEvent = async (event: AgentEvent): Promise<void> => {
+		if (event.type === "turn_start") {
+			this._skillFeedbackTurn =
+				this._harnessVersionBundle && this._workspaceIdentity
+					? new SkillFeedbackTurn(this._harnessVersionBundle, this._workspaceIdentity)
+					: undefined;
+		} else if (event.type === "message_start" && event.message.role === "user") {
+			this._skillFeedbackTurn?.reference(this._skillFeedbackReferences.get(event.message) ?? []);
+		}
 		if (event.type === "agent_start") {
 			for (const reservation of this._promptReservations) {
 				if (!reservation.signaled) continue;
@@ -1550,7 +1579,6 @@ export class AgentSession {
 		if (
 			isError ||
 			toolName !== "read" ||
-			!activeTrace ||
 			typeof args !== "object" ||
 			args === null ||
 			typeof details !== "object" ||
@@ -1563,10 +1591,11 @@ export class AgentSession {
 			"contentDigest" in details && typeof details.contentDigest === "string" ? details.contentDigest : undefined;
 		if (!path || !contentDigest) return;
 		const resolvedPath = canonicalizePath(resolvePath(path, this._cwd));
-		for (const skill of activeTrace.skills) {
+		this._skillFeedbackTurn?.read(resolvedPath, contentDigest);
+		for (const skill of activeTrace?.skills ?? []) {
 			if (skill.contentDigest !== contentDigest) continue;
 			if (canonicalizePath(resolvePath(skill.location, this._cwd)) !== resolvedPath) continue;
-			activeTrace.operationSpan.addEvent("diffex.skill.read", this._skillObservationAttributes(skill));
+			activeTrace?.operationSpan.addEvent("diffex.skill.read", this._skillObservationAttributes(skill));
 		}
 	}
 
@@ -2228,11 +2257,9 @@ export class AgentSession {
 			if (currentImages) {
 				userContent.push(...currentImages);
 			}
-			messages.push({
-				role: "user",
-				content: userContent,
-				timestamp: Date.now(),
-			});
+			const userMessage: AgentMessage = { role: "user", content: userContent, timestamp: Date.now() };
+			this._skillFeedbackReferences.set(userMessage, referencedSkills);
+			messages.push(userMessage);
 
 			// Inject any pending "nextTurn" messages as context alongside the user message
 			consumedNextTurnMessages = this._pendingNextTurnMessages;
@@ -2482,22 +2509,24 @@ export class AgentSession {
 					this.agent.state.systemPrompt,
 				);
 			}
-			return this._enqueueSteer(text, images);
+			return this._enqueueSteer(text, images, references);
 		});
 	}
 
-	private async _enqueueSteer(text: string, images?: ImageContent[]): Promise<void> {
+	private async _enqueueSteer(
+		text: string,
+		images?: ImageContent[],
+		references: readonly SkillReferenceSnapshot[] = [],
+	): Promise<void> {
 		this._steeringMessages.push(text);
 		this._emitQueueUpdate();
 		const content: (TextContent | ImageContent)[] = [{ type: "text", text }];
 		if (images) {
 			content.push(...images);
 		}
-		this.agent.steer({
-			role: "user",
-			content,
-			timestamp: Date.now(),
-		});
+		const message: AgentMessage = { role: "user", content, timestamp: Date.now() };
+		this._skillFeedbackReferences.set(message, references);
+		this.agent.steer(message);
 	}
 
 	/**
@@ -2520,22 +2549,24 @@ export class AgentSession {
 					this.agent.state.systemPrompt,
 				);
 			}
-			return this._enqueueFollowUp(text, images);
+			return this._enqueueFollowUp(text, images, references);
 		});
 	}
 
-	private async _enqueueFollowUp(text: string, images?: ImageContent[]): Promise<void> {
+	private async _enqueueFollowUp(
+		text: string,
+		images?: ImageContent[],
+		references: readonly SkillReferenceSnapshot[] = [],
+	): Promise<void> {
 		this._followUpMessages.push(text);
 		this._emitQueueUpdate();
 		const content: (TextContent | ImageContent)[] = [{ type: "text", text }];
 		if (images) {
 			content.push(...images);
 		}
-		this.agent.followUp({
-			role: "user",
-			content,
-			timestamp: Date.now(),
-		});
+		const message: AgentMessage = { role: "user", content, timestamp: Date.now() };
+		this._skillFeedbackReferences.set(message, references);
+		this.agent.followUp(message);
 	}
 
 	/**

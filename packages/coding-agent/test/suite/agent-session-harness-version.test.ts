@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { InMemoryTelemetryContext } from "@earendil-works/diffex-agent-core";
-import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/diffex-ai";
+import { type Context, fauxAssistantMessage, fauxToolCall } from "@earendil-works/diffex-ai";
 import {
 	computeHarnessSkillPackageVersion,
 	computeHarnessVersion,
@@ -17,11 +17,15 @@ import {
 } from "@earendil-works/diffex-harness-state";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { resolveHarnessWorkspace } from "../../src/core/harness-state-runtime.ts";
+import { SKILL_FEEDBACK_TOOL } from "../../src/core/skill-feedback.ts";
 import { createHarness, getMessageText, type Harness } from "./harness.ts";
 
 describe("AgentSession harness revisions", () => {
 	const harnesses: Harness[] = [];
 	const agentDirs: string[] = [];
+	const emptySkillReport = fauxAssistantMessage(fauxToolCall(SKILL_FEEDBACK_TOOL, { ratings: [] }), {
+		stopReason: "toolUse",
+	});
 
 	afterEach(async () => {
 		while (harnesses.length > 0) {
@@ -228,6 +232,7 @@ describe("AgentSession harness revisions", () => {
 				providerPrompt = context.systemPrompt ?? "";
 				return fauxAssistantMessage("activated");
 			},
+			emptySkillReport,
 		]);
 
 		await harness.session.prompt("observe the atomic revision");
@@ -296,6 +301,7 @@ describe("AgentSession harness revisions", () => {
 				providerPrompts.push(context.systemPrompt ?? "");
 				return fauxAssistantMessage("manual revision");
 			},
+			emptySkillReport,
 			(context) => {
 				providerPrompts.push(context.systemPrompt ?? "");
 				return fauxAssistantMessage("restored revision");
@@ -352,10 +358,13 @@ describe("AgentSession harness revisions", () => {
 		const selections = [one, two, three, updated, one, two, updated];
 		const providerPrompts: string[] = [];
 		harness.setResponses(
-			selections.map(() => (context) => {
-				providerPrompts.push(context.systemPrompt ?? "");
-				return fauxAssistantMessage("selected revision observed");
-			}),
+			selections.flatMap(() => [
+				(context: Context) => {
+					providerPrompts.push(context.systemPrompt ?? "");
+					return fauxAssistantMessage("selected revision observed");
+				},
+				emptySkillReport,
+			]),
 		);
 
 		for (const [index, selected] of selections.entries()) {
@@ -403,6 +412,7 @@ describe("AgentSession harness revisions", () => {
 				providerPrompt = context.systemPrompt ?? "";
 				return fauxAssistantMessage("ancestor remains selected");
 			},
+			emptySkillReport,
 		]);
 
 		await harness.session.switchHarnessVersion(one.manifest.version);
@@ -489,15 +499,18 @@ describe("AgentSession harness revisions", () => {
 				await release.promise;
 				return fauxAssistantMessage(fauxToolCall("read", { path: skill.filePath }), { stopReason: "toolUse" });
 			},
+			emptySkillReport,
 			(context) => {
 				providerPrompts.push(context.systemPrompt ?? "");
 				readResult = getMessageText(context.messages.find((message) => message.role === "toolResult"));
 				return fauxAssistantMessage("original request finished");
 			},
+			emptySkillReport,
 			(context) => {
 				providerPrompts.push(context.systemPrompt ?? "");
 				return fauxAssistantMessage("fresh request finished");
 			},
+			emptySkillReport,
 		]);
 
 		const inFlight = harness.session.prompt("read the ancestor skill");
@@ -539,16 +552,19 @@ describe("AgentSession harness revisions", () => {
 					await release.promise;
 					return fauxAssistantMessage("original request finished");
 				},
+				emptySkillReport,
 				(context) => {
 					providerPrompts.push(context.systemPrompt ?? "");
 					userMessages.push(getMessageText(context.messages.filter((message) => message.role === "user").at(-1)));
 					return fauxAssistantMessage("queued request finished");
 				},
+				emptySkillReport,
 				(context) => {
 					providerPrompts.push(context.systemPrompt ?? "");
 					userMessages.push(getMessageText(context.messages.filter((message) => message.role === "user").at(-1)));
 					return fauxAssistantMessage("fresh request finished");
 				},
+				emptySkillReport,
 			]);
 
 			const inFlight = harness.session.prompt("start with the ancestor");
@@ -684,6 +700,7 @@ describe("AgentSession harness revisions", () => {
 			},
 		]);
 
+		harness.appendResponses([emptySkillReport]);
 		const inFlight = harness.session.prompt("request admitted before activation");
 		await firstStarted;
 		const workspace = await resolveHarnessWorkspace(harness.tempDir);

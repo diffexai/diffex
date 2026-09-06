@@ -25,6 +25,7 @@ import { convertToLlm } from "../../src/core/messages.ts";
 import { SessionManager } from "../../src/core/session-manager.ts";
 import type { Settings } from "../../src/core/settings-manager.ts";
 import { SettingsManager } from "../../src/core/settings-manager.ts";
+import type { SkillFeedbackConsumer } from "../../src/core/skill-feedback.ts";
 import type { InlineExtension, ResourceLoader } from "../../src/index.ts";
 import {
 	type CreateTestExtensionsResultInput,
@@ -81,6 +82,7 @@ export interface HarnessOptions {
 	harnessVersionBundle?: HarnessVersionBundle;
 	telemetryContext?: TelemetryContext;
 	lifecycleObserver?: AgentSessionLifecycleObserver;
+	consumeSkillFeedback?: SkillFeedbackConsumer;
 }
 
 export interface Harness {
@@ -208,6 +210,7 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 		workspaceIdentity: workspace.workspace,
 		telemetryContext: options.telemetryContext,
 		lifecycleObserver: options.lifecycleObserver,
+		consumeSkillFeedback: options.consumeSkillFeedback,
 	});
 
 	const events: AgentSessionEvent[] = [];
