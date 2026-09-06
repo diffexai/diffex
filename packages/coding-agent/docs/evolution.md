@@ -40,6 +40,8 @@ Before a new manual or automatic evolution job captures its input, deterministic
 
 The job freezes memory, skill catalog, package digests, and expected base from the post-groom revision, not the session's potentially older prompt-bound revision. Existing requests remain pinned; subsequent prompts and new sessions observe the groomed selection. Installed skills are unaffected, and historical scores and lifecycle observations are retained.
 
+`@earendil-works/diffex-evolution` exports `SkillRetentionPolicy` and immutable `DEFAULT_SKILL_RETENTION_POLICY`: initial points 0, helpful +1, harmful -1.5, uninvoked -1, removal threshold -8, cap 10, and reset-on-modify. These are shared code-level defaults, not `settings.json` overrides. Package-version identity enforces reset-on-modify; lifecycle observations are audit evidence, never score inputs or cleanup targets. Without workspace-matching evolved skills, feedback requests and score-store grooming are skipped.
+
 ## Automatic eligibility
 
 When evolution is enabled, automatic work considers only invocation evidence accumulated by the active workspace and requires all of the following:

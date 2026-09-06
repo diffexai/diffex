@@ -10,10 +10,12 @@ import {
 } from "@earendil-works/diffex-harness-state";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+	DEFAULT_SKILL_RETENTION_POLICY,
 	type EvolutionScope,
 	EvolutionStorageCorruptionError,
 	FileEvolutionPersistence,
 	SKILL_SCORE_SCHEMA_VERSION,
+	SKILL_SCORE_WEIGHTS,
 	type SkillScore,
 	type SkillScoreRevision,
 } from "../src/index.ts";
@@ -59,6 +61,19 @@ function first(scores: readonly SkillScore[]): SkillScore {
 }
 
 describe("durable skill scores", () => {
+	it("exposes immutable shared retention defaults", () => {
+		expect(DEFAULT_SKILL_RETENTION_POLICY).toEqual({
+			initialPoints: 0,
+			weights: { helpful: 1, harmful: -1.5, neutral: -1 },
+			removalThreshold: -8,
+			skillCap: 10,
+			resetOnModify: true,
+		});
+		expect(DEFAULT_SKILL_RETENTION_POLICY.weights).toBe(SKILL_SCORE_WEIGHTS);
+		expect(Object.isFrozen(DEFAULT_SKILL_RETENTION_POLICY)).toBe(true);
+		expect(Object.isFrozen(SKILL_SCORE_WEIGHTS)).toBe(true);
+	});
+
 	it("applies exact weights once across concurrent sessions, reopening, and old replays", async () => {
 		const { harness, bundle, store, storePath, revision } = await fixture([
 			skill("verify"),

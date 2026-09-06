@@ -3,7 +3,12 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { HarnessStateStore, type HarnessWorkspaceIdentity } from "@earendil-works/diffex-harness-state";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { FileEvolutionPersistence, PersistentSkillCandidateRegistry, SkillWriter } from "../src/index.ts";
+import {
+	DeterministicSkillLifecycleObserver,
+	FileEvolutionPersistence,
+	PersistentSkillCandidateRegistry,
+	SkillWriter,
+} from "../src/index.ts";
 
 const workspace: HarnessWorkspaceIdentity = { repositoryId: "repo", directoryId: "checkout" };
 const scope = { repositoryId: "repo", scopeId: "checkout" };
@@ -125,6 +130,55 @@ describe("points-driven skill grooming", () => {
 			expect(await data.writer.listActivationReceipts(scope)).toEqual([]);
 		},
 	);
+
+	it.each([false, true])("skips the score store without workspace skills (foreign: %s)", async (foreign) => {
+		const data = await fixture([], foreign);
+		const scores = { loadSkillScores: vi.fn().mockRejectedValue(new Error("Must not load inactive scores")) };
+		expect(await data.writer.groom(scope, scores, data.context)).toEqual(data.base);
+		expect(scores.loadSkillScores).not.toHaveBeenCalled();
+		expect(await data.state.loadCurrent()).toEqual(data.base);
+	});
+
+	it("keeps retired versions' lifecycle observations for audit without using them as points", async () => {
+		const data = await fixture([-8, 0]);
+		const before = await data.persistence.loadSkillScores(data.state, data.revision);
+		const observer = new DeterministicSkillLifecycleObserver({
+			version: "test",
+			policyVersion: "test",
+			observations: data.persistence,
+		});
+		for (const row of before) {
+			await observer.record({
+				scope,
+				skill: {
+					skillId: row.skillId,
+					version: row.packageVersion,
+					contentDigest: row.contentDigest,
+					harnessRevision: row.harnessRevision,
+					workspace,
+					sourceKind: "evolved",
+				},
+				invocationEvents: ["read"],
+				topLevelTaskLineageId: "audit-task",
+				traceIds: ["audit-trace"],
+				evidenceIds: ["audit-evidence"],
+				// Deliberately oppose the point ledger: lifecycle signals must not drive grooming.
+				signal: row.points === -8 ? "helpful" : "harmful",
+				signalSource: "direct-user",
+				attributionMethod: "direct",
+				issueKind: null,
+				status: "final",
+				timestamp: new Date().toISOString(),
+				idempotencyKey: row.skillId,
+			});
+		}
+		const observations = await data.persistence.listSkillLifecycleObservations(scope);
+		const groomed = await data.writer.groom(scope, data.persistence, data.context);
+		expect(groomed.state.skills.map((skill) => skill.path)).toEqual([data.base.state.skills[1]!.path]);
+		const reopened = new FileEvolutionPersistence(join(data.root, "evolution"));
+		expect(await reopened.listSkillLifecycleObservations(scope)).toEqual(observations);
+		expect(await reopened.loadSkillScores(data.state, data.revision)).toEqual(before);
+	});
 
 	it("rejects incomplete, foreign, stale-package and stale-digest score inventories", async () => {
 		const data = await fixture([-8]);

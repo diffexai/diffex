@@ -4,7 +4,8 @@
 
 ### Added
 
-- Added versioned, workspace-isolated skill score storage with validated harness membership, zero-initialized package versions, and atomic compare-and-swap updates. Runtime feedback and automatic skill removal are not yet wired.
+- Added versioned, workspace-isolated skill score storage with validated harness membership, zero-initialized package versions, and atomic compare-and-swap updates.
+- Exposed immutable typed skill-retention defaults shared by output scoring and pre-evolution grooming; retired versions' scores and lifecycle observations remain available for audit.
 
 ### Changed
 

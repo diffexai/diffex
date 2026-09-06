@@ -453,8 +453,10 @@ export {
 	type SkillLifecycleReportInput,
 } from "./skill-lifecycle.ts";
 export {
+	DEFAULT_SKILL_RETENTION_POLICY,
 	SKILL_SCORE_SCHEMA_VERSION,
 	SKILL_SCORE_WEIGHTS,
+	type SkillRetentionPolicy,
 	type SkillScore,
 	type SkillScoreOutput,
 	type SkillScoreRevision,

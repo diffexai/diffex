@@ -8,7 +8,25 @@ import type { EvolutionScope } from "./contracts.ts";
 
 export const SKILL_SCORE_SCHEMA_VERSION = 2 as const;
 
-export const SKILL_SCORE_WEIGHTS = { helpful: 1, harmful: -1.5, neutral: -1 } as const;
+export interface SkillRetentionPolicy {
+	readonly initialPoints: 0;
+	readonly weights: Readonly<Record<"helpful" | "harmful" | "neutral", number>>;
+	readonly removalThreshold: number;
+	readonly skillCap: number;
+	/** Enforced by packageVersion/contentDigest subject identity, not a runtime toggle. */
+	readonly resetOnModify: true;
+}
+
+export const SKILL_SCORE_WEIGHTS = Object.freeze({ helpful: 1, harmful: -1.5, neutral: -1 } as const);
+
+/** Shared scoring/grooming defaults. Historical scores and lifecycle observations are retained for audit. */
+export const DEFAULT_SKILL_RETENTION_POLICY = Object.freeze({
+	initialPoints: 0,
+	weights: SKILL_SCORE_WEIGHTS,
+	removalThreshold: -8,
+	skillCap: 10,
+	resetOnModify: true,
+} satisfies SkillRetentionPolicy);
 
 export interface SkillScoreOutput extends SkillScoreRevision {
 	readonly sessionId: string;
@@ -76,7 +94,7 @@ export async function loadScoreableSkills(
 			skillId: computeHarnessSkillId(skill.workspace, skill.path),
 			packageVersion: skill.packageVersion,
 			contentDigest: skill.contentHash,
-			points: 0,
+			points: DEFAULT_SKILL_RETENTION_POLICY.initialPoints,
 			lastOutputIdempotencyKey: null,
 			appliedOutputKeys: [],
 		}));

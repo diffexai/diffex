@@ -50,10 +50,8 @@ import {
 	serializeEvolutionValue,
 } from "./provenance.ts";
 
-import type { SkillScore, SkillScoreRevision } from "./skill-scores.ts";
+import { DEFAULT_SKILL_RETENTION_POLICY, type SkillScore, type SkillScoreRevision } from "./skill-scores.ts";
 
-const SKILL_REMOVAL_THRESHOLD = -8;
-const SKILL_RETENTION_CAP = 10;
 type GroomingScore = Pick<SkillScore, "skillId" | "packageVersion" | "contentDigest" | "points">;
 type WriterMutation = Pick<SkillMutation, "mutationId" | "workspace" | "existingSkills" | "skill">;
 interface SkillGroomingBatch extends Omit<SkillMutationBatch, "mutations"> {
@@ -823,6 +821,8 @@ export class SkillWriter {
 			context.signal?.throwIfAborted();
 			await this.#dependencies.leases.assertHeld(context.lease);
 			const base = await this.#dependencies.harnessState.loadCurrent();
+			if (!base.state.skills.some((skill) => sameWorkspace(skill.workspace, this.#dependencies.workspace)))
+				return base;
 			const groomingScores = (
 				await scores.loadSkillScores(this.#dependencies.harnessState, {
 					scope,
@@ -900,8 +900,13 @@ export class SkillWriter {
 		const ranked = [...scores].sort(
 			(a, b) => a.points - b.points || (a.skillId < b.skillId ? -1 : a.skillId > b.skillId ? 1 : 0),
 		);
-		const thresholdCount = ranked.filter((score) => score.points <= SKILL_REMOVAL_THRESHOLD).length;
-		const removed = ranked.slice(0, Math.max(thresholdCount, ranked.length - SKILL_RETENTION_CAP));
+		const thresholdCount = ranked.filter(
+			(score) => score.points <= DEFAULT_SKILL_RETENTION_POLICY.removalThreshold,
+		).length;
+		const removed = ranked.slice(
+			0,
+			Math.max(thresholdCount, ranked.length - DEFAULT_SKILL_RETENTION_POLICY.skillCap),
+		);
 		return {
 			mutationId: stableId("skill-grooming-retire", { base: base.manifest.version, removed }),
 			workspace: this.#dependencies.workspace,
