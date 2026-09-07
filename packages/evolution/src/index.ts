@@ -465,6 +465,15 @@ export {
 	type SkillLifecycleReportInput,
 } from "./skill-lifecycle.ts";
 export {
+	SKILL_SCORE_SCHEMA_VERSION,
+	type SkillScoreCatalog,
+	type SkillScoreIdentity,
+	type SkillScoreLedger,
+	type SkillScoreRow,
+	type SkillScoreSnapshot,
+	type SkillScoreStore,
+} from "./skill-score-store.ts";
+export {
 	StructuredSkillSynthesizer,
 	type StructuredSkillSynthesizerDependencies,
 } from "./skill-synthesizer.ts";
