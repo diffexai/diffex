@@ -68,6 +68,16 @@ import {
 	computeCacheWaste,
 	detectCacheMiss,
 } from "../../core/cache-stats.ts";
+import {
+	type CollaborationMode,
+	type CollaborationModeTransitionResult,
+	getCollaborationMode,
+	isCollaborationModeBusy,
+	planHandoffSettlementGuards,
+	restoreCollaborationMode,
+	setCollaborationMode,
+	subscribePromptAdmission,
+} from "../../core/collaboration-mode.ts";
 import { type DiffexAccountAuth, HostedDiffexAccountAuth } from "../../core/diffex-account-auth.ts";
 import type {
 	AutocompleteProviderFactory,
@@ -144,7 +154,12 @@ import { type EvolutionMenuClient, EvolutionMenuComponent } from "./components/e
 import { ExtensionEditorComponent } from "./components/extension-editor.ts";
 import { ExtensionInputComponent } from "./components/extension-input.ts";
 import { ExtensionSelectorComponent } from "./components/extension-selector.ts";
-import { FooterComponent, formatCwdForFooter, formatTokens } from "./components/footer.ts";
+import {
+	CustomFooterPlanModeIndicator,
+	FooterComponent,
+	formatCwdForFooter,
+	formatTokens,
+} from "./components/footer.ts";
 import { formatHarnessVersionPickerLabel } from "./components/harness-version-display.ts";
 import {
 	createHarnessVersionSelectorItems,
@@ -204,6 +219,16 @@ interface Expandable {
 
 function isExpandable(obj: unknown): obj is Expandable {
 	return typeof obj === "object" && obj !== null && "setExpanded" in obj && typeof obj.setExpanded === "function";
+}
+
+function setInteractiveCollaborationMode(
+	session: AgentSession,
+	mode: CollaborationMode,
+	directBashCommandsInProgress: number,
+): CollaborationModeTransitionResult {
+	// The core Bash guard starts after the awaited user_bash extension hook.
+	if (directBashCommandsInProgress > 0) return { status: "busy", mode: getCollaborationMode(session) };
+	return setCollaborationMode(session, mode);
 }
 
 class ExpandableText extends Text implements Expandable {
@@ -508,6 +533,9 @@ export class InteractiveMode {
 	private editorContainer: Container;
 	private activeSelectorToken?: object;
 	private activeSelectorDispose?: () => void;
+	private pendingPlanHandoff?: { readonly plan: string };
+	private dismissPlanHandoffSelector?: () => void;
+	private planHandoffCheckScheduled = false;
 	private footer: FooterComponent;
 	private footerContainer: Container;
 	private footerDataProvider: FooterDataProvider;
@@ -566,6 +594,7 @@ export class InteractiveMode {
 
 	// Track current bash execution component
 	private bashComponent: BashExecutionComponent | undefined = undefined;
+	private directBashCommandsInProgress = 0;
 
 	// Track pending bash components (shown in pending area, moved to chat on submit)
 	private pendingBashComponents: BashExecutionComponent[] = [];
@@ -596,6 +625,7 @@ export class InteractiveMode {
 	private extensionWidgetsBelow = new Map<string, Component & { dispose?(): void }>();
 	private widgetContainerAbove!: Container;
 	private widgetContainerBelow!: Container;
+	private customFooterPlanModeIndicator: CustomFooterPlanModeIndicator;
 
 	// Custom footer from extension (undefined = use built-in footer)
 	private customFooter: (Component & { dispose?(): void }) | undefined = undefined;
@@ -638,9 +668,12 @@ export class InteractiveMode {
 		this.options = { ...options, tuiMode };
 		this.autoTrustOnReloadCwd = options.autoTrustOnReloadCwd;
 		this.runtimeHost.setBeforeSessionInvalidate(() => {
+			this.clearPlanHandoff();
 			this.resetExtensionUI();
 		});
 		this.runtimeHost.setRebindSession(async () => {
+			this.clearPlanHandoff();
+			this.restoreCurrentCollaborationMode();
 			await this.rebindCurrentSession({ renderBeforeBind: true });
 		});
 		this.version = VERSION;
@@ -663,6 +696,9 @@ export class InteractiveMode {
 		this.statusContainer = new Container();
 		this.widgetContainerAbove = new Container();
 		this.widgetContainerBelow = new Container();
+		this.customFooterPlanModeIndicator = new CustomFooterPlanModeIndicator(
+			() => this.customFooter !== undefined && getCollaborationMode(this.session) === "plan",
+		);
 		this.keybindings = KeybindingsManager.create();
 		setKeybindings(this.keybindings);
 		const editorPaddingX = this.settingsManager.getEditorPaddingX();
@@ -709,6 +745,13 @@ export class InteractiveMode {
 			(message) => this.showError(message),
 			() => this.updateEditorBorderColor(),
 		);
+	}
+
+	private restoreCurrentCollaborationMode(): void {
+		const result = restoreCollaborationMode(this.session);
+		if (result.status === "busy") {
+			throw new Error("Cannot restore collaboration mode while Diffex is busy");
+		}
 	}
 
 	private getAutocompleteSourceTag(sourceInfo?: SourceInfo): string | undefined {
@@ -969,6 +1012,7 @@ export class InteractiveMode {
 
 	async init(): Promise<void> {
 		if (this.isInitialized) return;
+		this.restoreCurrentCollaborationMode();
 
 		this.registerSignalHandlers();
 
@@ -1950,6 +1994,7 @@ export class InteractiveMode {
 					}
 				},
 				navigateTree: async (targetId, options) => {
+					this.clearPlanHandoff();
 					const result = await this.session.navigateTree(targetId, {
 						summarize: options?.summarize,
 						customInstructions: options?.customInstructions,
@@ -1960,6 +2005,7 @@ export class InteractiveMode {
 						return { cancelled: true };
 					}
 
+					this.restoreCurrentCollaborationMode();
 					this.chatContainer.clear();
 					this.renderInitialMessages();
 					if (result.editorText && !this.editor.getText().trim()) {
@@ -2059,6 +2105,7 @@ export class InteractiveMode {
 	}
 
 	private renderCurrentSessionState(): void {
+		this.clearPlanHandoff();
 		this.loadedResourcesContainer.clear();
 		this.chatContainer.clear();
 		this.pendingMessagesContainer.clear();
@@ -2595,7 +2642,12 @@ export class InteractiveMode {
 	 */
 	private renderWidgets(): void {
 		if (!this.widgetContainerAbove || !this.widgetContainerBelow) return;
-		this.renderWidgetContainer(this.widgetContainerAbove, this.extensionWidgetsAbove, true);
+		this.renderWidgetContainer(
+			this.widgetContainerAbove,
+			this.extensionWidgetsAbove,
+			true,
+			this.customFooterPlanModeIndicator,
+		);
 		this.renderWidgetContainer(this.widgetContainerBelow, this.extensionWidgetsBelow, false);
 		this.ui.requestRender();
 	}
@@ -2604,18 +2656,22 @@ export class InteractiveMode {
 		container: Container,
 		widgets: Map<string, Component & { dispose?(): void }>,
 		leadingSpacer: boolean,
+		trailingComponent?: Component,
 	): void {
 		container.clear();
 
-		if (widgets.size === 0) {
+		if (widgets.size === 0 && !trailingComponent) {
 			return;
 		}
 
-		if (leadingSpacer) {
+		if (leadingSpacer && widgets.size > 0) {
 			container.addChild(new Spacer(1));
 		}
 		for (const component of widgets.values()) {
 			container.addChild(component);
+		}
+		if (trailingComponent) {
+			container.addChild(trailingComponent);
 		}
 	}
 
@@ -2839,6 +2895,7 @@ export class InteractiveMode {
 		this.extensionSelector = undefined;
 		this.ui.setFocus(this.editor);
 		this.ui.requestRender();
+		this.schedulePendingPlanHandoff?.();
 	}
 
 	/**
@@ -2915,6 +2972,7 @@ export class InteractiveMode {
 		this.extensionInput = undefined;
 		this.ui.setFocus(this.editor);
 		this.ui.requestRender();
+		this.schedulePendingPlanHandoff?.();
 	}
 
 	/**
@@ -2956,6 +3014,7 @@ export class InteractiveMode {
 		this.extensionEditor = undefined;
 		this.ui.setFocus(this.editor);
 		this.ui.requestRender();
+		this.schedulePendingPlanHandoff?.();
 	}
 
 	/**
@@ -3030,6 +3089,7 @@ export class InteractiveMode {
 		this.editorContainer.addChild(this.editor as Component);
 		this.ui.setFocus(this.editor as Component);
 		this.ui.requestRender();
+		this.schedulePendingPlanHandoff?.();
 	}
 
 	/**
@@ -3068,6 +3128,7 @@ export class InteractiveMode {
 			this.editor.setText(savedText);
 			this.ui.setFocus(this.editor);
 			this.ui.requestRender();
+			this.schedulePendingPlanHandoff?.();
 		};
 
 		return new Promise((resolve, reject) => {
@@ -3077,8 +3138,10 @@ export class InteractiveMode {
 			const close = (result: T) => {
 				if (closed) return;
 				closed = true;
-				if (isOverlay) this.ui.hideOverlay();
-				else restoreEditor();
+				if (isOverlay) {
+					this.ui.hideOverlay();
+					this.schedulePendingPlanHandoff?.();
+				} else restoreEditor();
 				// Note: both branches above already call requestRender
 				resolve(result);
 				try {
@@ -3187,6 +3250,7 @@ export class InteractiveMode {
 		this.defaultEditor.onCtrlD = () => this.handleCtrlD();
 		this.defaultEditor.onAction("app.suspend", () => this.handleCtrlZ());
 		this.defaultEditor.onAction("app.thinking.cycle", () => this.cycleThinkingLevel());
+		this.defaultEditor.onAction("app.mode.toggle", () => this.toggleCollaborationMode());
 		this.defaultEditor.onAction("app.model.cycleForward", () => this.cycleModel("forward"));
 		this.defaultEditor.onAction("app.model.cycleBackward", () => this.cycleModel("backward"));
 
@@ -3260,6 +3324,7 @@ export class InteractiveMode {
 		this.defaultEditor.onSubmit = async (text: string) => {
 			text = text.trim();
 			if (!text) return;
+			this.clearPlanHandoff?.();
 
 			if (text.startsWith("!")) {
 				const isExcluded = text.startsWith("!!");
@@ -3281,6 +3346,10 @@ export class InteractiveMode {
 			if (text === "/settings") {
 				this.editor.setText("");
 				await this.showSettingsSelector();
+				return;
+			}
+			if (text === "/plan" || text.startsWith("/plan ")) {
+				await this.handlePlanCommand(text);
 				return;
 			}
 			if (text === "/skills") {
@@ -3463,10 +3532,45 @@ export class InteractiveMode {
 		};
 	}
 
+	private async handlePlanCommand(originalText: string): Promise<void> {
+		const request = originalText.slice("/plan".length).trim();
+		if (getCollaborationMode(this.session) === "plan") {
+			if (request) {
+				await this.defaultEditor.onSubmit?.(request);
+			} else {
+				this.showCollaborationModeStatus("Mode: Plan");
+			}
+			return;
+		}
+		try {
+			const result = setInteractiveCollaborationMode(this.session, "plan", this.directBashCommandsInProgress);
+			if (result.status === "busy") {
+				this.editor.setText(originalText);
+				this.showCollaborationModeStatus("Cannot switch modes while Diffex is busy.");
+				return;
+			}
+			this.clearPlanHandoff?.();
+		} catch (error) {
+			this.editor.setText(originalText);
+			this.showError(error instanceof Error ? error.message : String(error));
+			return;
+		}
+
+		this.showCollaborationModeStatus("Mode: Plan");
+		if (request) {
+			await this.defaultEditor.onSubmit?.(request);
+		}
+	}
+
 	private subscribeToAgent(): void {
-		this.unsubscribe = this.session.subscribe(async (event) => {
+		const unsubscribeAdmission = subscribePromptAdmission(this.session, () => this.clearPlanHandoff());
+		const unsubscribeAgent = this.session.subscribe(async (event) => {
 			await this.handleEvent(event);
 		});
+		this.unsubscribe = () => {
+			unsubscribeAdmission();
+			unsubscribeAgent();
+		};
 	}
 
 	private async handleEvent(event: AgentSessionEvent): Promise<void> {
@@ -3478,6 +3582,7 @@ export class InteractiveMode {
 
 		switch (event.type) {
 			case "agent_start":
+				this.clearPlanHandoff();
 				this.agentResponseStartMs = Date.now();
 				this.pendingTools.clear();
 				if (this.settingsManager.getShowTerminalProgress()) {
@@ -3510,6 +3615,9 @@ export class InteractiveMode {
 				break;
 
 			case "queue_update":
+				if (event.steering.length > 0 || event.followUp.length > 0) {
+					this.clearPlanHandoff();
+				}
 				this.updatePendingMessagesDisplay();
 				this.ui.requestRender();
 				break;
@@ -3667,6 +3775,9 @@ export class InteractiveMode {
 
 			case "agent_settled":
 				await this.checkShutdownRequested();
+				if (planHandoffSettlementGuards.get(event)?.() !== false) {
+					this.handleSettledPlanHandoff(event.planHandoff);
+				}
 				break;
 
 			case "subagent_wait_start":
@@ -3840,6 +3951,20 @@ export class InteractiveMode {
 		const text = new Text(theme.fg("dim", message), 1, 0);
 		this.chatContainer.addChild(spacer);
 		this.chatContainer.addChild(text);
+		this.lastStatusSpacer = spacer;
+		this.lastStatusText = text;
+		this.ui.requestRender();
+	}
+
+	private showCollaborationModeStatus(message: string): void {
+		const spacer = new Spacer(1);
+		const text = new Text(theme.fg("dim", message), 1, 0);
+		const children = this.chatContainer.children;
+		const activePathIndices = [this.pendingUserDock, this.streamingComponent, this.activeToolGroup]
+			.map((component) => (component ? children.indexOf(component) : -1))
+			.filter((index) => index >= 0);
+		const insertionIndex = activePathIndices.length > 0 ? Math.min(...activePathIndices) : children.length;
+		children.splice(insertionIndex, 0, spacer, text);
 		this.lastStatusSpacer = spacer;
 		this.lastStatusText = text;
 		this.ui.requestRender();
@@ -4436,6 +4561,7 @@ export class InteractiveMode {
 	private async handleFollowUp(): Promise<void> {
 		const text = (this.editor.getExpandedText?.() ?? this.editor.getText()).trim();
 		if (!text) return;
+		this.clearPlanHandoff?.();
 
 		// Queue input during compaction (extension commands execute immediately)
 		if (this.session.isCompacting) {
@@ -4491,6 +4617,21 @@ export class InteractiveMode {
 			this.footer.invalidate();
 			this.updateEditorBorderColor();
 			this.showStatus(`Thinking level: ${newLevel}`);
+		}
+	}
+
+	private toggleCollaborationMode(): void {
+		const mode: CollaborationMode = getCollaborationMode(this.session) === "plan" ? "default" : "plan";
+		try {
+			const result = setInteractiveCollaborationMode(this.session, mode, this.directBashCommandsInProgress);
+			if (result.status === "busy") {
+				this.showCollaborationModeStatus("Cannot switch modes while Diffex is busy.");
+				return;
+			}
+			this.clearPlanHandoff?.();
+			this.showCollaborationModeStatus(`Mode: ${result.mode === "plan" ? "Plan" : "Default"}`);
+		} catch (error) {
+			this.showError(error instanceof Error ? error.message : String(error));
 		}
 	}
 
@@ -4739,6 +4880,7 @@ export class InteractiveMode {
 	}
 
 	private queueCompactionMessage(text: string, mode: "steer" | "followUp"): void {
+		this.clearPlanHandoff?.();
 		this.compactionQueuedMessages.push({ text, mode });
 		this.editor.addToHistory?.(text);
 		this.editor.setText("");
@@ -4851,10 +4993,126 @@ export class InteractiveMode {
 	// Selectors
 	// =========================================================================
 
+	private hasQueuedPlanHandoffInput(): boolean {
+		const { steering, followUp } = this.getAllQueuedMessages();
+		return steering.length > 0 || followUp.length > 0 || this.pendingUserInputs.length > 0;
+	}
+
+	private isPlanHandoffModalBlocked(): boolean {
+		return (
+			this.renderer.hasOverlayEntries ||
+			this.editorContainer.children.length !== 1 ||
+			this.editorContainer.children[0] !== this.editor
+		);
+	}
+
+	private clearPlanHandoff(): void {
+		this.pendingPlanHandoff = undefined;
+		const dismiss = this.dismissPlanHandoffSelector;
+		this.dismissPlanHandoffSelector = undefined;
+		dismiss?.();
+	}
+
+	private schedulePendingPlanHandoff(delayMs = 0): void {
+		if (!this.pendingPlanHandoff || this.planHandoffCheckScheduled) return;
+		this.planHandoffCheckScheduled = true;
+		setTimeout(() => {
+			this.planHandoffCheckScheduled = false;
+			this.maybeShowPendingPlanHandoff();
+		}, delayMs);
+	}
+
+	private handleSettledPlanHandoff(planHandoff?: { readonly plan: string }): void {
+		this.clearPlanHandoff();
+		if (!planHandoff || getCollaborationMode(this.session) !== "plan" || this.hasQueuedPlanHandoffInput()) {
+			return;
+		}
+		this.pendingPlanHandoff = planHandoff;
+		this.maybeShowPendingPlanHandoff();
+	}
+
+	private maybeShowPendingPlanHandoff(): void {
+		const planHandoff = this.pendingPlanHandoff;
+		if (!planHandoff) return;
+		if (getCollaborationMode(this.session) !== "plan" || this.hasQueuedPlanHandoffInput()) {
+			this.clearPlanHandoff();
+			return;
+		}
+		if (this.directBashCommandsInProgress > 0 || isCollaborationModeBusy(this.session)) {
+			// Some busy operations finish without a TUI event. Retain one offer
+			// and recheck until idle, invalidated, or stopped.
+			this.schedulePendingPlanHandoff(100);
+			return;
+		}
+		if (this.isPlanHandoffModalBlocked()) return;
+		if (this.dismissPlanHandoffSelector) return;
+
+		let finish = () => {};
+		this.showSelector((done) => {
+			finish = () => {
+				this.dismissPlanHandoffSelector = undefined;
+				done();
+			};
+			const selector = new ExtensionSelectorComponent(
+				"Implement this plan?",
+				["Implement the plan", "Stay in Plan mode"],
+				(option) => {
+					if (this.pendingPlanHandoff !== planHandoff || this.dismissPlanHandoffSelector !== finish) return;
+					if (option === "Implement the plan") {
+						void this.implementSettledPlan();
+					} else {
+						this.clearPlanHandoff();
+					}
+				},
+				() => {
+					if (this.pendingPlanHandoff !== planHandoff || this.dismissPlanHandoffSelector !== finish) return;
+					this.clearPlanHandoff();
+				},
+				{ tui: this.ui, onToggleToolsExpanded: () => this.toggleToolOutputExpansion() },
+			);
+			return { component: selector, focus: selector, dispose: () => selector.dispose() };
+		});
+		this.dismissPlanHandoffSelector = finish;
+	}
+
+	private async implementSettledPlan(): Promise<void> {
+		if (!this.pendingPlanHandoff) return;
+		if (getCollaborationMode(this.session) !== "plan" || this.hasQueuedPlanHandoffInput()) {
+			this.clearPlanHandoff();
+			return;
+		}
+		const implementationPrompt = "Implement the plan.";
+		const session = this.session;
+		try {
+			const result = setInteractiveCollaborationMode(session, "default", this.directBashCommandsInProgress);
+			if (result.status === "busy") {
+				this.dismissPlanHandoffSelector?.();
+				this.schedulePendingPlanHandoff(100);
+				this.showError("Cannot switch modes while Diffex is busy.");
+				return;
+			}
+			this.clearPlanHandoff();
+			this.showCollaborationModeStatus("Mode: Default");
+		} catch (error) {
+			this.showError(error instanceof Error ? error.message : String(error));
+			return;
+		}
+
+		this.editor.addToHistory?.(implementationPrompt);
+		this.editor.setText("");
+		try {
+			await session.prompt(implementationPrompt);
+		} catch (error) {
+			this.editor.setText(implementationPrompt);
+			this.showError(error instanceof Error ? error.message : String(error));
+		}
+	}
+
 	private disposeActiveSelector(): void {
 		const dispose = this.activeSelectorDispose;
 		this.activeSelectorToken = undefined;
 		this.activeSelectorDispose = undefined;
+		this.dismissPlanHandoffSelector = undefined;
 		dispose?.();
 	}
 
@@ -4875,6 +5133,7 @@ export class InteractiveMode {
 			this.editorContainer.clear();
 			this.editorContainer.addChild(this.editor);
 			this.ui.setFocus(this.editor);
+			this.schedulePendingPlanHandoff?.();
 		};
 		const created = create(done);
 		dispose = created.dispose;
@@ -5634,6 +5893,7 @@ export class InteractiveMode {
 			const selector = new UserMessageSelectorComponent(
 				userMessages.map((m) => ({ id: m.entryId, text: m.text })),
 				async (entryId) => {
+					this.clearPlanHandoff();
 					done();
 					try {
 						const result = await this.runtimeHost.fork(entryId);
@@ -5701,6 +5961,7 @@ export class InteractiveMode {
 						this.showStatus("Already at this point");
 						return;
 					}
+					this.clearPlanHandoff();
 
 					// Ask about summarization
 					done(); // Close selector first
@@ -5777,6 +6038,7 @@ export class InteractiveMode {
 						}
 
 						// Update UI
+						this.restoreCurrentCollaborationMode();
 						this.chatContainer.clear();
 						this.renderInitialMessages();
 						if (result.editorText && !this.editor.getText().trim()) {
@@ -5862,6 +6124,7 @@ export class InteractiveMode {
 		sessionPath: string,
 		options?: Parameters<ExtensionCommandContext["switchSession"]>[1],
 	): Promise<{ cancelled: boolean }> {
+		this.clearPlanHandoff();
 		this.clearStatusIndicator();
 		try {
 			const result = await this.runtimeHost.switchSession(sessionPath, {
@@ -6202,6 +6465,7 @@ export class InteractiveMode {
 			this.editorContainer.addChild(this.editor);
 			this.ui.setFocus(this.editor);
 			this.ui.requestRender();
+			this.schedulePendingPlanHandoff?.();
 		};
 
 		try {
@@ -6301,6 +6565,7 @@ export class InteractiveMode {
 			this.editorContainer.addChild(this.editor);
 			this.ui.setFocus(this.editor);
 			this.ui.requestRender();
+			this.schedulePendingPlanHandoff?.();
 		};
 
 		const dialog = new LoginDialogComponent(
@@ -6348,6 +6613,7 @@ export class InteractiveMode {
 			this.editorContainer.addChild(this.editor);
 			this.ui.setFocus(this.editor);
 			this.ui.requestRender();
+			this.schedulePendingPlanHandoff?.();
 		};
 
 		try {
@@ -6462,6 +6728,7 @@ export class InteractiveMode {
 			this.editorContainer.addChild(this.editor);
 			this.ui.setFocus(this.editor);
 			this.ui.requestRender();
+			this.schedulePendingPlanHandoff?.();
 		};
 
 		try {
@@ -6523,6 +6790,7 @@ export class InteractiveMode {
 			this.editorContainer.addChild(editor);
 			this.ui.setFocus(editor);
 			this.ui.requestRender();
+			this.schedulePendingPlanHandoff?.();
 		};
 
 		let chatRestoredBeforeSessionStart = false;
@@ -6698,6 +6966,7 @@ export class InteractiveMode {
 			this.editorContainer.clear();
 			this.editorContainer.addChild(this.editor);
 			this.ui.setFocus(this.editor);
+			this.schedulePendingPlanHandoff?.();
 			try {
 				fs.unlinkSync(tmpFile);
 			} catch {
@@ -6944,7 +7213,8 @@ export class InteractiveMode {
 		const clear = this.getAppKeyDisplay("app.clear");
 		const exit = this.getAppKeyDisplay("app.exit");
 		const suspend = this.getAppKeyDisplay("app.suspend");
-		const cycleThinkingLevel = this.getAppKeyDisplay("app.thinking.cycle");
+		const modeToggle = this.getAppKeyDisplay("app.mode.toggle") || "Unbound";
+		const cycleThinkingLevel = this.getAppKeyDisplay("app.thinking.cycle") || "Unbound";
 		const cycleModelForward = this.getAppKeyDisplay("app.model.cycleForward");
 		const selectModel = this.getAppKeyDisplay("app.model.select");
 		const expandTools = this.getAppKeyDisplay("app.tools.expand");
@@ -6989,6 +7259,7 @@ export class InteractiveMode {
 | \`${clear}\` | Clear editor (first) / exit (second) |
 | \`${exit}\` | Exit (when editor is empty) |
 | \`${suspend}\` | Suspend to background |
+| \`${modeToggle}\` | Toggle collaboration mode |
 | \`${cycleThinkingLevel}\` | Cycle thinking level |
 | \`${cycleModelForward}\` / \`${cycleModelBackward}\` | Cycle models |
 | \`${selectModel}\` | Open model selector |
@@ -7103,6 +7374,15 @@ export class InteractiveMode {
 	}
 
 	private async handleBashCommand(command: string, excludeFromContext = false): Promise<void> {
+		this.directBashCommandsInProgress++;
+		try {
+			await this.runBashCommand(command, excludeFromContext);
+		} finally {
+			this.directBashCommandsInProgress--;
+		}
+	}
+
+	private async runBashCommand(command: string, excludeFromContext: boolean): Promise<void> {
 		const extensionRunner = this.session.extensionRunner;
 
 		// Emit user_bash event to let extensions intercept
@@ -7200,6 +7480,7 @@ export class InteractiveMode {
 	}
 
 	stop(): void {
+		this.pendingPlanHandoff = undefined;
 		this.disposeActiveSelector();
 		if (this.settingsManager.getShowTerminalProgress()) {
 			this.ui.terminal.setProgress(false);

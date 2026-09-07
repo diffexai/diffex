@@ -38,4 +38,12 @@ describe("BUILTIN_SLASH_COMMANDS", () => {
 			description: "Inspect and control harness evolution",
 		});
 	});
+
+	it("includes the built-in Plan mode command", () => {
+		expect(BUILTIN_SLASH_COMMANDS).toContainEqual({
+			name: "plan",
+			description: "Switch to Plan mode",
+			argumentHint: "<request>",
+		});
+	});
 });
