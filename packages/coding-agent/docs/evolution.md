@@ -59,7 +59,9 @@ The job snapshots the post-groom revision, including its evolved skills, rather 
 
 After each completed assistant output with workspace-matching evolved skills, a separate private continuation uses the existing system prompt and conversation to request only helpful/harmful judgments on skills used. It shares the lesson-report transport without sharing assessment exchanges. Reports are validated against the workspace, revision, package identities, and exposed skill names/aliases captured before that output. Installed, unknown, ambiguous, duplicate, or malformed references invalidate the whole report.
 
-Skill reports never enter conversation history, extension events, exports, compaction, durable traces, or evolution snapshots. Valid sparse or empty reports are available only to the private scoring consumer; runtime point updates and neutral inference are not wired yet, so reports are currently validated and discarded without changing scores.
+Skill reports never enter conversation history, extension events, exports, compaction, durable traces, lifecycle observations, or evolution snapshots. Valid reports score helpful +1, harmful -1.5, and every omitted active evolved skill -1. A valid empty report scores every eligible skill -1; failed, missing, or invalid reports change no scores. Explicit and inferred scores commit atomically once per session/output, independently of lesson reports.
+
+Only output-bound package identities still present in the selected workspace revision accrue points. Updated packages start at 0, retired packages stop accruing, and installed skills are never scored. Scores never modify skill artifacts. Score-driven skill removal is not yet wired.
 
 ## Validation and security
 
@@ -79,7 +81,7 @@ Evolution state is stored beneath the effective agent directory:
 
 Sessions resolved to the same workspace identity share evidence totals, jobs, candidates, and harness selection. Different workspace identities never contribute traces, invocation counts, token totals, or jobs to each other. A process that switches to a session in another workspace rotates its trace destination before attaching the replacement session.
 
-The evolution persistence API also provides `skill-scores/` ledgers, partitioned by evolution scope and exact workspace identity. Registration takes a validated harness bundle and includes only its workspace-matching evolved skills, never installed skills. Totals follow the skill ID, package version, and content digest across unrelated harness revisions; changed packages start at 0 and superseded totals remain available for audit. Writes validate revision membership and use atomic compare-and-swap updates. Runtime skill score updates, replay handling, and score-driven removal are not yet wired.
+The evolution persistence API also provides `skill-scores/` ledgers, partitioned by evolution scope and exact workspace identity. Registration takes a validated harness bundle and includes only its workspace-matching evolved skills, never installed skills. Totals follow the skill ID, package version, and content digest across unrelated harness revisions; changed packages start at 0 and superseded totals remain available for audit. Writes validate revision membership and use atomic compare-and-swap updates. Schema version 2 retains applied output keys alongside totals for replay protection across restarts and concurrent sessions. Scoring holds harness selection stable until commit; score-driven removal is not yet wired.
 
 Interrupted jobs and candidate work resume from durable checkpoints. Writer retries use stable idempotency keys, leases, exact base revisions, and compare-and-swap selection. Skill rollback follows immutable ancestry to the candidate's application boundary and selects its existing pre-activation revision; it does not mutate historical revisions.
 

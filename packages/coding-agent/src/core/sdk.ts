@@ -671,7 +671,7 @@ export async function createInternalAgentSession(
 		lifecycleObserver: options.lifecycleObserver,
 	});
 	const evolutionPath = join(resolveEvolutionWorkspaceStateDirectory(agentDir, workspace.workspace), "evolution");
-	const lessonScores = new FileEvolutionPersistence(evolutionPath);
+	const scores = new FileEvolutionPersistence(evolutionPath);
 	const memoryWriter = new EvolutionMemoryWriter({
 		version: VERSION,
 		harnessState: loadedHarnessState.store,
@@ -694,15 +694,15 @@ export async function createInternalAgentSession(
 			const scope = { repositoryId: workspace.workspace.repositoryId, scopeId };
 			// Lock order: harness selection, then score store. No provider calls run under either lock.
 			await loadedHarnessState.store.withCurrentVersion(async (current) => {
-				await lessonScores.registerLessonScoreRevision(scope, {
+				await scores.registerLessonScoreRevision(scope, {
 					harnessVersion: report.harnessRevision,
 					activeMemoryItems: report.activeMemoryItems,
 				});
-				await lessonScores.registerLessonScoreRevision(scope, {
+				await scores.registerLessonScoreRevision(scope, {
 					harnessVersion: current.manifest.version,
 					activeMemoryItems: await memoryWriter.loadActiveMemoryItems(current),
 				});
-				await lessonScores.applyLessonScoreReport(scope, report, current.manifest.version);
+				await scores.applyLessonScoreReport(scope, report, current.manifest.version);
 			});
 		},
 	});
@@ -712,6 +712,15 @@ export async function createInternalAgentSession(
 		getOutputId,
 		workspace: workspace.workspace,
 		stream: (model, context, requestOptions) => modelRuntime.streamSimple(model, context, requestOptions),
+		consume: async (report) => {
+			const bound = await loadedHarnessState.store.loadVersion(report.harnessRevision);
+			// Same lock order as lessons; selection cannot retire or replace a package during scoring.
+			await loadedHarnessState.store.withCurrentVersion(async (current) => {
+				await scores.registerSkillScoreRevision(report.scope, report.workspace, bound);
+				await scores.registerSkillScoreRevision(report.scope, report.workspace, current);
+				await scores.applySkillScoreReport(report.scope, report.workspace, report, current.manifest.version);
+			});
+		},
 	});
 	agent.preparePrivateContinuation = (context, model) => {
 		const continuations: PrivateContinuation[] = [];

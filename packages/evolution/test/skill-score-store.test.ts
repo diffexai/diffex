@@ -277,6 +277,20 @@ describe("skill score store", () => {
 		const initial = await store.loadSkillScores(scope, workspace, next.bundle.manifest.version);
 		expect(initial.scores.map((item) => item.skillId)).toEqual([row(next.bundle).skillId]);
 		await store.saveSkillScores(scope, workspace, initial.revision, [row(next.bundle)]);
+		await store.applySkillScoreReport(
+			scope,
+			workspace,
+			{
+				outputId: "workspace-output",
+				harnessRevision: next.bundle.manifest.version,
+				judgments: [],
+			},
+			next.bundle.manifest.version,
+		);
+		expect((await store.loadSkillScores(scope, workspace, next.bundle.manifest.version)).scores[0]?.points).toBe(
+			-2.5,
+		);
+		expect(await readFile(join(installed, "SKILL.md"), "utf8")).toBe(skill("installed").content);
 		for (const identity of otherWorkspaces) {
 			const otherScope = { ...scope, repositoryId: identity.repositoryId };
 			await expect(store.loadSkillScores(otherScope, identity, next.bundle.manifest.version)).rejects.toThrow(

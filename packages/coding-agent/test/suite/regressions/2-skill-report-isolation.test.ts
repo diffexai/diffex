@@ -4,6 +4,7 @@ import { type Context, fauxAssistantMessage, fauxToolCall, type SimpleStreamOpti
 import { HarnessStateStore } from "@earendil-works/diffex-harness-state";
 import { NOOP_TELEMETRY_CONTEXT } from "@earendil-works/diffex-telemetry";
 import { afterEach, describe, expect, it } from "vitest";
+import { FileEvolutionPersistence } from "#evolution";
 import { materializeJsonlInvocation } from "#harness-trace";
 import type { AgentSessionEvent } from "../../../src/core/agent-session.ts";
 import { createCodingAgentEvolutionRuntime } from "../../../src/core/evolution-runtime.ts";
@@ -214,6 +215,19 @@ describe("Item 2: private per-output skill reports", () => {
 			expect(assessment.options?.transport).toBe("sse");
 			expectPrivate(main.context);
 		}
+		const scores = new FileEvolutionPersistence(join(env.stateDir, "evolution"));
+		if (!env.workspace.directoryId) throw new Error("Missing workspace directory ID");
+		const scope = { repositoryId: env.workspace.repositoryId, scopeId: env.workspace.directoryId };
+		const snapshot = await scores.loadSkillScores(scope, env.workspace, env.bundle.manifest.version);
+		expect(snapshot.scores).toHaveLength(2);
+		for (const [name, points] of [
+			["review-Evolved", 1],
+			["verify", -3.5],
+		] as const) {
+			const skill = env.loader.getSkills().skills.find((skill) => skill.name === name)!;
+			expect(snapshot.scores.find((item) => item.skillId === skill.skillId)?.points).toBe(points);
+		}
+		expect(await scores.listSkillLifecycleObservations(scope)).toEqual([]);
 		expect(env.session.messages.filter((message) => message.role === "assistant")).toHaveLength(3);
 		expect(env.observedExtensions.some((event) => JSON.stringify(event).includes("agent_end"))).toBe(true);
 		expectPrivate(env.events);
