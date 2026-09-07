@@ -118,6 +118,16 @@ diffex @src/app.ts @src/app.test.ts "Review these together"
 
 Images or text can be pasted with Ctrl+V (Alt+V on Windows); images can also be dragged into supported terminals.
 
+### Plan before implementing
+
+Press Shift+Tab or run `/plan` to enter interactive Plan mode. `/plan <request>` enters the mode and immediately submits the request. The model inspects available evidence without implementing, using only permitted trusted `read`, `grep`, `find`, and `ls` tools plus the structured `request_user_input` tool when available.
+
+Structured questions offer two or three choices and an **Other** free-form answer. Answer every question to submit, or cancel to continue the conversation in Plan mode. When choices are unsuitable or the question tool is filtered out, the model asks an ordinary question instead.
+
+A valid final plan is stored and displayed as clean Markdown. After the response settles, choose **Implement the plan** to switch to Default and submit `Implement the plan.` in the same session, or **Stay in Plan mode**. Queued messages take precedence over this offer. Plan mode persists on the selected interactive session branch across resume, fork, and `/tree` navigation; print, JSON, RPC, and SDK modes always use Default.
+
+Plan mode is separate from `update_plan`, which only tracks an execution-time progress checklist.
+
 ### Run shell commands
 
 In interactive mode:
@@ -130,7 +140,7 @@ The command output is sent to the model. Use `!!command` to run a command withou
 
 ### Switch models
 
-Use `/model` or Ctrl+L to choose a model. Use Shift+Tab to cycle thinking level. Use Ctrl+P / Shift+Ctrl+P to cycle through scoped models.
+Use `/model` or Ctrl+L to choose a model. Use Ctrl+P / Shift+Ctrl+P to cycle through scoped models. Thinking-level cycling has no default shortcut; use `/settings` or configure `app.thinking.cycle` in `keybindings.json`.
 
 ### Continue later
 
