@@ -12,12 +12,9 @@
 - Partitioned evolution traces, invocation and token accounting, jobs, candidate work, and harness selection by workspace while sharing them across sessions in the same workspace.
 - Softened the bash tool's `PI_*` environment guideline in an attempt to reduce unnecessary inspection commands ([#7128](https://github.com/earendil-works/pi/issues/7128)).
 - Reduced worst-case automatic terminal theme detection delay from 200 ms to 100 ms by probing color-scheme and background support concurrently.
-- Persisted and registered successful skill candidates independently so sibling expansion failures no longer discard valid candidates or block EVOLVE.md updates.
 
 ### Fixed
 
-- Fixed interrupted skill candidate expansions resetting their two-execution retry budget after restart.
-- Fixed automatic evolution consuming an entire oversized evidence backlog instead of processing capped 400,000-token batches after each cooldown.
 - Fixed opening evolution jobs persisted before reported token accounting crashing the TUI.
 - Fixed the footer showing `Harness unknown` after another process creates or selects a harness revision.
 - Fixed extension TUI method wrappers recursing indefinitely when delegating to the original method ([#7731](https://github.com/earendil-works/pi/issues/7731)).
