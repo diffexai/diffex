@@ -3,6 +3,7 @@ import {
 	Agent,
 	type AgentMessage,
 	NOOP_TELEMETRY_CONTEXT,
+	type PrivateContinuation,
 	setDefaultStreamFn,
 	type TelemetryContext,
 	type ThinkingLevel,
@@ -31,6 +32,7 @@ import type { ResourceLoader } from "./resource-loader.ts";
 import { DefaultResourceLoader } from "./resource-loader.ts";
 import { getDefaultSessionDir, persistSessionState, SessionManager } from "./session-manager.ts";
 import { SettingsManager } from "./settings-manager.ts";
+import { createSkillReportContinuation } from "./skill-reports.ts";
 import { type PreparedSubagentWake, SubagentController } from "./subagents/controller.ts";
 import {
 	type ChildSnapshotV1,
@@ -675,15 +677,15 @@ export async function createInternalAgentSession(
 		harnessState: loadedHarnessState.store,
 		statePath: join(evolutionPath, "writer"),
 	});
-	agent.preparePrivateContinuation = createLessonReportContinuation({
+	const getOutputId = () =>
+		JSON.stringify([
+			sessionManager.getSessionId(),
+			sessionManager.getEntries().filter((entry) => entry.type === "message" && entry.message.role === "assistant")
+				.length + 1,
+		]);
+	const prepareLessonReport = createLessonReportContinuation({
 		getBundle: () => session.harnessVersionBundle,
-		getOutputId: () =>
-			JSON.stringify([
-				sessionManager.getSessionId(),
-				sessionManager
-					.getEntries()
-					.filter((entry) => entry.type === "message" && entry.message.role === "assistant").length + 1,
-			]),
+		getOutputId,
 		writer: memoryWriter,
 		stream: (model, context, requestOptions) => modelRuntime.streamSimple(model, context, requestOptions),
 		consume: async (report) => {
@@ -704,6 +706,28 @@ export async function createInternalAgentSession(
 			});
 		},
 	});
+	const prepareSkillReport = createSkillReportContinuation({
+		getBundle: () => session.harnessVersionBundle,
+		getCatalog: () => session.resourceLoader.getSkills(),
+		getOutputId,
+		workspace: workspace.workspace,
+		stream: (model, context, requestOptions) => modelRuntime.streamSimple(model, context, requestOptions),
+	});
+	agent.preparePrivateContinuation = (context, model) => {
+		const continuations: PrivateContinuation[] = [];
+		for (const prepare of [prepareLessonReport, prepareSkillReport]) {
+			try {
+				const continuation = prepare(context, model);
+				if (continuation) continuations.push(continuation);
+			} catch {
+				// A failed binding must not suppress the other private report.
+			}
+		}
+		if (continuations.length === 0) return undefined;
+		return async (message, toolResults, signal) => {
+			for (const continuation of continuations) await continuation(message, toolResults, signal);
+		};
+	};
 	if (session.activeHarnessVersion) {
 		try {
 			await options.lifecycleObserver?.harnessActivated(session.activeHarnessVersion);
