@@ -1103,6 +1103,11 @@ export class HarnessStateStore {
 		return this.#loadVersion(pointer.version);
 	}
 
+	/** Hold selection stable during a short external commit. The callback must not select or advance a version. */
+	withCurrentVersion<T>(operation: (bundle: HarnessVersionBundle) => Promise<T>): Promise<T> {
+		return this.#withLock(async () => operation(await this.loadCurrent()));
+	}
+
 	loadVersion(version: HarnessVersion): Promise<HarnessVersionBundle> {
 		return this.#loadVersion(version);
 	}

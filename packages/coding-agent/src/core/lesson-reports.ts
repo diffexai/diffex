@@ -1,5 +1,5 @@
 import type { AgentLoopConfig, StreamFn } from "@earendil-works/diffex-agent-core";
-import { type AssistantMessage, type Tool, uuidv7 } from "@earendil-works/diffex-ai";
+import type { AssistantMessage, Tool } from "@earendil-works/diffex-ai";
 import type { HarnessVersion, HarnessVersionBundle } from "@earendil-works/diffex-harness-state";
 import { NOOP_TELEMETRY_CONTEXT } from "@earendil-works/diffex-telemetry";
 import { Type } from "typebox";
@@ -63,10 +63,12 @@ export function resolveLessonReport(
 
 export function createLessonReportContinuation(options: {
 	getBundle: () => HarnessVersionBundle | undefined;
+	/** Stable session/output-ordinal key captured before the main output. */
+	getOutputId: () => string;
 	writer: EvolutionMemoryWriter;
 	/** Raw model-runtime transport, not the agent/extension-instrumented stream function. */
 	stream: StreamFn;
-	/** Item 3's scoring boundary. Valid reports are otherwise consumed and discarded. */
+	/** Private scoring boundary. */
 	consume?: (report: ValidatedLessonReport) => Promise<void>;
 }): NonNullable<AgentLoopConfig["preparePrivateContinuation"]> {
 	return (context, model) => {
@@ -84,7 +86,7 @@ export function createLessonReportContinuation(options: {
 			return undefined;
 		}
 		const harnessRevision = bundle.manifest.version;
-		const outputId = uuidv7();
+		const outputId = options.getOutputId();
 		// Start binding before the main output; never consult the selected pointer after this boundary.
 		const catalog = options.writer.loadActiveMemoryItems(bundle).catch(() => undefined);
 		return async (message, toolResults, signal) => {

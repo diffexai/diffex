@@ -226,6 +226,7 @@ describe("Item 2: private per-output lesson reports", () => {
 		let selected = env.bundle;
 		env.session.agent.preparePrivateContinuation = createLessonReportContinuation({
 			getBundle: () => selected,
+			getOutputId: () => "test-output",
 			writer: env.writer,
 			stream: (model, context, options) => env.session.modelRuntime.streamSimple(model, context, options),
 			consume: async (value) => {
@@ -311,6 +312,7 @@ describe("Item 2: private per-output lesson reports", () => {
 		const consumed: ValidatedLessonReport[] = [];
 		env.session.agent.preparePrivateContinuation = createLessonReportContinuation({
 			getBundle: () => env.session.harnessVersionBundle,
+			getOutputId: () => "test-output",
 			writer: env.writer,
 			stream: (model, context, options) => env.session.modelRuntime.streamSimple(model, context, options),
 			consume: async (value) => {
