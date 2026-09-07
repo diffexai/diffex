@@ -6,6 +6,7 @@
 
 - Added `pi auth check` provider/model auth preflight with optional credential output ([#7152](https://github.com/earendil-works/pi/issues/7152)).
 - Added an `/evolve` model selector for pinning evolution work to a separately selected model.
+- Added score-based lesson grooming before automatic and manual evolution snapshots, with a 12-lesson cap and a Browse status.
 
 ### Changed
 

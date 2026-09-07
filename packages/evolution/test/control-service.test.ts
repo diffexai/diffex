@@ -534,7 +534,9 @@ describe("evolution control service", () => {
 	it("projects eligibility and attaches a concurrent manual trigger", async () => {
 		const fixture = await serviceFixture();
 		const events: string[] = [];
-		const unsubscribe = fixture.service.subscribe((event) => events.push(`${event.type}:${event.jobId}`));
+		const unsubscribe = fixture.service.subscribe((event) => {
+			if (event.type !== "lesson-grooming") events.push(`${event.type}:${event.jobId}`);
+		});
 
 		const initial = await fixture.service.overview();
 		expect(initial).toMatchObject({

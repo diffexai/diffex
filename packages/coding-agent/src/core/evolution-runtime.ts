@@ -49,6 +49,7 @@ import {
 	EvolutionTargetAdapterRegistry,
 	EvolutionToolDeniedError,
 	FileEvolutionPersistence,
+	type ImmutableHarnessSnapshot,
 	type InteractivePriorityGate,
 	type JsonObject,
 	NON_SUBSTANTIVE_RUNTIME_TRACE_REASON,
@@ -810,7 +811,8 @@ class CodingAgentSnapshotSource implements EvolutionSnapshotSource {
 	readonly #session: AgentSession;
 	readonly #modelRuntime: ModelRuntime;
 	readonly #getEvolutionModel: () => EvolutionModelSelection | undefined;
-	readonly #writer: EvolutionMemoryWriter;
+	readonly #harnessState: HarnessStateStore;
+	readonly #prepareHarness: (signal?: AbortSignal) => Promise<ImmutableHarnessSnapshot>;
 
 	constructor(options: {
 		cwd: string;
@@ -820,7 +822,8 @@ class CodingAgentSnapshotSource implements EvolutionSnapshotSource {
 		session: AgentSession;
 		modelRuntime: ModelRuntime;
 		getEvolutionModel: () => EvolutionModelSelection | undefined;
-		writer: EvolutionMemoryWriter;
+		harnessState: HarnessStateStore;
+		prepareHarness: (signal?: AbortSignal) => Promise<ImmutableHarnessSnapshot>;
 	}) {
 		this.#cwd = options.cwd;
 		this.#directoryId = options.directoryId;
@@ -829,7 +832,8 @@ class CodingAgentSnapshotSource implements EvolutionSnapshotSource {
 		this.#session = options.session;
 		this.#modelRuntime = options.modelRuntime;
 		this.#getEvolutionModel = options.getEvolutionModel;
-		this.#writer = options.writer;
+		this.#harnessState = options.harnessState;
+		this.#prepareHarness = options.prepareHarness;
 	}
 
 	async #revision(): Promise<string> {
@@ -848,7 +852,8 @@ class CodingAgentSnapshotSource implements EvolutionSnapshotSource {
 		signal?.throwIfAborted();
 		const harnessVersion = this.#session.activeHarnessVersion;
 		if (harnessVersion === undefined) throw new Error("Evolution requires an active session harness");
-		const harness = await this.#writer.captureSnapshot(harnessVersion);
+		const harness = await this.#prepareHarness(signal);
+		const selected = await this.#harnessState.loadVersion(harness.harnessVersion);
 		const selection = this.#getEvolutionModel();
 		const model = selection ? this.#modelRuntime.getModel(selection.provider, selection.model) : this.#session.model;
 		if (!model) {
@@ -862,7 +867,13 @@ class CodingAgentSnapshotSource implements EvolutionSnapshotSource {
 			content: file.content,
 			contentDigest: computeEvolutionContentDigest(file.content),
 		}));
-		const skills = createEvolutionSkillSnapshots(this.#resourceLoader.getSkills().skills);
+		const skills = createEvolutionSkillSnapshots([
+			...this.#resourceLoader.getSkills().skills.filter((skill) => skill.sourceKind === "installed"),
+			...createEvolvedSkillCatalog(selected, {
+				repositoryId: scope.repositoryId,
+				directoryId: this.#directoryId,
+			}).skills,
+		]);
 		return {
 			repository: {
 				repositoryId: scope.repositoryId,
@@ -997,7 +1008,28 @@ export async function createCodingAgentEvolutionRuntime(
 			session: options.session,
 			modelRuntime: options.modelRuntime,
 			getEvolutionModel: options.getEvolutionModel ?? (() => undefined),
-			writer,
+			harnessState: options.harnessState,
+			async prepareHarness(signal) {
+				const lease = await persistence.acquire(
+					"writer",
+					"global",
+					`lesson-grooming-${randomUUID()}`,
+					clock.now(),
+					SKILL_ACTIVATION_LEASE_TTL_MS,
+				);
+				if (lease === null) throw new Error("Another harness writer is active");
+				try {
+					progress.emit({ type: "lesson-grooming", active: true });
+					return await writer.groom(persistence, scope, {
+						idempotencyKey: lease.ownerId,
+						lease,
+						signal,
+					});
+				} finally {
+					progress.emit({ type: "lesson-grooming", active: false });
+					await persistence.release(lease);
+				}
+			},
 		}),
 		executor: pipeline,
 	});

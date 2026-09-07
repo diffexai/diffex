@@ -598,6 +598,47 @@ describe("EvolutionMenuComponent", () => {
 		component.dispose();
 	});
 
+	it("shows lesson grooming only in Browse without creating a job and clears it immediately", async () => {
+		const fixture = client(overview());
+		const render = vi.fn();
+		const component = new EvolutionMenuComponent(
+			fixture.client,
+			() => {},
+			() => {},
+			render,
+		);
+		try {
+			await component.refresh();
+			fixture.emit({ type: "lesson-grooming", active: true });
+			expect(stripAnsi(component.render(160).join("\n"))).not.toContain("Reorganizing lessons");
+
+			for (let index = 0; index < 3; index += 1) component.handleInput("\u001b[B");
+			component.handleInput("\n");
+			await component.refresh();
+			const output = stripAnsi(component.render(160).join("\n"));
+			expect(output).toContain("Reorganizing lessons");
+			expect(output).toContain("No evolution jobs");
+			expect(fixture.startManual).not.toHaveBeenCalled();
+
+			render.mockClear();
+			fixture.emit({ type: "lesson-grooming", active: false });
+			expect(stripAnsi(component.render(160).join("\n"))).not.toContain("Reorganizing lessons");
+			expect(render).toHaveBeenCalled();
+			await component.refresh();
+			expect(stripAnsi(component.render(160).join("\n"))).not.toContain("Reorganizing lessons");
+
+			fixture.emit({ type: "lesson-grooming", active: true });
+			expect(stripAnsi(component.render(160).join("\n"))).toContain("Reorganizing lessons");
+			await component.refresh();
+			component.dispose();
+			render.mockClear();
+			fixture.emit({ type: "lesson-grooming", active: false });
+			expect(render).not.toHaveBeenCalled();
+		} finally {
+			component.dispose();
+		}
+	});
+
 	it("renders a concise browsed job detail", async () => {
 		const fixture = client(overview());
 		const checkpoint = new Date();

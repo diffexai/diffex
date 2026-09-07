@@ -579,13 +579,18 @@ export interface EvolutionLedger {
 	read(jobId: string): Promise<readonly EvolutionLedgerEvent[]>;
 }
 
-export interface EvolutionProgressEvent {
-	readonly jobId: string;
-	readonly emittedAt: string;
-	readonly type: "checkpoint" | "completed" | "failed" | "started";
-	readonly stage: EvolutionJobStage;
-	readonly checkpoint?: EvolutionStageCheckpoint;
-}
+export type EvolutionProgressEvent =
+	| {
+			readonly jobId: string;
+			readonly emittedAt: string;
+			readonly type: "checkpoint" | "completed" | "failed" | "started";
+			readonly stage: EvolutionJobStage;
+			readonly checkpoint?: EvolutionStageCheckpoint;
+	  }
+	| {
+			readonly type: "lesson-grooming";
+			readonly active: boolean;
+	  };
 
 export interface EvolutionEventSink {
 	emit(event: EvolutionProgressEvent): void | Promise<void>;

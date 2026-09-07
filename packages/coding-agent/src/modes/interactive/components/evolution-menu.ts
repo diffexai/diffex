@@ -307,6 +307,7 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 	#selectedIndex = 0;
 	#loading = true;
 	#actionPending = false;
+	#lessonGroomingActive = false;
 	#disposed = false;
 	#focused = false;
 	#pollTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -338,7 +339,12 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 		this.#selectModel = modelControls.selectModel;
 		this.#pollIntervalMs = pollIntervalMs;
 		this.#unsubscribe = client.subscribe((event) => {
-			if (event.type === "enabled-changed") {
+			if (this.#disposed) return;
+			if (event.type === "lesson-grooming") {
+				this.#lessonGroomingActive = event.active;
+				this.rebuild();
+				this.#requestRender();
+			} else if (event.type === "enabled-changed") {
 				this.rebuild();
 				this.#requestRender();
 			} else if (event.type === "completed") {
@@ -925,6 +931,7 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 				this.addChild(new Spacer(1));
 				this.#renderEntries(this.#overviewEntries(this.#overview));
 			} else if (view.kind === "jobs") {
+				if (this.#lessonGroomingActive) this.#addLine("Reorganizing lessons", "muted");
 				this.#renderEntries(
 					this.#jobs.map((job) => ({
 						label: formatEvolutionJobLabel(job),
