@@ -1,6 +1,7 @@
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { type Component, getGlyphs, truncateToWidth, visibleWidth } from "@earendil-works/diffex-tui";
 import type { AgentSession } from "../../../core/agent-session.ts";
+import { getCollaborationMode } from "../../../core/collaboration-mode.ts";
 import type { ReadonlyFooterDataProvider } from "../../../core/footer-data-provider.ts";
 import { theme } from "../theme/theme.ts";
 import { EvolutionFooterStatus, type EvolutionFooterStatusClient } from "./evolution-footer-status.ts";
@@ -52,6 +53,21 @@ export interface FooterComponentOptions {
 	readonly evolution?: EvolutionFooterStatusClient;
 	readonly requestRender?: () => void;
 	readonly onSelectedHarnessChange?: (version: string) => void | Promise<void>;
+}
+
+export class CustomFooterPlanModeIndicator implements Component {
+	private readonly shouldShow: () => boolean;
+
+	constructor(shouldShow: () => boolean) {
+		this.shouldShow = shouldShow;
+	}
+
+	render(width: number): string[] {
+		if (width <= 0 || !this.shouldShow()) return [];
+		return [truncateToWidth(theme.fg("warning", "Plan mode"), width, getGlyphs().ellipsis)];
+	}
+
+	invalidate(): void {}
 }
 
 export class FooterComponent implements Component {
@@ -144,16 +160,39 @@ export class FooterComponent implements Component {
 			theme.fg("borderMuted", " / ") +
 			theme.fg("footerWindow", windowDisplay);
 
-		if (width <= visibleWidth(contextCompact) + separatorWidth) {
+		const planMode = getCollaborationMode(this.session) === "plan";
+		const planFull = theme.fg("warning", "Plan mode");
+		const planCompact = theme.fg("warning", "Plan");
+
+		if (planMode && width < visibleWidth(planCompact)) {
+			return [truncateToWidth(planCompact, width, glyphs.ellipsis)];
+		}
+
+		if (!planMode && width <= visibleWidth(contextCompact) + separatorWidth) {
 			return [truncateToWidth(theme.fg("footerModel", modelName), width, glyphs.ellipsis)];
 		}
 
 		type FooterField = { key: string; order: number; text: string };
-		const modelWidth = Math.min(
-			width - visibleWidth(contextCompact) - separatorWidth,
-			Math.max(1, Math.floor(width * 0.45)),
-		);
+		const planText = planMode && width >= visibleWidth(planFull) ? planFull : planCompact;
+		const planCoreWidth = visibleWidth(planText) + separatorWidth * 2 + visibleWidth(contextCompact) + 1;
+		if (planMode && width < planCoreWidth) {
+			const planAndModelWidth = visibleWidth(planText) + separatorWidth + 1;
+			if (width < planAndModelWidth) {
+				return [planText];
+			}
+			const modelWidth = width - visibleWidth(planText) - separatorWidth;
+			return [
+				[planText, truncateToWidth(theme.fg("footerModel", modelName), modelWidth, glyphs.ellipsis)].join(
+					separator,
+				),
+			];
+		}
+
+		const reservedWidth =
+			visibleWidth(contextCompact) + separatorWidth + (planMode ? visibleWidth(planText) + separatorWidth : 0);
+		const modelWidth = Math.min(width - reservedWidth, Math.max(1, Math.floor(width * 0.45)));
 		let fields: FooterField[] = [
+			...(planMode ? [{ key: "plan", order: -1, text: planText }] : []),
 			{
 				key: "model",
 				order: 0,

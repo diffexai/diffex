@@ -64,6 +64,18 @@ import type { AgentSessionLifecycleObserver } from "./agent-session-lifecycle.ts
 import { formatNoApiKeyFoundMessage, formatNoModelSelectedMessage } from "./auth-guidance.ts";
 import { type BashResult, executeBashWithOperations } from "./bash-executor.ts";
 import {
+	CHANGE_COLLABORATION_MODE,
+	COLLABORATION_MODE_CUSTOM_TYPE,
+	type CollaborationMode,
+	type CollaborationModeTransitionResult,
+	GET_COLLABORATION_MODE,
+	IS_COLLABORATION_MODE_BUSY,
+	PLAN_MODE_SYSTEM_PROMPT,
+	PLAN_MODE_TOOL_NAMES,
+	planHandoffSettlementGuards,
+	SUBSCRIBE_PROMPT_ADMISSION,
+} from "./collaboration-mode.ts";
+import {
 	type CompactionResult,
 	calculateContextTokens,
 	collectEntriesForBranchSummary,
@@ -105,6 +117,7 @@ import {
 	wrapRegisteredTools,
 } from "./extensions/index.ts";
 import { emitSessionShutdownEvent } from "./extensions/runner.ts";
+import { parseFinalizedPlanResponse } from "./finalized-plan.ts";
 import type { BashExecutionMessage, CustomMessage } from "./messages.ts";
 import { ModelRegistry } from "./model-registry.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
@@ -118,6 +131,7 @@ import type {
 } from "./session-manager.ts";
 import {
 	appendCompactionTransaction,
+	appendCustomEntryWithRollback,
 	appendCustomMessageWithRollback,
 	CURRENT_SESSION_VERSION,
 	getLatestCompactionEntry,
@@ -142,6 +156,7 @@ import { type BuildSystemPromptOptions, buildSystemPrompt } from "./system-promp
 import { type CodingAgentTelemetrySpan, startCodingAgentSpan } from "./telemetry.ts";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts";
 import { createAllToolDefinitions } from "./tools/index.ts";
+import { createRequestUserInputToolDefinition, REQUEST_USER_INPUT_TOOL_NAME } from "./tools/request-user-input.ts";
 import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapper.ts";
 import { addUsageToTotals, createUsageTotals } from "./usage-totals.ts";
 
@@ -226,7 +241,7 @@ export type AgentSessionEvent =
 			messages: AgentMessage[];
 			willRetry: boolean;
 	  }
-	| { type: "agent_settled" }
+	| { type: "agent_settled"; planHandoff?: { readonly plan: string } }
 	| {
 			type: "queue_update";
 			steering: readonly string[];
@@ -412,7 +427,18 @@ interface SubagentCoordination {
 
 interface PromptReservation {
 	readonly signaled: boolean;
+	readonly collaborationMode: CollaborationMode;
+	readonly collaborationState?: CollaborationModeState;
 	agentStarted: boolean;
+}
+
+interface CollaborationModeState {
+	readonly mode: CollaborationMode;
+	readonly baseSystemPrompt: string;
+	readonly baseSystemPromptOptions: BuildSystemPromptOptions;
+	readonly effectiveSystemPrompt: string;
+	readonly effectiveToolDefinitions: Map<string, ToolDefinitionEntry>;
+	readonly tools: AgentTool[];
 }
 
 function estimateMessagesTokens(messages: AgentMessage[]): number {
@@ -502,6 +528,9 @@ export class AgentSession {
 	private _resourceLoader: ResourceLoader;
 	private _customTools: ToolDefinition[];
 	private _baseToolDefinitions: Map<string, ToolDefinition> = new Map();
+	private _baseToolRegistry: Map<string, AgentTool> = new Map();
+	private _requestUserInputDefinition: ToolDefinition | undefined;
+	private _requestUserInputTool: AgentTool | undefined;
 	private _cwd: string;
 	private _extensionRunnerRef?: { current?: ExtensionRunner };
 	private _initialActiveToolNames?: string[];
@@ -521,13 +550,19 @@ export class AgentSession {
 	// Tool registry for extension getTools/setTools
 	private _toolRegistry: Map<string, AgentTool> = new Map();
 	private _toolDefinitions: Map<string, ToolDefinitionEntry> = new Map();
-	private _toolPromptSnippets: Map<string, string> = new Map();
-	private _toolPromptGuidelines: Map<string, string[]> = new Map();
+	private _effectiveToolDefinitions: Map<string, ToolDefinitionEntry> = new Map();
 
 	// Base system prompt (without extension appends) - used to apply fresh appends each turn
 	private _baseSystemPrompt = "";
 	private _baseSystemPromptOptions!: BuildSystemPromptOptions;
 	private _systemPromptOverride?: string;
+	private _requestedToolNames: string[] = [];
+	private _collaborationMode: CollaborationMode = "default";
+	private _activeRunCollaborationMode: CollaborationMode | undefined;
+	private _activeRunCollaborationState: CollaborationModeState | undefined;
+	private _latestFinalizedPlan: string | undefined;
+	private _collaborationModeTransitionInProgress = false;
+	private _manualCompactionOperations = 0;
 	private readonly _subagentController: SubagentController | undefined;
 	private readonly _harnessStateStore: HarnessStateStore | undefined;
 	private readonly _workspaceIdentity: HarnessWorkspaceIdentity | undefined;
@@ -537,6 +572,8 @@ export class AgentSession {
 	private readonly _lifecycleObserver: AgentSessionLifecycleObserver | undefined;
 	private _harnessSwitchInProgress = false;
 	private _promptAdmissionInProgress = false;
+	private readonly _promptAdmissionListeners = new Set<() => void>();
+	private _planHandoffGeneration = 0;
 	private _subagentCoordination: SubagentCoordination | undefined;
 	private _pendingSubagentEscalationEnvelope: PendingSubagentEscalationEnvelope | undefined;
 	private readonly _pendingIdleSubagentEscalations = new Map<string, number>();
@@ -686,7 +723,23 @@ export class AgentSession {
 	 * happens here instead of in wrappers.
 	 */
 	private _installAgentToolHooks(): void {
-		this.agent.beforeToolCall = async ({ toolCall, args }) => {
+		this.agent.beforeToolCall = async ({ toolCall, args, context }) => {
+			if (toolCall.name === REQUEST_USER_INPUT_TOOL_NAME && this._activeRunCollaborationMode !== "plan") {
+				return {
+					block: true,
+					reason: `Tool "${REQUEST_USER_INPUT_TOOL_NAME}" is unavailable outside Plan mode.`,
+				};
+			}
+			if (this._activeRunCollaborationMode === "plan") {
+				const capturedTool = this._activeRunCollaborationState?.tools.find((tool) => tool.name === toolCall.name);
+				const activeTool = context.tools?.find((tool) => tool.name === toolCall.name);
+				if (!(PLAN_MODE_TOOL_NAMES as readonly string[]).includes(toolCall.name) || activeTool !== capturedTool) {
+					return {
+						block: true,
+						reason: `Tool "${toolCall.name}" is unavailable in Plan mode.`,
+					};
+				}
+			}
 			const runner = this._extensionRunner;
 			if (!runner.hasHandlers("tool_call")) {
 				return undefined;
@@ -757,9 +810,12 @@ export class AgentSession {
 				context: {
 					...previousContext,
 					systemPrompt:
-						this._systemPromptOverride ??
-						this._appendSubagentDelegatedMessageTrustGuidance(this._baseSystemPrompt),
-					tools: this.agent.state.tools.slice(),
+						this._activeRunCollaborationState?.effectiveSystemPrompt ??
+						this._deriveEffectivePrompt(
+							this._systemPromptOverride ?? this._baseSystemPrompt,
+							this._activeRunCollaborationMode ?? this._collaborationMode,
+						),
+					tools: (this._activeRunCollaborationState?.tools ?? this.agent.state.tools).slice(),
 				},
 				model: this.agent.state.model,
 				thinkingLevel: this.agent.state.thinkingLevel,
@@ -861,11 +917,14 @@ export class AgentSession {
 		resolve();
 	}
 
-	private async _emitAgentSettled(): Promise<void> {
+	private async _emitAgentSettled(planHandoff?: { readonly plan: string }): Promise<void> {
+		const generation = this._planHandoffGeneration;
+		const event = { type: "agent_settled", ...(planHandoff ? { planHandoff } : {}) } as const;
+		planHandoffSettlementGuards.set(event, () => !this._disposePromise && generation === this._planHandoffGeneration);
 		this._isAgentRunActive = false;
 		try {
 			await this._extensionRunner.emit({ type: "agent_settled" });
-			this._emit({ type: "agent_settled" });
+			this._emit(event);
 		} finally {
 			this._resolveIdleWaitIfIdle();
 		}
@@ -892,6 +951,7 @@ export class AgentSession {
 		// When a user message starts, check if it's from either queue and remove it BEFORE emitting
 		// This ensures the UI sees the updated queue state
 		if (event.type === "message_start" && event.message.role === "user") {
+			this._latestFinalizedPlan = undefined;
 			this._subagentController?.beginCoordinationCycle();
 			this._overflowRecoveryAttempted = false;
 			const messageText = contentText(event.message.content, "");
@@ -914,6 +974,21 @@ export class AgentSession {
 
 		// Emit to extensions first
 		await this._emitExtensionEvent(event);
+		if (
+			event.type === "message_end" &&
+			event.message.role === "assistant" &&
+			event.message.stopReason !== "pending" &&
+			event.message.stopReason !== "toolUse"
+		) {
+			this._latestFinalizedPlan = undefined;
+			if (this._activeRunCollaborationMode === "plan") {
+				const finalizedPlan = parseFinalizedPlanResponse(event.message);
+				if (finalizedPlan) {
+					this._replaceMessageInPlace(event.message, finalizedPlan.message);
+					this._latestFinalizedPlan = finalizedPlan.plan;
+				}
+			}
+		}
 
 		// Notify all listeners
 		this._emit(event.type === "agent_end" ? { ...event, willRetry: this._willRetryAfterAgentEnd(event) } : event);
@@ -1226,6 +1301,7 @@ export class AgentSession {
 			failures.push(error);
 		}
 		this._eventListeners = [];
+		this._promptAdmissionListeners.clear();
 		try {
 			cleanupSessionResources(this.sessionId);
 		} catch (error) {
@@ -1271,6 +1347,10 @@ export class AgentSession {
 		return this.agent.state.systemPrompt;
 	}
 
+	[GET_COLLABORATION_MODE](): CollaborationMode {
+		return this._collaborationMode;
+	}
+
 	/** Globally selected harness revision activated for this session. */
 	get activeHarnessVersion(): HarnessVersion | undefined {
 		return this._harnessVersionBundle?.manifest.version;
@@ -1303,7 +1383,57 @@ export class AgentSession {
 	}
 
 	getToolDefinition(name: string): ToolDefinition | undefined {
-		return this._toolDefinitions.get(name)?.definition;
+		return (this._activeRunCollaborationState?.effectiveToolDefinitions ?? this._effectiveToolDefinitions).get(name)
+			?.definition;
+	}
+
+	[SUBSCRIBE_PROMPT_ADMISSION](listener: () => void): () => void {
+		this._promptAdmissionListeners.add(listener);
+		return () => {
+			this._promptAdmissionListeners.delete(listener);
+		};
+	}
+
+	private _invalidatePlanHandoff(): void {
+		this._planHandoffGeneration++;
+		for (const listener of this._promptAdmissionListeners) listener();
+	}
+
+	[IS_COLLABORATION_MODE_BUSY](): boolean {
+		return (
+			this._collaborationModeTransitionInProgress ||
+			this._promptAdmissionInProgress ||
+			this._harnessSwitchInProgress ||
+			this.isStreaming ||
+			this.isRetrying ||
+			this.isCompacting ||
+			this.isBashRunning
+		);
+	}
+
+	[CHANGE_COLLABORATION_MODE](mode: CollaborationMode, persist: boolean): CollaborationModeTransitionResult {
+		if (mode === this._collaborationMode) return { status: "unchanged", mode };
+		if (this[IS_COLLABORATION_MODE_BUSY]()) {
+			return { status: "busy", mode: this._collaborationMode };
+		}
+
+		this._collaborationModeTransitionInProgress = true;
+		try {
+			const nextState = this._deriveCollaborationModeState(mode);
+			const entryId = persist
+				? appendCustomEntryWithRollback(this.sessionManager, COLLABORATION_MODE_CUSTOM_TYPE, { mode })
+				: undefined;
+			this._collaborationMode = mode;
+			this._planHandoffGeneration++;
+			this._installCollaborationModeState(nextState);
+			if (entryId) {
+				const entry = this.sessionManager.getEntry(entryId);
+				if (entry) this._emit({ type: "entry_appended", entry });
+			}
+			return { status: "changed", mode };
+		} finally {
+			this._collaborationModeTransitionInProgress = false;
+		}
 	}
 
 	/** Current in-memory child-agent roster, sorted by name. */
@@ -1377,9 +1507,8 @@ export class AgentSession {
 				: createEvolvedSkillCatalog(activatedBundle, this._workspaceIdentity),
 		);
 		this._harnessVersionBundle = activatedBundle;
-		this._baseSystemPrompt = this._rebuildSystemPrompt(this.getActiveToolNames());
 		this._systemPromptOverride = undefined;
-		this.agent.state.systemPrompt = this._appendSubagentDelegatedMessageTrustGuidance(this._baseSystemPrompt);
+		this._installCollaborationModeState(this._deriveCollaborationModeState(this._collaborationMode));
 		await this._notifyHarnessActivated(activatedBundle.manifest.version);
 	}
 
@@ -1401,26 +1530,17 @@ export class AgentSession {
 	 * Changes take effect on the next agent turn.
 	 */
 	setActiveToolsByName(toolNames: string[]): void {
-		const tools: AgentTool[] = [];
-		const validToolNames: string[] = [];
-		for (const name of toolNames) {
-			const tool = this._toolRegistry.get(name);
-			if (tool) {
-				tools.push(tool);
-				validToolNames.push(name);
-			}
-		}
-		this.agent.state.tools = tools;
-
-		// Rebuild base system prompt with new tool set
-		this._baseSystemPrompt = this._rebuildSystemPrompt(validToolNames);
-		this.agent.state.systemPrompt =
-			this._systemPromptOverride ?? this._appendSubagentDelegatedMessageTrustGuidance(this._baseSystemPrompt);
+		this._requestedToolNames = [...new Set(toolNames.filter((name) => this._toolRegistry.has(name)))];
+		if (this._activeRunCollaborationMode === "plan") return;
+		this._installCollaborationModeState(
+			this._deriveCollaborationModeState(this._activeRunCollaborationMode ?? this._collaborationMode),
+		);
 	}
 
 	/** Whether compaction or branch summarization is currently running */
 	get isCompacting(): boolean {
 		return (
+			this._manualCompactionOperations > 0 ||
 			this._autoCompactionAbortController !== undefined ||
 			this._compactionAbortController !== undefined ||
 			this._branchSummaryAbortController !== undefined
@@ -1570,9 +1690,10 @@ export class AgentSession {
 		const skill = this._resourceLoader.getSkills().skills.find((candidate) => candidate.skillId === skillId);
 		if (skill === undefined) return false;
 		this._skillEnablementOverrides.set(skillId, enabled);
-		this._baseSystemPrompt = this._rebuildSystemPrompt(this.getActiveToolNames());
-		this.agent.state.systemPrompt =
-			this._systemPromptOverride ?? this._appendSubagentDelegatedMessageTrustGuidance(this._baseSystemPrompt);
+		if (this._activeRunCollaborationMode === "plan") return true;
+		this._installCollaborationModeState(
+			this._deriveCollaborationModeState(this._activeRunCollaborationMode ?? this._collaborationMode),
+		);
 		return true;
 	}
 
@@ -1630,18 +1751,22 @@ export class AgentSession {
 		return Array.from(unique);
 	}
 
-	private _rebuildSystemPrompt(toolNames: string[]): string {
-		const validToolNames = toolNames.filter((name) => this._toolRegistry.has(name));
+	private _createSystemPrompt(
+		toolNames: string[],
+		definitions: ReadonlyMap<string, ToolDefinitionEntry>,
+	): { prompt: string; options: BuildSystemPromptOptions } {
+		const validToolNames = toolNames.filter((name) => definitions.has(name));
 		const toolSnippets: Record<string, string> = {};
 		const promptGuidelines: string[] = [];
 		for (const name of validToolNames) {
-			const snippet = this._toolPromptSnippets.get(name);
+			const definition = definitions.get(name)?.definition;
+			const snippet = this._normalizePromptSnippet(definition?.promptSnippet);
 			if (snippet) {
 				toolSnippets[name] = snippet;
 			}
 
-			const toolGuidelines = this._toolPromptGuidelines.get(name);
-			if (toolGuidelines) {
+			const toolGuidelines = this._normalizePromptGuidelines(definition?.promptGuidelines);
+			if (toolGuidelines.length > 0) {
 				promptGuidelines.push(...toolGuidelines);
 			}
 		}
@@ -1652,7 +1777,7 @@ export class AgentSession {
 		const loadedSkills = this._resourceLoader.getSkills().skills.filter((skill) => this._isSkillEnabled(skill));
 		const loadedContextFiles = this._resourceLoader.getAgentsFiles().agentsFiles;
 
-		this._baseSystemPromptOptions = {
+		const options: BuildSystemPromptOptions = {
 			cwd: this._cwd,
 			skills: loadedSkills,
 			contextFiles: loadedContextFiles,
@@ -1668,7 +1793,74 @@ export class AgentSession {
 					}
 				: undefined,
 		};
-		return buildSystemPrompt(this._baseSystemPromptOptions);
+		return { prompt: buildSystemPrompt(options), options };
+	}
+
+	private _deriveEffectivePrompt(systemPrompt: string, mode: CollaborationMode): string {
+		const prompt = mode === "plan" ? `${systemPrompt}\n\n${PLAN_MODE_SYSTEM_PROMPT}` : systemPrompt;
+		return this._appendSubagentDelegatedMessageTrustGuidance(prompt);
+	}
+
+	private _deriveCollaborationModeState(mode: CollaborationMode): CollaborationModeState {
+		let definitions: Map<string, ToolDefinitionEntry>;
+		let tools: AgentTool[];
+		if (mode === "plan") {
+			definitions = new Map();
+			tools = [];
+			for (const name of PLAN_MODE_TOOL_NAMES) {
+				const tool =
+					name === REQUEST_USER_INPUT_TOOL_NAME ? this._requestUserInputTool : this._baseToolRegistry.get(name);
+				const definition =
+					name === REQUEST_USER_INPUT_TOOL_NAME
+						? this._requestUserInputDefinition
+						: this._baseToolDefinitions.get(name);
+				if (!tool || !definition) continue;
+				tools.push(tool);
+				definitions.set(name, {
+					definition,
+					sourceInfo: createSyntheticSourceInfo(`<builtin:${name}>`, { source: "builtin" }),
+				});
+			}
+		} else {
+			definitions = this._toolDefinitions;
+			tools = this._requestedToolNames.flatMap((name) => {
+				const tool = this._toolRegistry.get(name);
+				return tool ? [tool] : [];
+			});
+		}
+
+		const { prompt, options } = this._createSystemPrompt(
+			tools.map((tool) => tool.name),
+			definitions,
+		);
+		return {
+			mode,
+			baseSystemPrompt: prompt,
+			baseSystemPromptOptions: options,
+			effectiveSystemPrompt: this._deriveEffectivePrompt(this._systemPromptOverride ?? prompt, mode),
+			effectiveToolDefinitions: definitions,
+			tools,
+		};
+	}
+
+	private _installCollaborationModeState(state: CollaborationModeState): void {
+		this._baseSystemPrompt = state.baseSystemPrompt;
+		this._baseSystemPromptOptions = state.baseSystemPromptOptions;
+		this._effectiveToolDefinitions = state.effectiveToolDefinitions;
+		this.agent.state.tools = state.tools;
+		this.agent.state.systemPrompt = state.effectiveSystemPrompt;
+	}
+
+	private _capturePlanAdmissionState(): CollaborationModeState | undefined {
+		if (this._collaborationMode !== "plan") return undefined;
+		return {
+			mode: "plan",
+			baseSystemPrompt: this._baseSystemPrompt,
+			baseSystemPromptOptions: this._baseSystemPromptOptions,
+			effectiveSystemPrompt: this.agent.state.systemPrompt,
+			effectiveToolDefinitions: new Map(this._effectiveToolDefinitions),
+			tools: this.agent.state.tools.slice(),
+		};
 	}
 
 	private _appendSubagentDelegatedMessageTrustGuidance(systemPrompt: string): string {
@@ -1749,10 +1941,20 @@ export class AgentSession {
 		}
 	}
 
-	private async _runAgentPrompt(messages: AgentMessage | AgentMessage[]): Promise<void> {
+	private async _runAgentPrompt(
+		messages: AgentMessage | AgentMessage[],
+		collaborationMode: CollaborationMode = this._collaborationMode,
+		collaborationState: CollaborationModeState | undefined = this._capturePlanAdmissionState(),
+	): Promise<void> {
 		this._agentRunAborted = false;
+		this._latestFinalizedPlan = undefined;
+		this._activeRunCollaborationMode = collaborationMode;
+		this._activeRunCollaborationState = collaborationState;
+		if (collaborationState) this._installCollaborationModeState(collaborationState);
 		this._isAgentRunActive = true;
 		try {
+			// Extension custom messages can start a logical run without prompt().
+			this._invalidatePlanHandoff();
 			let firstRun = true;
 			while (true) {
 				if (firstRun) await this.agent.prompt(messages);
@@ -1777,9 +1979,17 @@ export class AgentSession {
 				this._isAgentRunActive = true;
 			}
 		} finally {
+			const planHandoff =
+				this._activeRunCollaborationMode === "plan" && this._latestFinalizedPlan !== undefined
+					? { plan: this._latestFinalizedPlan }
+					: undefined;
+			this._latestFinalizedPlan = undefined;
 			this._systemPromptOverride = undefined;
+			this._activeRunCollaborationMode = undefined;
+			this._activeRunCollaborationState = undefined;
+			this._installCollaborationModeState(this._deriveCollaborationModeState(this._collaborationMode));
 			this._flushPendingBashMessages();
-			await this._emitAgentSettled();
+			await this._emitAgentSettled(planHandoff);
 		}
 	}
 
@@ -2019,8 +2229,18 @@ export class AgentSession {
 		if (signal && this._isAgentRunActive) {
 			return rejectPreflight(new Error("Cannot submit a signaled prompt while an agent run is active."));
 		}
+		const reservesAdmission = !this.isStreaming;
+		if (reservesAdmission && this._promptAdmissionInProgress) {
+			return rejectPreflight(new Error("Cannot submit a prompt while another prompt is being admitted."));
+		}
+		if (reservesAdmission) this._promptAdmissionInProgress = true;
 
-		const reservation: PromptReservation = { signaled: signal !== undefined, agentStarted: false };
+		const reservation: PromptReservation = {
+			signaled: signal !== undefined,
+			collaborationMode: this._collaborationMode,
+			collaborationState: this._capturePlanAdmissionState(),
+			agentStarted: false,
+		};
 		this._promptReservations.add(reservation);
 		const releaseUnsignaledPreflight = (): void => {
 			if (!reservation.signaled) this._promptReservations.delete(reservation);
@@ -2039,10 +2259,21 @@ export class AgentSession {
 		const cleanup = (): void => {
 			if (onAbort && signal) signal.removeEventListener("abort", onAbort);
 			this._promptReservations.delete(reservation);
+			if (reservesAdmission) this._promptAdmissionInProgress = false;
 		};
 		try {
+			if (reservesAdmission) {
+				this._invalidatePlanHandoff();
+			}
 			return this._traceOperation("prompt", (operationSpan) =>
-				this._prompt(text, options, releaseUnsignaledPreflight, operationSpan),
+				this._prompt(
+					text,
+					options,
+					releaseUnsignaledPreflight,
+					operationSpan,
+					reservation.collaborationMode,
+					reservation.collaborationState,
+				),
 			).finally(cleanup);
 		} catch (error) {
 			cleanup();
@@ -2055,19 +2286,17 @@ export class AgentSession {
 		options: PromptOptions | undefined,
 		releaseUnsignaledPreflight: () => void,
 		operationSpan: CodingAgentTelemetrySpan<"diffex.coding_agent.operation">,
+		collaborationMode: CollaborationMode,
+		collaborationState: CollaborationModeState | undefined,
 	): Promise<void> {
-		const reservesAdmission = !this.isStreaming;
-		if (reservesAdmission) {
-			if (this._promptAdmissionInProgress) {
-				throw new Error("Cannot submit a prompt while another prompt is being admitted.");
-			}
-			this._promptAdmissionInProgress = true;
-		}
-		try {
-			await this._promptAfterReservation(text, options, releaseUnsignaledPreflight, operationSpan);
-		} finally {
-			if (reservesAdmission) this._promptAdmissionInProgress = false;
-		}
+		await this._promptAfterReservation(
+			text,
+			options,
+			releaseUnsignaledPreflight,
+			operationSpan,
+			collaborationMode,
+			collaborationState,
+		);
 	}
 
 	private async _promptAfterReservation(
@@ -2075,6 +2304,8 @@ export class AgentSession {
 		options: PromptOptions | undefined,
 		releaseUnsignaledPreflight: () => void,
 		operationSpan: CodingAgentTelemetrySpan<"diffex.coding_agent.operation">,
+		collaborationMode: CollaborationMode,
+		collaborationState: CollaborationModeState | undefined,
 	): Promise<void> {
 		if (this._harnessSwitchInProgress) {
 			throw new Error("Cannot submit a prompt while a harness version switch is in progress.");
@@ -2240,8 +2471,8 @@ export class AgentSession {
 			const result = await this._extensionRunner.emitBeforeAgentStart(
 				expandedText,
 				currentImages,
-				this._baseSystemPrompt,
-				this._baseSystemPromptOptions,
+				collaborationState?.baseSystemPrompt ?? this._baseSystemPrompt,
+				collaborationState?.baseSystemPromptOptions ?? this._baseSystemPromptOptions,
 			);
 			signal?.throwIfAborted();
 			// Flush pending bash history only after cancellable preflight has completed.
@@ -2260,14 +2491,29 @@ export class AgentSession {
 					});
 				}
 			}
-			// Apply extension-modified system prompt, or reset to base, then append root-owned guidance.
+			// Apply collaboration instructions only after all extension prompt hooks.
 			if (result?.systemPrompt !== undefined) {
-				this._systemPromptOverride = this._appendSubagentDelegatedMessageTrustGuidance(result.systemPrompt);
-				this.agent.state.systemPrompt = this._systemPromptOverride;
+				this._systemPromptOverride = result.systemPrompt;
 			} else {
 				// Ensure we're using the base prompt (in case previous turn had modifications)
 				this._systemPromptOverride = undefined;
-				this.agent.state.systemPrompt = this._appendSubagentDelegatedMessageTrustGuidance(this._baseSystemPrompt);
+			}
+			let effectiveSystemPrompt: string;
+			if (collaborationState) {
+				collaborationState = {
+					...collaborationState,
+					effectiveSystemPrompt: this._deriveEffectivePrompt(
+						this._systemPromptOverride ?? collaborationState.baseSystemPrompt,
+						collaborationMode,
+					),
+				};
+				effectiveSystemPrompt = collaborationState.effectiveSystemPrompt;
+			} else {
+				effectiveSystemPrompt = this._deriveEffectivePrompt(
+					this._systemPromptOverride ?? this._baseSystemPrompt,
+					collaborationMode,
+				);
+				this.agent.state.systemPrompt = effectiveSystemPrompt;
 			}
 			activeSkillTrace = {
 				operationSpan,
@@ -2276,7 +2522,7 @@ export class AgentSession {
 					availableSkills,
 					referencedSkills,
 					forceLoadedSkills,
-					this.agent.state.systemPrompt,
+					effectiveSystemPrompt,
 				),
 			};
 		} catch (error) {
@@ -2327,7 +2573,7 @@ export class AgentSession {
 		this._releaseIdleSubagentEscalationsForSelectedBranch();
 		this._activeSkillTrace = activeSkillTrace;
 		try {
-			await this._runAgentPrompt(messages);
+			await this._runAgentPrompt(messages, collaborationMode, collaborationState);
 		} finally {
 			if (this._activeSkillTrace === activeSkillTrace) this._activeSkillTrace = undefined;
 		}
@@ -3017,9 +3263,12 @@ export class AgentSession {
 	 * @param customInstructions Optional instructions for the compaction summary
 	 */
 	compact(customInstructions?: string): Promise<CompactionResult> {
+		this._manualCompactionOperations++;
 		return this._runOwnedOperation(() =>
 			this._traceOperation("compaction", (telemetryContext) => this._compact(customInstructions, telemetryContext)),
-		);
+		).finally(() => {
+			this._manualCompactionOperations--;
+		});
 	}
 
 	private async _compact(customInstructions?: string, telemetryContext?: TelemetryContext): Promise<CompactionResult> {
@@ -3585,8 +3834,10 @@ export class AgentSession {
 		};
 
 		this._resourceLoader.extendResources(extensionPaths);
-		this._baseSystemPrompt = this._rebuildSystemPrompt(this.getActiveToolNames());
-		this.agent.state.systemPrompt = this._appendSubagentDelegatedMessageTrustGuidance(this._baseSystemPrompt);
+		if (this._activeRunCollaborationMode === "plan") return;
+		this._installCollaborationModeState(
+			this._deriveCollaborationModeState(this._activeRunCollaborationMode ?? this._collaborationMode),
+		);
 	}
 
 	private buildExtensionResourcePaths(entries: Array<{ path: string; extensionPath: string }>): Array<{
@@ -3760,7 +4011,7 @@ export class AgentSession {
 
 	private _refreshToolRegistry(options?: { activeToolNames?: string[]; includeAllExtensionTools?: boolean }): void {
 		const previousRegistryNames = new Set(this._toolRegistry.keys());
-		const previousActiveToolNames = this.getActiveToolNames();
+		const previousRequestedToolNames = this._requestedToolNames;
 		const allowedToolNames = this._allowedToolNames;
 		const excludedToolNames = this._excludedToolNames;
 		const isAllowedTool = (name: string): boolean =>
@@ -3773,7 +4024,7 @@ export class AgentSession {
 				definition,
 				sourceInfo: createSyntheticSourceInfo(`<sdk:${definition.name}>`, { source: "sdk" }),
 			})),
-		].filter((tool) => isAllowedTool(tool.definition.name));
+		].filter((tool) => tool.definition.name !== REQUEST_USER_INPUT_TOOL_NAME && isAllowedTool(tool.definition.name));
 		const definitionRegistry = new Map<string, ToolDefinitionEntry>(
 			Array.from(this._baseToolDefinitions.entries())
 				.filter(([name]) => isAllowedTool(name))
@@ -3792,22 +4043,6 @@ export class AgentSession {
 			});
 		}
 		this._toolDefinitions = definitionRegistry;
-		this._toolPromptSnippets = new Map(
-			Array.from(definitionRegistry.values())
-				.map(({ definition }) => {
-					const snippet = this._normalizePromptSnippet(definition.promptSnippet);
-					return snippet ? ([definition.name, snippet] as const) : undefined;
-				})
-				.filter((entry): entry is readonly [string, string] => entry !== undefined),
-		);
-		this._toolPromptGuidelines = new Map(
-			Array.from(definitionRegistry.values())
-				.map(({ definition }) => {
-					const guidelines = this._normalizePromptGuidelines(definition.promptGuidelines);
-					return guidelines.length > 0 ? ([definition.name, guidelines] as const) : undefined;
-				})
-				.filter((entry): entry is readonly [string, string[]] => entry !== undefined),
-		);
 		const runner = this._extensionRunner;
 		const wrappedExtensionTools = wrapRegisteredTools(allCustomTools, runner);
 		const wrappedBuiltInTools = wrapRegisteredTools(
@@ -3819,6 +4054,23 @@ export class AgentSession {
 				})),
 			runner,
 		);
+		this._baseToolRegistry = new Map(wrappedBuiltInTools.map((tool) => [tool.name, tool]));
+		this._requestUserInputDefinition = isAllowedTool(REQUEST_USER_INPUT_TOOL_NAME)
+			? (createRequestUserInputToolDefinition() as ToolDefinition)
+			: undefined;
+		this._requestUserInputTool = this._requestUserInputDefinition
+			? wrapRegisteredTools(
+					[
+						{
+							definition: this._requestUserInputDefinition,
+							sourceInfo: createSyntheticSourceInfo(`<builtin:${REQUEST_USER_INPUT_TOOL_NAME}>`, {
+								source: "builtin",
+							}),
+						},
+					],
+					runner,
+				)[0]
+			: undefined;
 
 		const toolRegistry = new Map(wrappedBuiltInTools.map((tool) => [tool.name, tool]));
 		for (const tool of wrappedExtensionTools as AgentTool[]) {
@@ -3827,7 +4079,7 @@ export class AgentSession {
 		this._toolRegistry = toolRegistry;
 
 		const nextActiveToolNames = (
-			options?.activeToolNames ? [...options.activeToolNames] : [...previousActiveToolNames]
+			options?.activeToolNames ? [...options.activeToolNames] : [...previousRequestedToolNames]
 		).filter((name) => isAllowedTool(name));
 
 		if (allowedToolNames) {
@@ -3859,12 +4111,12 @@ export class AgentSession {
 		const autoResizeImages = this.settingsManager.getImageAutoResize();
 		const shellCommandPrefix = this.settingsManager.getShellCommandPrefix();
 		const shellPath = this.settingsManager.getShellPath();
-		const baseToolDefinitions = this._baseToolsOverride
+		const baseToolsOverrideEntries = this._baseToolsOverride
+			? Object.entries(this._baseToolsOverride).filter(([name]) => name !== REQUEST_USER_INPUT_TOOL_NAME)
+			: undefined;
+		const baseToolDefinitions = baseToolsOverrideEntries
 			? Object.fromEntries(
-					Object.entries(this._baseToolsOverride).map(([name, tool]) => [
-						name,
-						createToolDefinitionFromAgentTool(tool),
-					]),
+					baseToolsOverrideEntries.map(([name, tool]) => [name, createToolDefinitionFromAgentTool(tool)]),
 				)
 			: {
 					...createAllToolDefinitions(this._cwd, {
@@ -3899,8 +4151,8 @@ export class AgentSession {
 		this._bindExtensionCore(this._extensionRunner);
 		this._applyExtensionBindings(this._extensionRunner);
 
-		const defaultActiveToolNames = this._baseToolsOverride
-			? Object.keys(this._baseToolsOverride)
+		const defaultActiveToolNames = baseToolsOverrideEntries
+			? baseToolsOverrideEntries.map(([name]) => name)
 			: ["read", "bash", "edit", "write", "update_plan"];
 		const baseActiveToolNames = options.activeToolNames ?? defaultActiveToolNames;
 		this._refreshToolRegistry({
@@ -3920,7 +4172,7 @@ export class AgentSession {
 		resetApiProviders();
 		await this._resourceLoader.reload();
 		this._buildRuntime({
-			activeToolNames: this.getActiveToolNames(),
+			activeToolNames: this._requestedToolNames,
 			flagValues: previousFlagValues,
 			includeAllExtensionTools: true,
 		});
@@ -4454,6 +4706,7 @@ export class AgentSession {
 			}
 
 			// Update agent state
+			this._planHandoffGeneration++;
 			const sessionContext = this.sessionManager.buildSessionContext();
 			this.agent.state.messages = sessionContext.messages;
 			this._filterPendingIdleSubagentEscalationsToSelectedBranch();

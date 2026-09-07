@@ -5,9 +5,11 @@
 ### Added
 
 - Added `pi auth check` provider/model auth preflight with optional credential output ([#7152](https://github.com/earendil-works/pi/issues/7152)).
+- Added interactive Plan mode with `/plan` and Shift+Tab entry, evidence-first trusted read-only tools, structured clarification questions, branch-local persistence, strict clean final-plan rendering, and a same-session implementation handoff.
 
 ### Changed
 
+- Changed Shift+Tab to toggle Default and Plan collaboration modes; thinking-level cycling remains available through `/settings` and configurable keybindings but has no default shortcut.
 - Lowered the automatic evolution threshold to 400,000 tokens and based eligibility on provider-reported assistant input and output usage instead of serialized evidence estimates.
 - Partitioned evolution traces, invocation and token accounting, jobs, candidate work, and harness selection by workspace while sharing them across sessions in the same workspace.
 - Softened the bash tool's `PI_*` environment guideline in an attempt to reduce unnecessary inspection commands ([#7128](https://github.com/earendil-works/pi/issues/7128)).
@@ -15,10 +17,15 @@
 
 ### Fixed
 
+- Fixed Plan implementation handoffs bypassing awaited direct-Bash hooks, losing busy-rejected offers, and retaining stale offers when an extension admits a new prompt, including before streaming starts.
 - Fixed opening evolution jobs persisted before reported token accounting crashing the TUI.
 - Fixed the footer showing `Harness unknown` after another process creates or selects a harness revision.
 - Fixed extension TUI method wrappers recursing indefinitely when delegating to the original method ([#7731](https://github.com/earendil-works/pi/issues/7731)).
 - Fixed right-click not pasting clipboard text in fullscreen mode on Windows.
+
+### Removed
+
+- Removed the legacy Plan-mode extension example and its dedicated tests after the built-in workflow superseded it.
 
 ## [0.84.0] - 2026-08-06
 
