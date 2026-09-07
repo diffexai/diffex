@@ -21,6 +21,7 @@ import { createHarness } from "../harness.ts";
 
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => {
+	vi.restoreAllMocks();
 	for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
 
@@ -207,18 +208,87 @@ describe("Item 4: grooming before evolution snapshots", () => {
 		},
 	);
 
-	it("trims thirteen manual lessons before the job and does not groom an ineligible automatic check", async () => {
+	it.each([0, 12])("leaves %i lessons unchanged below grooming thresholds", async (count) => {
+		const env = await setup(count);
+		for (let index = 0; index < 4; index += 1) {
+			env.harness.setResponses([fauxAssistantMessage("Verified."), ...(count === 0 ? [] : [assessment()])]);
+			await env.session.prompt(`Verify result ${index + 1}.`);
+		}
+		if (count > 0) {
+			expect(
+				(await env.scores.loadLessonScores(env.scope, env.bundle.manifest.version)).scores.map(
+					(item) => item.points,
+				),
+			).toEqual(Array.from({ length: count }, (_, index) => (index === 1 ? 4 : -4)));
+		}
+		const before = await env.writer.captureSnapshot();
+		const groom = vi.spyOn(EvolutionMemoryWriter.prototype, "groom");
+		const started = await env.runtime.control.startManual();
+		if (started.status !== "created") throw new Error("Expected a job");
+		expect(await env.store.loadCurrent()).toEqual(env.bundle);
+		expect(await env.writer.captureSnapshot()).toEqual(before);
+		const job = await env.scores.load(started.job.jobId);
+		if (!job) throw new Error("Missing job");
+		const input = await env.scores.get(job.inputSnapshot);
+		if (!("expectedHarnessBaseVersion" in input)) throw new Error("Missing input snapshot");
+		expect(input.expectedHarnessBaseVersion).toBe(env.bundle.manifest.version);
+		expect(input.harness).toEqual(before);
+		expect(groom).toHaveBeenCalledTimes(count === 0 ? 0 : 1);
+		if (count === 0) expect(env.events.filter((event) => event.type === "lesson-grooming")).toEqual([]);
+		expect(env.harness.getPendingResponseCount()).toBe(0);
+		await env.runtime.control.cancelJob(started.job.jobId);
+	});
+
+	it("skips grooming the empty selection while the session remains pinned to lessons", async () => {
+		const env = await setup();
+		env.harness.setResponses([fauxAssistantMessage("Verified."), assessment()]);
+		await env.session.prompt("Verify before changing selection.");
+		const empty = await env.store.saveVersion({ memory: "" }, env.bundle.manifest.version);
+		await env.store.selectVersion(empty.manifest.version);
+		expect(env.session.activeHarnessVersion).toBe(env.bundle.manifest.version);
+		expect(env.session.harnessVersionBundle?.state.memory).toContain("Keep rule 1.");
+		const groom = vi.spyOn(EvolutionMemoryWriter.prototype, "groom");
+		const started = await env.runtime.control.startManual();
+		if (started.status !== "created") throw new Error("Expected a job");
+		const job = await env.scores.load(started.job.jobId);
+		if (!job) throw new Error("Missing job");
+		const input = await env.scores.get(job.inputSnapshot);
+		if (!("expectedHarnessBaseVersion" in input)) throw new Error("Missing input snapshot");
+		expect(input.expectedHarnessBaseVersion).toBe(empty.manifest.version);
+		expect(input.harness).toEqual(await env.writer.captureSnapshot(empty.manifest.version));
+		expect(input.harness.memory).toBe("");
+		expect(input.harness.activeMemoryItems).toEqual([]);
+		expect(await env.store.loadCurrent()).toEqual(empty);
+		expect(env.session.activeHarnessVersion).toBe(env.bundle.manifest.version);
+		expect(groom).not.toHaveBeenCalled();
+		expect(env.events.filter((event) => event.type === "lesson-grooming")).toEqual([]);
+		expect(env.harness.getPendingResponseCount()).toBe(0);
+		await env.runtime.control.cancelJob(started.job.jobId);
+	});
+
+	it("trims the uniquely lowest of thirteen manual lessons and skips an ineligible automatic check", async () => {
 		const env = await setup(13);
 		expect(await env.runtime.control.triggerAutomatic()).toMatchObject({ status: "not-created" });
 		expect(env.events).toEqual([]);
 		expect((await env.store.loadCurrent()).manifest.version).toBe(env.bundle.manifest.version);
-		env.harness.setResponses([fauxAssistantMessage("Verified."), assessment()]);
+		env.harness.setResponses([
+			fauxAssistantMessage("Verified."),
+			fauxAssistantMessage(
+				fauxToolCall(LESSON_REPORT_TOOL.name, { lessons: [{ lessonNumber: 7, signal: "harmful" }] }),
+				{ stopReason: "toolUse" },
+			),
+		]);
 		await env.session.prompt("Verify.");
+		expect(
+			(await env.scores.loadLessonScores(env.scope, env.bundle.manifest.version)).scores.map((item) => item.points),
+		).toEqual(Array.from({ length: 13 }, (_, index) => (index === 6 ? -1.5 : -1)));
 		const started = await env.runtime.control.startManual();
 		if (started.status !== "created") throw new Error("Expected a job");
 		const snapshot = await env.writer.captureSnapshot();
 		expect(snapshot.activeMemoryItems).toHaveLength(12);
-		expect(snapshot.memory).not.toContain("Keep rule 1.");
+		expect(snapshot.memory).not.toContain("Keep rule 7.");
+		expect(snapshot.memory).toContain("Lesson 1: Keep rule 1.");
+		expect(snapshot.memory).toContain("Lesson 7: Keep rule 8.");
 		expect(snapshot.memory).toContain("Lesson 12: Keep rule 13.");
 		expect((await env.store.loadCurrent()).manifest.metadata.evolutionMemory.nextLessonNumber).toBe(13);
 		expect((await env.runtime.control.getJob(started.job.jobId)).baseHarnessVersion).toBe(snapshot.harnessVersion);

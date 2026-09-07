@@ -51,7 +51,7 @@ After each completed assistant output with active evolution memory, a private co
 
 Scores start at 0, persist per workspace, and apply atomically once per session/output. REPLACE creates a new lesson identity at 0; removed or superseded identities stop accruing points. `DEFAULT_LESSON_POLICY` and `LessonPolicy` in `packages/evolution/src/lesson-score-store.ts` expose the shared typed defaults, not per-session settings. Scores never appear in EVOLVE.md or model prompts.
 
-Before an eligible automatic or manual run freezes its input, Diffex grooms the selected revision's lessons. Lessons with scores at or below -5 are removed first; if more than 12 remain, the lowest-scoring lessons are removed until 12 remain. Equal scores remove earlier lessons first. This maintenance includes manual lessons, verifies their content digests, and compacts lesson numbering through the memory writer. Below these limits, the selected revision is unchanged.
+Before an eligible automatic or manual run freezes its input, Diffex grooms the selected revision's lessons, skipping grooming when its memory is empty. Lessons with scores at or below -5 are removed first; if more than 12 remain, the lowest-scoring lessons are removed until 12 remain. Equal scores remove earlier lessons first. This maintenance includes manual lessons, verifies their content digests, and compacts lesson numbering through the memory writer. Below these limits, the selected revision is unchanged.
 
 The job snapshots the post-groom revision, including its evolved skills, rather than the session's pinned revision. In-flight prompts remain pinned; the next prompt observes the selected revision. The `/evolve` Browse view shows **Reorganizing lessons** during grooming.
 

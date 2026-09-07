@@ -190,6 +190,56 @@ describe("Item 3: private lesson-report scoring", () => {
 		expect(await env.points()).toEqual([0, -4.5, -4]);
 	});
 
+	it("commits overlapping SDK session reports once per session/output identity", async () => {
+		const env = await setup();
+		const otherManager = SessionManager.create(env.harness.tempDir, join(env.agentDir, "sessions"));
+		const other = await env.open(otherManager);
+		let release!: () => void;
+		const released = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		let reporting = 0;
+		env.harness.setResponses(
+			Array.from({ length: 4 }, () => async (context) => {
+				if (!context.tools?.some((tool) => tool.name === LESSON_REPORT_TOOL.name)) {
+					return fauxAssistantMessage("Normal output.");
+				}
+				reporting += 1;
+				await released;
+				return report([
+					{ lessonNumber: 1, signal: "helpful" },
+					{ lessonNumber: 2, signal: "harmful" },
+				]);
+			}),
+		);
+		const prompts = [env.session.prompt("Check first session."), other.prompt("Check second session.")];
+		try {
+			await vi.waitFor(() => expect(reporting).toBe(2));
+			expect(await env.points()).toEqual([0, 0, 0]);
+		} finally {
+			release();
+			await Promise.all(prompts);
+		}
+		expect(await env.points()).toEqual([2, -3, -2]);
+		const outputIds = [env.manager, otherManager].map((manager) => JSON.stringify([manager.getSessionId(), 1]));
+		expect(new Set(outputIds).size).toBe(2);
+		const committed = await env.ledger();
+		expect([...committed.appliedOutputIds].sort()).toEqual([...outputIds].sort());
+		expect(
+			await Promise.all(
+				outputIds.map((outputId) =>
+					env.scores.applyLessonScoreReport(
+						env.scope,
+						{ outputId, harnessRevision: env.initial.harnessVersion, judgments: [] },
+						env.initial.harnessVersion,
+					),
+				),
+			),
+		).toEqual(["already-applied", "already-applied"]);
+		expect(await env.ledger()).toEqual(committed);
+		expect(env.harness.getPendingResponseCount()).toBe(0);
+	});
+
 	it("silently discards failed, missing, malformed and invalid reports without neutral penalties", async () => {
 		const env = await setup();
 		const before = await env.ledger();

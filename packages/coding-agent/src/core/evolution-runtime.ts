@@ -1010,6 +1010,8 @@ export async function createCodingAgentEvolutionRuntime(
 			getEvolutionModel: options.getEvolutionModel ?? (() => undefined),
 			harnessState: options.harnessState,
 			async prepareHarness(signal) {
+				const selected = await options.harnessState.loadCurrent();
+				if (!selected.state.memory.trim()) return writer.captureSnapshot(selected.manifest.version);
 				const lease = await persistence.acquire(
 					"writer",
 					"global",
