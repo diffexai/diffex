@@ -1,3 +1,4 @@
+import { sep } from "node:path";
 import type { HarnessVersion } from "@earendil-works/diffex-harness-state";
 import { setKeybindings, visibleWidth } from "@earendil-works/diffex-tui";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -7,6 +8,7 @@ import {
 	type EvolutionOverview,
 } from "#evolution";
 import type { AgentSession } from "../src/core/agent-session.ts";
+import { type CollaborationMode, GET_COLLABORATION_MODE } from "../src/core/collaboration-mode.ts";
 import type { EvolutionRuntimeEvent } from "../src/core/evolution-runtime.ts";
 import type { ReadonlyFooterDataProvider } from "../src/core/footer-data-provider.ts";
 import { KeybindingsManager } from "../src/core/keybindings.ts";
@@ -47,6 +49,7 @@ function createSession(options: {
 	toolUsage?: AssistantUsage;
 	usingSubscription?: boolean;
 	activeHarnessVersion?: string;
+	mode?: CollaborationMode;
 }): AgentSession {
 	const usage = options.usage;
 	const entries: Array<Record<string, unknown>> = [];
@@ -105,6 +108,7 @@ function createSession(options: {
 			isUsingSubscription: () => options.usingSubscription ?? false,
 		},
 		activeHarnessVersion: options.activeHarnessVersion,
+		[GET_COLLABORATION_MODE]: () => options.mode ?? "default",
 	};
 
 	return session as unknown as AgentSession;
@@ -171,7 +175,7 @@ describe("formatCwdForFooter", () => {
 
 	it("abbreviates the home directory and descendants", () => {
 		expect(formatCwdForFooter("/home/user", "/home/user")).toBe("~");
-		expect(formatCwdForFooter("/home/user/project", "/home/user")).toBe("~/project");
+		expect(formatCwdForFooter("/home/user/project", "/home/user")).toBe(`~${sep}project`);
 	});
 });
 
@@ -247,6 +251,59 @@ describe("FooterComponent width handling", () => {
 		expect(statsLine).toContain(theme.fg("thinkingText", "thinking medium"));
 		expect(statsLine).toContain(theme.fg("footerContext", "context 12.3%"));
 		expect(statsLine).toContain(theme.fg("footerWindow", "200k"));
+	});
+
+	it("shows a highest-priority warning-colored Plan identity on the single footer row", () => {
+		const session = createSession({
+			sessionName: "",
+			modelId: "gpt-5.5",
+			thinkingLevel: "medium",
+			mode: "plan",
+		});
+		const footer = new FooterComponent(session, createFooterData(1));
+
+		const lines = footer.render(120);
+		const line = stripAnsi(lines[0] ?? "");
+
+		expect(lines).toHaveLength(1);
+		expect(lines[0]).toContain(theme.fg("warning", "Plan mode"));
+		expect(line).toContain("gpt-5.5");
+		expect(line).toContain("context 12.3% / 200k");
+		expect(visibleWidth(lines[0] ?? "")).toBeLessThanOrEqual(120);
+	});
+
+	it("keeps the full Plan identity ahead of lower-priority footer fields", () => {
+		const session = createSession({ sessionName: "", modelId: "model", mode: "plan" });
+		const footer = new FooterComponent(session, createFooterData(1));
+
+		const line = stripAnsi(footer.render(18)[0] ?? "");
+
+		expect(line).toContain("Plan mode");
+		expect(line).toContain("model");
+		expect(line).not.toContain("12%");
+		expect(visibleWidth(line)).toBeLessThanOrEqual(18);
+	});
+
+	it("compacts and then truncates the Plan identity at narrow widths", () => {
+		const session = createSession({ sessionName: "", modelId: "model", mode: "plan" });
+		const footer = new FooterComponent(session, createFooterData(1));
+
+		expect(stripAnsi(footer.render(8)[0] ?? "")).toContain("Plan");
+		expect(stripAnsi(footer.render(8)[0] ?? "")).not.toContain("Plan mode");
+		expect(stripAnsi(footer.render(4)[0] ?? "")).toBe("Plan");
+		expect(visibleWidth(footer.render(3)[0] ?? "")).toBeLessThanOrEqual(3);
+		expect(stripAnsi(footer.render(3)[0] ?? "")).not.toBe("");
+	});
+
+	it("does not add collaboration identity to the Default footer", () => {
+		const session = createSession({ sessionName: "", modelId: "gpt-5.5", mode: "default" });
+		const footer = new FooterComponent(session, createFooterData(1));
+
+		const line = stripAnsi(footer.render(120)[0] ?? "");
+
+		expect(line).not.toContain("Plan");
+		expect(line).toContain("gpt-5.5");
+		expect(line).toContain("context 12.3% / 200k");
 	});
 
 	it("keeps model and context visible instead of truncating the full row at narrow widths", () => {

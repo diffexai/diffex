@@ -237,6 +237,7 @@ function createSessionId(): string {
 
 const PERSIST_SESSION_HEADER = Symbol("persistSessionHeader");
 const PERSIST_SESSION_STATE = Symbol("persistSessionState");
+const APPEND_CUSTOM_ENTRY_WITH_ROLLBACK = Symbol("appendCustomEntryWithRollback");
 const APPEND_CUSTOM_MESSAGE_WITH_ROLLBACK = Symbol("appendCustomMessageWithRollback");
 const APPEND_COMPACTION_TRANSACTION = Symbol("appendCompactionTransaction");
 
@@ -1292,6 +1293,29 @@ export class SessionManager {
 		return entry.id;
 	}
 
+	[APPEND_CUSTOM_ENTRY_WITH_ROLLBACK](customType: string, data?: unknown): string {
+		const previousLeafId = this.leafId;
+		const previousFlushed = this.flushed;
+		const entry: CustomEntry = {
+			type: "custom",
+			customType,
+			data,
+			id: generateId(this.byId),
+			parentId: previousLeafId,
+			timestamp: new Date().toISOString(),
+		};
+		try {
+			this._appendEntry(entry);
+			return entry.id;
+		} catch (error) {
+			if (this.fileEntries.at(-1) === entry) this.fileEntries.pop();
+			this.byId.delete(entry.id);
+			this.leafId = previousLeafId;
+			this.flushed = previousFlushed;
+			throw error;
+		}
+	}
+
 	/** Append a session info entry (e.g., display name). Returns entry id. */
 	appendSessionInfo(name: string): string {
 		const sanitizedName = name.replace(/[\r\n]+/g, " ").trim();
@@ -1964,6 +1988,15 @@ export function persistSessionHeader(sessionManager: SessionManager): void {
 /** Internal seam for durably admitting state that normal creation may still buffer. */
 export function persistSessionState(sessionManager: SessionManager): void {
 	sessionManager[PERSIST_SESSION_STATE]();
+}
+
+/** Internal synchronous selected-branch custom append with live-state rollback on persistence failure. */
+export function appendCustomEntryWithRollback(
+	sessionManager: SessionManager,
+	customType: string,
+	data?: unknown,
+): string {
+	return sessionManager[APPEND_CUSTOM_ENTRY_WITH_ROLLBACK](customType, data);
 }
 
 /** Internal synchronous selected-branch append with live-state rollback on persistence failure. */

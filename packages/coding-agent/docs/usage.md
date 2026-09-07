@@ -41,6 +41,7 @@ Type `/` in the editor to open command completion. Extensions can register custo
 | `/model` | Switch models |
 | `/scoped-models` | Enable/disable models for Ctrl+P cycling |
 | `/settings` | Thinking level, theme, installed skills, message delivery, transport |
+| `/plan [request]` | Enter Plan mode, optionally submitting a planning request |
 | `/skills` | Browse installed workspace, installed global, and evolved skills |
 | [`/evolve`](evolution.md) | Inspect and control harness evolution and generated skills |
 | [`/version`](evolution.md#controls) | Select the active harness revision |
@@ -65,6 +66,69 @@ Type `/` in the editor to open command completion. Extensions can register custo
 
 `/subagents` runs immediately, including while the parent agent is working or compacting.
 It displays the current in-memory roster without adding the command or roster to model context.
+
+## Plan Mode
+
+Plan mode is an interactive collaboration mode for researching and producing a decision-complete implementation plan without carrying it out. Press Shift+Tab to toggle between Default and Plan, run `/plan` to enter Plan mode idempotently, or run `/plan <request>` to enter it and submit the request through the normal prompt or queue path. The built-in footer shows `Plan mode`; an additional indicator remains visible when an extension supplies a custom footer. Mode changes require an idle session and are rejected during prompt admission, an active response or retry, compaction or branch summarization, harness switching, another transition, or a direct Bash command.
+
+### Planning policy and tools
+
+In Plan mode, the model must inspect available evidence before asking questions, distinguish discoverable facts from user preferences, and avoid implementation or repository mutations. Before asking, it explains the relevant context, why the decision is needed, and how the answer changes the plan.
+
+The model-visible tool surface is restricted to the invocation's permitted, trusted pre-extension implementations of:
+
+- `read`
+- `grep`
+- `find`
+- `ls`
+- Diffex's built-in `request_user_input`, when allowed
+
+Tool allowlists and exclusions still apply, so a filtered or unavailable tool is not restored by Plan mode. Post-base replacements, extension and custom tools, `bash`, `edit`, `write`, `update_plan`, and sub-agent tools are unavailable to the model. Returning to Default restores the latest requested Default tool set.
+
+This restriction is a model-tool boundary, not a filesystem security sandbox. Direct user `!` commands, extension event side effects, operating-system permissions, and external processes remain outside it.
+
+Each logical run captures its collaboration mode. Plan runs also retain their admitted planning prompt and exact trusted tool implementations through continuations and retries. Default mode keeps its existing dynamic prompt and tool refresh behavior.
+
+### Structured questions
+
+For a material choice that fits meaningful alternatives, the model can use `request_user_input` with one to three questions. Each question shows two or three mutually exclusive model-supplied choices with descriptions and one Diffex-supplied **Other** choice. The recommended alternative appears first with `(Recommended)` in its label. Selecting **Other** opens free-form input; blank answers are rejected. Answers are preserved while moving among questions, and submission becomes available after every question is answered.
+
+Cancelling the dialog returns a non-fatal cancelled result to the model and leaves Plan mode active. When `request_user_input` is filtered out, unavailable, or unsuitable for the question, the model asks an ordinary conversational question instead.
+
+### Final plan and implementation handoff
+
+The official plan must use exactly one pair of delimiters in one assistant text item:
+
+    <proposed_plan>
+    # Plan
+
+    1. First implementation step
+    </proposed_plan>
+
+The opening and closing tags must each be alone on their line, unindented, outside backtick or tilde fenced code, in that order, with non-whitespace plan content between them. The response must finish normally. Ordinary text may appear before or after the block. Invalid, repeated, nested, reversed, unclosed, fenced, or otherwise non-exact markup remains ordinary assistant text and is not eligible for a handoff.
+
+For a valid response, Diffex removes only the two tag lines before normal display and session storage. The plan Markdown and any surrounding text remain unchanged. The extracted handoff state is temporary and is not reconstructed from session history.
+
+After the latest eligible live response settles, Diffex offers exactly:
+
+- **Implement the plan** - switch to Default and submit `Implement the plan.` in the same session
+- **Stay in Plan mode** - dismiss the offer without changing mode
+
+Steering, follow-up, next-turn, or compaction-queued input permanently suppresses that completion's offer and continues through the existing queue path. An unrelated modal defers at most one offer until it closes. A user submission, navigation, session replacement, mode change, or new model run (including an extension-submitted run) clears the older offer, and historical plans do not replay it.
+
+Diffex clears the older offer synchronously when a new prompt is admitted, before any awaited input hook or model startup, even if an extension handles the request without starting a model run. It rechecks the complete mode-transition busy state before showing or accepting an offer. Temporary activity defers it until idle; accepting during a busy operation does not change mode or submit the implementation message. This includes prompt admission, harness switching, and the entire direct Bash command, even while an extension's `user_bash` hook is still awaiting its result.
+
+If the fixed implementation submission fails after switching modes, Diffex stays in Default, shows the error, and restores exactly `Implement the plan.` to the editor for retry. It does not roll back to Plan mode.
+
+### Persistence and scope
+
+Collaboration mode is stored as an interactive preference on the selected session branch. Interactive resume, fork, and `/tree` navigation inspect the newest matching preference on that branch and restore it when valid. A new session, a branch without a preference, or a malformed newest matching preference uses Default without reviving an older entry.
+
+Mode entries follow normal lazy session saving. In a new disk-backed session, toggling modes alone does not create the session file: the preference remains in memory until the first assistant message is saved or the session is explicitly persisted. Once the file exists, subsequent mode changes are written immediately. Ephemeral sessions remain in memory only.
+
+Print, JSON, RPC, and SDK invocations always use Default and do not overwrite the saved interactive preference. User wording alone cannot change collaboration mode.
+
+Plan mode is distinct from `update_plan`. Plan mode controls the interactive planning prompt, tools, presentation, and handoff; `update_plan` is a Default-mode execution checklist and neither enters nor leaves Plan mode.
 
 ## Automatic Sub-agent Coordination
 
@@ -153,6 +217,8 @@ Useful session commands:
 - `/compact` summarizes older messages to free context.
 
 See [Sessions](sessions.md) and [Compaction](compaction.md) for details.
+
+The selected collaboration mode is restored independently for the active interactive branch during resume, fork, and tree navigation. Non-interactive invocations always remain in Default and do not change that branch preference.
 
 ## Context Files
 
@@ -358,8 +424,8 @@ diffex --exclude-tools ask_question
 
 ## Design Principles
 
-Diffex keeps the core small and pushes workflow-specific behavior into extensions, skills, prompt templates, and packages.
+Diffex keeps the core small and pushes specialized workflow behavior into extensions, skills, prompt templates, and packages.
 
-It intentionally does not include built-in MCP, permission popups, full plan mode, persistent to-dos, or background bash. The built-in `update_plan` tool is only a lightweight progress checklist. You can build or install richer workflows as extensions or packages, or use external tools such as containers and tmux.
+It includes a focused interactive Plan mode, while `update_plan` remains only a lightweight execution checklist. Diffex intentionally does not include built-in MCP, permission popups, persistent to-dos, or background bash. You can build or install different approval and planning workflows as extensions or packages, or use external tools such as containers and tmux.
 
 For the full rationale, read the [blog post](https://mariozechner.at/posts/2025-11-30-pi-coding-agent/).
