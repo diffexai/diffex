@@ -597,6 +597,9 @@ function parseLessonScoreLedger(contents: string, path: string, scope: Evolution
 				!Array.isArray(catalog.items) ||
 				!catalog.items.every(isLessonScoreIdentity),
 		) ||
+		!isStringArray(parsed.appliedOutputIds) ||
+		parsed.appliedOutputIds.some((id) => id.length === 0) ||
+		new Set(parsed.appliedOutputIds).size !== parsed.appliedOutputIds.length ||
 		!Array.isArray(parsed.rows) ||
 		parsed.rows.some(
 			(row) =>
@@ -1225,7 +1228,14 @@ export class FileEvolutionPersistence
 		const path = join(this.#lessonScorePath, `${this.#scopeFileName(scope)}.json`);
 		const contents = await this.#readOptional(path);
 		return contents === null
-			? { schemaVersion: LESSON_SCORE_SCHEMA_VERSION, scope, revision: 0, catalogs: [], rows: [] }
+			? {
+					schemaVersion: LESSON_SCORE_SCHEMA_VERSION,
+					scope,
+					revision: 0,
+					catalogs: [],
+					rows: [],
+					appliedOutputIds: [],
+				}
 			: parseLessonScoreLedger(contents, path, scope);
 	}
 
@@ -1288,6 +1298,64 @@ export class FileEvolutionPersistence
 				};
 			}),
 		};
+	}
+
+	async applyLessonScoreReport(
+		...args: Parameters<LessonScoreStore["applyLessonScoreReport"]>
+	): ReturnType<LessonScoreStore["applyLessonScoreReport"]> {
+		const [scope, report, currentHarnessRevision] = args;
+		return this.#withStoreLock(async () => {
+			const ledger = await this.#loadLessonScoreLedger(scope);
+			const bound = ledger.catalogs.find((catalog) => catalog.harnessRevision === report.harnessRevision);
+			const current = ledger.catalogs.find((catalog) => catalog.harnessRevision === currentHarnessRevision);
+			if (!bound || !current) throw new Error("Unregistered lesson score revision");
+			if (typeof report.outputId !== "string" || report.outputId.length === 0 || !Array.isArray(report.judgments)) {
+				throw new Error("Invalid lesson score report");
+			}
+			const judgments = new Map<string, "helpful" | "harmful">();
+			for (const judgment of report.judgments) {
+				if (!isRecord(judgment)) throw new Error("Invalid lesson score judgment");
+				const { item: reference, signal } = judgment;
+				if (
+					!isLessonScoreIdentity(reference) ||
+					(signal !== "helpful" && signal !== "harmful") ||
+					judgments.has(reference.memoryItemId) ||
+					!bound.items.some(
+						(item) =>
+							item.memoryItemId === reference.memoryItemId &&
+							item.contentDigest === reference.contentDigest &&
+							item.creationRevision === reference.creationRevision,
+					)
+				) {
+					throw new Error("Invalid lesson score judgment");
+				}
+				judgments.set(reference.memoryItemId, signal);
+			}
+			if (ledger.appliedOutputIds.includes(report.outputId)) return "already-applied";
+			const rows = new Map(ledger.rows.map((row) => [row.memoryItemId, row]));
+			const survivors = new Map(current.items.map((item) => [item.memoryItemId, item]));
+			for (const boundItem of bound.items) {
+				const item = survivors.get(boundItem.memoryItemId);
+				if (!item || item.creationRevision !== boundItem.creationRevision) continue;
+				// Renumbering changes the digest, not identity. REPLACE always mints a new identity.
+				const signal = judgments.get(item.memoryItemId);
+				rows.set(item.memoryItemId, {
+					...item,
+					harnessRevision: currentHarnessRevision,
+					points:
+						(rows.get(item.memoryItemId)?.points ?? 0) +
+						(signal === "helpful" ? 1 : signal === "harmful" ? -1.5 : -1),
+					lastAppliedOutputIdempotencyKey: report.outputId,
+				});
+			}
+			await this.#saveLessonScoreLedger({
+				...ledger,
+				revision: ledger.revision + 1,
+				rows: [...rows.values()],
+				appliedOutputIds: [...ledger.appliedOutputIds, report.outputId],
+			});
+			return "committed";
+		});
 	}
 
 	async saveLessonScores(

@@ -293,6 +293,7 @@ export {
 	type LessonScoreCatalog,
 	type LessonScoreIdentity,
 	type LessonScoreLedger,
+	type LessonScoreReport,
 	type LessonScoreRow,
 	type LessonScoreSnapshot,
 	type LessonScoreStore,

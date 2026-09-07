@@ -13,6 +13,7 @@ import {
 	type ImmutableHarnessSnapshot,
 	LESSON_SCORE_SCHEMA_VERSION,
 	type LessonScoreLedger,
+	type LessonScoreReport,
 	type LessonScoreRow,
 	type MutationBatch,
 } from "../src/index.ts";
@@ -212,6 +213,151 @@ describe("lesson score store", () => {
 		]);
 	});
 
+	it("atomically expands sparse and empty reports with exact weights and durable replay protection", async () => {
+		const { store, storePath, snapshot, activate } = await fixture();
+		const next = await activate([
+			{
+				operation: "ADD",
+				destination: { section: null, anchor: null },
+				content: "Third lesson.",
+				intendedScope: ["repository"],
+			},
+		]);
+		const report: LessonScoreReport = {
+			outputId: "session-1/output-1",
+			harnessRevision: next.harnessVersion,
+			judgments: [
+				{ item: row(next), signal: "helpful" },
+				{ item: row(next, 1), signal: "harmful" },
+			],
+		};
+		const apply = (value: LessonScoreReport) => store.applyLessonScoreReport(scope, value, next.harnessVersion);
+		expect(await apply(report)).toBe("committed");
+		expect((await store.loadLessonScores(scope, next.harnessVersion)).scores.map((item) => item.points)).toEqual([
+			1, -1.5, -1,
+		]);
+		await apply({ ...report, outputId: "session-1/output-2" });
+		await apply({ ...report, outputId: "session-1/output-3", judgments: [] });
+		const saved = await store.loadLessonScores(scope, next.harnessVersion);
+		expect(saved.scores.map((item) => item.points)).toEqual([1, -4, -3]);
+		const restarted = new FileEvolutionPersistence(storePath);
+		expect(await restarted.applyLessonScoreReport(scope, report, next.harnessVersion)).toBe("already-applied");
+		expect(await restarted.loadLessonScores(scope, next.harnessVersion)).toEqual(saved);
+		expect((await store.loadLessonScores(scope, snapshot.harnessVersion)).scores.map((item) => item.points)).toEqual([
+			1, -4,
+		]);
+	});
+
+	it("serializes parallel sessions and duplicate outputs without lost updates", async () => {
+		const { store, storePath, snapshot } = await fixture();
+		const reports: LessonScoreReport[] = ["session-1/output-1", "session-2/output-1"].map((outputId) => ({
+			outputId,
+			harnessRevision: snapshot.harnessVersion,
+			judgments: [{ item: row(snapshot), signal: "helpful" }],
+		}));
+		const results = await Promise.all(
+			[...reports, ...reports].map((report) =>
+				new FileEvolutionPersistence(storePath).applyLessonScoreReport(scope, report, snapshot.harnessVersion),
+			),
+		);
+		expect(results.sort()).toEqual(["already-applied", "already-applied", "committed", "committed"]);
+		expect((await store.loadLessonScores(scope, snapshot.harnessVersion)).scores.map((item) => item.points)).toEqual([
+			2, -2,
+		]);
+	});
+
+	it("rejects whole invalid reports without committing explicit or inferred points", async () => {
+		const { store, snapshot } = await fixture();
+		const before = await store.loadLessonScores(scope, snapshot.harnessVersion);
+		const helpful = { item: row(snapshot), signal: "helpful" as const };
+		for (const judgments of [
+			[helpful, helpful],
+			[helpful, { ...helpful, signal: "harmful" }],
+			[helpful, { item: { ...row(snapshot, 1), contentDigest: otherRevision }, signal: "harmful" }],
+			[{ ...helpful, signal: "neutral" }],
+			null,
+		]) {
+			await expect(
+				store.applyLessonScoreReport(
+					scope,
+					{
+						outputId: "session-1/output-1",
+						harnessRevision: snapshot.harnessVersion,
+						judgments: judgments as LessonScoreReport["judgments"],
+					},
+					snapshot.harnessVersion,
+				),
+			).rejects.toThrow();
+			expect(await store.loadLessonScores(scope, snapshot.harnessVersion)).toEqual(before);
+		}
+		await expect(
+			store.applyLessonScoreReport(
+				scope,
+				{ outputId: "", harnessRevision: snapshot.harnessVersion, judgments: [] },
+				snapshot.harnessVersion,
+			),
+		).rejects.toThrow();
+		expect(await store.loadLessonScores(scope, snapshot.harnessVersion)).toEqual(before);
+	});
+
+	it("ignores removed and superseded items in late reports while scoring renumbered survivors", async () => {
+		const { store, snapshot, activate, writer } = await fixture();
+		const first = row(snapshot);
+		const second = row(snapshot, 1);
+		await store.applyLessonScoreReport(
+			scope,
+			{ outputId: "session-1/output-1", harnessRevision: snapshot.harnessVersion, judgments: [] },
+			snapshot.harnessVersion,
+		);
+		const replaced = await activate([
+			{
+				operation: "REPLACE",
+				removal: { memoryItemId: first.memoryItemId, expectedContentDigest: first.contentDigest, reason: "test" },
+				addition: { content: "Replacement lesson.", intendedScope: ["repository"] },
+			},
+		]);
+		await store.applyLessonScoreReport(
+			scope,
+			{
+				outputId: "session-1/output-2",
+				harnessRevision: snapshot.harnessVersion,
+				judgments: [{ item: first, signal: "helpful" }],
+			},
+			replaced.harnessVersion,
+		);
+		expect((await store.loadLessonScores(scope, replaced.harnessVersion)).scores.map((item) => item.points)).toEqual([
+			0, -2,
+		]);
+		const replacement = row(replaced);
+		const removed = await activate([
+			{
+				operation: "REMOVE",
+				memoryItemId: replacement.memoryItemId,
+				expectedContentDigest: replacement.contentDigest,
+				reason: "test",
+			},
+		]);
+		await store.applyLessonScoreReport(
+			scope,
+			{
+				outputId: "session-1/output-3",
+				harnessRevision: replaced.harnessVersion,
+				judgments: [
+					{ item: replacement, signal: "harmful" },
+					{ item: second, signal: "helpful" },
+				],
+			},
+			removed.harnessVersion,
+		);
+		expect((await store.loadLessonScores(scope, removed.harnessVersion)).scores.map((item) => item.points)).toEqual([
+			-1,
+		]);
+		expect((await store.loadLessonScores(scope, replaced.harnessVersion)).scores[0]?.points).toBe(0);
+		expect((await store.loadLessonScores(scope, snapshot.harnessVersion)).scores[0]?.points).toBe(-1);
+		expect(await writer.captureSnapshot()).toEqual(removed);
+		expect(removed.memory).toBe("Lesson 1: Second lesson.\n");
+	});
+
 	it("rejects changed, duplicate, and superseded catalogs", async () => {
 		const { store, snapshot } = await fixture();
 		await expect(store.registerLessonScoreRevision(scope, { ...snapshot, activeMemoryItems: [] })).rejects.toThrow(
@@ -280,6 +426,9 @@ describe("lesson score store", () => {
 		["schema version", (ledger) => ({ ...ledger, schemaVersion: 99 })],
 		["scope", (ledger) => ({ ...ledger, scope: { ...scope, scopeId: "other" } })],
 		["revision", (ledger) => ({ ...ledger, revision: -1 })],
+		["missing replay keys", (ledger) => ({ ...ledger, appliedOutputIds: undefined })],
+		["empty replay key", (ledger) => ({ ...ledger, appliedOutputIds: [""] })],
+		["duplicate replay keys", (ledger) => ({ ...ledger, appliedOutputIds: ["output-1", "output-1"] })],
 		["duplicate catalogs", (ledger) => ({ ...ledger, catalogs: [...ledger.catalogs, ...ledger.catalogs] })],
 		["duplicate rows", (ledger) => ({ ...ledger, rows: [...ledger.rows, ...ledger.rows] })],
 		["unbound rows", (ledger) => ({ ...ledger, catalogs: [] })],
