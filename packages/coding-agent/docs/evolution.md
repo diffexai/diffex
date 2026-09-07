@@ -73,6 +73,8 @@ Evolution state is stored beneath the effective agent directory:
 
 Sessions resolved to the same workspace identity share evidence totals, jobs, candidates, and harness selection. Different workspace identities never contribute traces, invocation counts, token totals, or jobs to each other. A process that switches to a session in another workspace rotates its trace destination before attaching the replacement session.
 
+The evolution persistence API also provides `skill-scores/` ledgers, partitioned by evolution scope and exact workspace identity. Registration takes a validated harness bundle and includes only its workspace-matching evolved skills, never installed skills. Totals follow the skill ID, package version, and content digest across unrelated harness revisions; changed packages start at 0 and superseded totals remain available for audit. Writes validate revision membership and use atomic compare-and-swap updates. Runtime skill feedback, replay handling, and score-driven removal are not yet wired.
+
 Interrupted jobs and candidate work resume from durable checkpoints. Writer retries use stable idempotency keys, leases, exact base revisions, and compare-and-swap selection. Skill rollback follows immutable ancestry to the candidate's application boundary and selects its existing pre-activation revision; it does not mutate historical revisions.
 
 Set `evolution.enabled` to `false` in global settings or use the toggle in `/evolve` to stop future tracing and background/manual evolution controls. Already-running Diffex processes monitor this global setting and stop their trace collectors and evolution workers when another process disables it. Disabling evolution does not unselect the current harness or remove already active evolved skills.

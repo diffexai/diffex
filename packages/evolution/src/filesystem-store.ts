@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { Dirent } from "node:fs";
 import { lstat, mkdir, mkdtemp, readdir, readFile, rename, rm, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
+import { computeHarnessSkillId, type HarnessWorkspaceIdentity } from "@earendil-works/diffex-harness-state";
 import lockfile from "proper-lockfile";
 import type {
 	EvolutionArtifactReference,
@@ -43,6 +44,12 @@ import type {
 	SkillLifecycleObservationStore,
 } from "./ports.ts";
 import { computeEvolutionContentDigest, serializeEvolutionValue } from "./provenance.ts";
+import {
+	SKILL_SCORE_SCHEMA_VERSION,
+	type SkillScoreIdentity,
+	type SkillScoreLedger,
+	type SkillScoreStore,
+} from "./skill-score-store.ts";
 
 const ARTIFACT_FILE_NAME = "artifact.json";
 const STORE_LOCK_STALE_MS = 30_000;
@@ -651,6 +658,98 @@ function parseLessonScoreLedger(contents: string, path: string, scope: Evolution
 	return ledger;
 }
 
+function isSkillScoreWorkspace(value: unknown): value is HarnessWorkspaceIdentity {
+	return (
+		isRecord(value) &&
+		typeof value.repositoryId === "string" &&
+		value.repositoryId.length > 0 &&
+		(value.directoryId === undefined || (typeof value.directoryId === "string" && value.directoryId.length > 0))
+	);
+}
+
+function skillScoreWorkspaceMatches(left: HarnessWorkspaceIdentity, right: HarnessWorkspaceIdentity): boolean {
+	return left.repositoryId === right.repositoryId && left.directoryId === right.directoryId;
+}
+
+function skillScoreKey(item: SkillScoreIdentity): string {
+	return JSON.stringify([item.skillId, item.packageVersion, item.contentDigest]);
+}
+
+function isSkillScoreIdentity(value: unknown): value is SkillScoreIdentity {
+	return (
+		isRecord(value) &&
+		typeof value.skillId === "string" &&
+		/^skill:[0-9a-f]{64}$/.test(value.skillId) &&
+		typeof value.packageVersion === "string" &&
+		DIGEST_PATTERN.test(value.packageVersion) &&
+		typeof value.contentDigest === "string" &&
+		DIGEST_PATTERN.test(value.contentDigest) &&
+		isSkillScoreWorkspace(value.workspace)
+	);
+}
+
+function parseSkillScoreLedger(
+	contents: string,
+	path: string,
+	scope: EvolutionScope,
+	workspace: HarnessWorkspaceIdentity,
+): SkillScoreLedger {
+	const parsed = parseJson(contents, path);
+	if (
+		!isRecord(parsed) ||
+		parsed.schemaVersion !== SKILL_SCORE_SCHEMA_VERSION ||
+		!isRecord(parsed.scope) ||
+		parsed.scope.repositoryId !== scope.repositoryId ||
+		parsed.scope.scopeId !== scope.scopeId ||
+		!isSkillScoreWorkspace(parsed.workspace) ||
+		!skillScoreWorkspaceMatches(parsed.workspace, workspace) ||
+		!Number.isSafeInteger(parsed.revision) ||
+		(parsed.revision as number) < 0 ||
+		!Array.isArray(parsed.catalogs) ||
+		parsed.catalogs.some(
+			(catalog) =>
+				!isRecord(catalog) ||
+				typeof catalog.harnessRevision !== "string" ||
+				!DIGEST_PATTERN.test(catalog.harnessRevision) ||
+				!Array.isArray(catalog.items) ||
+				!catalog.items.every(isSkillScoreIdentity),
+		) ||
+		!Array.isArray(parsed.rows) ||
+		parsed.rows.some(
+			(row) =>
+				!isSkillScoreIdentity(row) ||
+				!isRecord(row) ||
+				typeof row.harnessRevision !== "string" ||
+				!DIGEST_PATTERN.test(row.harnessRevision) ||
+				typeof row.points !== "number" ||
+				!Number.isFinite(row.points) ||
+				typeof row.lastAppliedOutputIdempotencyKey !== "string" ||
+				row.lastAppliedOutputIdempotencyKey.length === 0,
+		)
+	) {
+		throw new EvolutionStorageCorruptionError(path, "skill score ledger is invalid or incompatible");
+	}
+	const ledger = parsed as unknown as SkillScoreLedger;
+	const catalogs = new Map(ledger.catalogs.map((catalog) => [catalog.harnessRevision, catalog]));
+	if (
+		catalogs.size !== ledger.catalogs.length ||
+		ledger.catalogs.some(
+			(catalog) =>
+				new Set(catalog.items.map((item) => item.skillId)).size !== catalog.items.length ||
+				catalog.items.some((item) => !skillScoreWorkspaceMatches(item.workspace, workspace)),
+		) ||
+		new Set(ledger.rows.map(skillScoreKey)).size !== ledger.rows.length ||
+		ledger.rows.some(
+			(row) =>
+				!skillScoreWorkspaceMatches(row.workspace, workspace) ||
+				!catalogs.get(row.harnessRevision)?.items.some((item) => skillScoreKey(item) === skillScoreKey(row)),
+		)
+	) {
+		throw new EvolutionStorageCorruptionError(path, "skill score ledger has inconsistent identities");
+	}
+	return ledger;
+}
+
 function parseCancellation(contents: string, path: string, expectedJobId: string): EvolutionCancellationRequest {
 	const parsed = parseJson(contents, path);
 	if (
@@ -722,7 +821,8 @@ export class FileEvolutionPersistence
 		EvolutionLedger,
 		LessonScoreStore,
 		SkillCandidateRegistryStore,
-		SkillLifecycleObservationStore
+		SkillLifecycleObservationStore,
+		SkillScoreStore
 {
 	readonly #rootPath: string;
 	readonly #artifactPath: string;
@@ -734,6 +834,7 @@ export class FileEvolutionPersistence
 	readonly #lessonScorePath: string;
 	readonly #skillCandidateRegistryPath: string;
 	readonly #skillLifecycleObservationPath: string;
+	readonly #skillScorePath: string;
 	readonly #storeLockPath: string;
 	readonly #storeLockStaleMs: number;
 	readonly #storeLockUpdateMs: number;
@@ -749,6 +850,7 @@ export class FileEvolutionPersistence
 		this.#lessonScorePath = join(this.#rootPath, "lesson-scores");
 		this.#skillCandidateRegistryPath = join(this.#rootPath, "skill-candidates");
 		this.#skillLifecycleObservationPath = join(this.#rootPath, "skill-observations");
+		this.#skillScorePath = join(this.#rootPath, "skill-scores");
 		this.#storeLockPath = join(this.#rootPath, ".store");
 		this.#storeLockStaleMs = options.storeLockStaleMs ?? STORE_LOCK_STALE_MS;
 		this.#storeLockUpdateMs = options.storeLockUpdateMs ?? STORE_LOCK_UPDATE_MS;
@@ -770,6 +872,7 @@ export class FileEvolutionPersistence
 			this.#lessonScorePath,
 			this.#skillCandidateRegistryPath,
 			this.#skillLifecycleObservationPath,
+			this.#skillScorePath,
 		]) {
 			await mkdir(path, { recursive: true, mode: 0o700 });
 			const stats = await lstat(path);
@@ -1376,6 +1479,111 @@ export class FileEvolutionPersistence
 			const updated = new Map(ledger.rows.map((row) => [row.memoryItemId, row]));
 			for (const row of rows) updated.set(row.memoryItemId, row);
 			await this.#saveLessonScoreLedger({ ...ledger, revision: ledger.revision + 1, rows: [...updated.values()] });
+			return "committed";
+		});
+	}
+
+	#skillScoreFilePath(scope: EvolutionScope, workspace: HarnessWorkspaceIdentity): string {
+		if (
+			typeof scope.repositoryId !== "string" ||
+			typeof scope.scopeId !== "string" ||
+			scope.scopeId.length === 0 ||
+			!isSkillScoreWorkspace(workspace) ||
+			scope.repositoryId !== workspace.repositoryId
+		) {
+			throw new Error("Invalid skill score scope or workspace");
+		}
+		return join(
+			this.#skillScorePath,
+			`${artifactDirectoryName(computeEvolutionContentDigest({ scope, workspace }))}.json`,
+		);
+	}
+
+	async #loadSkillScoreLedger(scope: EvolutionScope, workspace: HarnessWorkspaceIdentity): Promise<SkillScoreLedger> {
+		const path = this.#skillScoreFilePath(scope, workspace);
+		await this.#ensureDirectories();
+		const contents = await this.#readOptional(path);
+		return contents === null
+			? { schemaVersion: SKILL_SCORE_SCHEMA_VERSION, scope, workspace, revision: 0, catalogs: [], rows: [] }
+			: parseSkillScoreLedger(contents, path, scope, workspace);
+	}
+
+	async #saveSkillScoreLedger(ledger: SkillScoreLedger): Promise<void> {
+		const path = this.#skillScoreFilePath(ledger.scope, ledger.workspace);
+		parseSkillScoreLedger(serializeEvolutionValue(ledger), path, ledger.scope, ledger.workspace);
+		await this.#atomicReplace(path, ledger);
+	}
+
+	async registerSkillScoreRevision(...args: Parameters<SkillScoreStore["registerSkillScoreRevision"]>): Promise<void> {
+		const [scope, workspace, bundle] = args;
+		const catalog = {
+			harnessRevision: bundle.manifest.version,
+			items: bundle.state.skills
+				.filter((skill) => skillScoreWorkspaceMatches(skill.workspace, workspace))
+				.map((skill) => ({
+					skillId: computeHarnessSkillId(skill.workspace, skill.path),
+					packageVersion: skill.packageVersion,
+					contentDigest: skill.contentHash,
+					workspace: skill.workspace,
+				}))
+				.sort((left, right) => left.skillId.localeCompare(right.skillId)),
+		};
+		await this.#withStoreLock(async () => {
+			const ledger = await this.#loadSkillScoreLedger(scope, workspace);
+			const prior = ledger.catalogs.find((item) => item.harnessRevision === catalog.harnessRevision);
+			if (prior !== undefined) {
+				if (serializeEvolutionValue(prior) !== serializeEvolutionValue(catalog)) {
+					throw new Error("Skill score revision was registered with different active skills");
+				}
+				return;
+			}
+			await this.#saveSkillScoreLedger({
+				...ledger,
+				revision: ledger.revision + 1,
+				catalogs: [...ledger.catalogs, catalog],
+			});
+		});
+	}
+
+	async loadSkillScores(
+		...args: Parameters<SkillScoreStore["loadSkillScores"]>
+	): ReturnType<SkillScoreStore["loadSkillScores"]> {
+		const [scope, workspace, harnessRevision] = args;
+		const ledger = await this.#loadSkillScoreLedger(scope, workspace);
+		const catalog = ledger.catalogs.find((item) => item.harnessRevision === harnessRevision);
+		if (catalog === undefined) throw new Error(`Unregistered skill score revision "${harnessRevision}"`);
+		const rows = new Map(ledger.rows.map((row) => [skillScoreKey(row), row]));
+		return {
+			revision: ledger.revision,
+			scope,
+			workspace,
+			harnessRevision,
+			scores: catalog.items.map((item) => {
+				const row = rows.get(skillScoreKey(item));
+				return {
+					...item,
+					points: row?.points ?? 0,
+					lastAppliedOutputIdempotencyKey: row?.lastAppliedOutputIdempotencyKey ?? null,
+				};
+			}),
+		};
+	}
+
+	async saveSkillScores(
+		...args: Parameters<SkillScoreStore["saveSkillScores"]>
+	): ReturnType<SkillScoreStore["saveSkillScores"]> {
+		const [scope, workspace, expectedRevision, rows] = args;
+		if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {
+			throw new Error("Invalid skill score ledger revision");
+		}
+		if (new Set(rows.map(skillScoreKey)).size !== rows.length) throw new Error("Duplicate skill score rows");
+		return this.#withStoreLock(async () => {
+			const ledger = await this.#loadSkillScoreLedger(scope, workspace);
+			if (ledger.revision !== expectedRevision) return "conflict";
+			if (rows.length === 0) return "committed";
+			const updated = new Map(ledger.rows.map((row) => [skillScoreKey(row), row]));
+			for (const row of rows) updated.set(skillScoreKey(row), row);
+			await this.#saveSkillScoreLedger({ ...ledger, revision: ledger.revision + 1, rows: [...updated.values()] });
 			return "committed";
 		});
 	}

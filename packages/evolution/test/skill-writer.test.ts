@@ -408,6 +408,13 @@ describe("skill writer", () => {
 			expectedNames: ["retained", "updated-skill"],
 		},
 		{
+			operation: "UPDATE" as const,
+			existingNames: ["same-skill"],
+			retainedNames: ["retained"],
+			proposedName: "same-skill",
+			expectedNames: ["retained", "same-skill"],
+		},
+		{
 			operation: "MERGE" as const,
 			existingNames: ["first-skill", "second-skill"],
 			retainedNames: ["retained"],
@@ -423,6 +430,19 @@ describe("skill writer", () => {
 		},
 	])("stages and atomically activates an accepted $operation mutation", async (testCase) => {
 		const data = await writerFixture(testCase);
+		await data.persistence.registerSkillScoreRevision(scope, workspace, data.base);
+		const initialScores = await data.persistence.loadSkillScores(scope, workspace, data.base.manifest.version);
+		await data.persistence.saveSkillScores(
+			scope,
+			workspace,
+			initialScores.revision,
+			initialScores.scores.map((item) => ({
+				...item,
+				harnessRevision: data.base.manifest.version,
+				points: -1.5,
+				lastAppliedOutputIdempotencyKey: "session-1/output-1",
+			})),
+		);
 		const batch = await data.writer.buildMutationBatch({ scope, groupId: data.group.groupId, createdAt: now });
 		expect(batch.mutations[0]?.memoryDisposition).toMatchObject({
 			classifications: ["independent"],
@@ -448,6 +468,24 @@ describe("skill writer", () => {
 		expect(current.manifest.base).toBe(data.base.manifest.version);
 		expect(current.state.memory).toBe(data.base.state.memory);
 		expect(current.state.skills.map((skill) => skill.name).sort()).toEqual([...testCase.expectedNames].sort());
+		await data.persistence.registerSkillScoreRevision(scope, workspace, current);
+		const scores = await data.persistence.loadSkillScores(scope, workspace, current.manifest.version);
+		expect(scores.scores).toHaveLength(current.state.skills.length);
+		for (const skill of current.state.skills) {
+			const score = scores.scores.find(
+				(item) => item.skillId === computeHarnessSkillId(skill.workspace, skill.path),
+			);
+			expect(score).toMatchObject({
+				packageVersion: skill.packageVersion,
+				contentDigest: skill.contentHash,
+				points: testCase.retainedNames.includes(skill.name) ? -1.5 : 0,
+			});
+		}
+		expect(
+			(await data.persistence.loadSkillScores(scope, workspace, data.base.manifest.version)).scores.map(
+				(item) => item.points,
+			),
+		).toEqual(initialScores.scores.map(() => -1.5));
 
 		const activationPath = join(data.root, "writer-state", "activations", `${batch.batchId}.json`);
 		const persisted = await readFile(activationPath, "utf8");

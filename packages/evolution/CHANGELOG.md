@@ -5,6 +5,7 @@
 ### Added
 
 - Added a versioned, scope-local lesson score ledger with active revision catalogs, zero-default point reads, validated atomic writes, and compare-and-swap updates.
+- Added a workspace-isolated evolved-skill score ledger with validated revision catalogs, atomic compare-and-swap writes, and zero-default scores for new package versions while retaining superseded totals.
 
 ### Changed
 
