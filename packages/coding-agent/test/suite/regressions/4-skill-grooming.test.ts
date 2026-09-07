@@ -2,7 +2,7 @@ import { join } from "node:path";
 import { createAssistantMessageEventStream, fauxAssistantMessage, fauxToolCall } from "@earendil-works/diffex-ai";
 import { computeHarnessSkillId, HarnessStateStore } from "@earendil-works/diffex-harness-state";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { FileEvolutionPersistence, StructuredSkillCurator } from "#evolution";
+import { DeterministicSkillLifecycleObserver, FileEvolutionPersistence, StructuredSkillCurator } from "#evolution";
 import { createCodingAgentEvolutionRuntime, EvolutionRuntimeCoordinator } from "../../../src/core/evolution-runtime.ts";
 import {
 	resolveEvolutionWorkspaceStateDirectory,
@@ -108,6 +108,34 @@ describe("Item 4: skill grooming before evolution", () => {
 		async (trigger) => {
 			const env = await setup();
 			const curate = vi.spyOn(StructuredSkillCurator.prototype, "curate");
+			// Existing non-secret evidence survives retirement; private reports must never add observations.
+			const retired = env.bundle.state.skills.find((skill) => skill.name === "skill-0")!;
+			const observation = await new DeterministicSkillLifecycleObserver({
+				version: "test-1",
+				policyVersion: "test-1",
+				observations: env.scores,
+			}).record({
+				scope: env.scope,
+				skill: {
+					skillId: computeHarnessSkillId(env.workspace, retired.path),
+					version: retired.packageVersion,
+					contentDigest: retired.contentHash,
+					sourceKind: "evolved",
+					harnessRevision: env.bundle.manifest.version,
+					workspace: env.workspace,
+				},
+				invocationEvents: ["read"],
+				topLevelTaskLineageId: "prior-task",
+				traceIds: ["prior-trace"],
+				evidenceIds: ["prior-evidence"],
+				signal: "helpful",
+				signalSource: "direct-user",
+				attributionMethod: "direct",
+				issueKind: null,
+				status: "final",
+				timestamp: "2026-08-29T12:00:00.000Z",
+				idempotencyKey: "prior-observation",
+			});
 			// An invalid report contributes no neutral decay.
 			env.harness.setResponses([fauxAssistantMessage("Verified."), fauxAssistantMessage("Missing report.")]);
 			await env.session.prompt("Verify before the valid reports.");
@@ -186,6 +214,7 @@ describe("Item 4: skill grooming before evolution", () => {
 					);
 				}
 				await env.session.prompt(`Verify result ${index + 1}.`);
+				expect(await env.scores.listSkillLifecycleObservations(env.scope)).toEqual([observation]);
 			}
 			const scores = await env.scores.loadSkillScores(env.scope, env.workspace, env.bundle.manifest.version);
 			expect(
@@ -236,6 +265,7 @@ describe("Item 4: skill grooming before evolution", () => {
 				})),
 			);
 			expect(selected.state.skills.map((skill) => skill.name)).toEqual(["skill-1"]);
+			expect(await env.scores.listSkillLifecycleObservations(env.scope)).toEqual([observation]);
 			expect(curate).toHaveBeenCalledTimes(1);
 			expect(curate.mock.calls[0]![0].input).toEqual(input);
 			expect(env.session.activeHarnessVersion).toBe(env.bundle.manifest.version);
@@ -254,6 +284,7 @@ describe("Item 4: skill grooming before evolution", () => {
 				stopReason: "stop",
 			});
 			expect(env.harness.getPendingResponseCount()).toBe(0);
+			expect(await env.scores.listSkillLifecycleObservations(env.scope)).toEqual([observation]);
 		},
 	);
 

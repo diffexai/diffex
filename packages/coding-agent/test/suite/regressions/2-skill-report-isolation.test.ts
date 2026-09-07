@@ -442,24 +442,46 @@ describe("Item 2: private per-output skill reports", () => {
 		expectPrivate(await readTree(env.stateDir));
 	});
 
-	it("does not assess installed-only catalogs, other workspaces or failed main outputs", async () => {
+	it("does not assess installed-only catalogs, inactive harnesses, other workspaces or failed main outputs", async () => {
 		const empty = await setup({ names: [] });
-		empty.harness.setResponses([fauxAssistantMessage("ordinary answer")]);
+		empty.harness.setResponses([
+			(context) => {
+				expect(context.systemPrompt).toContain("<name>review</name>");
+				return fauxAssistantMessage("ordinary answer");
+			},
+		]);
 		await empty.session.prompt("Hello");
+		expect(getMessageText(empty.session.messages.at(-1))).toBe("ordinary answer");
 		expect(empty.harness.faux.state.callCount).toBe(1);
 		const active = await setup();
 		active.harness.setResponses([fauxAssistantMessage("", { stopReason: "error", errorMessage: "main failure" })]);
 		await active.session.prompt("Hello");
 		expect(active.harness.faux.state.callCount).toBe(1);
-		const prepare = createSkillReportContinuation({
-			getBundle: () => active.bundle,
-			getCatalog: () => active.loader.getSkills(),
-			getOutputId: () => "unused",
-			workspace: { ...active.workspace, directoryId: "other-workspace" },
-			stream: () => {
-				throw new Error("Must not call provider");
-			},
-		});
-		expect(prepare({ messages: [] }, active.harness.getModel())).toBeUndefined();
+		for (const binding of [
+			{ bundle: undefined, workspace: empty.workspace },
+			{ bundle: active.bundle, workspace: empty.workspace },
+		]) {
+			const consumed: ValidatedSkillReport[] = [];
+			empty.session.agent.preparePrivateContinuation = createSkillReportContinuation({
+				getBundle: () => binding.bundle,
+				getCatalog: () => empty.loader.getSkills(),
+				getOutputId: () => "unused",
+				workspace: binding.workspace,
+				stream: (model, context, options) => empty.session.modelRuntime.streamSimple(model, context, options),
+				consume: async (value) => {
+					consumed.push(value);
+				},
+			});
+			const callsBefore = empty.harness.faux.state.callCount;
+			empty.harness.setResponses([fauxAssistantMessage("ordinary answer"), report([])]);
+			await empty.session.prompt("Use the installed review skill.");
+			expect(getMessageText(empty.session.messages.at(-1))).toBe("ordinary answer");
+			expect(empty.harness.faux.state.callCount).toBe(callsBefore + 1);
+			expect(empty.harness.getPendingResponseCount()).toBe(1);
+			expect(consumed).toEqual([]);
+			expect(empty.loader.getSkills().skills).toEqual(empty.installed);
+		}
+		expect(await empty.store.loadCurrent()).toEqual(empty.bundle);
+		expectPrivate(empty.events);
 	});
 });
