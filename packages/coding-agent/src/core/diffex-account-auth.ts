@@ -94,6 +94,40 @@ export class HostedDiffexAccountAuth implements DiffexAccountAuth {
 		}
 	}
 
+	/** Read-only commerce access. Credentials stay inside the account client. */
+	async readBilling(resource: "plans" | "subscription", signal?: AbortSignal): Promise<unknown> {
+		if (resource !== "plans" && resource !== "subscription")
+			throw new DiffexAccountAuthError("Invalid billing resource");
+		try {
+			const stored = await this.#dependencies.storage.read(this.apiOrigin, signal);
+			if (!stored) throw new DiffexAccountAuthError("Sign in to Diffex with /login before checking billing.");
+			const session =
+				stored.expiresAt <= this.#dependencies.now() + REFRESH_WINDOW_MS
+					? await refreshSession(stored, this.#dependencies, signal)
+					: stored;
+			const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+			const response = await this.#dependencies.fetch(new URL(`/v1/billing/${resource}`, this.apiOrigin), {
+				method: "GET",
+				redirect: "error",
+				headers: {
+					accept: "application/json",
+					"cache-control": "no-store",
+					authorization: `Bearer ${session.accessToken}`,
+				},
+				signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+			});
+			if (response.status === 401)
+				throw new DiffexAccountAuthError("Your Diffex session is no longer authorized. Use /login again.");
+			if (response.status === 403) throw new DiffexAccountAuthError("Your organization role cannot view billing.");
+			if (response.status === 404) throw new DiffexAccountAuthError("Billing is not enabled on this Diffex API.");
+			if (!response.ok) throw new DiffexAccountAuthError("Billing is temporarily unavailable. Try again shortly.");
+			return await response.json();
+		} catch (error) {
+			if (error instanceof DiffexAccountAuthError) throw new DiffexAccountAuthError(error.message);
+			throw new DiffexAccountAuthError("Unable to read Diffex billing. Check your connection and account sign-in.");
+		}
+	}
+
 	async login(options: DiffexAccountLoginOptions): Promise<void> {
 		try {
 			throwIfLoginCancelled(options.signal);
@@ -270,6 +304,7 @@ async function postJson(
 		const timeoutSignal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
 		response = await dependencies.fetch(new URL(path, apiOrigin), {
 			method: "POST",
+			redirect: "error",
 			headers: {
 				accept: "application/json",
 				"content-type": "application/json",
