@@ -9,6 +9,7 @@
 - Added score-based lesson grooming before automatic and manual evolution snapshots, with a 12-lesson cap and a Browse status.
 - Added private per-output evolved-skill self-reports with output-bound name/version validation, isolated from conversations and evolution evidence.
 - Wired atomic skill scoring for valid reports: helpful +1, harmful -1.5, omitted -1, with replay protection and exclusion of retired or superseded packages.
+- Added score-based evolved-skill grooming before automatic and manual evolution snapshots, preserving workspace isolation and freezing the post-groom skill catalog.
 
 ### Changed
 

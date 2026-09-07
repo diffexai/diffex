@@ -1011,24 +1011,34 @@ export async function createCodingAgentEvolutionRuntime(
 			harnessState: options.harnessState,
 			async prepareHarness(signal) {
 				const selected = await options.harnessState.loadCurrent();
-				if (!selected.state.memory.trim()) return writer.captureSnapshot(selected.manifest.version);
+				const hasMemory = selected.state.memory.trim().length > 0;
+				const hasSkills = selected.state.skills.some(
+					(skill) =>
+						skill.workspace.repositoryId === scope.repositoryId &&
+						skill.workspace.directoryId === currentDirectory.directoryId,
+				);
+				if (!hasMemory && !hasSkills) return writer.captureSnapshot(selected.manifest.version);
 				const lease = await persistence.acquire(
 					"writer",
 					"global",
-					`lesson-grooming-${randomUUID()}`,
+					`harness-grooming-${randomUUID()}`,
 					clock.now(),
 					SKILL_ACTIVATION_LEASE_TTL_MS,
 				);
 				if (lease === null) throw new Error("Another harness writer is active");
 				try {
-					progress.emit({ type: "lesson-grooming", active: true });
-					return await writer.groom(persistence, scope, {
-						idempotencyKey: lease.ownerId,
-						lease,
-						signal,
-					});
+					const context = { idempotencyKey: lease.ownerId, lease, signal };
+					if (hasMemory) {
+						progress.emit({ type: "lesson-grooming", active: true });
+						try {
+							await writer.groom(persistence, scope, context);
+						} finally {
+							progress.emit({ type: "lesson-grooming", active: false });
+						}
+					}
+					const groomed = await skillWriter.groom(persistence, scope, context);
+					return writer.captureSnapshot(groomed.manifest.version);
 				} finally {
-					progress.emit({ type: "lesson-grooming", active: false });
 					await persistence.release(lease);
 				}
 			},
