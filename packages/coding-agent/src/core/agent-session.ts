@@ -1406,6 +1406,7 @@ export class AgentSession {
 			this._harnessSwitchInProgress ||
 			this.isStreaming ||
 			this.isRetrying ||
+			this._manualCompactionOperations > 0 ||
 			this.isCompacting ||
 			this.isBashRunning
 		);
@@ -1475,7 +1476,7 @@ export class AgentSession {
 			if (this.isStreaming) {
 				throw new Error("Cannot switch harness versions while a response is streaming.");
 			}
-			if (this.isCompacting) {
+			if (this._manualCompactionOperations > 0 || this.isCompacting) {
 				throw new Error("Cannot switch harness versions while compaction is in progress.");
 			}
 			if (this.isBashRunning) {
@@ -1545,7 +1546,6 @@ export class AgentSession {
 	/** Whether compaction or branch summarization is currently running */
 	get isCompacting(): boolean {
 		return (
-			this._manualCompactionOperations > 0 ||
 			this._autoCompactionAbortController !== undefined ||
 			this._compactionAbortController !== undefined ||
 			this._branchSummaryAbortController !== undefined
