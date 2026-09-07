@@ -1,10 +1,10 @@
 import type { AgentLoopConfig, StreamFn } from "@earendil-works/diffex-agent-core";
 import type { AssistantMessage, Tool } from "@earendil-works/diffex-ai";
 import type { HarnessVersion, HarnessVersionBundle } from "@earendil-works/diffex-harness-state";
-import { NOOP_TELEMETRY_CONTEXT } from "@earendil-works/diffex-telemetry";
 import { Type } from "typebox";
 import { Check } from "typebox/value";
 import { type EvolutionMemoryItem, type EvolutionMemoryWriter, parseEvolutionMemoryBlocks } from "#evolution";
+import { createPrivateReportContinuation } from "./private-report.ts";
 
 export const LESSON_REPORT_PROMPT =
 	"From your evolution lessons, report only lessons you used during this run that were helpful or harmful. Return their lesson numbers and helpful/harmful judgments. Omit all other lessons; return an empty list if none qualify. Submit the report using report_lesson_usage.";
@@ -93,39 +93,21 @@ export function createLessonReportContinuation(options: {
 			try {
 				const activeMemoryItems = await catalog;
 				if (!activeMemoryItems || activeMemoryItems.length !== lessonNumbers.length || signal?.aborted) return;
-				const deadline = AbortSignal.timeout(30_000);
-				const privateSignal = signal ? AbortSignal.any([signal, deadline]) : deadline;
-				const response = await options.stream(
+				await createPrivateReportContinuation({
+					context,
 					model,
-					{
-						systemPrompt: context.systemPrompt,
-						messages: [
-							...context.messages,
-							...structuredClone([message, ...toolResults]),
-							{ role: "user", content: LESSON_REPORT_PROMPT, timestamp: Date.now() },
-						],
-						tools: [LESSON_REPORT_TOOL],
+					stream: options.stream,
+					prompt: LESSON_REPORT_PROMPT,
+					tool: LESSON_REPORT_TOOL,
+					consume: async (response) => {
+						const report = resolveLessonReport(
+							response,
+							{ outputId, harnessRevision, activeMemoryItems },
+							lessonNumbers,
+						);
+						if (report) await options.consume?.(report);
 					},
-					{
-						signal: privateSignal,
-						telemetryContext: NOOP_TELEMETRY_CONTEXT,
-						transport: "sse",
-						cacheRetention: "none",
-						maxTokens: 1024,
-						timeoutMs: 30_000,
-						maxRetries: 0,
-					},
-				);
-				// Drain privately: no agent events, extension callbacks, or transcript writes.
-				for await (const _event of response) {
-					// Only the final response is eligible for validation.
-				}
-				const report = resolveLessonReport(
-					await response.result(),
-					{ outputId, harnessRevision, activeMemoryItems },
-					lessonNumbers,
-				);
-				if (report && !privateSignal.aborted) await options.consume?.(report);
+				})(message, toolResults, signal);
 			} catch {
 				// Missing, failed, or malformed reports are not empty reports and never surface to the user.
 			}
