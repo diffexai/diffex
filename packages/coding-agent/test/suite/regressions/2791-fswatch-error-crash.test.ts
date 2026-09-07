@@ -87,7 +87,7 @@ process.exit(0);
 		let stderr = "";
 		let exitCode: number;
 		try {
-			_stdout = execFileSync(process.execPath, [scriptPath], {
+			_stdout = execFileSync(process.execPath, ["--import", "tsx", scriptPath], {
 				timeout: 10000,
 				encoding: "utf-8",
 				env: { ...process.env, DIFFEX_CODING_AGENT_DIR: agentDir },

@@ -102,7 +102,7 @@ describe("GitHub Copilot OAuth device flow", () => {
 	it("filters models to the authenticated account picker catalog", async () => {
 		const credentials = await refreshGitHubCopilotModelsForTest([
 			{
-				id: "gpt-4.1",
+				id: "gpt-5.5",
 				model_picker_enabled: true,
 				capabilities: { supports: { tool_calls: true } },
 			},
@@ -119,19 +119,19 @@ describe("GitHub Copilot OAuth device flow", () => {
 				capabilities: { supports: { tool_calls: true } },
 			},
 		]);
-		expect(credentials.availableModelIds).toEqual(["gpt-4.1"]);
+		expect(credentials.availableModelIds).toEqual(["gpt-5.5"]);
 
 		const store = new InMemoryCredentialStore();
 		await store.modify("github-copilot", async () => ({ ...credentials, type: "oauth" }));
 		const models = createModels({ credentials: store });
 		models.setProvider(githubCopilotProvider());
-		expect((await models.getAvailable("github-copilot")).map((model) => model.id)).toEqual(["gpt-4.1"]);
+		expect((await models.getAvailable("github-copilot")).map((model) => model.id)).toEqual(["gpt-5.5"]);
 	});
 
 	it("falls back to explicitly enabled policy models when the picker catalog is empty", async () => {
 		const credentials = await refreshGitHubCopilotModelsForTest([
 			{
-				id: "gpt-4.1",
+				id: "gpt-5.5",
 				model_picker_enabled: false,
 				policy: { state: "enabled" },
 				capabilities: { supports: { tool_calls: true } },
@@ -155,13 +155,13 @@ describe("GitHub Copilot OAuth device flow", () => {
 			},
 		]);
 
-		expect(credentials.availableModelIds).toEqual(["gpt-4.1"]);
+		expect(credentials.availableModelIds).toEqual(["gpt-5.5"]);
 
 		const store = new InMemoryCredentialStore();
 		await store.modify("github-copilot", async () => ({ ...credentials, type: "oauth" }));
 		const models = createModels({ credentials: store });
 		models.setProvider(githubCopilotProvider());
-		expect((await models.getAvailable("github-copilot")).map((model) => model.id)).toEqual(["gpt-4.1"]);
+		expect((await models.getAvailable("github-copilot")).map((model) => model.id)).toEqual(["gpt-5.5"]);
 	});
 
 	it("does not fall back to policy models for non-Individual accounts", async () => {
