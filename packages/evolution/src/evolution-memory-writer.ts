@@ -17,6 +17,7 @@ import type {
 	EvolutionMemoryReplaceDelta,
 	EvolutionMemoryWriteOutput,
 	EvolutionMutation,
+	EvolutionScope,
 	HarnessActivationResult,
 	ImmutableHarnessSnapshot,
 	MutationBatch,
@@ -30,7 +31,12 @@ import {
 	evolutionMemoryLessonNumber,
 	numberEvolutionMemoryLesson,
 } from "./evolution-memory-lessons.ts";
-import { computeEvolutionContentDigest, serializeEvolutionValue } from "./provenance.ts";
+import type { LessonScoreStore } from "./lesson-score-store.ts";
+import {
+	computeEvolutionContentDigest,
+	createEvolutionArtifactMetadata,
+	serializeEvolutionValue,
+} from "./provenance.ts";
 import type { EvolutionTargetWriter } from "./targets.ts";
 
 const CATALOG_SCHEMA_VERSION = 1 as const;
@@ -643,9 +649,74 @@ export class EvolutionMemoryWriter implements EvolutionTargetWriter {
 		};
 	}
 
+	/** Deterministic maintenance only; model-authored batches still cannot remove manual lessons. */
+	async groom(
+		scores: LessonScoreStore,
+		scope: EvolutionScope,
+		context: Parameters<EvolutionTargetWriter["write"]>[1],
+	): Promise<ImmutableHarnessSnapshot> {
+		context.signal?.throwIfAborted();
+		assertWriterContext(context);
+		const snapshot = await this.captureSnapshot();
+		if (snapshot.activeMemoryItems.length === 0) return snapshot;
+		await scores.registerLessonScoreRevision(scope, snapshot);
+		const points = await scores.loadLessonScores(scope, snapshot.harnessVersion);
+		// Catalog order is lesson order, so equal scores evict earlier lessons first.
+		const ranked = points.scores.map((item, index) => ({ ...item, index }));
+		ranked.sort((left, right) => left.points - right.points || left.index - right.index);
+		const thresholdCount = ranked.filter((item) => item.points <= -5).length;
+		const removals = ranked.slice(0, Math.max(thresholdCount, ranked.length - 12));
+		if (removals.length === 0) return snapshot;
+		const batchId = `lesson-grooming-${randomUUID()}`;
+		const content: Omit<MutationBatch, "metadata"> = {
+			batchId,
+			targetKind: this.kind,
+			expectedBaseVersion: snapshot.harnessVersion,
+			expectedBaseDigest: snapshot.memoryContentDigest,
+			baseMemoryItems: snapshot.activeMemoryItems,
+			activationEventId: `${batchId}-activation`,
+			mutations: removals.map((item, index) => ({
+				mutationId: `${batchId}-${index}`,
+				proposalId: `${batchId}-${index}`,
+				target: { kind: this.kind, expectedHarnessVersion: snapshot.harnessVersion },
+				payload: {
+					operation: "REMOVE",
+					memoryItemId: item.memoryItemId,
+					expectedContentDigest: item.contentDigest,
+					reason: "Deterministic lesson score threshold and capacity maintenance",
+				},
+			})),
+		};
+		const batch: MutationBatch = {
+			...content,
+			metadata: createEvolutionArtifactMetadata({
+				artifactId: batchId,
+				producer: { name: "lesson-grooming", version: this.#version, promptVersion: null, model: null },
+				sourceIds: [],
+				scope,
+				createdAt: new Date().toISOString(),
+				content,
+			}),
+		};
+		const result = await this.#write(batch, context, true);
+		const activation = await this.activate(batch, result, context);
+		if (activation.resultingHarnessVersion === null) throw new Error("Lesson grooming did not activate a revision");
+		const groomed = await this.captureSnapshot(activation.resultingHarnessVersion);
+		await scores.registerLessonScoreRevision(scope, groomed);
+		return groomed;
+	}
+
 	async write(
 		batch: MutationBatch,
 		context: Parameters<EvolutionTargetWriter["write"]>[1],
+	): Promise<MutationWriteResult> {
+		return this.#write(batch, context, false);
+	}
+
+	async #write(
+		batch: MutationBatch,
+		context: Parameters<EvolutionTargetWriter["write"]>[1],
+		maintenance: boolean,
 	): Promise<MutationWriteResult> {
 		context.signal?.throwIfAborted();
 		assertWriterContext(context);
@@ -736,7 +807,7 @@ export class EvolutionMemoryWriter implements EvolutionTargetWriter {
 				removedLessonNumber === null ||
 				baseItem.contentDigest !== expectedContentDigest ||
 				itemDigest(block.content) !== item.contentDigest ||
-				item.ledger.origin !== "evolution"
+				(!maintenance && item.ledger.origin !== "evolution")
 			) {
 				throw new Error(`Mutation cannot automatically remove memory item "${memoryItemId}"`);
 			}
