@@ -31,7 +31,7 @@ import {
 	evolutionMemoryLessonNumber,
 	numberEvolutionMemoryLesson,
 } from "./evolution-memory-lessons.ts";
-import type { LessonScoreStore } from "./lesson-score-store.ts";
+import { DEFAULT_LESSON_POLICY, type LessonScoreStore } from "./lesson-score-store.ts";
 import {
 	computeEvolutionContentDigest,
 	createEvolutionArtifactMetadata,
@@ -664,8 +664,8 @@ export class EvolutionMemoryWriter implements EvolutionTargetWriter {
 		// Catalog order is lesson order, so equal scores evict earlier lessons first.
 		const ranked = points.scores.map((item, index) => ({ ...item, index }));
 		ranked.sort((left, right) => left.points - right.points || left.index - right.index);
-		const thresholdCount = ranked.filter((item) => item.points <= -5).length;
-		const removals = ranked.slice(0, Math.max(thresholdCount, ranked.length - 12));
+		const thresholdCount = ranked.filter((item) => item.points <= DEFAULT_LESSON_POLICY.removalThreshold).length;
+		const removals = ranked.slice(0, Math.max(thresholdCount, ranked.length - DEFAULT_LESSON_POLICY.lessonCap));
 		if (removals.length === 0) return snapshot;
 		const batchId = `lesson-grooming-${randomUUID()}`;
 		const content: Omit<MutationBatch, "metadata"> = {

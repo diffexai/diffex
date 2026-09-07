@@ -21,6 +21,7 @@ import {
 	SKILL_LIFECYCLE_OBSERVATION_SCHEMA_VERSION,
 } from "./contracts.ts";
 import {
+	DEFAULT_LESSON_POLICY,
 	LESSON_SCORE_SCHEMA_VERSION,
 	type LessonScoreIdentity,
 	type LessonScoreLedger,
@@ -1293,7 +1294,7 @@ export class FileEvolutionPersistence
 				const row = rows.get(item.memoryItemId);
 				return {
 					...item,
-					points: row?.points ?? 0,
+					points: row?.points ?? DEFAULT_LESSON_POLICY.initialPoints,
 					lastAppliedOutputIdempotencyKey: row?.lastAppliedOutputIdempotencyKey ?? null,
 				};
 			}),
@@ -1343,8 +1344,8 @@ export class FileEvolutionPersistence
 					...item,
 					harnessRevision: currentHarnessRevision,
 					points:
-						(rows.get(item.memoryItemId)?.points ?? 0) +
-						(signal === "helpful" ? 1 : signal === "harmful" ? -1.5 : -1),
+						(rows.get(item.memoryItemId)?.points ?? DEFAULT_LESSON_POLICY.initialPoints) +
+						DEFAULT_LESSON_POLICY.weights[signal ?? "neutral"],
 					lastAppliedOutputIdempotencyKey: report.outputId,
 				});
 			}

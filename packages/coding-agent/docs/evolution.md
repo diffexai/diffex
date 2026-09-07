@@ -45,7 +45,11 @@ When evolution is enabled, automatic work considers only invocation evidence acc
 
 Each automatic run freezes the oldest unprocessed invocation evidence up to the same 400,000-token trigger threshold, including the complete invocation that reaches or crosses it. This can exceed 400,000 tokens only to preserve that invocation boundary, including when a single invocation exceeds the threshold. Later invocations remain unprocessed. A larger backlog is processed in successive threshold-sized batches after each cooldown, not all at once. A remaining partial batch waits until it reaches 400,000 tokens. The token total is the sum of provider-reported input and output usage shown after assistant responses. It does not estimate serialized evidence size or add cache-read and cache-write usage. Evolution model calls use the current session model unless a model is explicitly selected in `/evolve`; the explicit selection stays fixed across later session-model switches and may consume that provider's quota. Manual `/evolve` work remains uncapped and uses the same frozen evidence and validation boundaries.
 
-## Lesson grooming
+## Lesson feedback and grooming
+
+After each completed assistant output with active evolution memory, a private continuation asks only which used lessons were helpful or harmful. Valid reports score helpful +1, harmful -1.5, and omitted lessons -1; a valid empty report scores every eligible lesson -1. Failed or invalid reports change no scores. Reports stay out of conversation history, extension events, exports, compaction, traces, and evolution snapshots.
+
+Scores start at 0, persist per workspace, and apply atomically once per session/output. REPLACE creates a new lesson identity at 0; removed or superseded identities stop accruing points. `DEFAULT_LESSON_POLICY` and `LessonPolicy` in `packages/evolution/src/lesson-score-store.ts` expose the shared typed defaults, not per-session settings. Scores never appear in EVOLVE.md or model prompts.
 
 Before an eligible automatic or manual run freezes its input, Diffex grooms the selected revision's lessons. Lessons with scores at or below -5 are removed first; if more than 12 remain, the lowest-scoring lessons are removed until 12 remain. Equal scores remove earlier lessons first. This maintenance includes manual lessons, verifies their content digests, and compacts lesson numbering through the memory writer. Below these limits, the selected revision is unchanged.
 

@@ -289,7 +289,9 @@ export {
 	type FileEvolutionPersistenceOptions,
 } from "./filesystem-store.ts";
 export {
+	DEFAULT_LESSON_POLICY,
 	LESSON_SCORE_SCHEMA_VERSION,
+	type LessonPolicy,
 	type LessonScoreCatalog,
 	type LessonScoreIdentity,
 	type LessonScoreLedger,

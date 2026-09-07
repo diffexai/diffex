@@ -3,6 +3,24 @@ import type { EvolutionMemoryItem, EvolutionScope, ImmutableHarnessSnapshot } fr
 
 export const LESSON_SCORE_SCHEMA_VERSION = 2 as const;
 
+export interface LessonPolicy {
+	readonly initialPoints: 0;
+	readonly weights: Readonly<Record<"helpful" | "harmful" | "neutral", number>>;
+	readonly removalThreshold: number;
+	readonly lessonCap: number;
+	/** REPLACE mints a new identity, so no points carry over from the superseded lesson. */
+	readonly resetOnModify: true;
+}
+
+/** Shared runtime policy, not model-visible settings or per-session overrides. */
+export const DEFAULT_LESSON_POLICY: LessonPolicy = Object.freeze({
+	initialPoints: 0,
+	weights: Object.freeze({ helpful: 1, harmful: -1.5, neutral: -1 }),
+	removalThreshold: -5,
+	lessonCap: 12,
+	resetOnModify: true,
+});
+
 export type LessonScoreIdentity = Pick<EvolutionMemoryItem, "memoryItemId" | "contentDigest" | "creationRevision">;
 
 export interface LessonScoreRow extends LessonScoreIdentity {

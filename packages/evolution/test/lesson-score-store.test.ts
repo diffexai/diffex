@@ -6,6 +6,7 @@ import { HarnessStateStore } from "../../harness-state/src/index.ts";
 import {
 	computeEvolutionContentDigest,
 	createEvolutionArtifactMetadata,
+	DEFAULT_LESSON_POLICY,
 	type EvolutionMemoryDelta,
 	EvolutionMemoryWriter,
 	EvolutionStorageCorruptionError,
@@ -114,6 +115,18 @@ function row(snapshot: ImmutableHarnessSnapshot, index = 0): LessonScoreRow {
 }
 
 describe("lesson score store", () => {
+	it("exposes immutable scoring and retention defaults", () => {
+		expect(DEFAULT_LESSON_POLICY).toEqual({
+			initialPoints: 0,
+			weights: { helpful: 1, harmful: -1.5, neutral: -1 },
+			removalThreshold: -5,
+			lessonCap: 12,
+			resetOnModify: true,
+		});
+		expect(Object.isFrozen(DEFAULT_LESSON_POLICY)).toBe(true);
+		expect(Object.isFrozen(DEFAULT_LESSON_POLICY.weights)).toBe(true);
+	});
+
 	it("registers exact active catalogs, starts at zero without rows, and reads without harness files", async () => {
 		const { root, storePath, ledgerPath, store, writer, harness, empty, snapshot } = await fixture();
 		expect((await store.loadLessonScores(scope, empty.harnessVersion)).scores).toEqual([]);
