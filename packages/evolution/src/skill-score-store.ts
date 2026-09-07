@@ -5,7 +5,7 @@ import type {
 } from "@earendil-works/diffex-harness-state";
 import type { EvolutionScope } from "./contracts.ts";
 
-export const SKILL_SCORE_SCHEMA_VERSION = 1 as const;
+export const SKILL_SCORE_SCHEMA_VERSION = 2 as const;
 
 /** Package identity survives unrelated harness revisions; either digest changing starts a new subject. */
 export interface SkillScoreIdentity {
@@ -27,6 +27,17 @@ export interface SkillScoreCatalog {
 	readonly items: readonly SkillScoreIdentity[];
 }
 
+/** Validated sparse judgments bound to the output's catalog, never a conversation artifact. */
+export interface SkillScoreReport {
+	/** Stable session/output-ordinal key, shared by every retry of the same output. */
+	readonly outputId: string;
+	readonly harnessRevision: HarnessVersion;
+	readonly judgments: readonly {
+		readonly item: SkillScoreIdentity;
+		readonly signal: "helpful" | "harmful";
+	}[];
+}
+
 /** Mutable state, partitioned by both evolution scope and exact workspace identity. No skill content. */
 export interface SkillScoreLedger {
 	readonly schemaVersion: typeof SKILL_SCORE_SCHEMA_VERSION;
@@ -36,6 +47,8 @@ export interface SkillScoreLedger {
 	readonly catalogs: readonly SkillScoreCatalog[];
 	/** Superseded package versions remain here for audit, without affecting their replacements. */
 	readonly rows: readonly SkillScoreRow[];
+	/** Retained independently of rows, including outputs whose entire bound catalog was removed. */
+	readonly appliedOutputIds: readonly string[];
 }
 
 export interface SkillScoreSnapshot {
@@ -51,6 +64,17 @@ export interface SkillScoreSnapshot {
 }
 
 export interface SkillScoreStore {
+	/**
+	 * Atomically score a fully validated sparse report (+1 helpful, -1.5 harmful, -1 omitted).
+	 * Both revisions must be registered; caller holds harness selection stable until commit.
+	 * Only exact package identities surviving in currentHarnessRevision accrue points.
+	 */
+	applySkillScoreReport(
+		scope: EvolutionScope,
+		workspace: HarnessWorkspaceIdentity,
+		report: SkillScoreReport,
+		currentHarnessRevision: HarnessVersion,
+	): Promise<"committed" | "already-applied">;
 	/**
 	 * Register all workspace-matching skills from a validated harness bundle, never an installed catalog.
 	 * Caller supplies the bundle active for the output. New package identities have effective points of 0.

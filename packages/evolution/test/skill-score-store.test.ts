@@ -73,6 +73,158 @@ function row(bundle: HarnessVersionBundle, index = 0): SkillScoreRow {
 }
 
 describe("skill score store", () => {
+	it("scores sparse and empty reports atomically without drift on concurrent or older replays", async () => {
+		const { bundle, store, storePath, ledgerPath, harness } = await fixture();
+		const revision = bundle.manifest.version;
+		const first = row(bundle);
+		const second = row(bundle, 1);
+		const sparse = {
+			outputId: JSON.stringify(["session-1", 1]),
+			harnessRevision: revision,
+			judgments: [
+				{ item: first, signal: "helpful" as const },
+				{ item: second, signal: "harmful" as const },
+			],
+		};
+		const restarted = new FileEvolutionPersistence(storePath);
+		expect(
+			(
+				await Promise.all(
+					[store, restarted].map((instance) => instance.applySkillScoreReport(scope, workspace, sparse, revision)),
+				)
+			).sort(),
+		).toEqual(["already-applied", "committed"]);
+		const initial = await store.loadSkillScores(scope, workspace, revision);
+		expect(initial.scores.find((item) => item.skillId === first.skillId)?.points).toBe(1);
+		expect(initial.scores.find((item) => item.skillId === second.skillId)?.points).toBe(-1.5);
+		await Promise.all(
+			[store, restarted].map((instance, index) =>
+				instance.applySkillScoreReport(
+					scope,
+					workspace,
+					{
+						outputId: JSON.stringify([`session-${index + 1}`, 2]),
+						harnessRevision: revision,
+						judgments: [],
+					},
+					revision,
+				),
+			),
+		);
+		const saved = await readFile(ledgerPath, "utf8");
+		expect(await restarted.applySkillScoreReport(scope, workspace, sparse, revision)).toBe("already-applied");
+		expect(await readFile(ledgerPath, "utf8")).toBe(saved);
+		const scores = await restarted.loadSkillScores(scope, workspace, revision);
+		expect(scores.scores.find((item) => item.skillId === first.skillId)?.points).toBe(-1);
+		expect(scores.scores.find((item) => item.skillId === second.skillId)?.points).toBe(-3.5);
+		expect((JSON.parse(saved) as SkillScoreLedger).appliedOutputIds).toHaveLength(3);
+		expect(await harness.loadCurrent()).toEqual(bundle);
+		expect(await store.listSkillLifecycleObservations(scope)).toEqual([]);
+	});
+
+	it("rejects a whole report before committing any explicit, neutral or replay state", async () => {
+		const { bundle, store, ledgerPath } = await fixture();
+		const revision = bundle.manifest.version;
+		const valid = { item: row(bundle), signal: "helpful" as const };
+		const before = await readFile(ledgerPath, "utf8");
+		for (const invalid of [
+			valid,
+			{ ...valid, signal: "harmful" as const },
+			{ ...valid, item: { ...valid.item, skillId: "installed:skill" } },
+			{ ...valid, item: { ...valid.item, packageVersion: otherRevision } },
+			{ ...valid, item: { ...valid.item, contentDigest: otherRevision } },
+			{ ...valid, item: { ...valid.item, workspace: { ...workspace, directoryId: "other" } } },
+		]) {
+			await expect(
+				store.applySkillScoreReport(
+					scope,
+					workspace,
+					{
+						outputId: "invalid-output",
+						harnessRevision: revision,
+						judgments: [valid, invalid],
+					},
+					revision,
+				),
+			).rejects.toThrow("Invalid skill score judgment");
+			expect(await readFile(ledgerPath, "utf8")).toBe(before);
+		}
+		await expect(
+			store.applySkillScoreReport(
+				scope,
+				workspace,
+				{
+					outputId: "",
+					harnessRevision: revision,
+					judgments: [],
+				},
+				revision,
+			),
+		).rejects.toThrow("Invalid skill score report");
+		expect(await readFile(ledgerPath, "utf8")).toBe(before);
+	});
+
+	it.each(["content", "supporting-file"])(
+		"excludes superseded %s and retired versions from late reports",
+		async (change) => {
+			const { bundle, store, harness, empty, ledgerPath } = await fixture();
+			const revision = bundle.manifest.version;
+			await store.applySkillScoreReport(
+				scope,
+				workspace,
+				{
+					outputId: "initial",
+					harnessRevision: revision,
+					judgments: [],
+				},
+				revision,
+			);
+			const changed = skill("first");
+			if (change === "content") changed.content += "Changed procedure.\n";
+			else changed.files[0]!.content = "Changed guide.\n";
+			const next = await harness.saveVersion({ memory: "", skills: [changed] }, revision);
+			await store.registerSkillScoreRevision(scope, workspace, next);
+			await store.applySkillScoreReport(
+				scope,
+				workspace,
+				{
+					outputId: "late",
+					harnessRevision: revision,
+					judgments: [{ item: row(bundle), signal: "helpful" }],
+				},
+				next.manifest.version,
+			);
+			expect((await store.loadSkillScores(scope, workspace, revision)).scores.map((item) => item.points)).toEqual([
+				-1, -1,
+			]);
+			expect((await store.loadSkillScores(scope, workspace, next.manifest.version)).scores[0]?.points).toBe(0);
+			await store.applySkillScoreReport(
+				scope,
+				workspace,
+				{
+					outputId: "retired",
+					harnessRevision: revision,
+					judgments: [],
+				},
+				empty.manifest.version,
+			);
+			const saved = await readFile(ledgerPath, "utf8");
+			expect(
+				await store.applySkillScoreReport(
+					scope,
+					workspace,
+					{
+						outputId: "retired",
+						harnessRevision: revision,
+						judgments: [],
+					},
+					revision,
+				),
+			).toBe("already-applied");
+			expect(await readFile(ledgerPath, "utf8")).toBe(saved);
+		},
+	);
+
 	it("registers exact active identities at zero, persists totals, and reads without harness files", async () => {
 		const { root, harness, empty, bundle, store, storePath, ledgerPath } = await fixture();
 		expect((await store.loadSkillScores(scope, workspace, empty.manifest.version)).scores).toEqual([]);
@@ -245,6 +397,9 @@ describe("skill score store", () => {
 
 	const corruptions: readonly [string, (ledger: SkillScoreLedger) => unknown][] = [
 		["schema", (ledger) => ({ ...ledger, schemaVersion: 99 })],
+		["missing replay state", (ledger) => ({ ...ledger, appliedOutputIds: undefined })],
+		["duplicate outputs", (ledger) => ({ ...ledger, appliedOutputIds: ["output", "output"] })],
+		["empty output", (ledger) => ({ ...ledger, appliedOutputIds: [""] })],
 		["scope", (ledger) => ({ ...ledger, scope: { ...scope, scopeId: "other" } })],
 		["workspace", (ledger) => ({ ...ledger, workspace: { ...workspace, directoryId: "other" } })],
 		["revision", (ledger) => ({ ...ledger, revision: -1 })],

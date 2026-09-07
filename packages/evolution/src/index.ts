@@ -469,6 +469,7 @@ export {
 	type SkillScoreCatalog,
 	type SkillScoreIdentity,
 	type SkillScoreLedger,
+	type SkillScoreReport,
 	type SkillScoreRow,
 	type SkillScoreSnapshot,
 	type SkillScoreStore,

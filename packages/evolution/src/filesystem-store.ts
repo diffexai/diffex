@@ -714,6 +714,9 @@ function parseSkillScoreLedger(
 				!Array.isArray(catalog.items) ||
 				!catalog.items.every(isSkillScoreIdentity),
 		) ||
+		!isStringArray(parsed.appliedOutputIds) ||
+		parsed.appliedOutputIds.some((id) => id.length === 0) ||
+		new Set(parsed.appliedOutputIds).size !== parsed.appliedOutputIds.length ||
 		!Array.isArray(parsed.rows) ||
 		parsed.rows.some(
 			(row) =>
@@ -1504,7 +1507,15 @@ export class FileEvolutionPersistence
 		await this.#ensureDirectories();
 		const contents = await this.#readOptional(path);
 		return contents === null
-			? { schemaVersion: SKILL_SCORE_SCHEMA_VERSION, scope, workspace, revision: 0, catalogs: [], rows: [] }
+			? {
+					schemaVersion: SKILL_SCORE_SCHEMA_VERSION,
+					scope,
+					workspace,
+					revision: 0,
+					catalogs: [],
+					rows: [],
+					appliedOutputIds: [],
+				}
 			: parseSkillScoreLedger(contents, path, scope, workspace);
 	}
 
@@ -1567,6 +1578,57 @@ export class FileEvolutionPersistence
 				};
 			}),
 		};
+	}
+
+	async applySkillScoreReport(
+		...args: Parameters<SkillScoreStore["applySkillScoreReport"]>
+	): ReturnType<SkillScoreStore["applySkillScoreReport"]> {
+		const [scope, workspace, report, currentHarnessRevision] = args;
+		return this.#withStoreLock(async () => {
+			const ledger = await this.#loadSkillScoreLedger(scope, workspace);
+			const bound = ledger.catalogs.find((catalog) => catalog.harnessRevision === report.harnessRevision);
+			const current = ledger.catalogs.find((catalog) => catalog.harnessRevision === currentHarnessRevision);
+			if (!bound || !current) throw new Error("Unregistered skill score revision");
+			if (typeof report.outputId !== "string" || report.outputId.length === 0 || !Array.isArray(report.judgments)) {
+				throw new Error("Invalid skill score report");
+			}
+			const judgments = new Map<string, "helpful" | "harmful">();
+			for (const judgment of report.judgments) {
+				if (!isRecord(judgment)) throw new Error("Invalid skill score judgment");
+				const { item: reference, signal } = judgment;
+				if (
+					!isSkillScoreIdentity(reference) ||
+					!skillScoreWorkspaceMatches(reference.workspace, workspace) ||
+					(signal !== "helpful" && signal !== "harmful") ||
+					judgments.has(skillScoreKey(reference)) ||
+					!bound.items.some((item) => skillScoreKey(item) === skillScoreKey(reference))
+				) {
+					throw new Error("Invalid skill score judgment");
+				}
+				judgments.set(skillScoreKey(reference), signal);
+			}
+			if (ledger.appliedOutputIds.includes(report.outputId)) return "already-applied";
+			const rows = new Map(ledger.rows.map((row) => [skillScoreKey(row), row]));
+			const survivors = new Set(current.items.map(skillScoreKey));
+			for (const item of bound.items) {
+				const key = skillScoreKey(item);
+				if (!survivors.has(key)) continue;
+				const signal = judgments.get(key);
+				rows.set(key, {
+					...item,
+					harnessRevision: report.harnessRevision,
+					points: (rows.get(key)?.points ?? 0) + (signal === "helpful" ? 1 : signal === "harmful" ? -1.5 : -1),
+					lastAppliedOutputIdempotencyKey: report.outputId,
+				});
+			}
+			await this.#saveSkillScoreLedger({
+				...ledger,
+				revision: ledger.revision + 1,
+				rows: [...rows.values()],
+				appliedOutputIds: [...ledger.appliedOutputIds, report.outputId],
+			});
+			return "committed";
+		});
 	}
 
 	async saveSkillScores(
