@@ -27,6 +27,7 @@ import type {
 	AgentTool,
 	AgentToolCall,
 	AgentToolResult,
+	PrivateContinuation,
 	StreamFn,
 } from "./types.ts";
 
@@ -344,7 +345,7 @@ async function runTurn(options: RunTurnOptions): Promise<RunTurnResult> {
 		pendingMessages = [];
 	}
 
-	const message = await streamAssistantResponse(
+	const { message, privateContinuation } = await streamAssistantResponse(
 		currentContext,
 		config,
 		options.signal,
@@ -376,6 +377,12 @@ async function runTurn(options: RunTurnOptions): Promise<RunTurnResult> {
 			currentContext.messages.push(result);
 			options.newMessages.push(result);
 		}
+	}
+
+	try {
+		await privateContinuation?.(message, toolResults, options.signal);
+	} catch {
+		// Private assessment failures must never enter transcript, events, or trace errors.
 	}
 
 	await options.emit({ type: "turn_end", message, toolResults });
@@ -426,7 +433,7 @@ async function streamAssistantResponse(
 	signal: AbortSignal | undefined,
 	emit: AgentEventSink,
 	streamFunction: StreamFn,
-): Promise<AssistantMessage> {
+): Promise<{ message: AssistantMessage; privateContinuation?: PrivateContinuation }> {
 	// Apply context transform if configured (AgentMessage[] → AgentMessage[])
 	let messages = context.messages;
 	if (config.transformContext) {
@@ -442,6 +449,16 @@ async function streamAssistantResponse(
 		messages: llmMessages,
 		tools: context.tools,
 	};
+
+	let privateContinuation: PrivateContinuation | undefined;
+	try {
+		privateContinuation = config.preparePrivateContinuation?.(
+			{ ...llmContext, messages: structuredClone(llmContext.messages) },
+			config.model,
+		);
+	} catch {
+		// A missing or invalid private binding does not affect the main request.
+	}
 
 	// Resolve API key (important for expiring tokens)
 	const resolvedApiKey =
@@ -518,7 +535,7 @@ async function streamAssistantResponse(
 						}
 						await emit({ type: "message_end", message: finalMessage });
 						settleAiRequestSpan(span, finalMessage, chunkCount, startedAt, firstChunkAt);
-						return finalMessage;
+						return { message: finalMessage, privateContinuation };
 					}
 				}
 			}
@@ -532,7 +549,7 @@ async function streamAssistantResponse(
 			}
 			await emit({ type: "message_end", message: finalMessage });
 			settleAiRequestSpan(span, finalMessage, chunkCount, startedAt, firstChunkAt);
-			return finalMessage;
+			return { message: finalMessage, privateContinuation };
 		},
 	);
 }

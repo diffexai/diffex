@@ -147,7 +147,16 @@ export interface AgentLoopTurnUpdate {
 
 export interface PrepareNextTurnContext extends ShouldStopAfterTurnContext {}
 
+/** Private, non-transcript work bound before a model request and settled after its tool results. */
+export type PrivateContinuation = (
+	message: AssistantMessage,
+	toolResults: ToolResultMessage[],
+	signal?: AbortSignal,
+) => Promise<void>;
+
 export interface AgentLoopConfig extends SimpleStreamOptions {
+	/** Capture output-bound private work using the exact converted request context. Failures are discarded. */
+	preparePrivateContinuation?: (context: Context, model: Model<Api>) => PrivateContinuation | undefined;
 	model: Model<any>;
 	/** Explicit parent context for this in-process agent invocation. */
 	telemetryContext?: TelemetryContext;
