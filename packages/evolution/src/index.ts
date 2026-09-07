@@ -288,6 +288,15 @@ export {
 	FileEvolutionPersistence,
 	type FileEvolutionPersistenceOptions,
 } from "./filesystem-store.ts";
+export {
+	LESSON_SCORE_SCHEMA_VERSION,
+	type LessonScoreCatalog,
+	type LessonScoreIdentity,
+	type LessonScoreLedger,
+	type LessonScoreRow,
+	type LessonScoreSnapshot,
+	type LessonScoreStore,
+} from "./lesson-score-store.ts";
 export { EvolutionPipeline, type EvolutionPipelineDependencies } from "./pipeline.ts";
 export type {
 	Curator,
