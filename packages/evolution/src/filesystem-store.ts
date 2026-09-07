@@ -45,6 +45,7 @@ import type {
 } from "./ports.ts";
 import { computeEvolutionContentDigest, serializeEvolutionValue } from "./provenance.ts";
 import {
+	DEFAULT_SKILL_POLICY,
 	SKILL_SCORE_SCHEMA_VERSION,
 	type SkillScoreIdentity,
 	type SkillScoreLedger,
@@ -1573,7 +1574,7 @@ export class FileEvolutionPersistence
 				const row = rows.get(skillScoreKey(item));
 				return {
 					...item,
-					points: row?.points ?? 0,
+					points: row?.points ?? DEFAULT_SKILL_POLICY.initialPoints,
 					lastAppliedOutputIdempotencyKey: row?.lastAppliedOutputIdempotencyKey ?? null,
 				};
 			}),
@@ -1617,7 +1618,9 @@ export class FileEvolutionPersistence
 				rows.set(key, {
 					...item,
 					harnessRevision: report.harnessRevision,
-					points: (rows.get(key)?.points ?? 0) + (signal === "helpful" ? 1 : signal === "harmful" ? -1.5 : -1),
+					points:
+						(rows.get(key)?.points ?? DEFAULT_SKILL_POLICY.initialPoints) +
+						DEFAULT_SKILL_POLICY.weights[signal ?? "neutral"],
 					lastAppliedOutputIdempotencyKey: report.outputId,
 				});
 			}

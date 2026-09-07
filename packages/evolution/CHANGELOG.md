@@ -8,6 +8,7 @@
 - Added a workspace-isolated evolved-skill score ledger with validated revision catalogs, atomic compare-and-swap writes, and zero-default scores for new package versions while retaining superseded totals.
 - Added atomic sparse skill-report scoring with neutral inference, durable output replay protection, and exclusion of retired or superseded packages.
 - Added deterministic skill grooming through the writer's verified staging and activation path: remove scores at or below -8, then trim to 10 by points and skill ID.
+- Exposed immutable `DEFAULT_SKILL_POLICY` and `SkillPolicy` defaults shared by skill scoring and grooming, with reset-on-modify identity semantics.
 
 ### Changed
 

@@ -465,7 +465,9 @@ export {
 	type SkillLifecycleReportInput,
 } from "./skill-lifecycle.ts";
 export {
+	DEFAULT_SKILL_POLICY,
 	SKILL_SCORE_SCHEMA_VERSION,
+	type SkillPolicy,
 	type SkillScoreCatalog,
 	type SkillScoreIdentity,
 	type SkillScoreLedger,

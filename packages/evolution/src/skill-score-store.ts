@@ -7,6 +7,24 @@ import type { EvolutionScope } from "./contracts.ts";
 
 export const SKILL_SCORE_SCHEMA_VERSION = 2 as const;
 
+export interface SkillPolicy {
+	readonly initialPoints: 0;
+	readonly weights: Readonly<Record<"helpful" | "harmful" | "neutral", number>>;
+	readonly removalThreshold: number;
+	readonly skillCap: number;
+	/** UPDATE/MERGE changes package identity, so superseded points never carry over. */
+	readonly resetOnModify: true;
+}
+
+/** Shared runtime policy, not model-visible settings or per-session overrides. */
+export const DEFAULT_SKILL_POLICY: SkillPolicy = Object.freeze({
+	initialPoints: 0,
+	weights: Object.freeze({ helpful: 1, harmful: -1.5, neutral: -1 }),
+	removalThreshold: -8,
+	skillCap: 10,
+	resetOnModify: true,
+});
+
 /** Package identity survives unrelated harness revisions; either digest changing starts a new subject. */
 export interface SkillScoreIdentity {
 	readonly skillId: string;
@@ -38,7 +56,11 @@ export interface SkillScoreReport {
 	}[];
 }
 
-/** Mutable state, partitioned by both evolution scope and exact workspace identity. No skill content. */
+/**
+ * Mutable state, partitioned by both evolution scope and exact workspace identity. No skill content.
+ * Independent of lifecycle observations: secret reports never create observations, and retiring a
+ * scored package preserves its existing observations and superseded score rows for audit.
+ */
 export interface SkillScoreLedger {
 	readonly schemaVersion: typeof SKILL_SCORE_SCHEMA_VERSION;
 	readonly scope: EvolutionScope;

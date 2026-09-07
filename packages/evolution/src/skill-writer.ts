@@ -50,10 +50,7 @@ import {
 	createEvolutionArtifactMetadata,
 	serializeEvolutionValue,
 } from "./provenance.ts";
-import type { SkillScoreStore } from "./skill-score-store.ts";
-
-const SKILL_REMOVAL_THRESHOLD = -8;
-const SKILL_CAP = 10;
+import { DEFAULT_SKILL_POLICY, type SkillScoreStore } from "./skill-score-store.ts";
 
 type WritableSkillMutation = Pick<SkillMutation, "mutationId" | "workspace" | "existingSkills" | "skill">;
 interface SkillMaintenanceBatch extends Omit<SkillMutationBatch, "mutations"> {
@@ -833,8 +830,8 @@ export class SkillWriter {
 		const ranked = [...points.scores].sort(
 			(a, b) => a.points - b.points || (a.skillId < b.skillId ? -1 : a.skillId > b.skillId ? 1 : 0),
 		);
-		const thresholdCount = ranked.filter((item) => item.points <= SKILL_REMOVAL_THRESHOLD).length;
-		const removals = ranked.slice(0, Math.max(thresholdCount, ranked.length - SKILL_CAP));
+		const thresholdCount = ranked.filter((item) => item.points <= DEFAULT_SKILL_POLICY.removalThreshold).length;
+		const removals = ranked.slice(0, Math.max(thresholdCount, ranked.length - DEFAULT_SKILL_POLICY.skillCap));
 		if (removals.length === 0) return base;
 		const batchId = `skill-grooming-${randomUUID()}`;
 		const content: Omit<SkillMaintenanceBatch, "metadata"> = {

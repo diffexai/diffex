@@ -10,6 +10,7 @@ import {
 } from "../../harness-state/src/index.ts";
 import {
 	computeEvolutionContentDigest,
+	DEFAULT_SKILL_POLICY,
 	EvolutionStorageCorruptionError,
 	FileEvolutionPersistence,
 	SKILL_SCORE_SCHEMA_VERSION,
@@ -73,6 +74,18 @@ function row(bundle: HarnessVersionBundle, index = 0): SkillScoreRow {
 }
 
 describe("skill score store", () => {
+	it("exposes immutable shared scoring and retention defaults", () => {
+		expect(DEFAULT_SKILL_POLICY).toEqual({
+			initialPoints: 0,
+			weights: { helpful: 1, harmful: -1.5, neutral: -1 },
+			removalThreshold: -8,
+			skillCap: 10,
+			resetOnModify: true,
+		});
+		expect(Object.isFrozen(DEFAULT_SKILL_POLICY)).toBe(true);
+		expect(Object.isFrozen(DEFAULT_SKILL_POLICY.weights)).toBe(true);
+	});
+
 	it("scores sparse and empty reports atomically without drift on concurrent or older replays", async () => {
 		const { bundle, store, storePath, ledgerPath, harness } = await fixture();
 		const revision = bundle.manifest.version;
