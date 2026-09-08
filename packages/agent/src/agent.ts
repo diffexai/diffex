@@ -23,6 +23,7 @@ import type {
 	BeforeToolCallContext,
 	BeforeToolCallResult,
 	PrepareNextTurnContext,
+	PrivateContinuationMode,
 	QueueMode,
 	ShouldStopAfterTurnContext,
 	StreamFn,
@@ -102,6 +103,8 @@ export interface AgentOptions {
 	transformContext?: (messages: AgentMessage[], signal?: AbortSignal) => Promise<AgentMessage[]>;
 	streamFn: StreamFn;
 	preparePrivateContinuation?: AgentLoopConfig["preparePrivateContinuation"];
+	/** When private continuations settle. Default: "per-output". */
+	privateContinuationMode?: PrivateContinuationMode;
 	getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
 	onPayload?: SimpleStreamOptions["onPayload"];
 	onResponse?: SimpleStreamOptions["onResponse"];
@@ -184,6 +187,8 @@ export class Agent {
 	public transformContext?: (messages: AgentMessage[], signal?: AbortSignal) => Promise<AgentMessage[]>;
 	public streamFunction: StreamFn;
 	public preparePrivateContinuation?: AgentLoopConfig["preparePrivateContinuation"];
+	/** Controls whether private continuations settle per output or once per run. */
+	public privateContinuationMode: PrivateContinuationMode;
 	public getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
 	public onPayload?: SimpleStreamOptions["onPayload"];
 	public onResponse?: SimpleStreamOptions["onResponse"];
@@ -228,6 +233,7 @@ export class Agent {
 		this.transformContext = runtimeOptions.transformContext;
 		this.streamFunction = runtimeOptions.streamFn ?? getDefaultStreamFn();
 		this.preparePrivateContinuation = runtimeOptions.preparePrivateContinuation;
+		this.privateContinuationMode = runtimeOptions.privateContinuationMode ?? "per-output";
 		this.getApiKey = runtimeOptions.getApiKey;
 		this.onPayload = runtimeOptions.onPayload;
 		this.onResponse = runtimeOptions.onResponse;
@@ -480,6 +486,7 @@ export class Agent {
 						}
 					: undefined,
 			preparePrivateContinuation: this.preparePrivateContinuation,
+			privateContinuationMode: this.privateContinuationMode,
 			convertToLlm: this.convertToLlm,
 			transformContext: this.transformContext,
 			getApiKey: this.getApiKey,

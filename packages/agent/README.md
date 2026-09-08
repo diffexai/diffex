@@ -201,6 +201,10 @@ const agent = new Agent({
   // Required stream function
   streamFn: models.streamSimple.bind(models),
 
+  // Settle private continuations after every output (default), or only once
+  // with the final successful output from the complete prompt/continue run.
+  privateContinuationMode: "per-output",
+
   // Session ID for provider caching
   sessionId: "session-123",
 
@@ -241,6 +245,10 @@ const agent = new Agent({
   },
 });
 ```
+
+`privateContinuationMode` controls continuations created by `preparePrivateContinuation`. The default, `"per-output"`, settles each successful assistant output after its tools finish. `"per-turn"` retains only the continuation bound to the final successful model request and settles it once after tool chains and queued steering or follow-up messages finish. If the run's final assistant response fails or is aborted, the deferred continuation is discarded.
+
+The mode is mutable through `agent.privateContinuationMode` and is also available to low-level callers through `AgentLoopConfig.privateContinuationMode`.
 
 ## Agent State
 
@@ -294,6 +302,7 @@ agent.state.model = getModel("openai", "gpt-4o");
 agent.state.thinkingLevel = "medium";
 agent.state.tools = [myTool];
 agent.toolExecution = "sequential";
+agent.privateContinuationMode = "per-turn";
 agent.beforeToolCall = async ({ toolCall }) => undefined;
 agent.afterToolCall = async ({ toolCall, result }) => undefined;
 agent.shouldStopAfterTurn = async ({ context }) => shouldCompactBeforeNextTurn(context.messages);

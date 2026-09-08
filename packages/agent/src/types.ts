@@ -147,6 +147,9 @@ export interface AgentLoopTurnUpdate {
 
 export interface PrepareNextTurnContext extends ShouldStopAfterTurnContext {}
 
+/** Controls when private continuations are settled. */
+export type PrivateContinuationMode = "per-output" | "per-turn";
+
 /** Private, non-transcript work bound before a model request and settled after its tool results. */
 export type PrivateContinuation = (
 	message: AssistantMessage,
@@ -157,6 +160,8 @@ export type PrivateContinuation = (
 export interface AgentLoopConfig extends SimpleStreamOptions {
 	/** Capture output-bound private work using the exact converted request context. Failures are discarded. */
 	preparePrivateContinuation?: (context: Context, model: Model<Api>) => PrivateContinuation | undefined;
+	/** Settle each successful output's continuation, or only the final successful output's. Default: "per-output". */
+	privateContinuationMode?: PrivateContinuationMode;
 	model: Model<any>;
 	/** Explicit parent context for this in-process agent invocation. */
 	telemetryContext?: TelemetryContext;

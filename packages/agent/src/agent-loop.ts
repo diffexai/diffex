@@ -252,6 +252,7 @@ async function runLoop(
 	let config = initialConfig;
 	let firstTurn = true;
 	let turnIndex = 0;
+	let deferredPrivateContinuation: DeferredPrivateContinuation | undefined;
 	// Check for steering messages at start (user may have typed while waiting)
 	let pendingMessages: AgentMessage[] = (await config.getSteeringMessages?.()) || [];
 
@@ -290,7 +291,17 @@ async function runLoop(
 			config = { ...result.config, telemetryContext: runTelemetryContext, turnId: undefined };
 			pendingMessages = result.pendingMessages;
 			hasMoreToolCalls = result.hasMoreToolCalls;
-			if (result.ended) return turnIndex;
+			if (result.deferredPrivateContinuation) {
+				deferredPrivateContinuation = result.deferredPrivateContinuation;
+			}
+			if (result.discardDeferredPrivateContinuation) {
+				deferredPrivateContinuation = undefined;
+			}
+			if (result.ended) {
+				await settlePrivateContinuation(deferredPrivateContinuation, signal);
+				await emit({ type: "agent_end", messages: newMessages });
+				return turnIndex;
+			}
 		}
 
 		// Agent would stop here. Check for follow-up messages.
@@ -305,6 +316,7 @@ async function runLoop(
 		break;
 	}
 
+	await settlePrivateContinuation(deferredPrivateContinuation, signal);
 	await emit({ type: "agent_end", messages: newMessages });
 	return turnIndex;
 }
@@ -321,12 +333,20 @@ interface RunTurnOptions {
 	span: AgentRuntimeTelemetrySpan<"diffex.agent.turn">;
 }
 
+interface DeferredPrivateContinuation {
+	continuation?: PrivateContinuation;
+	message: AssistantMessage;
+	toolResults: ToolResultMessage[];
+}
+
 interface RunTurnResult {
 	currentContext: AgentContext;
 	config: AgentLoopConfig;
 	pendingMessages: AgentMessage[];
 	hasMoreToolCalls: boolean;
 	ended: boolean;
+	deferredPrivateContinuation?: DeferredPrivateContinuation;
+	discardDeferredPrivateContinuation?: boolean;
 }
 
 async function runTurn(options: RunTurnOptions): Promise<RunTurnResult> {
@@ -359,8 +379,14 @@ async function runTurn(options: RunTurnOptions): Promise<RunTurnResult> {
 	if (outcome !== "completed") {
 		options.span.setStatus({ status: "error" });
 		await options.emit({ type: "turn_end", message, toolResults: [] });
-		await options.emit({ type: "agent_end", messages: options.newMessages });
-		return { currentContext, config, pendingMessages, hasMoreToolCalls: false, ended: true };
+		return {
+			currentContext,
+			config,
+			pendingMessages,
+			hasMoreToolCalls: false,
+			ended: true,
+			discardDeferredPrivateContinuation: true,
+		};
 	}
 
 	const toolCalls = message.content.filter((content) => content.type === "toolCall");
@@ -379,10 +405,12 @@ async function runTurn(options: RunTurnOptions): Promise<RunTurnResult> {
 		}
 	}
 
-	try {
-		await privateContinuation?.(message, toolResults, options.signal);
-	} catch {
-		// Private assessment failures must never enter transcript, events, or trace errors.
+	const deferredPrivateContinuation =
+		config.privateContinuationMode === "per-turn"
+			? { continuation: privateContinuation, message, toolResults }
+			: undefined;
+	if (config.privateContinuationMode !== "per-turn") {
+		await settlePrivateContinuation({ continuation: privateContinuation, message, toolResults }, options.signal);
 	}
 
 	await options.emit({ type: "turn_end", message, toolResults });
@@ -415,12 +443,36 @@ async function runTurn(options: RunTurnOptions): Promise<RunTurnResult> {
 			newMessages: options.newMessages,
 		})
 	) {
-		await options.emit({ type: "agent_end", messages: options.newMessages });
-		return { currentContext, config, pendingMessages, hasMoreToolCalls, ended: true };
+		return {
+			currentContext,
+			config,
+			pendingMessages,
+			hasMoreToolCalls,
+			ended: true,
+			deferredPrivateContinuation,
+		};
 	}
 
 	pendingMessages = (await config.getSteeringMessages?.()) || [];
-	return { currentContext, config, pendingMessages, hasMoreToolCalls, ended: false };
+	return {
+		currentContext,
+		config,
+		pendingMessages,
+		hasMoreToolCalls,
+		ended: false,
+		deferredPrivateContinuation,
+	};
+}
+
+async function settlePrivateContinuation(
+	deferred: DeferredPrivateContinuation | undefined,
+	signal: AbortSignal | undefined,
+): Promise<void> {
+	try {
+		await deferred?.continuation?.(deferred.message, deferred.toolResults, signal);
+	} catch {
+		// Private assessment failures must never enter transcript, events, or trace errors.
+	}
 }
 
 /**
