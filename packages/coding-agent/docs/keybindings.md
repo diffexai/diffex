@@ -147,7 +147,7 @@ This routing remains configurable through the ordinary action bindings. For exam
 | `app.thinking.cycle` | *(none)* | Cycle thinking level |
 | `app.thinking.toggle` | `ctrl+t` | Collapse or expand thinking blocks |
 
-Shift+Tab enters or leaves interactive Plan mode. Thinking level remains selectable through `/settings`; bind `app.thinking.cycle` explicitly if you also want a shortcut for cycling it.
+Shift+Tab enters or leaves interactive Plan mode. Select a model through `/model` or Ctrl+L to choose its thinking level; bind `app.thinking.cycle` explicitly if you also want a shortcut for cycling it.
 
 ### Display and Message Queue
 

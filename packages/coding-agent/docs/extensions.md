@@ -340,7 +340,7 @@ user sends another prompt ◄─────────────────
   ├─► thinking_level_select (if model change changes/clamps thinking level)
   └─► model_select
 
-thinking level changes (settings, keybinding, diffex.setThinkingLevel())
+thinking level changes (/model thinking selector, keybinding, diffex.setThinkingLevel())
   └─► thinking_level_select
 
 exit (Ctrl+C, Ctrl+D, SIGHUP, SIGTERM)

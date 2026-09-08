@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- Removed `thinkingLevel` and `availableThinkingLevels` from `SettingsConfig`, and `onThinkingLevelChange` from `SettingsCallbacks`. Custom settings selector callers should stop passing these fields; thinking selection now follows model selection.
+
 ### Added
 
 - Added `pi auth check` provider/model auth preflight with optional credential output ([#7152](https://github.com/earendil-works/pi/issues/7152)).
@@ -9,7 +13,8 @@
 
 ### Changed
 
-- Changed Shift+Tab to toggle Default and Plan collaboration modes; thinking-level cycling remains available through `/settings` and configurable keybindings but has no default shortcut.
+- Changed Shift+Tab to toggle Default and Plan collaboration modes; thinking-level cycling remains available through configurable keybindings but has no default shortcut.
+- Moved thinking-level selection from `/settings` to a screen after `/model` or Ctrl+L model selection, including exact matches and reselecting the current model. Models with at most one supported level skip the screen; canceling retains the selected model and its current supported level.
 - Lowered the automatic evolution threshold to 400,000 tokens and based eligibility on provider-reported assistant input and output usage instead of serialized evidence estimates.
 - Partitioned evolution traces, invocation and token accounting, jobs, candidate work, and harness selection by workspace while sharing them across sessions in the same workspace.
 - Softened the bash tool's `PI_*` environment guideline in an attempt to reduce unnecessary inspection commands ([#7128](https://github.com/earendil-works/pi/issues/7128)).

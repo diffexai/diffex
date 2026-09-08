@@ -8,6 +8,7 @@ import {
 	Text,
 } from "@earendil-works/diffex-tui";
 import { getSelectListTheme, theme } from "../theme/theme.ts";
+import { keyHint } from "./keybinding-hints.ts";
 
 const THINKING_SELECT_LIST_LAYOUT: SelectListLayoutOptions = {
 	minPrimaryColumnWidth: 12,
@@ -70,6 +71,9 @@ export class ThinkingSelectorComponent extends Container {
 		};
 
 		this.addChild(this.selectList);
+		this.addChild(
+			new Text(`${keyHint("tui.select.confirm", "select")}  ${keyHint("tui.select.cancel", "keep current")}`, 1, 0),
+		);
 	}
 
 	getSelectList(): SelectList {

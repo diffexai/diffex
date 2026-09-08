@@ -1,4 +1,5 @@
-import { CURSOR_MARKER, getGlyphs, setKeybindings, Text } from "@earendil-works/diffex-tui";
+import { join } from "node:path";
+import { CURSOR_MARKER, getCapabilities, getGlyphs, setKeybindings, Text } from "@earendil-works/diffex-tui";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { KeybindingsManager } from "../src/core/keybindings.ts";
 import { SettingsManager } from "../src/core/settings-manager.ts";
@@ -25,8 +26,6 @@ function settingsConfig(overrides: Partial<SettingsConfig> = {}): SettingsConfig
 		followUpMode: "one-at-a-time",
 		transport: "sse",
 		httpIdleTimeoutMs: 300_000,
-		thinkingLevel: "medium",
-		availableThinkingLevels: ["off", "low", "medium", "high"],
 		currentTheme: "dark",
 		terminalTheme: "dark",
 		availableThemes: ["dark", "light"],
@@ -64,7 +63,6 @@ describe("SettingsSelectorComponent", () => {
 			{
 				fullscreenScrollbar: "auto",
 				warnings: {},
-				availableThinkingLevels: [],
 				availableThemes: [],
 			} as unknown as SettingsConfig,
 			{ createInstalledSkillsSettings } as unknown as SettingsCallbacks,
@@ -168,7 +166,7 @@ describe("SettingsSelectorComponent", () => {
 		expect(output).toContain("Source: auto · scope: user · enabled");
 		list.handleInput(" ");
 
-		expect(settingsManager.getSkillPaths()).toContain("-review/SKILL.md");
+		expect(settingsManager.getSkillPaths()).toContain(`-${join("review", "SKILL.md")}`);
 	});
 
 	it("cycles through fullscreen scrollbar modes", () => {
@@ -234,7 +232,7 @@ describe("SettingsSelectorComponent", () => {
 		expect(compactLines[0]).toBe(" Settings");
 		expect(compactLines[1]).toBe(">");
 		expect(compactLines.join("\n")).toContain(`${getGlyphs().selected} Auto-compact`);
-		expect(compactLines.join("\n")).toContain("(1/27)");
+		expect(compactLines.join("\n")).toContain(getCapabilities().images ? "(1/28)" : "(1/26)");
 		expect(compactLines.at(-1)).toContain("Type to search · Enter/Space change · Esc close");
 		expect(compactLines).toHaveLength(8);
 		expect(compactLines.every((line) => Array.from(line).length <= 60)).toBe(true);
@@ -247,27 +245,19 @@ describe("SettingsSelectorComponent", () => {
 		expect(restoredLines.at(-1)).toContain("Type to search · Enter/Space to change · Esc to cancel");
 	});
 
-	it("opens and applies a thinking-level submenu without changing its controls", () => {
-		const onThinkingLevelChange = vi.fn();
+	it("only exposes thinking visibility in settings", () => {
+		const onHideThinkingBlockChange = vi.fn();
 		const selector = new SettingsSelectorComponent(settingsConfig(), {
-			onThinkingLevelChange,
+			onHideThinkingBlockChange,
 		} as unknown as SettingsCallbacks);
 		const settingsList = selector.getSettingsList();
 
-		for (const character of "Thinking level") settingsList.handleInput(character);
+		for (const character of "thinking") settingsList.handleInput(character);
+		const rendered = stripAnsi(selector.render(80).join("\n"));
+		expect(rendered).not.toContain("Thinking level");
+		expect(rendered).toContain("Hide thinking");
+
 		settingsList.handleInput("\r");
-
-		const submenu = stripAnsi(selector.render(80).join("\n"))
-			.split("\n")
-			.map((line) => line.trimEnd())
-			.join("\n");
-		expect(submenu).toContain(" Thinking Level\n Select reasoning depth for thinking-capable models\n");
-		expect(submenu).toContain("enter select  escape/ctrl+c back");
-
-		settingsList.handleInput("\u001b[B");
-		settingsList.handleInput("\r");
-
-		expect(onThinkingLevelChange).toHaveBeenCalledWith("high");
-		expect(stripAnsi(selector.render(80).join("\n"))).toContain("Thinking level");
+		expect(onHideThinkingBlockChange).toHaveBeenCalledWith(true);
 	});
 });

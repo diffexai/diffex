@@ -38,9 +38,9 @@ Type `/` in the editor to open command completion. Extensions can register custo
 |---------|-------------|
 | `/login`, `/logout` | Manage OAuth or API-key credentials |
 | [`/llama`](llama-cpp.md) | Download, load, and unload llama.cpp router models |
-| `/model` | Switch models |
+| `/model` | Select a model, then its thinking level |
 | `/scoped-models` | Enable/disable models for Ctrl+P cycling |
-| `/settings` | Thinking level, theme, installed skills, message delivery, transport |
+| `/settings` | Theme, installed skills, message delivery, transport |
 | `/plan [request]` | Enter Plan mode, optionally submitting a planning request |
 | `/skills` | Browse installed workspace, installed global, and evolved skills |
 | [`/evolve`](evolution.md) | Inspect and control harness evolution and generated skills |

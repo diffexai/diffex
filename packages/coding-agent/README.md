@@ -173,9 +173,9 @@ Type `/` in the editor to trigger commands. [Extensions](#extensions) can regist
 |---------|-------------|
 | `/login`, `/logout` | Manage provider credentials |
 | [`/llama`](docs/llama-cpp.md) | Download, load, and unload llama.cpp router models |
-| `/model` | Switch models |
+| `/model` | Select a model, then its thinking level |
 | `/scoped-models` | Enable/disable models for Ctrl+P cycling |
-| `/settings` | Thinking level, theme, installed skills, message delivery, transport |
+| `/settings` | Theme, installed skills, message delivery, transport |
 | `/plan [request]` | Enter Plan mode, optionally submitting a planning request |
 | [`/skills`](docs/skills.md#skill-commands) | Search and reference one or more skills in the editor |
 | [`/evolve`](docs/evolution.md) | Inspect and control harness evolution and generated skills |
@@ -221,7 +221,7 @@ See `/hotkeys` for the full list. Customize via `~/.diffex/agent/keybindings.jso
 | Ctrl+T | Collapse/expand thinking blocks |
 | Ctrl+X | Copy the last assistant message |
 
-Thinking-level cycling has no default shortcut. Use `/settings` or bind `app.thinking.cycle` in `keybindings.json`.
+Use `/model` or Ctrl+L to select a model, then choose its thinking level when multiple levels are supported. Selecting the current model also opens the thinking selector. Escape keeps the selected model and its current supported level. Thinking-level cycling has no default shortcut; bind `app.thinking.cycle` in `keybindings.json` to enable one.
 
 ### Plan Mode
 

@@ -25,6 +25,8 @@ Use `/trust` in interactive mode to save a project trust decision for future ses
 
 ### Model & Thinking
 
+Use `/model` or Ctrl+L to select a model, then choose from its supported thinking levels. Exact `/model <id>` matches and selecting the current model also open this screen. It is skipped when there is at most one supported level. Escape or Ctrl+C keeps the selected model and its current supported level. The thinking preference is shared across models and saved as `defaultThinkingLevel`, with existing model capability clamping.
+
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
 | `defaultProvider` | string | - | Default provider (e.g., `"anthropic"`, `"openai"`) |

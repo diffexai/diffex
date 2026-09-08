@@ -189,6 +189,7 @@ import {
 	WorkingStatusIndicator,
 } from "./components/status-indicator.ts";
 import { SubagentsComponent } from "./components/subagents.ts";
+import { ThinkingSelectorComponent } from "./components/thinking-selector.ts";
 import { ToolExecutionComponent } from "./components/tool-execution.ts";
 import { ToolGroupComponent } from "./components/tool-group.ts";
 import { TreeSelectorComponent } from "./components/tree-selector.ts";
@@ -5223,8 +5224,6 @@ export class InteractiveMode {
 					followUpMode: this.session.followUpMode,
 					transport: this.settingsManager.getTransport(),
 					httpIdleTimeoutMs: this.settingsManager.getHttpIdleTimeoutMs(),
-					thinkingLevel: this.session.thinkingLevel,
-					availableThinkingLevels: this.session.getAvailableThinkingLevels(),
 					currentTheme: this.settingsManager.getThemeSetting() || "dark",
 					terminalTheme: this.themeController.getTerminalTheme(),
 					availableThemes: getAvailableThemes(),
@@ -5287,11 +5286,6 @@ export class InteractiveMode {
 						this.settingsManager.setHttpIdleTimeoutMs(timeoutMs);
 						configureHttpDispatcher(timeoutMs);
 						this.showStatus(`HTTP idle timeout: ${formatHttpIdleTimeoutMs(timeoutMs)}`);
-					},
-					onThinkingLevelChange: (level) => {
-						this.session.setThinkingLevel(level);
-						this.footer.invalidate();
-						this.updateEditorBorderColor();
 					},
 					onThemeChange: (themeSetting) => {
 						this.settingsManager.setTheme(themeSetting);
@@ -5589,6 +5583,7 @@ export class InteractiveMode {
 				this.showStatus(`Model: ${model.id}`);
 				void this.maybeWarnAboutAnthropicSubscriptionAuth(model);
 				this.checkDaxnutsEasterEgg(model);
+				this.showThinkingSelector();
 			} catch (error) {
 				this.showError(error instanceof Error ? error.message : String(error));
 			}
@@ -5741,6 +5736,7 @@ export class InteractiveMode {
 						this.showStatus(`Model: ${model.id}`);
 						void this.maybeWarnAboutAnthropicSubscriptionAuth(model);
 						this.checkDaxnutsEasterEgg(model);
+						this.showThinkingSelector();
 					} catch (error) {
 						done();
 						this.showError(error instanceof Error ? error.message : String(error));
@@ -5753,6 +5749,30 @@ export class InteractiveMode {
 				initialSearchInput,
 			);
 			return { component: selector, focus: selector, dispose: () => selector.dispose() };
+		});
+	}
+
+	private showThinkingSelector(): void {
+		const availableLevels = this.session.getAvailableThinkingLevels();
+		if (availableLevels.length <= 1) return;
+
+		this.showSelector((done) => {
+			const selector = new ThinkingSelectorComponent(
+				this.session.thinkingLevel,
+				availableLevels,
+				(level) => {
+					this.session.setThinkingLevel(level);
+					this.footer.invalidate();
+					this.updateEditorBorderColor();
+					done();
+					this.showStatus(`Thinking level: ${this.session.thinkingLevel}`);
+				},
+				() => {
+					done();
+					this.ui.requestRender();
+				},
+			);
+			return { component: selector, focus: selector.getSelectList() };
 		});
 	}
 

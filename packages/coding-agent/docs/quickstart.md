@@ -140,7 +140,7 @@ The command output is sent to the model. Use `!!command` to run a command withou
 
 ### Switch models
 
-Use `/model` or Ctrl+L to choose a model. Use Ctrl+P / Shift+Ctrl+P to cycle through scoped models. Thinking-level cycling has no default shortcut; use `/settings` or configure `app.thinking.cycle` in `keybindings.json`.
+Use `/model` or Ctrl+L to choose a model, then select its thinking level when multiple levels are supported. You can select the current model to change only its thinking level. Use Ctrl+P / Shift+Ctrl+P to cycle through scoped models. Thinking-level cycling has no default shortcut; configure `app.thinking.cycle` in `keybindings.json` to enable one.
 
 ### Continue later
 
