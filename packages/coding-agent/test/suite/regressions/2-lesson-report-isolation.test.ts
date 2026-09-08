@@ -51,7 +51,7 @@ function expectPrivate(value: unknown): void {
 	expect(text).not.toContain(MARKER);
 }
 
-describe("Item 2: private per-output lesson reports", () => {
+describe("Item 2: private per-turn lesson reports", () => {
 	const cleanups: (() => Promise<void>)[] = [];
 	afterEach(async () => {
 		for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
@@ -133,19 +133,18 @@ describe("Item 2: private per-output lesson reports", () => {
 		};
 	}
 
-	it("uses production SDK wiring and keeps reports out of later prompts, exports, compaction, traces and evolution snapshots", async () => {
+	it("uses one final production-wired report per prompt without leaking into later prompts, exports, compaction, traces or snapshots", async () => {
 		const env = await setup();
 		const fixture = join(env.harness.tempDir, "input.txt");
 		await writeFile(fixture, "ordinary tool result");
 		const calls: { context: Context; options: SimpleStreamOptions | undefined }[] = [];
 		const responses = [
 			fauxAssistantMessage(fauxToolCall("read", { path: fixture }), { stopReason: "toolUse" }),
+			fauxAssistantMessage("Checked the requested input and verified its contents."),
 			report([
 				{ lessonNumber: 1, signal: "helpful" },
 				{ lessonNumber: 2, signal: "harmful" },
 			]),
-			fauxAssistantMessage("Checked the requested input and verified its contents."),
-			report([]),
 			fauxAssistantMessage("The follow-up is complete."),
 			report([{ lessonNumber: 3, signal: "helpful" }]),
 		];
@@ -157,8 +156,9 @@ describe("Item 2: private per-output lesson reports", () => {
 		);
 		await env.session.prompt("Read the input and verify it.");
 		await env.session.prompt("Confirm the result.");
-		expect(calls).toHaveLength(6);
-		for (const index of [1, 3, 5]) {
+		expect(calls).toHaveLength(5);
+		expect(calls[1]?.context.messages.map((message) => message.role)).toEqual(["user", "assistant", "toolResult"]);
+		for (const index of [2, 4]) {
 			const main = calls[index - 1]!;
 			const assessment = calls[index]!;
 			expect(assessment.context.systemPrompt).toBe(main.context.systemPrompt);
@@ -167,7 +167,7 @@ describe("Item 2: private per-output lesson reports", () => {
 			expect(getMessageText(assessment.context.messages.at(-1))).toBe(LESSON_REPORT_PROMPT);
 			expect(
 				assessment.context.messages.slice(main.context.messages.length, -1).map((message) => message.role),
-			).toEqual(index === 1 ? ["assistant", "toolResult"] : ["assistant"]);
+			).toEqual(["assistant"]);
 			expect(assessment.context.tools).toEqual([LESSON_REPORT_TOOL]);
 			expect(assessment.options?.telemetryContext).toBe(NOOP_TELEMETRY_CONTEXT);
 			expect(assessment.options?.sessionId).toBeUndefined();

@@ -61,7 +61,7 @@ function expectPrivate(value: unknown): void {
 	}
 }
 
-describe("Item 2: private per-output skill reports", () => {
+describe("Item 2: private per-turn skill reports", () => {
 	const cleanups: (() => Promise<void>)[] = [];
 	afterEach(async () => {
 		for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
@@ -166,7 +166,7 @@ describe("Item 2: private per-output skill reports", () => {
 		};
 	}
 
-	it("uses SDK wiring for every output without recursive assessments or leaks into context, exports, compaction, traces or snapshots", async () => {
+	it("uses one final SDK-wired report per prompt without recursive assessments or leaks into context, exports, compaction, traces or snapshots", async () => {
 		const env = await setup({ memory: "Lesson 1: Verify results.\n" });
 		const calls: { context: Context; options: SimpleStreamOptions | undefined }[] = [];
 		const lessonReport = fauxAssistantMessage(fauxToolCall(LESSON_REPORT_TOOL.name, { lessons: [] }), {
@@ -177,14 +177,12 @@ describe("Item 2: private per-output skill reports", () => {
 				fauxAssistantMessage(fauxToolCall("read", { path: env.bundle.state.skills[0]!.filePath }), {
 					stopReason: "toolUse",
 				}),
+				fauxAssistantMessage("Checked the requested input and verified its contents."),
 				lessonReport,
 				report([
 					{ skillName: "review-Evolved", signal: "helpful" },
 					{ skillName: "verify", signal: "harmful" },
 				]),
-				fauxAssistantMessage("Checked the requested input and verified its contents."),
-				lessonReport,
-				report([]),
 				fauxAssistantMessage("The follow-up is complete."),
 				lessonReport,
 				report([{ skillName: "review-Evolved", signal: "helpful" }]),
@@ -195,8 +193,9 @@ describe("Item 2: private per-output skill reports", () => {
 		);
 		await env.session.prompt("Read the evolved review skill and verify the result.");
 		await env.session.prompt("Confirm the result using the skill already loaded.");
-		expect(calls).toHaveLength(9);
-		for (const index of [2, 5, 8]) {
+		expect(calls).toHaveLength(7);
+		expect(calls[1]?.context.messages.map((message) => message.role)).toEqual(["user", "assistant", "toolResult"]);
+		for (const index of [3, 6]) {
 			const main = calls[index - 2]!;
 			const assessment = calls[index]!;
 			expect(assessment.context.systemPrompt).toBe(main.context.systemPrompt);
@@ -205,7 +204,7 @@ describe("Item 2: private per-output skill reports", () => {
 			expect(getMessageText(assessment.context.messages.at(-1))).toBe(SKILL_REPORT_PROMPT);
 			expect(
 				assessment.context.messages.slice(main.context.messages.length, -1).map((message) => message.role),
-			).toEqual(index === 2 ? ["assistant", "toolResult"] : ["assistant"]);
+			).toEqual(["assistant"]);
 			expect(JSON.stringify(assessment.context.messages)).toContain(INSTRUCTIONS);
 			expect(assessment.context.tools).toEqual([SKILL_REPORT_TOOL]);
 			expect(assessment.options?.telemetryContext).toBe(NOOP_TELEMETRY_CONTEXT);
@@ -221,8 +220,8 @@ describe("Item 2: private per-output skill reports", () => {
 		const snapshot = await scores.loadSkillScores(scope, env.workspace, env.bundle.manifest.version);
 		expect(snapshot.scores).toHaveLength(2);
 		for (const [name, points] of [
-			["review-Evolved", 1],
-			["verify", -3.5],
+			["review-Evolved", 2],
+			["verify", -2.5],
 		] as const) {
 			const skill = env.loader.getSkills().skills.find((skill) => skill.name === name)!;
 			expect(snapshot.scores.find((item) => item.skillId === skill.skillId)?.points).toBe(points);

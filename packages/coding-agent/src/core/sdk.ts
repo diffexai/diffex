@@ -574,6 +574,7 @@ export async function createInternalAgentSession(
 			tools: [],
 		},
 		convertToLlm: convertToLlmWithBlockImages,
+		privateContinuationMode: "per-turn",
 		streamFn: async (model, context, options) => {
 			const providerRetrySettings = settingsManager.getProviderRetrySettings();
 			const httpIdleTimeoutMs = settingsManager.getHttpIdleTimeoutMs();
@@ -680,8 +681,8 @@ export async function createInternalAgentSession(
 	const getOutputId = () =>
 		JSON.stringify([
 			sessionManager.getSessionId(),
-			sessionManager.getEntries().filter((entry) => entry.type === "message" && entry.message.role === "assistant")
-				.length + 1,
+			sessionManager.getEntries().filter((entry) => entry.type === "message" && entry.message.role === "user")
+				.length,
 		]);
 	const prepareLessonReport = createLessonReportContinuation({
 		getBundle: () => session.harnessVersionBundle,

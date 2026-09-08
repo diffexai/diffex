@@ -147,8 +147,9 @@ async function setup() {
 }
 
 describe("Item 3: private lesson-report scoring", () => {
-	it("scores sparse and empty reports through SDK wiring and keeps output ordinals stable across restart", async () => {
+	it("scores one final report per prompt and keeps user-message ordinals stable across restart", async () => {
 		const env = await setup();
+		let promptIndex = 0;
 		for (const [lessons, expected] of [
 			[
 				[
@@ -160,9 +161,21 @@ describe("Item 3: private lesson-report scoring", () => {
 			[[{ lessonNumber: 1, signal: "helpful" }], [2, -2.5, -2]],
 			[[], [1, -3.5, -3]],
 		] as const) {
-			env.harness.setResponses([fauxAssistantMessage("Normal output."), report(lessons)]);
+			const responses = [fauxAssistantMessage("Normal output."), report(lessons)];
+			if (promptIndex === 0) {
+				responses.unshift(
+					fauxAssistantMessage(fauxToolCall("missing", {}), {
+						stopReason: "toolUse",
+					}),
+				);
+			}
+			const callsBefore = env.harness.faux.state.callCount;
+			env.harness.setResponses(responses);
 			await env.session.prompt("Check the result.");
+			expect(env.harness.faux.state.callCount - callsBefore).toBe(promptIndex === 0 ? 3 : 2);
+			expect((await env.ledger()).appliedOutputIds).toHaveLength(promptIndex + 1);
 			expect(await env.points()).toEqual(expected);
+			promptIndex++;
 		}
 		const sessionId = env.manager.getSessionId();
 		expect((await env.ledger()).appliedOutputIds).toEqual(
