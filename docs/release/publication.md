@@ -42,7 +42,7 @@ The publisher itself uses fixed release-record keys.
 See [Cloudflare R2 token permissions](https://developers.cloudflare.com/r2/api/tokens/) for the storage capability boundary.
 
 Users call the public version endpoint without R2 credentials.
-The planned Worker accesses private storage through a native binding, which supports both reads and writes.
+The deployed staging Worker accesses private storage through a native binding, which supports both reads and writes.
 If enforced read-only storage access is required, configure a separate read-only credential per Worker environment during endpoint implementation.
 
 ## Publication invariants
@@ -124,3 +124,24 @@ No secret values were printed, committed, or copied into client or Worker config
 This verifies credential configuration and real publisher-to-R2 behavior; a GitHub-hosted staging run remains available after the new manual workflow reaches `main`.
 
 A final credential-isolation check confirmed both release namespaces remained empty after staging cleanup.
+
+## Deployed public API verification
+
+The optional `--public-api` flag adds actual unauthenticated HTTP checks against the fixed staging Worker:
+
+```sh
+node scripts/verify-release-publication.mjs --staging --public-api
+```
+
+The manual workflow exposes the same flag as `check_public_api`, disabled by default.
+Only the CLI staging environment supplies publication credentials; the Worker deployment workflow never receives them.
+The verifier tests canonical projection, missing releases, malformed JSON, unsupported schema, prereleases, ignored query selectors, rejected methods and suffixes, readiness, and unchanged storage after HTTP requests.
+It restores malformed fixtures conditionally and removes only records owned by the run.
+A final HTTP failure still releases the lock after successful object cleanup; actual storage cleanup failure retains the lock for investigation.
+
+Live verification passed on 2026-09-10 using synthetic versions `0.1789069419298.0` and `0.1789069419298.1`.
+The real publisher used controlled npm responses for all 11 packages, real staging R2, and the deployed Worker.
+Both release keys, the latest pointer, and the shared lock were confirmed absent afterward.
+The production latest record remained absent.
+The [cloud staging acceptance record](https://github.com/diffexai/diffex-cloud/blob/feat/serve-verified-releases/docs/public-api-staging.md) records Worker deployment identities, the separate missing-binding failure and recovery test, and unchanged Render routing.
+This proves publisher-to-R2-to-HTTP behavior; the installed CLI authority migration and canary remain separate work.

@@ -2,6 +2,11 @@ name: Verify Release Publication
 
 on:
   workflow_dispatch:
+    inputs:
+      check_public_api:
+        description: Verify the deployed staging public API against release fixtures
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -34,4 +39,10 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.DIFFEX_ARTIFACTS_R2_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: auto
           AWS_EC2_METADATA_DISABLED: 'true'
-        run: node scripts/verify-release-publication.mjs --staging
+          CHECK_PUBLIC_API: ${{ inputs.check_public_api }}
+        run: |
+          if [ "$CHECK_PUBLIC_API" = "true" ]; then
+            node scripts/verify-release-publication.mjs --staging --public-api
+          else
+            node scripts/verify-release-publication.mjs --staging
+          fi
