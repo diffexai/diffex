@@ -9,7 +9,7 @@ import {
 	type HarnessWorkspaceIdentity,
 	harnessVersionDirectoryName,
 	harnessWorkspaceSelectionFileName,
-} from "@earendil-works/diffex-harness-state";
+} from "@diffexai/diffex-harness-state";
 import { afterEach, describe, expect, it } from "vitest";
 import {
 	loadWorkspaceHarnessState,

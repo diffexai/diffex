@@ -33,8 +33,8 @@ See these complete provider examples:
 Extensions can register either a complete diffex-ai `Provider` or use the legacy provider-config form. Prefer a complete provider when custom authentication, filtering, refresh, or streaming behavior is required. Diffex composes `models.json` overrides above registered native providers.
 
 ```typescript
-import { createProvider, openAICompletionsApi } from "@earendil-works/diffex-ai";
-import type { ExtensionAPI } from "@earendil-works/diffex-coding-agent";
+import { createProvider, openAICompletionsApi } from "@diffexai/diffex-ai";
+import type { ExtensionAPI } from "@diffexai/diffex";
 
 export default function (diffex: ExtensionAPI) {
   diffex.registerProvider(createProvider({
@@ -125,7 +125,7 @@ To add a completely new provider, specify `models` along with the required confi
 If the model list comes from a remote endpoint, use an async extension factory:
 
 ```typescript
-import type { ExtensionAPI } from "@earendil-works/diffex-coding-agent";
+import type { ExtensionAPI } from "@diffexai/diffex";
 
 export default async function (diffex: ExtensionAPI) {
   const response = await fetch("http://localhost:1234/v1/models");
@@ -288,7 +288,7 @@ The key is resolved for each request. An explicit request `Authorization` header
 Add OAuth/SSO authentication that integrates with `/login`:
 
 ```typescript
-import type { OAuthCredentials, OAuthLoginCallbacks } from "@earendil-works/diffex-ai";
+import type { OAuthCredentials, OAuthLoginCallbacks } from "@diffexai/diffex-ai";
 
 diffex.registerProvider("corporate-ai", {
   baseUrl: "https://ai.corp.com/v1",
@@ -417,7 +417,7 @@ import {
   type SimpleStreamOptions,
   calculateCost,
   createAssistantMessageEventStream,
-} from "@earendil-works/diffex-ai";
+} from "@diffexai/diffex-ai";
 
 function streamMyProvider(
   model: Model<any>,

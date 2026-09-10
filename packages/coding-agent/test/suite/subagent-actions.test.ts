@@ -1,6 +1,6 @@
-import type { AgentTool } from "@earendil-works/diffex-agent-core";
-import type { AssistantMessage, Context } from "@earendil-works/diffex-ai";
-import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/diffex-ai";
+import type { AgentTool } from "@diffexai/diffex-agent-core";
+import type { AssistantMessage, Context } from "@diffexai/diffex-ai";
+import { fauxAssistantMessage, fauxToolCall } from "@diffexai/diffex-ai";
 import { Type } from "typebox";
 import { Check } from "typebox/value";
 import { afterEach, describe, expect, it, vi } from "vitest";

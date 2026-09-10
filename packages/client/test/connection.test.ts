@@ -6,7 +6,7 @@ import {
 	PROTOCOL_VERSION,
 	ProtocolValidationError,
 	type ServerSnapshot,
-} from "@earendil-works/diffex-protocol";
+} from "@diffexai/diffex-protocol";
 import { describe, expect, test } from "vitest";
 import { type ByteTransportFactory, DiffexClient, DiffexDisconnectedError } from "../src/index.ts";
 import {

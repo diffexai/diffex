@@ -1,6 +1,6 @@
-import type { AgentMessage } from "@earendil-works/diffex-agent-core";
-import type { AssistantMessage, Usage } from "@earendil-works/diffex-ai/compat";
-import { getModel } from "@earendil-works/diffex-ai/compat";
+import type { AgentMessage } from "@diffexai/diffex-agent-core";
+import type { AssistantMessage, Usage } from "@diffexai/diffex-ai/compat";
+import { getModel } from "@diffexai/diffex-ai/compat";
 import { readFileSync } from "fs";
 import { join } from "path";
 import { beforeEach, describe, expect, it } from "vitest";

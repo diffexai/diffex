@@ -5,7 +5,7 @@
  * When forking, offers to restore code to that point in history.
  */
 
-import type { ExtensionAPI } from "@earendil-works/diffex-coding-agent";
+import type { ExtensionAPI } from "@diffexai/diffex";
 
 export default function (diffex: ExtensionAPI) {
 	const checkpoints = new Map<string, string>();

@@ -1,4 +1,4 @@
-import { getGlyphs, setKeybindings, visibleWidth } from "@earendil-works/diffex-tui";
+import { getGlyphs, setKeybindings, visibleWidth } from "@diffexai/diffex-tui";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { KeybindingsManager } from "../src/core/keybindings.ts";
 import { TrustSelectorComponent } from "../src/modes/interactive/components/trust-selector.ts";

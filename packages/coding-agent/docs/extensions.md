@@ -58,7 +58,7 @@ See [examples/extensions/](../examples/extensions/) for working implementations.
 Create `~/.diffex/agent/extensions/my-extension.ts`:
 
 ```typescript
-import type { ExtensionAPI } from "@earendil-works/diffex-coding-agent";
+import type { ExtensionAPI } from "@diffexai/diffex";
 import { Type } from "typebox";
 
 export default function (diffex: ExtensionAPI) {
@@ -140,10 +140,10 @@ To share extensions via npm or git as Diffex packages, see [packages.md](package
 
 | Package | Purpose |
 |---------|---------|
-| `@earendil-works/diffex-coding-agent` | Extension types (`ExtensionAPI`, `ExtensionContext`, events) |
+| `@diffexai/diffex` | Extension types (`ExtensionAPI`, `ExtensionContext`, events) |
 | `typebox` | Schema definitions for tool parameters |
-| `@earendil-works/diffex-ai` | AI utilities (`StringEnum` for Google-compatible enums) |
-| `@earendil-works/diffex-tui` | TUI components for custom rendering |
+| `@diffexai/diffex-ai` | AI utilities (`StringEnum` for Google-compatible enums) |
+| `@diffexai/diffex-tui` | TUI components for custom rendering |
 
 npm dependencies work too. Add a `package.json` next to your extension (or in a parent directory), run `npm install`, and imports from `node_modules/` are resolved automatically.
 
@@ -156,7 +156,7 @@ Node.js built-ins (`node:fs`, `node:path`, etc.) are also available.
 An extension exports a default factory function that receives `ExtensionAPI`. The factory can be synchronous or asynchronous:
 
 ```typescript
-import type { ExtensionAPI } from "@earendil-works/diffex-coding-agent";
+import type { ExtensionAPI } from "@diffexai/diffex";
 
 export default function (diffex: ExtensionAPI) {
   // Subscribe to events
@@ -185,7 +185,7 @@ If the factory returns a `Promise`, Diffex awaits it before continuing startup. 
 Use an async factory for one-time startup work such as fetching remote configuration or dynamically discovering available models.
 
 ```typescript
-import type { ExtensionAPI } from "@earendil-works/diffex-coding-agent";
+import type { ExtensionAPI } from "@diffexai/diffex";
 
 export default async function (diffex: ExtensionAPI) {
   const response = await fetch("http://localhost:1234/v1/models");
@@ -766,7 +766,7 @@ Behavior guarantees:
 - `terminate` only applies to a blocked call; the agent stops early only when every finalized result in the batch is terminating
 
 ```typescript
-import { isToolCallEventType } from "@earendil-works/diffex-coding-agent";
+import { isToolCallEventType } from "@diffexai/diffex";
 
 diffex.on("tool_call", async (event, ctx) => {
   // event.toolName - "bash", "read", "write", "edit", etc.
@@ -802,7 +802,7 @@ export type MyToolInput = Static<typeof myToolSchema>;
 Use `isToolCallEventType` with explicit type parameters:
 
 ```typescript
-import { isToolCallEventType } from "@earendil-works/diffex-coding-agent";
+import { isToolCallEventType } from "@diffexai/diffex";
 import type { MyToolInput } from "my-extension";
 
 diffex.on("tool_call", (event) => {
@@ -826,7 +826,7 @@ In parallel tool mode, `tool_result` and `tool_execution_end` may interleave in 
 Use `ctx.signal` for nested async work inside the handler. This lets Esc cancel model calls, `fetch()`, and other abort-aware operations started by the extension.
 
 ```typescript
-import { isBashToolResult } from "@earendil-works/diffex-coding-agent";
+import { isBashToolResult } from "@diffexai/diffex";
 
 diffex.on("tool_result", async (event, ctx) => {
   // event.toolName, event.toolCallId, event.input
@@ -854,7 +854,7 @@ diffex.on("tool_result", async (event, ctx) => {
 Fired when user executes `!` or `!!` commands. **Can intercept.**
 
 ```typescript
-import { createLocalBashOperations } from "@earendil-works/diffex-coding-agent";
+import { createLocalBashOperations } from "@diffexai/diffex";
 
 diffex.on("user_bash", (event, ctx) => {
   // event.command - the bash command
@@ -948,7 +948,7 @@ Current working directory.
 Use `CONFIG_DIR_NAME` instead of hardcoding `.diffex` when constructing project-local config paths. Rebranded distributions can use a different config directory name.
 
 ```typescript
-import { CONFIG_DIR_NAME, type ExtensionAPI } from "@earendil-works/diffex-coding-agent";
+import { CONFIG_DIR_NAME, type ExtensionAPI } from "@diffexai/diffex";
 import { join } from "node:path";
 
 export default function (diffex: ExtensionAPI) {
@@ -1203,7 +1203,7 @@ Options:
 To discover available sessions, use the static `SessionManager.list()` or `SessionManager.listAll()` methods:
 
 ```typescript
-import { SessionManager } from "@earendil-works/diffex-coding-agent";
+import { SessionManager } from "@diffexai/diffex";
 
 diffex.registerCommand("switch", {
   description: "Switch to another session",
@@ -1297,7 +1297,7 @@ Tools run with `ExtensionContext`, so they cannot call `ctx.reload()` directly. 
 Example tool the LLM can call to trigger reload:
 
 ```typescript
-import type { ExtensionAPI } from "@earendil-works/diffex-coding-agent";
+import type { ExtensionAPI } from "@diffexai/diffex";
 import { Type } from "typebox";
 
 export default function (diffex: ExtensionAPI) {
@@ -1346,7 +1346,7 @@ See [dynamic-tools.ts](../examples/extensions/dynamic-tools.ts) for a full examp
 
 ```typescript
 import { Type } from "typebox";
-import { StringEnum } from "@earendil-works/diffex-ai";
+import { StringEnum } from "@diffexai/diffex-ai";
 
 diffex.registerTool({
   name: "my_tool",
@@ -1505,7 +1505,7 @@ diffex.registerCommand("stats", {
 Optional: add argument auto-completion for `/command ...`:
 
 ```typescript
-import type { AutocompleteItem } from "@earendil-works/diffex-tui";
+import type { AutocompleteItem } from "@diffexai/diffex-tui";
 
 diffex.registerCommand("deploy", {
   description: "Deploy to an environment",
@@ -1584,7 +1584,7 @@ If a transformer throws, Diffex keeps the Markdown produced so far and continues
 Register a custom TUI renderer for custom entries with your `customType`. Custom entries are created with `diffex.appendEntry()` and do not participate in LLM context.
 
 ```typescript
-import { Box, Text } from "@earendil-works/diffex-tui";
+import { Box, Text } from "@diffexai/diffex-tui";
 
 diffex.registerEntryRenderer("status-card", (entry, { expanded }, theme) => {
   const data = entry.data as { title: string; count: number };
@@ -1707,10 +1707,10 @@ Dynamic providers can implement `refreshModels`. Diffex calls it during model re
 
 `context.signal` is always a concrete signal and provider callbacks must pass it to blocking I/O. Public `ModelRuntime.refresh()` and `ModelRegistry.refresh()` calls accept an optional signal and are unbounded when it is omitted; extensions and applications choose their own deadlines. Cancellation stops the caller waiting even if a provider ignores the signal, but cooperation is still required to stop the underlying work.
 
-Extensions that need native provider auth, filtering, refresh, or stream behavior can register a complete `Provider` from `@earendil-works/diffex-ai`. The provider becomes the composition base and `models.json` overrides still apply above it.
+Extensions that need native provider auth, filtering, refresh, or stream behavior can register a complete `Provider` from `@diffexai/diffex-ai`. The provider becomes the composition base and `models.json` overrides still apply above it.
 
 ```typescript
-import { createProvider, openAICompletionsApi } from "@earendil-works/diffex-ai";
+import { createProvider, openAICompletionsApi } from "@diffexai/diffex-ai";
 
 const provider = createProvider({
   id: "local-server",
@@ -1893,7 +1893,7 @@ Pass the real target file path to `withFileMutationQueue()`, not the raw user ar
 Queue the entire mutation window on that target path. That includes read-modify-write logic, not just the final write.
 
 ```typescript
-import { withFileMutationQueue } from "@earendil-works/diffex-coding-agent";
+import { withFileMutationQueue } from "@diffexai/diffex";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 
@@ -1918,8 +1918,8 @@ async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 
 ```typescript
 import { Type } from "typebox";
-import { StringEnum } from "@earendil-works/diffex-ai";
-import { Text } from "@earendil-works/diffex-tui";
+import { StringEnum } from "@diffexai/diffex-ai";
+import { Text } from "@diffexai/diffex-tui";
 
 diffex.registerTool({
   name: "my_tool",
@@ -1990,7 +1990,7 @@ async execute(toolCallId, params) {
 }
 ```
 
-**Important:** Use `StringEnum` from `@earendil-works/diffex-ai` for string enums. `Type.Union`/`Type.Literal` doesn't work with Google's API.
+**Important:** Use `StringEnum` from `@diffexai/diffex-ai` for string enums. `Type.Union`/`Type.Literal` doesn't work with Google's API.
 
 **Argument preparation:** `prepareArguments(args)` is optional. If defined, it runs before schema validation and before `execute()`. Use it to mimic an older accepted input shape when Diffex resumes an older session whose stored tool call arguments no longer match the current schema. Return the object you want validated against `parameters`. Keep the public schema strict. Do not add deprecated compatibility fields to `parameters` just to keep old resumed sessions working.
 
@@ -2077,7 +2077,7 @@ Built-in tool implementations:
 Built-in tools support pluggable operations for delegating to remote systems (SSH, containers, etc.):
 
 ```typescript
-import { createReadTool, createBashTool, type ReadOperations } from "@earendil-works/diffex-coding-agent";
+import { createReadTool, createBashTool, type ReadOperations } from "@diffexai/diffex";
 
 // Create tool with custom operations
 const remoteRead = createReadTool(cwd, {
@@ -2108,7 +2108,7 @@ For `user_bash`, extensions can reuse Diffex's local shell backend via `createLo
 The bash tool also supports a spawn hook to adjust the command, cwd, or env before execution:
 
 ```typescript
-import { createBashTool } from "@earendil-works/diffex-coding-agent";
+import { createBashTool } from "@diffexai/diffex";
 
 const bashTool = createBashTool(cwd, {
   spawnHook: ({ command, cwd, env }) => ({
@@ -2146,7 +2146,7 @@ import {
   formatSize,        // Human-readable size (e.g., "50KB", "1.5MB")
   DEFAULT_MAX_BYTES, // 50KB
   DEFAULT_MAX_LINES, // 2000
-} from "@earendil-works/diffex-coding-agent";
+} from "@diffexai/diffex";
 
 async execute(toolCallId, params, signal, onUpdate, ctx) {
   const output = await runCommand();
@@ -2237,7 +2237,7 @@ Use `context.state` for cross-slot shared state. Keep slot-local caches on the r
 Renders the tool call or header:
 
 ```typescript
-import { Text } from "@earendil-works/diffex-tui";
+import { Text } from "@diffexai/diffex-tui";
 
 renderCall(args, theme, context) {
   const text = (context.lastComponent as Text | undefined) ?? new Text("", 0, 0);
@@ -2282,7 +2282,7 @@ If a slot intentionally has no visible content, return an empty `Component` such
 Use `keyHint()` to display keybinding hints that respect the active keybinding configuration:
 
 ```typescript
-import { keyHint } from "@earendil-works/diffex-coding-agent";
+import { keyHint } from "@diffexai/diffex";
 
 renderResult(result, { expanded }, theme, context) {
   let text = theme.fg("success", "✓ Done");
@@ -2364,7 +2364,7 @@ For the best cache behavior, keep the loader tool active for the whole session a
 The following extension registers two searchable tools, removes them from the initial active set, and keeps only `search_tools` as their loader. The example uses simple keyword matching, but the search implementation could use BM25, embeddings, a remote catalog, or project-specific routing.
 
 ```typescript
-import type { ExtensionAPI } from "@earendil-works/diffex-coding-agent";
+import type { ExtensionAPI } from "@diffexai/diffex";
 import { Type } from "typebox";
 
 const SEARCHABLE_TOOL_NAMES = new Set(["lookup_weather", "search_issues"]);
@@ -2695,7 +2695,7 @@ See [github-issue-autocomplete.ts](../examples/extensions/github-issue-autocompl
 For complex UI, use `ctx.ui.custom()`. This temporarily replaces the editor with your component until `done()` is called:
 
 ```typescript
-import { Text, Component } from "@earendil-works/diffex-tui";
+import { Text, Component } from "@diffexai/diffex-tui";
 
 const result = await ctx.ui.custom<boolean>((tui, theme, keybindings, done) => {
   const text = new Text("Press Enter to confirm, Escape to cancel", 1, 1);
@@ -2760,8 +2760,8 @@ See [tui.md](tui.md) for the full `OverlayOptions` and `OverlayHandle` API and [
 Replace the main input editor with a custom implementation (vim mode, emacs mode, etc.):
 
 ```typescript
-import { CustomEditor, type ExtensionAPI } from "@earendil-works/diffex-coding-agent";
-import { matchesKey } from "@earendil-works/diffex-tui";
+import { CustomEditor, type ExtensionAPI } from "@diffexai/diffex";
+import { matchesKey } from "@diffexai/diffex-tui";
 
 class VimEditor extends CustomEditor {
   private mode: "normal" | "insert" = "insert";
@@ -2811,7 +2811,7 @@ See [tui.md](tui.md) Pattern 7 for a complete example with mode indicator.
 Register a custom renderer for messages with your `customType`. Use message renderers for content that should participate in LLM context:
 
 ```typescript
-import { Text } from "@earendil-works/diffex-tui";
+import { Text } from "@diffexai/diffex-tui";
 
 diffex.registerMessageRenderer("my-extension", (message, options, theme) => {
   const { expanded, outputPad } = options;
@@ -2870,7 +2870,7 @@ theme.strikethrough(text)
 For syntax highlighting in custom tool renderers:
 
 ```typescript
-import { highlightCode, getLanguageFromPath } from "@earendil-works/diffex-coding-agent";
+import { highlightCode, getLanguageFromPath } from "@diffexai/diffex";
 
 // Highlight code with explicit language
 const highlighted = highlightCode("const x = 1;", "typescript", theme);

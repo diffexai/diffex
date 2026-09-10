@@ -8,8 +8,8 @@
  * - Edge case tests (wide chars, styled text, emoji)
  */
 
-import type { ExtensionAPI, ExtensionCommandContext, Theme } from "@earendil-works/diffex-coding-agent";
-import { CURSOR_MARKER, type Focusable, matchesKey, visibleWidth } from "@earendil-works/diffex-tui";
+import type { ExtensionAPI, ExtensionCommandContext, Theme } from "@diffexai/diffex";
+import { CURSOR_MARKER, type Focusable, matchesKey, visibleWidth } from "@diffexai/diffex-tui";
 
 export default function (diffex: ExtensionAPI) {
 	diffex.registerCommand("overlay-test", {

@@ -1,4 +1,4 @@
-import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/diffex-ai";
+import { fauxAssistantMessage, fauxToolCall } from "@diffexai/diffex-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CURRENT_PLAN_CUSTOM_ENTRY_TYPE, resolveCurrentPlanState } from "../../src/core/current-plan-state.ts";
 import type { CustomEntry } from "../../src/core/session-manager.ts";

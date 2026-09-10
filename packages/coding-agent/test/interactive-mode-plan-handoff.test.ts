@@ -1,6 +1,6 @@
-import { fauxAssistantMessage } from "@earendil-works/diffex-ai";
-import type { Component, EditorComponent } from "@earendil-works/diffex-tui";
-import { type Container, Text } from "@earendil-works/diffex-tui";
+import { fauxAssistantMessage } from "@diffexai/diffex-ai";
+import type { Component, EditorComponent } from "@diffexai/diffex-tui";
+import { type Container, Text } from "@diffexai/diffex-tui";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { AgentSession, AgentSessionEvent } from "../src/core/agent-session.ts";
 import type { AgentSessionRuntime } from "../src/core/agent-session-runtime.ts";

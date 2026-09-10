@@ -7,7 +7,7 @@ import type {
 	TelemetrySchemaSpanName,
 	TelemetrySchemaSpanStartAttributes,
 	TelemetrySchemaSpanUnion,
-} from "@earendil-works/diffex-agent-core";
+} from "@diffexai/diffex-agent-core";
 import type { SettingsManager } from "./settings-manager.ts";
 
 function isTruthyEnvFlag(value: string | undefined): boolean {

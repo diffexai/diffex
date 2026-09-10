@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
 import * as path from "node:path";
-import type { AgentMessage } from "@earendil-works/diffex-agent-core";
-import { type AutocompleteProvider, CombinedAutocompleteProvider } from "@earendil-works/diffex-tui";
+import type { AgentMessage } from "@diffexai/diffex-agent-core";
+import { type AutocompleteProvider, CombinedAutocompleteProvider } from "@diffexai/diffex-tui";
 import { beforeAll, describe, expect, test, vi } from "vitest";
 import { type Component, Container, type Focusable, type TUI } from "../../tui/src/tui.ts";
 import { TuiMainScreen } from "../../tui/src/tui-main-screen.ts";

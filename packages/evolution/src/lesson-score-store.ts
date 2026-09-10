@@ -1,4 +1,4 @@
-import type { HarnessVersion } from "@earendil-works/diffex-harness-state";
+import type { HarnessVersion } from "@diffexai/diffex-harness-state";
 import type { EvolutionMemoryItem, EvolutionScope, ImmutableHarnessSnapshot } from "./contracts.ts";
 
 export const LESSON_SCORE_SCHEMA_VERSION = 2 as const;

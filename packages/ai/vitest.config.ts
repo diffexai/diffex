@@ -12,6 +12,6 @@ export default defineConfig({
 		silent: "passed-only",
 	},
 	resolve: {
-		alias: [{ find: /^@earendil-works\/diffex-telemetry$/, replacement: telemetrySrcIndex }],
+		alias: [{ find: /^@diffexai\/diffex-telemetry$/, replacement: telemetrySrcIndex }],
 	},
 });

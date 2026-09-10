@@ -14,7 +14,7 @@
  *
  * Note: Regular !command syntax (whole-line bash) is preserved and works as before.
  */
-import type { ExtensionAPI } from "@earendil-works/diffex-coding-agent";
+import type { ExtensionAPI } from "@diffexai/diffex";
 
 export default function (diffex: ExtensionAPI) {
 	const PATTERN = /!\{([^}]+)\}/g;

@@ -1,9 +1,9 @@
-import type { HarnessVersion } from "@earendil-works/diffex-harness-state";
+import type { HarnessVersion } from "@diffexai/diffex-harness-state";
 import type {
 	MaterializationIntegrity,
 	MaterializedInvocation,
 	MaterializedTerminationStatus,
-} from "@earendil-works/diffex-harness-trace";
+} from "@diffexai/diffex-harness-trace";
 
 export const EVOLUTION_SCHEMA_VERSION = 1 as const;
 export const EVOLUTION_MEMORY_ITEM_SCHEMA_VERSION = 1 as const;

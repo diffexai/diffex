@@ -1,4 +1,4 @@
-import { Container, getGlyphs, Markdown, type MarkdownTheme, Text } from "@earendil-works/diffex-tui";
+import { Container, getGlyphs, Markdown, type MarkdownTheme, Text } from "@diffexai/diffex-tui";
 import type { BranchSummaryMessage } from "../../../core/messages.ts";
 import { getMarkdownTheme, theme } from "../theme/theme.ts";
 import { keyText } from "./keybinding-hints.ts";

@@ -11,7 +11,7 @@
  * Start Diffex with this extension:
  *   diffex -e ./examples/extensions/input-transform-streaming.ts
  */
-import type { ExtensionAPI } from "@earendil-works/diffex-coding-agent";
+import type { ExtensionAPI } from "@diffexai/diffex";
 
 const TRIGGER = /\b(changes?|diff|modified)\b/i;
 

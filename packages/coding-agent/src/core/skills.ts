@@ -3,7 +3,7 @@ import {
 	computeHarnessSkillId,
 	type HarnessVersionBundle,
 	type HarnessWorkspaceIdentity,
-} from "@earendil-works/diffex-harness-state";
+} from "@diffexai/diffex-harness-state";
 import { existsSync, readdirSync, readFileSync, statSync } from "fs";
 import ignore from "ignore";
 import { basename, dirname, join, relative, resolve, sep } from "path";

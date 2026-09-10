@@ -1,4 +1,4 @@
-# @earendil-works/diffex-protocol
+# @diffexai/diffex-protocol
 
 Runtime-neutral schemas, types, CBOR encoding, and byte-stream framing for the experimental Diffex protocol.
 
@@ -21,7 +21,7 @@ import {
   createServerMessageDecoder,
   encodeClientMessage,
   type ClientHello,
-} from "@earendil-works/diffex-protocol";
+} from "@diffexai/diffex-protocol";
 
 const hello: ClientHello = {
   type: "hello",

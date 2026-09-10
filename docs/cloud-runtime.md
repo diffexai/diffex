@@ -5,8 +5,8 @@
 The hosted Diffex product runs the same Pi-derived coding-agent runtime as local Diffex.
 It does not use the archived Rust implementation or a cloud-specific prompt loop.
 
-`@earendil-works/diffex-server` binds the coding-agent runtime to `@earendil-works/diffex-protocol` inside an isolated sandbox.
-`@earendil-works/diffex-client` connects to that server through a transport supplied by the product.
+`@diffexai/diffex-server` binds the coding-agent runtime to `@diffexai/diffex-protocol` inside an isolated sandbox.
+`@diffexai/diffex-client` connects to that server through a transport supplied by the product.
 
 ## Boundary
 
@@ -25,7 +25,9 @@ Only Daytona's opaque placeholder enters the sandbox environment, and the real p
 ## Runtime Image
 
 `Dockerfile.runtime` produces the AMD64 image used to create the Daytona sandbox snapshot.
-The runtime-image workflow verifies this image on pull requests and publishes an immutable `ghcr.io/diffexai/diffex-runtime:sha-<commit>` image after the matching `main` commit passes review.
+The runtime-image workflow is disabled during the identity migration, including manual dispatches.
+Phase 3 re-enables validation and immutable `ghcr.io/diffexai/diffex-runtime:sha-<commit>` publication after reviewing the image and its consumers.
+Keep production on its existing tested image and Daytona snapshot until that phase completes.
 
 Before a cloud release, register GHCR with Daytona, create a Daytona snapshot from that exact immutable image tag or digest, and set `DAYTONA_SANDBOX_SNAPSHOT` to the resulting snapshot name.
 Do not use a floating image tag for production.

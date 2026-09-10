@@ -1,4 +1,4 @@
-import type { Transport } from "@earendil-works/diffex-ai";
+import type { Transport } from "@diffexai/diffex-ai";
 import {
 	type Component,
 	Container,
@@ -12,7 +12,7 @@ import {
 	SettingsList,
 	Spacer,
 	Text,
-} from "@earendil-works/diffex-tui";
+} from "@diffexai/diffex-tui";
 import { formatHttpIdleTimeoutMs, HTTP_IDLE_TIMEOUT_CHOICES } from "../../../core/http-dispatcher.ts";
 import type {
 	DefaultProjectTrust,

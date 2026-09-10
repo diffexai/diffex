@@ -1,5 +1,5 @@
 {
-	"name": "@earendil-works/diffex-coding-agent-server",
+	"name": "@diffexai/diffex-coding-agent-server",
 	"version": "0.2.0",
 	"description": "Hosted Diffex protocol service backed by the Pi-derived coding-agent runtime",
 	"type": "module",
@@ -23,12 +23,12 @@
 		"directory": "packages/coding-agent-server"
 	},
 	"dependencies": {
-		"@earendil-works/diffex-coding-agent": "^0.2.0",
-		"@earendil-works/diffex-protocol": "^0.2.0",
-		"@earendil-works/diffex-server": "^0.2.0"
+		"@diffexai/diffex": "^0.2.0",
+		"@diffexai/diffex-protocol": "^0.2.0",
+		"@diffexai/diffex-server": "^0.2.0"
 	},
 	"devDependencies": {
-		"@earendil-works/diffex-client": "^0.2.0",
+		"@diffexai/diffex-client": "^0.2.0",
 		"shx": "0.4.0",
 		"vitest": "4.1.9",
 		"ws": "8.21.0"

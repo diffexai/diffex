@@ -6,7 +6,7 @@ import {
 	type ServerMessage,
 	ServerMessageDecoder,
 	type ServerSnapshot,
-} from "@earendil-works/diffex-protocol";
+} from "@diffexai/diffex-protocol";
 import { DiffexDisconnectedError, DiffexServerError, toDisconnectedError, toError } from "./errors.ts";
 import { createPromiseResolvers, type PromiseResolvers } from "./promise.ts";
 import type { ByteTransport, ByteTransportFactory, ByteTransportHandlers } from "./transport.ts";

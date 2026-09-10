@@ -23,6 +23,7 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import type { ContentBlockParam, MessageCreateParamsStreaming } from "@anthropic-ai/sdk/resources/messages.js";
+import type { ExtensionAPI } from "@diffexai/diffex";
 import {
 	type Api,
 	type AssistantMessage,
@@ -42,8 +43,7 @@ import {
 	type Tool,
 	type ToolCall,
 	type ToolResultMessage,
-} from "@earendil-works/diffex-ai";
-import type { ExtensionAPI } from "@earendil-works/diffex-coding-agent";
+} from "@diffexai/diffex-ai";
 
 // =============================================================================
 // OAuth implementation adapted for the legacy extension compatibility interface.

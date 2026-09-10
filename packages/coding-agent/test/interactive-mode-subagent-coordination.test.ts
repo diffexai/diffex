@@ -1,4 +1,4 @@
-import { Container, Markdown, type TUI } from "@earendil-works/diffex-tui";
+import { Container, Markdown, type TUI } from "@diffexai/diffex-tui";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { TuiMainScreen } from "../../tui/src/tui-main-screen.ts";
 import { VirtualTerminal } from "../../tui/test/virtual-terminal.ts";

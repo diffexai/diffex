@@ -5,8 +5,8 @@
  * without paying for an extra follow-up LLM turn.
  */
 
-import { defineTool, type ExtensionAPI } from "@earendil-works/diffex-coding-agent";
-import { Text } from "@earendil-works/diffex-tui";
+import { defineTool, type ExtensionAPI } from "@diffexai/diffex";
+import { Text } from "@diffexai/diffex-tui";
 import { Type } from "typebox";
 
 interface StructuredOutputDetails {

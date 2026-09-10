@@ -11,7 +11,7 @@ import {
 	getAgentDir,
 	type PromptTemplate,
 	SessionManager,
-} from "@earendil-works/diffex-coding-agent";
+} from "@diffexai/diffex";
 
 // Define custom templates
 const deployTemplate: PromptTemplate = {

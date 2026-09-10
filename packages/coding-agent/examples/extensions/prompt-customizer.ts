@@ -12,7 +12,7 @@
  * 2. Use the extension — it automatically adapts to your active tools and skills
  */
 
-import type { BuildSystemPromptOptions, ExtensionAPI } from "@earendil-works/diffex-coding-agent";
+import type { BuildSystemPromptOptions, ExtensionAPI } from "@diffexai/diffex";
 
 /**
  * Adds tool-specific guidance that adapts to the active tool set.

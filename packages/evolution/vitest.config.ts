@@ -10,6 +10,6 @@ export default defineConfig({
 		reporters: process.env.GITHUB_ACTIONS ? ["dot", "github-actions"] : ["dot"],
 	},
 	resolve: {
-		alias: [{ find: /^@earendil-works\/diffex-harness-state$/, replacement: harnessStateSource }],
+		alias: [{ find: /^@diffexai\/diffex-harness-state$/, replacement: harnessStateSource }],
 	},
 });

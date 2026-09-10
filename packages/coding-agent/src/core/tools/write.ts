@@ -1,5 +1,5 @@
-import type { AgentTool } from "@earendil-works/diffex-agent-core";
-import { Container, Text } from "@earendil-works/diffex-tui";
+import type { AgentTool } from "@diffexai/diffex-agent-core";
+import { Container, Text } from "@diffexai/diffex-tui";
 import { mkdir as fsMkdir, writeFile as fsWriteFile } from "fs/promises";
 import { dirname } from "path";
 import { type Static, Type } from "typebox";

@@ -40,10 +40,10 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Api, Model } from "@earendil-works/diffex-ai";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/diffex-coding-agent";
-import { CONFIG_DIR_NAME, DynamicBorder, getAgentDir } from "@earendil-works/diffex-coding-agent";
-import { Container, Key, type SelectItem, SelectList, Text } from "@earendil-works/diffex-tui";
+import type { ExtensionAPI, ExtensionContext } from "@diffexai/diffex";
+import { CONFIG_DIR_NAME, DynamicBorder, getAgentDir } from "@diffexai/diffex";
+import type { Api, Model } from "@diffexai/diffex-ai";
+import { Container, Key, type SelectItem, SelectList, Text } from "@diffexai/diffex-tui";
 
 // Preset configuration
 interface Preset {

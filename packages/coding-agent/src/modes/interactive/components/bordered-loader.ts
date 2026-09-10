@@ -1,4 +1,4 @@
-import { CancellableLoader, Container, getGlyphs, Loader, type TUI } from "@earendil-works/diffex-tui";
+import { CancellableLoader, Container, getGlyphs, Loader, type TUI } from "@diffexai/diffex-tui";
 import type { Theme } from "../theme/theme.ts";
 import { keyText } from "./keybinding-hints.ts";
 

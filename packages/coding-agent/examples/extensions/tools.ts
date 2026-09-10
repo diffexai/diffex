@@ -9,9 +9,9 @@
  * 2. Use /tools to open the tool selector
  */
 
-import type { ExtensionAPI, ExtensionContext, ToolInfo } from "@earendil-works/diffex-coding-agent";
-import { getSettingsListTheme } from "@earendil-works/diffex-coding-agent";
-import { Container, type SettingItem, SettingsList } from "@earendil-works/diffex-tui";
+import type { ExtensionAPI, ExtensionContext, ToolInfo } from "@diffexai/diffex";
+import { getSettingsListTheme } from "@diffexai/diffex";
+import { Container, type SettingItem, SettingsList } from "@diffexai/diffex-tui";
 
 // State persisted to session
 interface ToolsState {

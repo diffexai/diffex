@@ -8,8 +8,8 @@ import type {
 	Session as CoreSession,
 	Entry,
 	MessageEntry,
-} from "@earendil-works/diffex-agent-core";
-import type { Usage } from "@earendil-works/diffex-ai";
+} from "@diffexai/diffex-agent-core";
+import type { Usage } from "@diffexai/diffex-ai";
 import { afterEach, vi } from "vitest";
 import type { SqliteDatabaseFactory, SqliteSessionMetadata } from "../src/index.ts";
 

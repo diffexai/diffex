@@ -1,4 +1,4 @@
-import { getGlyphs, setKeybindings, TuiMainScreen } from "@earendil-works/diffex-tui";
+import { getGlyphs, setKeybindings, TuiMainScreen } from "@diffexai/diffex-tui";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { VirtualTerminal } from "../../tui/test/virtual-terminal.ts";
 import { KeybindingsManager } from "../src/core/keybindings.ts";

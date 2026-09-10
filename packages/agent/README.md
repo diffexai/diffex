@@ -1,23 +1,23 @@
-# @earendil-works/diffex-agent-core
+# @diffexai/diffex-agent-core
 
-Stateful agent with tool execution and event streaming. Built on `@earendil-works/diffex-ai`.
+Stateful agent with tool execution and event streaming. Built on `@diffexai/diffex-ai`.
 
 ## Installation
 
 ```bash
-npm install @earendil-works/diffex-agent-core
+npm install @diffexai/diffex-agent-core
 ```
 
 ### SQLite session backends
 
-The SQLite session backend and the `node:sqlite` adapter live in a separate package, `@earendil-works/diffex-session-backend-sqlite-node`, so the core package does not pull in runtime builtins or native SQLite dependencies by default. The backend accepts a runtime-specific SQLite factory, allowing other session backends to ship as their own packages in the future.
+The SQLite session backend and the `node:sqlite` adapter live in a separate package, `@diffexai/diffex-session-backend-sqlite-node`, so the core package does not pull in runtime builtins or native SQLite dependencies by default. The backend accepts a runtime-specific SQLite factory, allowing other session backends to ship as their own packages in the future.
 
 ## Quick Start
 
 ```typescript
-import { Agent } from "@earendil-works/diffex-agent-core";
-import { createModels } from "@earendil-works/diffex-ai";
-import { anthropicProvider } from "@earendil-works/diffex-ai/providers/anthropic";
+import { Agent } from "@diffexai/diffex-agent-core";
+import { createModels } from "@diffexai/diffex-ai";
+import { anthropicProvider } from "@diffexai/diffex-ai/providers/anthropic";
 
 const models = createModels();
 models.setProvider(anthropicProvider());
@@ -387,7 +387,7 @@ Follow-up messages are checked only when there are no more tool calls and no ste
 Extend `AgentMessage` via declaration merging:
 
 ```typescript
-declare module "@earendil-works/diffex-agent-core" {
+declare module "@diffexai/diffex-agent-core" {
   interface CustomAgentMessages {
     notification: { role: "notification"; text: string; timestamp: number };
   }
@@ -469,7 +469,7 @@ Return `terminate: true` from `execute()`, a blocked `beforeToolCall`, or `after
 For browser apps that proxy through a backend:
 
 ```typescript
-import { Agent, streamProxy } from "@earendil-works/diffex-agent-core";
+import { Agent, streamProxy } from "@diffexai/diffex-agent-core";
 
 const agent = new Agent({
   streamFn: (model, context, options) =>
@@ -486,7 +486,7 @@ const agent = new Agent({
 For direct control without the Agent class:
 
 ```typescript
-import { agentLoop, agentLoopContinue } from "@earendil-works/diffex-agent-core";
+import { agentLoop, agentLoopContinue } from "@diffexai/diffex-agent-core";
 
 const context: AgentContext = {
   systemPrompt: "You are helpful.",

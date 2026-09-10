@@ -1,5 +1,5 @@
-import type { AgentMessage } from "@earendil-works/diffex-agent-core";
-import type { AssistantMessage } from "@earendil-works/diffex-ai";
+import type { AgentMessage } from "@diffexai/diffex-agent-core";
+import type { AssistantMessage } from "@diffexai/diffex-ai";
 import { describe, expect, it } from "vitest";
 import { buildSessionContext } from "../../../src/harness/session/context.ts";
 import type { Entry } from "../../../src/harness/session/types.ts";

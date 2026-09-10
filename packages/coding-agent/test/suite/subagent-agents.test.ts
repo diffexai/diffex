@@ -1,4 +1,4 @@
-import { fauxAssistantMessage } from "@earendil-works/diffex-ai";
+import { fauxAssistantMessage } from "@diffexai/diffex-ai";
 import { Check } from "typebox/value";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ExtensionContext } from "../../src/core/extensions/types.ts";

@@ -1,12 +1,7 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-	type RgbColor,
-	resetCapabilitiesCache,
-	SELECTED_LIST_PREFIX,
-	setCapabilities,
-} from "@earendil-works/diffex-tui";
+import { type RgbColor, resetCapabilitiesCache, SELECTED_LIST_PREFIX, setCapabilities } from "@diffexai/diffex-tui";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	detectTerminalBackgroundFromEnv,

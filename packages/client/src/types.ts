@@ -1,4 +1,4 @@
-import type { ModelRef, ThinkingLevel } from "@earendil-works/diffex-protocol";
+import type { ModelRef, ThinkingLevel } from "@diffexai/diffex-protocol";
 import type { ByteTransportFactory } from "./transport.ts";
 
 export type ConnectionState = "disconnected" | "connecting" | "connected";

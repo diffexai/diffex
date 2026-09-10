@@ -6,7 +6,7 @@ import {
 	Spacer,
 	Text,
 	UNSELECTED_LIST_PREFIX,
-} from "@earendil-works/diffex-tui";
+} from "@diffexai/diffex-tui";
 import {
 	getProjectTrustOptions,
 	type ProjectTrustOption,

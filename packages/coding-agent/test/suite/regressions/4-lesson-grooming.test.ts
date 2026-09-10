@@ -1,6 +1,6 @@
 import { join } from "node:path";
-import { createAssistantMessageEventStream, fauxAssistantMessage, fauxToolCall } from "@earendil-works/diffex-ai";
-import { HarnessStateStore } from "@earendil-works/diffex-harness-state";
+import { createAssistantMessageEventStream, fauxAssistantMessage, fauxToolCall } from "@diffexai/diffex-ai";
+import { HarnessStateStore } from "@diffexai/diffex-harness-state";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { computeEvolutionContentDigest, EvolutionMemoryWriter, FileEvolutionPersistence } from "#evolution";
 import { CuratorToolRegistry } from "../../../../evolution/src/curator-tools.ts";

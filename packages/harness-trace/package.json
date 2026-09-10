@@ -1,5 +1,5 @@
 {
-	"name": "@earendil-works/diffex-harness-trace",
+	"name": "@diffexai/diffex-harness-trace",
 	"version": "0.2.0",
 	"description": "Private durable harness trace recording for Diffex",
 	"private": true,
@@ -21,7 +21,7 @@
 		"test": "vitest --run",
 		"prepublishOnly": "npm run clean && npm run build"
 	},
-	"author": "Earendil Works",
+	"author": "DiffexAI",
 	"license": "MIT",
 	"repository": {
 		"type": "git",
@@ -32,7 +32,7 @@
 		"node": ">=22.19.0"
 	},
 	"dependencies": {
-		"@earendil-works/diffex-telemetry": "0.2.0"
+		"@diffexai/diffex-telemetry": "0.2.0"
 	},
 	"devDependencies": {
 		"@types/node": "24.12.4",

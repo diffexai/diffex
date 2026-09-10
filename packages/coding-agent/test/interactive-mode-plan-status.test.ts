@@ -1,5 +1,5 @@
-import type { Component } from "@earendil-works/diffex-tui";
-import { Container, Text, visibleWidth } from "@earendil-works/diffex-tui";
+import type { Component } from "@diffexai/diffex-tui";
+import { Container, Text, visibleWidth } from "@diffexai/diffex-tui";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import type { ReadonlyFooterDataProvider } from "../src/core/footer-data-provider.ts";
 import type { AppKeybinding, KeybindingsConfig } from "../src/core/keybindings.ts";

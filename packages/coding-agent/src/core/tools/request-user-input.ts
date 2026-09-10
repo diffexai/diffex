@@ -1,4 +1,4 @@
-import { Container, Text } from "@earendil-works/diffex-tui";
+import { Container, Text } from "@diffexai/diffex-tui";
 import { Type } from "typebox";
 import { RequestUserInputComponent } from "../../modes/interactive/components/request-user-input.ts";
 import type { ToolDefinition } from "../extensions/types.ts";

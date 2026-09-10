@@ -1,11 +1,11 @@
-import { Agent } from "@earendil-works/diffex-agent-core";
+import { Agent } from "@diffexai/diffex-agent-core";
 import {
 	type AssistantMessage,
 	getModel,
 	streamSimple,
 	type ToolResultMessage,
 	type Usage,
-} from "@earendil-works/diffex-ai/compat";
+} from "@diffexai/diffex-ai/compat";
 import { describe, expect, it } from "vitest";
 import { AgentSession } from "../src/core/agent-session.ts";
 import { AuthStorage } from "../src/core/auth-storage.ts";

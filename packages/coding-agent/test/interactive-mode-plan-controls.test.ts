@@ -1,8 +1,8 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fauxAssistantMessage } from "@earendil-works/diffex-ai";
-import { type Component, Container } from "@earendil-works/diffex-tui";
+import { fauxAssistantMessage } from "@diffexai/diffex-ai";
+import { type Component, Container } from "@diffexai/diffex-tui";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { AgentSession } from "../src/core/agent-session.ts";
 import type { AgentSessionRuntime } from "../src/core/agent-session-runtime.ts";

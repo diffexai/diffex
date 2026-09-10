@@ -1,5 +1,5 @@
-import { createModels, type Usage } from "@earendil-works/diffex-ai";
-import { getModel } from "@earendil-works/diffex-ai/compat";
+import { createModels, type Usage } from "@diffexai/diffex-ai";
+import { getModel } from "@diffexai/diffex-ai/compat";
 import { describe, expect, it } from "vitest";
 import {
 	AgentHarness,

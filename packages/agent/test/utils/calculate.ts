@@ -1,4 +1,4 @@
-import type { Usage } from "@earendil-works/diffex-ai";
+import type { Usage } from "@diffexai/diffex-ai";
 import { type Static, Type } from "typebox";
 import type { AgentTool, AgentToolResult } from "../../src/types.ts";
 

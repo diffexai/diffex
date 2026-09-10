@@ -7,7 +7,7 @@
  * Usage: diffex -e ./model-status.ts
  */
 
-import type { ExtensionAPI } from "@earendil-works/diffex-coding-agent";
+import type { ExtensionAPI } from "@diffexai/diffex";
 
 export default function (diffex: ExtensionAPI) {
 	diffex.on("model_select", async (event, ctx) => {

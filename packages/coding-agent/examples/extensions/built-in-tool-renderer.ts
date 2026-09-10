@@ -25,14 +25,9 @@
  *   diffex -e ./built-in-tool-renderer.ts
  */
 
-import type {
-	BashToolDetails,
-	EditToolDetails,
-	ExtensionAPI,
-	ReadToolDetails,
-} from "@earendil-works/diffex-coding-agent";
-import { createBashTool, createEditTool, createReadTool, createWriteTool } from "@earendil-works/diffex-coding-agent";
-import { Text } from "@earendil-works/diffex-tui";
+import type { BashToolDetails, EditToolDetails, ExtensionAPI, ReadToolDetails } from "@diffexai/diffex";
+import { createBashTool, createEditTool, createReadTool, createWriteTool } from "@diffexai/diffex";
+import { Text } from "@diffexai/diffex-tui";
 
 export default function (diffex: ExtensionAPI) {
 	const cwd = process.cwd();

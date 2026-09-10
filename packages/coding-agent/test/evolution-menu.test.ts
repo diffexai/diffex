@@ -1,5 +1,5 @@
-import type { HarnessVersion } from "@earendil-works/diffex-harness-state";
-import { setKeybindings } from "@earendil-works/diffex-tui";
+import type { HarnessVersion } from "@diffexai/diffex-harness-state";
+import { setKeybindings } from "@diffexai/diffex-tui";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	AUTOMATIC_EVOLUTION_TOKEN_THRESHOLD,

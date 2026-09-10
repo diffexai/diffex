@@ -485,7 +485,7 @@ try {
 }
 
 const diffexConfigName: string | undefined = pkg.diffexConfig?.name;
-export const PACKAGE_NAME: string = pkg.name || "@earendil-works/diffex-coding-agent";
+export const PACKAGE_NAME: string = pkg.name || "@diffexai/diffex";
 export const APP_NAME: string = diffexConfigName || "diffex";
 export const APP_TITLE: string = diffexConfigName ? APP_NAME : "Diffex";
 export const CONFIG_DIR_NAME: string = pkg.diffexConfig?.configDir || ".diffex";

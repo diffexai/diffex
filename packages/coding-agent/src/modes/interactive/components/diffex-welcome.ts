@@ -1,4 +1,4 @@
-import { type Component, getGlyphs, sliceByColumn, Text, type TUI, visibleWidth } from "@earendil-works/diffex-tui";
+import { type Component, getGlyphs, sliceByColumn, Text, type TUI, visibleWidth } from "@diffexai/diffex-tui";
 import { theme } from "../theme/theme.ts";
 
 export const DIFFEX_LOGO_ART = [

@@ -1,8 +1,8 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import type { AgentTool } from "@earendil-works/diffex-agent-core";
-import type { Context, Model, SimpleStreamOptions } from "@earendil-works/diffex-ai";
-import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/diffex-ai";
+import type { AgentTool } from "@diffexai/diffex-agent-core";
+import type { Context, Model, SimpleStreamOptions } from "@diffexai/diffex-ai";
+import { fauxAssistantMessage, fauxToolCall } from "@diffexai/diffex-ai";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgentSession } from "../../src/core/agent-session.ts";

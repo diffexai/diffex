@@ -5,7 +5,7 @@
  *    example prompt: Use the available tools to calculate 100 + 500. Do not calculate it yourself.
  */
 
-import type { ExtensionAPI } from "@earendil-works/diffex-coding-agent";
+import type { ExtensionAPI } from "@diffexai/diffex";
 import { Type } from "typebox";
 
 function calculate(_expr: string): string {

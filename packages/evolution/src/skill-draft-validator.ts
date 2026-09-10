@@ -1,5 +1,5 @@
 import { posix } from "node:path";
-import { validateHarnessSkillContent, validateHarnessSkillFilePath } from "@earendil-works/diffex-harness-state";
+import { validateHarnessSkillContent, validateHarnessSkillFilePath } from "@diffexai/diffex-harness-state";
 import type {
 	EvolutionArtifactProducer,
 	EvolutionArtifactReference,

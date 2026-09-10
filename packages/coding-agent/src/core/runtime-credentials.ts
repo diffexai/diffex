@@ -1,4 +1,4 @@
-import type { AuthOperationOptions, Credential, CredentialInfo, CredentialStore } from "@earendil-works/diffex-ai";
+import type { AuthOperationOptions, Credential, CredentialInfo, CredentialStore } from "@diffexai/diffex-ai";
 
 /** Async credential store overlay for non-persistent runtime API keys. */
 export class RuntimeCredentials implements CredentialStore {

@@ -1,5 +1,5 @@
-import type { Context, SimpleStreamOptions } from "@earendil-works/diffex-ai";
-import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/diffex-ai";
+import type { Context, SimpleStreamOptions } from "@diffexai/diffex-ai";
+import { fauxAssistantMessage, fauxToolCall } from "@diffexai/diffex-ai";
 import { afterEach, describe, expect, it } from "vitest";
 import type { AgentSession } from "../../src/core/agent-session.ts";
 import type { ExtensionContext } from "../../src/core/extensions/types.ts";

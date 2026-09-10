@@ -1,6 +1,6 @@
 import { readdir as fsReaddir, stat as fsStat } from "node:fs/promises";
-import type { AgentTool } from "@earendil-works/diffex-agent-core";
-import { Text } from "@earendil-works/diffex-tui";
+import type { AgentTool } from "@diffexai/diffex-agent-core";
+import { Text } from "@diffexai/diffex-tui";
 import nodePath from "path";
 import { type Static, Type } from "typebox";
 import { keyHint } from "../../modes/interactive/components/keybinding-hints.ts";

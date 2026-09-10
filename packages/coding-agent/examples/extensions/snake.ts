@@ -2,8 +2,8 @@
  * Snake game extension - play snake with /snake command
  */
 
-import type { ExtensionAPI } from "@earendil-works/diffex-coding-agent";
-import { matchesKey, visibleWidth } from "@earendil-works/diffex-tui";
+import type { ExtensionAPI } from "@diffexai/diffex";
+import { matchesKey, visibleWidth } from "@diffexai/diffex-tui";
 
 const GAME_WIDTH = 40;
 const GAME_HEIGHT = 15;

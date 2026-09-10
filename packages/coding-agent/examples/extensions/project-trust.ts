@@ -13,7 +13,7 @@
  * Try it in a project containing .diffex, AGENTS.md/CLAUDE.md, or .agents/skills.
  */
 
-import type { ExtensionAPI, ProjectTrustEventResult } from "@earendil-works/diffex-coding-agent";
+import type { ExtensionAPI, ProjectTrustEventResult } from "@diffexai/diffex";
 
 export default function (diffex: ExtensionAPI) {
 	let loadCount = 0;

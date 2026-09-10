@@ -10,7 +10,7 @@ import {
 	type ToolCall,
 	type ToolResultMessage,
 	type UserMessage,
-} from "@earendil-works/diffex-ai";
+} from "@diffexai/diffex-ai";
 import type {
 	AssistantTranscriptItem,
 	JsonValue,
@@ -19,7 +19,7 @@ import type {
 	ToolTranscriptItem,
 	Usage,
 	UserTranscriptItem,
-} from "@earendil-works/diffex-protocol";
+} from "@diffexai/diffex-protocol";
 
 type Assert<T extends true> = T;
 type ExactKeys<T, Keys extends keyof T> = keyof T extends Keys ? true : false;

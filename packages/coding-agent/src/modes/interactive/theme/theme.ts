@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { ThinkingLevel } from "@earendil-works/diffex-agent-core";
+import type { ThinkingLevel } from "@diffexai/diffex-agent-core";
 import {
 	type EditorTheme,
 	getCapabilities,
@@ -9,7 +9,7 @@ import {
 	SELECTED_LIST_PREFIX,
 	type SelectListTheme,
 	type SettingsListTheme,
-} from "@earendil-works/diffex-tui";
+} from "@diffexai/diffex-tui";
 import chalk from "chalk";
 import { type Static, Type } from "typebox";
 import { Compile } from "typebox/compile";
@@ -858,7 +858,7 @@ export function getDefaultTheme(): string {
 // ============================================================================
 
 // Use globalThis to share theme across module loaders (tsx + jiti in dev mode)
-const THEME_KEY = Symbol.for("@earendil-works/diffex-coding-agent:theme");
+const THEME_KEY = Symbol.for("@diffexai/diffex:theme");
 const THEME_KEY_OLD = Symbol.for("@mariozechner/pi-coding-agent:theme");
 
 // Export theme as a getter that reads from globalThis

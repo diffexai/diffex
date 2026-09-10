@@ -4,7 +4,7 @@
 
 Extensions and custom tools can render custom TUI components for interactive user interfaces. This page covers the component system and available building blocks.
 
-**Source:** [`@earendil-works/diffex-tui`](https://github.com/diffexai/diffex/tree/main/packages/tui)
+**Source:** [`@diffexai/diffex-tui`](https://github.com/diffexai/diffex/tree/main/packages/tui)
 
 ## Component Interface
 
@@ -33,7 +33,7 @@ The TUI appends a full SGR reset and OSC 8 reset at the end of each rendered lin
 Components that display a text cursor and need IME (Input Method Editor) support should implement the `Focusable` interface:
 
 ```typescript
-import { CURSOR_MARKER, type Component, type Focusable } from "@earendil-works/diffex-tui";
+import { CURSOR_MARKER, type Component, type Focusable } from "@diffexai/diffex-tui";
 
 class MyInput implements Component, Focusable {
   focused: boolean = false;  // Set by TUI when focus changes
@@ -59,7 +59,7 @@ The cursor remains hidden by default. This keeps the fake cursor rendering, whil
 When a container component (dialog, selector, etc.) contains an `Input` or `Editor` child, the container must implement `Focusable` and propagate the focus state to the child. Otherwise, the hardware cursor won't be positioned correctly for IME input.
 
 ```typescript
-import { Container, type Focusable, Input } from "@earendil-works/diffex-tui";
+import { Container, type Focusable, Input } from "@diffexai/diffex-tui";
 
 class SearchDialog extends Container implements Focusable {
   private searchInput: Input;
@@ -201,10 +201,10 @@ See [overlay-qa-tests.ts](../examples/extensions/overlay-qa-tests.ts) for compre
 
 ## Built-in Components
 
-Import from `@earendil-works/diffex-tui`:
+Import from `@diffexai/diffex-tui`:
 
 ```typescript
-import { Text, Box, Container, Spacer, Markdown } from "@earendil-works/diffex-tui";
+import { Text, Box, Container, Spacer, Markdown } from "@diffexai/diffex-tui";
 ```
 
 ### Text
@@ -286,7 +286,7 @@ const image = new Image(
 Use `matchesKey()` for key detection:
 
 ```typescript
-import { matchesKey, Key } from "@earendil-works/diffex-tui";
+import { matchesKey, Key } from "@diffexai/diffex-tui";
 
 handleInput(data: string) {
   if (matchesKey(data, Key.up)) {
@@ -312,7 +312,7 @@ handleInput(data: string) {
 **Critical:** Each line from `render()` must not exceed the `width` parameter.
 
 ```typescript
-import { visibleWidth, truncateToWidth } from "@earendil-works/diffex-tui";
+import { visibleWidth, truncateToWidth } from "@diffexai/diffex-tui";
 
 render(width: number): string[] {
   // Truncate long lines
@@ -333,7 +333,7 @@ Example: Interactive selector
 import {
   matchesKey, Key,
   truncateToWidth, visibleWidth
-} from "@earendil-works/diffex-tui";
+} from "@diffexai/diffex-tui";
 
 class MySelector {
   private items: string[];
@@ -450,8 +450,8 @@ renderResult(result, options, theme, context) {
 **For Markdown**, use `getMarkdownTheme()`:
 
 ```typescript
-import { getMarkdownTheme } from "@earendil-works/diffex-coding-agent";
-import { Markdown } from "@earendil-works/diffex-tui";
+import { getMarkdownTheme } from "@diffexai/diffex";
+import { Markdown } from "@diffexai/diffex-tui";
 
 renderResult(result, options, theme, context) {
   const mdTheme = getMarkdownTheme();
@@ -612,12 +612,12 @@ These patterns cover the most common UI needs in extensions. **Copy these patter
 
 ### Pattern 1: Selection Dialog (SelectList)
 
-For letting users pick from a list of options. Use `SelectList` from `@earendil-works/diffex-tui` with `DynamicBorder` for framing.
+For letting users pick from a list of options. Use `SelectList` from `@diffexai/diffex-tui` with `DynamicBorder` for framing.
 
 ```typescript
-import type { ExtensionAPI } from "@earendil-works/diffex-coding-agent";
-import { DynamicBorder } from "@earendil-works/diffex-coding-agent";
-import { Container, type SelectItem, SelectList, Text } from "@earendil-works/diffex-tui";
+import type { ExtensionAPI } from "@diffexai/diffex";
+import { DynamicBorder } from "@diffexai/diffex";
+import { Container, type SelectItem, SelectList, Text } from "@diffexai/diffex-tui";
 
 diffex.registerCommand("pick", {
   handler: async (_args, ctx) => {
@@ -675,7 +675,7 @@ diffex.registerCommand("pick", {
 For operations that take time and should be cancellable. `BorderedLoader` shows a spinner and handles escape to cancel.
 
 ```typescript
-import { BorderedLoader } from "@earendil-works/diffex-coding-agent";
+import { BorderedLoader } from "@diffexai/diffex";
 
 diffex.registerCommand("fetch", {
   handler: async (_args, ctx) => {
@@ -704,11 +704,11 @@ diffex.registerCommand("fetch", {
 
 ### Pattern 3: Settings/Toggles (SettingsList)
 
-For toggling multiple settings. Use `SettingsList` from `@earendil-works/diffex-tui` with `getSettingsListTheme()`.
+For toggling multiple settings. Use `SettingsList` from `@diffexai/diffex-tui` with `getSettingsListTheme()`.
 
 ```typescript
-import { getSettingsListTheme } from "@earendil-works/diffex-coding-agent";
-import { Container, type SettingItem, SettingsList, Text } from "@earendil-works/diffex-tui";
+import { getSettingsListTheme } from "@diffexai/diffex";
+import { Container, type SettingItem, SettingsList, Text } from "@diffexai/diffex-tui";
 
 diffex.registerCommand("settings", {
   handler: async (_args, ctx) => {
@@ -845,8 +845,8 @@ Token stats available via `ctx.sessionManager.getBranch()` and `ctx.model`.
 Replace the main input editor with a custom implementation. Useful for modal editing (vim), different keybindings (emacs), or specialized input handling.
 
 ```typescript
-import { CustomEditor, type ExtensionAPI } from "@earendil-works/diffex-coding-agent";
-import { matchesKey, truncateToWidth } from "@earendil-works/diffex-tui";
+import { CustomEditor, type ExtensionAPI } from "@diffexai/diffex";
+import { matchesKey, truncateToWidth } from "@diffexai/diffex-tui";
 
 type Mode = "normal" | "insert";
 

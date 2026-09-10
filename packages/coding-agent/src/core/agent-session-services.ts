@@ -1,7 +1,7 @@
 import { join } from "node:path";
-import { NOOP_TELEMETRY_CONTEXT, type TelemetryContext, type ThinkingLevel } from "@earendil-works/diffex-agent-core";
-import type { Model } from "@earendil-works/diffex-ai";
-import type { HarnessStateStore, HarnessVersionBundle } from "@earendil-works/diffex-harness-state";
+import { NOOP_TELEMETRY_CONTEXT, type TelemetryContext, type ThinkingLevel } from "@diffexai/diffex-agent-core";
+import type { Model } from "@diffexai/diffex-ai";
+import type { HarnessStateStore, HarnessVersionBundle } from "@diffexai/diffex-harness-state";
 import { getAgentDir } from "../config.ts";
 import { resolvePath } from "../utils/paths.ts";
 import type { AgentSessionLifecycleObserver } from "./agent-session-lifecycle.ts";

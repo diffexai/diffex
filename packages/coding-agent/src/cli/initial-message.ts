@@ -1,4 +1,4 @@
-import type { ImageContent } from "@earendil-works/diffex-ai";
+import type { ImageContent } from "@diffexai/diffex-ai";
 import type { Args } from "./args.ts";
 
 export interface InitialMessageInput {

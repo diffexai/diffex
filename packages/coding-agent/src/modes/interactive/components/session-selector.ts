@@ -15,7 +15,7 @@ import {
 	truncateToWidth,
 	UNSELECTED_LIST_PREFIX,
 	visibleWidth,
-} from "@earendil-works/diffex-tui";
+} from "@diffexai/diffex-tui";
 import { KeybindingsManager } from "../../../core/keybindings.ts";
 import type { SessionInfo, SessionListProgress } from "../../../core/session-manager.ts";
 import { deleteParentSessionWithOwnedSubagents } from "../../../core/subagents/persistence.ts";

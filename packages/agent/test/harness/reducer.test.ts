@@ -1,4 +1,4 @@
-import type { AssistantMessage, ToolResultMessage, Usage, UserMessage } from "@earendil-works/diffex-ai";
+import type { AssistantMessage, ToolResultMessage, Usage, UserMessage } from "@diffexai/diffex-ai";
 import { describe, expect, it } from "vitest";
 import {
 	type EffectiveLaneConfiguration,

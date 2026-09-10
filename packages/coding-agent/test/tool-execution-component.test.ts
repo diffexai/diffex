@@ -1,5 +1,5 @@
 import { join, resolve } from "node:path";
-import { getGlyphs, Text, type TUI } from "@earendil-works/diffex-tui";
+import { getGlyphs, Text, type TUI } from "@diffexai/diffex-tui";
 import { Type } from "typebox";
 import { beforeAll, describe, expect, test } from "vitest";
 import { getReadmePath } from "../src/config.ts";

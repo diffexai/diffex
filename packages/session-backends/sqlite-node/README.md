@@ -1,6 +1,6 @@
-# @earendil-works/diffex-session-backend-sqlite-node
+# @diffexai/diffex-session-backend-sqlite-node
 
-Node sqlite session backend for `@earendil-works/diffex-agent-core` sessions. Provides the
+Node sqlite session backend for `@diffexai/diffex-agent-core` sessions. Provides the
 `node:sqlite` adapter (`SqliteDatabase` implementation), SQLite session repository,
 migrations, materialized views, and optional FTS search.
 

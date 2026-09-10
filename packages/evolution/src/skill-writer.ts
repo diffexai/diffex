@@ -12,7 +12,7 @@ import {
 	type HarnessWorkspaceIdentity,
 	validateHarnessSkillContent,
 	validateHarnessSkillFilePath,
-} from "@earendil-works/diffex-harness-state";
+} from "@diffexai/diffex-harness-state";
 import type {
 	EvolutionArtifactProducer,
 	EvolutionArtifactReference,

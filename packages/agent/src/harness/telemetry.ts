@@ -10,7 +10,7 @@ import type {
 	TelemetrySchemaSpanStartAttributes,
 	TelemetrySchemaSpanUnion,
 	TelemetrySpan,
-} from "@earendil-works/diffex-telemetry";
+} from "@diffexai/diffex-telemetry";
 
 export type {
 	AttributeValue,
@@ -37,7 +37,7 @@ export type {
 	TelemetrySpanDefinition,
 	TelemetryStartAttributeDefinition,
 	TypedSpanStarter,
-} from "@earendil-works/diffex-telemetry";
+} from "@diffexai/diffex-telemetry";
 
 export const AI_TELEMETRY_SCHEMA = {
 	version: 1,

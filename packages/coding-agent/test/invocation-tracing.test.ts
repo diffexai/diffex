@@ -3,14 +3,14 @@ import { mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } 
 import { mkdir, open } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { fauxAssistantMessage } from "@earendil-works/diffex-ai";
+import { fauxAssistantMessage } from "@diffexai/diffex-ai";
 import {
 	readJsonlTraceFile,
 	type TraceFooterRecord,
 	type TraceRecord,
 	type TraceSessionAttachRecord,
 	type TraceSpanEventRecord,
-} from "@earendil-works/diffex-harness-trace";
+} from "@diffexai/diffex-harness-trace";
 import lockfile from "proper-lockfile";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { EvolutionScope } from "#evolution";
@@ -23,7 +23,7 @@ import { SessionManager } from "../src/core/session-manager.ts";
 const cliPath = resolve(__dirname, "../src/cli.ts");
 const tsconfigPath = resolve(__dirname, "../../../tsconfig.json");
 const FAUX_EXTENSION_SOURCE = `
-import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "@earendil-works/diffex-ai/compat";
+import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "@diffexai/diffex-ai/compat";
 
 const faux = registerFauxProvider();
 faux.setResponses([

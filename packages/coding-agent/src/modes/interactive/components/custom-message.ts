@@ -1,6 +1,6 @@
-import type { TextContent } from "@earendil-works/diffex-ai";
-import type { Component } from "@earendil-works/diffex-tui";
-import { Container, getGlyphs, Markdown, type MarkdownTheme, Spacer, Text } from "@earendil-works/diffex-tui";
+import type { TextContent } from "@diffexai/diffex-ai";
+import type { Component } from "@diffexai/diffex-tui";
+import { Container, getGlyphs, Markdown, type MarkdownTheme, Spacer, Text } from "@diffexai/diffex-tui";
 import type { MessageRenderer } from "../../../core/extensions/types.ts";
 import type { CustomMessage } from "../../../core/messages.ts";
 import { getMarkdownTheme, theme } from "../theme/theme.ts";

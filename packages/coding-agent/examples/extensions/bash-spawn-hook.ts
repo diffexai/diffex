@@ -7,8 +7,8 @@
  *   diffex -e ./bash-spawn-hook.ts
  */
 
-import type { ExtensionAPI } from "@earendil-works/diffex-coding-agent";
-import { createBashTool } from "@earendil-works/diffex-coding-agent";
+import type { ExtensionAPI } from "@diffexai/diffex";
+import { createBashTool } from "@diffexai/diffex";
 
 export default function (diffex: ExtensionAPI) {
 	const cwd = process.cwd();

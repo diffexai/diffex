@@ -1,7 +1,7 @@
 import { existsSync, lstatSync, mkdirSync, readdirSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
-import type { ThinkingLevel } from "@earendil-works/diffex-agent-core";
-import { uuidv7 } from "@earendil-works/diffex-ai";
+import type { ThinkingLevel } from "@diffexai/diffex-agent-core";
+import { uuidv7 } from "@diffexai/diffex-ai";
 import {
 	assertValidSessionId,
 	type CustomEntry,

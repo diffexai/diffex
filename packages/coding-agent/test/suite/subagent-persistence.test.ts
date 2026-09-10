@@ -11,9 +11,9 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import type { AgentTool } from "@earendil-works/diffex-agent-core";
-import { fauxAssistantMessage } from "@earendil-works/diffex-ai";
-import type { FauxModelDefinition } from "@earendil-works/diffex-ai/compat";
+import type { AgentTool } from "@diffexai/diffex-agent-core";
+import { fauxAssistantMessage } from "@diffexai/diffex-ai";
+import type { FauxModelDefinition } from "@diffexai/diffex-ai/compat";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentSession } from "../../src/core/agent-session.ts";
 import { createAgentSessionFromServices, createAgentSessionServices } from "../../src/core/agent-session-services.ts";

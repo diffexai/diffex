@@ -1,5 +1,5 @@
-import type { AgentMessage } from "@earendil-works/diffex-agent-core";
-import type { AssistantMessage, Model } from "@earendil-works/diffex-ai";
+import type { AgentMessage } from "@diffexai/diffex-agent-core";
+import type { AssistantMessage, Model } from "@diffexai/diffex-ai";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	type CompactionPreparation,
@@ -12,8 +12,8 @@ const { completeSimpleMock } = vi.hoisted(() => ({
 	completeSimpleMock: vi.fn(),
 }));
 
-vi.mock("@earendil-works/diffex-ai/compat", async (importOriginal) => {
-	const actual = await importOriginal<typeof import("@earendil-works/diffex-ai/compat")>();
+vi.mock("@diffexai/diffex-ai/compat", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("@diffexai/diffex-ai/compat")>();
 	return {
 		...actual,
 		completeSimple: completeSimpleMock,

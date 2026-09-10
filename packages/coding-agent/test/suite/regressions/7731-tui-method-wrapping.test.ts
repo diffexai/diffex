@@ -1,4 +1,4 @@
-import type { TUI } from "@earendil-works/diffex-tui";
+import type { TUI } from "@diffexai/diffex-tui";
 import { describe, expect, it, vi } from "vitest";
 import { createInteractiveTuiReference } from "../../../src/modes/interactive/interactive-mode.ts";
 

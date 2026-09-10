@@ -7,13 +7,13 @@ import * as fs from "node:fs";
 import { createRequire } from "node:module";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import * as _bundledDiffexAgentCore from "@earendil-works/diffex-agent-core";
-import type { Provider } from "@earendil-works/diffex-ai";
-import * as _bundledDiffexAiCompat from "@earendil-works/diffex-ai/compat";
-import * as _bundledDiffexAiOauth from "@earendil-works/diffex-ai/oauth";
-import * as _bundledDiffexAiProviders from "@earendil-works/diffex-ai/providers/all";
-import type { KeyId } from "@earendil-works/diffex-tui";
-import * as _bundledDiffexTui from "@earendil-works/diffex-tui";
+import * as _bundledDiffexAgentCore from "@diffexai/diffex-agent-core";
+import type { Provider } from "@diffexai/diffex-ai";
+import * as _bundledDiffexAiCompat from "@diffexai/diffex-ai/compat";
+import * as _bundledDiffexAiOauth from "@diffexai/diffex-ai/oauth";
+import * as _bundledDiffexAiProviders from "@diffexai/diffex-ai/providers/all";
+import type { KeyId } from "@diffexai/diffex-tui";
+import * as _bundledDiffexTui from "@diffexai/diffex-tui";
 import { createJiti } from "jiti/static";
 // Static imports of packages that extensions may use.
 // These MUST be static so Bun bundles them into the compiled binary.
@@ -23,7 +23,7 @@ import * as _bundledTypeboxCompile from "typebox/compile";
 import * as _bundledTypeboxValue from "typebox/value";
 import { CONFIG_DIR_NAME, getAgentDir, isBunBinary } from "../../config.ts";
 // NOTE: This import works because loader.ts exports are NOT re-exported from index.ts,
-// avoiding a circular dependency. Extensions can import from @earendil-works/diffex-coding-agent.
+// avoiding a circular dependency. Extensions can import from @diffexai/diffex.
 import * as _bundledDiffexCodingAgent from "../../index.ts";
 import { resolvePath } from "../../utils/paths.ts";
 import { readDiffexManifest } from "../diffex-manifest.ts";
@@ -54,16 +54,16 @@ const VIRTUAL_MODULES: Record<string, unknown> = {
 	"@sinclair/typebox": _bundledTypebox,
 	"@sinclair/typebox/compile": _bundledTypeboxCompile,
 	"@sinclair/typebox/value": _bundledTypeboxValue,
-	"@earendil-works/diffex-agent-core": _bundledDiffexAgentCore,
-	"@earendil-works/diffex-tui": _bundledDiffexTui,
+	"@diffexai/diffex-agent-core": _bundledDiffexAgentCore,
+	"@diffexai/diffex-tui": _bundledDiffexTui,
 	// Extensions resolve the Diffex AI root to the compat entrypoint (a strict
 	// superset of the core entrypoint): existing extensions using the old
 	// global API keep working at runtime until compat is removed.
-	"@earendil-works/diffex-ai": _bundledDiffexAiCompat,
-	"@earendil-works/diffex-ai/compat": _bundledDiffexAiCompat,
-	"@earendil-works/diffex-ai/oauth": _bundledDiffexAiOauth,
-	"@earendil-works/diffex-ai/providers/all": _bundledDiffexAiProviders,
-	"@earendil-works/diffex-coding-agent": _bundledDiffexCodingAgent,
+	"@diffexai/diffex-ai": _bundledDiffexAiCompat,
+	"@diffexai/diffex-ai/compat": _bundledDiffexAiCompat,
+	"@diffexai/diffex-ai/oauth": _bundledDiffexAiOauth,
+	"@diffexai/diffex-ai/providers/all": _bundledDiffexAiProviders,
+	"@diffexai/diffex": _bundledDiffexCodingAgent,
 	"@mariozechner/pi-agent-core": _bundledDiffexAgentCore,
 	"@mariozechner/pi-tui": _bundledDiffexTui,
 	"@mariozechner/pi-ai": _bundledDiffexAiCompat,
@@ -103,26 +103,26 @@ function getAliases(): Record<string, string> {
 	};
 
 	const diffexCodingAgentEntry = packageIndex;
-	const diffexAgentCoreEntry = resolveWorkspaceOrImport("agent/dist/index.js", "@earendil-works/diffex-agent-core");
-	const diffexTuiEntry = resolveWorkspaceOrImport("tui/dist/index.js", "@earendil-works/diffex-tui");
+	const diffexAgentCoreEntry = resolveWorkspaceOrImport("agent/dist/index.js", "@diffexai/diffex-agent-core");
+	const diffexTuiEntry = resolveWorkspaceOrImport("tui/dist/index.js", "@diffexai/diffex-tui");
 	// Extensions resolve the Diffex AI root to the compat entrypoint (a strict
 	// superset of the core entrypoint): existing extensions using the old
 	// global API keep working at runtime until compat is removed.
-	const diffexAiCompatEntry = resolveWorkspaceOrImport("ai/dist/compat.js", "@earendil-works/diffex-ai/compat");
-	const diffexAiOauthEntry = resolveWorkspaceOrImport("ai/dist/oauth.js", "@earendil-works/diffex-ai/oauth");
+	const diffexAiCompatEntry = resolveWorkspaceOrImport("ai/dist/compat.js", "@diffexai/diffex-ai/compat");
+	const diffexAiOauthEntry = resolveWorkspaceOrImport("ai/dist/oauth.js", "@diffexai/diffex-ai/oauth");
 	const diffexAiProvidersEntry = resolveWorkspaceOrImport(
 		"ai/dist/providers/all.js",
-		"@earendil-works/diffex-ai/providers/all",
+		"@diffexai/diffex-ai/providers/all",
 	);
 
 	_aliases = {
-		"@earendil-works/diffex-coding-agent": diffexCodingAgentEntry,
-		"@earendil-works/diffex-agent-core": diffexAgentCoreEntry,
-		"@earendil-works/diffex-tui": diffexTuiEntry,
-		"@earendil-works/diffex-ai/providers/all": diffexAiProvidersEntry,
-		"@earendil-works/diffex-ai/compat": diffexAiCompatEntry,
-		"@earendil-works/diffex-ai/oauth": diffexAiOauthEntry,
-		"@earendil-works/diffex-ai": diffexAiCompatEntry,
+		"@diffexai/diffex": diffexCodingAgentEntry,
+		"@diffexai/diffex-agent-core": diffexAgentCoreEntry,
+		"@diffexai/diffex-tui": diffexTuiEntry,
+		"@diffexai/diffex-ai/providers/all": diffexAiProvidersEntry,
+		"@diffexai/diffex-ai/compat": diffexAiCompatEntry,
+		"@diffexai/diffex-ai/oauth": diffexAiOauthEntry,
+		"@diffexai/diffex-ai": diffexAiCompatEntry,
 		"@mariozechner/pi-coding-agent": diffexCodingAgentEntry,
 		"@mariozechner/pi-agent-core": diffexAgentCoreEntry,
 		"@mariozechner/pi-tui": diffexTuiEntry,

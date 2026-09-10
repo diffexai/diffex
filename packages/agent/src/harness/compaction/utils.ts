@@ -1,4 +1,4 @@
-import { contentText, type Message } from "@earendil-works/diffex-ai";
+import { contentText, type Message } from "@diffexai/diffex-ai";
 import type { AgentMessage } from "../../types.ts";
 
 /** File paths touched by a session branch or compaction range. */

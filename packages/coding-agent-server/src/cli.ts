@@ -2,8 +2,8 @@
 
 import { timingSafeEqual } from "node:crypto";
 import { join } from "node:path";
-import { ModelRuntime } from "@earendil-works/diffex-coding-agent";
-import { createWebSocketServer } from "@earendil-works/diffex-server/websocket";
+import { ModelRuntime } from "@diffexai/diffex";
+import { createWebSocketServer } from "@diffexai/diffex-server/websocket";
 import { createHostedCodingAgentService } from "./service.ts";
 import { createDurableUsageReporter } from "./usage-reporter.ts";
 

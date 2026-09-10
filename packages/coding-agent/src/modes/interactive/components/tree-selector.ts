@@ -14,7 +14,7 @@ import {
 	UNSELECTED_LIST_PREFIX,
 	visibleWidth,
 	wrapTextWithAnsi,
-} from "@earendil-works/diffex-tui";
+} from "@diffexai/diffex-tui";
 import type { SessionTreeNode } from "../../../core/session-manager.ts";
 import { theme } from "../theme/theme.ts";
 import { DynamicBorder } from "./dynamic-border.ts";

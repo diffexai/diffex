@@ -1,6 +1,6 @@
-import type { PrivateContinuation, StreamFn } from "@earendil-works/diffex-agent-core";
-import type { Api, AssistantMessage, Context, Model, Tool } from "@earendil-works/diffex-ai";
-import { NOOP_TELEMETRY_CONTEXT } from "@earendil-works/diffex-telemetry";
+import type { PrivateContinuation, StreamFn } from "@diffexai/diffex-agent-core";
+import type { Api, AssistantMessage, Context, Model, Tool } from "@diffexai/diffex-ai";
+import { NOOP_TELEMETRY_CONTEXT } from "@diffexai/diffex-telemetry";
 
 /** One private continuation, never routed through agent events or extension-instrumented transport. */
 export function createPrivateReportContinuation(options: {

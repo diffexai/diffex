@@ -9,7 +9,7 @@ import {
 	truncateToWidth,
 	UNSELECTED_LIST_PREFIX,
 	visibleWidth,
-} from "@earendil-works/diffex-tui";
+} from "@diffexai/diffex-tui";
 import { theme } from "../theme/theme.ts";
 
 interface UserMessageItem {

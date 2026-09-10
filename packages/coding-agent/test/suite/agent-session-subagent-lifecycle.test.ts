@@ -1,6 +1,6 @@
-import type { AgentToolResult } from "@earendil-works/diffex-agent-core";
-import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/diffex-ai";
-import { type FauxProviderRegistration, registerFauxProvider } from "@earendil-works/diffex-ai/compat";
+import type { AgentToolResult } from "@diffexai/diffex-agent-core";
+import { fauxAssistantMessage, fauxToolCall } from "@diffexai/diffex-ai";
+import { type FauxProviderRegistration, registerFauxProvider } from "@diffexai/diffex-ai/compat";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentSession } from "../../src/core/agent-session.ts";

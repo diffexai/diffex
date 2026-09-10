@@ -1,8 +1,8 @@
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AgentTool } from "@earendil-works/diffex-agent-core";
-import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/diffex-ai";
+import type { AgentTool } from "@diffexai/diffex-agent-core";
+import { fauxAssistantMessage, fauxToolCall } from "@diffexai/diffex-ai";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {

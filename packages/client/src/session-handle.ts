@@ -5,7 +5,7 @@ import type {
 	ServerEvent,
 	SessionSnapshot,
 	ThinkingLevel,
-} from "@earendil-works/diffex-protocol";
+} from "@diffexai/diffex-protocol";
 import type { Unsubscribe } from "./types.ts";
 
 type SessionCommand = Extract<Command, { sessionId: string }>;

@@ -8,7 +8,7 @@ export default mergeConfig(
 			include: ["test/**/*.test.ts"],
 		},
 		resolve: {
-			alias: [{ find: /^@earendil-works\/diffex-coding-agent$/, replacement: workspaceSourcePaths.codingAgentIndex }],
+			alias: [{ find: /^@diffexai\/diffex$/, replacement: workspaceSourcePaths.codingAgentIndex }],
 		},
 	}),
 );

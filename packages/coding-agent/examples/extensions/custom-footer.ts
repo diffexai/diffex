@@ -8,9 +8,9 @@
  * Token stats come from ctx.sessionManager/ctx.model (already accessible).
  */
 
-import type { AssistantMessage } from "@earendil-works/diffex-ai";
-import type { ExtensionAPI } from "@earendil-works/diffex-coding-agent";
-import { truncateToWidth, visibleWidth } from "@earendil-works/diffex-tui";
+import type { ExtensionAPI } from "@diffexai/diffex";
+import type { AssistantMessage } from "@diffexai/diffex-ai";
+import { truncateToWidth, visibleWidth } from "@diffexai/diffex-tui";
 
 export default function (diffex: ExtensionAPI) {
 	let enabled = false;

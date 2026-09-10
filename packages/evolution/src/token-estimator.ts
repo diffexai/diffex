@@ -1,4 +1,4 @@
-import type { MaterializedInvocation } from "@earendil-works/diffex-harness-trace";
+import type { MaterializedInvocation } from "@diffexai/diffex-harness-trace";
 import { serializeEvolutionValue } from "./provenance.ts";
 
 export const EVOLUTION_TOKEN_ESTIMATOR_VERSION = "canonical-json-utf8-v1" as const;

@@ -1,7 +1,7 @@
 import { crc32, deflateSync } from "node:zlib";
-import type { AgentTool } from "@earendil-works/diffex-agent-core";
-import type { ImageContent } from "@earendil-works/diffex-ai";
-import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/diffex-ai";
+import type { AgentTool } from "@diffexai/diffex-agent-core";
+import type { ImageContent } from "@diffexai/diffex-ai";
+import { fauxAssistantMessage, fauxToolCall } from "@diffexai/diffex-ai";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it } from "vitest";
 import { createHarness, type Harness } from "./harness.ts";

@@ -1,6 +1,6 @@
 import { join } from "node:path";
-import { createAssistantMessageEventStream, fauxAssistantMessage, fauxToolCall } from "@earendil-works/diffex-ai";
-import { computeHarnessSkillId, HarnessStateStore } from "@earendil-works/diffex-harness-state";
+import { createAssistantMessageEventStream, fauxAssistantMessage, fauxToolCall } from "@diffexai/diffex-ai";
+import { computeHarnessSkillId, HarnessStateStore } from "@diffexai/diffex-harness-state";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DeterministicSkillLifecycleObserver, FileEvolutionPersistence, StructuredSkillCurator } from "#evolution";
 import { createCodingAgentEvolutionRuntime, EvolutionRuntimeCoordinator } from "../../../src/core/evolution-runtime.ts";

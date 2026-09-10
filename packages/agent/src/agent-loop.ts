@@ -10,8 +10,8 @@ import {
 	type ToolResultMessage,
 	uuidv7,
 	validateToolArguments,
-} from "@earendil-works/diffex-ai";
-import { NOOP_TELEMETRY_CONTEXT } from "@earendil-works/diffex-telemetry";
+} from "@diffexai/diffex-ai";
+import { NOOP_TELEMETRY_CONTEXT } from "@diffexai/diffex-telemetry";
 import {
 	type AgentRuntimeTelemetrySpan,
 	type AiTelemetrySpan,

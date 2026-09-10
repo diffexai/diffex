@@ -1,4 +1,4 @@
-import type { Entry, EntryOrder } from "@earendil-works/diffex-agent-core";
+import type { Entry, EntryOrder } from "@diffexai/diffex-agent-core";
 import { sql } from "../sql.ts";
 import type { SqliteDatabase } from "../types.ts";
 

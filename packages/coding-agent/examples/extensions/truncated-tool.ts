@@ -15,7 +15,7 @@
  */
 
 import { mkdtemp, writeFile } from "node:fs/promises";
-import type { ExtensionAPI } from "@earendil-works/diffex-coding-agent";
+import type { ExtensionAPI } from "@diffexai/diffex";
 import {
 	DEFAULT_MAX_BYTES,
 	DEFAULT_MAX_LINES,
@@ -23,8 +23,8 @@ import {
 	type TruncationResult,
 	truncateHead,
 	withFileMutationQueue,
-} from "@earendil-works/diffex-coding-agent";
-import { Text } from "@earendil-works/diffex-tui";
+} from "@diffexai/diffex";
+import { Text } from "@diffexai/diffex-tui";
 import { execSync } from "child_process";
 import { tmpdir } from "os";
 import { join } from "path";

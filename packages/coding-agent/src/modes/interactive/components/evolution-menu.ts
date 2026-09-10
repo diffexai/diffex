@@ -8,7 +8,7 @@ import {
 	Text,
 	TruncatedText,
 	UNSELECTED_LIST_PREFIX,
-} from "@earendil-works/diffex-tui";
+} from "@diffexai/diffex-tui";
 import { diffLines } from "diff";
 import type {
 	EvolutionHarnessVersionInfo,

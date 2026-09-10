@@ -5,7 +5,7 @@
  * Demonstrates how extensions can use ctx.shutdown() to exit Diffex cleanly.
  */
 
-import type { ExtensionAPI } from "@earendil-works/diffex-coding-agent";
+import type { ExtensionAPI } from "@diffexai/diffex";
 import { Type } from "typebox";
 
 export default function (diffex: ExtensionAPI) {

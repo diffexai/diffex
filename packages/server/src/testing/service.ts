@@ -6,7 +6,7 @@ import type {
 	SessionSnapshot,
 	ThinkingLevel,
 	TranscriptProgress,
-} from "@earendil-works/diffex-protocol";
+} from "@diffexai/diffex-protocol";
 import { DiffexServerError } from "../errors.ts";
 import type {
 	CreateSessionOptions,

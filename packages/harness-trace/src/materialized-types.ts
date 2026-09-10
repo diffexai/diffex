@@ -1,4 +1,4 @@
-import type { SpanAttributes, SpanStatus } from "@earendil-works/diffex-telemetry";
+import type { SpanAttributes, SpanStatus } from "@diffexai/diffex-telemetry";
 import type {
 	TraceHealth,
 	TraceProducer,

@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 import type { Socket } from "node:net";
-import { encodeServerMessage, type ServerHelloError, ServerMessageDecoder } from "@earendil-works/diffex-protocol";
+import { encodeServerMessage, type ServerHelloError, ServerMessageDecoder } from "@diffexai/diffex-protocol";
 import { expect, test, vi } from "vitest";
 import { UnixByteConnection } from "../src/transports/unix/listener.ts";
 

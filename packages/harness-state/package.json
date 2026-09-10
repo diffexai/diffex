@@ -1,5 +1,5 @@
 {
-	"name": "@earendil-works/diffex-harness-state",
+	"name": "@diffexai/diffex-harness-state",
 	"version": "0.2.0",
 	"description": "Persistent harness state schema and bundle storage for Diffex",
 	"type": "module",
@@ -26,7 +26,7 @@
 		"harness",
 		"versioning"
 	],
-	"author": "Earendil Works",
+	"author": "DiffexAI",
 	"license": "MIT",
 	"repository": {
 		"type": "git",

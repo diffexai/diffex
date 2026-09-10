@@ -1,4 +1,4 @@
-import { visibleWidth } from "@earendil-works/diffex-tui";
+import { visibleWidth } from "@diffexai/diffex-tui";
 import { beforeAll, describe, expect, it } from "vitest";
 import type { SubagentSummary } from "../src/core/subagents/types.ts";
 import { SubagentsComponent } from "../src/modes/interactive/components/subagents.ts";

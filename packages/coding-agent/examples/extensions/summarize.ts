@@ -1,7 +1,7 @@
-import { uuidv7 } from "@earendil-works/diffex-ai";
-import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/diffex-coding-agent";
-import { DynamicBorder, getMarkdownTheme } from "@earendil-works/diffex-coding-agent";
-import { Container, Markdown, matchesKey, Text } from "@earendil-works/diffex-tui";
+import type { ExtensionAPI, ExtensionCommandContext } from "@diffexai/diffex";
+import { DynamicBorder, getMarkdownTheme } from "@diffexai/diffex";
+import { uuidv7 } from "@diffexai/diffex-ai";
+import { Container, Markdown, matchesKey, Text } from "@diffexai/diffex-tui";
 
 type ContentBlock = {
 	type?: string;

@@ -1,5 +1,5 @@
-import type { ThinkingLevel } from "@earendil-works/diffex-agent-core";
-import { type Component, Container, setKeybindings, type TUI, visibleWidth } from "@earendil-works/diffex-tui";
+import type { ThinkingLevel } from "@diffexai/diffex-agent-core";
+import { type Component, Container, setKeybindings, type TUI, visibleWidth } from "@diffexai/diffex-tui";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { KeybindingsManager } from "../src/core/keybindings.ts";
 import { CustomEditor } from "../src/modes/interactive/components/custom-editor.ts";

@@ -1,5 +1,5 @@
-import { NOOP_TELEMETRY_CONTEXT, type TelemetryContext, uuidv7 } from "@earendil-works/diffex-agent-core";
-import type { AssistantMessage } from "@earendil-works/diffex-ai";
+import { NOOP_TELEMETRY_CONTEXT, type TelemetryContext, uuidv7 } from "@diffexai/diffex-agent-core";
+import type { AssistantMessage } from "@diffexai/diffex-ai";
 import type { AgentSession } from "../agent-session.ts";
 import type { ToolDefinition } from "../extensions/types.ts";
 import { startCodingAgentSpan } from "../telemetry.ts";

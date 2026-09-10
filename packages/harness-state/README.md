@@ -1,4 +1,4 @@
-# `@earendil-works/diffex-harness-state`
+# `@diffexai/diffex-harness-state`
 
 Persistent, content-addressed harness revisions for Diffex.
 

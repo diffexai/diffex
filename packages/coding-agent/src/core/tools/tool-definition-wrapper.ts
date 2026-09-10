@@ -1,4 +1,4 @@
-import type { AgentTool } from "@earendil-works/diffex-agent-core";
+import type { AgentTool } from "@diffexai/diffex-agent-core";
 import type { ExtensionContext, ToolDefinition } from "../extensions/types.ts";
 
 /** Wrap a ToolDefinition into an AgentTool for the core runtime. */

@@ -1,4 +1,4 @@
-import { getGlyphs } from "@earendil-works/diffex-tui";
+import { getGlyphs } from "@diffexai/diffex-tui";
 import { mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";

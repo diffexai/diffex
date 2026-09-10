@@ -1,7 +1,7 @@
 import { lstat, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { encodeClientMessage, encodeFrame, PROTOCOL_VERSION } from "@earendil-works/diffex-protocol";
+import { encodeClientMessage, encodeFrame, PROTOCOL_VERSION } from "@diffexai/diffex-protocol";
 import { afterEach, describe, expect, test } from "vitest";
 import { type DiffexServer, DiffexServerError, InternalServerError, NotImplementedError } from "../src/index.ts";
 import { connectUnixTestClient, Deferred, type ProtocolTestClient, TestServerService } from "../src/testing/index.ts";

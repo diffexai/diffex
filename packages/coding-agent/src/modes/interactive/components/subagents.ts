@@ -1,4 +1,4 @@
-import { type Component, truncateToWidth } from "@earendil-works/diffex-tui";
+import { type Component, truncateToWidth } from "@diffexai/diffex-tui";
 import type { SubagentStatus, SubagentSummary } from "../../../core/subagents/types.ts";
 import { type ThemeColor, theme } from "../theme/theme.ts";
 

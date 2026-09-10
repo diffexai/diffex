@@ -1,20 +1,20 @@
 {
-	"name": "@earendil-works/diffex-coding-agent",
+	"name": "@diffexai/diffex",
 	"version": "0.2.0",
 	"lockfileVersion": 3,
 	"requires": true,
 	"packages": {
 		"": {
-			"name": "@earendil-works/diffex-coding-agent",
+			"name": "@diffexai/diffex",
 			"version": "0.2.0",
 			"license": "MIT",
 			"dependencies": {
-				"@earendil-works/diffex-agent-core": "^0.2.0",
-				"@earendil-works/diffex-ai": "^0.2.0",
-				"@earendil-works/diffex-client": "^0.2.0",
-				"@earendil-works/diffex-harness-state": "^0.2.0",
-				"@earendil-works/diffex-protocol": "^0.2.0",
-				"@earendil-works/diffex-tui": "^0.2.0",
+				"@diffexai/diffex-agent-core": "^0.2.0",
+				"@diffexai/diffex-ai": "^0.2.0",
+				"@diffexai/diffex-client": "^0.2.0",
+				"@diffexai/diffex-harness-state": "^0.2.0",
+				"@diffexai/diffex-protocol": "^0.2.0",
+				"@diffexai/diffex-tui": "^0.2.0",
 				"@napi-rs/keyring": "1.3.0",
 				"@silvia-odwyer/photon-node": "0.3.4",
 				"chalk": "5.6.2",
@@ -478,13 +478,13 @@
 				"node": ">=6.9.0"
 			}
 		},
-		"node_modules/@earendil-works/diffex-agent-core": {
+		"node_modules/@diffexai/diffex-agent-core": {
 			"version": "0.2.0",
-			"resolved": "https://registry.npmjs.org/@earendil-works/diffex-agent-core/-/diffex-agent-core-0.2.0.tgz",
+			"resolved": "https://registry.npmjs.org/@diffexai/diffex-agent-core/-/diffex-agent-core-0.2.0.tgz",
 			"license": "MIT",
 			"dependencies": {
-				"@earendil-works/diffex-ai": "^0.2.0",
-				"@earendil-works/diffex-telemetry": "^0.2.0",
+				"@diffexai/diffex-ai": "^0.2.0",
+				"@diffexai/diffex-telemetry": "^0.2.0",
 				"diff": "8.0.4",
 				"ignore": "7.0.5",
 				"typebox": "1.3.7",
@@ -494,14 +494,14 @@
 				"node": ">=22.19.0"
 			}
 		},
-		"node_modules/@earendil-works/diffex-ai": {
+		"node_modules/@diffexai/diffex-ai": {
 			"version": "0.2.0",
-			"resolved": "https://registry.npmjs.org/@earendil-works/diffex-ai/-/diffex-ai-0.2.0.tgz",
+			"resolved": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-0.2.0.tgz",
 			"license": "MIT",
 			"dependencies": {
 				"@anthropic-ai/sdk": "0.91.1",
 				"@aws-sdk/client-bedrock-runtime": "3.1048.0",
-				"@earendil-works/diffex-telemetry": "^0.2.0",
+				"@diffexai/diffex-telemetry": "^0.2.0",
 				"@google/genai": "1.52.0",
 				"@mistralai/mistralai": "2.2.6",
 				"@opentelemetry/api": "1.9.0",
@@ -519,20 +519,20 @@
 				"node": ">=22.19.0"
 			}
 		},
-		"node_modules/@earendil-works/diffex-client": {
+		"node_modules/@diffexai/diffex-client": {
 			"version": "0.2.0",
-			"resolved": "https://registry.npmjs.org/@earendil-works/diffex-client/-/diffex-client-0.2.0.tgz",
+			"resolved": "https://registry.npmjs.org/@diffexai/diffex-client/-/diffex-client-0.2.0.tgz",
 			"license": "MIT",
 			"dependencies": {
-				"@earendil-works/diffex-protocol": "^0.2.0"
+				"@diffexai/diffex-protocol": "^0.2.0"
 			},
 			"engines": {
 				"node": ">=22.19.0"
 			}
 		},
-		"node_modules/@earendil-works/diffex-harness-state": {
+		"node_modules/@diffexai/diffex-harness-state": {
 			"version": "0.2.0",
-			"resolved": "https://registry.npmjs.org/@earendil-works/diffex-harness-state/-/diffex-harness-state-0.2.0.tgz",
+			"resolved": "https://registry.npmjs.org/@diffexai/diffex-harness-state/-/diffex-harness-state-0.2.0.tgz",
 			"license": "MIT",
 			"dependencies": {
 				"proper-lockfile": "4.1.2",
@@ -543,9 +543,9 @@
 				"node": ">=22.19.0"
 			}
 		},
-		"node_modules/@earendil-works/diffex-protocol": {
+		"node_modules/@diffexai/diffex-protocol": {
 			"version": "0.2.0",
-			"resolved": "https://registry.npmjs.org/@earendil-works/diffex-protocol/-/diffex-protocol-0.2.0.tgz",
+			"resolved": "https://registry.npmjs.org/@diffexai/diffex-protocol/-/diffex-protocol-0.2.0.tgz",
 			"license": "MIT",
 			"dependencies": {
 				"typebox": "1.3.7"
@@ -554,17 +554,17 @@
 				"node": ">=22.19.0"
 			}
 		},
-		"node_modules/@earendil-works/diffex-telemetry": {
+		"node_modules/@diffexai/diffex-telemetry": {
 			"version": "0.2.0",
-			"resolved": "https://registry.npmjs.org/@earendil-works/diffex-telemetry/-/diffex-telemetry-0.2.0.tgz",
+			"resolved": "https://registry.npmjs.org/@diffexai/diffex-telemetry/-/diffex-telemetry-0.2.0.tgz",
 			"license": "MIT",
 			"engines": {
 				"node": ">=22.19.0"
 			}
 		},
-		"node_modules/@earendil-works/diffex-tui": {
+		"node_modules/@diffexai/diffex-tui": {
 			"version": "0.2.0",
-			"resolved": "https://registry.npmjs.org/@earendil-works/diffex-tui/-/diffex-tui-0.2.0.tgz",
+			"resolved": "https://registry.npmjs.org/@diffexai/diffex-tui/-/diffex-tui-0.2.0.tgz",
 			"license": "MIT",
 			"dependencies": {
 				"get-east-asian-width": "1.6.0",

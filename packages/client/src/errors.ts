@@ -1,4 +1,4 @@
-import type { JsonValue, ProtocolError, ProtocolErrorCode } from "@earendil-works/diffex-protocol";
+import type { JsonValue, ProtocolError, ProtocolErrorCode } from "@diffexai/diffex-protocol";
 
 export class DiffexServerError extends Error {
 	readonly code: ProtocolErrorCode;

@@ -1,5 +1,5 @@
-import type { AgentTool, ThinkingLevel } from "@earendil-works/diffex-agent-core";
-import { fauxAssistantMessage, fauxToolCall, type Model, type Usage } from "@earendil-works/diffex-ai";
+import type { AgentTool, ThinkingLevel } from "@diffexai/diffex-agent-core";
+import { fauxAssistantMessage, fauxToolCall, type Model, type Usage } from "@diffexai/diffex-ai";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it } from "vitest";
 import type { BuildSystemPromptOptions, ExtensionAPI } from "../../src/index.ts";

@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { CURSOR_MARKER, getCapabilities, getGlyphs, setKeybindings, Text } from "@earendil-works/diffex-tui";
+import { CURSOR_MARKER, getCapabilities, getGlyphs, setKeybindings, Text } from "@diffexai/diffex-tui";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { KeybindingsManager } from "../src/core/keybindings.ts";
 import { SettingsManager } from "../src/core/settings-manager.ts";

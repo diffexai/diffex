@@ -1,4 +1,4 @@
-import { PROTOCOL_VERSION } from "@earendil-works/diffex-protocol";
+import { PROTOCOL_VERSION } from "@diffexai/diffex-protocol";
 import { describe, expect, test } from "vitest";
 import { DiffexClient, DiffexClientDisposedError } from "../src/index.ts";
 import { attachSession, baseServerSnapshot, connectClient, MemoryByteServer, sessionSnapshot } from "./support.ts";

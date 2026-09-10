@@ -12,7 +12,7 @@ import {
 	DefaultResourceLoader,
 	getAgentDir,
 	SessionManager,
-} from "@earendil-works/diffex-coding-agent";
+} from "@diffexai/diffex";
 
 // Or define custom skills inline
 const customSkill = createSkill({

@@ -16,7 +16,7 @@ See [examples/sdk/](../examples/sdk/) for working examples from minimal to full 
 ## Quick Start
 
 ```typescript
-import { createAgentSession, ModelRuntime, SessionManager } from "@earendil-works/diffex-coding-agent";
+import { createAgentSession, ModelRuntime, SessionManager } from "@diffexai/diffex";
 
 const modelRuntime = await ModelRuntime.create();
 const { session } = await createAgentSession({
@@ -37,7 +37,7 @@ await session.dispose();
 ## Installation
 
 ```bash
-npm install @earendil-works/diffex-coding-agent
+npm install @diffexai/diffex
 ```
 
 The SDK is included in the main package. No separate installation needed.
@@ -51,7 +51,7 @@ The main factory function for a single `AgentSession`.
 `createAgentSession()` uses a `ResourceLoader` to supply extensions, skills, prompt templates, themes, and context files. If you do not provide one, it uses `DefaultResourceLoader` with standard discovery.
 
 ```typescript
-import { createAgentSession, SessionManager } from "@earendil-works/diffex-coding-agent";
+import { createAgentSession, SessionManager } from "@diffexai/diffex";
 
 // Minimal: defaults with DefaultResourceLoader
 const { session } = await createAgentSession();
@@ -132,7 +132,7 @@ import {
   createAgentSessionServices,
   getAgentDir,
   SessionManager,
-} from "@earendil-works/diffex-coding-agent";
+} from "@diffexai/diffex";
 
 const createRuntime: CreateAgentSessionRuntimeFactory = async ({ cwd, sessionManager, sessionStartEvent }) => {
   const services = await createAgentSessionServices({ cwd });
@@ -250,7 +250,7 @@ Both `steer()` and `followUp()` expand file-based prompt templates but error on 
 
 ### Agent and AgentState
 
-The `Agent` class (from `@earendil-works/diffex-agent-core`) handles the core LLM interaction. Access it via `session.agent`.
+The `Agent` class (from `@diffexai/diffex-agent-core`) handles the core LLM interaction. Access it via `session.agent`.
 
 ```typescript
 // Access current state
@@ -397,8 +397,8 @@ When you pass a custom `ResourceLoader`, `cwd` and `agentDir` no longer control 
 ### Model
 
 ```typescript
-import { getModel } from "@earendil-works/diffex-ai";
-import { ModelRuntime } from "@earendil-works/diffex-coding-agent";
+import { getModel } from "@diffexai/diffex-ai";
+import { ModelRuntime } from "@diffexai/diffex";
 
 const modelRuntime = await ModelRuntime.create();
 
@@ -438,7 +438,7 @@ To match CLI model parsing, use the exported resolver helpers:
 import {
   resolveCliModel,
   resolveModelScopeWithDiagnostics,
-} from "@earendil-works/diffex-coding-agent";
+} from "@diffexai/diffex";
 
 const cliModel = resolveCliModel({
   cliModel: "anthropic/claude-opus-4-5:high",
@@ -469,8 +469,8 @@ Authentication resolution priority (handled by `ModelRuntime`):
 4. Fallback resolver (for custom provider keys from `models.json`)
 
 ```typescript
-import { InMemoryCredentialStore } from "@earendil-works/diffex-ai";
-import { createAgentSession, ModelRuntime } from "@earendil-works/diffex-coding-agent";
+import { InMemoryCredentialStore } from "@diffexai/diffex-ai";
+import { createAgentSession, ModelRuntime } from "@diffexai/diffex";
 
 // Default: uses ~/.diffex/agent/auth.json and ~/.diffex/agent/models.json
 const modelRuntime = await ModelRuntime.create();
@@ -524,7 +524,7 @@ A failed or timed-out network refresh does not undo a successful credential oper
 Use a `ResourceLoader` to override the system prompt:
 
 ```typescript
-import { createAgentSession, DefaultResourceLoader } from "@earendil-works/diffex-coding-agent";
+import { createAgentSession, DefaultResourceLoader } from "@diffexai/diffex";
 
 const loader = new DefaultResourceLoader({
   systemPromptOverride: () => "You are a helpful assistant.",
@@ -587,7 +587,7 @@ The `edit` tool returns `details.diff` for Diffex's TUI display and `details.pat
 The `update_plan` tool returns `details.plan` with the full ordered checklist snapshot.
 
 ```typescript
-import { createAgentSession } from "@earendil-works/diffex-coding-agent";
+import { createAgentSession } from "@diffexai/diffex";
 
 // Read-only mode
 const { session } = await createAgentSession({
@@ -625,7 +625,7 @@ const { session } = await createAgentSession({
 When you pass a custom `cwd`, `createAgentSession()` builds selected built-in tools for that cwd.
 
 ```typescript
-import { createAgentSession, SessionManager } from "@earendil-works/diffex-coding-agent";
+import { createAgentSession, SessionManager } from "@diffexai/diffex";
 
 const cwd = "/path/to/project";
 
@@ -649,7 +649,7 @@ const { session } = await createAgentSession({
 
 ```typescript
 import { Type } from "typebox";
-import { createAgentSession, defineTool } from "@earendil-works/diffex-coding-agent";
+import { createAgentSession, defineTool } from "@diffexai/diffex";
 
 // Inline custom tool
 const myTool = defineTool({
@@ -684,7 +684,7 @@ If you pass `tools`, include each custom or extension tool name you want enabled
 Extensions are loaded by the `ResourceLoader`. `DefaultResourceLoader` discovers extensions from `~/.diffex/agent/extensions/`, `.diffex/extensions/`, and settings.json extension sources.
 
 ```typescript
-import { createAgentSession, DefaultResourceLoader } from "@earendil-works/diffex-coding-agent";
+import { createAgentSession, DefaultResourceLoader } from "@diffexai/diffex";
 
 const loader = new DefaultResourceLoader({
   additionalExtensionPaths: ["/path/to/my-extension.ts"],
@@ -706,7 +706,7 @@ Extensions can register tools, subscribe to events, add commands, and more. See 
 **Named inline extensions:** By default, inline factories display as `<inline:1>`, `<inline:2>`, etc. in the startup Extensions list. To show a descriptive name instead, wrap the factory:
 
 ```typescript
-import type { InlineExtension } from "@earendil-works/diffex-coding-agent";
+import type { InlineExtension } from "@diffexai/diffex";
 
 const myProvider: InlineExtension = {
   name: "my-provider",
@@ -727,7 +727,7 @@ This displays as `<inline:my-provider>` instead of `<inline:1>`. Bare factory fu
 **Event Bus:** Extensions can communicate via `diffex.events`. Pass a shared `eventBus` to `DefaultResourceLoader` if you need to emit or listen from outside:
 
 ```typescript
-import { createEventBus, DefaultResourceLoader } from "@earendil-works/diffex-coding-agent";
+import { createEventBus, DefaultResourceLoader } from "@diffexai/diffex";
 
 const eventBus = createEventBus();
 const loader = new DefaultResourceLoader({
@@ -747,7 +747,7 @@ import {
   createAgentSession,
   DefaultResourceLoader,
   type Skill,
-} from "@earendil-works/diffex-coding-agent";
+} from "@diffexai/diffex";
 
 const customSkill: Skill = {
   name: "my-skill",
@@ -800,7 +800,7 @@ See [Harness Evolution](evolution.md) and [Skills](skills.md).
 ### Context Files
 
 ```typescript
-import { createAgentSession, DefaultResourceLoader } from "@earendil-works/diffex-coding-agent";
+import { createAgentSession, DefaultResourceLoader } from "@diffexai/diffex";
 
 const loader = new DefaultResourceLoader({
   agentsFilesOverride: (current) => ({
@@ -824,7 +824,7 @@ import {
   createAgentSession,
   DefaultResourceLoader,
   type PromptTemplate,
-} from "@earendil-works/diffex-coding-agent";
+} from "@diffexai/diffex";
 
 const customCommand: PromptTemplate = {
   name: "deploy",
@@ -859,7 +859,7 @@ import {
   createAgentSessionServices,
   getAgentDir,
   SessionManager,
-} from "@earendil-works/diffex-coding-agent";
+} from "@diffexai/diffex";
 
 // In-memory (no persistence)
 const { session } = await createAgentSession({
@@ -953,7 +953,7 @@ sm.createBranchedSession(leafId);       // Extract path to new file
 ### Settings Management
 
 ```typescript
-import { createAgentSession, SettingsManager, SessionManager } from "@earendil-works/diffex-coding-agent";
+import { createAgentSession, SettingsManager, SessionManager } from "@diffexai/diffex";
 
 // Default: loads from files (global + project merged)
 const { session } = await createAgentSession({
@@ -1009,7 +1009,7 @@ Use `DefaultResourceLoader` to discover extensions, skills, prompts, themes, and
 import {
   DefaultResourceLoader,
   getAgentDir,
-} from "@earendil-works/diffex-coding-agent";
+} from "@diffexai/diffex";
 
 const loader = new DefaultResourceLoader({
   cwd,
@@ -1029,7 +1029,7 @@ const contextFiles = loader.getAgentsFiles().agentsFiles;
 Use `createSkill()` for SDK-provided skills so the same identity and version rules apply:
 
 ```typescript
-import { createSkill, createSyntheticSourceInfo } from "@earendil-works/diffex-coding-agent";
+import { createSkill, createSyntheticSourceInfo } from "@diffexai/diffex";
 
 const skill = createSkill({
   name: "review",
@@ -1067,7 +1067,7 @@ interface LoadExtensionsResult {
 ## Complete Example
 
 ```typescript
-import { getModel } from "@earendil-works/diffex-ai";
+import { getModel } from "@diffexai/diffex-ai";
 import { Type } from "typebox";
 import {
   createAgentSession,
@@ -1076,7 +1076,7 @@ import {
   ModelRuntime,
   SessionManager,
   SettingsManager,
-} from "@earendil-works/diffex-coding-agent";
+} from "@diffexai/diffex";
 
 const modelRuntime = await ModelRuntime.create({
   authPath: "/custom/agent/auth.json",
@@ -1157,7 +1157,7 @@ import {
   getAgentDir,
   InteractiveMode,
   SessionManager,
-} from "@earendil-works/diffex-coding-agent";
+} from "@diffexai/diffex";
 
 const createRuntime: CreateAgentSessionRuntimeFactory = async ({ cwd, sessionManager, sessionStartEvent }) => {
   const services = await createAgentSessionServices({ cwd });
@@ -1197,7 +1197,7 @@ import {
   getAgentDir,
   runPrintMode,
   SessionManager,
-} from "@earendil-works/diffex-coding-agent";
+} from "@diffexai/diffex";
 
 const createRuntime: CreateAgentSessionRuntimeFactory = async ({ cwd, sessionManager, sessionStartEvent }) => {
   const services = await createAgentSessionServices({ cwd });
@@ -1234,7 +1234,7 @@ import {
   getAgentDir,
   runRpcMode,
   SessionManager,
-} from "@earendil-works/diffex-coding-agent";
+} from "@diffexai/diffex";
 
 const createRuntime: CreateAgentSessionRuntimeFactory = async ({ cwd, sessionManager, sessionStartEvent }) => {
   const services = await createAgentSessionServices({ cwd });

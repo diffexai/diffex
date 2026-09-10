@@ -1,4 +1,4 @@
-import type { MaterializedInvocation } from "@earendil-works/diffex-harness-trace";
+import type { MaterializedInvocation } from "@diffexai/diffex-harness-trace";
 import type {
 	CounterReport,
 	DeferredSkillCandidateFinding,

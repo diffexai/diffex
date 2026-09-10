@@ -14,7 +14,7 @@ import {
 	type ServerHello,
 	type ServerHelloError,
 	type ServerMessage,
-} from "@earendil-works/diffex-protocol";
+} from "@diffexai/diffex-protocol";
 import {
 	type ByteConnection,
 	type ByteConnectionHandler,

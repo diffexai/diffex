@@ -2,8 +2,8 @@
  * Shared utilities for compaction and branch summarization.
  */
 
-import type { AgentMessage } from "@earendil-works/diffex-agent-core";
-import { contentText, type Message } from "@earendil-works/diffex-ai";
+import type { AgentMessage } from "@diffexai/diffex-agent-core";
+import { contentText, type Message } from "@diffexai/diffex-ai";
 
 // ============================================================================
 // File Operation Tracking

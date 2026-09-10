@@ -1,6 +1,6 @@
-import type { AgentMessage } from "@earendil-works/diffex-agent-core";
-import type { AssistantMessage, ToolResultMessage, Usage } from "@earendil-works/diffex-ai";
-import { Container, Text, type TUI } from "@earendil-works/diffex-tui";
+import type { AgentMessage } from "@diffexai/diffex-agent-core";
+import type { AssistantMessage, ToolResultMessage, Usage } from "@diffexai/diffex-ai";
+import { Container, Text, type TUI } from "@diffexai/diffex-tui";
 import { beforeAll, describe, expect, test, vi } from "vitest";
 import type { AgentSessionEvent } from "../../../src/core/agent-session.ts";
 import type { SessionEntry } from "../../../src/core/session-manager.ts";

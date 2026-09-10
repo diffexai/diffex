@@ -4,16 +4,8 @@
  * Escape in editor returns to options, Escape in options cancels
  */
 
-import type { ExtensionAPI } from "@earendil-works/diffex-coding-agent";
-import {
-	Editor,
-	type EditorTheme,
-	Key,
-	matchesKey,
-	Text,
-	visibleWidth,
-	wrapTextWithAnsi,
-} from "@earendil-works/diffex-tui";
+import type { ExtensionAPI } from "@diffexai/diffex";
+import { Editor, type EditorTheme, Key, matchesKey, Text, visibleWidth, wrapTextWithAnsi } from "@diffexai/diffex-tui";
 import { Type } from "typebox";
 
 interface OptionWithDesc {

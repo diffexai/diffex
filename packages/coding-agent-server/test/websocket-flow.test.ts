@@ -1,12 +1,12 @@
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DiffexClient } from "@earendil-works/diffex-client";
-import { createWebSocketTransportFactory } from "@earendil-works/diffex-client/websocket";
-import { ModelRuntime } from "@earendil-works/diffex-coding-agent";
-import { DiffexServer } from "@earendil-works/diffex-server";
-import { TestServerService } from "@earendil-works/diffex-server/testing";
-import { createWebSocketListener } from "@earendil-works/diffex-server/websocket";
+import { ModelRuntime } from "@diffexai/diffex";
+import { DiffexClient } from "@diffexai/diffex-client";
+import { createWebSocketTransportFactory } from "@diffexai/diffex-client/websocket";
+import { DiffexServer } from "@diffexai/diffex-server";
+import { TestServerService } from "@diffexai/diffex-server/testing";
+import { createWebSocketListener } from "@diffexai/diffex-server/websocket";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 import { createHostedCodingAgentService } from "../src/service.ts";

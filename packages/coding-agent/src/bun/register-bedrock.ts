@@ -1,4 +1,4 @@
-import { bedrockProviderModule } from "@earendil-works/diffex-ai/bedrock-provider";
-import { setBedrockProviderModule } from "@earendil-works/diffex-ai/compat";
+import { bedrockProviderModule } from "@diffexai/diffex-ai/bedrock-provider";
+import { setBedrockProviderModule } from "@diffexai/diffex-ai/compat";
 
 setBedrockProviderModule(bedrockProviderModule);

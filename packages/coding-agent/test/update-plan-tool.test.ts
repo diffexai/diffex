@@ -1,6 +1,6 @@
-import type { AgentToolResult } from "@earendil-works/diffex-agent-core";
-import { getModel, streamSimple } from "@earendil-works/diffex-ai/compat";
-import type { TUI } from "@earendil-works/diffex-tui";
+import type { AgentToolResult } from "@diffexai/diffex-agent-core";
+import { getModel, streamSimple } from "@diffexai/diffex-ai/compat";
+import type { TUI } from "@diffexai/diffex-tui";
 import { beforeAll, describe, expect, test } from "vitest";
 import type { ToolDefinition } from "../src/core/extensions/types.ts";
 import {

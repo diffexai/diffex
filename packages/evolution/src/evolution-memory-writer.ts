@@ -9,7 +9,7 @@ import {
 	type HarnessVersion,
 	type HarnessVersionBundle,
 	type HarnessVersionMetadata,
-} from "@earendil-works/diffex-harness-state";
+} from "@diffexai/diffex-harness-state";
 import type {
 	EvolutionMemoryAddDelta,
 	EvolutionMemoryExactDiff,

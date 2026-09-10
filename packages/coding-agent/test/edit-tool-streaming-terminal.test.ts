@@ -1,7 +1,7 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Container, Editor, Spacer, Text, type TUI, TuiMainScreen } from "@earendil-works/diffex-tui";
+import { Container, Editor, Spacer, Text, type TUI, TuiMainScreen } from "@diffexai/diffex-tui";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { VirtualTerminal } from "../../tui/test/virtual-terminal.ts";
 import { createEditToolDefinition } from "../src/core/tools/edit.ts";

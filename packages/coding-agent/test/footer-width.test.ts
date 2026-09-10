@@ -1,6 +1,6 @@
 import { sep } from "node:path";
-import type { HarnessVersion } from "@earendil-works/diffex-harness-state";
-import { setKeybindings, visibleWidth } from "@earendil-works/diffex-tui";
+import type { HarnessVersion } from "@diffexai/diffex-harness-state";
+import { setKeybindings, visibleWidth } from "@diffexai/diffex-tui";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	AUTOMATIC_EVOLUTION_TOKEN_THRESHOLD,

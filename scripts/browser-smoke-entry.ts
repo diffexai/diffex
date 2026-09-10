@@ -1,6 +1,6 @@
-import { DiffexClient } from "@earendil-works/diffex-client";
-import { createAssistantMessageEventStream, Type } from "@earendil-works/diffex-ai";
-import { complete, getModel, getProviders, streamSimple } from "@earendil-works/diffex-ai/compat";
+import { DiffexClient } from "@diffexai/diffex-client";
+import { createAssistantMessageEventStream, Type } from "@diffexai/diffex-ai";
+import { complete, getModel, getProviders, streamSimple } from "@diffexai/diffex-ai/compat";
 import {
 	Agent,
 	bashExecutionToText,
@@ -17,8 +17,8 @@ import {
 	streamProxy,
 	toError,
 	truncateHead,
-} from "@earendil-works/diffex-agent-core";
-import { decodeCbor, encodeCbor, PROTOCOL_VERSION } from "@earendil-works/diffex-protocol";
+} from "@diffexai/diffex-agent-core";
+import { decodeCbor, encodeCbor, PROTOCOL_VERSION } from "@diffexai/diffex-protocol";
 
 // Keep this entry browser-safe. It is bundled by scripts/check-browser-smoke.mjs
 // to catch accidental Node-only runtime imports in browser-facing package exports.

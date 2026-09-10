@@ -2,8 +2,8 @@
  * Hello Tool - Minimal custom tool example
  */
 
-import { Type } from "@earendil-works/diffex-ai";
-import { defineTool, type ExtensionAPI } from "@earendil-works/diffex-coding-agent";
+import { defineTool, type ExtensionAPI } from "@diffexai/diffex";
+import { Type } from "@diffexai/diffex-ai";
 
 const helloTool = defineTool({
 	name: "hello",

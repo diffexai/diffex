@@ -1,6 +1,6 @@
 import { createInterface } from "node:readline";
-import type { AgentTool } from "@earendil-works/diffex-agent-core";
-import { Text } from "@earendil-works/diffex-tui";
+import type { AgentTool } from "@diffexai/diffex-agent-core";
+import { Text } from "@diffexai/diffex-tui";
 import { spawn } from "child_process";
 import path from "path";
 import { type Static, Type } from "typebox";

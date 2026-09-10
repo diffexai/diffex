@@ -1,6 +1,6 @@
-import type { AgentLoopConfig, StreamFn } from "@earendil-works/diffex-agent-core";
-import type { AssistantMessage, Tool } from "@earendil-works/diffex-ai";
-import type { HarnessVersion, HarnessVersionBundle } from "@earendil-works/diffex-harness-state";
+import type { AgentLoopConfig, StreamFn } from "@diffexai/diffex-agent-core";
+import type { AssistantMessage, Tool } from "@diffexai/diffex-ai";
+import type { HarnessVersion, HarnessVersionBundle } from "@diffexai/diffex-harness-state";
 import { Type } from "typebox";
 import { Check } from "typebox/value";
 import { type EvolutionMemoryItem, type EvolutionMemoryWriter, parseEvolutionMemoryBlocks } from "#evolution";

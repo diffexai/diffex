@@ -4,7 +4,7 @@ import {
 	PROTOCOL_VERSION,
 	type ServerSnapshot,
 	type SessionMetadata,
-} from "@earendil-works/diffex-protocol";
+} from "@diffexai/diffex-protocol";
 import type { ConnectionState } from "./connection.ts";
 import type { DiffexServerService } from "./types.ts";
 

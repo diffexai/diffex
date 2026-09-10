@@ -3,7 +3,6 @@ import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
-import { contentText } from "@earendil-works/diffex-ai";
 import {
 	type AgentSession,
 	type CreateAgentSessionOptions,
@@ -12,7 +11,8 @@ import {
 	ModelRuntime,
 	SessionManager,
 	SettingsManager,
-} from "@earendil-works/diffex-coding-agent";
+} from "@diffexai/diffex";
+import { contentText } from "@diffexai/diffex-ai";
 import {
 	createHarness,
 	type Harness,

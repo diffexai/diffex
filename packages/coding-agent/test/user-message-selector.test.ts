@@ -1,4 +1,4 @@
-import { getGlyphs, visibleWidth } from "@earendil-works/diffex-tui";
+import { getGlyphs, visibleWidth } from "@diffexai/diffex-tui";
 import { beforeAll, describe, expect, it } from "vitest";
 import { UserMessageSelectorComponent } from "../src/modes/interactive/components/user-message-selector.ts";
 import { initTheme } from "../src/modes/interactive/theme/theme.ts";

@@ -6,8 +6,8 @@ import {
 	type HarnessVersion,
 	type HarnessVersionList,
 	harnessVersionDirectoryName,
-} from "@earendil-works/diffex-harness-state";
-import type { MaterializedEvidence, MaterializedInvocation } from "@earendil-works/diffex-harness-trace";
+} from "@diffexai/diffex-harness-state";
+import type { MaterializedEvidence, MaterializedInvocation } from "@diffexai/diffex-harness-trace";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	computeEvolutionContentDigest,

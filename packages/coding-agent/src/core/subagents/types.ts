@@ -1,4 +1,4 @@
-import type { ThinkingLevel } from "@earendil-works/diffex-agent-core";
+import type { ThinkingLevel } from "@diffexai/diffex-agent-core";
 import type { AgentSession } from "../agent-session.ts";
 import type { SessionManager } from "../session-manager.ts";
 import type { ToolName } from "../tools/index.ts";

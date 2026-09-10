@@ -1,11 +1,11 @@
-import { InMemoryTelemetryContext } from "@earendil-works/diffex-agent-core";
-import { fauxAssistantMessage } from "@earendil-works/diffex-ai";
+import { InMemoryTelemetryContext } from "@diffexai/diffex-agent-core";
+import { fauxAssistantMessage } from "@diffexai/diffex-ai";
 import {
 	HARNESS_VERSION_SCHEMA_VERSION,
 	HarnessStateStore,
 	type HarnessVersionBundle,
 	INITIAL_HARNESS_VERSION_METADATA,
-} from "@earendil-works/diffex-harness-state";
+} from "@diffexai/diffex-harness-state";
 import { afterEach, describe, expect, it } from "vitest";
 import { SubagentController } from "../../src/core/subagents/controller.ts";
 import { captureSubagentSessionConfig } from "../../src/core/subagents/services.ts";

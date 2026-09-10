@@ -1,4 +1,4 @@
-import { ProcessTerminal, setKeybindings, type TUI, TuiMainScreen } from "@earendil-works/diffex-tui";
+import { ProcessTerminal, setKeybindings, type TUI, TuiMainScreen } from "@diffexai/diffex-tui";
 import { existsSync } from "fs";
 import { APP_NAME, CONFIG_DIR_NAME, ENV_AGENT_DIR, getAgentDir, getSettingsPath, PACKAGE_NAME } from "../config.ts";
 import { areExperimentalFeaturesEnabled } from "../core/experimental.ts";
@@ -23,7 +23,7 @@ import {
 	type Theme,
 } from "../modes/interactive/theme/theme.ts";
 
-const OFFICIAL_PACKAGE_NAME = "@earendil-works/diffex-coding-agent";
+const OFFICIAL_PACKAGE_NAME = "@diffexai/diffex";
 const OFFICIAL_APP_NAME = "diffex";
 const OFFICIAL_CONFIG_DIR_NAME = ".diffex";
 

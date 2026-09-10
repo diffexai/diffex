@@ -17,7 +17,7 @@ pkg update && pkg upgrade
 pkg install nodejs termux-api git
 
 # Install Diffex
-npm install -g --ignore-scripts @earendil-works/diffex-coding-agent
+npm install -g --ignore-scripts @diffexai/diffex
 
 # Create config directory
 mkdir -p ~/.diffex/agent

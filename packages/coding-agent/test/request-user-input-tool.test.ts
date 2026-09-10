@@ -1,5 +1,5 @@
-import type { Component, TUI } from "@earendil-works/diffex-tui";
-import { setKeybindings, visibleWidth } from "@earendil-works/diffex-tui";
+import type { Component, TUI } from "@diffexai/diffex-tui";
+import { setKeybindings, visibleWidth } from "@diffexai/diffex-tui";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ExtensionContext } from "../src/core/extensions/types.ts";
 import { KeybindingsManager } from "../src/core/keybindings.ts";

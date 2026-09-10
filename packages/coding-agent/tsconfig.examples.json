@@ -3,10 +3,10 @@
 	"compilerOptions": {
 		"noEmit": true,
 		"paths": {
-			"@earendil-works/diffex-coding-agent": ["./src/index.ts"],
-			"@earendil-works/diffex-coding-agent/hooks": ["./src/core/hooks/index.ts"],
-			"@earendil-works/diffex-tui": ["../tui/src/index.ts"],
-			"@earendil-works/diffex-ai": ["../ai/src/index.ts"],
+			"@diffexai/diffex": ["./src/index.ts"],
+			"@diffexai/diffex/hooks": ["./src/core/hooks/index.ts"],
+			"@diffexai/diffex-tui": ["../tui/src/index.ts"],
+			"@diffexai/diffex-ai": ["../ai/src/index.ts"],
 			"typebox": ["../../node_modules/typebox"]
 		},
 		"skipLibCheck": true

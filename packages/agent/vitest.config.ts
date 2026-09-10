@@ -16,10 +16,10 @@ export default defineConfig({
 	},
 	resolve: {
 		alias: [
-			{ find: /^@earendil-works\/diffex-telemetry$/, replacement: telemetrySrcIndex },
-			{ find: /^@earendil-works\/diffex-agent-core$/, replacement: agentSrcIndex },
-			{ find: /^@earendil-works\/diffex-ai$/, replacement: aiSrcIndex },
-			{ find: /^@earendil-works\/diffex-ai\/compat$/, replacement: aiSrcCompat },
+			{ find: /^@diffexai\/diffex-telemetry$/, replacement: telemetrySrcIndex },
+			{ find: /^@diffexai\/diffex-agent-core$/, replacement: agentSrcIndex },
+			{ find: /^@diffexai\/diffex-ai$/, replacement: aiSrcIndex },
+			{ find: /^@diffexai\/diffex-ai\/compat$/, replacement: aiSrcCompat },
 		],
 	},
 });

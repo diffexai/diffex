@@ -4,7 +4,7 @@
 		"outDir": "./dist",
 		"rootDir": "./src",
 		"paths": {
-			"@earendil-works/diffex-protocol": ["../protocol/dist/index.d.ts"]
+			"@diffexai/diffex-protocol": ["../protocol/dist/index.d.ts"]
 		}
 	},
 	"include": ["src/**/*.ts"],

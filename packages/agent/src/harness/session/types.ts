@@ -1,4 +1,4 @@
-import type { StopReason, Usage } from "@earendil-works/diffex-ai";
+import type { StopReason, Usage } from "@diffexai/diffex-ai";
 import "../messages.ts";
 import type { AgentMessage } from "../../types.ts";
 import type { Session } from "./session.ts";

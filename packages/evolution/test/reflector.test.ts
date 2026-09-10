@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { MaterializedEvidence, MaterializedInvocation } from "@earendil-works/diffex-harness-trace";
+import type { MaterializedEvidence, MaterializedInvocation } from "@diffexai/diffex-harness-trace";
 import { afterEach, describe, expect, it } from "vitest";
 import { buildEvidenceCorpusDocument } from "../src/evidence-corpus.ts";
 import {

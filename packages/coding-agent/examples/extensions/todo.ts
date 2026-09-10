@@ -10,9 +10,9 @@
  * correct for that point in history.
  */
 
-import { StringEnum } from "@earendil-works/diffex-ai";
-import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/diffex-coding-agent";
-import { matchesKey, Text, truncateToWidth } from "@earendil-works/diffex-tui";
+import type { ExtensionAPI, ExtensionContext, Theme } from "@diffexai/diffex";
+import { StringEnum } from "@diffexai/diffex-ai";
+import { matchesKey, Text, truncateToWidth } from "@diffexai/diffex-tui";
 import { Type } from "typebox";
 
 interface Todo {

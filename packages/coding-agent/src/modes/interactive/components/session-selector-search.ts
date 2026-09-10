@@ -1,4 +1,4 @@
-import { fuzzyMatch } from "@earendil-works/diffex-tui";
+import { fuzzyMatch } from "@diffexai/diffex-tui";
 import type { SessionInfo } from "../../../core/session-manager.ts";
 
 export type SortMode = "threaded" | "recent" | "relevance";

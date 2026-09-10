@@ -6,16 +6,16 @@ import { isAbsolute, join, relative, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 
 const packages = [
-	{ directory: "packages/harness-state", name: "@earendil-works/diffex-harness-state" },
-	{ directory: "packages/telemetry", name: "@earendil-works/diffex-telemetry" },
-	{ directory: "packages/ai", name: "@earendil-works/diffex-ai" },
-	{ directory: "packages/tui", name: "@earendil-works/diffex-tui" },
-	{ directory: "packages/agent", name: "@earendil-works/diffex-agent-core" },
-	{ directory: "packages/protocol", name: "@earendil-works/diffex-protocol" },
-	{ directory: "packages/client", name: "@earendil-works/diffex-client" },
-	{ directory: "packages/session-backends/sqlite-node", name: "@earendil-works/diffex-session-backend-sqlite-node" },
-	{ directory: "packages/server", name: "@earendil-works/diffex-server" },
-	{ directory: "packages/coding-agent", name: "@earendil-works/diffex-coding-agent" },
+	{ directory: "packages/harness-state", name: "@diffexai/diffex-harness-state" },
+	{ directory: "packages/telemetry", name: "@diffexai/diffex-telemetry" },
+	{ directory: "packages/ai", name: "@diffexai/diffex-ai" },
+	{ directory: "packages/tui", name: "@diffexai/diffex-tui" },
+	{ directory: "packages/agent", name: "@diffexai/diffex-agent-core" },
+	{ directory: "packages/protocol", name: "@diffexai/diffex-protocol" },
+	{ directory: "packages/client", name: "@diffexai/diffex-client" },
+	{ directory: "packages/session-backends/sqlite-node", name: "@diffexai/diffex-session-backend-sqlite-node" },
+	{ directory: "packages/server", name: "@diffexai/diffex-server" },
+	{ directory: "packages/coding-agent", name: "@diffexai/diffex" },
 ];
 
 const privateBuildPackages = [{ directory: "packages/harness-trace" }];

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { Dirent } from "node:fs";
 import { lstat, mkdir, mkdtemp, readdir, readFile, rename, rm, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
-import { computeHarnessSkillId, type HarnessWorkspaceIdentity } from "@earendil-works/diffex-harness-state";
+import { computeHarnessSkillId, type HarnessWorkspaceIdentity } from "@diffexai/diffex-harness-state";
 import lockfile from "proper-lockfile";
 import type {
 	EvolutionArtifactReference,

@@ -1,4 +1,4 @@
-import type { ClientMessageDecoder } from "@earendil-works/diffex-protocol";
+import type { ClientMessageDecoder } from "@diffexai/diffex-protocol";
 
 import type { MaybePromise } from "./types.ts";
 

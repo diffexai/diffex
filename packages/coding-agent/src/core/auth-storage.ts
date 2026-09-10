@@ -3,7 +3,7 @@
  * Provider auth orchestration belongs to ModelRuntime and Diffex AI Models.
  */
 
-import type { AuthOperationOptions, Credential, CredentialInfo, CredentialStore } from "@earendil-works/diffex-ai";
+import type { AuthOperationOptions, Credential, CredentialInfo, CredentialStore } from "@diffexai/diffex-ai";
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
 import lockfile from "proper-lockfile";

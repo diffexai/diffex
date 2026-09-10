@@ -1,10 +1,10 @@
 import { join } from "node:path";
-import type { SessionMetadata, SessionRepo } from "@earendil-works/diffex-agent-core";
-import { NodeExecutionEnv } from "@earendil-works/diffex-agent-core/node";
+import type { SessionMetadata, SessionRepo } from "@diffexai/diffex-agent-core";
+import { NodeExecutionEnv } from "@diffexai/diffex-agent-core/node";
 import {
 	createSessionBackendConformance,
 	type SessionBackendFixture,
-} from "@earendil-works/diffex-agent-core/session/testing";
+} from "@diffexai/diffex-agent-core/session/testing";
 import { describe, it } from "vitest";
 import { createNodeSqliteFactory, type SqliteSessionMetadata, SqliteSessionRepository } from "../src/index.ts";
 import { createTempDir } from "./test-utils.ts";

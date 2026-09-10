@@ -1,5 +1,5 @@
 import path from "node:path";
-import { visibleWidth } from "@earendil-works/diffex-tui";
+import { visibleWidth } from "@diffexai/diffex-tui";
 import { existsSync, readFileSync } from "fs";
 
 export interface ChangelogEntry {

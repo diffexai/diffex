@@ -1,5 +1,5 @@
-import { SessionError } from "@earendil-works/diffex-agent-core";
-import { uuidv7 } from "@earendil-works/diffex-ai";
+import { SessionError } from "@diffexai/diffex-agent-core";
+import { uuidv7 } from "@diffexai/diffex-ai";
 import { sql } from "./sql.ts";
 import {
 	copyBranchEntriesThroughSeq,

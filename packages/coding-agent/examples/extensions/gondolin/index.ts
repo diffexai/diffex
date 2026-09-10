@@ -20,7 +20,7 @@
  */
 
 import path from "node:path";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/diffex-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@diffexai/diffex";
 import {
 	type BashOperations,
 	createBashTool,
@@ -41,7 +41,7 @@ import {
 	truncateHead,
 	truncateLine,
 	type WriteOperations,
-} from "@earendil-works/diffex-coding-agent";
+} from "@diffexai/diffex";
 import { RealFSProvider, VM } from "@earendil-works/gondolin";
 
 const GUEST_WORKSPACE = "/workspace";

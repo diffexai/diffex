@@ -1,4 +1,4 @@
-import type { ThinkingLevel } from "@earendil-works/diffex-agent-core";
+import type { ThinkingLevel } from "@diffexai/diffex-agent-core";
 import {
 	Container,
 	type SelectItem,
@@ -6,7 +6,7 @@ import {
 	type SelectListLayoutOptions,
 	Spacer,
 	Text,
-} from "@earendil-works/diffex-tui";
+} from "@diffexai/diffex-tui";
 import { getSelectListTheme, theme } from "../theme/theme.ts";
 import { keyHint } from "./keybinding-hints.ts";
 

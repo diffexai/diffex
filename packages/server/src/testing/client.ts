@@ -8,7 +8,7 @@ import {
 	type ResponseEnvelope,
 	type ServerMessage,
 	ServerMessageDecoder,
-} from "@earendil-works/diffex-protocol";
+} from "@diffexai/diffex-protocol";
 import { Deferred } from "./service.ts";
 
 interface MessageWaiter {

@@ -1,9 +1,9 @@
-# @earendil-works/diffex-client
+# @diffexai/diffex-client
 
 Transport-neutral client for remote Diffex sessions. `DiffexClient` exchanges length-prefixed CBOR messages through a small `ByteTransport` interface. The package has no Node-specific imports.
 
 ```ts
-import { DiffexClient, type ByteTransportFactory } from "@earendil-works/diffex-client";
+import { DiffexClient, type ByteTransportFactory } from "@diffexai/diffex-client";
 
 const transportFactory: ByteTransportFactory = async (handlers) => {
   // Connect using WebSocket, Unix socket, or another ordered byte transport.
@@ -46,8 +46,8 @@ Subscriber exceptions are isolated from protocol state. Set `onListenerError` in
 Node.js and Bun consumers can use the separately exported Unix-domain socket transport:
 
 ```ts
-import { DiffexClient } from "@earendil-works/diffex-client";
-import { createUnixTransportFactory } from "@earendil-works/diffex-client/unix";
+import { DiffexClient } from "@diffexai/diffex-client";
+import { createUnixTransportFactory } from "@diffexai/diffex-client/unix";
 
 const client = new DiffexClient({
   transportFactory: createUnixTransportFactory({
@@ -60,15 +60,15 @@ await client.connect();
 
 `maxPendingBytes` bounds queued outbound data. It defaults to four times the protocol frame limit. The transport preserves send order and waits for socket backpressure before resolving each send.
 
-The `@earendil-works/diffex-client` root remains transport- and runtime-neutral. Importing the Node-compatible transport requires the explicit `@earendil-works/diffex-client/unix` subpath.
+The `@diffexai/diffex-client` root remains transport- and runtime-neutral. Importing the Node-compatible transport requires the explicit `@diffexai/diffex-client/unix` subpath.
 
 ## Hosted Diffex cloud
 
 Use the separately exported cloud client for the authenticated REST lifecycle and native WebSocket attachment:
 
 ```ts
-import { DiffexClient } from "@earendil-works/diffex-client";
-import { DiffexCloudClient } from "@earendil-works/diffex-client/cloud";
+import { DiffexClient } from "@diffexai/diffex-client";
+import { DiffexCloudClient } from "@diffexai/diffex-client/cloud";
 
 const cloud = new DiffexCloudClient({
   baseUrl: "https://api.diffex.ai",
@@ -89,8 +89,8 @@ Every transport connection obtains a fresh, short-lived attachment URL, and only
 Browser and Node runtimes with a global `WebSocket` implementation can use the separately exported transport:
 
 ```ts
-import { DiffexClient } from "@earendil-works/diffex-client";
-import { createWebSocketTransportFactory } from "@earendil-works/diffex-client/websocket";
+import { DiffexClient } from "@diffexai/diffex-client";
+import { createWebSocketTransportFactory } from "@diffexai/diffex-client/websocket";
 
 const client = new DiffexClient({
   transportFactory: createWebSocketTransportFactory({

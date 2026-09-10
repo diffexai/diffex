@@ -1,8 +1,8 @@
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
-import { DynamicBorder, type ExtensionAPI, type ExtensionContext } from "@earendil-works/diffex-coding-agent";
-import { Container, hyperlink, Text } from "@earendil-works/diffex-tui";
+import { DynamicBorder, type ExtensionAPI, type ExtensionContext } from "@diffexai/diffex";
+import { Container, hyperlink, Text } from "@diffexai/diffex-tui";
 
 const PR_PROMPT_PATTERN = /^\s*You are given one or more GitHub PR URLs:\s*(\S+)/im;
 const ISSUE_PROMPT_PATTERN = /^\s*Analyze GitHub issue\(s\):\s*(\S+)/im;

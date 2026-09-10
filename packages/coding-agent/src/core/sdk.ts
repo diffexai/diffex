@@ -7,9 +7,9 @@ import {
 	setDefaultStreamFn,
 	type TelemetryContext,
 	type ThinkingLevel,
-} from "@earendil-works/diffex-agent-core";
-import { clampThinkingLevel, type Message, type Model, streamSimple } from "@earendil-works/diffex-ai/compat";
-import type { HarnessStateStore, HarnessVersionBundle } from "@earendil-works/diffex-harness-state";
+} from "@diffexai/diffex-agent-core";
+import { clampThinkingLevel, type Message, type Model, streamSimple } from "@diffexai/diffex-ai/compat";
+import type { HarnessStateStore, HarnessVersionBundle } from "@diffexai/diffex-harness-state";
 import { EvolutionMemoryWriter, FileEvolutionPersistence } from "#evolution";
 import { getAgentDir, VERSION } from "../config.ts";
 import { resolvePath } from "../utils/paths.ts";
@@ -384,7 +384,7 @@ function restoreRootSubagents(
  * const { session } = await createAgentSession();
  *
  * // With explicit model
- * import { getModel } from '@earendil-works/diffex-ai';
+ * import { getModel } from '@diffexai/diffex-ai';
  * const { session } = await createAgentSession({
  *   model: getModel('anthropic', 'claude-opus-4-5'),
  *   thinkingLevel: 'high',

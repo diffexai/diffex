@@ -1,4 +1,4 @@
-import type { TUI } from "@earendil-works/diffex-tui";
+import type { TUI } from "@diffexai/diffex-tui";
 import type { SettingsManager } from "../../../core/settings-manager.ts";
 import {
 	detectTerminalBackgroundFromEnv,

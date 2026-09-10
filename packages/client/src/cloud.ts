@@ -1,4 +1,4 @@
-import { PROTOCOL_VERSION } from "@earendil-works/diffex-protocol";
+import { PROTOCOL_VERSION } from "@diffexai/diffex-protocol";
 import type { ByteTransportFactory } from "./transport.ts";
 import { createWebSocketTransportFactory, type WebSocketConstructor } from "./websocket.ts";
 

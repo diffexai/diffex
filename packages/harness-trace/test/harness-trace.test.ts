@@ -2,11 +2,8 @@ import { type FileHandle, mkdir, mkdtemp, open, readFile, rm, writeFile } from "
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { RecordedTelemetrySpan, SpanAttributes } from "@earendil-works/diffex-telemetry";
-import {
-	createTelemetryAdapterConformance,
-	type TelemetryAdapterFixture,
-} from "@earendil-works/diffex-telemetry/testing";
+import type { RecordedTelemetrySpan, SpanAttributes } from "@diffexai/diffex-telemetry";
+import { createTelemetryAdapterConformance, type TelemetryAdapterFixture } from "@diffexai/diffex-telemetry/testing";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	createJsonlTraceContext,

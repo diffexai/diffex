@@ -1,4 +1,4 @@
-import { type Component, getGlyphs, Loader, type LoaderIndicatorOptions, type TUI } from "@earendil-works/diffex-tui";
+import { type Component, getGlyphs, Loader, type LoaderIndicatorOptions, type TUI } from "@diffexai/diffex-tui";
 import type { WorkingIndicatorOptions } from "../../../core/extensions/index.ts";
 import { theme } from "../theme/theme.ts";
 import { CountdownTimer } from "./countdown-timer.ts";

@@ -5,7 +5,7 @@ import {
 	type SelectListLayoutOptions,
 	Spacer,
 	Text,
-} from "@earendil-works/diffex-tui";
+} from "@diffexai/diffex-tui";
 import { getAvailableThemes, getSelectListTheme, theme } from "../theme/theme.ts";
 
 const THEME_SELECT_LIST_LAYOUT: SelectListLayoutOptions = {

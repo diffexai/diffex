@@ -6,8 +6,8 @@ import type {
 	TextContent,
 	ThinkingBudgets,
 	Transport,
-} from "@earendil-works/diffex-ai";
-import { NOOP_TELEMETRY_CONTEXT, type TelemetryContext } from "@earendil-works/diffex-telemetry";
+} from "@diffexai/diffex-ai";
+import { NOOP_TELEMETRY_CONTEXT, type TelemetryContext } from "@diffexai/diffex-telemetry";
 import { runAgentLoop, runAgentLoopContinue } from "./agent-loop.ts";
 import { getDefaultStreamFn } from "./stream-fn.ts";
 import type {

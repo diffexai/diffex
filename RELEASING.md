@@ -7,7 +7,7 @@ The release tag also builds binaries, stages the GitHub release, announces the v
 
 - Use a clean `main` branch with all intended changes merged.
 - Confirm GitHub Actions can start jobs and the repository billing or spending limit is not blocking runners.
-- Confirm the `@earendil-works` npm organization exists and your npm account has package publishing permission with account-level two-factor authentication enabled.
+- Confirm the `@diffexai` npm organization exists and your npm account has package publishing permission with account-level two-factor authentication enabled.
 - Use npm 11.15.0 or newer when configuring trusted publishers.
 - Confirm every public package has repository metadata pointing to `diffexai/diffex`.
 
@@ -16,7 +16,7 @@ The release tag also builds binaries, stages the GitHub release, announces the v
 npm requires a package to exist before a trusted publisher can be configured.
 Use this bootstrap process only once, before the first normal release.
 
-1. Sign in with an npm account that can publish public packages under `@earendil-works`.
+1. Sign in with an npm account that can publish public packages under `@diffexai`.
 
    ```bash
    npm login
@@ -49,7 +49,7 @@ Use this bootstrap process only once, before the first normal release.
 5. Verify each package has the expected trusted publisher.
 
    ```bash
-   npm trust list @earendil-works/diffex-coding-agent
+   npm trust list @diffexai/diffex
    ```
 
 6. Restrict traditional token publishing after trusted publishing is verified.

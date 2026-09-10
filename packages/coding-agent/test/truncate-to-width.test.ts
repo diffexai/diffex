@@ -1,4 +1,4 @@
-import { truncateToWidth, visibleWidth } from "@earendil-works/diffex-tui";
+import { truncateToWidth, visibleWidth } from "@diffexai/diffex-tui";
 import { describe, expect, it } from "vitest";
 
 /**

@@ -2,9 +2,9 @@
  * Extension runner - executes extensions and manages their lifecycle.
  */
 
-import { type AgentMessage, NOOP_TELEMETRY_CONTEXT, type TelemetryContext } from "@earendil-works/diffex-agent-core";
-import type { ImageContent, Model, Provider, ProviderHeaders } from "@earendil-works/diffex-ai";
-import type { KeyId } from "@earendil-works/diffex-tui";
+import { type AgentMessage, NOOP_TELEMETRY_CONTEXT, type TelemetryContext } from "@diffexai/diffex-agent-core";
+import type { ImageContent, Model, Provider, ProviderHeaders } from "@diffexai/diffex-ai";
+import type { KeyId } from "@diffexai/diffex-tui";
 import { type Theme, theme } from "../../modes/interactive/theme/theme.ts";
 import type { ResourceDiagnostic } from "../diagnostics.ts";
 import type { KeybindingsConfig } from "../keybindings.ts";

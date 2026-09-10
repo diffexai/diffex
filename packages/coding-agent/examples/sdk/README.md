@@ -32,14 +32,14 @@ npx tsx examples/sdk/01-minimal.ts
 ## Quick Reference
 
 ```typescript
-import { getModel } from "@earendil-works/diffex-ai";
+import { getModel } from "@diffexai/diffex-ai";
 import {
   createAgentSession,
   DefaultResourceLoader,
   ModelRuntime,
   SessionManager,
   SettingsManager,
-} from "@earendil-works/diffex-coding-agent";
+} from "@diffexai/diffex";
 
 const modelRuntime = await ModelRuntime.create();
 

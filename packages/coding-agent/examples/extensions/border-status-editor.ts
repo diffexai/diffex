@@ -1,11 +1,6 @@
-import {
-	CustomEditor,
-	type ExtensionAPI,
-	type ExtensionContext,
-	type KeybindingsManager,
-} from "@earendil-works/diffex-coding-agent";
-import type { Component, EditorTheme, TUI } from "@earendil-works/diffex-tui";
-import { truncateToWidth, visibleWidth } from "@earendil-works/diffex-tui";
+import { CustomEditor, type ExtensionAPI, type ExtensionContext, type KeybindingsManager } from "@diffexai/diffex";
+import type { Component, EditorTheme, TUI } from "@diffexai/diffex-tui";
+import { truncateToWidth, visibleWidth } from "@diffexai/diffex-tui";
 
 function fitBorder(
 	left: string,

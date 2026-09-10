@@ -27,7 +27,7 @@ import {
 	SelectList,
 	type TUI,
 	TuiMainScreen,
-} from "@earendil-works/diffex-tui";
+} from "@diffexai/diffex-tui";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 

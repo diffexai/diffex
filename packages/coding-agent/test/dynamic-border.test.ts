@@ -1,4 +1,4 @@
-import { getGlyphs } from "@earendil-works/diffex-tui";
+import { getGlyphs } from "@diffexai/diffex-tui";
 import { describe, expect, it } from "vitest";
 import { DynamicBorder } from "../src/modes/interactive/components/dynamic-border.ts";
 

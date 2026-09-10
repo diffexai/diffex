@@ -1,4 +1,4 @@
-import { SELECTED_LIST_PREFIX, setKeybindings, stripTerminalSequences, type TUI } from "@earendil-works/diffex-tui";
+import { SELECTED_LIST_PREFIX, setKeybindings, stripTerminalSequences, type TUI } from "@diffexai/diffex-tui";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { KeybindingsManager } from "../../../src/core/keybindings.ts";
 import { ModelSelectorComponent } from "../../../src/modes/interactive/components/model-selector.ts";

@@ -26,8 +26,8 @@ import {
 	type TelemetryContext,
 	type ThinkingLevel,
 	uuidv7,
-} from "@earendil-works/diffex-agent-core";
-import { contentText } from "@earendil-works/diffex-ai";
+} from "@diffexai/diffex-agent-core";
+import { contentText } from "@diffexai/diffex-ai";
 import type {
 	AssistantMessage,
 	AuthResult,
@@ -36,7 +36,7 @@ import type {
 	ProviderHeaders,
 	TextContent,
 	Usage,
-} from "@earendil-works/diffex-ai/compat";
+} from "@diffexai/diffex-ai/compat";
 import {
 	clampThinkingLevel,
 	cleanupSessionResources,
@@ -48,14 +48,14 @@ import {
 	type RetryCallbacks,
 	resetApiProviders,
 	streamSimple,
-} from "@earendil-works/diffex-ai/compat";
+} from "@diffexai/diffex-ai/compat";
 import type {
 	HarnessStateStore,
 	HarnessVersion,
 	HarnessVersionBundle,
 	HarnessVersionList,
 	HarnessWorkspaceIdentity,
-} from "@earendil-works/diffex-harness-state";
+} from "@diffexai/diffex-harness-state";
 import { getThemeByName, theme } from "../modes/interactive/theme/theme.ts";
 import { canonicalizePath, resolvePath } from "../utils/paths.ts";
 import { sleep } from "../utils/sleep.ts";

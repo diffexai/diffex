@@ -1,8 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { fauxAssistantMessage, fauxToolCall, type Message } from "@earendil-works/diffex-ai";
-import { computeHarnessSkillId, HarnessStateStore } from "@earendil-works/diffex-harness-state";
+import { fauxAssistantMessage, fauxToolCall, type Message } from "@diffexai/diffex-ai";
+import { computeHarnessSkillId, HarnessStateStore } from "@diffexai/diffex-harness-state";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	type EvolutionControlService,

@@ -11,8 +11,8 @@ import {
 	type Message,
 	type Model,
 	type Tool,
-} from "@earendil-works/diffex-ai";
-import type { HarnessStateStore, HarnessVersion } from "@earendil-works/diffex-harness-state";
+} from "@diffexai/diffex-ai";
+import type { HarnessStateStore, HarnessVersion } from "@diffexai/diffex-harness-state";
 import lockfile from "proper-lockfile";
 import type { TSchema } from "typebox";
 import { Check, Errors } from "typebox/value";

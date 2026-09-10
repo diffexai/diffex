@@ -4,7 +4,6 @@
  * Replace everything - no discovery, explicit configuration.
  */
 
-import { getModel } from "@earendil-works/diffex-ai/compat";
 import {
 	createAgentSession,
 	createExtensionRuntime,
@@ -12,7 +11,8 @@ import {
 	type ResourceLoader,
 	SessionManager,
 	SettingsManager,
-} from "@earendil-works/diffex-coding-agent";
+} from "@diffexai/diffex";
+import { getModel } from "@diffexai/diffex-ai/compat";
 
 const modelRuntime = await ModelRuntime.create({
 	authPath: "/tmp/my-agent/auth.json",

@@ -1,4 +1,4 @@
-import { type Component, getGlyphs, Spacer, truncateToWidth, visibleWidth } from "@earendil-works/diffex-tui";
+import { type Component, getGlyphs, Spacer, truncateToWidth, visibleWidth } from "@diffexai/diffex-tui";
 import { theme } from "../theme/theme.ts";
 
 const EXTENDED_HINGE_MIN_COLUMNS = 80;

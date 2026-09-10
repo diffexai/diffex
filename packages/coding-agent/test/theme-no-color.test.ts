@@ -1,4 +1,4 @@
-import { type GlyphMode, getGlyphs } from "@earendil-works/diffex-tui";
+import { type GlyphMode, getGlyphs } from "@diffexai/diffex-tui";
 import { afterEach, describe, expect, test } from "vitest";
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.ts";
 import { initTheme, theme } from "../src/modes/interactive/theme/theme.ts";

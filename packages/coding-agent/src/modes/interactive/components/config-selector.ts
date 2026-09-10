@@ -17,7 +17,7 @@ import {
 	truncateToWidth,
 	UNSELECTED_LIST_PREFIX,
 	visibleWidth,
-} from "@earendil-works/diffex-tui";
+} from "@diffexai/diffex-tui";
 import { CONFIG_DIR_NAME } from "../../../config.ts";
 import type { PathMetadata, ResolvedPaths, ResolvedResource } from "../../../core/package-manager.ts";
 import type { PackageSource, SettingsManager } from "../../../core/settings-manager.ts";

@@ -1,8 +1,4 @@
-import type {
-	HarnessVersion,
-	HarnessVersionBundle,
-	HarnessWorkspaceIdentity,
-} from "@earendil-works/diffex-harness-state";
+import type { HarnessVersion, HarnessVersionBundle, HarnessWorkspaceIdentity } from "@diffexai/diffex-harness-state";
 import type { EvolutionScope } from "./contracts.ts";
 
 export const SKILL_SCORE_SCHEMA_VERSION = 2 as const;

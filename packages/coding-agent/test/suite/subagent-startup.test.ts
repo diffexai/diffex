@@ -1,6 +1,6 @@
-import type { AgentEvent } from "@earendil-works/diffex-agent-core";
-import type { AssistantMessage, Context } from "@earendil-works/diffex-ai";
-import { fauxAssistantMessage } from "@earendil-works/diffex-ai";
+import type { AgentEvent } from "@diffexai/diffex-agent-core";
+import type { AssistantMessage, Context } from "@diffexai/diffex-ai";
+import { fauxAssistantMessage } from "@diffexai/diffex-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgentSession } from "../../src/core/agent-session.ts";
 import type { ExtensionContext } from "../../src/core/extensions/types.ts";

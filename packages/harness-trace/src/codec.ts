@@ -1,4 +1,4 @@
-import type { AttributeValue, SpanAttributes, SpanStatus } from "@earendil-works/diffex-telemetry";
+import type { AttributeValue, SpanAttributes, SpanStatus } from "@diffexai/diffex-telemetry";
 import {
 	type AgentHarnessSessionSegmentCursor,
 	type CodingAgentV3EntryCursor,

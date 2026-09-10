@@ -1,4 +1,4 @@
-import type { TelemetryContext } from "@earendil-works/diffex-agent-core";
+import type { TelemetryContext } from "@diffexai/diffex-agent-core";
 import { CONFIG_DIR_NAME } from "../config.ts";
 import { emitProjectTrustEvent } from "./extensions/runner.ts";
 import type { LoadExtensionsResult, ProjectTrustContext } from "./extensions/types.ts";

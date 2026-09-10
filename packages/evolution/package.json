@@ -1,5 +1,5 @@
 {
-	"name": "@earendil-works/diffex-evolution",
+	"name": "@diffexai/diffex-evolution",
 	"version": "0.2.0",
 	"description": "Private evolution pipeline contracts and orchestration for Diffex",
 	"private": true,
@@ -21,7 +21,7 @@
 		"test": "vitest --run",
 		"prepublishOnly": "npm run clean && npm run build"
 	},
-	"author": "Earendil Works",
+	"author": "DiffexAI",
 	"license": "MIT",
 	"repository": {
 		"type": "git",
@@ -32,8 +32,8 @@
 		"node": ">=22.19.0"
 	},
 	"dependencies": {
-		"@earendil-works/diffex-harness-state": "0.2.0",
-		"@earendil-works/diffex-harness-trace": "0.2.0",
+		"@diffexai/diffex-harness-state": "0.2.0",
+		"@diffexai/diffex-harness-trace": "0.2.0",
 		"proper-lockfile": "4.1.2"
 	},
 	"devDependencies": {

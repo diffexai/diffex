@@ -1,6 +1,6 @@
-# @earendil-works/diffex-coding-agent-server
+# @diffexai/diffex-coding-agent-server
 
-Production service adapter between the Pi-derived Diffex coding-agent runtime and `@earendil-works/diffex-server`.
+Production service adapter between the Pi-derived Diffex coding-agent runtime and `@diffexai/diffex-server`.
 
 The hosted control plane allocates one cloud session per sandbox and passes its stable session ID to this service.
 Protocol clients attach to that existing session rather than creating an unrelated runtime identity.

@@ -1,4 +1,4 @@
-import type { SpanAttributes, SpanStatus, TelemetryContext } from "@earendil-works/diffex-telemetry";
+import type { SpanAttributes, SpanStatus, TelemetryContext } from "@diffexai/diffex-telemetry";
 
 export const TRACE_SCHEMA_VERSION = 1 as const;
 

@@ -1,4 +1,4 @@
-import type { Api, Model, ModelsStoreEntry, Provider } from "@earendil-works/diffex-ai";
+import type { Api, Model, ModelsStoreEntry, Provider } from "@diffexai/diffex-ai";
 import { VERSION } from "../config.ts";
 import { getDiffexUserAgent } from "../utils/diffex-user-agent.ts";
 import { fetchWithRetry } from "../utils/management-http.ts";

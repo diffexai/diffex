@@ -9,7 +9,7 @@ import {
 	type Model,
 	type Models,
 	type Usage,
-} from "@earendil-works/diffex-ai";
+} from "@diffexai/diffex-ai";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
 	type CompactionPreparation,

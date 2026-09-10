@@ -1,4 +1,4 @@
-import { NOOP_TELEMETRY_CONTEXT, type TelemetryContext } from "@earendil-works/diffex-telemetry";
+import { NOOP_TELEMETRY_CONTEXT, type TelemetryContext } from "@diffexai/diffex-telemetry";
 import { describe, expect, it } from "vitest";
 import { buildBaseOptions } from "../src/api/simple-options.ts";
 import { generateImages } from "../src/images.ts";

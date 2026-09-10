@@ -30,13 +30,13 @@ export interface SourceAttachment extends TestAttachment {
 }
 
 interface DiffexSessionArtifact extends TestArtifactBase {
-	type: "@earendil-works/diffex-evals:session";
+	type: "@diffexai/diffex-evals:session";
 	runId: string;
 	attachments: [DiffexSessionAttachment] | [];
 }
 
 interface SourceArtifact extends TestArtifactBase {
-	type: "@earendil-works/diffex-evals:source";
+	type: "@diffexai/diffex-evals:source";
 	runId: string;
 	attachments: [SourceAttachment] | [];
 }
@@ -59,7 +59,7 @@ export async function recordEvalSessionArtifact(
 		throw new TypeError("Diffex eval session artifact metadata is invalid.");
 	}
 	await recordArtifact(task, {
-		type: "@earendil-works/diffex-evals:session",
+		type: "@diffexai/diffex-evals:session",
 		runId,
 		attachments: [
 			{
@@ -78,7 +78,7 @@ export async function recordEvalSourceArtifact(
 	attachment: SourceAttachment,
 ): Promise<void> {
 	await recordArtifact(task, {
-		type: "@earendil-works/diffex-evals:source",
+		type: "@diffexai/diffex-evals:source",
 		runId,
 		attachments: [attachment],
 	});
@@ -92,13 +92,12 @@ export async function persistEvalArtifactReferences(
 	const references: Array<{ name: string; path: string }> = [];
 	for (const artifact of artifacts) {
 		if (
-			(artifact.type !== "@earendil-works/diffex-evals:session" &&
-				artifact.type !== "@earendil-works/diffex-evals:source") ||
+			(artifact.type !== "@diffexai/diffex-evals:session" && artifact.type !== "@diffexai/diffex-evals:source") ||
 			artifact.runId !== runId
 		) {
 			continue;
 		}
-		const category = artifact.type === "@earendil-works/diffex-evals:session" ? "sessions" : "sources";
+		const category = artifact.type === "@diffexai/diffex-evals:session" ? "sessions" : "sources";
 		for (const attachment of artifact.attachments) {
 			const name = basename(attachment.name);
 			if (name !== attachment.name) throw new TypeError(`Invalid eval artifact name: ${attachment.name}`);

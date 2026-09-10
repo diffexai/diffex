@@ -18,8 +18,8 @@ import {
 	type RefreshModelsContext,
 	type SimpleStreamOptions,
 	type StreamOptions,
-} from "@earendil-works/diffex-ai";
-import { getApiProvider } from "@earendil-works/diffex-ai/compat";
+} from "@diffexai/diffex-ai";
+import { getApiProvider } from "@diffexai/diffex-ai/compat";
 import type { ModelConfig, ModelsJsonModel, ModelsJsonModelOverride, ModelsJsonProvider } from "./model-config.ts";
 import {
 	clearConfigValueCache,

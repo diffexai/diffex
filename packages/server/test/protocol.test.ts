@@ -1,5 +1,5 @@
-import type { Api, AssistantMessage, Model, ToolCall, ToolResultMessage, UserMessage } from "@earendil-works/diffex-ai";
-import { encodeServerMessage, PROTOCOL_VERSION } from "@earendil-works/diffex-protocol";
+import type { Api, AssistantMessage, Model, ToolCall, ToolResultMessage, UserMessage } from "@diffexai/diffex-ai";
+import { encodeServerMessage, PROTOCOL_VERSION } from "@diffexai/diffex-protocol";
 import { describe, expect, test } from "vitest";
 import {
 	sanitizeProtocolDetails,

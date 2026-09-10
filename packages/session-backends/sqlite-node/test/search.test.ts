@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { NodeExecutionEnv } from "@earendil-works/diffex-agent-core/node";
+import { NodeExecutionEnv } from "@diffexai/diffex-agent-core/node";
 import { describe, expect, it } from "vitest";
 import { createNodeSqliteFactory, createSqliteSessionSearch, SqliteSessionRepository } from "../src/index.ts";
 import { createSetupFailureSqlite, createTempDir, createUserMessage, getSqliteEntries } from "./test-utils.ts";

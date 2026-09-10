@@ -9,7 +9,7 @@ import {
 	Spacer,
 	TruncatedText,
 	UNSELECTED_LIST_PREFIX,
-} from "@earendil-works/diffex-tui";
+} from "@diffexai/diffex-tui";
 import type { SkillReference, SkillReferenceGroup } from "../../../core/skills.ts";
 import { theme } from "../theme/theme.ts";
 import { keyHint, rawKeyHint } from "./keybinding-hints.ts";

@@ -141,7 +141,7 @@ cp permission-gate.ts ~/.diffex/agent/extensions/
 See [docs/extensions.md](../../docs/extensions.md) for full documentation.
 
 ```typescript
-import type { ExtensionAPI } from "@earendil-works/diffex-coding-agent";
+import type { ExtensionAPI } from "@diffexai/diffex";
 import { Type } from "typebox";
 
 export default function (diffex: ExtensionAPI) {
@@ -183,7 +183,7 @@ export default function (diffex: ExtensionAPI) {
 
 **Use StringEnum for string parameters** (required for Google API compatibility):
 ```typescript
-import { StringEnum } from "@earendil-works/diffex-ai";
+import { StringEnum } from "@diffexai/diffex-ai";
 
 // Good
 action: StringEnum(["list", "add"] as const)

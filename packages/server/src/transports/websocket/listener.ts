@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { Duplex } from "node:stream";
-import { DEFAULT_MAX_FRAME_LENGTH } from "@earendil-works/diffex-protocol";
+import { DEFAULT_MAX_FRAME_LENGTH } from "@diffexai/diffex-protocol";
 import { type RawData, WebSocket, WebSocketServer } from "ws";
 import type { ByteConnection, ByteConnectionAcceptor } from "../../connection.ts";
 import type { DiffexServerListener } from "../../listener.ts";

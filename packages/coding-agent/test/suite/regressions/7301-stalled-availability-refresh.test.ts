@@ -1,4 +1,4 @@
-import type { Models } from "@earendil-works/diffex-ai";
+import type { Models } from "@diffexai/diffex-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createHarness, type Harness } from "../harness.ts";
 

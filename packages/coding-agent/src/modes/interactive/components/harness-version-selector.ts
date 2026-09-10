@@ -1,4 +1,4 @@
-import { computeHarnessSkillId, type HarnessSkill } from "@earendil-works/diffex-harness-state";
+import { computeHarnessSkillId, type HarnessSkill } from "@diffexai/diffex-harness-state";
 import {
 	Container,
 	type Focusable,
@@ -11,7 +11,7 @@ import {
 	Text,
 	TruncatedText,
 	UNSELECTED_LIST_PREFIX,
-} from "@earendil-works/diffex-tui";
+} from "@diffexai/diffex-tui";
 import type { EvolutionHarnessVersionInfo } from "#evolution";
 import { theme } from "../theme/theme.ts";
 import {

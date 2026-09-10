@@ -1,4 +1,4 @@
-import { computeHarnessSkillPackageVersion, validateHarnessSkillContent } from "@earendil-works/diffex-harness-state";
+import { computeHarnessSkillPackageVersion, validateHarnessSkillContent } from "@diffexai/diffex-harness-state";
 import type {
 	EvolutionArtifactProducer,
 	EvolutionArtifactReference,

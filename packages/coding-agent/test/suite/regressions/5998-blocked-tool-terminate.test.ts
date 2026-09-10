@@ -1,5 +1,5 @@
-import type { AgentTool } from "@earendil-works/diffex-agent-core";
-import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/diffex-ai";
+import type { AgentTool } from "@diffexai/diffex-agent-core";
+import { fauxAssistantMessage, fauxToolCall } from "@diffexai/diffex-ai";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it } from "vitest";
 import { createHarness, getAssistantTexts, type Harness } from "../harness.ts";

@@ -4,8 +4,8 @@
  * Run with: npx tsx test/streaming-render-debug.ts
  */
 
-import type { AssistantMessage } from "@earendil-works/diffex-ai";
-import { ProcessTerminal, type TUI, TuiMainScreen } from "@earendil-works/diffex-tui";
+import type { AssistantMessage } from "@diffexai/diffex-ai";
+import { ProcessTerminal, type TUI, TuiMainScreen } from "@diffexai/diffex-tui";
 import { readFileSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";

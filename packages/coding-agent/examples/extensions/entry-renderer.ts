@@ -8,8 +8,8 @@
  * Usage: /status-card [message]
  */
 
-import type { ExtensionAPI } from "@earendil-works/diffex-coding-agent";
-import { Box, Text } from "@earendil-works/diffex-tui";
+import type { ExtensionAPI } from "@diffexai/diffex";
+import { Box, Text } from "@diffexai/diffex-tui";
 
 interface StatusCardData {
 	message: string;

@@ -1,4 +1,4 @@
-import { getGlyphs, type TUI } from "@earendil-works/diffex-tui";
+import { getGlyphs, type TUI } from "@diffexai/diffex-tui";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BorderedLoader } from "../src/modes/interactive/components/bordered-loader.ts";
 import {

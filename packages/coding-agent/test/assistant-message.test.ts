@@ -1,5 +1,5 @@
-import type { AssistantMessage } from "@earendil-works/diffex-ai";
-import { getGlyphs } from "@earendil-works/diffex-tui";
+import type { AssistantMessage } from "@diffexai/diffex-ai";
+import { getGlyphs } from "@diffexai/diffex-tui";
 import { describe, expect, test } from "vitest";
 import {
 	AssistantMessageComponent,

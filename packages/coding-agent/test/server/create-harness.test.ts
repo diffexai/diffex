@@ -7,10 +7,10 @@ import {
 	type Result,
 	Session,
 	type ShellExecOptions,
-} from "@earendil-works/diffex-agent-core";
-import { NodeExecutionEnv } from "@earendil-works/diffex-agent-core/node";
-import { createModels } from "@earendil-works/diffex-ai";
-import { getModel } from "@earendil-works/diffex-ai/compat";
+} from "@diffexai/diffex-agent-core";
+import { NodeExecutionEnv } from "@diffexai/diffex-agent-core/node";
+import { createModels } from "@diffexai/diffex-ai";
+import { getModel } from "@diffexai/diffex-ai/compat";
 import { Type } from "typebox";
 import { describe, expect, test, vi } from "vitest";
 import { createSkill } from "../../src/core/skills.ts";

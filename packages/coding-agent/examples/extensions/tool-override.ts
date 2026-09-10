@@ -20,8 +20,8 @@
  *   diffex -e ./tool-override.ts
  */
 
-import type { TextContent } from "@earendil-works/diffex-ai";
-import { type ExtensionAPI, getAgentDir, withFileMutationQueue } from "@earendil-works/diffex-coding-agent";
+import { type ExtensionAPI, getAgentDir, withFileMutationQueue } from "@diffexai/diffex";
+import type { TextContent } from "@diffexai/diffex-ai";
 import { constants, readFileSync } from "fs";
 import { access, appendFile, readFile } from "fs/promises";
 import { join, resolve } from "path";

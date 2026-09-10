@@ -9,7 +9,7 @@ LLMs have limited context windows. When conversations grow too long, Diffex uses
 - [`packages/coding-agent/src/core/session-manager.ts`](https://github.com/diffexai/diffex/blob/main/packages/coding-agent/src/core/session-manager.ts) - Entry types (`CompactionEntry`, `BranchSummaryEntry`)
 - [`packages/coding-agent/src/core/extensions/types.ts`](https://github.com/diffexai/diffex/blob/main/packages/coding-agent/src/core/extensions/types.ts) - Extension event types
 
-For TypeScript definitions in your project, inspect `node_modules/@earendil-works/diffex-coding-agent/dist/`.
+For TypeScript definitions in your project, inspect `node_modules/@diffexai/diffex/dist/`.
 
 ## Overview
 
@@ -314,7 +314,7 @@ diffex.on("session_before_compact", async (event, ctx) => {
 To generate a summary with your own model, convert messages to text using `serializeConversation`:
 
 ```typescript
-import { convertToLlm, serializeConversation } from "@earendil-works/diffex-coding-agent";
+import { convertToLlm, serializeConversation } from "@diffexai/diffex";
 
 diffex.on("session_before_compact", async (event, ctx) => {
   const { preparation } = event;

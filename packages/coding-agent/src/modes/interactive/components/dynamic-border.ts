@@ -1,4 +1,4 @@
-import { type Component, getGlyphs } from "@earendil-works/diffex-tui";
+import { type Component, getGlyphs } from "@diffexai/diffex-tui";
 import { theme } from "../theme/theme.ts";
 
 /**

@@ -1,4 +1,4 @@
-import { DiffexSessionOwnershipError } from "@earendil-works/diffex-client";
+import { DiffexSessionOwnershipError } from "@diffexai/diffex-client";
 import { describe, expect, test } from "vitest";
 import { RemoteSession } from "../../src/client/remote-session.ts";
 import { collectRequests, connectClient, MemoryServer, sessionSnapshot } from "./support.ts";

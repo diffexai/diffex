@@ -1,5 +1,5 @@
-import { computeHarnessSkillPackageVersion } from "@earendil-works/diffex-harness-state";
-import type { MaterializedEvidence, MaterializedInvocation } from "@earendil-works/diffex-harness-trace";
+import { computeHarnessSkillPackageVersion } from "@diffexai/diffex-harness-state";
+import type { MaterializedEvidence, MaterializedInvocation } from "@diffexai/diffex-harness-trace";
 import { describe, expect, it } from "vitest";
 import {
 	computeEvolutionContentDigest,

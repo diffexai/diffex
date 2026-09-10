@@ -12,10 +12,10 @@
  * The generated prompt appears as a draft in the editor for review/editing.
  */
 
-import type { AgentMessage } from "@earendil-works/diffex-agent-core";
-import { type Message, uuidv7 } from "@earendil-works/diffex-ai";
-import type { ExtensionAPI, SessionEntry } from "@earendil-works/diffex-coding-agent";
-import { BorderedLoader, convertToLlm, serializeConversation } from "@earendil-works/diffex-coding-agent";
+import type { ExtensionAPI, SessionEntry } from "@diffexai/diffex";
+import { BorderedLoader, convertToLlm, serializeConversation } from "@diffexai/diffex";
+import type { AgentMessage } from "@diffexai/diffex-agent-core";
+import { type Message, uuidv7 } from "@diffexai/diffex-ai";
 
 const SYSTEM_PROMPT = `You are a context transfer assistant. Given a conversation history and the user's goal for a new thread, generate a focused prompt that:
 

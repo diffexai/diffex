@@ -13,9 +13,9 @@
  *   diffex --extension examples/extensions/custom-compaction.ts
  */
 
-import { uuidv7 } from "@earendil-works/diffex-ai";
-import type { ExtensionAPI } from "@earendil-works/diffex-coding-agent";
-import { convertToLlm, serializeConversation } from "@earendil-works/diffex-coding-agent";
+import type { ExtensionAPI } from "@diffexai/diffex";
+import { convertToLlm, serializeConversation } from "@diffexai/diffex";
+import { uuidv7 } from "@diffexai/diffex-ai";
 
 export default function (diffex: ExtensionAPI) {
 	diffex.on("session_before_compact", async (event, ctx) => {

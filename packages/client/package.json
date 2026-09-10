@@ -1,5 +1,5 @@
 {
-	"name": "@earendil-works/diffex-client",
+	"name": "@diffexai/diffex-client",
 	"version": "0.2.0",
 	"description": "Transport-neutral client for remote Diffex sessions over framed CBOR bytes",
 	"type": "module",
@@ -44,7 +44,7 @@
 		"cbor",
 		"binary"
 	],
-	"author": "Earendil Works",
+	"author": "DiffexAI",
 	"license": "MIT",
 	"repository": {
 		"type": "git",
@@ -55,7 +55,7 @@
 		"node": ">=22.19.0"
 	},
 	"dependencies": {
-		"@earendil-works/diffex-protocol": "^0.2.0"
+		"@diffexai/diffex-protocol": "^0.2.0"
 	},
 	"devDependencies": {
 		"shx": "0.4.0",

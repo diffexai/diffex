@@ -6,7 +6,7 @@ import {
 	encodeServerMessage,
 	PROTOCOL_VERSION,
 	type ServerSnapshot,
-} from "@earendil-works/diffex-protocol";
+} from "@diffexai/diffex-protocol";
 import { describe, expect, test } from "vitest";
 import { DiffexClient } from "../src/index.ts";
 import { createUnixTransportFactory } from "../src/unix.ts";

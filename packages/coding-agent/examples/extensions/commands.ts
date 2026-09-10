@@ -10,7 +10,7 @@
  * 3. Use /commands extensions to filter by source
  */
 
-import type { ExtensionAPI, SlashCommandInfo } from "@earendil-works/diffex-coding-agent";
+import type { ExtensionAPI, SlashCommandInfo } from "@diffexai/diffex";
 
 export default function commandsExtension(diffex: ExtensionAPI) {
 	diffex.registerCommand("commands", {

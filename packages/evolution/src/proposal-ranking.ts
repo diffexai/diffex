@@ -1,4 +1,4 @@
-import type { MaterializedEvidence, MaterializedInvocation } from "@earendil-works/diffex-harness-trace";
+import type { MaterializedEvidence, MaterializedInvocation } from "@diffexai/diffex-harness-trace";
 import type {
 	EvidenceRankingScoreComponents,
 	EvolutionArtifactProducer,

@@ -13,16 +13,10 @@ import {
 	startAiSpan,
 	type TelemetryContext,
 	type ThinkingLevel,
-} from "@earendil-works/diffex-agent-core";
-import {
-	contentText,
-	type RetryCallbacks,
-	type RetryPolicy,
-	retryAssistantCall,
-	uuidv7,
-} from "@earendil-works/diffex-ai";
-import type { AssistantMessage, Context, Model, SimpleStreamOptions, Usage } from "@earendil-works/diffex-ai/compat";
-import { completeSimple } from "@earendil-works/diffex-ai/compat";
+} from "@diffexai/diffex-agent-core";
+import { contentText, type RetryCallbacks, type RetryPolicy, retryAssistantCall, uuidv7 } from "@diffexai/diffex-ai";
+import type { AssistantMessage, Context, Model, SimpleStreamOptions, Usage } from "@diffexai/diffex-ai/compat";
+import { completeSimple } from "@diffexai/diffex-ai/compat";
 import { convertToLlm } from "../messages.ts";
 import {
 	buildSessionContext,

@@ -23,11 +23,11 @@ export default defineConfig({
 	},
 	resolve: {
 		alias: [
-			{ find: /^@earendil-works\/diffex-telemetry$/, replacement: telemetryIndex },
-			{ find: /^@earendil-works\/diffex-agent-core\/session\/testing$/, replacement: agentSessionTesting },
-			{ find: /^@earendil-works\/diffex-agent-core\/node$/, replacement: agentNode },
-			{ find: /^@earendil-works\/diffex-agent-core$/, replacement: agentIndex },
-			{ find: /^@earendil-works\/diffex-ai$/, replacement: aiIndex },
+			{ find: /^@diffexai\/diffex-telemetry$/, replacement: telemetryIndex },
+			{ find: /^@diffexai\/diffex-agent-core\/session\/testing$/, replacement: agentSessionTesting },
+			{ find: /^@diffexai\/diffex-agent-core\/node$/, replacement: agentNode },
+			{ find: /^@diffexai\/diffex-agent-core$/, replacement: agentIndex },
+			{ find: /^@diffexai\/diffex-ai$/, replacement: aiIndex },
 		],
 	},
 });

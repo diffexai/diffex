@@ -6,16 +6,16 @@ import { createInMemoryModelRegistry, createModelRegistry, getModelRuntime } fro
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AgentMessage, AgentTool, TelemetryContext } from "@earendil-works/diffex-agent-core";
-import { Agent } from "@earendil-works/diffex-agent-core";
+import type { AgentMessage, AgentTool, TelemetryContext } from "@diffexai/diffex-agent-core";
+import { Agent } from "@diffexai/diffex-agent-core";
 import type {
 	FauxModelDefinition,
 	FauxProviderRegistration,
 	FauxResponseStep,
 	Model,
-} from "@earendil-works/diffex-ai/compat";
-import { registerFauxProvider, streamSimple } from "@earendil-works/diffex-ai/compat";
-import type { HarnessStateStore, HarnessVersionBundle } from "@earendil-works/diffex-harness-state";
+} from "@diffexai/diffex-ai/compat";
+import { registerFauxProvider, streamSimple } from "@diffexai/diffex-ai/compat";
+import type { HarnessStateStore, HarnessVersionBundle } from "@diffexai/diffex-harness-state";
 import { AgentSession, type AgentSessionEvent } from "../../src/core/agent-session.ts";
 import type { AgentSessionLifecycleObserver } from "../../src/core/agent-session-lifecycle.ts";
 import { AuthStorage } from "../../src/core/auth-storage.ts";

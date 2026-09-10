@@ -6,7 +6,7 @@ import {
 	Spacer,
 	Text,
 	UNSELECTED_LIST_PREFIX,
-} from "@earendil-works/diffex-tui";
+} from "@diffexai/diffex-tui";
 import { type TerminalTheme, theme } from "../theme/theme.ts";
 import { DIFFEX_LOGO_ART } from "./diffex-welcome.ts";
 import { keyHint, rawKeyHint } from "./keybinding-hints.ts";

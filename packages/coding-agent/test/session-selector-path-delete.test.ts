@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { setKeybindings } from "@earendil-works/diffex-tui";
+import { setKeybindings } from "@diffexai/diffex-tui";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { KeybindingsManager } from "../src/core/keybindings.ts";
 import { type SessionInfo, SessionManager } from "../src/core/session-manager.ts";

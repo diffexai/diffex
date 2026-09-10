@@ -1,5 +1,5 @@
-import type { AgentMessage } from "@earendil-works/diffex-agent-core";
-import { fauxAssistantMessage, type Message, type TextContent } from "@earendil-works/diffex-ai";
+import type { AgentMessage } from "@diffexai/diffex-agent-core";
+import { fauxAssistantMessage, type Message, type TextContent } from "@diffexai/diffex-ai";
 import { afterEach, describe, expect, it } from "vitest";
 import {
 	appendCurrentPlanRecord,

@@ -7,8 +7,8 @@ import {
 	type SpanOptions,
 	type TelemetryContext,
 	type TelemetrySpan,
-} from "@earendil-works/diffex-agent-core";
-import { uuidv7 } from "@earendil-works/diffex-ai";
+} from "@diffexai/diffex-agent-core";
+import { uuidv7 } from "@diffexai/diffex-ai";
 import lockfile from "proper-lockfile";
 import { classifyEvolutionEvidence } from "#evolution";
 import {

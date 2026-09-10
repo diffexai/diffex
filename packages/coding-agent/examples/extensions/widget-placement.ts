@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from "@earendil-works/diffex-coding-agent";
+import type { ExtensionAPI } from "@diffexai/diffex";
 
 export default function widgetPlacementExtension(diffex: ExtensionAPI) {
 	diffex.on("session_start", (_event, ctx) => {

@@ -9,7 +9,7 @@ import {
 	UNSELECTED_LIST_PREFIX,
 	visibleWidth,
 	wrapTextWithAnsi,
-} from "@earendil-works/diffex-tui";
+} from "@diffexai/diffex-tui";
 import type {
 	RequestUserInputAnswer,
 	RequestUserInputQuestion,

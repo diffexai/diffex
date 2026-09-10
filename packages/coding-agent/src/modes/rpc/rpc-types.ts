@@ -5,8 +5,8 @@
  * Responses and events are emitted as JSON lines on stdout.
  */
 
-import type { AgentMessage, ThinkingLevel } from "@earendil-works/diffex-agent-core";
-import type { ImageContent, Model } from "@earendil-works/diffex-ai";
+import type { AgentMessage, ThinkingLevel } from "@diffexai/diffex-agent-core";
+import type { ImageContent, Model } from "@diffexai/diffex-ai";
 import type { SessionStats } from "../../core/agent-session.ts";
 import type { BashResult } from "../../core/bash-executor.ts";
 import type { CompactionResult } from "../../core/compaction/index.ts";

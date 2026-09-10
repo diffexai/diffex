@@ -5,14 +5,14 @@
 		"paths": {
 			"#evolution": ["../evolution/dist/index.d.ts"],
 			"#harness-trace": ["../harness-trace/dist/index.d.ts"],
-			"@earendil-works/diffex-agent-core": ["../agent/dist/index.d.ts"],
-			"@earendil-works/diffex-agent-core/*": ["../agent/dist/*.d.ts"],
-			"@earendil-works/diffex-ai": ["../ai/dist/index.d.ts"],
-			"@earendil-works/diffex-ai/*": ["../ai/dist/*.d.ts", "../ai/dist/providers/*.d.ts"],
-			"@earendil-works/diffex-client": ["../client/dist/index.d.ts"],
-			"@earendil-works/diffex-protocol": ["../protocol/dist/index.d.ts"],
-			"@earendil-works/diffex-tui": ["../tui/dist/index.d.ts"],
-			"@earendil-works/diffex-tui/*": ["../tui/dist/*.d.ts", "../tui/dist/components/*.d.ts"]
+			"@diffexai/diffex-agent-core": ["../agent/dist/index.d.ts"],
+			"@diffexai/diffex-agent-core/*": ["../agent/dist/*.d.ts"],
+			"@diffexai/diffex-ai": ["../ai/dist/index.d.ts"],
+			"@diffexai/diffex-ai/*": ["../ai/dist/*.d.ts", "../ai/dist/providers/*.d.ts"],
+			"@diffexai/diffex-client": ["../client/dist/index.d.ts"],
+			"@diffexai/diffex-protocol": ["../protocol/dist/index.d.ts"],
+			"@diffexai/diffex-tui": ["../tui/dist/index.d.ts"],
+			"@diffexai/diffex-tui/*": ["../tui/dist/*.d.ts", "../tui/dist/components/*.d.ts"]
 		},
 		"rootDir": "./src"
 	},

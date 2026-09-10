@@ -1,4 +1,4 @@
-import type { RequestEnvelope } from "@earendil-works/diffex-protocol";
+import type { RequestEnvelope } from "@diffexai/diffex-protocol";
 import { describe, expect, test } from "vitest";
 import { collectRequests, connectClient, MemoryServer, openRemoteSession, sessionSnapshot } from "./support.ts";
 

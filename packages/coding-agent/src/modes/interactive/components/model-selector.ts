@@ -1,4 +1,4 @@
-import { type Model, modelsAreEqual } from "@earendil-works/diffex-ai";
+import { type Model, modelsAreEqual } from "@diffexai/diffex-ai";
 import {
 	Container,
 	type Focusable,
@@ -11,7 +11,7 @@ import {
 	Text,
 	type TUI,
 	UNSELECTED_LIST_PREFIX,
-} from "@earendil-works/diffex-tui";
+} from "@diffexai/diffex-tui";
 import type { ModelRuntime } from "../../../core/model-runtime.ts";
 import type { SettingsManager } from "../../../core/settings-manager.ts";
 import { getModelSelectorSearchText } from "../model-search.ts";

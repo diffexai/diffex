@@ -7,7 +7,7 @@ import {
 	type ServerMessage,
 	type ServerSnapshot,
 	type SessionSnapshot,
-} from "@earendil-works/diffex-protocol";
+} from "@diffexai/diffex-protocol";
 import type { ByteTransport, ByteTransportHandlers, DiffexSessionHandle } from "../src/index.ts";
 import { DiffexClient } from "../src/index.ts";
 

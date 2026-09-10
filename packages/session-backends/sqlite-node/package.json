@@ -1,7 +1,7 @@
 {
-	"name": "@earendil-works/diffex-session-backend-sqlite-node",
+	"name": "@diffexai/diffex-session-backend-sqlite-node",
 	"version": "0.2.0",
-	"description": "Node sqlite session backend for @earendil-works/diffex-agent-core sessions",
+	"description": "Node sqlite session backend for @diffexai/diffex-agent-core sessions",
 	"type": "module",
 	"main": "./dist/index.js",
 	"types": "./dist/index.d.ts",
@@ -23,7 +23,7 @@
 		"coverage": "vitest --run --coverage",
 		"prepublishOnly": "npm run clean && npm run build"
 	},
-	"author": "Earendil Works",
+	"author": "DiffexAI",
 	"license": "MIT",
 	"repository": {
 		"type": "git",
@@ -34,8 +34,8 @@
 		"node": ">=22.19.0"
 	},
 	"dependencies": {
-		"@earendil-works/diffex-ai": "^0.2.0",
-		"@earendil-works/diffex-agent-core": "^0.2.0"
+		"@diffexai/diffex-ai": "^0.2.0",
+		"@diffexai/diffex-agent-core": "^0.2.0"
 	},
 	"devDependencies": {
 		"@vitest/coverage-v8": "4.1.9",

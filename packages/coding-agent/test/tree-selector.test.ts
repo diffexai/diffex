@@ -1,5 +1,5 @@
 import { stripVTControlCharacters } from "node:util";
-import { SELECTED_LIST_PREFIX, setKeybindings, visibleWidth } from "@earendil-works/diffex-tui";
+import { SELECTED_LIST_PREFIX, setKeybindings, visibleWidth } from "@diffexai/diffex-tui";
 import { beforeAll, beforeEach, describe, expect, test } from "vitest";
 import { KeybindingsManager } from "../src/core/keybindings.ts";
 import type {

@@ -62,8 +62,8 @@ afterEach(() => {
 function createNpmPrefixInstall(template = "diffex-prefix-"): { prefix: string; packageDir: string } {
 	const prefix = mkdtempSync(join(tmpdir(), template));
 	const root = join(prefix, "lib", "node_modules");
-	const scopeDir = join(root, "@earendil-works");
-	const packageDir = join(scopeDir, "diffex-coding-agent");
+	const scopeDir = join(root, "@diffexai");
+	const packageDir = join(scopeDir, "diffex");
 	mkdirSync(packageDir, { recursive: true });
 	tempDir = prefix;
 	process.env.DIFFEX_PACKAGE_DIR = packageDir;
@@ -119,8 +119,8 @@ function createBunGlobalInstall(): { packageDir: string } {
 	const prefix = join(temp, ".bun");
 	const bunBin = join(prefix, "bin");
 	const root = join(prefix, "install", "global", "node_modules");
-	const scopeDir = join(root, "@earendil-works");
-	const packageDir = join(scopeDir, "diffex-coding-agent");
+	const scopeDir = join(root, "@diffexai");
+	const packageDir = join(scopeDir, "diffex");
 	mkdirSync(packageDir, { recursive: true });
 	mkdirSync(bunBin, { recursive: true });
 	writeFileSync(join(bunBin, process.platform === "win32" ? "bun.cmd" : "bun"), createFakeBunScript(bunBin));
@@ -194,12 +194,12 @@ describe("Diffex configuration namespace", () => {
 describe("detectInstallMethod", () => {
 	test("detects pnpm from Windows .pnpm install paths", () => {
 		setExecPath(
-			"C:\\Users\\Admin\\Documents\\pnpm-repository\\global\\5\\.pnpm\\@earendil-works+diffex-coding-agent@0.67.68\\node_modules\\@earendil-works\\diffex-coding-agent\\dist\\cli.js",
+			"C:\\Users\\Admin\\Documents\\pnpm-repository\\global\\5\\.pnpm\\@diffexai+diffex@0.67.68\\node_modules\\@diffexai\\diffex\\dist\\cli.js",
 		);
 
 		expect(detectInstallMethod()).toBe("pnpm");
-		expect(getUpdateInstruction("@earendil-works/diffex-coding-agent")).toBe(
-			"Run: pnpm install -g --ignore-scripts --config.minimumReleaseAge=0 @earendil-works/diffex-coding-agent",
+		expect(getUpdateInstruction("@diffexai/diffex")).toBe(
+			"Run: pnpm install -g --ignore-scripts --config.minimumReleaseAge=0 @diffexai/diffex",
 		);
 	});
 
@@ -207,39 +207,31 @@ describe("detectInstallMethod", () => {
 		setExecPath("/usr/local/bin/node");
 
 		expect(detectInstallMethod()).toBe("unknown");
-		expect(getSelfUpdateCommand("@earendil-works/diffex-coding-agent")).toBeUndefined();
-		expect(getUpdateInstruction("@earendil-works/diffex-coding-agent")).toBe(
-			"Update @earendil-works/diffex-coding-agent using the package manager, wrapper, or source checkout that provides this installation.",
+		expect(getSelfUpdateCommand("@diffexai/diffex")).toBeUndefined();
+		expect(getUpdateInstruction("@diffexai/diffex")).toBe(
+			"Update @diffexai/diffex using the package manager, wrapper, or source checkout that provides this installation.",
 		);
 	});
 
 	test("self-updates npm installs from custom prefixes", () => {
 		const { prefix } = createNpmPrefixInstall();
 
-		const command = getSelfUpdateCommand("@earendil-works/diffex-coding-agent");
+		const command = getSelfUpdateCommand("@diffexai/diffex");
 
 		expect(detectInstallMethod()).toBe("npm");
 		expect(command).toEqual({
 			command: "npm",
-			args: [
-				"--prefix",
-				prefix,
-				"install",
-				"-g",
-				"--ignore-scripts",
-				"--min-release-age=0",
-				"@earendil-works/diffex-coding-agent",
-			],
-			display: `npm --prefix ${prefix} install -g --ignore-scripts --min-release-age=0 @earendil-works/diffex-coding-agent`,
+			args: ["--prefix", prefix, "install", "-g", "--ignore-scripts", "--min-release-age=0", "@diffexai/diffex"],
+			display: `npm --prefix ${prefix} install -g --ignore-scripts --min-release-age=0 @diffexai/diffex`,
 		});
 	});
 
 	test("self-updates exact npm versions without uninstalling the current package", () => {
 		const { prefix } = createNpmPrefixInstall();
 
-		const command = getSelfUpdateCommand("@earendil-works/diffex-coding-agent", undefined, {
-			packageName: "@earendil-works/diffex-coding-agent",
-			installSpec: "@earendil-works/diffex-coding-agent@1.2.3",
+		const command = getSelfUpdateCommand("@diffexai/diffex", undefined, {
+			packageName: "@diffexai/diffex",
+			installSpec: "@diffexai/diffex@1.2.3",
 		});
 
 		expect(command).toEqual({
@@ -251,9 +243,9 @@ describe("detectInstallMethod", () => {
 				"-g",
 				"--ignore-scripts",
 				"--min-release-age=0",
-				"@earendil-works/diffex-coding-agent@1.2.3",
+				"@diffexai/diffex@1.2.3",
 			],
-			display: `npm --prefix ${prefix} install -g --ignore-scripts --min-release-age=0 @earendil-works/diffex-coding-agent@1.2.3`,
+			display: `npm --prefix ${prefix} install -g --ignore-scripts --min-release-age=0 @diffexai/diffex@1.2.3`,
 		});
 	});
 
@@ -284,27 +276,19 @@ describe("detectInstallMethod", () => {
 	test("self-update respects configured npmCommand", () => {
 		const { prefix } = createNpmPrefixInstall();
 
-		const command = getSelfUpdateCommand("@earendil-works/diffex-coding-agent", ["npm", "--prefix", prefix]);
+		const command = getSelfUpdateCommand("@diffexai/diffex", ["npm", "--prefix", prefix]);
 
 		expect(command).toEqual({
 			command: "npm",
-			args: [
-				"--prefix",
-				prefix,
-				"install",
-				"-g",
-				"--ignore-scripts",
-				"--min-release-age=0",
-				"@earendil-works/diffex-coding-agent",
-			],
-			display: `npm --prefix ${prefix} install -g --ignore-scripts --min-release-age=0 @earendil-works/diffex-coding-agent`,
+			args: ["--prefix", prefix, "install", "-g", "--ignore-scripts", "--min-release-age=0", "@diffexai/diffex"],
+			display: `npm --prefix ${prefix} install -g --ignore-scripts --min-release-age=0 @diffexai/diffex`,
 		});
 	});
 
 	test("self-update treats empty npmCommand as unset", () => {
 		const { prefix } = createNpmPrefixInstall();
 
-		const command = getSelfUpdateCommand("@earendil-works/diffex-coding-agent", []);
+		const command = getSelfUpdateCommand("@diffexai/diffex", []);
 
 		expect(command?.args).toEqual([
 			"--prefix",
@@ -313,41 +297,41 @@ describe("detectInstallMethod", () => {
 			"-g",
 			"--ignore-scripts",
 			"--min-release-age=0",
-			"@earendil-works/diffex-coding-agent",
+			"@diffexai/diffex",
 		]);
 	});
 
 	test("quotes npm self-update display paths", () => {
 		const { prefix } = createNpmPrefixInstall("pi prefix ");
 
-		const command = getSelfUpdateCommand("@earendil-works/diffex-coding-agent");
+		const command = getSelfUpdateCommand("@diffexai/diffex");
 
 		expect(command?.display).toBe(
-			`npm --prefix "${prefix}" install -g --ignore-scripts --min-release-age=0 @earendil-works/diffex-coding-agent`,
+			`npm --prefix "${prefix}" install -g --ignore-scripts --min-release-age=0 @diffexai/diffex`,
 		);
 	});
 
 	test("does not infer Windows npm custom prefixes from package paths", () => {
-		const packageDir = "C:\\Users\\Admin\\npm prefix\\node_modules\\@earendil-works\\diffex-coding-agent";
+		const packageDir = "C:\\Users\\Admin\\npm prefix\\node_modules\\@diffexai\\diffex";
 		process.env.DIFFEX_PACKAGE_DIR = packageDir;
 		setExecPath(`${packageDir}\\dist\\cli.js`);
 
 		expect(detectInstallMethod()).toBe("npm");
-		expect(getUpdateInstruction("@earendil-works/diffex-coding-agent")).toBe(
-			"Run: npm install -g --ignore-scripts --min-release-age=0 @earendil-works/diffex-coding-agent",
+		expect(getUpdateInstruction("@diffexai/diffex")).toBe(
+			"Run: npm install -g --ignore-scripts --min-release-age=0 @diffexai/diffex",
 		);
 	});
 
 	test("self-updates bun global installs from bun pm bin", () => {
 		createBunGlobalInstall();
 
-		const command = getSelfUpdateCommand("@earendil-works/diffex-coding-agent");
+		const command = getSelfUpdateCommand("@diffexai/diffex");
 
 		expect(detectInstallMethod()).toBe("bun");
 		expect(command).toEqual({
 			command: "bun",
-			args: ["install", "-g", "--ignore-scripts", "--minimum-release-age=0", "@earendil-works/diffex-coding-agent"],
-			display: "bun install -g --ignore-scripts --minimum-release-age=0 @earendil-works/diffex-coding-agent",
+			args: ["install", "-g", "--ignore-scripts", "--minimum-release-age=0", "@diffexai/diffex"],
+			display: "bun install -g --ignore-scripts --minimum-release-age=0 @diffexai/diffex",
 		});
 	});
 
@@ -381,8 +365,8 @@ describe("detectInstallMethod", () => {
 		const temp = mkdtempSync(join(tmpdir(), "diffex-pnpm11-"));
 		const binDir = join(temp, "bin");
 		const root = join(temp, "Library", "pnpm", "global", "v11");
-		const packageName = "@earendil-works/diffex-coding-agent";
-		const globalPackageDir = join(root, "11e9a", "node_modules", "@earendil-works", "diffex-coding-agent");
+		const packageName = "@diffexai/diffex";
+		const globalPackageDir = join(root, "11e9a", "node_modules", "@diffexai", "diffex");
 		const storePackageDir = join(
 			temp,
 			"Library",
@@ -390,13 +374,13 @@ describe("detectInstallMethod", () => {
 			"store",
 			"v11",
 			"links",
-			"@earendil-works",
-			"diffex-coding-agent",
+			"@diffexai",
+			"diffex",
 			"0.75.0",
 			"hash",
 			"node_modules",
-			"@earendil-works",
-			"diffex-coding-agent",
+			"@diffexai",
+			"diffex",
 		);
 		mkdirSync(globalPackageDir, { recursive: true });
 		mkdirSync(storePackageDir, { recursive: true });
@@ -475,9 +459,7 @@ describe("detectInstallMethod", () => {
 		const { packageDir } = createNpmPrefixInstall();
 		chmodSync(packageDir, 0o500);
 
-		expect(getSelfUpdateCommand("@earendil-works/diffex-coding-agent")).toBeUndefined();
-		expect(getSelfUpdateUnavailableInstruction("@earendil-works/diffex-coding-agent")).toContain(
-			"the install path is not writable",
-		);
+		expect(getSelfUpdateCommand("@diffexai/diffex")).toBeUndefined();
+		expect(getSelfUpdateUnavailableInstruction("@diffexai/diffex")).toContain("the install path is not writable");
 	});
 });

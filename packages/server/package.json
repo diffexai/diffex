@@ -1,5 +1,5 @@
 {
-	"name": "@earendil-works/diffex-server",
+	"name": "@diffexai/diffex-server",
 	"version": "0.2.0",
 	"description": "Experimental server package for Diffex",
 	"type": "module",
@@ -40,7 +40,7 @@
 		"diffex",
 		"server"
 	],
-	"author": "Earendil Works",
+	"author": "DiffexAI",
 	"license": "MIT",
 	"repository": {
 		"type": "git",
@@ -51,8 +51,8 @@
 		"node": ">=22.19.0"
 	},
 	"dependencies": {
-		"@earendil-works/diffex-ai": "^0.2.0",
-		"@earendil-works/diffex-protocol": "^0.2.0",
+		"@diffexai/diffex-ai": "^0.2.0",
+		"@diffexai/diffex-protocol": "^0.2.0",
 		"ws": "8.21.0"
 	},
 	"devDependencies": {

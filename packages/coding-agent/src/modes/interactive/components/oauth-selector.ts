@@ -1,4 +1,4 @@
-import type { ApiKeyAuth, AuthCheck, OAuthAuth } from "@earendil-works/diffex-ai";
+import type { ApiKeyAuth, AuthCheck, OAuthAuth } from "@diffexai/diffex-ai";
 import {
 	Container,
 	type Focusable,
@@ -10,7 +10,7 @@ import {
 	Spacer,
 	TruncatedText,
 	UNSELECTED_LIST_PREFIX,
-} from "@earendil-works/diffex-tui";
+} from "@diffexai/diffex-tui";
 import { theme } from "../theme/theme.ts";
 
 export type AuthSelectorProvider = {

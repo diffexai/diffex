@@ -1,4 +1,4 @@
-import type { ImageContent, TextContent } from "@earendil-works/diffex-ai";
+import type { ImageContent, TextContent } from "@diffexai/diffex-ai";
 import { processImage } from "./image-process.ts";
 
 export type ToolResultContent = TextContent | ImageContent;

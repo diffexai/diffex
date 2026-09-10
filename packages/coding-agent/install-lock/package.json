@@ -1,10 +1,10 @@
 {
-	"name": "@earendil-works/diffex-coding-agent-install",
+	"name": "@diffexai/diffex-coding-agent-install",
 	"version": "0.2.0",
 	"private": true,
 	"description": "Lockfile root used by the Diffex installer and updater.",
 	"dependencies": {
-		"@earendil-works/diffex-coding-agent": "0.2.0"
+		"@diffexai/diffex": "0.2.0"
 	},
 	"overrides": {
 		"protobufjs": "7.6.5",

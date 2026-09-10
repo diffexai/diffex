@@ -1,4 +1,4 @@
-import type { AssistantMessage } from "@earendil-works/diffex-ai";
+import type { AssistantMessage } from "@diffexai/diffex-ai";
 import { describe, expect, it } from "vitest";
 import {
 	collectCacheMisses,

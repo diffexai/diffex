@@ -1,4 +1,4 @@
-import type { MaterializedEvidence, MaterializedInvocation } from "@earendil-works/diffex-harness-trace";
+import type { MaterializedEvidence, MaterializedInvocation } from "@diffexai/diffex-harness-trace";
 
 export const NON_SUBSTANTIVE_RUNTIME_TRACE_REASON = "non-substantive-runtime-trace" as const;
 

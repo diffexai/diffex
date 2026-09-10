@@ -1,8 +1,8 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fauxAssistantMessage } from "@earendil-works/diffex-ai";
-import { HarnessStateStore, type HarnessVersion } from "@earendil-works/diffex-harness-state";
+import { fauxAssistantMessage } from "@diffexai/diffex-ai";
+import { HarnessStateStore, type HarnessVersion } from "@diffexai/diffex-harness-state";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { isCollaborationModeBusy, setCollaborationMode } from "../../../src/core/collaboration-mode.ts";
 import { createHarness, getUserTexts, type Harness } from "../harness.ts";

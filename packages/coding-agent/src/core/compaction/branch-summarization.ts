@@ -5,10 +5,10 @@
  * a summary of the branch being left so context isn't lost.
  */
 
-import type { AgentMessage, StreamFn, TelemetryContext } from "@earendil-works/diffex-agent-core";
-import type { RetryCallbacks, RetryPolicy } from "@earendil-works/diffex-ai";
-import { contentText } from "@earendil-works/diffex-ai";
-import type { Model, SimpleStreamOptions, Usage } from "@earendil-works/diffex-ai/compat";
+import type { AgentMessage, StreamFn, TelemetryContext } from "@diffexai/diffex-agent-core";
+import type { RetryCallbacks, RetryPolicy } from "@diffexai/diffex-ai";
+import { contentText } from "@diffexai/diffex-ai";
+import type { Model, SimpleStreamOptions, Usage } from "@diffexai/diffex-ai/compat";
 import {
 	convertToLlm,
 	createBranchSummaryMessage,

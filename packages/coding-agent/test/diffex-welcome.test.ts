@@ -1,6 +1,6 @@
 import { stripVTControlCharacters } from "node:util";
-import type { TUI } from "@earendil-works/diffex-tui";
-import { getGlyphs, visibleWidth } from "@earendil-works/diffex-tui";
+import type { TUI } from "@diffexai/diffex-tui";
+import { getGlyphs, visibleWidth } from "@diffexai/diffex-tui";
 import { afterAll, afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
 	DIFFEX_LOGO_ART,

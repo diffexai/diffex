@@ -4,7 +4,7 @@
  * Usage: diffex --extension ./examples/extensions/rainbow-editor.ts
  */
 
-import { CustomEditor, type ExtensionAPI } from "@earendil-works/diffex-coding-agent";
+import { CustomEditor, type ExtensionAPI } from "@diffexai/diffex";
 
 // Base colors (coral → yellow → green → teal → blue → purple → pink)
 const COLORS: [number, number, number][] = [

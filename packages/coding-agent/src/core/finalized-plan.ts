@@ -1,4 +1,4 @@
-import type { AssistantMessage } from "@earendil-works/diffex-ai/compat";
+import type { AssistantMessage } from "@diffexai/diffex-ai/compat";
 
 const OPEN_TAG = "<proposed_plan>";
 const CLOSE_TAG = "</proposed_plan>";

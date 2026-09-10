@@ -1,9 +1,9 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type AgentTool, InMemoryTelemetryContext } from "@earendil-works/diffex-agent-core";
-import { type AssistantMessage, fauxAssistantMessage, fauxToolCall, type Model } from "@earendil-works/diffex-ai";
-import { HarnessStateStore } from "@earendil-works/diffex-harness-state";
+import { type AgentTool, InMemoryTelemetryContext } from "@diffexai/diffex-agent-core";
+import { type AssistantMessage, fauxAssistantMessage, fauxToolCall, type Model } from "@diffexai/diffex-ai";
+import { HarnessStateStore } from "@diffexai/diffex-harness-state";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { InputEvent } from "../../src/core/extensions/index.ts";

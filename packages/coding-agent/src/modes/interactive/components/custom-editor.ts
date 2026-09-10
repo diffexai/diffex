@@ -1,4 +1,4 @@
-import { Editor, type EditorOptions, type EditorTheme, type TUI } from "@earendil-works/diffex-tui";
+import { Editor, type EditorOptions, type EditorTheme, type TUI } from "@diffexai/diffex-tui";
 import type { AppKeybinding, KeybindingsManager } from "../../../core/keybindings.ts";
 
 /**

@@ -1,4 +1,4 @@
-import type { AuthResult } from "@earendil-works/diffex-ai";
+import type { AuthResult } from "@diffexai/diffex-ai";
 import { APP_NAME } from "../config.ts";
 import type { Args } from "./args.ts";
 

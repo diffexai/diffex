@@ -1,4 +1,4 @@
-import { visibleWidth } from "@earendil-works/diffex-tui";
+import { visibleWidth } from "@diffexai/diffex-tui";
 import { afterEach, beforeAll, describe, expect, test } from "vitest";
 import {
 	DiffexPathDockHinge,

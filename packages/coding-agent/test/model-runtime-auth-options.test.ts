@@ -1,4 +1,4 @@
-import { type AuthType, type CredentialStore, InMemoryCredentialStore } from "@earendil-works/diffex-ai";
+import { type AuthType, type CredentialStore, InMemoryCredentialStore } from "@diffexai/diffex-ai";
 import { describe, expect, it } from "vitest";
 import { AuthStorage } from "../src/core/auth-storage.ts";
 import { ModelRuntime } from "../src/core/model-runtime.ts";

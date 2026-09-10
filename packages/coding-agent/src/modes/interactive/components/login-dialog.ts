@@ -1,5 +1,5 @@
-import type { AuthInfoLink, OAuthDeviceCodeInfo } from "@earendil-works/diffex-ai";
-import { Container, type Focusable, getKeybindings, Input, Spacer, Text, type TUI } from "@earendil-works/diffex-tui";
+import type { AuthInfoLink, OAuthDeviceCodeInfo } from "@diffexai/diffex-ai";
+import { Container, type Focusable, getKeybindings, Input, Spacer, Text, type TUI } from "@diffexai/diffex-tui";
 import { openBrowser } from "../../../utils/open-browser.ts";
 import { theme } from "../theme/theme.ts";
 import { keyHint } from "./keybinding-hints.ts";

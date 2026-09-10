@@ -1,4 +1,4 @@
-import type { Api, Model, Provider } from "@earendil-works/diffex-ai";
+import type { Api, Model, Provider } from "@diffexai/diffex-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AuthStorage } from "../../../src/core/auth-storage.ts";
 import { ModelRuntime } from "../../../src/core/model-runtime.ts";

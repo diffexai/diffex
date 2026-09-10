@@ -4,7 +4,7 @@
  * Override settings using SettingsManager.
  */
 
-import { createAgentSession, SessionManager, SettingsManager } from "@earendil-works/diffex-coding-agent";
+import { createAgentSession, SessionManager, SettingsManager } from "@diffexai/diffex";
 
 const cwd = process.cwd();
 

@@ -4,7 +4,7 @@
  * Shows how to select a specific model and thinking level.
  */
 
-import { createAgentSession, ModelRuntime } from "@earendil-works/diffex-coding-agent";
+import { createAgentSession, ModelRuntime } from "@diffexai/diffex";
 
 const modelRuntime = await ModelRuntime.create();
 

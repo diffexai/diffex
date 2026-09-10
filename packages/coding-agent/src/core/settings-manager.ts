@@ -1,6 +1,6 @@
-import type { ThinkingLevel } from "@earendil-works/diffex-agent-core";
-import type { Transport } from "@earendil-works/diffex-ai";
-import type { TuiMode as RendererTuiMode, ScrollViewScrollbar } from "@earendil-works/diffex-tui";
+import type { ThinkingLevel } from "@diffexai/diffex-agent-core";
+import type { Transport } from "@diffexai/diffex-ai";
+import type { TuiMode as RendererTuiMode, ScrollViewScrollbar } from "@diffexai/diffex-tui";
 import { randomUUID } from "crypto";
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "fs";
 import { dirname, join } from "path";

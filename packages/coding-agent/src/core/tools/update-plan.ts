@@ -1,5 +1,5 @@
-import type { AgentTool } from "@earendil-works/diffex-agent-core";
-import { Container, Text } from "@earendil-works/diffex-tui";
+import type { AgentTool } from "@diffexai/diffex-agent-core";
+import { Container, Text } from "@diffexai/diffex-tui";
 import { Type } from "typebox";
 import type { Theme } from "../../modes/interactive/theme/theme.ts";
 import type { ToolDefinition } from "../extensions/types.ts";

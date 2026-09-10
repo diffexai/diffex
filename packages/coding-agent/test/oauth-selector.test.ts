@@ -1,4 +1,4 @@
-import { getGlyphs, setKeybindings } from "@earendil-works/diffex-tui";
+import { getGlyphs, setKeybindings } from "@diffexai/diffex-tui";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { KeybindingsManager } from "../src/core/keybindings.ts";
 import { OAuthSelectorComponent } from "../src/modes/interactive/components/oauth-selector.ts";

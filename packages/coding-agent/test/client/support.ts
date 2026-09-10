@@ -1,4 +1,4 @@
-import { type ByteTransport, type ByteTransportHandlers, DiffexClient } from "@earendil-works/diffex-client";
+import { type ByteTransport, type ByteTransportHandlers, DiffexClient } from "@diffexai/diffex-client";
 import {
 	type ClientMessage,
 	ClientMessageDecoder,
@@ -8,7 +8,7 @@ import {
 	type ServerMessage,
 	type ServerSnapshot,
 	type SessionSnapshot,
-} from "@earendil-works/diffex-protocol";
+} from "@diffexai/diffex-protocol";
 import { RemoteSession, type RemoteSessionOptions } from "../../src/client/remote-session.ts";
 
 export class MemoryServer {

@@ -1,4 +1,4 @@
-import type { MaterializedEvidence } from "@earendil-works/diffex-harness-trace";
+import type { MaterializedEvidence } from "@diffexai/diffex-harness-trace";
 import type {
 	EvidenceCorpusDocument,
 	EvidenceCorpusManifest,

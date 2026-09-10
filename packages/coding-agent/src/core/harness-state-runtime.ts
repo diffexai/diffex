@@ -6,7 +6,7 @@ import {
 	type HarnessVersionBundle,
 	type HarnessWorkspaceIdentity,
 	harnessWorkspaceSelectionFileName,
-} from "@earendil-works/diffex-harness-state";
+} from "@diffexai/diffex-harness-state";
 
 export interface ResolvedHarnessWorkspace {
 	readonly workspace: HarnessWorkspaceIdentity;

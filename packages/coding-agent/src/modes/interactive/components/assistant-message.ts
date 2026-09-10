@@ -1,5 +1,5 @@
-import type { AssistantMessage } from "@earendil-works/diffex-ai";
-import { Container, getGlyphs, Markdown, type MarkdownTheme, Spacer, Text } from "@earendil-works/diffex-tui";
+import type { AssistantMessage } from "@diffexai/diffex-ai";
+import { Container, getGlyphs, Markdown, type MarkdownTheme, Spacer, Text } from "@diffexai/diffex-tui";
 import type { MarkdownTransformer } from "../../../core/extensions/types.ts";
 import { getMarkdownTheme, theme } from "../theme/theme.ts";
 import {

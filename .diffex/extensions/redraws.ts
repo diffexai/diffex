@@ -4,8 +4,8 @@
  * Exposes /tui to show TUI redraw stats.
  */
 
-import type { ExtensionAPI } from "@earendil-works/diffex-coding-agent";
-import { Text } from "@earendil-works/diffex-tui";
+import type { ExtensionAPI } from "@diffexai/diffex";
+import { Text } from "@diffexai/diffex-tui";
 
 export default function (pi: ExtensionAPI) {
 	pi.registerCommand("tui", {

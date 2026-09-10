@@ -7,7 +7,7 @@ import {
 	type SpanOptions,
 	type SpanStatus,
 	type TelemetrySpan,
-} from "@earendil-works/diffex-telemetry";
+} from "@diffexai/diffex-telemetry";
 import { encodeTraceRecord } from "./codec.ts";
 import {
 	type AgentHarnessSessionSegmentCursor,

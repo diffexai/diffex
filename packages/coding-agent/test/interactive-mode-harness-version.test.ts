@@ -1,5 +1,5 @@
-import type { HarnessSkill } from "@earendil-works/diffex-harness-state";
-import { setKeybindings } from "@earendil-works/diffex-tui";
+import type { HarnessSkill } from "@diffexai/diffex-harness-state";
+import { setKeybindings } from "@diffexai/diffex-tui";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { KeybindingsManager } from "../src/core/keybindings.ts";
 import type { HarnessVersionSelectorComponent } from "../src/modes/interactive/components/harness-version-selector.ts";

@@ -1,7 +1,7 @@
 import { lstat, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ServerMessageDecoder } from "@earendil-works/diffex-protocol";
+import { ServerMessageDecoder } from "@diffexai/diffex-protocol";
 import { afterEach, expect, test, vi } from "vitest";
 import type { ByteConnection } from "../src/connection.ts";
 import { DiffexServer } from "../src/index.ts";

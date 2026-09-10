@@ -1,4 +1,4 @@
-import type { HarnessVersion } from "@earendil-works/diffex-harness-state";
+import type { HarnessVersion } from "@diffexai/diffex-harness-state";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	AUTOMATIC_EVOLUTION_TOKEN_THRESHOLD,

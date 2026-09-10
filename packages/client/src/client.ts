@@ -9,7 +9,7 @@ import {
 	type ServerEvent,
 	type ServerSnapshot,
 	type SessionMetadata,
-} from "@earendil-works/diffex-protocol";
+} from "@diffexai/diffex-protocol";
 import { Connection } from "./connection.ts";
 import {
 	DiffexClientDisposedError,

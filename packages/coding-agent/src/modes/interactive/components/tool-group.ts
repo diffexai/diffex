@@ -1,4 +1,4 @@
-import { type Component, truncateToWidth, visibleWidth } from "@earendil-works/diffex-tui";
+import { type Component, truncateToWidth, visibleWidth } from "@diffexai/diffex-tui";
 import { theme } from "../theme/theme.ts";
 import {
 	DiffexPathDockHinge,

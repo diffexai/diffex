@@ -1,6 +1,6 @@
 import { copyFileSync, existsSync, mkdirSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
-import type { TelemetryContext } from "@earendil-works/diffex-agent-core";
+import type { TelemetryContext } from "@diffexai/diffex-agent-core";
 import { resolvePath } from "../utils/paths.ts";
 import type { AgentSession } from "./agent-session.ts";
 import type { InvocationSessionAttachmentReason } from "./agent-session-lifecycle.ts";

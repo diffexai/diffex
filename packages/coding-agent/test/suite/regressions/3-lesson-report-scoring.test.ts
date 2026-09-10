@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/diffex-ai";
-import { HarnessStateStore } from "@earendil-works/diffex-harness-state";
+import { fauxAssistantMessage, fauxToolCall } from "@diffexai/diffex-ai";
+import { HarnessStateStore } from "@diffexai/diffex-harness-state";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	computeEvolutionContentDigest,

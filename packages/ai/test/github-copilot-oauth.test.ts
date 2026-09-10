@@ -2,16 +2,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { InMemoryCredentialStore } from "../src/auth/credential-store.ts";
 import { githubCopilotOAuth } from "../src/auth/oauth/github-copilot.ts";
 import { createModels } from "../src/models.ts";
-import { githubCopilotProvider } from "../src/providers/github-copilot.ts";
 import { GITHUB_COPILOT_MODELS } from "../src/providers/github-copilot.models.ts";
+import { githubCopilotProvider } from "../src/providers/github-copilot.ts";
 
 const neverAbortedSignal = new AbortController().signal;
 
 // Copilot retires models from the generated catalog independently of this test,
 // so select the asserted model from the current catalog instead of pinning an id.
-const copilotPickerModelId = Object.values(GITHUB_COPILOT_MODELS).find(
-	(model) => model.api === "openai-responses",
-)?.id;
+const copilotPickerModelId = Object.values(GITHUB_COPILOT_MODELS).find((model) => model.api === "openai-responses")?.id;
 if (copilotPickerModelId === undefined) {
 	throw new Error("GitHub Copilot generated catalog has no openai-responses model");
 }

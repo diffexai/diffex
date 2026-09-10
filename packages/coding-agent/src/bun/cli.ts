@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { registerBunOAuthFlows } from "@earendil-works/diffex-ai/bun-oauth";
+import { registerBunOAuthFlows } from "@diffexai/diffex-ai/bun-oauth";
 import { APP_NAME } from "../config.ts";
 
 process.title = APP_NAME;

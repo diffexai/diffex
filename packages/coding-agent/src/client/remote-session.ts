@@ -4,7 +4,7 @@ import type {
 	DiffexClient,
 	SessionLease,
 	Unsubscribe,
-} from "@earendil-works/diffex-client";
+} from "@diffexai/diffex-client";
 import type {
 	ModelMetadata,
 	ModelRef,
@@ -14,7 +14,7 @@ import type {
 	SessionSnapshot,
 	ThinkingLevel,
 	TranscriptItem,
-} from "@earendil-works/diffex-protocol";
+} from "@diffexai/diffex-protocol";
 import {
 	applyTranscriptProgress,
 	applyTranscriptSnapshot,

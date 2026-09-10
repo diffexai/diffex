@@ -1,8 +1,8 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { AgentTool } from "@earendil-works/diffex-agent-core";
-import { type Context, fauxAssistantMessage, fauxToolCall } from "@earendil-works/diffex-ai";
-import { HarnessStateStore, type HarnessVersionBundle } from "@earendil-works/diffex-harness-state";
+import type { AgentTool } from "@diffexai/diffex-agent-core";
+import { type Context, fauxAssistantMessage, fauxToolCall } from "@diffexai/diffex-ai";
+import { HarnessStateStore, type HarnessVersionBundle } from "@diffexai/diffex-harness-state";
 import { Type } from "typebox";
 import { Check } from "typebox/value";
 import { afterEach, describe, expect, it, vi } from "vitest";

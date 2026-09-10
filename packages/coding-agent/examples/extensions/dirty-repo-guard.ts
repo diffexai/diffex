@@ -5,7 +5,7 @@
  * Useful to ensure work is committed before switching context.
  */
 
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/diffex-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@diffexai/diffex";
 
 async function checkDirtyRepo(
 	diffex: ExtensionAPI,

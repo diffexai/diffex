@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { Command, EventEnvelope, SessionMetadata, SessionSnapshot } from "@earendil-works/diffex-protocol";
+import type { Command, EventEnvelope, SessionMetadata, SessionSnapshot } from "@diffexai/diffex-protocol";
 import type { ByteConnection, ConnectionState } from "./connection.ts";
 import { DiffexServerError } from "./errors.ts";
 import type {

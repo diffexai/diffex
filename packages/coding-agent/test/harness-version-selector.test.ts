@@ -1,4 +1,4 @@
-import { setKeybindings, visibleWidth } from "@earendil-works/diffex-tui";
+import { setKeybindings, visibleWidth } from "@diffexai/diffex-tui";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { KeybindingsManager } from "../src/core/keybindings.ts";
 import {

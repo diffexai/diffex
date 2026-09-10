@@ -1,4 +1,4 @@
-import { fauxAssistantMessage } from "@earendil-works/diffex-ai";
+import { fauxAssistantMessage } from "@diffexai/diffex-ai";
 import { describe, expect, it } from "vitest";
 import { createHarness } from "../harness.ts";
 

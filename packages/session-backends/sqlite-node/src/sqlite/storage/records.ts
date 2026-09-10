@@ -1,4 +1,4 @@
-import { SessionError } from "@earendil-works/diffex-agent-core";
+import { SessionError } from "@diffexai/diffex-agent-core";
 import { joinSqlFragments, sql } from "../sql.ts";
 import type { SqliteDatabase } from "../types.ts";
 

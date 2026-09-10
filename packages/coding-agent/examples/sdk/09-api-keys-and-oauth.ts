@@ -4,7 +4,7 @@
  * Configure provider auth through ModelRuntime.
  */
 
-import { createAgentSession, ModelRuntime, SessionManager } from "@earendil-works/diffex-coding-agent";
+import { createAgentSession, ModelRuntime, SessionManager } from "@diffexai/diffex";
 
 const modelRuntime = await ModelRuntime.create();
 const { session: defaultAuthSession } = await createAgentSession({

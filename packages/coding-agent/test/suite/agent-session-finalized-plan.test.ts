@@ -1,4 +1,4 @@
-import { fauxAssistantMessage, fauxText } from "@earendil-works/diffex-ai";
+import { fauxAssistantMessage, fauxText } from "@diffexai/diffex-ai";
 import { afterEach, describe, expect, it } from "vitest";
 import { setCollaborationMode } from "../../src/core/collaboration-mode.ts";
 import { parseFinalizedPlanResponse } from "../../src/core/finalized-plan.ts";

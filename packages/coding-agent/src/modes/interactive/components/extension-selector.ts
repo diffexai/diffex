@@ -13,7 +13,7 @@ import {
 	type TUI,
 	truncateToWidth,
 	UNSELECTED_LIST_PREFIX,
-} from "@earendil-works/diffex-tui";
+} from "@diffexai/diffex-tui";
 import { theme } from "../theme/theme.ts";
 import { CountdownTimer } from "./countdown-timer.ts";
 import { keyHint, rawKeyHint } from "./keybinding-hints.ts";

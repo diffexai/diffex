@@ -10,7 +10,7 @@
  * extensions system using diffex.registerTool().
  */
 
-import { createAgentSession, SessionManager } from "@earendil-works/diffex-coding-agent";
+import { createAgentSession, SessionManager } from "@diffexai/diffex";
 
 // Read-only mode (no edit/write)
 const { session: readOnlySession } = await createAgentSession({

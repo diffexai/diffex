@@ -1,4 +1,4 @@
-import type { Message } from "@earendil-works/diffex-ai";
+import type { Message } from "@diffexai/diffex-ai";
 import { describe, expect, it } from "vitest";
 import { serializeConversation } from "../src/core/compaction/utils.ts";
 

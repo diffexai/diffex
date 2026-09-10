@@ -1,6 +1,6 @@
-import { Agent } from "@earendil-works/diffex-agent-core";
-import { createModels } from "@earendil-works/diffex-ai";
-import { anthropicProvider } from "@earendil-works/diffex-ai/providers/anthropic";
+import { Agent } from "@diffexai/diffex-agent-core";
+import { createModels } from "@diffexai/diffex-ai";
+import { anthropicProvider } from "@diffexai/diffex-ai/providers/anthropic";
 
 const models = createModels();
 models.setProvider(anthropicProvider());

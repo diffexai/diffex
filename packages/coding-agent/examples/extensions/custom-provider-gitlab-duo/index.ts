@@ -9,6 +9,7 @@
  *   # Then /login gitlab-duo, or set GITLAB_TOKEN=glpat-...
  */
 
+import type { ExtensionAPI } from "@diffexai/diffex";
 import {
 	type Api,
 	type AssistantMessageEventStream,
@@ -21,8 +22,7 @@ import {
 	openAIResponsesApi,
 	type SimpleStreamOptions,
 	type ThinkingLevelMap,
-} from "@earendil-works/diffex-ai/compat";
-import type { ExtensionAPI } from "@earendil-works/diffex-coding-agent";
+} from "@diffexai/diffex-ai/compat";
 
 // =============================================================================
 // Constants

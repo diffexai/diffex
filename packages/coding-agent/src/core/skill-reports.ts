@@ -1,11 +1,11 @@
-import type { AgentLoopConfig, StreamFn } from "@earendil-works/diffex-agent-core";
-import type { AssistantMessage, Tool } from "@earendil-works/diffex-ai";
+import type { AgentLoopConfig, StreamFn } from "@diffexai/diffex-agent-core";
+import type { AssistantMessage, Tool } from "@diffexai/diffex-ai";
 import {
 	computeHarnessSkillId,
 	type HarnessVersion,
 	type HarnessVersionBundle,
 	type HarnessWorkspaceIdentity,
-} from "@earendil-works/diffex-harness-state";
+} from "@diffexai/diffex-harness-state";
 import { Type } from "typebox";
 import { Check } from "typebox/value";
 import type { EvolutionScope, SkillScoreIdentity } from "#evolution";

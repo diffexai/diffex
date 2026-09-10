@@ -1,4 +1,4 @@
-import { DEFAULT_MAX_FRAME_LENGTH } from "@earendil-works/diffex-protocol";
+import { DEFAULT_MAX_FRAME_LENGTH } from "@diffexai/diffex-protocol";
 import type { ByteTransport, ByteTransportFactory, ByteTransportHandlers } from "./transport.ts";
 
 type WebSocketData = ArrayBuffer | ArrayBufferView;

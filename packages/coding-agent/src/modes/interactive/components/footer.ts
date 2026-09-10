@@ -1,5 +1,5 @@
 import { isAbsolute, relative, resolve, sep } from "node:path";
-import { type Component, getGlyphs, truncateToWidth, visibleWidth } from "@earendil-works/diffex-tui";
+import { type Component, getGlyphs, truncateToWidth, visibleWidth } from "@diffexai/diffex-tui";
 import type { AgentSession } from "../../../core/agent-session.ts";
 import { getCollaborationMode } from "../../../core/collaboration-mode.ts";
 import type { ReadonlyFooterDataProvider } from "../../../core/footer-data-provider.ts";

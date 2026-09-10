@@ -6,8 +6,8 @@ import type {
 	Provider,
 	ProviderStreamOptions,
 	RefreshModelsContext,
-} from "@earendil-works/diffex-ai";
-import { stream, streamSimple } from "@earendil-works/diffex-ai/compat";
+} from "@diffexai/diffex-ai";
+import { stream, streamSimple } from "@diffexai/diffex-ai/compat";
 import { LlamaClient, type LlamaModelInfo, llamaInferenceUrl, normalizeLlamaServerUrl } from "./client.ts";
 
 export const LLAMA_PROVIDER_ID = "llama.cpp";

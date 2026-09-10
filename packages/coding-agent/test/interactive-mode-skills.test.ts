@@ -1,4 +1,4 @@
-import { setKeybindings } from "@earendil-works/diffex-tui";
+import { setKeybindings } from "@diffexai/diffex-tui";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { KeybindingsManager } from "../src/core/keybindings.ts";
 import type { SkillReference } from "../src/core/skills.ts";

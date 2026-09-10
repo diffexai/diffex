@@ -1,4 +1,4 @@
-import { getGlyphs, Text, type TUI, visibleWidth } from "@earendil-works/diffex-tui";
+import { getGlyphs, Text, type TUI, visibleWidth } from "@diffexai/diffex-tui";
 import { Type } from "typebox";
 import { beforeAll, describe, expect, test, vi } from "vitest";
 import type { ToolDefinition } from "../src/core/extensions/types.ts";

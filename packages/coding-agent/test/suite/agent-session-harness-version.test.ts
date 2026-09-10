@@ -2,8 +2,8 @@ import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { InMemoryTelemetryContext } from "@earendil-works/diffex-agent-core";
-import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/diffex-ai";
+import { InMemoryTelemetryContext } from "@diffexai/diffex-agent-core";
+import { fauxAssistantMessage, fauxToolCall } from "@diffexai/diffex-ai";
 import {
 	computeHarnessSkillPackageVersion,
 	computeHarnessVersion,
@@ -14,7 +14,7 @@ import {
 	type HarnessVersionMetadata,
 	type HarnessWorkspaceIdentity,
 	harnessVersionDirectoryName,
-} from "@earendil-works/diffex-harness-state";
+} from "@diffexai/diffex-harness-state";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { resolveHarnessWorkspace } from "../../src/core/harness-state-runtime.ts";
 import { createHarness, getMessageText, type Harness } from "./harness.ts";

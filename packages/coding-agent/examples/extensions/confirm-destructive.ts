@@ -5,7 +5,7 @@
  * Demonstrates how to cancel session events using the before_* events.
  */
 
-import type { ExtensionAPI, SessionBeforeSwitchEvent, SessionMessageEntry } from "@earendil-works/diffex-coding-agent";
+import type { ExtensionAPI, SessionBeforeSwitchEvent, SessionMessageEntry } from "@diffexai/diffex";
 
 export default function (diffex: ExtensionAPI) {
 	diffex.on("session_before_switch", async (event: SessionBeforeSwitchEvent, ctx) => {

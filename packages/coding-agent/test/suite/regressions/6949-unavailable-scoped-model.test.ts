@@ -1,5 +1,5 @@
-import type { Api, Model } from "@earendil-works/diffex-ai";
-import { setKeybindings } from "@earendil-works/diffex-tui";
+import type { Api, Model } from "@diffexai/diffex-ai";
+import { setKeybindings } from "@diffexai/diffex-tui";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { KeybindingsManager } from "../../../src/core/keybindings.ts";
 import { ScopedModelsSelectorComponent } from "../../../src/modes/interactive/components/scoped-models-selector.ts";

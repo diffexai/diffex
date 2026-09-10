@@ -4,10 +4,10 @@
 		"outDir": "./dist",
 		"rootDir": "./src",
 		"paths": {
-			"@earendil-works/diffex-coding-agent": ["../coding-agent/dist/index.d.ts"],
-			"@earendil-works/diffex-protocol": ["../protocol/dist/index.d.ts"],
-			"@earendil-works/diffex-server": ["../server/dist/index.d.ts"],
-			"@earendil-works/diffex-server/websocket": ["../server/dist/transports/websocket/index.d.ts"]
+			"@diffexai/diffex": ["../coding-agent/dist/index.d.ts"],
+			"@diffexai/diffex-protocol": ["../protocol/dist/index.d.ts"],
+			"@diffexai/diffex-server": ["../server/dist/index.d.ts"],
+			"@diffexai/diffex-server/websocket": ["../server/dist/transports/websocket/index.d.ts"]
 		}
 	},
 	"include": ["src/**/*.ts"],

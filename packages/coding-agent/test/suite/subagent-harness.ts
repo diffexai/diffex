@@ -1,4 +1,4 @@
-import type { Context } from "@earendil-works/diffex-ai";
+import type { Context } from "@diffexai/diffex-ai";
 import type { AgentSession } from "../../src/core/agent-session.ts";
 import { SubagentController } from "../../src/core/subagents/controller.ts";
 import {

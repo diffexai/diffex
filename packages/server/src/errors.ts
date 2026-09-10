@@ -1,4 +1,4 @@
-import type { JsonValue, ProtocolErrorCode } from "@earendil-works/diffex-protocol";
+import type { JsonValue, ProtocolErrorCode } from "@diffexai/diffex-protocol";
 
 export type DiffexServerOperationErrorCode = Extract<
 	ProtocolErrorCode,

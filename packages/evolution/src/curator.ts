@@ -1,5 +1,5 @@
-import type { HarnessVersion } from "@earendil-works/diffex-harness-state";
-import type { MaterializedEvidence, MaterializedInvocation } from "@earendil-works/diffex-harness-trace";
+import type { HarnessVersion } from "@diffexai/diffex-harness-state";
+import type { MaterializedEvidence, MaterializedInvocation } from "@diffexai/diffex-harness-trace";
 import type {
 	ApplicableInstructionReference,
 	CuratorToolCallLedgerEvent,

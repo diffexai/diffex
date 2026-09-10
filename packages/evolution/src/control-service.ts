@@ -4,8 +4,8 @@ import {
 	type HarnessVersion,
 	type HarnessVersionBundle,
 	type HarnessVersionList,
-} from "@earendil-works/diffex-harness-state";
-import type { MaterializedEvidence } from "@earendil-works/diffex-harness-trace";
+} from "@diffexai/diffex-harness-state";
+import type { MaterializedEvidence } from "@diffexai/diffex-harness-trace";
 import type {
 	EvolutionFailureReasonCode,
 	EvolutionInputSnapshot,

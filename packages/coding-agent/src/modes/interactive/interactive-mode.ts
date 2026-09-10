@@ -7,10 +7,10 @@ import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { AgentMessage } from "@earendil-works/diffex-agent-core";
-import type { AuthEvent, AuthPrompt } from "@earendil-works/diffex-ai";
-import type { AssistantMessage, ImageContent, Message, Model } from "@earendil-works/diffex-ai/compat";
-import type { HarnessVersionList } from "@earendil-works/diffex-harness-state";
+import type { AgentMessage } from "@diffexai/diffex-agent-core";
+import type { AuthEvent, AuthPrompt } from "@diffexai/diffex-ai";
+import type { AssistantMessage, ImageContent, Message, Model } from "@diffexai/diffex-ai/compat";
+import type { HarnessVersionList } from "@diffexai/diffex-harness-state";
 import type {
 	AutocompleteItem,
 	AutocompleteProvider,
@@ -24,8 +24,8 @@ import type {
 	SlashCommand,
 	Terminal,
 	TuiMainScreenRenderState,
-} from "@earendil-works/diffex-tui";
-import * as TuiLayouts from "@earendil-works/diffex-tui";
+} from "@diffexai/diffex-tui";
+import * as TuiLayouts from "@diffexai/diffex-tui";
 import {
 	CombinedAutocompleteProvider,
 	type Component,
@@ -45,7 +45,7 @@ import {
 	TuiAltScreen,
 	TuiMainScreen,
 	visibleWidth,
-} from "@earendil-works/diffex-tui";
+} from "@diffexai/diffex-tui";
 import chalk from "chalk";
 import { spawn, spawnSync } from "child_process";
 import {

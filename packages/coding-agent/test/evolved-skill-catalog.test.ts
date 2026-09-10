@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { HarnessStateStore } from "@earendil-works/diffex-harness-state";
+import { HarnessStateStore } from "@diffexai/diffex-harness-state";
 import { afterEach, describe, expect, it } from "vitest";
 import { resolveHarnessWorkspace } from "../src/core/harness-state-runtime.ts";
 import { DefaultResourceLoader } from "../src/core/resource-loader.ts";

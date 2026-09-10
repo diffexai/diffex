@@ -1,4 +1,4 @@
-import type { HarnessVersion } from "@earendil-works/diffex-harness-state";
+import type { HarnessVersion } from "@diffexai/diffex-harness-state";
 import type { SessionManager } from "./session-manager.ts";
 
 export type InvocationSessionAttachmentReason = "startup" | "resume" | "new" | "import" | "fork" | "switch";

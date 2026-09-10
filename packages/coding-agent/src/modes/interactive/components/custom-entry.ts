@@ -1,5 +1,5 @@
-import type { Component } from "@earendil-works/diffex-tui";
-import { Container, getGlyphs, Spacer, Text } from "@earendil-works/diffex-tui";
+import type { Component } from "@diffexai/diffex-tui";
+import { Container, getGlyphs, Spacer, Text } from "@diffexai/diffex-tui";
 import type { EntryRenderer } from "../../../core/extensions/types.ts";
 import type { CustomEntry } from "../../../core/session-manager.ts";
 import { theme } from "../theme/theme.ts";

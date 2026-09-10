@@ -1,4 +1,4 @@
-import type { FileSystem, SessionCreateOptions, SessionMetadata } from "@earendil-works/diffex-agent-core";
+import type { FileSystem, SessionCreateOptions, SessionMetadata } from "@diffexai/diffex-agent-core";
 
 /** Result of a prepared SQLite statement execution. */
 export interface SqliteRunResult {

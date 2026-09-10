@@ -1,6 +1,6 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/diffex-ai";
+import { fauxAssistantMessage, fauxToolCall } from "@diffexai/diffex-ai";
 import { afterEach, describe, expect, it } from "vitest";
 import { PLAN_MODE_SYSTEM_PROMPT, setCollaborationMode } from "../../../src/core/collaboration-mode.ts";
 import { createSkill } from "../../../src/core/skills.ts";

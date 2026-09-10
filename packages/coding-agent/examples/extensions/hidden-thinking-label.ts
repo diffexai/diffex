@@ -18,7 +18,7 @@
  *   /thinking-label          Reset to the default label
  */
 
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/diffex-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@diffexai/diffex";
 
 const DEFAULT_LABEL = "Pondering...";
 

@@ -7,7 +7,7 @@ import {
 	getAgentDir,
 	ModelRuntime,
 	SessionManager,
-} from "@earendil-works/diffex-coding-agent";
+} from "@diffexai/diffex";
 import type {
 	ModelMetadata,
 	ModelRef,
@@ -17,7 +17,7 @@ import type {
 	ThinkingLevel,
 	TranscriptItem,
 	UserTranscriptItem,
-} from "@earendil-works/diffex-protocol";
+} from "@diffexai/diffex-protocol";
 import {
 	type CreateSessionOptions,
 	DiffexServerError,
@@ -30,7 +30,7 @@ import {
 	toProtocolModelMetadata,
 	toProtocolToolResultMessage,
 	toProtocolUserMessage,
-} from "@earendil-works/diffex-server";
+} from "@diffexai/diffex-server";
 import type { RuntimeUsageReporter } from "./usage-reporter.ts";
 export interface HostedCodingAgentServiceOptions {
 	sessionId: string;

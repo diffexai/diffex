@@ -1,4 +1,4 @@
-import type { SessionSnapshot } from "@earendil-works/diffex-protocol";
+import type { SessionSnapshot } from "@diffexai/diffex-protocol";
 import { describe, expect, test } from "vitest";
 import {
 	applyTranscriptProgress,

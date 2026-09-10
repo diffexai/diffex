@@ -1,7 +1,7 @@
-import type { TelemetryContext, ThinkingLevel } from "@earendil-works/diffex-agent-core";
-import type { Model } from "@earendil-works/diffex-ai";
-import { clampThinkingLevel } from "@earendil-works/diffex-ai/compat";
-import type { HarnessStateStore, HarnessVersionBundle } from "@earendil-works/diffex-harness-state";
+import type { TelemetryContext, ThinkingLevel } from "@diffexai/diffex-agent-core";
+import type { Model } from "@diffexai/diffex-ai";
+import { clampThinkingLevel } from "@diffexai/diffex-ai/compat";
+import type { HarnessStateStore, HarnessVersionBundle } from "@diffexai/diffex-harness-state";
 import type { AgentSession } from "../agent-session.ts";
 import {
 	type AgentSessionServices,

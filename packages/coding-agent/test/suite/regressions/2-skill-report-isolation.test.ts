@@ -1,8 +1,8 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { type Context, fauxAssistantMessage, fauxToolCall, type SimpleStreamOptions } from "@earendil-works/diffex-ai";
-import { HarnessStateStore } from "@earendil-works/diffex-harness-state";
-import { NOOP_TELEMETRY_CONTEXT } from "@earendil-works/diffex-telemetry";
+import { type Context, fauxAssistantMessage, fauxToolCall, type SimpleStreamOptions } from "@diffexai/diffex-ai";
+import { HarnessStateStore } from "@diffexai/diffex-harness-state";
+import { NOOP_TELEMETRY_CONTEXT } from "@diffexai/diffex-telemetry";
 import { afterEach, describe, expect, it } from "vitest";
 import { FileEvolutionPersistence } from "#evolution";
 import { materializeJsonlInvocation } from "#harness-trace";

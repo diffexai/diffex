@@ -16,7 +16,7 @@
  * Then use ctrl+o to toggle between minimal (collapsed) and full (expanded) views.
  */
 
-import type { ExtensionAPI } from "@earendil-works/diffex-coding-agent";
+import type { ExtensionAPI } from "@diffexai/diffex";
 import {
 	createBashTool,
 	createEditTool,
@@ -25,8 +25,8 @@ import {
 	createLsTool,
 	createReadTool,
 	createWriteTool,
-} from "@earendil-works/diffex-coding-agent";
-import { Text } from "@earendil-works/diffex-tui";
+} from "@diffexai/diffex";
+import { Text } from "@diffexai/diffex-tui";
 import { homedir } from "os";
 
 /**

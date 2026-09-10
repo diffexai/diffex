@@ -7,7 +7,7 @@
  * Usage: /emit [event-name] [data] - emit an event on the bus
  */
 
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/diffex-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@diffexai/diffex";
 
 export default function (diffex: ExtensionAPI) {
 	// Store ctx for use in event handler

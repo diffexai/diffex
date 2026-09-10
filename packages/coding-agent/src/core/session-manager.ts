@@ -1,5 +1,5 @@
-import type { AgentMessage } from "@earendil-works/diffex-agent-core";
-import { type ImageContent, type Message, type TextContent, type Usage, uuidv7 } from "@earendil-works/diffex-ai";
+import type { AgentMessage } from "@diffexai/diffex-agent-core";
+import { type ImageContent, type Message, type TextContent, type Usage, uuidv7 } from "@diffexai/diffex-ai";
 import { createHash, randomUUID } from "crypto";
 import {
 	appendFileSync,

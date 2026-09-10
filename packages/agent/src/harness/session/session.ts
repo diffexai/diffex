@@ -1,4 +1,4 @@
-import { uuidv7 } from "@earendil-works/diffex-ai";
+import { uuidv7 } from "@diffexai/diffex-ai";
 import type { AgentMessage } from "../../types.ts";
 import type {
 	BranchBounds,

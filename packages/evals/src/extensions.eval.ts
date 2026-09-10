@@ -61,8 +61,8 @@ const ExtensionAuthoringJudge = createJudge<DiffexCodingAgentInput, ExtensionAut
 				output.extensionSource.matchAll(/\b(?:from|import)\s+["']([^"']+)["']/g),
 				(match) => match[1],
 			);
-			if (!imports.includes("@earendil-works/diffex-coding-agent")) {
-				failures.push("extension does not import the canonical @earendil-works/diffex-coding-agent package");
+			if (!imports.includes("@diffexai/diffex")) {
+				failures.push("extension does not import the canonical @diffexai/diffex package");
 			}
 			if (imports.some((specifier) => specifier.startsWith("@mariozechner/"))) {
 				failures.push("extension imports a legacy @mariozechner package");

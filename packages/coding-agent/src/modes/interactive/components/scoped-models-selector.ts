@@ -1,4 +1,4 @@
-import type { Model } from "@earendil-works/diffex-ai";
+import type { Model } from "@diffexai/diffex-ai";
 import {
 	Container,
 	type Focusable,
@@ -12,7 +12,7 @@ import {
 	Spacer,
 	Text,
 	UNSELECTED_LIST_PREFIX,
-} from "@earendil-works/diffex-tui";
+} from "@diffexai/diffex-tui";
 import { getModelSearchText } from "../model-search.ts";
 import { theme } from "../theme/theme.ts";
 import { keyText } from "./keybinding-hints.ts";
