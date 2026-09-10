@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { isDeepStrictEqual } from "node:util";
+import { isReleaseRecord, isStableVersion } from "../packages/coding-agent/src/utils/release-contract.ts";
 import { getPublicWorkspacePackages } from "./release-packages.mjs";
 
 const RELEASES_PREFIX = "releases/v1";
@@ -40,7 +41,7 @@ function parseArgs(args) {
 
 	if (!options.bucket) throw new Error("--bucket is required");
 	if (!options.endpoint) throw new Error("--endpoint is required");
-	if (!options.version || !STABLE_SEMVER_RE.test(options.version)) {
+	if (!isStableVersion(options.version)) {
 		throw new Error("--version must be a stable semver version");
 	}
 	return options;
@@ -165,14 +166,8 @@ function readRelease(bucket, endpoint, key, outputPath) {
 	} catch {
 		throw new Error("Diffex release record is not valid JSON.");
 	}
-	if (
-		typeof release !== "object" ||
-		release === null ||
-		Array.isArray(release) ||
-		typeof release.version !== "string" ||
-		!STABLE_SEMVER_RE.test(release.version)
-	) {
-		throw new Error("Diffex release record has an invalid version.");
+	if (!isReleaseRecord(release)) {
+		throw new Error("Invalid release record in storage.");
 	}
 	return { etag: metadata.ETag, version: release.version, release, body };
 }
@@ -202,7 +197,9 @@ function putJson(bucket, endpoint, path, key, cacheControl, condition) {
 export function compareReleaseVersions(left, right) {
 	const leftMatch = STABLE_SEMVER_RE.exec(left);
 	const rightMatch = STABLE_SEMVER_RE.exec(right);
-	if (!leftMatch || !rightMatch) throw new Error("Release versions must be stable semver versions.");
+	if (!isStableVersion(left) || !isStableVersion(right) || !leftMatch || !rightMatch) {
+		throw new Error("Release versions must be stable semver versions.");
+	}
 
 	for (const index of [1, 2, 3]) {
 		const leftPart = BigInt(leftMatch[index]);
@@ -252,6 +249,7 @@ async function main() {
 		publishedAt: new Date().toISOString(),
 		packages: publishedPackages,
 	};
+	if (!isReleaseRecord(release)) throw new Error("Invalid release record; publication refused.");
 	const temporaryDirectory = mkdtempSync(join(tmpdir(), "diffex-release-announcement-"));
 	try {
 		const releasePath = join(temporaryDirectory, "release.json");

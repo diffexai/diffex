@@ -1,0 +1,2269 @@
+{
+  "valid": [
+    {
+      "name": "publisher-shaped record",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "leap day",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2024-02-29T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "reordered packages",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "unscoped workspace name",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "diffex-helper",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "sha256 integrity",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "sha384 integrity",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha384-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "stable version 0.0.0",
+      "value": {
+        "schemaVersion": 1,
+        "version": "0.0.0",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "0.0.0",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "0.0.0",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "stable version 9007199254740993.0.0",
+      "value": {
+        "schemaVersion": 1,
+        "version": "9007199254740993.0.0",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "9007199254740993.0.0",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "9007199254740993.0.0",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "invalid record type None",
+      "value": null
+    },
+    {
+      "name": "invalid record type []",
+      "value": []
+    },
+    {
+      "name": "invalid record type True",
+      "value": true
+    },
+    {
+      "name": "invalid record type 1",
+      "value": 1
+    },
+    {
+      "name": "invalid record type record",
+      "value": "record"
+    },
+    {
+      "name": "missing schemaVersion",
+      "value": {
+        "version": "1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "missing version",
+      "value": {
+        "schemaVersion": 1,
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "missing sourceCommit",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "missing publishedAt",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "missing packages",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z"
+      }
+    },
+    {
+      "name": "invalid schema 0",
+      "value": {
+        "schemaVersion": 0,
+        "version": "1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid schema 2",
+      "value": {
+        "schemaVersion": 2,
+        "version": "1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid schema 1",
+      "value": {
+        "schemaVersion": "1",
+        "version": "1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid schema None",
+      "value": {
+        "schemaVersion": null,
+        "version": "1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid version ''",
+      "value": {
+        "schemaVersion": 1,
+        "version": "",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid version None",
+      "value": {
+        "schemaVersion": 1,
+        "version": null,
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid version 123",
+      "value": {
+        "schemaVersion": 1,
+        "version": 123,
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid version '01.2.3'",
+      "value": {
+        "schemaVersion": 1,
+        "version": "01.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid version '1.02.3'",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.02.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid version '1.2.03'",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.03",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid version 'v1.2.3'",
+      "value": {
+        "schemaVersion": 1,
+        "version": "v1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid version '1.2.3-beta.1'",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3-beta.1",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid version '1.2.3+build'",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3+build",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid version '1.2'",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid version '1.2.3\\n'",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3\n",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid version ' 1.2.3'",
+      "value": {
+        "schemaVersion": 1,
+        "version": " 1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid version '1.2.3 '",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3 ",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid commit ''",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3",
+        "sourceCommit": "",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid commit None",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3",
+        "sourceCommit": null,
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid commit 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid commit 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid commit 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3",
+        "sourceCommit": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid commit 'gggggggggggggggggggggggggggggggggggggggg'",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3",
+        "sourceCommit": "gggggggggggggggggggggggggggggggggggggggg",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid commit 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\n'",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid publication time ''",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid publication time None",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": null,
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid publication time '2026-02-30T00:00:00.000Z'",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-02-30T00:00:00.000Z",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid publication time '2026-09-10'",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid publication time '2026-09-10T00:00:00Z'",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T00:00:00Z",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid publication time '2026-09-10T00:00:00.000+00:00'",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T00:00:00.000+00:00",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid publication time '2026-09-10T25:00:00.000Z'",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T25:00:00.000Z",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid package collection 41",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": null
+      }
+    },
+    {
+      "name": "invalid package collection 42",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": {}
+      }
+    },
+    {
+      "name": "invalid package collection 43",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": []
+      }
+    },
+    {
+      "name": "invalid package collection 44",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid package collection 45",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid package collection 46",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid package collection 47",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          null,
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "missing package name",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "missing package version",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "missing package tarball",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "missing package integrity",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz"
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid package name ''",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid package name None",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": null,
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid package name 'UPPER'",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "UPPER",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid package name '@scope'",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "@scope",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid package name 'bad name'",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "bad name",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid package name '../package'",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "../package",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid package name 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid package name 'name\\n'",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "name\n",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "foreign canonical identity",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@foreign/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "mismatched package version 0",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.4",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "mismatched package version 1",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.4",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid tarball ''",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": "",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid tarball None",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": null,
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid tarball 'relative.tgz'",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": "relative.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid tarball 'http://registry.npmjs.org/a.tgz'",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": "http://registry.npmjs.org/a.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid tarball 'https://user:pass@example.invalid/a.tgz'",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": "https://user:pass@example.invalid/a.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid tarball 'https://example.invalid/a.tgz#fragment'",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": "https://example.invalid/a.tgz#fragment",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid tarball ' https://example.invalid/a.tgz'",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": " https://example.invalid/a.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid tarball 'https://example.invalid/a.tgz\\n'",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": "https://example.invalid/a.tgz\n",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid tarball 'https://EXAMPLE.invalid/a.tgz'",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": "https://EXAMPLE.invalid/a.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid integrity 72",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": ""
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid integrity 73",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": null
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid integrity 74",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha1-AAAAAAAAAAAAAAAAAAAAAAAAAAA="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid integrity 75",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha512-controlled-fixture"
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid integrity 76",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha512-YQ=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid integrity 77",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==\n"
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid integrity 78",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA== sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid integrity 79",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAB=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "unknown root field",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ],
+        "note": "unexpected"
+      }
+    },
+    {
+      "name": "unknown package field",
+      "value": {
+        "schemaVersion": 1,
+        "version": "1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+            "extra": true
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      }
+    }
+  ],
+  "http": [
+    {
+      "name": "published",
+      "method": "GET",
+      "lookup": "record",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8",
+        "cache-control": "no-store"
+      },
+      "body": {
+        "version": "1.2.3",
+        "packageName": "@diffexai/diffex"
+      }
+    },
+    {
+      "name": "no release",
+      "method": "GET",
+      "lookup": "missing",
+      "status": 404,
+      "headers": {
+        "content-type": "application/json; charset=utf-8",
+        "cache-control": "no-store"
+      },
+      "body": {
+        "error": "no_published_release"
+      }
+    },
+    {
+      "name": "invalid record",
+      "method": "GET",
+      "lookup": "invalid",
+      "status": 503,
+      "headers": {
+        "content-type": "application/json; charset=utf-8",
+        "cache-control": "no-store"
+      },
+      "body": {
+        "error": "release_unavailable"
+      }
+    },
+    {
+      "name": "storage failure",
+      "method": "GET",
+      "lookup": "unavailable",
+      "status": 503,
+      "headers": {
+        "content-type": "application/json; charset=utf-8",
+        "cache-control": "no-store"
+      },
+      "body": {
+        "error": "release_unavailable"
+      }
+    },
+    {
+      "name": "unsupported POST",
+      "method": "POST",
+      "lookup": "record",
+      "status": 405,
+      "headers": {
+        "content-type": "application/json; charset=utf-8",
+        "cache-control": "no-store",
+        "allow": "GET"
+      },
+      "body": {
+        "error": "method_not_allowed"
+      }
+    },
+    {
+      "name": "unsupported PUT",
+      "method": "PUT",
+      "lookup": "record",
+      "status": 405,
+      "headers": {
+        "content-type": "application/json; charset=utf-8",
+        "cache-control": "no-store",
+        "allow": "GET"
+      },
+      "body": {
+        "error": "method_not_allowed"
+      }
+    },
+    {
+      "name": "unsupported PATCH",
+      "method": "PATCH",
+      "lookup": "record",
+      "status": 405,
+      "headers": {
+        "content-type": "application/json; charset=utf-8",
+        "cache-control": "no-store",
+        "allow": "GET"
+      },
+      "body": {
+        "error": "method_not_allowed"
+      }
+    },
+    {
+      "name": "unsupported DELETE",
+      "method": "DELETE",
+      "lookup": "record",
+      "status": 405,
+      "headers": {
+        "content-type": "application/json; charset=utf-8",
+        "cache-control": "no-store",
+        "allow": "GET"
+      },
+      "body": {
+        "error": "method_not_allowed"
+      }
+    },
+    {
+      "name": "unsupported OPTIONS",
+      "method": "OPTIONS",
+      "lookup": "record",
+      "status": 405,
+      "headers": {
+        "content-type": "application/json; charset=utf-8",
+        "cache-control": "no-store",
+        "allow": "GET"
+      },
+      "body": {
+        "error": "method_not_allowed"
+      }
+    },
+    {
+      "name": "unsupported HEAD",
+      "method": "HEAD",
+      "lookup": "record",
+      "status": 405,
+      "headers": {
+        "content-type": "application/json; charset=utf-8",
+        "cache-control": "no-store",
+        "allow": "GET"
+      },
+      "body": {
+        "error": "method_not_allowed"
+      }
+    }
+  ],
+  "responses": [
+    {
+      "name": "published",
+      "status": 200,
+      "body": {
+        "version": "1.2.3",
+        "packageName": "@diffexai/diffex"
+      },
+      "valid": true
+    },
+    {
+      "name": "no release",
+      "status": 404,
+      "body": {
+        "error": "no_published_release"
+      },
+      "valid": false
+    },
+    {
+      "name": "invalid record",
+      "status": 503,
+      "body": {
+        "error": "release_unavailable"
+      },
+      "valid": false
+    },
+    {
+      "name": "storage failure",
+      "status": 503,
+      "body": {
+        "error": "release_unavailable"
+      },
+      "valid": false
+    },
+    {
+      "name": "unsupported POST",
+      "status": 405,
+      "body": {
+        "error": "method_not_allowed"
+      },
+      "valid": false
+    },
+    {
+      "name": "unsupported PUT",
+      "status": 405,
+      "body": {
+        "error": "method_not_allowed"
+      },
+      "valid": false
+    },
+    {
+      "name": "unsupported PATCH",
+      "status": 405,
+      "body": {
+        "error": "method_not_allowed"
+      },
+      "valid": false
+    },
+    {
+      "name": "unsupported DELETE",
+      "status": 405,
+      "body": {
+        "error": "method_not_allowed"
+      },
+      "valid": false
+    },
+    {
+      "name": "unsupported OPTIONS",
+      "status": 405,
+      "body": {
+        "error": "method_not_allowed"
+      },
+      "valid": false
+    },
+    {
+      "name": "unsupported HEAD",
+      "status": 405,
+      "body": {
+        "error": "method_not_allowed"
+      },
+      "valid": false
+    },
+    {
+      "name": "invalid success shape 10",
+      "status": 200,
+      "body": null,
+      "valid": false
+    },
+    {
+      "name": "invalid success shape 11",
+      "status": 200,
+      "body": [],
+      "valid": false
+    },
+    {
+      "name": "invalid success shape 12",
+      "status": 200,
+      "body": {},
+      "valid": false
+    },
+    {
+      "name": "invalid success shape 13",
+      "status": 200,
+      "body": {
+        "schemaVersion": 1,
+        "version": "1.2.3",
+        "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "publishedAt": "2026-09-10T12:00:00.000Z",
+        "packages": [
+          {
+            "name": "@diffexai/diffex-ai",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex-ai/-/diffex-ai-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          {
+            "name": "@diffexai/diffex",
+            "version": "1.2.3",
+            "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-1.2.3.tgz",
+            "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+          }
+        ]
+      },
+      "valid": false
+    },
+    {
+      "name": "invalid success shape 14",
+      "status": 200,
+      "body": {
+        "version": "1.2.3"
+      },
+      "valid": false
+    },
+    {
+      "name": "invalid success shape 15",
+      "status": 200,
+      "body": {
+        "version": "1.2.3",
+        "packageName": "@foreign/diffex"
+      },
+      "valid": false
+    },
+    {
+      "name": "invalid success shape 16",
+      "status": 200,
+      "body": {
+        "version": "1.2.3",
+        "packageName": "@diffexai/diffex",
+        "note": "hello"
+      },
+      "valid": false
+    },
+    {
+      "name": "invalid response version 'v1.2.3'",
+      "status": 200,
+      "body": {
+        "version": "v1.2.3",
+        "packageName": "@diffexai/diffex"
+      },
+      "valid": false
+    },
+    {
+      "name": "invalid response version '01.2.3'",
+      "status": 200,
+      "body": {
+        "version": "01.2.3",
+        "packageName": "@diffexai/diffex"
+      },
+      "valid": false
+    },
+    {
+      "name": "invalid response version '1.2.3-beta.1'",
+      "status": 200,
+      "body": {
+        "version": "1.2.3-beta.1",
+        "packageName": "@diffexai/diffex"
+      },
+      "valid": false
+    },
+    {
+      "name": "invalid response version '1.2.3+build'",
+      "status": 200,
+      "body": {
+        "version": "1.2.3+build",
+        "packageName": "@diffexai/diffex"
+      },
+      "valid": false
+    },
+    {
+      "name": "invalid response version '1.2.3\\n'",
+      "status": 200,
+      "body": {
+        "version": "1.2.3\n",
+        "packageName": "@diffexai/diffex"
+      },
+      "valid": false
+    },
+    {
+      "name": "invalid response version 123",
+      "status": 200,
+      "body": {
+        "version": 123,
+        "packageName": "@diffexai/diffex"
+      },
+      "valid": false
+    }
+  ]
+}

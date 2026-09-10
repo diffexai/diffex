@@ -30,7 +30,7 @@ globalThis.fetch = async (input, options) => {
 			version: pkg.version,
 			dist: {
 				tarball: `https://tarballs.example.invalid/${encodeURIComponent(pkg.name)}/${pkg.version}.tgz`,
-				integrity: "sha512-controlled-fixture",
+				integrity: `sha512-${"A".repeat(86)}==`,
 			},
 		});
 	}

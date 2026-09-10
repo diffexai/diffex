@@ -47,6 +47,10 @@ If enforced read-only storage access is required, configure a separate read-only
 
 ## Publication invariants
 
+The [stable release contract](contract.md) specifies the exact stored schema and public HTTP projection.
+The publisher now enforces that schema for both new and existing records.
+The consumer fixture suite prepares strict parsing for the future endpoint migration.
+
 Before any write, the publisher inventories every non-private workspace package and requires its version to match the requested canonical stable semver.
 It checks exact npm package identity and version, integrity metadata, and tarball availability for all packages.
 Requests have a 30-second timeout, npm propagation retries have a ten-minute budget, and storage commands have a one-minute timeout.

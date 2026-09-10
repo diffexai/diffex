@@ -193,3 +193,15 @@ test("version comparison rejects noncanonical versions and avoids numeric precis
 	}
 	assert.equal(compareReleaseVersions("9007199254740993.0.0", "9007199254740992.0.0"), 1);
 });
+
+test("publisher rejects a noncanonical source commit before storing records", () => {
+	const fixture = createPublicationFixture();
+	try {
+		const result = fixture.run("0.0.3", { commit: "not-a-commit" });
+		assert.equal(result.status, 1);
+		assert.match(result.stderr, /Invalid release record/);
+		assert.deepEqual(fixture.state().objects, {});
+	} finally {
+		fixture.cleanup();
+	}
+});
