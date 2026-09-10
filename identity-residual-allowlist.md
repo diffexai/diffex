@@ -1,17 +1,34 @@
 # Identity residual allowlist
 
-Source revision: `76eef7af077298d1c7ab7a6b749e3fd2cc455c6c`.
+Source revision: `e96184d57f05d9bbfef6896f08314b2bba89adb1`.
 Review date: 2026-09-10 UTC.
 This records exact retained occurrences, not wildcard exemptions.
 The unresolved table is a blocking inventory and does not authorize those identities.
 This audit document and the phase-1 handoff contain descriptive historical identity text and are not executable identity configuration.
 
+Diffex and Luntraa are unrelated to Earendil.
+Security/staff exceptions below were explicitly approved by the owner; they are active inherited references, not historical provenance.
+
 ## Reviewed source occurrences
 
 | Exact path and line | Exact retained string | Classification | Rationale | Retirement condition |
 |---|---|---|---|---|
+| .github/workflows/issue-analysis.yml:17 | EARENDIL_ORG_READ_TOKEN | Owner-approved skip | Owner explicitly deferred security contacts and staff authorization because Diffex is private; this is not an affiliation claim | Replace or remove if the owner resumes security-contact or staff-workflow migration |
+| .github/workflows/issue-analysis.yml:18 | earendil-works | Owner-approved skip | Owner explicitly deferred security contacts and staff authorization because Diffex is private; this is not an affiliation claim | Replace or remove if the owner resumes security-contact or staff-workflow migration |
+| .github/workflows/issue-analysis.yml:19 | earendil-works/staff&#96;. | Owner-approved skip | Owner explicitly deferred security contacts and staff authorization because Diffex is private; this is not an affiliation claim | Replace or remove if the owner resumes security-contact or staff-workflow migration |
+| .github/workflows/issue-analysis.yml:78 | secrets.EARENDIL_ORG_READ_TOKEN | Owner-approved skip | Owner explicitly deferred security contacts and staff authorization because Diffex is private; this is not an affiliation claim | Replace or remove if the owner resumes security-contact or staff-workflow migration |
+| .github/workflows/issue-analysis.yml:176 | core.setFailed(&#x27;EARENDIL_ORG_READ_TOKEN | Owner-approved skip | Owner explicitly deferred security contacts and staff authorization because Diffex is private; this is not an affiliation claim | Replace or remove if the owner resumes security-contact or staff-workflow migration |
+| .github/workflows/issue-analysis.yml:182 | https://api.github.com/orgs/earendil-works/teams/staff/memberships/${encodeURIComponent(username)} | Owner-approved skip | Owner explicitly deferred security contacts and staff authorization because Diffex is private; this is not an affiliation claim | Replace or remove if the owner resumes security-contact or staff-workflow migration |
+| .github/workflows/issue-analysis.yml:194 | earendil-works/staff | Owner-approved skip | Owner explicitly deferred security contacts and staff authorization because Diffex is private; this is not an affiliation claim | Replace or remove if the owner resumes security-contact or staff-workflow migration |
+| .github/workflows/issue-analysis.yml:202 | earendil-works/staff | Owner-approved skip | Owner explicitly deferred security contacts and staff authorization because Diffex is private; this is not an affiliation claim | Replace or remove if the owner resumes security-contact or staff-workflow migration |
+| .github/workflows/issue-analysis.yml:210 | earendil-works/staff | Owner-approved skip | Owner explicitly deferred security contacts and staff authorization because Diffex is private; this is not an affiliation claim | Replace or remove if the owner resumes security-contact or staff-workflow migration |
+| .github/workflows/issue-analysis.yml:213 | console.log(&#96;earendil-works/staff | Owner-approved skip | Owner explicitly deferred security contacts and staff authorization because Diffex is private; this is not an affiliation claim | Replace or remove if the owner resumes security-contact or staff-workflow migration |
+| .github/workflows/issue-analysis.yml:217 | earendil-works/staff | Owner-approved skip | Owner explicitly deferred security contacts and staff authorization because Diffex is private; this is not an affiliation claim | Replace or remove if the owner resumes security-contact or staff-workflow migration |
 | LICENSE:189 | Copyright 2026 Luntraa, Inc. | Legal attribution | Confirmed copyright owner | Retain while legally required |
 | README.md:29 | Harness](https://github.com/earendil-works/pi). | Upstream history | Original upstream source or issue provenance | Retain while the referenced upstream history remains relevant |
+| SECURITY.md:29 | security@earendil.com | Owner-approved skip | Owner explicitly deferred security contacts and staff authorization because Diffex is private; this is not an affiliation claim | Replace or remove if the owner resumes security-contact or staff-workflow migration |
+| SECURITY.md:86 | Earendil | Owner-approved skip | Owner explicitly deferred security contacts and staff authorization because Diffex is private; this is not an affiliation claim | Replace or remove if the owner resumes security-contact or staff-workflow migration |
+| SECURITY.md:87 | Earendil-operated | Owner-approved skip | Owner explicitly deferred security contacts and staff authorization because Diffex is private; this is not an affiliation claim | Replace or remove if the owner resumes security-contact or staff-workflow migration |
 | package-lock.json:778 | node_modules/@earendil-works/gondolin&quot;: | External dependency | Published third-party Gondolin identity; not a Diffex-owned package | Remove only when the dependency is intentionally replaced |
 | package-lock.json:780 | https://registry.npmjs.org/@earendil-works/gondolin/-/gondolin-0.12.0.tgz | External dependency | Published third-party Gondolin identity; not a Diffex-owned package | Remove only when the dependency is intentionally replaced |
 | package-lock.json:796 | @earendil-works/gondolin-krun-runner-darwin-arm64&quot;: | External dependency | Published third-party Gondolin identity; not a Diffex-owned package | Remove only when the dependency is intentionally replaced |
@@ -930,30 +947,8 @@ This audit document and the phase-1 handoff contain descriptive historical ident
 
 | Exact path and line | Exact string | Classification | Required action | Retirement condition |
 |---|---|---|---|---|
-| .github/workflows/issue-analysis.yml:17 | EARENDIL_ORG_READ_TOKEN | Unresolved active identity | Requires the operational replacement or announcement approval requested from the owner | Replace before phase 1 completes |
-| .github/workflows/issue-analysis.yml:18 | earendil-works | Unresolved active identity | Requires the operational replacement or announcement approval requested from the owner | Replace before phase 1 completes |
-| .github/workflows/issue-analysis.yml:19 | earendil-works/staff&#96;. | Unresolved active identity | Requires the operational replacement or announcement approval requested from the owner | Replace before phase 1 completes |
-| .github/workflows/issue-analysis.yml:78 | secrets.EARENDIL_ORG_READ_TOKEN | Unresolved active identity | Requires the operational replacement or announcement approval requested from the owner | Replace before phase 1 completes |
-| .github/workflows/issue-analysis.yml:176 | core.setFailed(&#x27;EARENDIL_ORG_READ_TOKEN | Unresolved active identity | Requires the operational replacement or announcement approval requested from the owner | Replace before phase 1 completes |
-| .github/workflows/issue-analysis.yml:182 | https://api.github.com/orgs/earendil-works/teams/staff/memberships/${encodeURIComponent(username)} | Unresolved active identity | Requires the operational replacement or announcement approval requested from the owner | Replace before phase 1 completes |
-| .github/workflows/issue-analysis.yml:194 | earendil-works/staff | Unresolved active identity | Requires the operational replacement or announcement approval requested from the owner | Replace before phase 1 completes |
-| .github/workflows/issue-analysis.yml:202 | earendil-works/staff | Unresolved active identity | Requires the operational replacement or announcement approval requested from the owner | Replace before phase 1 completes |
-| .github/workflows/issue-analysis.yml:210 | earendil-works/staff | Unresolved active identity | Requires the operational replacement or announcement approval requested from the owner | Replace before phase 1 completes |
-| .github/workflows/issue-analysis.yml:213 | console.log(&#96;earendil-works/staff | Unresolved active identity | Requires the operational replacement or announcement approval requested from the owner | Replace before phase 1 completes |
-| .github/workflows/issue-analysis.yml:217 | earendil-works/staff | Unresolved active identity | Requires the operational replacement or announcement approval requested from the owner | Replace before phase 1 completes |
-| SECURITY.md:29 | security@earendil.com | Unresolved active identity | Requires the operational replacement or announcement approval requested from the owner | Replace before phase 1 completes |
-| SECURITY.md:86 | Earendil | Unresolved active identity | Requires the operational replacement or announcement approval requested from the owner | Replace before phase 1 completes |
-| SECURITY.md:87 | Earendil-operated | Unresolved active identity | Requires the operational replacement or announcement approval requested from the owner | Replace before phase 1 completes |
-| packages/coding-agent/src/modes/interactive/components/earendil-announcement.ts:26 | EarendilAnnouncementComponent | Unresolved active identity | Requires the operational replacement or announcement approval requested from the owner | Replace before phase 1 completes |
-| packages/coding-agent/src/modes/interactive/components/earendil-announcement.ts:30 | Earendil | Unresolved active identity | Requires the operational replacement or announcement approval requested from the owner | Replace before phase 1 completes |
-| packages/coding-agent/src/modes/interactive/interactive-mode.ts:152 | EarendilAnnouncementComponent | Unresolved active identity | Requires the operational replacement or announcement approval requested from the owner | Replace before phase 1 completes |
-| packages/coding-agent/src/modes/interactive/interactive-mode.ts:152 | ./components/earendil-announcement.ts | Unresolved active identity | Requires the operational replacement or announcement approval requested from the owner | Replace before phase 1 completes |
-| packages/coding-agent/src/modes/interactive/interactive-mode.ts:7380 | EarendilAnnouncementComponent | Unresolved active identity | Requires the operational replacement or announcement approval requested from the owner | Replace before phase 1 completes |
-| packages/coding-agent/test/secondary-dialogs.test.ts:5 | EarendilAnnouncementComponent | Unresolved active identity | Requires the operational replacement or announcement approval requested from the owner | Replace before phase 1 completes |
-| packages/coding-agent/test/secondary-dialogs.test.ts:5 | ../src/modes/interactive/components/earendil-announcement.ts | Unresolved active identity | Requires the operational replacement or announcement approval requested from the owner | Replace before phase 1 completes |
-| packages/coding-agent/test/secondary-dialogs.test.ts:118 | Earendil | Unresolved active identity | Requires the operational replacement or announcement approval requested from the owner | Replace before phase 1 completes |
-| packages/coding-agent/test/secondary-dialogs.test.ts:119 | EarendilAnnouncementComponent | Unresolved active identity | Requires the operational replacement or announcement approval requested from the owner | Replace before phase 1 completes |
-| packages/coding-agent/test/secondary-dialogs.test.ts:124 | Earendil | Unresolved active identity | Requires the operational replacement or announcement approval requested from the owner | Replace before phase 1 completes |
+
+None outside the exact owner-approved skips above.
 
 ## Artifact verification
 
@@ -966,19 +961,14 @@ Docker image inspection is unavailable because no local Docker daemon is running
 
 Artifacts were built from the source revision above.
 Byte offsets identify exact occurrences without relying on generated line wrapping.
+The source archive includes the preceding audit and handoff; those two exact descriptive documents are excluded to avoid recursively auditing previous audit output.
 Rows marked unresolved are blocking findings, not allowlist exceptions.
 
 | Artifact, member, and byte offset | Exact string | Classification | Rationale and retirement condition |
 |---|---|---|---|
 | diffexai-diffex-0.2.0.tgz!package/dist/utils/changelog.js@byte-287 | earendil-works | Supported migration behavior | Legacy repository matcher; maintainers retire with legacy-link normalization |
 | diffexai-diffex-0.2.0.tgz!package/dist/utils/child-process.js@byte-879 | earendil-works/pi#5303 | Upstream history | Original upstream provenance; retain while source or issue remains relevant |
-| diffexai-diffex-0.2.0.tgz!package/dist/modes/interactive/components/earendil-announcement.js@byte-744 | EarendilAnnouncementComponent | Unresolved active identity | Requires operational replacement or announcement approval before phase 1 completes |
-| diffexai-diffex-0.2.0.tgz!package/dist/modes/interactive/components/earendil-announcement.js@byte-911 | Earendil | Unresolved active identity | Requires operational replacement or announcement approval before phase 1 completes |
-| diffexai-diffex-0.2.0.tgz!package/dist/modes/interactive/components/earendil-announcement.js@byte-1438 | earendil-announcement.js.map | Unresolved active identity | Requires operational replacement or announcement approval before phase 1 completes |
 | diffexai-diffex-0.2.0.tgz!package/dist/core/tools/find.js@byte-9344 | https://github.com/earendil-works/pi/issues/5960 | Upstream history | Original upstream provenance; retain while source or issue remains relevant |
-| diffexai-diffex-0.2.0.tgz!package/dist/modes/interactive/interactive-mode.js@byte-4424 | EarendilAnnouncementComponent | Unresolved active identity | Requires operational replacement or announcement approval before phase 1 completes |
-| diffexai-diffex-0.2.0.tgz!package/dist/modes/interactive/interactive-mode.js@byte-4462 | ./components/earendil-announcement.js | Unresolved active identity | Requires operational replacement or announcement approval before phase 1 completes |
-| diffexai-diffex-0.2.0.tgz!package/dist/modes/interactive/interactive-mode.js@byte-287670 | EarendilAnnouncementComponent | Unresolved active identity | Requires operational replacement or announcement approval before phase 1 completes |
 | diffexai-diffex-0.2.0.tgz!package/dist/migrations.js@byte-2912 | https://github.com/earendil-works/pi-mono/issues/320 | Upstream history | Original upstream provenance; retain while source or issue remains relevant |
 | diffexai-diffex-0.2.0.tgz!package/examples/extensions/gondolin/package-lock.json@byte-215 | @earendil-works/gondolin | External dependency | Published third-party dependency or npm-maintained nested dependency path; retire when dependency changes |
 | diffexai-diffex-0.2.0.tgz!package/examples/extensions/gondolin/package-lock.json@byte-576 | node_modules/@earendil-works/gondolin | External dependency | Published third-party dependency or npm-maintained nested dependency path; retire when dependency changes |
@@ -994,22 +984,8 @@ Rows marked unresolved are blocking findings, not allowlist exceptions.
 | diffexai-diffex-0.2.0.tgz!package/dist/utils/changelog.js.map@byte-9908 | earendil-works | Supported migration behavior | Legacy repository matcher; maintainers retire with legacy-link normalization |
 | diffexai-diffex-0.2.0.tgz!package/dist/utils/child-process.d.ts.map@byte-2459 | earendil-works/pi#5303 | Upstream history | Original upstream provenance; retain while source or issue remains relevant |
 | diffexai-diffex-0.2.0.tgz!package/dist/utils/child-process.js.map@byte-5033 | earendil-works/pi#5303 | Upstream history | Original upstream provenance; retain while source or issue remains relevant |
-| diffexai-diffex-0.2.0.tgz!package/dist/modes/interactive/components/earendil-announcement.d.ts.map@byte-21 | earendil-announcement.d.ts | Unresolved active identity | Requires operational replacement or announcement approval before phase 1 completes |
-| diffexai-diffex-0.2.0.tgz!package/dist/modes/interactive/components/earendil-announcement.d.ts.map@byte-77 | ../../../../src/modes/interactive/components/earendil-announcement.ts | Unresolved active identity | Requires operational replacement or announcement approval before phase 1 completes |
-| diffexai-diffex-0.2.0.tgz!package/dist/modes/interactive/components/earendil-announcement.d.ts.map@byte-1080 | EarendilAnnouncementComponent | Unresolved active identity | Requires operational replacement or announcement approval before phase 1 completes |
-| diffexai-diffex-0.2.0.tgz!package/dist/modes/interactive/components/earendil-announcement.d.ts.map@byte-1245 | Earendil&#92; | Unresolved active identity | Requires operational replacement or announcement approval before phase 1 completes |
-| diffexai-diffex-0.2.0.tgz!package/dist/modes/interactive/components/earendil-announcement.js.map@byte-21 | earendil-announcement.js | Unresolved active identity | Requires operational replacement or announcement approval before phase 1 completes |
-| diffexai-diffex-0.2.0.tgz!package/dist/modes/interactive/components/earendil-announcement.js.map@byte-75 | ../../../../src/modes/interactive/components/earendil-announcement.ts | Unresolved active identity | Requires operational replacement or announcement approval before phase 1 completes |
-| diffexai-diffex-0.2.0.tgz!package/dist/modes/interactive/components/earendil-announcement.js.map@byte-2483 | EarendilAnnouncementComponent | Unresolved active identity | Requires operational replacement or announcement approval before phase 1 completes |
-| diffexai-diffex-0.2.0.tgz!package/dist/modes/interactive/components/earendil-announcement.js.map@byte-2648 | Earendil&#92; | Unresolved active identity | Requires operational replacement or announcement approval before phase 1 completes |
 | diffexai-diffex-0.2.0.tgz!package/dist/core/tools/find.d.ts.map@byte-11427 | https://github.com/earendil-works/pi/issues/5960&#92;n&#92;t&#92;t&#92;t&#92;t&#92;t&#92;tlet | Upstream history | Original upstream provenance; retain while source or issue remains relevant |
 | diffexai-diffex-0.2.0.tgz!package/dist/core/tools/find.js.map@byte-22811 | https://github.com/earendil-works/pi/issues/5960&#92;n&#92;t&#92;t&#92;t&#92;t&#92;t&#92;tlet | Upstream history | Original upstream provenance; retain while source or issue remains relevant |
-| diffexai-diffex-0.2.0.tgz!package/dist/modes/interactive/interactive-mode.d.ts.map@byte-16413 | EarendilAnnouncementComponent | Unresolved active identity | Requires operational replacement or announcement approval before phase 1 completes |
-| diffexai-diffex-0.2.0.tgz!package/dist/modes/interactive/interactive-mode.d.ts.map@byte-16452 | ./components/earendil-announcement.ts&#92; | Unresolved active identity | Requires operational replacement or announcement approval before phase 1 completes |
-| diffexai-diffex-0.2.0.tgz!package/dist/modes/interactive/interactive-mode.d.ts.map@byte-293908 | EarendilAnnouncementComponent | Unresolved active identity | Requires operational replacement or announcement approval before phase 1 completes |
-| diffexai-diffex-0.2.0.tgz!package/dist/modes/interactive/interactive-mode.js.map@byte-254972 | EarendilAnnouncementComponent | Unresolved active identity | Requires operational replacement or announcement approval before phase 1 completes |
-| diffexai-diffex-0.2.0.tgz!package/dist/modes/interactive/interactive-mode.js.map@byte-255011 | ./components/earendil-announcement.ts&#92; | Unresolved active identity | Requires operational replacement or announcement approval before phase 1 completes |
-| diffexai-diffex-0.2.0.tgz!package/dist/modes/interactive/interactive-mode.js.map@byte-532467 | EarendilAnnouncementComponent | Unresolved active identity | Requires operational replacement or announcement approval before phase 1 completes |
 | diffexai-diffex-0.2.0.tgz!package/dist/migrations.d.ts.map@byte-3321 | https://github.com/earendil-works/pi-mono/issues/320&#92;n | Upstream history | Original upstream provenance; retain while source or issue remains relevant |
 | diffexai-diffex-0.2.0.tgz!package/dist/migrations.js.map@byte-11595 | https://github.com/earendil-works/pi-mono/issues/320&#92;n | Upstream history | Original upstream provenance; retain while source or issue remains relevant |
 | diffexai-diffex-0.2.0.tgz!package/CHANGELOG.md@byte-407 | https://github.com/earendil-works/pi/issues/7152 | Immutable changelog | Packaged historical release record; retain immutable provenance |
@@ -1565,8 +1541,6 @@ Rows marked unresolved are blocking findings, not allowlist exceptions.
 | diffexai-diffex-0.2.0.tgz!package/docs/containerization.md@byte-1147 | https://github.com/earendil-works/gondolin | External dependency | Published third-party dependency or npm-maintained nested dependency path; retire when dependency changes |
 | diffexai-diffex-0.2.0.tgz!package/docs/containerization.md@byte-1938 | @earendil-works/gondolin | External dependency | Published third-party dependency or npm-maintained nested dependency path; retire when dependency changes |
 | diffexai-diffex-0.2.0.tgz!package/dist/utils/child-process.d.ts@byte-1068 | earendil-works/pi#5303 | Upstream history | Original upstream provenance; retain while source or issue remains relevant |
-| diffexai-diffex-0.2.0.tgz!package/dist/modes/interactive/components/earendil-announcement.d.ts@byte-71 | EarendilAnnouncementComponent | Unresolved active identity | Requires operational replacement or announcement approval before phase 1 completes |
-| diffexai-diffex-0.2.0.tgz!package/dist/modes/interactive/components/earendil-announcement.d.ts@byte-163 | earendil-announcement.d.ts.map | Unresolved active identity | Requires operational replacement or announcement approval before phase 1 completes |
 | diffexai-diffex-0.2.0.tgz!package/examples/extensions/gondolin/index.ts@byte-568 | @earendil-works/gondolin | External dependency | Published third-party dependency or npm-maintained nested dependency path; retire when dependency changes |
 | diffexai-diffex-0.2.0.tgz!package/examples/extensions/gondolin/index.ts@byte-1194 | @earendil-works/gondolin | External dependency | Published third-party dependency or npm-maintained nested dependency path; retire when dependency changes |
 | diffexai-diffex-0.2.0.tgz!package/dist/migrations.d.ts@byte-553 | https://github.com/earendil-works/pi-mono/issues/320 | Upstream history | Original upstream provenance; retain while source or issue remains relevant |
@@ -1590,22 +1564,22 @@ Rows marked unresolved are blocking findings, not allowlist exceptions.
 | diffexai-diffex-tui-0.2.0.tgz!package/dist/components/markdown.js@byte-5201 | https://github.com/earendil-works/pi/issues/5825. | Upstream history | Original upstream provenance; retain while source or issue remains relevant |
 | diffexai-diffex-tui-0.2.0.tgz!package/dist/components/markdown.d.ts.map@byte-8338 | https://github.com/earendil-works/pi/issues/5825.&#92;n&#92;tconst | Upstream history | Original upstream provenance; retain while source or issue remains relevant |
 | diffexai-diffex-tui-0.2.0.tgz!package/dist/components/markdown.js.map@byte-39247 | https://github.com/earendil-works/pi/issues/5825.&#92;n&#92;tconst | Upstream history | Original upstream provenance; retain while source or issue remains relevant |
-| diffex-phase1-source.tar.gz!diffex-0.2.0/.github/workflows/issue-analysis.yml@byte-867 | EARENDIL_ORG_READ_TOKEN | Unresolved active identity | Requires operational replacement or announcement approval before phase 1 completes |
-| diffex-phase1-source.tar.gz!diffex-0.2.0/.github/workflows/issue-analysis.yml@byte-924 | earendil-works | Unresolved active identity | Requires operational replacement or announcement approval before phase 1 completes |
-| diffex-phase1-source.tar.gz!diffex-0.2.0/.github/workflows/issue-analysis.yml@byte-1048 | earendil-works/staff | Unresolved active identity | Requires operational replacement or announcement approval before phase 1 completes |
-| diffex-phase1-source.tar.gz!diffex-0.2.0/.github/workflows/issue-analysis.yml@byte-3628 | secrets.EARENDIL_ORG_READ_TOKEN | Unresolved active identity | Requires operational replacement or announcement approval before phase 1 completes |
-| diffex-phase1-source.tar.gz!diffex-0.2.0/.github/workflows/issue-analysis.yml@byte-7583 | EARENDIL_ORG_READ_TOKEN | Unresolved active identity | Requires operational replacement or announcement approval before phase 1 completes |
-| diffex-phase1-source.tar.gz!diffex-0.2.0/.github/workflows/issue-analysis.yml@byte-7777 | https://api.github.com/orgs/earendil-works/teams/staff/memberships/ | Unresolved active identity | Requires operational replacement or announcement approval before phase 1 completes |
-| diffex-phase1-source.tar.gz!diffex-0.2.0/.github/workflows/issue-analysis.yml@byte-8326 | earendil-works/staff | Unresolved active identity | Requires operational replacement or announcement approval before phase 1 completes |
-| diffex-phase1-source.tar.gz!diffex-0.2.0/.github/workflows/issue-analysis.yml@byte-8597 | earendil-works/staff | Unresolved active identity | Requires operational replacement or announcement approval before phase 1 completes |
-| diffex-phase1-source.tar.gz!diffex-0.2.0/.github/workflows/issue-analysis.yml@byte-8954 | earendil-works/staff | Unresolved active identity | Requires operational replacement or announcement approval before phase 1 completes |
-| diffex-phase1-source.tar.gz!diffex-0.2.0/.github/workflows/issue-analysis.yml@byte-9053 | earendil-works/staff | Unresolved active identity | Requires operational replacement or announcement approval before phase 1 completes |
-| diffex-phase1-source.tar.gz!diffex-0.2.0/.github/workflows/issue-analysis.yml@byte-9262 | earendil-works/staff | Unresolved active identity | Requires operational replacement or announcement approval before phase 1 completes |
+| diffex-phase1-source.tar.gz!diffex-0.2.0/.github/workflows/issue-analysis.yml@byte-867 | EARENDIL_ORG_READ_TOKEN | Owner-approved skip | Exact inherited security/staff reference deferred by owner; replace or remove when that operational migration resumes |
+| diffex-phase1-source.tar.gz!diffex-0.2.0/.github/workflows/issue-analysis.yml@byte-924 | earendil-works | Owner-approved skip | Exact inherited security/staff reference deferred by owner; replace or remove when that operational migration resumes |
+| diffex-phase1-source.tar.gz!diffex-0.2.0/.github/workflows/issue-analysis.yml@byte-1048 | earendil-works/staff | Owner-approved skip | Exact inherited security/staff reference deferred by owner; replace or remove when that operational migration resumes |
+| diffex-phase1-source.tar.gz!diffex-0.2.0/.github/workflows/issue-analysis.yml@byte-3628 | secrets.EARENDIL_ORG_READ_TOKEN | Owner-approved skip | Exact inherited security/staff reference deferred by owner; replace or remove when that operational migration resumes |
+| diffex-phase1-source.tar.gz!diffex-0.2.0/.github/workflows/issue-analysis.yml@byte-7583 | EARENDIL_ORG_READ_TOKEN | Owner-approved skip | Exact inherited security/staff reference deferred by owner; replace or remove when that operational migration resumes |
+| diffex-phase1-source.tar.gz!diffex-0.2.0/.github/workflows/issue-analysis.yml@byte-7777 | https://api.github.com/orgs/earendil-works/teams/staff/memberships/ | Owner-approved skip | Exact inherited security/staff reference deferred by owner; replace or remove when that operational migration resumes |
+| diffex-phase1-source.tar.gz!diffex-0.2.0/.github/workflows/issue-analysis.yml@byte-8326 | earendil-works/staff | Owner-approved skip | Exact inherited security/staff reference deferred by owner; replace or remove when that operational migration resumes |
+| diffex-phase1-source.tar.gz!diffex-0.2.0/.github/workflows/issue-analysis.yml@byte-8597 | earendil-works/staff | Owner-approved skip | Exact inherited security/staff reference deferred by owner; replace or remove when that operational migration resumes |
+| diffex-phase1-source.tar.gz!diffex-0.2.0/.github/workflows/issue-analysis.yml@byte-8954 | earendil-works/staff | Owner-approved skip | Exact inherited security/staff reference deferred by owner; replace or remove when that operational migration resumes |
+| diffex-phase1-source.tar.gz!diffex-0.2.0/.github/workflows/issue-analysis.yml@byte-9053 | earendil-works/staff | Owner-approved skip | Exact inherited security/staff reference deferred by owner; replace or remove when that operational migration resumes |
+| diffex-phase1-source.tar.gz!diffex-0.2.0/.github/workflows/issue-analysis.yml@byte-9262 | earendil-works/staff | Owner-approved skip | Exact inherited security/staff reference deferred by owner; replace or remove when that operational migration resumes |
 | diffex-phase1-source.tar.gz!diffex-0.2.0/LICENSE@byte-10777 | Luntraa | Legal attribution | Confirmed copyright owner; retain while legally required |
 | diffex-phase1-source.tar.gz!diffex-0.2.0/README.md@byte-1551 | https://github.com/earendil-works/pi | Upstream history | Original upstream provenance; retain while source or issue remains relevant |
-| diffex-phase1-source.tar.gz!diffex-0.2.0/SECURITY.md@byte-1421 | security@earendil.com | Unresolved active identity | Requires operational replacement or announcement approval before phase 1 completes |
-| diffex-phase1-source.tar.gz!diffex-0.2.0/SECURITY.md@byte-4233 | Earendil | Unresolved active identity | Requires operational replacement or announcement approval before phase 1 completes |
-| diffex-phase1-source.tar.gz!diffex-0.2.0/SECURITY.md@byte-4262 | Earendil-operated | Unresolved active identity | Requires operational replacement or announcement approval before phase 1 completes |
+| diffex-phase1-source.tar.gz!diffex-0.2.0/SECURITY.md@byte-1421 | security@earendil.com | Owner-approved skip | Exact inherited security/staff reference deferred by owner; replace or remove when that operational migration resumes |
+| diffex-phase1-source.tar.gz!diffex-0.2.0/SECURITY.md@byte-4233 | Earendil | Owner-approved skip | Exact inherited security/staff reference deferred by owner; replace or remove when that operational migration resumes |
+| diffex-phase1-source.tar.gz!diffex-0.2.0/SECURITY.md@byte-4262 | Earendil-operated | Owner-approved skip | Exact inherited security/staff reference deferred by owner; replace or remove when that operational migration resumes |
 | diffex-phase1-source.tar.gz!diffex-0.2.0/package-lock.json@byte-25698 | node_modules/@earendil-works/gondolin | External dependency | Published third-party dependency or npm-maintained nested dependency path; retire when dependency changes |
 | diffex-phase1-source.tar.gz!diffex-0.2.0/package-lock.json@byte-25780 | https://registry.npmjs.org/@earendil-works/gondolin/-/gondolin-0.12.0.tgz | External dependency | Published third-party dependency or npm-maintained nested dependency path; retire when dependency changes |
 | diffex-phase1-source.tar.gz!diffex-0.2.0/package-lock.json@byte-26260 | @earendil-works/gondolin-krun-runner-darwin-arm64 | External dependency | Published third-party dependency or npm-maintained nested dependency path; retire when dependency changes |
@@ -2439,19 +2413,9 @@ Rows marked unresolved are blocking findings, not allowlist exceptions.
 | diffex-phase1-source.tar.gz!diffex-0.2.0/packages/coding-agent/examples/extensions/gondolin/package.json@byte-306 | @earendil-works/gondolin | External dependency | Published third-party dependency or npm-maintained nested dependency path; retire when dependency changes |
 | diffex-phase1-source.tar.gz!diffex-0.2.0/packages/coding-agent/src/core/tools/find.ts@byte-8995 | https://github.com/earendil-works/pi/issues/5960 | Upstream history | Original upstream provenance; retain while source or issue remains relevant |
 | diffex-phase1-source.tar.gz!diffex-0.2.0/packages/coding-agent/src/migrations.ts@byte-2629 | https://github.com/earendil-works/pi-mono/issues/320 | Upstream history | Original upstream provenance; retain while source or issue remains relevant |
-| diffex-phase1-source.tar.gz!diffex-0.2.0/packages/coding-agent/src/modes/interactive/components/earendil-announcement.ts@byte-746 | EarendilAnnouncementComponent | Unresolved active identity | Requires operational replacement or announcement approval before phase 1 completes |
-| diffex-phase1-source.tar.gz!diffex-0.2.0/packages/coding-agent/src/modes/interactive/components/earendil-announcement.ts@byte-899 | Earendil | Unresolved active identity | Requires operational replacement or announcement approval before phase 1 completes |
-| diffex-phase1-source.tar.gz!diffex-0.2.0/packages/coding-agent/src/modes/interactive/interactive-mode.ts@byte-5956 | EarendilAnnouncementComponent | Unresolved active identity | Requires operational replacement or announcement approval before phase 1 completes |
-| diffex-phase1-source.tar.gz!diffex-0.2.0/packages/coding-agent/src/modes/interactive/interactive-mode.ts@byte-5994 | ./components/earendil-announcement.ts | Unresolved active identity | Requires operational replacement or announcement approval before phase 1 completes |
-| diffex-phase1-source.tar.gz!diffex-0.2.0/packages/coding-agent/src/modes/interactive/interactive-mode.ts@byte-254060 | EarendilAnnouncementComponent | Unresolved active identity | Requires operational replacement or announcement approval before phase 1 completes |
 | diffex-phase1-source.tar.gz!diffex-0.2.0/packages/coding-agent/src/utils/changelog.ts@byte-391 | earendil-works | Supported migration behavior | Legacy repository matcher; maintainers retire with legacy-link normalization |
 | diffex-phase1-source.tar.gz!diffex-0.2.0/packages/coding-agent/src/utils/child-process.ts@byte-1531 | earendil-works/pi#5303 | Upstream history | Original upstream provenance; retain while source or issue remains relevant |
 | diffex-phase1-source.tar.gz!diffex-0.2.0/packages/coding-agent/test/changelog.test.ts@byte-1331 | https://github.com/earendil-works/pi-mono/pull/5167 | Upstream history | Original upstream provenance; retain while source or issue remains relevant |
-| diffex-phase1-source.tar.gz!diffex-0.2.0/packages/coding-agent/test/secondary-dialogs.test.ts@byte-288 | EarendilAnnouncementComponent | Unresolved active identity | Requires operational replacement or announcement approval before phase 1 completes |
-| diffex-phase1-source.tar.gz!diffex-0.2.0/packages/coding-agent/test/secondary-dialogs.test.ts@byte-326 | ../src/modes/interactive/components/earendil-announcement.ts | Unresolved active identity | Requires operational replacement or announcement approval before phase 1 completes |
-| diffex-phase1-source.tar.gz!diffex-0.2.0/packages/coding-agent/test/secondary-dialogs.test.ts@byte-4308 | Earendil | Unresolved active identity | Requires operational replacement or announcement approval before phase 1 completes |
-| diffex-phase1-source.tar.gz!diffex-0.2.0/packages/coding-agent/test/secondary-dialogs.test.ts@byte-4378 | EarendilAnnouncementComponent | Unresolved active identity | Requires operational replacement or announcement approval before phase 1 completes |
-| diffex-phase1-source.tar.gz!diffex-0.2.0/packages/coding-agent/test/secondary-dialogs.test.ts@byte-4541 | Earendil | Unresolved active identity | Requires operational replacement or announcement approval before phase 1 completes |
 | diffex-phase1-source.tar.gz!diffex-0.2.0/packages/coding-agent/test/suite/regressions/2791-fswatch-error-crash.test.ts@byte-304 | https://github.com/earendil-works/pi-mono/issues/2791 | Upstream history | Original upstream provenance; retain while source or issue remains relevant |
 | diffex-phase1-source.tar.gz!diffex-0.2.0/packages/coding-agent/test/suite/regressions/3302-find-path-glob.test.ts@byte-315 | https://github.com/earendil-works/pi-mono/issues/3302 | Upstream history | Original upstream provenance; retain while source or issue remains relevant |
 | diffex-phase1-source.tar.gz!diffex-0.2.0/packages/coding-agent/test/suite/regressions/3303-find-nested-gitignore.test.ts@byte-315 | https://github.com/earendil-works/pi-mono/issues/3303 | Upstream history | Original upstream provenance; retain while source or issue remains relevant |
@@ -3079,15 +3043,7 @@ Rows marked unresolved are blocking findings, not allowlist exceptions.
 | diffex-darwin-arm64.tar.gz!diffex/CHANGELOG.md@byte-233030 | Earendil | Immutable changelog | Packaged historical release record; retain immutable provenance |
 | diffex-darwin-arm64.tar.gz!diffex/CHANGELOG.md@byte-233178 | Earendil | Immutable changelog | Packaged historical release record; retain immutable provenance |
 | diffex-darwin-arm64.tar.gz!diffex/CHANGELOG.md@byte-233958 | Earendil | Immutable changelog | Packaged historical release record; retain immutable provenance |
-| diffex-darwin-arm64.tar.gz!diffex/diffex@byte-73627453 | earendil-works | Supported migration behavior | Legacy repository matcher; maintainers retire with legacy-link normalization |
-| diffex-darwin-arm64.tar.gz!diffex/diffex@byte-73720503 | dist/modes/interactive/components/earendil-announcement.js | Unresolved active identity | Requires operational replacement or announcement approval before phase 1 completes |
-| diffex-darwin-arm64.tar.gz!diffex/diffex@byte-73721061 | EarendilAnnouncementComponent | Unresolved active identity | Requires operational replacement or announcement approval before phase 1 completes |
-| diffex-darwin-arm64.tar.gz!diffex/diffex@byte-73721096 | init_earendil_announcement | Unresolved active identity | Requires operational replacement or announcement approval before phase 1 completes |
-| diffex-darwin-arm64.tar.gz!diffex/diffex@byte-73721190 | EarendilAnnouncementComponent | Unresolved active identity | Requires operational replacement or announcement approval before phase 1 completes |
-| diffex-darwin-arm64.tar.gz!diffex/diffex@byte-73721228 | EarendilAnnouncementComponent | Unresolved active identity | Requires operational replacement or announcement approval before phase 1 completes |
-| diffex-darwin-arm64.tar.gz!diffex/diffex@byte-73721391 | Earendil | Unresolved active identity | Requires operational replacement or announcement approval before phase 1 completes |
-| diffex-darwin-arm64.tar.gz!diffex/diffex@byte-74273486 | EarendilAnnouncementComponent | Unresolved active identity | Requires operational replacement or announcement approval before phase 1 completes |
-| diffex-darwin-arm64.tar.gz!diffex/diffex@byte-74278829 | init_earendil_announcement | Unresolved active identity | Requires operational replacement or announcement approval before phase 1 completes |
+| diffex-darwin-arm64.tar.gz!diffex/diffex@byte-73627059 | earendil-works | Supported migration behavior | Legacy repository matcher; maintainers retire with legacy-link normalization |
 | diffex-darwin-arm64.tar.gz!diffex/examples/extensions/gondolin/package-lock.json@byte-215 | @earendil-works/gondolin | External dependency | Published third-party dependency or npm-maintained nested dependency path; retire when dependency changes |
 | diffex-darwin-arm64.tar.gz!diffex/examples/extensions/gondolin/package-lock.json@byte-576 | node_modules/@earendil-works/gondolin | External dependency | Published third-party dependency or npm-maintained nested dependency path; retire when dependency changes |
 | diffex-darwin-arm64.tar.gz!diffex/examples/extensions/gondolin/package-lock.json@byte-658 | https://registry.npmjs.org/@earendil-works/gondolin/-/gondolin-0.12.0.tgz | External dependency | Published third-party dependency or npm-maintained nested dependency path; retire when dependency changes |
@@ -3104,14 +3060,12 @@ Rows marked unresolved are blocking findings, not allowlist exceptions.
 | diffex-darwin-arm64.tar.gz!diffex/docs/containerization.md@byte-1938 | @earendil-works/gondolin | External dependency | Published third-party dependency or npm-maintained nested dependency path; retire when dependency changes |
 | generated-declarations!packages/coding-agent/dist/migrations.d.ts@byte-553 | https://github.com/earendil-works/pi-mono/issues/320 | Upstream history | Original upstream provenance; retain while source or issue remains relevant |
 | generated-declarations!packages/coding-agent/dist/utils/child-process.d.ts@byte-1068 | earendil-works/pi#5303 | Upstream history | Original upstream provenance; retain while source or issue remains relevant |
-| generated-declarations!packages/coding-agent/dist/modes/interactive/components/earendil-announcement.d.ts@byte-71 | EarendilAnnouncementComponent | Unresolved active identity | Requires operational replacement or announcement approval before phase 1 completes |
-| generated-declarations!packages/coding-agent/dist/modes/interactive/components/earendil-announcement.d.ts@byte-163 | earendil-announcement.d.ts.map | Unresolved active identity | Requires operational replacement or announcement approval before phase 1 completes |
 
 ## Artifact checksums
 
 | Archive | SHA-256 |
 |---|---|
-| diffexai-diffex-0.2.0.tgz | 2e4a15530c8c3fca0ec87dd2c1e6b12a9c7ddb13dd2155bfc18d4b991b2cdcb8 |
+| diffexai-diffex-0.2.0.tgz | 732d45c014368df143363c3825d96a782d7a0cbd3c69cb9da604278ad464bae9 |
 | diffexai-diffex-agent-core-0.2.0.tgz | 10a10787c5958f3599790741de1e3a0d5b45f2bf9caae4f8bd03390cf7e30508 |
 | diffexai-diffex-ai-0.2.0.tgz | f268bba416eef7a8ba8dc977cf4ad3443f1037d82bede351334df9abf00a7e30 |
 | diffexai-diffex-client-0.2.0.tgz | 2f87cace71c708ed98a51f971c9c2e854ef820224eff4c6ca199003e96052e0b |
@@ -3122,5 +3076,5 @@ Rows marked unresolved are blocking findings, not allowlist exceptions.
 | diffexai-diffex-session-backend-sqlite-node-0.2.0.tgz | d23826ab601981f1782bb156b907f4398f0a9e435e98c052dd97194a18da6b2b |
 | diffexai-diffex-telemetry-0.2.0.tgz | 0f846a375378b6c795c44f9f57f9d89672423ef9a24e04160be69d10ac3a6afb |
 | diffexai-diffex-tui-0.2.0.tgz | 73f7bdbb9b7e16be100ff6d82a1292df34f805adec3249dde082e90066b1f2de |
-| diffex-phase1-source.tar.gz | baa2fc37d1557d3dcac05b5e0fc5cdf61d3f1d90e5a0ffe19d0c6197463a59ca |
-| diffex-darwin-arm64.tar.gz | cefa657594e68594ba9244c23bb7ad750a9168d4ba4250377b6e6c47d9f7405d |
+| diffex-phase1-source.tar.gz | dc1cb7889f456343383147c5fab8ef90aea028062910c94c92108d8f43e154b2 |
+| diffex-darwin-arm64.tar.gz | de2581b2ec6036e0b203c53a1d43b82d9e5bbb494aff286e15161e30ba7afa6b |
