@@ -149,7 +149,6 @@ import {
 	diffexIntroTextBold,
 } from "./components/diffex-welcome.ts";
 import { DynamicBorder } from "./components/dynamic-border.ts";
-import { EarendilAnnouncementComponent } from "./components/earendil-announcement.ts";
 import { type EvolutionMenuClient, EvolutionMenuComponent } from "./components/evolution-menu.ts";
 import { ExtensionEditorComponent } from "./components/extension-editor.ts";
 import { ExtensionInputComponent } from "./components/extension-input.ts";
@@ -3478,11 +3477,6 @@ export class InteractiveMode {
 			}
 			if (text === "/arminsayshi") {
 				this.handleArminSaysHi();
-				this.editor.setText("");
-				return;
-			}
-			if (text === "/dementedelves") {
-				this.handleDementedDelves();
 				this.editor.setText("");
 				return;
 			}
@@ -7372,12 +7366,6 @@ export class InteractiveMode {
 	private handleArminSaysHi(): void {
 		this.chatContainer.addChild(new Spacer(1));
 		this.chatContainer.addChild(new ArminComponent(this.ui));
-		this.ui.requestRender();
-	}
-
-	private handleDementedDelves(): void {
-		this.chatContainer.addChild(new Spacer(1));
-		this.chatContainer.addChild(new EarendilAnnouncementComponent());
 		this.ui.requestRender();
 	}
 

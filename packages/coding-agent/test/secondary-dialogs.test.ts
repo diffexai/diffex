@@ -2,7 +2,6 @@ import { getGlyphs, setKeybindings, TuiMainScreen } from "@diffexai/diffex-tui";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { VirtualTerminal } from "../../tui/test/virtual-terminal.ts";
 import { KeybindingsManager } from "../src/core/keybindings.ts";
-import { EarendilAnnouncementComponent } from "../src/modes/interactive/components/earendil-announcement.ts";
 import { ExtensionEditorComponent } from "../src/modes/interactive/components/extension-editor.ts";
 import { ExtensionInputComponent } from "../src/modes/interactive/components/extension-input.ts";
 import { ExtensionSelectorComponent } from "../src/modes/interactive/components/extension-selector.ts";
@@ -113,18 +112,5 @@ describe("secondary dialogs", () => {
 		expect(output.at(-1)).toContain("cancel");
 		expect(output).toHaveLength(10);
 		expect(output.every((line) => Array.from(line).length <= 60)).toBe(true);
-	});
-
-	it("renders the Earendil announcement without a box", () => {
-		const component = new EarendilAnnouncementComponent();
-
-		const output = renderPlain(component, 80);
-		const text = output.join("\n");
-
-		expect(output[0]).toContain("Diffex has joined Earendil");
-		expect(text).toContain("Read the blog post:");
-		expect(text).toContain("https://mariozechner.at/posts/2026-04-08-ive-sold-out/");
-		expect(output.some((line) => /^\s*─+\s*$/.test(line))).toBe(false);
-		expect(output.at(-1)).not.toBe("");
 	});
 });
