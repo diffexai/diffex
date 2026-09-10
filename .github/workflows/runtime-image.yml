@@ -32,6 +32,8 @@ concurrency:
 
 jobs:
   build:
+    # Phase 1 identity migration hold. Phase 3 validates and re-enables publication.
+    if: ${{ false }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
