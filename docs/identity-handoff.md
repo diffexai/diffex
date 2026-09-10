@@ -1,7 +1,7 @@
-# Phase 1 identity handoff
+# Product identity handoff
 
-Status: phase 1 complete within the owner-approved scope below.
-Distribution and backend cutover remain later-phase work.
+Status: source identity migration complete within the owner-approved scope below.
+Distribution and backend cutover remain separate release work.
 The source migration is based on `4d5859e71143d3c1ba29fa7df4e2068087ba2322`.
 
 ## Confirmed identities
@@ -29,17 +29,17 @@ Private packages retain their existing suffixes under the new scope.
 
 | Workspace | Final package | Publication |
 |---|---|---|
-| `packages/agent` | `@diffexai/diffex-agent-core` | Public, phase 3 |
-| `packages/ai` | `@diffexai/diffex-ai` | Public, phase 3 |
-| `packages/client` | `@diffexai/diffex-client` | Public, phase 3 |
-| `packages/coding-agent` | `@diffexai/diffex` | Public, phase 3 |
-| `packages/coding-agent-server` | `@diffexai/diffex-coding-agent-server` | Public, phase 3 |
-| `packages/harness-state` | `@diffexai/diffex-harness-state` | Public, phase 3 |
-| `packages/protocol` | `@diffexai/diffex-protocol` | Public, phase 3 |
-| `packages/server` | `@diffexai/diffex-server` | Public, phase 3 |
-| `packages/session-backends/sqlite-node` | `@diffexai/diffex-session-backend-sqlite-node` | Public, phase 3 |
-| `packages/telemetry` | `@diffexai/diffex-telemetry` | Public, phase 3 |
-| `packages/tui` | `@diffexai/diffex-tui` | Public, phase 3 |
+| `packages/agent` | `@diffexai/diffex-agent-core` | Public; publication deferred |
+| `packages/ai` | `@diffexai/diffex-ai` | Public; publication deferred |
+| `packages/client` | `@diffexai/diffex-client` | Public; publication deferred |
+| `packages/coding-agent` | `@diffexai/diffex` | Public; publication deferred |
+| `packages/coding-agent-server` | `@diffexai/diffex-coding-agent-server` | Public; publication deferred |
+| `packages/harness-state` | `@diffexai/diffex-harness-state` | Public; publication deferred |
+| `packages/protocol` | `@diffexai/diffex-protocol` | Public; publication deferred |
+| `packages/server` | `@diffexai/diffex-server` | Public; publication deferred |
+| `packages/session-backends/sqlite-node` | `@diffexai/diffex-session-backend-sqlite-node` | Public; publication deferred |
+| `packages/telemetry` | `@diffexai/diffex-telemetry` | Public; publication deferred |
+| `packages/tui` | `@diffexai/diffex-tui` | Public; publication deferred |
 | `packages/evals` | `@diffexai/diffex-evals` | Private |
 | `packages/evolution` | `@diffexai/diffex-evolution` | Private |
 | `packages/harness-trace` | `@diffexai/diffex-harness-trace` | Private |
@@ -71,15 +71,15 @@ This is owner-provided verification, not a successful local account check.
 ## Publication hold and consumer inventory
 
 `.github/workflows/runtime-image.yml` has an unconditional false job condition that also blocks manual dispatch.
-Keep it disabled through phase 1 and phase 2.
+Keep it disabled until the runtime image and deployment consumers are validated.
 `Dockerfile.runtime` already labels the canonical repository and uses Node 24 for both stages.
 `docs/cloud-runtime.md` identifies the target image and the `DAYTONA_SANDBOX_SNAPSHOT` consumer setting.
 No production image digest or snapshot value is stored in this repository.
 The owner instructed us to skip production image, Daytona snapshot, credential, and deployment-allowlist inventory.
-Do not change those consumers in phase 1.
+Consumer changes are outside this source identity migration.
 
-Phase 3 configures the trusted publisher for every public package with repository `diffexai/diffex`, workflow `build-binaries.yml`, environment `npm-publish`, and action `npm publish`.
-Do not bootstrap packages, configure publication credentials, publish npm packages, create release assets, publish GHCR images, or activate self-update in this phase.
+Before publishing, configure the trusted publisher for every public package with repository `diffexai/diffex`, workflow `build-binaries.yml`, environment `npm-publish`, and action `npm publish`.
+Do not bootstrap packages, configure publication credentials, publish npm packages, create release assets, publish GHCR images, or activate self-update as part of this source identity migration.
 
 ## Owner-approved scope adjustments
 

@@ -26,8 +26,8 @@ Only Daytona's opaque placeholder enters the sandbox environment, and the real p
 
 `Dockerfile.runtime` produces the AMD64 image used to create the Daytona sandbox snapshot.
 The runtime-image workflow is disabled during the identity migration, including manual dispatches.
-Phase 3 re-enables validation and immutable `ghcr.io/diffexai/diffex-runtime:sha-<commit>` publication after reviewing the image and its consumers.
-Keep production on its existing tested image and Daytona snapshot until that phase completes.
+Re-enable the workflow for validation and immutable `ghcr.io/diffexai/diffex-runtime:sha-<commit>` publication after reviewing the image and its consumers.
+Keep production on its existing tested image and Daytona snapshot until the replacement image and snapshot pass release validation.
 
 Before a cloud release, register GHCR with Daytona, create a Daytona snapshot from that exact immutable image tag or digest, and set `DAYTONA_SANDBOX_SNAPSHOT` to the resulting snapshot name.
 Do not use a floating image tag for production.

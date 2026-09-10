@@ -32,7 +32,7 @@ concurrency:
 
 jobs:
   build:
-    # Phase 1 identity migration hold. Phase 3 validates and re-enables publication.
+    # Publication is paused until the runtime image and deployment consumers are validated.
     if: ${{ false }}
     runs-on: ubuntu-latest
     permissions:
