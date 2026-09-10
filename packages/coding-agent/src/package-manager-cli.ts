@@ -25,6 +25,7 @@ import { DefaultResourceLoader } from "./core/resource-loader.ts";
 import { SettingsManager } from "./core/settings-manager.ts";
 import { hasTrustRequiringProjectResources, ProjectTrustStore } from "./core/trust-manager.ts";
 import { spawnProcess } from "./utils/child-process.ts";
+import { isStableVersion, RELEASE_PACKAGE_NAME } from "./utils/release-contract.ts";
 import { formatVersionCheckError, getLatestDiffexRelease, isNewerPackageVersion } from "./utils/version-check.ts";
 import {
 	cleanupWindowsSelfUpdateQuarantine,
@@ -489,9 +490,12 @@ async function getSelfUpdatePlan(force: boolean): Promise<SelfUpdatePlan> {
 		throw new Error(`Could not determine latest ${APP_NAME} version.`);
 	}
 
-	const packageName = latestRelease.packageName ?? PACKAGE_NAME;
+	if (latestRelease.packageName !== RELEASE_PACKAGE_NAME || !isStableVersion(latestRelease.version)) {
+		throw new Error(`Refusing self-update: expected a stable ${RELEASE_PACKAGE_NAME} release.`);
+	}
+	const packageName = RELEASE_PACKAGE_NAME;
 	const installSpec = `${packageName}@${latestRelease.version}`;
-	if (force || packageName !== PACKAGE_NAME || isNewerPackageVersion(latestRelease.version, VERSION)) {
+	if (force || isNewerPackageVersion(latestRelease.version, VERSION)) {
 		return {
 			packageName,
 			installSpec,

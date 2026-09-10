@@ -19,7 +19,7 @@ globalThis.fetch = async (input, init) => {
 	if (process.env.DIFFEX_REPRO_FAILURE === "1") throw new Error("controlled network failure");
 	return Response.json({
 		version: process.env.DIFFEX_REPRO_VERSION,
-		packageName: "@foreign-fixture/untrusted-cli",
+		packageName: process.env.DIFFEX_REPRO_PACKAGE,
 	});
 };
 

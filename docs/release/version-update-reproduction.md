@@ -11,9 +11,10 @@ A response naming `@foreign-fixture/untrusted-cli` reaches the CLI's real packag
 `--force` also accepts the foreign identity when the response version equals the installed version.
 The reproduction captures both commands before execution and simulates successful completion; no package manager runs and no installed software changes.
 
-These tests characterize the vulnerable behavior, not the desired update policy.
-When the consumer is constrained to the Diffex authority and canonical package, replace the vulnerable expectations with rejection assertions while retaining the CLI and terminal coverage.
-This change does not fix the updater or perform endpoint cutover.
+The finding and captured commands below are historical evidence from the vulnerable implementation.
+The same reproduction was confirmed again before adding the [canonical self-update safeguard](self-update-target.md).
+The executable suite now asserts rejection of foreign targets and retains CLI and terminal coverage.
+Endpoint cutover remains pending.
 
 ## Repeat the reproduction
 

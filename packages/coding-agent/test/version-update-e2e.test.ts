@@ -10,7 +10,6 @@ const repositoryDir = resolve(packageDir, "../..");
 const packageJson = readFileSync(join(packageDir, "package.json"), "utf8");
 const installed = JSON.parse(packageJson) as { name: string; version: string };
 const endpoint = "https://pi.dev/api/latest-version";
-const foreignPackage = "@foreign-fixture/untrusted-cli";
 
 interface RecordedEvent {
 	type: string;
@@ -27,6 +26,8 @@ async function reproduce(options: {
 	offline?: boolean;
 	skip?: boolean;
 	failure?: boolean;
+	packageName?: string;
+	version?: string;
 }) {
 	const root = mkdtempSync(join(tmpdir(), "diffex-version-repro-"));
 	const agentDir = join(root, "agent");
@@ -49,7 +50,8 @@ async function reproduce(options: {
 		DIFFEX_CODING_AGENT_DIR: agentDir,
 		DIFFEX_NO_LOCAL_LLM: "1",
 		DIFFEX_REPRO_RECORD: recordPath,
-		DIFFEX_REPRO_VERSION: options.force ? installed.version : "9999.0.0",
+		DIFFEX_REPRO_VERSION: options.version ?? (options.force ? installed.version : "9999.0.0"),
+		DIFFEX_REPRO_PACKAGE: options.packageName ?? "@foreign-fixture/untrusted-cli",
 		DIFFEX_REPRO_FAILURE: options.failure ? "1" : "",
 		DIFFEX_OFFLINE: options.offline ? "1" : "",
 		DIFFEX_SKIP_VERSION_CHECK: options.skip ? "1" : "",
@@ -127,16 +129,21 @@ function versionRequests(events: RecordedEvent[]) {
 	return events.filter((event) => event.type === "request" && event.url === endpoint);
 }
 
-// Characterization of the vulnerable implementation, to be inverted when the consumer is constrained.
+// The source CLI must reject untrusted targets before dispatching package commands.
 describe.skipIf(process.platform === "win32")("version discovery through the source CLI", () => {
-	it.each([false, true])("captures foreign-package uninstall/install attempts with force=%s", async (force) => {
+	it.each([false, true])("rejects foreign packages before any command with force=%s", async (force) => {
 		const result = await reproduce({ force });
+		expect(result.code, result.output).toBe(1);
+		expect(versionRequests(result.events)).toHaveLength(1);
+		expect(result.events.filter((event) => event.type === "spawn")).toEqual([]);
+		expect(result.output).toContain("Refusing self-update: expected a stable @diffexai/diffex release.");
+	});
+
+	it.each([false, true])("pins canonical installation without uninstall with force=%s", async (force) => {
+		const result = await reproduce({ force, packageName: "@diffexai/diffex" });
 		expect(result.code, result.output).toBe(0);
-		expect(versionRequests(result.events)).toEqual([
-			expect.objectContaining({ method: "GET", userAgent: expect.stringContaining(`diffex/${installed.version} `) }),
-		]);
+		expect(versionRequests(result.events)).toHaveLength(1);
 		expect(result.events.filter((event) => event.type === "spawn")).toEqual([
-			{ type: "spawn", command: "npm", args: ["--prefix", result.prefix, "uninstall", "-g", installed.name] },
 			{
 				type: "spawn",
 				command: "npm",
@@ -147,13 +154,24 @@ describe.skipIf(process.platform === "win32")("version discovery through the sou
 					"-g",
 					"--ignore-scripts",
 					"--min-release-age=0",
-					`${foreignPackage}@${force ? installed.version : "9999.0.0"}`,
+					`@diffexai/diffex@${force ? installed.version : "9999.0.0"}`,
 				],
 			},
 		]);
-		expect(result.output).toContain(
-			`Updating diffex with npm --prefix ${result.prefix} uninstall -g ${installed.name}`,
-		);
+	});
+
+	it.each([
+		"npm:foreign@1.2.3",
+		"https://example.invalid/install.tgz",
+		"1.2.3-beta.1",
+		"1.2.3+build",
+		"v1.2.3",
+		"01.2.3",
+	])("rejects unsafe version %s even with force", async (version) => {
+		const result = await reproduce({ force: true, packageName: "@diffexai/diffex", version });
+		expect(result.code, result.output).toBe(1);
+		expect(result.events.filter((event) => event.type === "spawn")).toEqual([]);
+		expect(result.output).toContain("Refusing self-update");
 	});
 
 	it.each([false, true])("offline suppresses manual discovery and commands with force=%s", async (force) => {
@@ -163,11 +181,11 @@ describe.skipIf(process.platform === "win32")("version discovery through the sou
 		expect(result.output).toContain("Could not determine latest diffex version.");
 	});
 
-	it("automatic opt-out still permits manual foreign-package update", async () => {
+	it("automatic opt-out permits manual discovery but cannot bypass package validation", async () => {
 		const result = await reproduce({ skip: true });
-		expect(result.code, result.output).toBe(0);
+		expect(result.code, result.output).toBe(1);
 		expect(versionRequests(result.events)).toHaveLength(1);
-		expect(result.events.filter((event) => event.type === "spawn")).toHaveLength(2);
+		expect(result.events.filter((event) => event.type === "spawn")).toEqual([]);
 	});
 
 	it("manual network failure retries twice without attempting package mutation", async () => {
