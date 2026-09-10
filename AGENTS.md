@@ -165,3 +165,4 @@ If the user's instructions conflict with any rule in this document, ask for expl
 ## Learning Log
 
 - 2026-09-10: CLI reproduction assumed a preload fetch stub survived HTTP setup and used an unsupported quit command -> Install the stub after importing HTTP setup, retain a socket guard, and verify the real `/exit` command before terminal automation.
+- 2026-09-10: The system Python could not bootstrap an isolated AWS CLI -> Use an explicit supported Python runtime for temporary publication tooling.

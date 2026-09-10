@@ -1,0 +1,37 @@
+name: Verify Release Publication
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-release-publication-staging
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: diffex-release-staging
+    steps:
+      - name: Checkout reviewed source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+      - name: Verify AWS CLI
+        run: aws --version
+      - name: Check controlled publisher regressions
+        run: node --test scripts/publish-release-announcement.test.mjs
+      - name: Verify publication against staging storage
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.DIFFEX_ARTIFACTS_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.DIFFEX_ARTIFACTS_R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          AWS_EC2_METADATA_DISABLED: 'true'
+        run: node scripts/verify-release-publication.mjs --staging

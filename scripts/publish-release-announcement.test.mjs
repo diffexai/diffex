@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createPublicationFixture } from "./fixtures/release-publication/harness.mjs";
 import { advanceLatestRelease, compareReleaseVersions } from "./publish-release-announcement.mjs";
 
 test("compares stable release versions numerically", () => {
@@ -31,9 +32,7 @@ test("retries a lost conditional update and preserves a racing newer marker", as
 		"0.84.0",
 		async () => {
 			readCount++;
-			return readCount === 1
-				? { etag: '"previous"', version: "0.83.0" }
-				: { etag: '"newer"', version: "0.85.0" };
+			return readCount === 1 ? { etag: '"previous"', version: "0.83.0" } : { etag: '"newer"', version: "0.85.0" };
 		},
 		async (condition) => {
 			writeCount++;
@@ -59,4 +58,138 @@ test("creates a missing marker with an if-none-match condition", async () => {
 
 	assert.deepEqual(result, { advanced: true, version: "0.84.0" });
 	assert.deepEqual(condition, { missing: true });
+});
+
+// Exercise the exact release-CI command with isolated manifests, npm, and storage.
+test("publisher rejects missing credentials before package verification or storage", () => {
+	const fixture = createPublicationFixture();
+	try {
+		const result = fixture.run("0.0.3", { credentials: false });
+		assert.equal(result.status, 1);
+		assert.match(result.stderr, /AWS_ACCESS_KEY_ID.*AWS_SECRET_ACCESS_KEY/);
+		assert.doesNotMatch(result.stdout, /available from npm/);
+		assert.deepEqual(fixture.state().calls, []);
+	} finally {
+		fixture.cleanup();
+	}
+});
+
+for (const failure of ["package", "tarball"]) {
+	test(`publisher leaves both records untouched when ${failure} verification fails`, () => {
+		const fixture = createPublicationFixture();
+		try {
+			const objects = { "releases/v1/latest.json": JSON.stringify({ version: "0.0.2" }) };
+			fixture.seed(objects);
+			const result = fixture.run("0.0.3", { failure });
+			assert.equal(result.status, 1);
+			assert.match(result.stderr, /Timed out waiting/);
+			assert.deepEqual(fixture.state().objects, objects);
+			assert.deepEqual(fixture.state().calls, []);
+		} finally {
+			fixture.cleanup();
+		}
+	});
+}
+
+test("publisher safely creates, repeats, and orders verified announcements", () => {
+	const fixture = createPublicationFixture();
+	try {
+		let result = fixture.run("0.0.3");
+		assert.equal(result.status, 0, result.stderr);
+		const first = fixture.state().objects;
+		assert.equal(first["releases/v1/latest.json"], first["releases/v1/releases/0.0.3.json"]);
+		result = fixture.run("0.0.3");
+		assert.equal(result.status, 0, result.stderr);
+		assert.deepEqual(fixture.state().objects, first);
+		result = fixture.run("0.0.2");
+		assert.equal(result.status, 0, result.stderr);
+		assert.equal(fixture.state().objects["releases/v1/latest.json"], first["releases/v1/latest.json"]);
+		assert.ok(fixture.state().objects["releases/v1/releases/0.0.2.json"]);
+	} finally {
+		fixture.cleanup();
+	}
+});
+
+test("retry after an interrupted announcement reuses the immutable record", () => {
+	const fixture = createPublicationFixture();
+	try {
+		const first = fixture.run("0.0.3");
+		assert.equal(first.status, 0, first.stderr);
+		const key = "releases/v1/releases/0.0.3.json";
+		const record = JSON.parse(fixture.state().objects[key]);
+		record.publishedAt = "2025-01-01T00:00:00.000Z";
+		const body = JSON.stringify(record);
+		fixture.seed({ [key]: body });
+		const retry = fixture.run("0.0.3");
+		assert.equal(retry.status, 0, retry.stderr);
+		assert.equal(fixture.state().objects["releases/v1/latest.json"], body);
+	} finally {
+		fixture.cleanup();
+	}
+});
+
+test("publisher rejects conflicting immutable release identity", () => {
+	const fixture = createPublicationFixture();
+	try {
+		const first = fixture.run("0.0.3");
+		assert.equal(first.status, 0, first.stderr);
+		const objects = fixture.state().objects;
+		const retry = fixture.run("0.0.3", { commit: "b".repeat(40) });
+		assert.equal(retry.status, 1);
+		assert.match(retry.stderr, /conflict/i);
+		assert.deepEqual(fixture.state().objects, objects);
+	} finally {
+		fixture.cleanup();
+	}
+});
+
+test("publisher redacts storage failures and never treats denied access as a missing record", () => {
+	const fixture = createPublicationFixture();
+	try {
+		fixture.seed({}, "AccessDenied");
+		const result = fixture.run("0.0.3");
+		assert.equal(result.status, 1);
+		assert.match(result.stderr, /R2 rejected publication credentials/);
+		assert.doesNotMatch(result.stderr + result.stdout, /fixture-secret/);
+		assert.deepEqual(fixture.state().objects, {});
+	} finally {
+		fixture.cleanup();
+	}
+});
+
+test("publisher fails closed when the existing latest record is malformed", () => {
+	const fixture = createPublicationFixture();
+	try {
+		fixture.seed({ "releases/v1/latest.json": "malformed fixture-secret" });
+		const result = fixture.run("0.0.3");
+		assert.equal(result.status, 1);
+		assert.match(result.stderr, /not valid JSON/);
+		assert.doesNotMatch(result.stderr + result.stdout, /fixture-secret/);
+		assert.equal(fixture.state().objects["releases/v1/latest.json"], "malformed fixture-secret");
+	} finally {
+		fixture.cleanup();
+	}
+});
+
+test("pointer contention has a bounded retry limit", async () => {
+	let attempts = 0;
+	await assert.rejects(
+		advanceLatestRelease(
+			"0.0.3",
+			async () => undefined,
+			async () => {
+				attempts++;
+				return false;
+			},
+		),
+		/after 5 attempts/,
+	);
+	assert.equal(attempts, 5);
+});
+
+test("version comparison rejects noncanonical versions and avoids numeric precision loss", () => {
+	for (const value of ["01.2.3", "1.02.3", "1.2.03", "v1.2.3", "1.2.3+build", "1.2.3-beta.1"]) {
+		assert.throws(() => compareReleaseVersions(value, "1.2.3"));
+	}
+	assert.equal(compareReleaseVersions("9007199254740993.0.0", "9007199254740992.0.0"), 1);
 });

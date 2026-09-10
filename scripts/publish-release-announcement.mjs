@@ -5,6 +5,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { isDeepStrictEqual } from "node:util";
 import { getPublicWorkspacePackages } from "./release-packages.mjs";
 
 const RELEASES_PREFIX = "releases/v1";
@@ -12,7 +13,8 @@ const REGISTRY_URL = "https://registry.npmjs.org";
 const RETRY_DELAY_MS = 5000;
 const RETRY_TIMEOUT_MS = 10 * 60 * 1000;
 const MAX_POINTER_UPDATE_ATTEMPTS = 5;
-const STABLE_SEMVER_RE = /^(\d+)\.(\d+)\.(\d+)$/;
+const STABLE_SEMVER_RE = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+const REQUEST_TIMEOUT_MS = 30_000;
 
 function parseArgs(args) {
 	const options = {
@@ -30,7 +32,9 @@ function parseArgs(args) {
 		const value = args[++index];
 		if (!value) throw new Error(`${arg} requires a value`);
 		options[
-			{ "--bucket": "bucket", "--endpoint": "endpoint", "--source-commit": "sourceCommit", "--version": "version" }[arg]
+			{ "--bucket": "bucket", "--endpoint": "endpoint", "--source-commit": "sourceCommit", "--version": "version" }[
+				arg
+			]
 		] = value;
 	}
 
@@ -48,7 +52,10 @@ function sleep(milliseconds) {
 
 async function resolvePackageFromNpm(pkg) {
 	const packageUrl = `${REGISTRY_URL}/${encodeURIComponent(pkg.name)}/${pkg.version}`;
-	const response = await fetch(packageUrl, { headers: { accept: "application/json" } });
+	const response = await fetch(packageUrl, {
+		headers: { accept: "application/json" },
+		signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+	});
 	if (!response.ok) {
 		throw new Error(`${pkg.name}@${pkg.version}: npm registry returned ${response.status}`);
 	}
@@ -58,6 +65,7 @@ async function resolvePackageFromNpm(pkg) {
 		typeof data !== "object" ||
 		data === null ||
 		Array.isArray(data) ||
+		data.name !== pkg.name ||
 		data.version !== pkg.version ||
 		typeof data.dist !== "object" ||
 		data.dist === null ||
@@ -68,7 +76,7 @@ async function resolvePackageFromNpm(pkg) {
 		throw new Error(`${pkg.name}@${pkg.version}: npm registry returned invalid metadata`);
 	}
 
-	const tarball = await fetch(data.dist.tarball, { method: "HEAD" });
+	const tarball = await fetch(data.dist.tarball, { method: "HEAD", signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
 	if (!tarball.ok) {
 		throw new Error(`${pkg.name}@${pkg.version}: tarball returned ${tarball.status}`);
 	}
@@ -97,12 +105,16 @@ async function verifyPackagesAreAvailable(packages) {
 			return results.map((result) => result.value);
 		}
 
-		console.log(`Waiting for ${failures.length} Diffex package${failures.length === 1 ? "" : "s"} on npm (attempt ${attempt}):`);
+		console.log(
+			`Waiting for ${failures.length} Diffex package${failures.length === 1 ? "" : "s"} on npm (attempt ${attempt}):`,
+		);
 		for (const failure of failures) console.log(`  ${failure}`);
 		if (Date.now() < deadline) await sleep(RETRY_DELAY_MS);
 	} while (Date.now() < deadline);
 
-	throw new Error(`Timed out waiting for Diffex packages to become available from npm:\n${failures.map((failure) => `  ${failure}`).join("\n")}`);
+	throw new Error(
+		`Timed out waiting for Diffex packages to become available from npm:\n${failures.map((failure) => `  ${failure}`).join("\n")}`,
+	);
 }
 
 function gitSourceCommit() {
@@ -116,52 +128,43 @@ function runAws(args, { allowNotFound = false, allowPreconditionFailure = false 
 			...process.env,
 			AWS_DEFAULT_REGION: process.env.AWS_DEFAULT_REGION || "auto",
 			AWS_EC2_METADATA_DISABLED: "true",
+			AWS_PAGER: "",
 		},
 		stdio: ["ignore", "pipe", "pipe"],
+		timeout: 60_000,
 	});
-	if (result.error) throw result.error;
+	if (result.error) throw new Error("AWS CLI could not run or timed out; verify installation and connectivity.");
 	if (result.status === 0) return result.stdout;
 
-	const message = `${result.stdout}\n${result.stderr}`.trim();
-	if (allowNotFound && /(?:404|NoSuchKey|Not Found)/i.test(message)) return undefined;
-	if (allowPreconditionFailure && /(?:412|PreconditionFailed|ConditionalRequestConflict)/i.test(message)) {
+	// Never echo provider output: it can contain credentials, signed URLs, or headers.
+	const code = /An error occurred \(([^)]+)\)/.exec(result.stderr)?.[1];
+	if (allowNotFound && ["404", "NoSuchKey", "NotFound"].includes(code)) return undefined;
+	if (allowPreconditionFailure && ["412", "PreconditionFailed", "ConditionalRequestConflict"].includes(code))
 		return undefined;
+	if (["AccessDenied", "InvalidAccessKeyId", "SignatureDoesNotMatch", "ExpiredToken"].includes(code)) {
+		throw new Error("R2 rejected publication credentials; verify account, bucket scope, and credential validity.");
 	}
-	throw new Error(`aws ${args.slice(0, 2).join(" ")} failed:\n${message}`);
+	throw new Error(
+		`AWS CLI ${args.slice(0, 2).join(" ")} failed; check storage availability and AWS CLI conditional-write support.`,
+	);
 }
 
-function readLatestRelease(bucket, endpoint, outputPath) {
-	const head = runAws(
-		[
-			"s3api",
-			"head-object",
-			"--bucket",
-			bucket,
-			"--key",
-			`${RELEASES_PREFIX}/latest.json`,
-			"--endpoint-url",
-			endpoint,
-		],
+function readRelease(bucket, endpoint, key, outputPath) {
+	// Get the ETag and body from one response so conditional writes use one snapshot.
+	const result = runAws(
+		["s3api", "get-object", "--bucket", bucket, "--key", key, "--endpoint-url", endpoint, outputPath],
 		{ allowNotFound: true },
 	);
-	if (head === undefined) return undefined;
-
-	const metadata = JSON.parse(head);
-	if (typeof metadata.ETag !== "string") {
-		throw new Error("Latest Diffex release marker has no ETag.");
+	if (result === undefined) return undefined;
+	const metadata = JSON.parse(result);
+	if (typeof metadata.ETag !== "string") throw new Error("Diffex release record has no ETag.");
+	const body = readFileSync(outputPath, "utf8");
+	let release;
+	try {
+		release = JSON.parse(body);
+	} catch {
+		throw new Error("Diffex release record is not valid JSON.");
 	}
-	runAws([
-		"s3api",
-		"get-object",
-		"--bucket",
-		bucket,
-		"--key",
-		`${RELEASES_PREFIX}/latest.json`,
-		"--endpoint-url",
-		endpoint,
-		outputPath,
-	]);
-	const release = JSON.parse(readFileSync(outputPath, "utf8"));
 	if (
 		typeof release !== "object" ||
 		release === null ||
@@ -169,9 +172,9 @@ function readLatestRelease(bucket, endpoint, outputPath) {
 		typeof release.version !== "string" ||
 		!STABLE_SEMVER_RE.test(release.version)
 	) {
-		throw new Error("Latest Diffex release marker has an invalid version.");
+		throw new Error("Diffex release record has an invalid version.");
 	}
-	return { etag: metadata.ETag, version: release.version };
+	return { etag: metadata.ETag, version: release.version, release, body };
 }
 
 function putJson(bucket, endpoint, path, key, cacheControl, condition) {
@@ -202,8 +205,9 @@ export function compareReleaseVersions(left, right) {
 	if (!leftMatch || !rightMatch) throw new Error("Release versions must be stable semver versions.");
 
 	for (const index of [1, 2, 3]) {
-		const difference = Number(leftMatch[index]) - Number(rightMatch[index]);
-		if (difference !== 0) return difference;
+		const leftPart = BigInt(leftMatch[index]);
+		const rightPart = BigInt(rightMatch[index]);
+		if (leftPart !== rightPart) return leftPart > rightPart ? 1 : -1;
 	}
 	return 0;
 }
@@ -220,12 +224,20 @@ export async function advanceLatestRelease(version, readLatest, writeLatest) {
 			return { advanced: true, version };
 		}
 	}
-	throw new Error(`Could not advance the Diffex release marker to ${version} after ${MAX_POINTER_UPDATE_ATTEMPTS} attempts.`);
+	throw new Error(
+		`Could not advance the Diffex release marker to ${version} after ${MAX_POINTER_UPDATE_ATTEMPTS} attempts.`,
+	);
 }
 
 async function main() {
 	const options = parseArgs(process.argv.slice(2));
+	if (!process.env.AWS_ACCESS_KEY_ID?.trim() || !process.env.AWS_SECRET_ACCESS_KEY?.trim()) {
+		throw new Error(
+			"Release publication requires AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY from the protected release environment.",
+		);
+	}
 	const packages = getPublicWorkspacePackages();
+	if (packages.length === 0) throw new Error("No public workspace packages found for verification.");
 	for (const pkg of packages) {
 		if (pkg.version !== options.version) {
 			throw new Error(`${pkg.name} is ${pkg.version}; expected ${options.version}`);
@@ -243,7 +255,6 @@ async function main() {
 	const temporaryDirectory = mkdtempSync(join(tmpdir(), "diffex-release-announcement-"));
 	try {
 		const releasePath = join(temporaryDirectory, "release.json");
-		const latestPath = join(temporaryDirectory, "latest.json");
 		writeFileSync(releasePath, `${JSON.stringify(release, null, "\t")}\n`);
 		if (
 			!putJson(
@@ -255,18 +266,47 @@ async function main() {
 				{ missing: true },
 			)
 		) {
-			console.log(`Release record ${options.version} already exists.`);
+			const existing = readRelease(
+				options.bucket,
+				options.endpoint,
+				`${RELEASES_PREFIX}/releases/${options.version}.json`,
+				join(temporaryDirectory, "existing.json"),
+			);
+			const identity = ({ schemaVersion, version, sourceCommit, packages }) => ({
+				schemaVersion,
+				version,
+				sourceCommit,
+				packages:
+					Array.isArray(packages) && packages.every((pkg) => pkg && typeof pkg.name === "string")
+						? [...packages].sort((a, b) => a.name.localeCompare(b.name))
+						: undefined,
+			});
+			if (
+				!existing ||
+				!isDeepStrictEqual(identity(existing.release), identity(release)) ||
+				typeof existing.release.publishedAt !== "string" ||
+				!Number.isFinite(Date.parse(existing.release.publishedAt))
+			) {
+				throw new Error("Existing immutable release record conflicts with the verified announcement.");
+			}
+			writeFileSync(releasePath, existing.body);
+			console.log(`Release record ${options.version} already exists and matches verified publication.`);
 		}
 
-		writeFileSync(latestPath, `${JSON.stringify(release, null, "\t")}\n`);
 		const result = await advanceLatestRelease(
 			options.version,
-			() => readLatestRelease(options.bucket, options.endpoint, join(temporaryDirectory, "latest-current.json")),
+			() =>
+				readRelease(
+					options.bucket,
+					options.endpoint,
+					`${RELEASES_PREFIX}/latest.json`,
+					join(temporaryDirectory, "latest-current.json"),
+				),
 			(condition) =>
 				putJson(
 					options.bucket,
 					options.endpoint,
-					latestPath,
+					releasePath,
 					`${RELEASES_PREFIX}/latest.json`,
 					"no-store",
 					condition,

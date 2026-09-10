@@ -272,8 +272,9 @@ jobs:
 
   announce-diffex-release:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: publish-npm
-    environment: diffex-model-upload
+    environment: diffex-release-upload
     concurrency:
       group: announce-diffex-release
       cancel-in-progress: false
@@ -286,7 +287,7 @@ jobs:
       AWS_SECRET_ACCESS_KEY: ${{ secrets.DIFFEX_ARTIFACTS_R2_SECRET_ACCESS_KEY }}
       AWS_DEFAULT_REGION: auto
       AWS_EC2_METADATA_DISABLED: 'true'
-      R2_ENDPOINT: https://67c0d357268b0fca6e0b465bb9d01b84.r2.cloudflarestorage.com
+      R2_ENDPOINT: https://6b24afa849f8254ab5e6e2d1956239cc.r2.cloudflarestorage.com
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
