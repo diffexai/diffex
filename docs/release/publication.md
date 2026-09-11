@@ -102,7 +102,8 @@ If cleanup fails, the lock remains for investigation; inspect its recorded keys 
 Do not empty the bucket or delete another run's records.
 
 `.github/workflows/verify-release-publication.yml` exposes the same verification as a manual-only workflow using the staging environment.
-It requires no dependency installation and is excluded from default PR CI.
+Publisher-only verification requires no dependency installation and is excluded from default PR CI.
+The optional client canaries install the locked dependencies with lifecycle scripts disabled.
 Dispatch it from `main` once the workflow is merged; adding a workflow on a pull request does not make it dispatchable from the default branch.
 
 ## Verification evidence
@@ -145,3 +146,27 @@ Both release keys, the latest pointer, and the shared lock were confirmed absent
 The production latest record remained absent.
 The [cloud staging acceptance record](https://github.com/diffexai/diffex-cloud/blob/feat/serve-verified-releases/docs/public-api-staging.md) records Worker deployment identities, the separate missing-binding failure and recovery test, and unchanged Render routing.
 This proves publisher-to-R2-to-HTTP behavior; the installed CLI authority migration and canary remain separate work.
+
+## Source CLI staging canaries
+
+Use the staging-only publication credentials and an AWS CLI supporting conditional writes:
+
+```sh
+node scripts/verify-release-publication.mjs --staging --client-canaries
+```
+
+The manual workflow exposes this as `check_client_canaries`, disabled by default, and automatically includes the HTTP checks.
+The command uses the same exclusive staging lock, ownership checks, conditional writes, and verified cleanup as publication verification.
+It adds manual and interactive source CLI clients while each controlled record is present in real R2.
+Each client gets an isolated home, project, credentials directory, and simulated npm prefix.
+The test-only preload maps the exact production version URL to the fixed staging HTTPS endpoint and rejects redirects.
+It permits sockets only to that staging hostname on port 443, intercepts every package-manager subprocess, and never passes storage credentials into the client.
+The production client has no endpoint override.
+
+Canaries cover missing releases, newer/equal/older releases, normal and forced updates, manual retries, offline mode, automatic opt-out, and quiet interactive startup and `/exit` in a real 100x30 terminal.
+Malformed JSON, wrong schema, prerelease versions, missing or duplicate canonical packages, package-version mismatches, and foreign identities must produce an unavailable response and no install even with force.
+Every successful install attempt must match the complete expected npm argument list, pinned to `@diffexai/diffex@<validated-version>` without uninstall.
+The JSON evidence captures requested and actual URLs, response status and public body, socket destination, intercepted install command, and verified local cleanup.
+Install telemetry is intercepted separately without network traffic; its Pi dependency remains separate migration work.
+The source canary does not establish published-package installation or binary acceptance.
+See [the client canary acceptance record](client-canaries.md) for executed results and remaining limits.

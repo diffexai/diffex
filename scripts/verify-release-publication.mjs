@@ -4,11 +4,20 @@ import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { checkStagingClient } from "./fixtures/release-client-canary.mjs";
 import { createPublicationFixture } from "./fixtures/release-publication/harness.mjs";
 
-const checkPublicApi = process.argv.length === 4 && process.argv[3] === "--public-api";
-if (process.argv[2] !== "--staging" || (process.argv.length !== 3 && !checkPublicApi)) {
-	throw new Error("Use --staging [--public-api] with staging-scoped AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY.");
+const flags = process.argv.slice(2);
+const checkClients = flags.includes("--client-canaries");
+const checkPublicApi = checkClients || flags.includes("--public-api");
+if (
+	flags[0] !== "--staging" ||
+	new Set(flags).size !== flags.length ||
+	flags.some((flag) => !["--staging", "--public-api", "--client-canaries"].includes(flag))
+) {
+	throw new Error(
+		"Use --staging [--public-api] [--client-canaries] with staging-scoped AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY.",
+	);
 }
 if (!process.env.AWS_ACCESS_KEY_ID || !process.env.AWS_SECRET_ACCESS_KEY) {
 	throw new Error("Staging verification requires AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY.");
@@ -53,9 +62,7 @@ function aws(operation, args, { allowMissing = false } = {}) {
 	const code = /An error occurred \(([^)]+)\)/.exec(result.stderr ?? "")?.[1];
 	if (allowMissing && ["NoSuchKey", "404", "NotFound"].includes(code)) return undefined;
 	if (result.error || result.status !== 0)
-		throw new Error(
-			`Staging ${operation} failed; check credentials, concurrency lock, and conditional-write support.`,
-		);
+		throw new Error(`Staging ${operation} failed; check credentials, concurrency lock, and conditional-write support.`);
 	return JSON.parse(result.stdout || "{}");
 }
 function read(key) {
@@ -75,7 +82,10 @@ function publish(value, options = {}) {
 function removeOwned(key) {
 	const object = read(key);
 	if (!object) return;
-	assert.ok(ownedInvalidBodies.has(object.body) || JSON.parse(object.body).sourceCommit === commit, "Refusing cleanup of an object owned by another writer.");
+	assert.ok(
+		ownedInvalidBodies.has(object.body) || JSON.parse(object.body).sourceCommit === commit,
+		"Refusing cleanup of an object owned by another writer.",
+	);
 	aws("delete-object", ["--key", key]);
 	assert.equal(read(key), undefined, "Staging object remains after cleanup.");
 }
@@ -90,6 +100,22 @@ try {
 	ready = true;
 	await expectWorker(404, { error: "no_published_release" });
 	await expectWorker(200, { status: "ready", release: "missing" }, "/health/ready");
+	if (checkClients) {
+		const missing = {
+			code: 1,
+			requests: 1,
+			status: 404,
+			body: { error: "no_published_release" },
+			message: "No published Diffex release is available yet.",
+		};
+		await checkStagingClient("missing release", {}, missing);
+		await checkStagingClient("forced missing release", { force: true }, missing);
+		await checkStagingClient(
+			"interactive missing release",
+			{ interactive: true },
+			{ ...missing, code: 0, message: undefined },
+		);
+	}
 	console.log(`Staging publication fixture: ${version}, ${newer}`);
 
 	for (const failure of ["package", "tarball"]) {
@@ -105,7 +131,45 @@ try {
 	assert.equal(JSON.parse(initial.body).packages.length, fixture.packageCount);
 	console.log("First verified publication creates matching versioned and latest records.");
 	await expectWorker(200, { version, packageName: "@diffexai/diffex" });
-	await expectWorker(200, { version, packageName: "@diffexai/diffex" }, "/api/latest-version?key=unrelated&packageName=foreign&version=99.0.0");
+	if (checkClients) {
+		const valid = { code: 0, requests: 1, status: 200, body: { version, packageName: "@diffexai/diffex" } };
+		await checkStagingClient("newer release", {}, { ...valid, installVersion: version });
+		await checkStagingClient(
+			"equal release",
+			{ installedVersion: version },
+			{ ...valid, message: "already up to date" },
+		);
+		await checkStagingClient("older release", { installedVersion: newer }, { ...valid, message: "already up to date" });
+		await checkStagingClient(
+			"forced equal release",
+			{ installedVersion: version, force: true },
+			{ ...valid, installVersion: version },
+		);
+		await checkStagingClient(
+			"forced older release",
+			{ installedVersion: newer, force: true },
+			{ ...valid, installVersion: version },
+		);
+		await checkStagingClient("manual automatic opt-out", { skip: true }, { ...valid, installVersion: version });
+		await checkStagingClient(
+			"manual offline",
+			{ offline: true, force: true },
+			{ code: 1, requests: 0, message: "Could not determine latest diffex version." },
+		);
+		await checkStagingClient("interactive newer release", { interactive: true }, valid);
+		await checkStagingClient("interactive offline", { interactive: true, offline: true }, { code: 0, requests: 0 });
+		await checkStagingClient(
+			"interactive automatic opt-out",
+			{ interactive: true, skip: true },
+			{ code: 0, requests: 0 },
+		);
+	}
+
+	await expectWorker(
+		200,
+		{ version, packageName: "@diffexai/diffex" },
+		"/api/latest-version?key=unrelated&packageName=foreign&version=99.0.0",
+	);
 	await expectWorker(200, { status: "ready", release: "published" }, "/health/ready");
 	for (const method of ["POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"])
 		await expectWorker(405, { error: "method_not_allowed" }, "/api/latest-version", method);
@@ -114,19 +178,69 @@ try {
 	assert.equal(read(latestKey).body, initial.body, "HTTP requests must not mutate release storage.");
 	if (checkPublicApi) {
 		const invalidFile = join(fixture.directory, "invalid-record.json");
-		for (const invalid of [
-			`{invalid-json-${commit}`,
-			JSON.stringify({ ...JSON.parse(initial.body), schemaVersion: 2 }),
-			JSON.stringify({ ...JSON.parse(initial.body), version: `${version}-beta.1` }),
+		const record = JSON.parse(initial.body);
+		const canonical = record.packages.find((pkg) => pkg.name === "@diffexai/diffex");
+		for (const [name, invalid] of [
+			["invalid JSON", `{invalid-json-${commit}`],
+			["wrong schema", JSON.stringify({ ...record, schemaVersion: 2 })],
+			["prerelease semver", JSON.stringify({ ...record, version: `${version}-beta.1` })],
+			[
+				"missing canonical package",
+				JSON.stringify({ ...record, packages: record.packages.filter((pkg) => pkg !== canonical) }),
+			],
+			["duplicate canonical package", JSON.stringify({ ...record, packages: [...record.packages, canonical] })],
+			[
+				"package version mismatch",
+				JSON.stringify({
+					...record,
+					packages: record.packages.map((pkg) => (pkg === canonical ? { ...pkg, version: newer } : pkg)),
+				}),
+			],
+			[
+				"foreign package",
+				JSON.stringify({
+					...record,
+					packages: record.packages.map((pkg) =>
+						pkg === canonical ? { ...pkg, name: "@foreign-fixture/untrusted-cli" } : pkg,
+					),
+				}),
+			],
 		]) {
 			ownedInvalidBodies.add(invalid);
 			writeFileSync(invalidFile, invalid);
 			aws("put-object", ["--key", latestKey, "--body", invalidFile, "--if-match", read(latestKey).metadata.ETag]);
 			await expectWorker(503, { error: "release_unavailable" });
 			await expectWorker(503, { status: "unavailable", release: "unavailable" }, "/health/ready");
+			if (checkClients) {
+				const unavailable = {
+					code: 1,
+					requests: 3,
+					status: 503,
+					body: { error: "release_unavailable" },
+					message: "Diffex update service is unavailable.",
+				};
+				await checkStagingClient(`forced ${name}`, { force: true }, unavailable);
+				if (name === "invalid JSON")
+					await checkStagingClient(
+						"interactive unavailable",
+						{ interactive: true },
+						{ ...unavailable, code: 0, requests: 1, message: undefined },
+					);
+			}
 		}
 		writeFileSync(invalidFile, initial.body);
-		aws("put-object", ["--key", latestKey, "--body", invalidFile, "--if-match", read(latestKey).metadata.ETag, "--content-type", "application/json", "--cache-control", "no-store"]);
+		aws("put-object", [
+			"--key",
+			latestKey,
+			"--body",
+			invalidFile,
+			"--if-match",
+			read(latestKey).metadata.ETag,
+			"--content-type",
+			"application/json",
+			"--cache-control",
+			"no-store",
+		]);
 		await expectWorker(200, { version, packageName: "@diffexai/diffex" });
 	}
 	publish(version);

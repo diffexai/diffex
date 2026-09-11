@@ -8,6 +8,11 @@ on:
         type: boolean
         default: false
 
+      check_client_canaries:
+        description: Verify isolated source CLI startup and self-update against staging
+        type: boolean
+        default: false
+
 permissions:
   contents: read
 
@@ -29,6 +34,9 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
+      - name: Install canary dependencies without lifecycle scripts
+        if: inputs.check_client_canaries
+        run: npm ci --ignore-scripts
       - name: Verify AWS CLI
         run: aws --version
       - name: Check controlled publisher regressions
@@ -40,8 +48,11 @@ jobs:
           AWS_DEFAULT_REGION: auto
           AWS_EC2_METADATA_DISABLED: 'true'
           CHECK_PUBLIC_API: ${{ inputs.check_public_api }}
+          CHECK_CLIENT_CANARIES: ${{ inputs.check_client_canaries }}
         run: |
-          if [ "$CHECK_PUBLIC_API" = "true" ]; then
+          if [ "$CHECK_CLIENT_CANARIES" = "true" ]; then
+            node scripts/verify-release-publication.mjs --staging --client-canaries
+          elif [ "$CHECK_PUBLIC_API" = "true" ]; then
             node scripts/verify-release-publication.mjs --staging --public-api
           else
             node scripts/verify-release-publication.mjs --staging

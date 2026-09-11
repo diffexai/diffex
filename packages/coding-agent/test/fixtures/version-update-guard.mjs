@@ -5,11 +5,17 @@ import { appendFileSync } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import { Socket } from "node:net";
 import { basename, dirname, join } from "node:path";
+import { Agent, fetch as requestStaging } from "undici";
 import "../../src/core/http-dispatcher.ts";
 
 const recordPath = process.env.DIFFEX_REPRO_RECORD;
 if (!recordPath) throw new Error("The reproduction requires an isolated event record");
 const record = (event) => appendFileSync(recordPath, `${JSON.stringify(event)}\n`);
+
+const staging = process.env.DIFFEX_REPRO_STAGING === "1";
+const stagingUrl = "https://diffex-public-api-staging.yibai14651.workers.dev/api/latest-version";
+const stagingHost = new URL(stagingUrl).hostname;
+const dispatcher = staging ? new Agent() : undefined;
 
 globalThis.fetch = async (input, init) => {
 	const url = input instanceof Request ? input.url : String(input);
@@ -22,6 +28,22 @@ globalThis.fetch = async (input, init) => {
 		redirect: init?.redirect,
 	});
 	if (url !== "https://api.diffex.ai/api/latest-version") return new Response(null, { status: 503 });
+	if (staging) {
+		if ((init?.method ?? "GET") !== "GET" || init?.redirect !== "manual") {
+			throw new Error("Unexpected staging request options");
+		}
+		const response = await requestStaging(stagingUrl, { ...init, dispatcher, redirect: "manual" });
+		const body = await response.text();
+		record({
+			type: "staging-response",
+			url: stagingUrl,
+			status: response.status,
+			body,
+			cacheControl: response.headers.get("cache-control"),
+			contentType: response.headers.get("content-type"),
+		});
+		return new Response(body, { status: response.status, headers: response.headers });
+	}
 	if (process.env.DIFFEX_REPRO_FAILURE === "1") throw new Error("controlled network failure");
 	if (process.env.DIFFEX_REPRO_RESPONSE) {
 		return new Response(process.env.DIFFEX_REPRO_RESPONSE, {
@@ -39,7 +61,13 @@ globalThis.fetch = async (input, init) => {
 };
 
 // Prevent alternate HTTP clients from reaching the network too.
-Socket.prototype.connect = function () {
+const originalConnect = Socket.prototype.connect;
+Socket.prototype.connect = function (...args) {
+	const options = Array.isArray(args[0]) ? args[0][0] : args[0];
+	if (staging && options?.host === stagingHost && Number(options.port) === 443) {
+		record({ type: "staging-connect", host: stagingHost, port: 443 });
+		return originalConnect.apply(this, args);
+	}
 	record({ type: "blocked-network" });
 	throw new Error("Network disabled by the version-update reproduction");
 };
