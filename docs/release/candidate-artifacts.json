@@ -1,0 +1,398 @@
+{
+  "sourceCommit": "33704b32c5d17b849c013834fd1c56d65de843fd",
+  "date": "2026-09-11",
+  "version": "0.2.0",
+  "environment": {
+    "os": "macOS 26.1",
+    "kernel": "Darwin 25.1.0",
+    "architecture": "arm64",
+    "node": "22.19.0",
+    "npm": "10.9.3",
+    "bun": "1.3.11",
+    "python": "3.13"
+  },
+  "artifacts": [
+    {
+      "name": "@diffexai/diffex-agent-core",
+      "version": "0.2.0",
+      "filename": "diffexai-diffex-agent-core-0.2.0.tgz",
+      "sha256": "10a10787c5958f3599790741de1e3a0d5b45f2bf9caae4f8bd03390cf7e30508"
+    },
+    {
+      "name": "@diffexai/diffex-ai",
+      "version": "0.2.0",
+      "filename": "diffexai-diffex-ai-0.2.0.tgz",
+      "sha256": "f97e33175b3dc6b85ae463c434c1ae0f65b0b8682e820a046b8a1315cd5ba909"
+    },
+    {
+      "name": "@diffexai/diffex-client",
+      "version": "0.2.0",
+      "filename": "diffexai-diffex-client-0.2.0.tgz",
+      "sha256": "2f87cace71c708ed98a51f971c9c2e854ef820224eff4c6ca199003e96052e0b"
+    },
+    {
+      "name": "@diffexai/diffex",
+      "version": "0.2.0",
+      "filename": "diffexai-diffex-0.2.0.tgz",
+      "sha256": "0bbb793d77b70adeaa3c08c6e8f366b5f8fbcdbc3e7d843e82cffdc37994ab74"
+    },
+    {
+      "name": "@diffexai/diffex-coding-agent-server",
+      "version": "0.2.0",
+      "filename": "diffexai-diffex-coding-agent-server-0.2.0.tgz",
+      "sha256": "fc9bf1f501f24d991a552d146d23b41391cd94b28d00b6a0289acb0d2cb671ba"
+    },
+    {
+      "name": "@diffexai/diffex-harness-state",
+      "version": "0.2.0",
+      "filename": "diffexai-diffex-harness-state-0.2.0.tgz",
+      "sha256": "9235d38d4efb96370d7da95ccca3666b0152e347f18defb9646e7dcb8b8f37ae"
+    },
+    {
+      "name": "@diffexai/diffex-protocol",
+      "version": "0.2.0",
+      "filename": "diffexai-diffex-protocol-0.2.0.tgz",
+      "sha256": "1bd0590a817451289475a8b2c9b15d3e36ca11db3790f9a98be7123de3ad6816"
+    },
+    {
+      "name": "@diffexai/diffex-server",
+      "version": "0.2.0",
+      "filename": "diffexai-diffex-server-0.2.0.tgz",
+      "sha256": "48d7a28a526c35fa032095cf79d302f06f625027fe6ae185925dbd921fd7c34d"
+    },
+    {
+      "name": "@diffexai/diffex-session-backend-sqlite-node",
+      "version": "0.2.0",
+      "filename": "diffexai-diffex-session-backend-sqlite-node-0.2.0.tgz",
+      "sha256": "d23826ab601981f1782bb156b907f4398f0a9e435e98c052dd97194a18da6b2b"
+    },
+    {
+      "name": "@diffexai/diffex-telemetry",
+      "version": "0.2.0",
+      "filename": "diffexai-diffex-telemetry-0.2.0.tgz",
+      "sha256": "0f846a375378b6c795c44f9f57f9d89672423ef9a24e04160be69d10ac3a6afb"
+    },
+    {
+      "name": "@diffexai/diffex-tui",
+      "version": "0.2.0",
+      "filename": "diffexai-diffex-tui-0.2.0.tgz",
+      "sha256": "27bbaa49e67f13dbca060970065a92836885682f8b5c5c3a95e2d23782004c02"
+    },
+    {
+      "filename": "binaries/darwin-arm64/diffex",
+      "sha256": "8e4b67e1453c3af626ac082c5f9379c9c11c398c8c7ad3004af70d5e1bf9c416"
+    },
+    {
+      "filename": "binaries/diffex-darwin-arm64.tar.gz",
+      "sha256": "c3242d874350bb7328fdb5bfd3c6cb7823595b5116093017108cd0f5402934bf"
+    }
+  ],
+  "providers": [
+    {
+      "id": "amazon-bedrock",
+      "name": "Amazon Bedrock"
+    },
+    {
+      "id": "ant-ling",
+      "name": "Ant Ling"
+    },
+    {
+      "id": "anthropic",
+      "name": "Anthropic"
+    },
+    {
+      "id": "azure-openai-responses",
+      "name": "Azure OpenAI"
+    },
+    {
+      "id": "baseten",
+      "name": "Baseten"
+    },
+    {
+      "id": "cerebras",
+      "name": "Cerebras"
+    },
+    {
+      "id": "cloudflare-ai-gateway",
+      "name": "Cloudflare AI Gateway"
+    },
+    {
+      "id": "cloudflare-workers-ai",
+      "name": "Cloudflare Workers AI"
+    },
+    {
+      "id": "deepseek",
+      "name": "DeepSeek"
+    },
+    {
+      "id": "fireworks",
+      "name": "Fireworks"
+    },
+    {
+      "id": "github-copilot",
+      "name": "GitHub Copilot"
+    },
+    {
+      "id": "google",
+      "name": "Google"
+    },
+    {
+      "id": "google-vertex",
+      "name": "Google Vertex AI"
+    },
+    {
+      "id": "groq",
+      "name": "Groq"
+    },
+    {
+      "id": "huggingface",
+      "name": "Hugging Face"
+    },
+    {
+      "id": "kimi-coding",
+      "name": "Kimi For Coding"
+    },
+    {
+      "id": "minimax",
+      "name": "MiniMax"
+    },
+    {
+      "id": "minimax-cn",
+      "name": "MiniMax CN"
+    },
+    {
+      "id": "mistral",
+      "name": "Mistral"
+    },
+    {
+      "id": "moonshotai",
+      "name": "Moonshot AI"
+    },
+    {
+      "id": "moonshotai-cn",
+      "name": "Moonshot AI CN"
+    },
+    {
+      "id": "nvidia",
+      "name": "NVIDIA"
+    },
+    {
+      "id": "openai",
+      "name": "OpenAI"
+    },
+    {
+      "id": "openai-codex",
+      "name": "OpenAI Codex"
+    },
+    {
+      "id": "opencode",
+      "name": "OpenCode Zen"
+    },
+    {
+      "id": "opencode-go",
+      "name": "OpenCode Go"
+    },
+    {
+      "id": "openrouter",
+      "name": "OpenRouter"
+    },
+    {
+      "id": "qwen-token-plan",
+      "name": "Qwen Token Plan"
+    },
+    {
+      "id": "qwen-token-plan-cn",
+      "name": "Qwen Token Plan CN"
+    },
+    {
+      "id": "qwen-token-plan-individual",
+      "name": "Qwen Token Plan Individual"
+    },
+    {
+      "id": "radius",
+      "name": "Radius"
+    },
+    {
+      "id": "together",
+      "name": "Together"
+    },
+    {
+      "id": "vercel-ai-gateway",
+      "name": "Vercel AI Gateway"
+    },
+    {
+      "id": "xai",
+      "name": "xAI"
+    },
+    {
+      "id": "xiaomi",
+      "name": "Xiaomi"
+    },
+    {
+      "id": "xiaomi-token-plan-ams",
+      "name": "Xiaomi Token Plan AMS"
+    },
+    {
+      "id": "xiaomi-token-plan-cn",
+      "name": "Xiaomi Token Plan CN"
+    },
+    {
+      "id": "xiaomi-token-plan-sgp",
+      "name": "Xiaomi Token Plan SGP"
+    },
+    {
+      "id": "zai",
+      "name": "Z.AI"
+    },
+    {
+      "id": "zai-coding-cn",
+      "name": "Z.AI Coding CN"
+    }
+  ],
+  "identityScan": {
+    "sourceFiles": 912,
+    "sourceOccurrences": 17,
+    "artifactFilesWithMatches": 31,
+    "rawArtifactOccurrences": 54,
+    "approvedOrLegalRawOccurrences": 49,
+    "incidentalThirdPartyOccurrences": 5,
+    "decodedSourceMapOccurrences": 28,
+    "review": "candidate-identity-review.json"
+  },
+  "commands": [
+    {
+      "command": "npm run build:offline",
+      "exitCode": 0
+    },
+    {
+      "command": "npm run check",
+      "exitCode": 0
+    },
+    {
+      "command": "./test.sh",
+      "exitCode": 0
+    },
+    {
+      "command": "node --test scripts/check-runtime-identities.test.mjs scripts/issue-analysis.test.mjs",
+      "exitCode": 0,
+      "tests": 10
+    },
+    {
+      "command": "node scripts/prepare-candidate-artifacts.mjs /tmp/diffex-candidate-handoff",
+      "exitCode": 0
+    },
+    {
+      "command": "./scripts/build-binaries.sh --skip-install --skip-deps --skip-build --platform darwin-arm64 --out /tmp/diffex-candidate-handoff/binaries",
+      "exitCode": 0
+    },
+    {
+      "command": "python3 scripts/verify-candidate-artifacts.py /tmp/diffex-candidate-handoff",
+      "exitCode": 0
+    },
+    {
+      "command": "node scripts/scan-candidate-artifacts.mjs /tmp/diffex-candidate-handoff",
+      "exitCode": 0
+    }
+  ],
+  "smoke": [
+    {
+      "runtime": "node",
+      "command": ["--version"],
+      "exitCode": 0
+    },
+    {
+      "runtime": "node",
+      "command": ["--help"],
+      "exitCode": 0
+    },
+    {
+      "runtime": "node",
+      "command": ["auth", "--help"],
+      "exitCode": 0
+    },
+    {
+      "runtime": "node",
+      "command": ["--list-models"],
+      "exitCode": 0,
+      "expected": "fixture"
+    },
+    {
+      "runtime": "node",
+      "command": ["-p", "Reply with the fixture confirmation."],
+      "exitCode": 0,
+      "expected": "handoff-fixture-ok"
+    },
+    {
+      "runtime": "node",
+      "command": "interactive prompt, login selector, exit",
+      "exitCode": 0,
+      "events": [
+        {
+          "type": "inference",
+          "provider": "handoff"
+        },
+        {
+          "type": "request",
+          "url": "https://api.diffex.ai/api/latest-version"
+        },
+        {
+          "type": "inference",
+          "provider": "handoff"
+        }
+      ],
+      "accounts": ["OpenAI Codex", "Radius", "xAI"],
+      "cleanup": "process exited and isolated directories removed"
+    },
+    {
+      "runtime": "bun",
+      "command": ["--version"],
+      "exitCode": 0
+    },
+    {
+      "runtime": "bun",
+      "command": ["--help"],
+      "exitCode": 0
+    },
+    {
+      "runtime": "bun",
+      "command": ["auth", "--help"],
+      "exitCode": 0
+    },
+    {
+      "runtime": "bun",
+      "command": ["--list-models"],
+      "exitCode": 0,
+      "expected": "fixture"
+    },
+    {
+      "runtime": "bun",
+      "command": ["-p", "Reply with the fixture confirmation."],
+      "exitCode": 0,
+      "expected": "handoff-fixture-ok"
+    },
+    {
+      "runtime": "bun",
+      "command": "interactive prompt, login selector, exit",
+      "exitCode": 0,
+      "events": [
+        {
+          "type": "inference",
+          "provider": "handoff"
+        },
+        {
+          "type": "request",
+          "url": "https://api.diffex.ai/api/latest-version"
+        },
+        {
+          "type": "inference",
+          "provider": "handoff"
+        }
+      ],
+      "accounts": ["OpenAI Codex", "Radius", "xAI"],
+      "cleanup": "process exited and isolated directories removed"
+    }
+  ],
+  "liveLoginAndInference": "Skipped at the explicit request of the owner.",
+  "cleanup": "All isolated smoke homes, projects, caches, credentials and processes removed. No remote fixtures, sessions or sandboxes created. Local artifacts retained in /tmp/diffex-candidate-handoff.",
+  "publication": "No npm packages, GitHub releases, source archives, hosted images or deployment changes published."
+}

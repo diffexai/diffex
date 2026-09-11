@@ -1,0 +1,976 @@
+{
+  "sourceCommit": "33704b32c5d17b849c013834fd1c56d65de843fd",
+  "offsetEncoding": "zero-based byte offsets in the unpacked file; source-map decoded entries use source line numbers",
+  "files": [
+    {
+      "path": "node/node_modules/@diffexai/diffex/CHANGELOG.md",
+      "sha256": "00b1501c588c75cd7c12e9769e0f8e1c14b87663b608a8da3a1e87fc3acb185c",
+      "historicalOccurrences": 1824,
+      "review": "Immutable changelog history preserved under repository instructions; no current runtime identity or egress permission."
+    },
+    {
+      "path": "node/node_modules/@diffexai/diffex/dist/core/provider-attribution.d.ts.map",
+      "sha256": "5336b5b7016a6151e21da7ba9a267e12a18fe9aae321fe63100418b1c5691f67",
+      "occurrences": [
+        {
+          "identity": "pi.dev",
+          "offset": 2172,
+          "context": "\\t}\\n\\n\\tif (isOpenRouterModel(model)) {\\n\\t\\treturn {\\n\\t\\t\\t\\\"HTTP-Referer\\\": \\\"https://pi.dev\\\",\\n\\t\\t\\t\\\"X-OpenRouter-Title\\\": \\\"pi\\\",\\n\\t\\t\\t\\\"X-OpenRouter-Categories\\\": \\\"cli-agent\\\",\\n\\t\\t}",
+          "classification": "approved integration",
+          "source": "packages/coding-agent/src/core/provider-attribution.ts",
+          "reviewedSourceContexts": [
+            "\t\t\t\"HTTP-Referer\": \"https://pi.dev\","
+          ]
+        },
+        {
+          "identity": "pi-coding-agent",
+          "offset": 2468,
+          "context": "\\n\\t\\t};\\n\\t}\\n\\n\\tif (isCloudflareModel(model)) {\\n\\t\\treturn {\\n\\t\\t\\t\\\"User-Agent\\\": \\\"pi-coding-agent\\\",\\n\\t\\t};\\n\\t}\\n\\n\\treturn undefined;\\n}\\n\\nfunction getSessionHeaders(model: Model<Api>, sessionI",
+          "classification": "approved integration",
+          "source": "packages/coding-agent/src/core/provider-attribution.ts",
+          "reviewedSourceContexts": [
+            "\t\t\t\"User-Agent\": \"pi-coding-agent\","
+          ]
+        }
+      ],
+      "decodedSources": [
+        {
+          "path": "../../src/core/provider-attribution.ts",
+          "line": 50,
+          "identity": "pi.dev",
+          "context": "\t\t\t\"HTTP-Referer\": \"https://pi.dev\",",
+          "classification": "approved integration",
+          "source": "packages/coding-agent/src/core/provider-attribution.ts"
+        },
+        {
+          "path": "../../src/core/provider-attribution.ts",
+          "line": 51,
+          "identity": "pi",
+          "context": "\t\t\t\"X-OpenRouter-Title\": \"pi\",",
+          "classification": "approved integration",
+          "source": "packages/coding-agent/src/core/provider-attribution.ts"
+        },
+        {
+          "path": "../../src/core/provider-attribution.ts",
+          "line": 58,
+          "identity": "Pi",
+          "context": "\t\t\t\"X-BILLING-INVOKE-ORIGIN\": \"Pi\",",
+          "classification": "approved integration",
+          "source": "packages/coding-agent/src/core/provider-attribution.ts"
+        },
+        {
+          "path": "../../src/core/provider-attribution.ts",
+          "line": 64,
+          "identity": "pi-coding-agent",
+          "context": "\t\t\t\"User-Agent\": \"pi-coding-agent\",",
+          "classification": "approved integration",
+          "source": "packages/coding-agent/src/core/provider-attribution.ts"
+        },
+        {
+          "path": "../../src/core/provider-attribution.ts",
+          "line": 80,
+          "identity": "pi",
+          "context": "\treturn { \"x-opencode-session\": sessionId, \"x-opencode-client\": \"pi\" };",
+          "classification": "approved integration",
+          "source": "packages/coding-agent/src/core/provider-attribution.ts"
+        }
+      ]
+    },
+    {
+      "path": "node/node_modules/@diffexai/diffex/dist/core/provider-attribution.js",
+      "sha256": "9065c87bbb1c18469e82a90dd9bee1993976f5297d494e8bbee8d88e4d16b843",
+      "occurrences": [
+        {
+          "identity": "pi.dev",
+          "offset": 1381,
+          "context": "    if (isOpenRouterModel(model)) {\n        return {\n            \"HTTP-Referer\": \"https://pi.dev\",\n            \"X-OpenRouter-Title\": \"pi\",\n            \"X-OpenRouter-Categories\": \"cli-agent\",\n     ",
+          "classification": "approved integration",
+          "source": "packages/coding-agent/src/core/provider-attribution.ts",
+          "reviewedSourceContexts": [
+            "\t\t\t\"HTTP-Referer\": \"https://pi.dev\","
+          ]
+        },
+        {
+          "identity": "pi",
+          "offset": 1425,
+          "context": "return {\n            \"HTTP-Referer\": \"https://pi.dev\",\n            \"X-OpenRouter-Title\": \"pi\",\n            \"X-OpenRouter-Categories\": \"cli-agent\",\n        };\n    }\n    if (isNvidiaNimModel(mod",
+          "classification": "approved integration",
+          "source": "packages/coding-agent/src/core/provider-attribution.ts",
+          "reviewedSourceContexts": [
+            "\t\t\t\"X-OpenRouter-Title\": \"pi\",",
+            "\treturn { \"x-opencode-session\": sessionId, \"x-opencode-client\": \"pi\" };"
+          ]
+        },
+        {
+          "identity": "Pi",
+          "offset": 1591,
+          "context": "  if (isNvidiaNimModel(model)) {\n        return {\n            \"X-BILLING-INVOKE-ORIGIN\": \"Pi\",\n        };\n    }\n    if (isCloudflareModel(model)) {\n        return {\n            \"User-Agent\": \"",
+          "classification": "approved integration",
+          "source": "packages/coding-agent/src/core/provider-attribution.ts",
+          "reviewedSourceContexts": [
+            "\t\t\t\"X-BILLING-INVOKE-ORIGIN\": \"Pi\","
+          ]
+        },
+        {
+          "identity": "pi-coding-agent",
+          "offset": 1693,
+          "context": " };\n    }\n    if (isCloudflareModel(model)) {\n        return {\n            \"User-Agent\": \"pi-coding-agent\",\n        };\n    }\n    return undefined;\n}\nfunction getSessionHeaders(model, sessionId) {\n    if (!",
+          "classification": "approved integration",
+          "source": "packages/coding-agent/src/core/provider-attribution.ts",
+          "reviewedSourceContexts": [
+            "\t\t\t\"User-Agent\": \"pi-coding-agent\","
+          ]
+        },
+        {
+          "identity": "pi",
+          "offset": 2084,
+          "context": "turn undefined;\n    }\n    return { \"x-opencode-session\": sessionId, \"x-opencode-client\": \"pi\" };\n}\nexport function mergeProviderAttributionHeaders(model, settingsManager, sessionId, ...headerS",
+          "classification": "approved integration",
+          "source": "packages/coding-agent/src/core/provider-attribution.ts",
+          "reviewedSourceContexts": [
+            "\t\t\t\"X-OpenRouter-Title\": \"pi\",",
+            "\treturn { \"x-opencode-session\": sessionId, \"x-opencode-client\": \"pi\" };"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "node/node_modules/@diffexai/diffex/dist/core/provider-attribution.js.map",
+      "sha256": "c4de68eec369b331cac3a6045b98c8cbaaa8b5d505fe6e7fe85982bd64be8c14",
+      "occurrences": [
+        {
+          "identity": "pi.dev",
+          "offset": 4172,
+          "context": "\\t}\\n\\n\\tif (isOpenRouterModel(model)) {\\n\\t\\treturn {\\n\\t\\t\\t\\\"HTTP-Referer\\\": \\\"https://pi.dev\\\",\\n\\t\\t\\t\\\"X-OpenRouter-Title\\\": \\\"pi\\\",\\n\\t\\t\\t\\\"X-OpenRouter-Categories\\\": \\\"cli-agent\\\",\\n\\t\\t}",
+          "classification": "approved integration",
+          "source": "packages/coding-agent/src/core/provider-attribution.ts",
+          "reviewedSourceContexts": [
+            "\t\t\t\"HTTP-Referer\": \"https://pi.dev\","
+          ]
+        },
+        {
+          "identity": "pi-coding-agent",
+          "offset": 4468,
+          "context": "\\n\\t\\t};\\n\\t}\\n\\n\\tif (isCloudflareModel(model)) {\\n\\t\\treturn {\\n\\t\\t\\t\\\"User-Agent\\\": \\\"pi-coding-agent\\\",\\n\\t\\t};\\n\\t}\\n\\n\\treturn undefined;\\n}\\n\\nfunction getSessionHeaders(model: Model<Api>, sessionI",
+          "classification": "approved integration",
+          "source": "packages/coding-agent/src/core/provider-attribution.ts",
+          "reviewedSourceContexts": [
+            "\t\t\t\"User-Agent\": \"pi-coding-agent\","
+          ]
+        }
+      ],
+      "decodedSources": [
+        {
+          "path": "../../src/core/provider-attribution.ts",
+          "line": 50,
+          "identity": "pi.dev",
+          "context": "\t\t\t\"HTTP-Referer\": \"https://pi.dev\",",
+          "classification": "approved integration",
+          "source": "packages/coding-agent/src/core/provider-attribution.ts"
+        },
+        {
+          "path": "../../src/core/provider-attribution.ts",
+          "line": 51,
+          "identity": "pi",
+          "context": "\t\t\t\"X-OpenRouter-Title\": \"pi\",",
+          "classification": "approved integration",
+          "source": "packages/coding-agent/src/core/provider-attribution.ts"
+        },
+        {
+          "path": "../../src/core/provider-attribution.ts",
+          "line": 58,
+          "identity": "Pi",
+          "context": "\t\t\t\"X-BILLING-INVOKE-ORIGIN\": \"Pi\",",
+          "classification": "approved integration",
+          "source": "packages/coding-agent/src/core/provider-attribution.ts"
+        },
+        {
+          "path": "../../src/core/provider-attribution.ts",
+          "line": 64,
+          "identity": "pi-coding-agent",
+          "context": "\t\t\t\"User-Agent\": \"pi-coding-agent\",",
+          "classification": "approved integration",
+          "source": "packages/coding-agent/src/core/provider-attribution.ts"
+        },
+        {
+          "path": "../../src/core/provider-attribution.ts",
+          "line": 80,
+          "identity": "pi",
+          "context": "\treturn { \"x-opencode-session\": sessionId, \"x-opencode-client\": \"pi\" };",
+          "classification": "approved integration",
+          "source": "packages/coding-agent/src/core/provider-attribution.ts"
+        }
+      ]
+    },
+    {
+      "path": "node/node_modules/@diffexai/diffex/dist/core/remote-catalog-provider.d.ts",
+      "sha256": "39ad152c748050a7641c5735d9555b1625225f8b0912a0a26bd61165d6bd9a0c",
+      "occurrences": [
+        {
+          "identity": "pi.dev",
+          "offset": 138,
+          "context": "ai\";\nexport declare const REMOTE_CATALOG_REFRESH_INTERVAL_MS: number;\n/** Add a persisted pi.dev catalog overlay to a static built-in provider. */\nexport declare function withRemoteCatalog(provide",
+          "classification": "approved integration",
+          "source": "packages/coding-agent/src/core/remote-catalog-provider.ts",
+          "reviewedSourceContexts": [
+            "const DEFAULT_CATALOG_BASE_URL = \"https://pi.dev\";",
+            "/** Add a persisted pi.dev catalog overlay to a static built-in provider. */"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "node/node_modules/@diffexai/diffex/dist/core/remote-catalog-provider.d.ts.map",
+      "sha256": "defd3abaf3695ee9fb82395846d98866d8e85eebefc3280c158efd83e3413f4c",
+      "occurrences": [
+        {
+          "identity": "pi.dev",
+          "offset": 680,
+          "context": "try } from \\\"../utils/management-http.ts\\\";\\n\\nconst DEFAULT_CATALOG_BASE_URL = \\\"https://pi.dev\\\";\\nexport const REMOTE_CATALOG_REFRESH_INTERVAL_MS = 4 * 60 * 60 * 1000;\\n\\nfunction mergeModels(b",
+          "classification": "approved integration",
+          "source": "packages/coding-agent/src/core/remote-catalog-provider.ts",
+          "reviewedSourceContexts": [
+            "const DEFAULT_CATALOG_BASE_URL = \"https://pi.dev\";",
+            "/** Add a persisted pi.dev catalog overlay to a static built-in provider. */"
+          ]
+        },
+        {
+          "identity": "pi.dev",
+          "offset": 2107,
+          "context": "calGeneratedAt)) {\\n\\t\\treturn [];\\n\\t}\\n\\treturn entry.models;\\n}\\n\\n/** Add a persisted pi.dev catalog overlay to a static built-in provider. */\\nexport function withRemoteCatalog(\\n\\tprovider: ",
+          "classification": "approved integration",
+          "source": "packages/coding-agent/src/core/remote-catalog-provider.ts",
+          "reviewedSourceContexts": [
+            "const DEFAULT_CATALOG_BASE_URL = \"https://pi.dev\";",
+            "/** Add a persisted pi.dev catalog overlay to a static built-in provider. */"
+          ]
+        }
+      ],
+      "decodedSources": [
+        {
+          "path": "../../src/core/remote-catalog-provider.ts",
+          "line": 6,
+          "identity": "pi.dev",
+          "context": "const DEFAULT_CATALOG_BASE_URL = \"https://pi.dev\";",
+          "classification": "approved integration",
+          "source": "packages/coding-agent/src/core/remote-catalog-provider.ts"
+        },
+        {
+          "path": "../../src/core/remote-catalog-provider.ts",
+          "line": 44,
+          "identity": "pi.dev",
+          "context": "/** Add a persisted pi.dev catalog overlay to a static built-in provider. */",
+          "classification": "approved integration",
+          "source": "packages/coding-agent/src/core/remote-catalog-provider.ts"
+        }
+      ]
+    },
+    {
+      "path": "node/node_modules/@diffexai/diffex/dist/core/remote-catalog-provider.js",
+      "sha256": "df1ec660af92809908eae517752d818ecf17237b04ca70f0f81a9f0cae06229a",
+      "occurrences": [
+        {
+          "identity": "pi.dev",
+          "offset": 212,
+          "context": "WithRetry } from \"../utils/management-http.js\";\nconst DEFAULT_CATALOG_BASE_URL = \"https://pi.dev\";\nexport const REMOTE_CATALOG_REFRESH_INTERVAL_MS = 4 * 60 * 60 * 1000;\nfunction mergeModels(baseli",
+          "classification": "approved integration",
+          "source": "packages/coding-agent/src/core/remote-catalog-provider.ts",
+          "reviewedSourceContexts": [
+            "const DEFAULT_CATALOG_BASE_URL = \"https://pi.dev\";",
+            "/** Add a persisted pi.dev catalog overlay to a static built-in provider. */"
+          ]
+        },
+        {
+          "identity": "pi.dev",
+          "offset": 1514,
+          "context": "alGeneratedAt)) {\n        return [];\n    }\n    return entry.models;\n}\n/** Add a persisted pi.dev catalog overlay to a static built-in provider. */\nexport function withRemoteCatalog(provider, catal",
+          "classification": "approved integration",
+          "source": "packages/coding-agent/src/core/remote-catalog-provider.ts",
+          "reviewedSourceContexts": [
+            "const DEFAULT_CATALOG_BASE_URL = \"https://pi.dev\";",
+            "/** Add a persisted pi.dev catalog overlay to a static built-in provider. */"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "node/node_modules/@diffexai/diffex/dist/core/remote-catalog-provider.js.map",
+      "sha256": "9c27a2ba2962bad047046d670e3de217a48ac413677b4d21820173b28bf7981b",
+      "occurrences": [
+        {
+          "identity": "pi.dev",
+          "offset": 4959,
+          "context": "try } from \\\"../utils/management-http.ts\\\";\\n\\nconst DEFAULT_CATALOG_BASE_URL = \\\"https://pi.dev\\\";\\nexport const REMOTE_CATALOG_REFRESH_INTERVAL_MS = 4 * 60 * 60 * 1000;\\n\\nfunction mergeModels(b",
+          "classification": "approved integration",
+          "source": "packages/coding-agent/src/core/remote-catalog-provider.ts",
+          "reviewedSourceContexts": [
+            "const DEFAULT_CATALOG_BASE_URL = \"https://pi.dev\";",
+            "/** Add a persisted pi.dev catalog overlay to a static built-in provider. */"
+          ]
+        },
+        {
+          "identity": "pi.dev",
+          "offset": 6386,
+          "context": "calGeneratedAt)) {\\n\\t\\treturn [];\\n\\t}\\n\\treturn entry.models;\\n}\\n\\n/** Add a persisted pi.dev catalog overlay to a static built-in provider. */\\nexport function withRemoteCatalog(\\n\\tprovider: ",
+          "classification": "approved integration",
+          "source": "packages/coding-agent/src/core/remote-catalog-provider.ts",
+          "reviewedSourceContexts": [
+            "const DEFAULT_CATALOG_BASE_URL = \"https://pi.dev\";",
+            "/** Add a persisted pi.dev catalog overlay to a static built-in provider. */"
+          ]
+        }
+      ],
+      "decodedSources": [
+        {
+          "path": "../../src/core/remote-catalog-provider.ts",
+          "line": 6,
+          "identity": "pi.dev",
+          "context": "const DEFAULT_CATALOG_BASE_URL = \"https://pi.dev\";",
+          "classification": "approved integration",
+          "source": "packages/coding-agent/src/core/remote-catalog-provider.ts"
+        },
+        {
+          "path": "../../src/core/remote-catalog-provider.ts",
+          "line": 44,
+          "identity": "pi.dev",
+          "context": "/** Add a persisted pi.dev catalog overlay to a static built-in provider. */",
+          "classification": "approved integration",
+          "source": "packages/coding-agent/src/core/remote-catalog-provider.ts"
+        }
+      ]
+    },
+    {
+      "path": "node/node_modules/@diffexai/diffex/examples/extensions/doom-overlay/README.md",
+      "sha256": "76502ed664f76f32b10fda35760b5d2cde407490d3567c2a4c6f14d8066cf7c7",
+      "occurrences": [
+        {
+          "identity": "pi-doom",
+          "offset": 1252,
+          "context": "doomgeneric](https://github.com/ozkl/doomgeneric) for the portable DOOM implementation\n- [pi-doom](https://github.com/badlogic/pi-doom) for the original diffex integration\n",
+          "classification": "legal notice",
+          "source": "packages/coding-agent/examples/extensions/doom-overlay/README.md",
+          "reviewedSourceContexts": [
+            "- [pi-doom](https://github.com/badlogic/pi-doom) for the original diffex integration"
+          ]
+        },
+        {
+          "identity": "pi-doom",
+          "offset": 1289,
+          "context": "doomgeneric) for the portable DOOM implementation\n- [pi-doom](https://github.com/badlogic/pi-doom) for the original diffex integration\n",
+          "classification": "legal notice",
+          "source": "packages/coding-agent/examples/extensions/doom-overlay/README.md",
+          "reviewedSourceContexts": [
+            "- [pi-doom](https://github.com/badlogic/pi-doom) for the original diffex integration"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "node/node_modules/@diffexai/diffex-ai/dist/api/openai-codex-responses.d.ts.map",
+      "sha256": "b104d6dfc7aa4ae7de3eeaa869bf90493ec4eb92047311c341e8e1876463a478",
+      "occurrences": [
+        {
+          "identity": "pi",
+          "offset": 59693,
+          "context": "unt-id\\\", accountId);\\n\\theaders.set(\\\"originator\\\", \\\"pi\\\");\\n\\tconst userAgent = _os ? `pi (${_os.platform()} ${_os.release()}; ${_os.arch()})` : \\\"pi (browser)\\\";\\n\\theaders.set(\\\"User-Agen",
+          "classification": "approved integration",
+          "source": "packages/ai/src/api/openai-codex-responses.ts",
+          "reviewedSourceContexts": [
+            "\theaders.set(\"originator\", \"pi\");",
+            "\tconst userAgent = _os ? `pi (${_os.platform()} ${_os.release()}; ${_os.arch()})` : \"pi (browser)\";"
+          ]
+        },
+        {
+          "identity": "pi",
+          "offset": 59753,
+          "context": ";\\n\\tconst userAgent = _os ? `pi (${_os.platform()} ${_os.release()}; ${_os.arch()})` : \\\"pi (browser)\\\";\\n\\theaders.set(\\\"User-Agent\\\", userAgent);\\n\\treturn headers;\\n}\\n\\nfunction buildSSEH",
+          "classification": "approved integration",
+          "source": "packages/ai/src/api/openai-codex-responses.ts",
+          "reviewedSourceContexts": [
+            "\theaders.set(\"originator\", \"pi\");",
+            "\tconst userAgent = _os ? `pi (${_os.platform()} ${_os.release()}; ${_os.arch()})` : \"pi (browser)\";"
+          ]
+        }
+      ],
+      "decodedSources": [
+        {
+          "path": "../../src/api/openai-codex-responses.ts",
+          "line": 1608,
+          "identity": "pi",
+          "context": "\theaders.set(\"originator\", \"pi\");",
+          "classification": "approved integration",
+          "source": "packages/ai/src/api/openai-codex-responses.ts"
+        },
+        {
+          "path": "../../src/api/openai-codex-responses.ts",
+          "line": 1609,
+          "identity": "pi",
+          "context": "\tconst userAgent = _os ? `pi (${_os.platform()} ${_os.release()}; ${_os.arch()})` : \"pi (browser)\";",
+          "classification": "approved integration",
+          "source": "packages/ai/src/api/openai-codex-responses.ts"
+        },
+        {
+          "path": "../../src/api/openai-codex-responses.ts",
+          "line": 1609,
+          "identity": "pi",
+          "context": "\tconst userAgent = _os ? `pi (${_os.platform()} ${_os.release()}; ${_os.arch()})` : \"pi (browser)\";",
+          "classification": "approved integration",
+          "source": "packages/ai/src/api/openai-codex-responses.ts"
+        }
+      ]
+    },
+    {
+      "path": "node/node_modules/@diffexai/diffex-ai/dist/api/openai-codex-responses.js",
+      "sha256": "f0699749b06045244fd6ced26aee4f2627e7218199fd2955b0003fe08592aead",
+      "occurrences": [
+        {
+          "identity": "pi",
+          "offset": 52546,
+          "context": "oken}`);\n    headers.set(\"chatgpt-account-id\", accountId);\n    headers.set(\"originator\", \"pi\");\n    const userAgent = _os ? `pi (${_os.platform()} ${_os.release()}; ${_os.arch()})` : \"pi (brow",
+          "classification": "approved integration",
+          "source": "packages/ai/src/api/openai-codex-responses.ts",
+          "reviewedSourceContexts": [
+            "\theaders.set(\"originator\", \"pi\");",
+            "\tconst userAgent = _os ? `pi (${_os.platform()} ${_os.release()}; ${_os.arch()})` : \"pi (browser)\";"
+          ]
+        },
+        {
+          "identity": "pi",
+          "offset": 52581,
+          "context": "ccount-id\", accountId);\n    headers.set(\"originator\", \"pi\");\n    const userAgent = _os ? `pi (${_os.platform()} ${_os.release()}; ${_os.arch()})` : \"pi (browser)\";\n    headers.set(\"User-Agent\"",
+          "classification": "approved integration",
+          "source": "packages/ai/src/api/openai-codex-responses.ts",
+          "reviewedSourceContexts": [
+            "\theaders.set(\"originator\", \"pi\");",
+            "\tconst userAgent = _os ? `pi (${_os.platform()} ${_os.release()}; ${_os.arch()})` : \"pi (browser)\";"
+          ]
+        },
+        {
+          "identity": "pi",
+          "offset": 52640,
+          "context": ";\n    const userAgent = _os ? `pi (${_os.platform()} ${_os.release()}; ${_os.arch()})` : \"pi (browser)\";\n    headers.set(\"User-Agent\", userAgent);\n    return headers;\n}\nfunction buildSSEHeader",
+          "classification": "approved integration",
+          "source": "packages/ai/src/api/openai-codex-responses.ts",
+          "reviewedSourceContexts": [
+            "\theaders.set(\"originator\", \"pi\");",
+            "\tconst userAgent = _os ? `pi (${_os.platform()} ${_os.release()}; ${_os.arch()})` : \"pi (browser)\";"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "node/node_modules/@diffexai/diffex-ai/dist/api/openai-codex-responses.js.map",
+      "sha256": "8f59a28de8246a392b4c04d1e06f383788dac6a9fc7e25f6aeaaf5c69d9ff5a4",
+      "occurrences": [
+        {
+          "identity": "pi",
+          "offset": 105386,
+          "context": "unt-id\\\", accountId);\\n\\theaders.set(\\\"originator\\\", \\\"pi\\\");\\n\\tconst userAgent = _os ? `pi (${_os.platform()} ${_os.release()}; ${_os.arch()})` : \\\"pi (browser)\\\";\\n\\theaders.set(\\\"User-Agen",
+          "classification": "approved integration",
+          "source": "packages/ai/src/api/openai-codex-responses.ts",
+          "reviewedSourceContexts": [
+            "\theaders.set(\"originator\", \"pi\");",
+            "\tconst userAgent = _os ? `pi (${_os.platform()} ${_os.release()}; ${_os.arch()})` : \"pi (browser)\";"
+          ]
+        },
+        {
+          "identity": "pi",
+          "offset": 105446,
+          "context": ";\\n\\tconst userAgent = _os ? `pi (${_os.platform()} ${_os.release()}; ${_os.arch()})` : \\\"pi (browser)\\\";\\n\\theaders.set(\\\"User-Agent\\\", userAgent);\\n\\treturn headers;\\n}\\n\\nfunction buildSSEH",
+          "classification": "approved integration",
+          "source": "packages/ai/src/api/openai-codex-responses.ts",
+          "reviewedSourceContexts": [
+            "\theaders.set(\"originator\", \"pi\");",
+            "\tconst userAgent = _os ? `pi (${_os.platform()} ${_os.release()}; ${_os.arch()})` : \"pi (browser)\";"
+          ]
+        }
+      ],
+      "decodedSources": [
+        {
+          "path": "../../src/api/openai-codex-responses.ts",
+          "line": 1608,
+          "identity": "pi",
+          "context": "\theaders.set(\"originator\", \"pi\");",
+          "classification": "approved integration",
+          "source": "packages/ai/src/api/openai-codex-responses.ts"
+        },
+        {
+          "path": "../../src/api/openai-codex-responses.ts",
+          "line": 1609,
+          "identity": "pi",
+          "context": "\tconst userAgent = _os ? `pi (${_os.platform()} ${_os.release()}; ${_os.arch()})` : \"pi (browser)\";",
+          "classification": "approved integration",
+          "source": "packages/ai/src/api/openai-codex-responses.ts"
+        },
+        {
+          "path": "../../src/api/openai-codex-responses.ts",
+          "line": 1609,
+          "identity": "pi",
+          "context": "\tconst userAgent = _os ? `pi (${_os.platform()} ${_os.release()}; ${_os.arch()})` : \"pi (browser)\";",
+          "classification": "approved integration",
+          "source": "packages/ai/src/api/openai-codex-responses.ts"
+        }
+      ]
+    },
+    {
+      "path": "node/node_modules/@diffexai/diffex-ai/dist/auth/oauth/openai-codex.d.ts.map",
+      "sha256": "62de92cb3093bdd6aa53034131ca11b62d55320d4ef64edd2a553b06d559b2cc",
+      "occurrences": [],
+      "decodedSources": [
+        {
+          "path": "../../../src/auth/oauth/openai-codex.ts",
+          "line": 294,
+          "identity": "pi",
+          "context": "\toriginator: string = \"pi\",",
+          "classification": "approved integration",
+          "source": "packages/ai/src/auth/oauth/openai-codex.ts"
+        }
+      ]
+    },
+    {
+      "path": "node/node_modules/@diffexai/diffex-ai/dist/auth/oauth/openai-codex.js",
+      "sha256": "f381c2625dfd23d3f0259343ec9b02cbe6091a2d814710c3cd1a50b554ebecfc",
+      "occurrences": [
+        {
+          "identity": "pi",
+          "offset": 8599,
+          "context": "\n            };\n        },\n    });\n}\nasync function createAuthorizationFlow(originator = \"pi\") {\n    const { verifier, challenge } = await generatePKCE();\n    const state = createState();\n    ",
+          "classification": "approved integration",
+          "source": "packages/ai/src/auth/oauth/openai-codex.ts",
+          "reviewedSourceContexts": ["\toriginator: string = \"pi\","]
+        }
+      ]
+    },
+    {
+      "path": "node/node_modules/@diffexai/diffex-ai/dist/auth/oauth/openai-codex.js.map",
+      "sha256": "52075f74ff389610f3555919b1859c3cfee601bd245bd32ea0b6df8f9453db42",
+      "occurrences": [],
+      "decodedSources": [
+        {
+          "path": "../../../src/auth/oauth/openai-codex.ts",
+          "line": 294,
+          "identity": "pi",
+          "context": "\toriginator: string = \"pi\",",
+          "classification": "approved integration",
+          "source": "packages/ai/src/auth/oauth/openai-codex.ts"
+        }
+      ]
+    },
+    {
+      "path": "node/node_modules/@diffexai/diffex-ai/dist/auth/oauth/radius.d.ts.map",
+      "sha256": "085a79e5c06dd61ed79d887f904c25c7690926d83c604cfa682ef03cf3942fd9",
+      "occurrences": [
+        {
+          "identity": "pi-gateway",
+          "offset": 1736,
+          "context": "\"browser\\\";\\nconst LOGIN_METHOD_DEVICE_CODE = \\\"device-code\\\";\\nconst OAUTH_CLIENT_ID = \\\"pi-gateway\\\";\\nconst OAUTH_SCOPE = \\\"gateway offline_access\\\";\\nconst OAUTH_DEVICE_CODE_GRANT_TYPE = \\\"urn:iet",
+          "classification": "approved integration",
+          "source": "packages/ai/src/auth/oauth/radius.ts",
+          "reviewedSourceContexts": ["const OAUTH_CLIENT_ID = \"pi-gateway\";"]
+        }
+      ],
+      "decodedSources": [
+        {
+          "path": "../../../src/auth/oauth/radius.ts",
+          "line": 33,
+          "identity": "pi-gateway",
+          "context": "const OAUTH_CLIENT_ID = \"pi-gateway\";",
+          "classification": "approved integration",
+          "source": "packages/ai/src/auth/oauth/radius.ts"
+        }
+      ]
+    },
+    {
+      "path": "node/node_modules/@diffexai/diffex-ai/dist/auth/oauth/radius.js",
+      "sha256": "72e7293a97495bc82cf55b12b0af70503330153e9018d734aed1fc85b65e1dfb",
+      "occurrences": [
+        {
+          "identity": "pi-gateway",
+          "offset": 1217,
+          "context": "SER = \"browser\";\nconst LOGIN_METHOD_DEVICE_CODE = \"device-code\";\nconst OAUTH_CLIENT_ID = \"pi-gateway\";\nconst OAUTH_SCOPE = \"gateway offline_access\";\nconst OAUTH_DEVICE_CODE_GRANT_TYPE = \"urn:ietf:para",
+          "classification": "approved integration",
+          "source": "packages/ai/src/auth/oauth/radius.ts",
+          "reviewedSourceContexts": ["const OAUTH_CLIENT_ID = \"pi-gateway\";"]
+        }
+      ]
+    },
+    {
+      "path": "node/node_modules/@diffexai/diffex-ai/dist/auth/oauth/radius.js.map",
+      "sha256": "0b903bfaf9a0ad9a33a1e8cc46e433f4dced0dd791bf7334095c246d201e9707",
+      "occurrences": [
+        {
+          "identity": "pi-gateway",
+          "offset": 11995,
+          "context": "\"browser\\\";\\nconst LOGIN_METHOD_DEVICE_CODE = \\\"device-code\\\";\\nconst OAUTH_CLIENT_ID = \\\"pi-gateway\\\";\\nconst OAUTH_SCOPE = \\\"gateway offline_access\\\";\\nconst OAUTH_DEVICE_CODE_GRANT_TYPE = \\\"urn:iet",
+          "classification": "approved integration",
+          "source": "packages/ai/src/auth/oauth/radius.ts",
+          "reviewedSourceContexts": ["const OAUTH_CLIENT_ID = \"pi-gateway\";"]
+        }
+      ],
+      "decodedSources": [
+        {
+          "path": "../../../src/auth/oauth/radius.ts",
+          "line": 33,
+          "identity": "pi-gateway",
+          "context": "const OAUTH_CLIENT_ID = \"pi-gateway\";",
+          "classification": "approved integration",
+          "source": "packages/ai/src/auth/oauth/radius.ts"
+        }
+      ]
+    },
+    {
+      "path": "node/node_modules/@diffexai/diffex-ai/dist/auth/oauth/xai.d.ts.map",
+      "sha256": "26a807bf04c00ba129c09a973becd4f5f800ec55d3a1836808b4b375a074c96c",
+      "occurrences": [],
+      "decodedSources": [
+        {
+          "path": "../../../src/auth/oauth/xai.ts",
+          "line": 151,
+          "identity": "pi",
+          "context": "\t\t\treferrer: \"pi\",",
+          "classification": "approved integration",
+          "source": "packages/ai/src/auth/oauth/xai.ts"
+        }
+      ]
+    },
+    {
+      "path": "node/node_modules/@diffexai/diffex-ai/dist/auth/oauth/xai.js",
+      "sha256": "d34783560dc2ac75d6e717b248136eb75a902fbd53b3e56fb9f2ec50c6c793d7",
+      "occurrences": [
+        {
+          "identity": "pi",
+          "offset": 4641,
+          "context": "ODE_URL, {\n        client_id: XAI_CLIENT_ID,\n        scope: XAI_SCOPE,\n        referrer: \"pi\",\n    }, signal);\n    if (!response.ok) {\n        throw requestFailure(\"device authorization\", resp",
+          "classification": "approved integration",
+          "source": "packages/ai/src/auth/oauth/xai.ts",
+          "reviewedSourceContexts": ["\t\t\treferrer: \"pi\","]
+        }
+      ]
+    },
+    {
+      "path": "node/node_modules/@diffexai/diffex-ai/dist/auth/oauth/xai.js.map",
+      "sha256": "56f76e919ab387e41ddaf4f90fcbcd2c2765640134fffb8f05d269630f29ffea",
+      "occurrences": [],
+      "decodedSources": [
+        {
+          "path": "../../../src/auth/oauth/xai.ts",
+          "line": 151,
+          "identity": "pi",
+          "context": "\t\t\treferrer: \"pi\",",
+          "classification": "approved integration",
+          "source": "packages/ai/src/auth/oauth/xai.ts"
+        }
+      ]
+    },
+    {
+      "path": "node/node_modules/@diffexai/diffex-ai/dist/providers/radius-config.d.ts",
+      "sha256": "cc578f2d379758e57327b2b0f29731cee4987108a0c731b30afba5e32cb5b5a3",
+      "occurrences": [
+        {
+          "identity": "radius.pi.dev",
+          "offset": 172,
+          "context": "kingLevelMap } from \"../types.ts\";\nexport declare const DEFAULT_RADIUS_GATEWAY = \"https://radius.pi.dev\";\nexport type RadiusGatewayModel = {\n    id: string;\n    name: string;\n    reasoning: boolean;\n    ",
+          "classification": "approved integration",
+          "source": "packages/ai/src/providers/radius-config.ts",
+          "reviewedSourceContexts": [
+            "export const DEFAULT_RADIUS_GATEWAY = \"https://radius.pi.dev\";"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "node/node_modules/@diffexai/diffex-ai/dist/providers/radius-config.d.ts.map",
+      "sha256": "3ce1218f2ac813e5c459a68a6556e6dc17ab4ee2ffabd32701cfd70e03ebcd3a",
+      "occurrences": [
+        {
+          "identity": "radius.pi.dev",
+          "offset": 1417,
+          "context": "inkingLevelMap } from \\\"../types.ts\\\";\\n\\nexport const DEFAULT_RADIUS_GATEWAY = \\\"https://radius.pi.dev\\\";\\n\\nexport type RadiusGatewayModel = {\\n\\tid: string;\\n\\tname: string;\\n\\treasoning: boolean;\\n\\t",
+          "classification": "approved integration",
+          "source": "packages/ai/src/providers/radius-config.ts",
+          "reviewedSourceContexts": [
+            "export const DEFAULT_RADIUS_GATEWAY = \"https://radius.pi.dev\";"
+          ]
+        }
+      ],
+      "decodedSources": [
+        {
+          "path": "../../src/providers/radius-config.ts",
+          "line": 4,
+          "identity": "radius.pi.dev",
+          "context": "export const DEFAULT_RADIUS_GATEWAY = \"https://radius.pi.dev\";",
+          "classification": "approved integration",
+          "source": "packages/ai/src/providers/radius-config.ts"
+        }
+      ]
+    },
+    {
+      "path": "node/node_modules/@diffexai/diffex-ai/dist/providers/radius-config.js",
+      "sha256": "feae85aac33e3cba701c98c6687ce8dd5482ea3b6ff865782b0adcdba88922fa",
+      "occurrences": [
+        {
+          "identity": "radius.pi.dev",
+          "offset": 47,
+          "context": "export const DEFAULT_RADIUS_GATEWAY = \"https://radius.pi.dev\";\nfunction isRadiusGatewayModel(value) {\n    if (typeof value !== \"object\" || value === null || Arr",
+          "classification": "approved integration",
+          "source": "packages/ai/src/providers/radius-config.ts",
+          "reviewedSourceContexts": [
+            "export const DEFAULT_RADIUS_GATEWAY = \"https://radius.pi.dev\";"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "node/node_modules/@diffexai/diffex-ai/dist/providers/radius-config.js.map",
+      "sha256": "160d87badc3d08d39d932f78b690110a37d0d5870f8db1478289262d4bb7eb27",
+      "occurrences": [
+        {
+          "identity": "radius.pi.dev",
+          "offset": 2962,
+          "context": "inkingLevelMap } from \\\"../types.ts\\\";\\n\\nexport const DEFAULT_RADIUS_GATEWAY = \\\"https://radius.pi.dev\\\";\\n\\nexport type RadiusGatewayModel = {\\n\\tid: string;\\n\\tname: string;\\n\\treasoning: boolean;\\n\\t",
+          "classification": "approved integration",
+          "source": "packages/ai/src/providers/radius-config.ts",
+          "reviewedSourceContexts": [
+            "export const DEFAULT_RADIUS_GATEWAY = \"https://radius.pi.dev\";"
+          ]
+        }
+      ],
+      "decodedSources": [
+        {
+          "path": "../../src/providers/radius-config.ts",
+          "line": 4,
+          "identity": "radius.pi.dev",
+          "context": "export const DEFAULT_RADIUS_GATEWAY = \"https://radius.pi.dev\";",
+          "classification": "approved integration",
+          "source": "packages/ai/src/providers/radius-config.ts"
+        }
+      ]
+    },
+    {
+      "path": "node/node_modules/@diffexai/diffex-client/CHANGELOG.md",
+      "sha256": "bad7ff4544c33e36233e650520efcb53cfd456efd2ee44ce7863f56600502474",
+      "historicalOccurrences": 1,
+      "review": "Immutable changelog history preserved under repository instructions; no current runtime identity or egress permission."
+    },
+    {
+      "path": "node/node_modules/@diffexai/diffex-server/CHANGELOG.md",
+      "sha256": "0d7b67432c4005a04a4ff64e039b973598a8337e1eee652c4756c4b3cc61c66a",
+      "historicalOccurrences": 3,
+      "review": "Immutable changelog history preserved under repository instructions; no current runtime identity or egress permission."
+    },
+    {
+      "path": "node/node_modules/@diffexai/diffex-session-backend-sqlite-node/CHANGELOG.md",
+      "sha256": "51c2f2c8cfdbcd367380730b45008e60e0a456e717b45fe3b917e4822ae42602",
+      "historicalOccurrences": 4,
+      "review": "Immutable changelog history preserved under repository instructions; no current runtime identity or egress permission."
+    },
+    {
+      "path": "binaries/darwin-arm64/CHANGELOG.md",
+      "sha256": "00b1501c588c75cd7c12e9769e0f8e1c14b87663b608a8da3a1e87fc3acb185c",
+      "historicalOccurrences": 1824,
+      "review": "Immutable changelog history preserved under repository instructions; no current runtime identity or egress permission."
+    },
+    {
+      "path": "binaries/darwin-arm64/diffex",
+      "sha256": "8e4b67e1453c3af626ac082c5f9379c9c11c398c8c7ad3004af70d5e1bf9c416",
+      "occurrences": [
+        {
+          "identity": "radius.pi.dev",
+          "offset": 60387079,
+          "context": "Radius config from ${gateway}`);\n  return config;\n}\nvar DEFAULT_RADIUS_GATEWAY = \"https://radius.pi.dev\";\n\n// ../../node_modules/isexe/windows.js\nvar require_windows = __commonJS((exports, module) => {\n ",
+          "classification": "approved integration",
+          "source": "packages/ai/src/providers/radius-config.ts",
+          "reviewedSourceContexts": [
+            "export const DEFAULT_RADIUS_GATEWAY = \"https://radius.pi.dev\";"
+          ]
+        },
+        {
+          "identity": "Pi",
+          "offset": 61046273,
+          "context": "    let e3 = gt(t2, a2, false, \"?>\");\n            if (!e3)\n              throw new Error(\"Pi Tag is not closed.\");\n            i2 = this.saveTextToParentTag(i2, n2, this.readonlyMatcher);\n    ",
+          "classification": "third-party context, outside Diffex product identity",
+          "dependency": "fast-xml-parser 5.7.3",
+          "reason": "XML processing-instruction error; PI is XML terminology."
+        },
+        {
+          "identity": "pi",
+          "offset": 65456584,
+          "context": " ${token}`);\n  headers.set(\"chatgpt-account-id\", accountId);\n  headers.set(\"originator\", \"pi\");\n  const userAgent = _os ? `pi (${_os.platform()} ${_os.release()}; ${_os.arch()})` : \"pi (browse",
+          "classification": "approved integration",
+          "source": "packages/ai/src/api/openai-codex-responses.ts",
+          "reviewedSourceContexts": [
+            "\theaders.set(\"originator\", \"pi\");",
+            "\tconst userAgent = _os ? `pi (${_os.platform()} ${_os.release()}; ${_os.arch()})` : \"pi (browser)\";"
+          ]
+        },
+        {
+          "identity": "pi",
+          "offset": 65456617,
+          "context": "pt-account-id\", accountId);\n  headers.set(\"originator\", \"pi\");\n  const userAgent = _os ? `pi (${_os.platform()} ${_os.release()}; ${_os.arch()})` : \"pi (browser)\";\n  headers.set(\"User-Agent\", ",
+          "classification": "approved integration",
+          "source": "packages/ai/src/api/openai-codex-responses.ts",
+          "reviewedSourceContexts": [
+            "\theaders.set(\"originator\", \"pi\");",
+            "\tconst userAgent = _os ? `pi (${_os.platform()} ${_os.release()}; ${_os.arch()})` : \"pi (browser)\";"
+          ]
+        },
+        {
+          "identity": "pi",
+          "offset": 65456676,
+          "context": "\");\n  const userAgent = _os ? `pi (${_os.platform()} ${_os.release()}; ${_os.arch()})` : \"pi (browser)\";\n  headers.set(\"User-Agent\", userAgent);\n  return headers;\n}\nfunction buildSSEHeaders(in",
+          "classification": "approved integration",
+          "source": "packages/ai/src/api/openai-codex-responses.ts",
+          "reviewedSourceContexts": [
+            "\theaders.set(\"originator\", \"pi\");",
+            "\tconst userAgent = _os ? `pi (${_os.platform()} ${_os.release()}; ${_os.arch()})` : \"pi (browser)\";"
+          ]
+        },
+        {
+          "identity": "pi.dev",
+          "offset": 66935201,
+          "context": "els = published;\n        }\n      });\n    }\n  };\n}\nvar DEFAULT_CATALOG_BASE_URL = \"https://pi.dev\", REMOTE_CATALOG_REFRESH_INTERVAL_MS;\nvar init_remote_catalog_provider = __esm(() => {\n  init_confi",
+          "classification": "approved integration",
+          "source": "packages/coding-agent/src/core/remote-catalog-provider.ts",
+          "reviewedSourceContexts": [
+            "const DEFAULT_CATALOG_BASE_URL = \"https://pi.dev\";",
+            "/** Add a persisted pi.dev catalog overlay to a static built-in provider. */"
+          ]
+        },
+        {
+          "identity": "pi",
+          "offset": 68605984,
+          "context": "|0\",\n      \"devnull\",\n      \"false\",\n      \"im\",\n      \"missing\",\n      \"nothing\",\n      \"pi\",\n      \"stderr\",\n      \"stdin\",\n      \"stdout\",\n      \"true\",\n      \"undef\",\n      \"\\u03C0\",\n     ",
+          "classification": "third-party context, outside Diffex product identity",
+          "dependency": "highlight.js 10.7.3",
+          "reason": "Julia mathematical constant in syntax-highlighting vocabulary."
+        },
+        {
+          "identity": "Pi",
+          "offset": 68781371,
+          "context": "    \"PetersenGraph\",\n    \"PhaseMargins\",\n    \"PhaseRange\",\n    \"PhysicalSystemData\",\n    \"Pi\",\n    \"Pick\",\n    \"PIDData\",\n    \"PIDDerivativeFilter\",\n    \"PIDFeedforward\",\n    \"PIDTune\",\n    \"P",
+          "classification": "third-party context, outside Diffex product identity",
+          "dependency": "highlight.js 10.7.3",
+          "reason": "Mathematica mathematical constant in syntax-highlighting vocabulary."
+        },
+        {
+          "identity": "pi",
+          "offset": 69143068,
+          "context": "      \"pareto_type_2_lcdf\",\n      \"pareto_type_2_lpdf\",\n      \"pareto_type_2_rng\",\n      \"pi\",\n      \"poisson_cdf\",\n      \"poisson_lccdf\",\n      \"poisson_lcdf\",\n      \"poisson_log_lpmf\",\n     ",
+          "classification": "third-party context, outside Diffex product identity",
+          "dependency": "highlight.js 10.7.3",
+          "reason": "Stan mathematical constant in syntax-highlighting vocabulary."
+        },
+        {
+          "identity": "pi",
+          "offset": 70428755,
+          "context": "NI_CLI\"]], [\"codex\", [\"CODEX_SANDBOX\", \"CODEX_THREAD_ID\"]], [\"opencode\", [\"OPENCODE\"]], [\"pi\", [dist_i(\"PATH\", /\\.pi[\\\\/]agent/)]], [\"auggie\", [\"AUGMENT_AGENT\"]], [\"goose\", [\"GOOSE_PROVIDER\"]]",
+          "classification": "third-party context, outside Diffex product identity",
+          "dependency": "jiti 2.7.0 bundled std-env",
+          "reason": "Detects an external Pi agent from PATH as one of several external runtimes; does not identify Diffex as Pi or depend on a Pi package, endpoint, credential, or organization."
+        },
+        {
+          "identity": "pi.dev",
+          "offset": 73489727,
+          "context": "return;\n  }\n  if (isOpenRouterModel(model)) {\n    return {\n      \"HTTP-Referer\": \"https://pi.dev\",\n      \"X-OpenRouter-Title\": \"pi\",\n      \"X-OpenRouter-Categories\": \"cli-agent\"\n    };\n  }\n  if (i",
+          "classification": "approved integration",
+          "source": "packages/coding-agent/src/core/provider-attribution.ts",
+          "reviewedSourceContexts": [
+            "\t\t\t\"HTTP-Referer\": \"https://pi.dev\","
+          ]
+        },
+        {
+          "identity": "pi",
+          "offset": 73489765,
+          "context": "del)) {\n    return {\n      \"HTTP-Referer\": \"https://pi.dev\",\n      \"X-OpenRouter-Title\": \"pi\",\n      \"X-OpenRouter-Categories\": \"cli-agent\"\n    };\n  }\n  if (isNvidiaNimModel(model)) {\n    retu",
+          "classification": "approved integration",
+          "source": "packages/coding-agent/src/core/provider-attribution.ts",
+          "reviewedSourceContexts": [
+            "\t\t\t\"X-OpenRouter-Title\": \"pi\",",
+            "\treturn { \"x-opencode-session\": sessionId, \"x-opencode-client\": \"pi\" };"
+          ]
+        },
+        {
+          "identity": "Pi",
+          "offset": 73489906,
+          "context": "   };\n  }\n  if (isNvidiaNimModel(model)) {\n    return {\n      \"X-BILLING-INVOKE-ORIGIN\": \"Pi\"\n    };\n  }\n  if (isCloudflareModel(model)) {\n    return {\n      \"User-Agent\": \"pi-coding-agent\"\n  ",
+          "classification": "approved integration",
+          "source": "packages/coding-agent/src/core/provider-attribution.ts",
+          "reviewedSourceContexts": [
+            "\t\t\t\"X-BILLING-INVOKE-ORIGIN\": \"Pi\","
+          ]
+        },
+        {
+          "identity": "pi-coding-agent",
+          "offset": 73489989,
+          "context": "GIN\": \"Pi\"\n    };\n  }\n  if (isCloudflareModel(model)) {\n    return {\n      \"User-Agent\": \"pi-coding-agent\"\n    };\n  }\n  return;\n}\nfunction getSessionHeaders(model, sessionId) {\n  if (!sessionId)\n    return",
+          "classification": "approved integration",
+          "source": "packages/coding-agent/src/core/provider-attribution.ts",
+          "reviewedSourceContexts": [
+            "\t\t\t\"User-Agent\": \"pi-coding-agent\","
+          ]
+        },
+        {
+          "identity": "pi",
+          "offset": 73490309,
+          "context": "OST)) {\n    return;\n  }\n  return { \"x-opencode-session\": sessionId, \"x-opencode-client\": \"pi\" };\n}\nfunction mergeProviderAttributionHeaders(model, settingsManager, sessionId, ...headerSources)",
+          "classification": "approved integration",
+          "source": "packages/coding-agent/src/core/provider-attribution.ts",
+          "reviewedSourceContexts": [
+            "\t\t\t\"X-OpenRouter-Title\": \"pi\",",
+            "\treturn { \"x-opencode-session\": sessionId, \"x-opencode-client\": \"pi\" };"
+          ]
+        },
+        {
+          "identity": "pi",
+          "offset": 74673979,
+          "context": "Body}` : \"\"}`\n      };\n    }\n  });\n}\nasync function createAuthorizationFlow(originator = \"pi\") {\n  const { verifier, challenge } = await generatePKCE();\n  const state = createState();\n  const ",
+          "classification": "approved integration",
+          "source": "packages/ai/src/auth/oauth/openai-codex.ts",
+          "reviewedSourceContexts": ["\toriginator: string = \"pi\","]
+        },
+        {
+          "identity": "pi-gateway",
+          "offset": 74690611,
+          "context": "BROWSER = \"browser\";\nvar LOGIN_METHOD_DEVICE_CODE = \"device-code\";\nvar OAUTH_CLIENT_ID = \"pi-gateway\";\nvar OAUTH_SCOPE = \"gateway offline_access\";\nvar OAUTH_DEVICE_CODE_GRANT_TYPE = \"urn:ietf:params:o",
+          "classification": "approved integration",
+          "source": "packages/ai/src/auth/oauth/radius.ts",
+          "reviewedSourceContexts": ["const OAUTH_CLIENT_ID = \"pi-gateway\";"]
+        },
+        {
+          "identity": "pi",
+          "offset": 74703952,
+          "context": "XAI_DEVICE_CODE_URL, {\n    client_id: XAI_CLIENT_ID,\n    scope: XAI_SCOPE,\n    referrer: \"pi\"\n  }, signal);\n  if (!response.ok) {\n    throw requestFailure(\"device authorization\", response);\n  ",
+          "classification": "approved integration",
+          "source": "packages/ai/src/auth/oauth/xai.ts",
+          "reviewedSourceContexts": ["\t\t\treferrer: \"pi\","]
+        }
+      ]
+    },
+    {
+      "path": "binaries/darwin-arm64/examples/extensions/doom-overlay/README.md",
+      "sha256": "76502ed664f76f32b10fda35760b5d2cde407490d3567c2a4c6f14d8066cf7c7",
+      "occurrences": [
+        {
+          "identity": "pi-doom",
+          "offset": 1252,
+          "context": "doomgeneric](https://github.com/ozkl/doomgeneric) for the portable DOOM implementation\n- [pi-doom](https://github.com/badlogic/pi-doom) for the original diffex integration\n",
+          "classification": "legal notice",
+          "source": "packages/coding-agent/examples/extensions/doom-overlay/README.md",
+          "reviewedSourceContexts": [
+            "- [pi-doom](https://github.com/badlogic/pi-doom) for the original diffex integration"
+          ]
+        },
+        {
+          "identity": "pi-doom",
+          "offset": 1289,
+          "context": "doomgeneric) for the portable DOOM implementation\n- [pi-doom](https://github.com/badlogic/pi-doom) for the original diffex integration\n",
+          "classification": "legal notice",
+          "source": "packages/coding-agent/examples/extensions/doom-overlay/README.md",
+          "reviewedSourceContexts": [
+            "- [pi-doom](https://github.com/badlogic/pi-doom) for the original diffex integration"
+          ]
+        }
+      ]
+    }
+  ]
+}
