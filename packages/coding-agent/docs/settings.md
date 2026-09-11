@@ -58,7 +58,7 @@ Use `/model` or Ctrl+L to select a model, then choose from its supported thinkin
 | `quietStartup` | boolean | `false` | Hide startup header |
 | `defaultProjectTrust` | string | `"ask"` | Fallback project trust behavior: `"ask"`, `"always"`, or `"never"`. Global setting only |
 | `collapseChangelog` | boolean | `false` | Show condensed changelog after updates |
-| `enableInstallTelemetry` | boolean | `true` | Send an anonymous install/update version ping after first install or changelog-detected updates. This does not control update checks |
+| `enableProviderAttribution` | boolean | `false` | Add optional attribution headers to OpenRouter, Cloudflare, and direct NVIDIA NIM requests |
 | `enableAnalytics` | boolean | `false` | Opt-in analytics data sharing. Currently only asked for during the experimental first-time setup (`DIFFEX_EXPERIMENTAL=1`) |
 | `trackingId` | string | - | Analytics tracking identifier, generated when `enableAnalytics` is turned on |
 | `doubleEscapeAction` | string | `"tree"` | Action for double-escape: `"tree"`, `"fork"`, or `"none"` |
@@ -78,11 +78,17 @@ For VS Code, include `--wait` so Diffex resumes after the editor exits:
 }
 ```
 
-### Telemetry and update checks
+### Provider attribution and update checks
 
-`enableInstallTelemetry` only controls the anonymous install/update ping to the upstream compatibility telemetry service. Opting out of telemetry does not disable update checks; Diffex can still query the upstream compatibility release service for the latest CLI version.
+Diffex does not send install or update telemetry reports.
+The former `enableInstallTelemetry` setting and `DIFFEX_TELEMETRY` variable are ignored.
+Optional provider attribution defaults off so removing the old shared setting cannot re-enable headers for users who previously opted out.
+Use `enableProviderAttribution` or `DIFFEX_PROVIDER_ATTRIBUTION` to control optional OpenRouter, Cloudflare, and direct NVIDIA NIM headers independently.
+The environment variable takes precedence: `1`/`true`/`yes` enables attribution; `0`/`false`/`no` disables it.
+This setting does not control update checks, OpenCode session headers, or explicitly configured request headers.
 
-Set `DIFFEX_SKIP_VERSION_CHECK=1` to disable the upstream compatibility release check. Use `--offline` or `DIFFEX_OFFLINE=1` to disable all startup network operations described here, including update checks, package update checks, and install/update telemetry.
+Set `DIFFEX_SKIP_VERSION_CHECK=1` to disable automatic release checks against `https://api.diffex.ai/api/latest-version`.
+Use `--offline` or `DIFFEX_OFFLINE=1` to disable startup network operations, including update checks and package update checks.
 
 ### Network
 

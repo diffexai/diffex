@@ -6,10 +6,7 @@ export async function checkStagingClient(name, options, expected) {
 	assert.equal(result.code, expected.code, result.output);
 	const requests = result.events.filter((event) => event.type === "request" && event.url === endpoint);
 	const interceptedOtherRequests = result.events.filter((event) => event.type === "request" && event.url !== endpoint);
-	for (const request of interceptedOtherRequests) {
-		// Install telemetry is a separate migration; the preload returns 503 without forwarding it.
-		assert.match(request.url, /^https:\/\/pi\.dev\/api\/report-install\?version=[0-9.]+$/);
-	}
+	assert.deepEqual(interceptedOtherRequests, [], "Unexpected startup request");
 	const connections = result.events.filter((event) => event.type === "staging-connect");
 	assert.equal(connections.length > 0, expected.requests > 0);
 	for (const connection of connections) {

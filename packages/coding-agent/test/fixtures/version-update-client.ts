@@ -28,6 +28,9 @@ export interface RecordedEvent {
 }
 
 export async function reproduce(options: {
+	settings?: Record<string, unknown>;
+	legacyTelemetryEnv?: string;
+	providerAttributionEnv?: string;
 	staging?: boolean;
 	installedVersion?: string;
 	interactive?: boolean;
@@ -47,7 +50,7 @@ export async function reproduce(options: {
 	const homeDir = join(root, "home");
 	const cwd = join(root, "project");
 	for (const dir of [agentDir, homeDir, cwd]) mkdirSync(dir);
-	writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ theme: "dark", packages: [] }));
+	writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ theme: "dark", packages: [], ...options.settings }));
 	writeFileSync(recordPath, "");
 	const env: NodeJS.ProcessEnv = {
 		PATH: process.env.PATH,
@@ -61,6 +64,8 @@ export async function reproduce(options: {
 		TSX_TSCONFIG_PATH: join(repositoryDir, "tsconfig.json"),
 		DIFFEX_CODING_AGENT_DIR: agentDir,
 		DIFFEX_NO_LOCAL_LLM: "1",
+		DIFFEX_TELEMETRY: options.legacyTelemetryEnv,
+		DIFFEX_PROVIDER_ATTRIBUTION: options.providerAttributionEnv,
 		DIFFEX_REPRO_RECORD: recordPath,
 		DIFFEX_REPRO_STAGING: options.staging ? "1" : "",
 		DIFFEX_REPRO_VERSION: options.version ?? (options.force ? installed.version : "9999.0.0"),
@@ -142,7 +147,8 @@ export async function reproduce(options: {
 			[],
 			output,
 		);
-		return { code, events, output: stripVTControlCharacters(output), quitSent, prefix: root };
+		const settings = JSON.parse(readFileSync(join(agentDir, "settings.json"), "utf8")) as Record<string, unknown>;
+		return { code, events, output: stripVTControlCharacters(output), quitSent, prefix: root, settings };
 	} finally {
 		clearTimeout(timeout);
 		clearInterval(exitPoll);

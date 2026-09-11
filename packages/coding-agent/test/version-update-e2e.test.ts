@@ -167,6 +167,7 @@ describe.skipIf(process.platform === "win32")("version discovery through the sou
 		expect(result.code, result.output).toBe(0);
 		expect(result.quitSent).toBe(true);
 		expect(versionRequests(result.events)).toHaveLength(expectedRequests);
+		expect(result.events.filter((event) => event.type === "request" && event.url !== endpoint)).toEqual([]);
 		expect(result.events.filter((event) => event.type === "spawn")).toEqual([]);
 		expect(result.output).not.toContain("New version");
 		expect(result.output).not.toContain("Could not determine latest");

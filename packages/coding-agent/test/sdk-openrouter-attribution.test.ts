@@ -21,7 +21,7 @@ describe("createAgentSession provider attribution headers", () => {
 	let tempDir: string;
 	let cwd: string;
 	let agentDir: string;
-	let originalTelemetryEnv: string | undefined;
+	let originalAttributionEnv: string | undefined;
 
 	beforeEach(() => {
 		tempDir = join(tmpdir(), `pi-sdk-attribution-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -29,15 +29,15 @@ describe("createAgentSession provider attribution headers", () => {
 		agentDir = join(tempDir, "agent");
 		mkdirSync(cwd, { recursive: true });
 		mkdirSync(agentDir, { recursive: true });
-		originalTelemetryEnv = process.env.DIFFEX_TELEMETRY;
-		delete process.env.DIFFEX_TELEMETRY;
+		originalAttributionEnv = process.env.DIFFEX_PROVIDER_ATTRIBUTION;
+		delete process.env.DIFFEX_PROVIDER_ATTRIBUTION;
 	});
 
 	afterEach(async () => {
-		if (originalTelemetryEnv === undefined) {
-			delete process.env.DIFFEX_TELEMETRY;
+		if (originalAttributionEnv === undefined) {
+			delete process.env.DIFFEX_PROVIDER_ATTRIBUTION;
 		} else {
-			process.env.DIFFEX_TELEMETRY = originalTelemetryEnv;
+			process.env.DIFFEX_PROVIDER_ATTRIBUTION = originalAttributionEnv;
 		}
 		if (tempDir && existsSync(tempDir)) {
 			rmSync(tempDir, { recursive: true, force: true });
@@ -85,16 +85,14 @@ describe("createAgentSession provider attribution headers", () => {
 	async function captureHeaders(
 		model: Model<Api>,
 		options: {
-			telemetryEnabled?: boolean;
+			attributionEnabled?: boolean;
 			providerHeaders?: Record<string, string>;
 			requestHeaders?: Record<string, string>;
 			sessionId?: string;
 		} = {},
 	): Promise<ProviderHeaders | undefined> {
 		const settingsManager = SettingsManager.create(cwd, agentDir);
-		if (options.telemetryEnabled === false) {
-			settingsManager.setEnableInstallTelemetry(false);
-		}
+		settingsManager.setEnableProviderAttribution(options.attributionEnabled ?? true);
 
 		const authStorage = AuthStorage.inMemory({
 			[model.provider]: { type: "api_key", key: "test-api-key" },
@@ -143,6 +141,28 @@ describe("createAgentSession provider attribution headers", () => {
 		}
 	}
 
+	it.each(["0", "false", "NO", ""])('lets the environment disable provider attribution with "%s"', async (value) => {
+		process.env.DIFFEX_PROVIDER_ATTRIBUTION = value;
+		const headers = await captureHeaders(createModel("openrouter", "https://openrouter.ai/api/v1"));
+		expect(headers ?? {}).toEqual({});
+	});
+
+	it.each(["1", "TRUE", "yes"])('lets the environment enable provider attribution with "%s"', async (value) => {
+		process.env.DIFFEX_PROVIDER_ATTRIBUTION = value;
+		const headers = await captureHeaders(createModel("openrouter", "https://openrouter.ai/api/v1"), {
+			attributionEnabled: false,
+		});
+		expect(headers?.["X-OpenRouter-Categories"]).toBe("cli-agent");
+	});
+
+	it("defaults provider attribution off and persists its independent setting", async () => {
+		const settings = SettingsManager.create(cwd, agentDir);
+		expect(settings.getEnableProviderAttribution()).toBe(false);
+		settings.setEnableProviderAttribution(true);
+		await settings.flush();
+		expect(SettingsManager.create(cwd, agentDir).getEnableProviderAttribution()).toBe(true);
+	});
+
 	it("adds default attribution headers for OpenRouter models", async () => {
 		const headers = await captureHeaders(createModel("openrouter", "https://openrouter.ai/api/v1"));
 
@@ -151,9 +171,9 @@ describe("createAgentSession provider attribution headers", () => {
 		expect(headers?.["X-OpenRouter-Categories"]).toBe("cli-agent");
 	});
 
-	it("does not add attribution headers when telemetry is disabled", async () => {
+	it("does not add attribution headers when provider attribution is disabled", async () => {
 		const headers = await captureHeaders(createModel("openrouter", "https://openrouter.ai/api/v1"), {
-			telemetryEnabled: false,
+			attributionEnabled: false,
 		});
 
 		expect(headers?.["HTTP-Referer"]).toBeUndefined();
@@ -205,9 +225,9 @@ describe("createAgentSession provider attribution headers", () => {
 		expect(headers?.["X-BILLING-INVOKE-ORIGIN"]).toBe("Pi");
 	});
 
-	it("does not add NVIDIA NIM attribution headers when telemetry is disabled", async () => {
+	it("does not add NVIDIA NIM attribution headers when provider attribution is disabled", async () => {
 		const headers = await captureHeaders(createModel("nvidia", "https://integrate.api.nvidia.com/v1"), {
-			telemetryEnabled: false,
+			attributionEnabled: false,
 		});
 
 		expect(headers?.["X-BILLING-INVOKE-ORIGIN"]).toBeUndefined();

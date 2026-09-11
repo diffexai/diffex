@@ -33,7 +33,7 @@ function settingsConfig(overrides: Partial<SettingsConfig> = {}): SettingsConfig
 		mermaidRenderingMode: "final",
 		showCacheMissNotices: true,
 		collapseChangelog: true,
-		enableInstallTelemetry: true,
+		enableProviderAttribution: false,
 		doubleEscapeAction: "tree",
 		treeFilterMode: "default",
 		showHardwareCursor: false,
@@ -243,6 +243,22 @@ describe("SettingsSelectorComponent", () => {
 			.map((line) => line.trimEnd());
 		expect(restoredLines.slice(0, 3)).toEqual([" Settings", " Search and adjust how Diffex looks and behaves.", ""]);
 		expect(restoredLines.at(-1)).toContain("Type to search · Enter/Space to change · Esc to cancel");
+	});
+
+	it("offers provider attribution without an install telemetry control", () => {
+		const onEnableProviderAttributionChange = vi.fn();
+		const selector = new SettingsSelectorComponent(settingsConfig(), {
+			onEnableProviderAttributionChange,
+		} as unknown as SettingsCallbacks);
+		const settingsList = selector.getSettingsList();
+
+		for (const character of "attribution") settingsList.handleInput(character);
+		const rendered = stripAnsi(selector.render(80).join("\n"));
+		expect(rendered).toContain("Provider attribution");
+		expect(rendered).toContain("false");
+		expect(rendered).not.toContain("Install telemetry");
+		settingsList.handleInput("\r");
+		expect(onEnableProviderAttributionChange).toHaveBeenCalledWith(true);
 	});
 
 	it("only exposes thinking visibility in settings", () => {

@@ -76,9 +76,9 @@ These variables are read by Diffex itself:
 | `DIFFEX_CODING_AGENT_DIR` | Override the config directory; default is `~/.diffex/agent` |
 | `DIFFEX_CODING_AGENT_SESSION_DIR` | Override session storage; overridden by `--session-dir` |
 | `DIFFEX_PACKAGE_DIR` | Override the package directory, useful for Nix/Guix store paths |
-| `DIFFEX_OFFLINE` | Disable startup network operations, including update checks, package updates, and install/update telemetry |
-| `DIFFEX_SKIP_VERSION_CHECK` | Disable the upstream compatibility release check |
-| `DIFFEX_TELEMETRY` | Override install/update telemetry and provider attribution headers: `1`/`true`/`yes` or `0`/`false`/`no` |
+| `DIFFEX_OFFLINE` | Disable startup network operations, including update checks and package updates |
+| `DIFFEX_SKIP_VERSION_CHECK` | Disable the automatic Diffex release check |
+| `DIFFEX_PROVIDER_ATTRIBUTION` | Override optional provider attribution headers: `1`/`true`/`yes` or `0`/`false`/`no`; defaults off |
 | `DIFFEX_CACHE_RETENTION` | Set to `long` for extended provider prompt caching where supported |
 | `DIFFEX_SHARE_VIEWER_URL` | Override the base URL used by `/share` |
 | `DIFFEX_HARDWARE_CURSOR` | Set to `1` to show the hardware cursor; see [Terminal setup](terminal-setup.md) |

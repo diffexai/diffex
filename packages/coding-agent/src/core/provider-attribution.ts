@@ -1,6 +1,5 @@
 import type { Api, Model, ProviderHeaders } from "@diffexai/diffex-ai";
 import type { SettingsManager } from "./settings-manager.ts";
-import { isInstallTelemetryEnabled } from "./telemetry.ts";
 
 const OPENROUTER_HOST = "openrouter.ai";
 const NVIDIA_NIM_HOST = "integrate.api.nvidia.com";
@@ -37,7 +36,12 @@ function getDefaultAttributionHeaders(
 	model: Model<Api>,
 	settingsManager: SettingsManager,
 ): Record<string, string> | undefined {
-	if (!isInstallTelemetryEnabled(settingsManager)) {
+	const attributionEnv = process.env.DIFFEX_PROVIDER_ATTRIBUTION;
+	const enabled =
+		attributionEnv !== undefined
+			? ["1", "true", "yes"].includes(attributionEnv.toLowerCase())
+			: settingsManager.getEnableProviderAttribution();
+	if (!enabled) {
 		return undefined;
 	}
 

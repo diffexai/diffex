@@ -403,7 +403,7 @@ ${chalk.bold("Environment Variables:")}
   ${ENV_SESSION_DIR.padEnd(32)} - Session storage directory (overridden by --session-dir)
   DIFFEX_PACKAGE_DIR                   - Override package directory (for Nix/Guix store paths)
   DIFFEX_OFFLINE                       - Disable startup network operations when set to 1/true/yes
-  DIFFEX_TELEMETRY                     - Override install telemetry when set to 1/true/yes or 0/false/no
+  DIFFEX_PROVIDER_ATTRIBUTION          - Override optional provider attribution headers when set to 1/true/yes or 0/false/no
   DIFFEX_SHARE_VIEWER_URL              - Base URL for /share command (default: https://gist.github.com/)
 
 ${chalk.bold("Built-in Tool Names:")}

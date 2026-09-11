@@ -333,14 +333,18 @@ If no extension or saved decision applies, `defaultProjectTrust` controls the fa
 
 Use `/trust` in interactive mode to save a project trust decision for future sessions, including trust for the immediate parent folder. It writes `~/.diffex/agent/trust.json` only; the current session is not reloaded, so restart Diffex for changes to take effect.
 
-### Telemetry and update checks
+### Provider attribution and update checks
 
-Diffex has two separate startup features:
+Diffex does not send install or update telemetry reports.
+The former `enableInstallTelemetry` setting and `DIFFEX_TELEMETRY` variable are no longer used.
 
-- **Update check:** queries the upstream compatibility release service for the latest CLI version. Disable it with `DIFFEX_SKIP_VERSION_CHECK=1`. Disabling update checks only turns off this check.
-- **Install/update telemetry:** after first install or a changelog-detected update, sends an anonymous version ping to the upstream compatibility telemetry service. This setting also controls optional provider attribution headers for OpenRouter, Cloudflare, and direct NVIDIA NIM requests. Opt out by setting `enableInstallTelemetry` to `false` in `settings.json`, or by setting `DIFFEX_TELEMETRY=0`. This does not disable update checks; Diffex may still contact the upstream compatibility release service unless update checks are disabled or offline mode is enabled.
+Optional attribution headers for OpenRouter, Cloudflare, and direct NVIDIA NIM requests have a separate `enableProviderAttribution` setting, which defaults to `false`.
+Enable it through **Provider attribution** in `/settings`, or override it with `DIFFEX_PROVIDER_ATTRIBUTION=1` (`0` disables it).
+This control does not affect update checks, OpenCode session headers, or explicitly configured request headers.
 
-Use `--offline` or `DIFFEX_OFFLINE=1` to disable all startup network operations described here, including update checks, package update checks, and install/update telemetry.
+Startup update checks query `https://api.diffex.ai/api/latest-version`.
+Disable automatic checks with `DIFFEX_SKIP_VERSION_CHECK=1`.
+Use `--offline` or `DIFFEX_OFFLINE=1` to disable startup network operations, including update checks and package update checks.
 
 ---
 
@@ -698,9 +702,9 @@ diffex --thinking high "Solve this complex problem"
 | `DIFFEX_CODING_AGENT_DIR` | Override config directory (default: `~/.diffex/agent`) |
 | `DIFFEX_CODING_AGENT_SESSION_DIR` | Override session storage directory (overridden by `--session-dir`) |
 | `DIFFEX_PACKAGE_DIR` | Override package directory (useful for Nix/Guix where store paths tokenize poorly) |
-| `DIFFEX_OFFLINE` | Disable startup network operations, including update checks, package update checks, and install/update telemetry |
-| `DIFFEX_SKIP_VERSION_CHECK` | Skip the upstream compatibility release check at startup |
-| `DIFFEX_TELEMETRY` | Override install/update telemetry and provider attribution headers. Use `1`/`true`/`yes` to enable or `0`/`false`/`no` to disable. This does not disable update checks |
+| `DIFFEX_OFFLINE` | Disable startup network operations, including update checks and package update checks |
+| `DIFFEX_SKIP_VERSION_CHECK` | Skip the Diffex release check at startup |
+| `DIFFEX_PROVIDER_ATTRIBUTION` | Override optional provider attribution headers: `1`/`true`/`yes` enables them; `0`/`false`/`no` disables them. Does not control update checks |
 | `DIFFEX_CACHE_RETENTION` | Set to `long` for extended prompt cache (Anthropic: 1h, OpenAI: 24h) |
 | `VISUAL`, `EDITOR` | Fallback external editor for Ctrl+G when `externalEditor` is unset; defaults to Notepad on Windows and `nano` elsewhere |
 

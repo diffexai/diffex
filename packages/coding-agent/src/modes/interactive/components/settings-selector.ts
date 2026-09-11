@@ -63,7 +63,7 @@ export interface SettingsConfig {
 	mermaidRenderingMode: MermaidRenderingMode;
 	showCacheMissNotices: boolean;
 	collapseChangelog: boolean;
-	enableInstallTelemetry: boolean;
+	enableProviderAttribution: boolean;
 	doubleEscapeAction: "fork" | "tree" | "none";
 	treeFilterMode: "default" | "no-tools" | "user-only" | "labeled-only" | "all";
 	showHardwareCursor: boolean;
@@ -95,7 +95,7 @@ export interface SettingsCallbacks {
 	onMermaidRenderingModeChange: (mode: MermaidRenderingMode) => void;
 	onShowCacheMissNoticesChange: (shown: boolean) => void;
 	onCollapseChangelogChange: (collapsed: boolean) => void;
-	onEnableInstallTelemetryChange: (enabled: boolean) => void;
+	onEnableProviderAttributionChange: (enabled: boolean) => void;
 	onDoubleEscapeActionChange: (action: "fork" | "tree" | "none") => void;
 	onTreeFilterModeChange: (mode: "default" | "no-tools" | "user-only" | "labeled-only" | "all") => void;
 	onShowHardwareCursorChange: (enabled: boolean) => void;
@@ -558,10 +558,10 @@ export class SettingsSelectorComponent extends Container implements Focusable {
 				values: ["true", "false"],
 			},
 			{
-				id: "install-telemetry",
-				label: "Install telemetry",
-				description: "Send an anonymous version/update ping after changelog-detected updates",
-				currentValue: config.enableInstallTelemetry ? "true" : "false",
+				id: "provider-attribution",
+				label: "Provider attribution",
+				description: "Add optional attribution headers to OpenRouter, Cloudflare, and direct NVIDIA NIM requests",
+				currentValue: config.enableProviderAttribution ? "true" : "false",
 				values: ["true", "false"],
 			},
 			{
@@ -791,8 +791,8 @@ export class SettingsSelectorComponent extends Container implements Focusable {
 					case "quiet-startup":
 						callbacks.onQuietStartupChange(newValue === "true");
 						break;
-					case "install-telemetry":
-						callbacks.onEnableInstallTelemetryChange(newValue === "true");
+					case "provider-attribution":
+						callbacks.onEnableProviderAttributionChange(newValue === "true");
 						break;
 					case "default-project-trust": {
 						const defaultProjectTrust = DEFAULT_PROJECT_TRUST_BY_LABEL.get(newValue);
