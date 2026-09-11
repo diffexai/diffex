@@ -78,7 +78,6 @@ export function migrateAuthToAuthJson(): string[] {
  * ~/.diffex/agent/sessions/<encoded-cwd>/. This migration moves them
  * to the correct location based on the cwd in their session header.
  *
- * See: https://github.com/earendil-works/pi-mono/issues/320
  */
 export function migrateSessionsFromAgentRoot(): void {
 	const agentDir = getAgentDir();

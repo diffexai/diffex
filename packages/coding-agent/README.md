@@ -4,7 +4,6 @@
   </a>
 </p>
 <p align="center">
-  <a href="https://discord.com/invite/3cU7Bz4UPx"><img alt="Upstream Discord" src="https://img.shields.io/badge/discord-upstream-5865F2?style=flat-square&logo=discord&logoColor=white" /></a>
   <a href="https://www.npmjs.com/package/@diffexai/diffex"><img alt="npm" src="https://img.shields.io/npm/v/@diffexai/diffex?style=flat-square" /></a>
 </p>
 
@@ -17,22 +16,6 @@ Diffex is a minimal terminal coding harness. Adapt Diffex to your workflows, not
 Diffex ships with powerful defaults, including session-scoped sub-agents and an interactive Plan mode. You can adapt or replace workflows with extensions and third-party Diffex packages.
 
 Diffex runs in four modes: interactive, print or JSON, RPC for process integration, and an SDK for embedding in your own apps.
-
-## Share your OSS coding agent sessions
-
-If you use Diffex for open source work, please share your coding agent sessions.
-
-Public OSS session data helps improve models, prompts, tools, and evaluations using real development workflows.
-
-For the full explanation, see [this post on X](https://x.com/badlogicgames/status/2037811643774652911).
-
-To publish sessions, use [`badlogic/pi-share-hf`](https://github.com/badlogic/pi-share-hf). Read its README.md for setup instructions. All you need is a Hugging Face account, the Hugging Face CLI, and `pi-share-hf`.
-
-You can also watch [this video](https://x.com/badlogicgames/status/2041151967695634619), where the upstream Pi author demonstrates publishing `pi-mono` sessions.
-
-Example upstream `pi-mono` work sessions are published here:
-
-- [badlogicgames/pi-mono on Hugging Face](https://huggingface.co/datasets/badlogicgames/pi-mono)
 
 ## Table of Contents
 
@@ -538,7 +521,7 @@ Diffex is aggressively extensible so it doesn't have to dictate your workflow. F
 
 **No background bash.** Use tmux. Full observability, direct interaction.
 
-Read the [blog post](https://mariozechner.at/posts/2025-11-30-pi-coding-agent/) for the full rationale.
+
 
 ---
 

@@ -263,7 +263,6 @@ Use `/export [file]` to write a session to HTML.
 Use `/share` to upload a secret GitHub Gist and return its direct URL.
 Anyone with the URL can access the Gist.
 
-If you use Diffex for open source work and want to publish sessions for model, prompt, tool, and evaluation research, see [`badlogic/pi-share-hf`](https://github.com/badlogic/pi-share-hf). It publishes sessions to Hugging Face datasets.
 
 ## CLI Reference
 
@@ -427,5 +426,3 @@ diffex --exclude-tools ask_question
 Diffex keeps the core small and pushes specialized workflow behavior into extensions, skills, prompt templates, and packages.
 
 It includes a focused interactive Plan mode, while `update_plan` remains only a lightweight execution checklist. Diffex intentionally does not include built-in MCP, permission popups, persistent to-dos, or background bash. You can build or install different approval and planning workflows as extensions or packages, or use external tools such as containers and tmux.
-
-For the full rationale, read the [blog post](https://mariozechner.at/posts/2025-11-30-pi-coding-agent/).

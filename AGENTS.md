@@ -174,3 +174,6 @@ If the user's instructions conflict with any rule in this document, ask for expl
 - 2026-09-11: Install-report tests confused the package version with the inherited changelog checkpoint -> Derive checkpoint fixtures from changelog entries and assert attempted requests independently.
 - 2026-09-11: A multi-file rename stopped midway and validation loaded stale fixtures -> Preflight replacements and finish all edits before launching tests.
 - 2026-09-11: An SDK regression expected undefined headers although the SDK returns an empty object -> Assert header contents at the SDK boundary.
+
+- 2026-09-11: Rebuilding a lock from installed modules lost other-platform metadata -> Regenerate through the documented npm version and compare all retained versions, native targets, and libc fields.
+- 2026-09-11: Terminal automation assumed one authentication selector and immediate child exit -> Inspect menu transitions, dismiss nested selectors, and bound both interaction and process reaping.

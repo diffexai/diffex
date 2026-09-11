@@ -64,13 +64,6 @@ const VIRTUAL_MODULES: Record<string, unknown> = {
 	"@diffexai/diffex-ai/oauth": _bundledDiffexAiOauth,
 	"@diffexai/diffex-ai/providers/all": _bundledDiffexAiProviders,
 	"@diffexai/diffex": _bundledDiffexCodingAgent,
-	"@mariozechner/pi-agent-core": _bundledDiffexAgentCore,
-	"@mariozechner/pi-tui": _bundledDiffexTui,
-	"@mariozechner/pi-ai": _bundledDiffexAiCompat,
-	"@mariozechner/pi-ai/compat": _bundledDiffexAiCompat,
-	"@mariozechner/pi-ai/oauth": _bundledDiffexAiOauth,
-	"@mariozechner/pi-ai/providers/all": _bundledDiffexAiProviders,
-	"@mariozechner/pi-coding-agent": _bundledDiffexCodingAgent,
 };
 
 const require = createRequire(import.meta.url);
@@ -123,13 +116,6 @@ function getAliases(): Record<string, string> {
 		"@diffexai/diffex-ai/compat": diffexAiCompatEntry,
 		"@diffexai/diffex-ai/oauth": diffexAiOauthEntry,
 		"@diffexai/diffex-ai": diffexAiCompatEntry,
-		"@mariozechner/pi-coding-agent": diffexCodingAgentEntry,
-		"@mariozechner/pi-agent-core": diffexAgentCoreEntry,
-		"@mariozechner/pi-tui": diffexTuiEntry,
-		"@mariozechner/pi-ai/providers/all": diffexAiProvidersEntry,
-		"@mariozechner/pi-ai/compat": diffexAiCompatEntry,
-		"@mariozechner/pi-ai/oauth": diffexAiOauthEntry,
-		"@mariozechner/pi-ai": diffexAiCompatEntry,
 		typebox: typeboxEntry,
 		"typebox/compile": typeboxCompileEntry,
 		"typebox/value": typeboxValueEntry,

@@ -4,7 +4,7 @@ This document should guide you about understanding the security concept behind
 Diffex and also where the boundaries are.
 
 In general Diffex is a coding agent that runs locally within the security boundary
-of the user that is running it.  It's the responsibiltiy of the user to monitor
+of the user that is running it.  It's the responsibility of the user to monitor
 its operations or to contain it within a container, virtual machine or other
 Sandbox solution.
 
@@ -24,10 +24,9 @@ coding agent trivially and this cannot be protected against.
 ## Reporting a Vulnerability
 
 If you believe you found a security vulnerability in Diffex or another package in
-this repository, please report it privately by either:
-
-- Emailing `security@earendil.com`, or
-- Opening a private report through GitHub Security Advisories for this repository
+this repository, contact a Diffex repository owner privately through your existing repository access.
+A dedicated public security mailbox and GitHub private reporting channel have not yet been verified.
+Do not send sensitive reports to an upstream project.
 
 Please include:
 
@@ -42,7 +41,7 @@ reports and coordinate disclosure as appropriate.
 ## Scope
 
 Security issues in the distributed packages, command-line tools, APIs, and
-repository code are in scope as well as Diffex-operated infrastricture
+repository code are in scope as well as Diffex-operated infrastructure
 on `diffex.ai`.
 
 ## Out Of Scope
@@ -51,7 +50,7 @@ on `diffex.ai`.
 - Behavior of Diffex extensions or skills installed by the user
 - Risks from working in untrusted repositories
 - Risks from installing untrusted extensions, skills, packages, or tools
-- Isuses caused by non trustworthy MITM proxies
+- Issues caused by non trustworthy MITM proxies
 - Public internet exposure of a Diffex installation
 - Prompt injection attacks
 - Exposed secrets that are third-party/user-controlled credentials
@@ -83,5 +82,5 @@ When possible, include the exact affected path, package version or commit SHA,
 configuration, and a proof of concept against the latest release or latest
 `main`.  For dependency reports, include evidence that the shipped dependency is
 affected and that the issue is reachable through Diffex.  For exposed-secret reports,
-include evidence that the credential is owned by Earendil or grants access to
-Earendil-operated infrastructure or services.
+include evidence that the credential is owned by Diffex or grants access to
+Diffex-operated infrastructure or services.

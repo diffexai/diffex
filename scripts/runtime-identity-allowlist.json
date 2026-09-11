@@ -1,0 +1,139 @@
+[
+  {
+    "path": "README.md",
+    "context": "Diffex is a fork of the [Pi Agent Harness](https://github.com/earendil-works/pi).",
+    "identities": [
+      "earendil-works"
+    ],
+    "category": "legal notice",
+    "reason": "Preserves upstream source attribution alongside the unchanged MIT notice in LICENSE."
+  },
+  {
+    "path": "packages/ai/src/api/openai-codex-responses.ts",
+    "context": "\theaders.set(\"originator\", \"pi\");",
+    "identities": [
+      "pi"
+    ],
+    "category": "approved integration",
+    "reason": "OpenAI Codex OAuth and required provider attribution explicitly retained by the owner on 2026-09-11."
+  },
+  {
+    "path": "packages/ai/src/api/openai-codex-responses.ts",
+    "context": "\tconst userAgent = _os ? `pi (${_os.platform()} ${_os.release()}; ${_os.arch()})` : \"pi (browser)\";",
+    "identities": [
+      "pi",
+      "pi"
+    ],
+    "category": "approved integration",
+    "reason": "OpenAI Codex OAuth and required provider attribution explicitly retained by the owner on 2026-09-11."
+  },
+  {
+    "path": "packages/ai/src/auth/oauth/openai-codex.ts",
+    "context": "\toriginator: string = \"pi\",",
+    "identities": [
+      "pi"
+    ],
+    "category": "approved integration",
+    "reason": "OpenAI Codex OAuth explicitly retained by the owner on 2026-09-11."
+  },
+  {
+    "path": "packages/ai/src/auth/oauth/radius.ts",
+    "context": "const OAUTH_CLIENT_ID = \"pi-gateway\";",
+    "identities": [
+      "pi-gateway"
+    ],
+    "category": "approved integration",
+    "reason": "Radius gateway OAuth client retained by the release audit."
+  },
+  {
+    "path": "packages/ai/src/auth/oauth/xai.ts",
+    "context": "\t\t\treferrer: \"pi\",",
+    "identities": [
+      "pi"
+    ],
+    "category": "approved integration",
+    "reason": "xAI OAuth explicitly retained by the owner on 2026-09-11."
+  },
+  {
+    "path": "packages/ai/src/providers/radius-config.ts",
+    "context": "export const DEFAULT_RADIUS_GATEWAY = \"https://radius.pi.dev\";",
+    "identities": [
+      "radius.pi.dev"
+    ],
+    "category": "approved integration",
+    "reason": "Default Radius gateway retained by the release audit."
+  },
+  {
+    "path": "packages/coding-agent/examples/extensions/doom-overlay/README.md",
+    "context": "- [pi-doom](https://github.com/badlogic/pi-doom) for the original diffex integration",
+    "identities": [
+      "pi-doom",
+      "pi-doom"
+    ],
+    "category": "legal notice",
+    "reason": "Preserves the original integration credit for the redistributed DOOM overlay source."
+  },
+  {
+    "path": "packages/coding-agent/src/core/provider-attribution.ts",
+    "context": "\t\t\t\"HTTP-Referer\": \"https://pi.dev\",",
+    "identities": [
+      "pi.dev"
+    ],
+    "category": "approved integration",
+    "reason": "Provider attribution retained by the release audit; optional headers default off."
+  },
+  {
+    "path": "packages/coding-agent/src/core/provider-attribution.ts",
+    "context": "\t\t\t\"X-OpenRouter-Title\": \"pi\",",
+    "identities": [
+      "pi"
+    ],
+    "category": "approved integration",
+    "reason": "Provider attribution retained by the release audit; optional headers default off."
+  },
+  {
+    "path": "packages/coding-agent/src/core/provider-attribution.ts",
+    "context": "\t\t\t\"X-BILLING-INVOKE-ORIGIN\": \"Pi\",",
+    "identities": [
+      "Pi"
+    ],
+    "category": "approved integration",
+    "reason": "Provider attribution retained by the release audit; optional headers default off."
+  },
+  {
+    "path": "packages/coding-agent/src/core/provider-attribution.ts",
+    "context": "\t\t\t\"User-Agent\": \"pi-coding-agent\",",
+    "identities": [
+      "pi-coding-agent"
+    ],
+    "category": "approved integration",
+    "reason": "Provider attribution retained by the release audit; optional headers default off."
+  },
+  {
+    "path": "packages/coding-agent/src/core/provider-attribution.ts",
+    "context": "\treturn { \"x-opencode-session\": sessionId, \"x-opencode-client\": \"pi\" };",
+    "identities": [
+      "pi"
+    ],
+    "category": "approved integration",
+    "reason": "OpenCode session/client attribution retained by the release audit independently of the optional attribution toggle."
+  },
+  {
+    "path": "packages/coding-agent/src/core/remote-catalog-provider.ts",
+    "context": "const DEFAULT_CATALOG_BASE_URL = \"https://pi.dev\";",
+    "identities": [
+      "pi.dev"
+    ],
+    "category": "approved integration",
+    "reason": "Pi-supported model catalogs retained by the release audit."
+  },
+  {
+    "path": "packages/coding-agent/src/core/remote-catalog-provider.ts",
+    "context": "/** Add a persisted pi.dev catalog overlay to a static built-in provider. */",
+    "identities": [
+      "pi.dev"
+    ],
+    "category": "approved integration",
+    "reason": "Pi-supported model catalogs retained by the release audit."
+  }
+]

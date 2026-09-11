@@ -272,7 +272,7 @@ String form loads all resources from a package:
 
 ```json
 {
-  "packages": ["pi-skills", "@org/my-extension"]
+  "packages": ["@org/my-skills", "@org/my-extension"]
 }
 ```
 
@@ -282,7 +282,7 @@ Object form filters which resources to load:
 {
   "packages": [
     {
-      "source": "pi-skills",
+      "source": "@org/my-skills",
       "skills": ["brave-search", "transcribe"],
       "extensions": []
     }
@@ -313,7 +313,7 @@ See [packages.md](packages.md) for package management details.
   "warnings": {
     "anthropicExtraUsage": true
   },
-  "packages": ["pi-skills"]
+  "packages": ["@org/my-skills"]
 }
 ```
 

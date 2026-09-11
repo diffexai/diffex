@@ -236,8 +236,7 @@ export function createFindToolDefinition(
 
 						// fd normally ignores .gitignore outside git repos, so keep --no-require-git
 						// there. Inside repos, use fd's default git-aware behavior so parent
-						// .gitignore rules stop at nested repo boundaries:
-						// https://github.com/earendil-works/pi/issues/5960
+						// .gitignore rules stop at nested repo boundaries.
 						let insideGitRepo = false;
 						for (let current = searchPath; ; ) {
 							if (await pathExists(path.join(current, ".git"))) {

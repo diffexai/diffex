@@ -1,7 +1,7 @@
 {
 	"name": "@diffexai/diffex-coding-agent-server",
 	"version": "0.2.0",
-	"description": "Hosted Diffex protocol service backed by the Pi-derived coding-agent runtime",
+	"description": "Hosted Diffex protocol service backed by the Diffex coding-agent runtime",
 	"type": "module",
 	"main": "./dist/index.js",
 	"types": "./dist/index.d.ts",

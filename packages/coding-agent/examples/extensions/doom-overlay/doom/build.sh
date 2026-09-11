@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build DOOM for pi-doom using doomgeneric and Emscripten
+# Build DOOM for Diffex DOOM using doomgeneric and Emscripten
 
 set -e
 
@@ -8,7 +8,7 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 DOOM_DIR="$PROJECT_ROOT/doom"
 BUILD_DIR="$PROJECT_ROOT/doom/build"
 
-echo "=== pi-doom Build Script ==="
+echo "=== Diffex DOOM Build Script ==="
 
 # Check for emcc
 if ! command -v emcc &> /dev/null; then
@@ -35,7 +35,7 @@ fi
 mkdir -p "$BUILD_DIR"
 
 # Copy our platform file
-cp "$DOOM_DIR/doomgeneric_pi.c" "$DOOM_DIR/doomgeneric/doomgeneric/"
+cp "$DOOM_DIR/doomgeneric_diffex.c" "$DOOM_DIR/doomgeneric/doomgeneric/"
 
 echo "Compiling DOOM to WebAssembly..."
 cd "$DOOM_DIR/doomgeneric/doomgeneric"
@@ -73,7 +73,7 @@ emcc -O2 \
     d_net.c \
     doomdef.c \
     doomgeneric.c \
-    doomgeneric_pi.c \
+    doomgeneric_diffex.c \
     doomstat.c \
     dstrings.c \
     f_finale.c \
