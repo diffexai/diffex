@@ -1,14 +1,31 @@
 import { compare, valid } from "semver";
+import type { RequestInit as UndiciRequestInit } from "undici";
 import { getDiffexUserAgent } from "./diffex-user-agent.ts";
 import { fetchWithRetry } from "./management-http.ts";
+import { isLatestVersion, type LatestVersion } from "./release-contract.ts";
 
-const LATEST_VERSION_URL = "https://pi.dev/api/latest-version";
+const LATEST_VERSION_URL = "https://api.diffex.ai/api/latest-version";
 const DEFAULT_VERSION_CHECK_TIMEOUT_MS = 10000;
 
-export interface LatestDiffexRelease {
-	version: string;
-	packageName?: string;
+export interface LatestDiffexRelease extends LatestVersion {
+	// Retain note rendering for a future coordinated contract extension.
+	// The current HTTP contract has no note field and cannot populate this.
 	note?: string;
+}
+
+export class VersionCheckError extends Error {
+	readonly reason: "no-release" | "unavailable" | "invalid-release";
+
+	constructor(reason: VersionCheckError["reason"]) {
+		const messages = {
+			"no-release": "No published Diffex release is available yet.",
+			unavailable: "Diffex update service is unavailable. Try again later.",
+			"invalid-release": "Refusing self-update: expected a stable @diffexai/diffex release.",
+		};
+		super(messages[reason]);
+		this.name = "VersionCheckError";
+		this.reason = reason;
+	}
 }
 
 /** Include useful errno details hidden behind Node's generic "fetch failed" error. */
@@ -54,37 +71,50 @@ export async function getLatestDiffexRelease(
 ): Promise<LatestDiffexRelease | undefined> {
 	if (process.env.DIFFEX_OFFLINE) return undefined;
 
-	const response = await fetchWithRetry(
-		LATEST_VERSION_URL,
-		{
-			headers: {
-				"User-Agent": getDiffexUserAgent(currentVersion),
-				accept: "application/json",
-			},
+	const requestOptions = {
+		// Never forward a version request to a redirected authority or path.
+		redirect: "manual",
+		credentials: "omit",
+		cache: "no-store",
+		headers: {
+			"User-Agent": getDiffexUserAgent(currentVersion),
+			accept: "application/json",
 		},
-		{
-			maxRetries: options.retry ? 2 : 0,
-			timeoutMs: options.timeoutMs ?? DEFAULT_VERSION_CHECK_TIMEOUT_MS,
-		},
-	);
-	if (!response.ok) return undefined;
-
-	const data = (await response.json()) as {
-		packageName?: unknown;
-		version?: unknown;
-		note?: unknown;
-	};
-	if (typeof data.version !== "string" || !data.version.trim()) {
-		return undefined;
+	} satisfies UndiciRequestInit;
+	const response = await fetchWithRetry(LATEST_VERSION_URL, requestOptions, {
+		maxRetries: options.retry ? 2 : 0,
+		timeoutMs: options.timeoutMs ?? DEFAULT_VERSION_CHECK_TIMEOUT_MS,
+	});
+	if (
+		(response.status !== 200 && response.status !== 404) ||
+		response.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase() !== "application/json"
+	) {
+		await response.body?.cancel().catch(() => {});
+		throw new VersionCheckError("unavailable");
 	}
-	const packageName =
-		typeof data.packageName === "string" && data.packageName.trim() ? data.packageName.trim() : undefined;
-	const note = typeof data.note === "string" && data.note.trim() ? data.note.trim() : undefined;
-	return {
-		version: data.version.trim(),
-		packageName,
-		...(note ? { note } : {}),
-	};
+
+	const data: unknown = await response.json().catch(() => {
+		throw new VersionCheckError("unavailable");
+	});
+	if (response.status === 404) {
+		if (
+			typeof data === "object" &&
+			data !== null &&
+			!Array.isArray(data) &&
+			Object.keys(data).length === 1 &&
+			"error" in data &&
+			data.error === "no_published_release"
+		) {
+			throw new VersionCheckError("no-release");
+		}
+		throw new VersionCheckError("unavailable");
+	}
+	// The shared contract permits arbitrary integer components; npm's semver
+	// implementation cannot safely install values outside its supported range.
+	if (!isLatestVersion(data) || valid(data.version) !== data.version) {
+		throw new VersionCheckError("invalid-release");
+	}
+	return { version: data.version, packageName: data.packageName };
 }
 
 export async function getLatestDiffexVersion(

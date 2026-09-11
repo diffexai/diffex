@@ -14,9 +14,24 @@ const record = (event) => appendFileSync(recordPath, `${JSON.stringify(event)}\n
 globalThis.fetch = async (input, init) => {
 	const url = input instanceof Request ? input.url : String(input);
 	const headers = new Headers(init?.headers);
-	record({ type: "request", url, method: init?.method ?? "GET", userAgent: headers.get("user-agent") });
-	if (url !== "https://pi.dev/api/latest-version") return new Response(null, { status: 503 });
+	record({
+		type: "request",
+		url,
+		method: init?.method ?? "GET",
+		userAgent: headers.get("user-agent"),
+		redirect: init?.redirect,
+	});
+	if (url !== "https://api.diffex.ai/api/latest-version") return new Response(null, { status: 503 });
 	if (process.env.DIFFEX_REPRO_FAILURE === "1") throw new Error("controlled network failure");
+	if (process.env.DIFFEX_REPRO_RESPONSE) {
+		return new Response(process.env.DIFFEX_REPRO_RESPONSE, {
+			status: Number(process.env.DIFFEX_REPRO_STATUS || "200"),
+			headers: {
+				"Content-Type": "application/json",
+				...(process.env.DIFFEX_REPRO_REDIRECT ? { Location: process.env.DIFFEX_REPRO_REDIRECT } : {}),
+			},
+		});
+	}
 	return Response.json({
 		version: process.env.DIFFEX_REPRO_VERSION,
 		packageName: process.env.DIFFEX_REPRO_PACKAGE,

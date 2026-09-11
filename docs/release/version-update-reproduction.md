@@ -14,7 +14,7 @@ The reproduction captures both commands before execution and simulates successfu
 The finding and captured commands below are historical evidence from the vulnerable implementation.
 The same reproduction was confirmed again before adding the [canonical self-update safeguard](self-update-target.md).
 The executable suite now asserts rejection of foreign targets and retains CLI and terminal coverage.
-Endpoint cutover remains pending.
+The shared source consumer now uses the Diffex authority as documented in the [consumer migration record](self-update-target.md); deployed client canaries and production activation remain separate validation work.
 
 ## Repeat the reproduction
 

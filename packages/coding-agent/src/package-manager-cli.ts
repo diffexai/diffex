@@ -26,7 +26,12 @@ import { SettingsManager } from "./core/settings-manager.ts";
 import { hasTrustRequiringProjectResources, ProjectTrustStore } from "./core/trust-manager.ts";
 import { spawnProcess } from "./utils/child-process.ts";
 import { isStableVersion, RELEASE_PACKAGE_NAME } from "./utils/release-contract.ts";
-import { formatVersionCheckError, getLatestDiffexRelease, isNewerPackageVersion } from "./utils/version-check.ts";
+import {
+	formatVersionCheckError,
+	getLatestDiffexRelease,
+	isNewerPackageVersion,
+	VersionCheckError,
+} from "./utils/version-check.ts";
 import {
 	cleanupWindowsSelfUpdateQuarantine,
 	quarantineWindowsNativeDependencies,
@@ -482,7 +487,8 @@ async function getSelfUpdatePlan(force: boolean): Promise<SelfUpdatePlan> {
 	try {
 		latestRelease = await getLatestDiffexRelease(VERSION, { retry: true });
 	} catch (error: unknown) {
-		throw new Error(`Could not determine latest ${APP_NAME} version: ${formatVersionCheckError(error)}`, {
+		if (error instanceof VersionCheckError) throw error;
+		throw new Error(`Diffex update service is unavailable: ${formatVersionCheckError(error)}`, {
 			cause: error,
 		});
 	}

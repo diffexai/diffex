@@ -166,3 +166,5 @@ If the user's instructions conflict with any rule in this document, ask for expl
 
 - 2026-09-10: CLI reproduction assumed a preload fetch stub survived HTTP setup and used an unsupported quit command -> Install the stub after importing HTTP setup, retain a socket guard, and verify the real `/exit` command before terminal automation.
 - 2026-09-10: The system Python could not bootstrap an isolated AWS CLI -> Use an explicit supported Python runtime for temporary publication tooling.
+- 2026-09-10: Vitest expanded an empty-array JSON fixture into no arguments -> Wrap payloads in named case objects so array and null validation cases exercise their intended values.
+- 2026-09-10: Node ambient fetch types omitted the runtime-supported cache option -> Validate request options against the installed Undici types used by the HTTP dispatcher.
