@@ -205,3 +205,5 @@ If the user's instructions conflict with any rule in this document, ask for expl
 - 2026-09-12: A shell commit body retained a literal newline escape -> Write multiline commit and PR text to a file and pass the file to Git or GitHub CLI.
 
 - 2026-09-12: Artifact smoke assumed an Agent mutator and reusable old consumers -> Check installed public API types, create fresh consumers, and retain failed acceptance with verified cleanup.
+
+- 2026-09-12: Native acceptance inherited fd and ripgrep on the developer machine but clean runners downloaded them -> Provision controlled search helpers, execute both, and keep unexpected downloads blocked.

@@ -153,9 +153,19 @@ export const operations = {
 	"@diffexai/diffex-coding-agent-server": `const reporter = api.createDurableUsageReporter({ endpoint: "http://127.0.0.1:1/usage", sharedSecret: "local-artifact-fixture-only-32-bytes", outboxDirectory: path.join(process.env.DIFFEX_CODING_AGENT_DIR, "outbox"), fetch: () => { throw new Error("Unexpected usage"); } }); await reporter.close();`,
 };
 
-export function installConsumer(directory, manager, selected, records, tarballDirectory) {
+export function installConsumer(
+	directory,
+	manager,
+	selected,
+	records,
+	tarballDirectory,
+	cacheDirectory = join(directory, "cache"),
+) {
 	mkdirSync(directory, { recursive: true });
 	const env = isolatedEnvironment(directory);
+	mkdirSync(cacheDirectory, { recursive: true });
+	env.npm_config_cache = join(cacheDirectory, "npm");
+	env.BUN_INSTALL_CACHE_DIR = join(cacheDirectory, "bun");
 	writeFileSync(join(directory, ".npmrc"), "@diffexai:registry=http://127.0.0.1:9/\n");
 	const dependencies = Object.fromEntries(
 		selected.map((pkg) => [
@@ -171,7 +181,7 @@ export function installConsumer(directory, manager, selected, records, tarballDi
 		manager,
 		manager === "npm"
 			? ["install", "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund"]
-			: ["install", "--production", "--ignore-scripts"],
+			: ["install", "--production", "--ignore-scripts", "--network-concurrency=8"],
 		{ cwd: directory, env, stdio: "inherit", timeout: 180_000 },
 	);
 	for (const pkg of selected) {
@@ -233,11 +243,12 @@ export function acceptArtifacts(artifactDirectory, outputDirectory, { managers =
 	};
 	try {
 		for (const manager of managers) {
+			const cacheDirectory = join(temporary, manager, "registry-cache");
 			for (const pkg of packages) {
 				assert(operations[pkg.name], `Missing representative operation: ${pkg.name}`);
 				const consumer = join(temporary, manager, pkg.name.split("/").pop());
 				const selected = packageClosure(pkg.name, packages);
-				const env = installConsumer(consumer, manager, selected, records, tarballDirectory);
+				const env = installConsumer(consumer, manager, selected, records, tarballDirectory, cacheDirectory);
 				const packageRoot = join(consumer, "node_modules", pkg.name);
 				const imports = declaredEntrypoints(pkg, packageRoot);
 				const source = [
@@ -272,7 +283,21 @@ export function acceptArtifacts(artifactDirectory, outputDirectory, { managers =
 				console.log(`Accepted ${manager}: ${pkg.name}`);
 			}
 			const consumer = join(temporary, manager, "process acceptance");
-			const env = installConsumer(consumer, manager, packages, records, tarballDirectory);
+			const env = installConsumer(consumer, manager, packages, records, tarballDirectory, cacheDirectory);
+			const project = join(consumer, "project");
+			writeFileSync(join(project, "artifact helper.txt"), "artifact-helper-confirmation\n");
+			const helperOptions = { cwd: project, env, encoding: "utf8", timeout: 10000 };
+			assert(execFileSync("fd", ["artifact", "."], helperOptions).includes("artifact helper.txt"));
+			assert(
+				execFileSync(
+					"rg",
+					["--fixed-strings", "artifact-helper-confirmation", "artifact helper.txt"],
+					helperOptions,
+				).includes("artifact-helper-confirmation"),
+			);
+			const helpers = Object.fromEntries(
+				["fd", "rg"].map((tool) => [tool, execFileSync(tool, ["--version"], helperOptions).trim()]),
+			);
 			cpSync(join(root, "scripts/fixtures/artifact-network-guard.mjs"), join(consumer, "guard.mjs"));
 			cpSync(join(root, "scripts/fixtures/artifact-server.mjs"), join(consumer, "server-smoke.mjs"));
 			execFileSync(process.execPath, ["--import", join(consumer, "guard.mjs"), join(consumer, "server-smoke.mjs")], {
@@ -284,14 +309,17 @@ export function acceptArtifacts(artifactDirectory, outputDirectory, { managers =
 			const layout = join(temporary, manager, "terminal");
 			mkdirSync(layout);
 			// The terminal harness accepts explicit consumer paths, avoiding workspace resolution.
-			execFileSync("python3", [join(root, "scripts/verify-candidate-artifacts.py"), layout, consumer], {
-				env,
-				cwd: consumer,
-				stdio: "inherit",
-				timeout: 90_000,
-			});
-			cpSync(layout, join(outputDirectory, manager), { recursive: true });
-			evidence.processes.push({ manager, server: "passed", terminal: "passed" });
+			try {
+				execFileSync("python3", [join(root, "scripts/verify-candidate-artifacts.py"), layout, consumer], {
+					env,
+					cwd: consumer,
+					stdio: "inherit",
+					timeout: 90_000,
+				});
+			} finally {
+				cpSync(layout, join(outputDirectory, manager), { recursive: true });
+			}
+			evidence.processes.push({ manager, server: "passed", terminal: "passed", helpers });
 		}
 		verifyTarballs(tarballDirectory, records, packages);
 		writeFileSync(

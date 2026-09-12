@@ -2,7 +2,9 @@
 
 The release gate installs every package returned by `scripts/release-packages.mjs` from its reviewed local tarball.
 Each package receives a separate consumer with only its public dependency closure, ordered before the package that requires it.
-Consumers live outside the repository in paths containing spaces, with separate homes, configuration, projects, temporary files, package prefixes, and npm/Bun caches.
+Consumers live outside the repository in paths containing spaces, with separate homes, configuration, projects, temporary files, and package prefixes.
+Each manager starts with an empty registry cache shared only among consumers in that acceptance run, and Bun registry concurrency is bounded.
+Installed file identities are rechecked in every consumer even when downloaded dependencies are cached.
 Lifecycle scripts are disabled and the Diffex registry scope points to an unavailable loopback endpoint, so a missing local override fails instead of fetching an older Diffex package.
 External npm dependencies still resolve from the public registry.
 
@@ -30,6 +32,10 @@ The terminal path exercises packaged themes and the HTML export path exercises i
 Clipboard coverage loads the native module without reading or replacing the user's clipboard.
 Socket guards reject non-loopback process traffic; the terminal fixture supplies the known no-release HTTP response and fails on unexpected socket attempts.
 No provider credentials are inherited.
+The controlled environment must supply native `fd` and `ripgrep` executables on PATH.
+Acceptance executes file discovery and content search, records their versions, and keeps automatic helper downloads blocked.
+Native runners install those prerequisites through apt or Homebrew before package acceptance.
+This validates the npm installation with controlled system helpers; it does not establish the separate automatic-helper-download lifecycle.
 
 ## Supported distribution scope
 
