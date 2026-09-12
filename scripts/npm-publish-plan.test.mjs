@@ -62,3 +62,18 @@ describe("npm publish planning", () => {
 		]);
 	});
 });
+
+it("requires exactly one artifact directory and rejects ambiguous options", () => {
+	assert.deepEqual(parsePublishArgs(["--artifacts", "/tmp/approved", "--dry-run"]), {
+		bootstrap: false,
+		dryRun: true,
+		artifacts: "/tmp/approved",
+	});
+	for (const args of [
+		["--artifacts"],
+		["--artifacts", "--bootstrap"],
+		["--artifacts", "a", "--artifacts", "b"],
+		["--bootstrap", "--bootstrap"],
+	])
+		assert.throws(() => parsePublishArgs(args));
+});

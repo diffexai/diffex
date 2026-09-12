@@ -7,18 +7,18 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import { isReleaseRecord, isStableVersion } from "../packages/coding-agent/src/utils/release-contract.ts";
-import { getPublicWorkspacePackages } from "./release-packages.mjs";
+import { readReleaseArtifacts } from "./release-artifacts.mjs";
+import { verifyNpmArtifact } from "./release-registry.mjs";
 
 const RELEASES_PREFIX = "releases/v1";
-const REGISTRY_URL = "https://registry.npmjs.org";
 const RETRY_DELAY_MS = 5000;
 const RETRY_TIMEOUT_MS = 10 * 60 * 1000;
 const MAX_POINTER_UPDATE_ATTEMPTS = 5;
 const STABLE_SEMVER_RE = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
-const REQUEST_TIMEOUT_MS = 30_000;
 
 function parseArgs(args) {
 	const options = {
+		artifacts: undefined,
 		bucket: undefined,
 		endpoint: undefined,
 		sourceCommit: undefined,
@@ -27,18 +27,29 @@ function parseArgs(args) {
 
 	for (let index = 0; index < args.length; index++) {
 		const arg = args[index];
-		if (arg !== "--bucket" && arg !== "--endpoint" && arg !== "--source-commit" && arg !== "--version") {
+		if (
+			arg !== "--artifacts" &&
+			arg !== "--bucket" &&
+			arg !== "--endpoint" &&
+			arg !== "--source-commit" &&
+			arg !== "--version"
+		) {
 			throw new Error(`Unknown argument: ${arg}`);
 		}
 		const value = args[++index];
 		if (!value) throw new Error(`${arg} requires a value`);
 		options[
-			{ "--bucket": "bucket", "--endpoint": "endpoint", "--source-commit": "sourceCommit", "--version": "version" }[
-				arg
-			]
+			{
+				"--artifacts": "artifacts",
+				"--bucket": "bucket",
+				"--endpoint": "endpoint",
+				"--source-commit": "sourceCommit",
+				"--version": "version",
+			}[arg]
 		] = value;
 	}
 
+	if (!options.artifacts) throw new Error("--artifacts is required");
 	if (!options.bucket) throw new Error("--bucket is required");
 	if (!options.endpoint) throw new Error("--endpoint is required");
 	if (!isStableVersion(options.version)) {
@@ -51,45 +62,6 @@ function sleep(milliseconds) {
 	return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-async function resolvePackageFromNpm(pkg) {
-	const packageUrl = `${REGISTRY_URL}/${encodeURIComponent(pkg.name)}/${pkg.version}`;
-	const response = await fetch(packageUrl, {
-		headers: { accept: "application/json" },
-		signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-	});
-	if (!response.ok) {
-		throw new Error(`${pkg.name}@${pkg.version}: npm registry returned ${response.status}`);
-	}
-
-	const data = await response.json();
-	if (
-		typeof data !== "object" ||
-		data === null ||
-		Array.isArray(data) ||
-		data.name !== pkg.name ||
-		data.version !== pkg.version ||
-		typeof data.dist !== "object" ||
-		data.dist === null ||
-		Array.isArray(data.dist) ||
-		typeof data.dist.tarball !== "string" ||
-		typeof data.dist.integrity !== "string"
-	) {
-		throw new Error(`${pkg.name}@${pkg.version}: npm registry returned invalid metadata`);
-	}
-
-	const tarball = await fetch(data.dist.tarball, { method: "HEAD", signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
-	if (!tarball.ok) {
-		throw new Error(`${pkg.name}@${pkg.version}: tarball returned ${tarball.status}`);
-	}
-
-	return {
-		name: pkg.name,
-		version: pkg.version,
-		tarball: data.dist.tarball,
-		integrity: data.dist.integrity,
-	};
-}
-
 async function verifyPackagesAreAvailable(packages) {
 	const deadline = Date.now() + RETRY_TIMEOUT_MS;
 	let attempt = 0;
@@ -97,7 +69,7 @@ async function verifyPackagesAreAvailable(packages) {
 
 	do {
 		attempt++;
-		const results = await Promise.allSettled(packages.map(resolvePackageFromNpm));
+		const results = await Promise.allSettled(packages.map((pkg) => verifyNpmArtifact(pkg)));
 		failures = results.flatMap((result, index) =>
 			result.status === "rejected" ? [`${packages[index].name}: ${result.reason}`] : [],
 		);
@@ -233,19 +205,15 @@ async function main() {
 			"Release publication requires AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY from the protected release environment.",
 		);
 	}
-	const packages = getPublicWorkspacePackages();
-	if (packages.length === 0) throw new Error("No public workspace packages found for verification.");
-	for (const pkg of packages) {
-		if (pkg.version !== options.version) {
-			throw new Error(`${pkg.name} is ${pkg.version}; expected ${options.version}`);
-		}
-	}
+	const sourceCommit = options.sourceCommit ?? gitSourceCommit();
+	const manifest = readReleaseArtifacts(options.artifacts, { version: options.version, sourceCommit });
+	const packages = manifest.packages;
 
 	const publishedPackages = await verifyPackagesAreAvailable(packages);
 	const release = {
 		schemaVersion: 1,
 		version: options.version,
-		sourceCommit: options.sourceCommit ?? gitSourceCommit(),
+		sourceCommit,
 		publishedAt: new Date().toISOString(),
 		packages: publishedPackages,
 	};
@@ -301,14 +269,7 @@ async function main() {
 					join(temporaryDirectory, "latest-current.json"),
 				),
 			(condition) =>
-				putJson(
-					options.bucket,
-					options.endpoint,
-					releasePath,
-					`${RELEASES_PREFIX}/latest.json`,
-					"no-store",
-					condition,
-				),
+				putJson(options.bucket, options.endpoint, releasePath, `${RELEASES_PREFIX}/latest.json`, "no-store", condition),
 		);
 		console.log(
 			result.advanced

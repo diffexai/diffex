@@ -5,9 +5,10 @@
 The CLI monorepo owns npm verification and release-record publication through `scripts/publish-release-announcement.mjs` and `.github/workflows/build-binaries.yml`.
 The independent public API Worker in `diffex-cloud` consumes these records; Worker, Render, and landing deployments do not advance them.
 
-The release workflow builds binaries, stages a draft GitHub Release, publishes npm packages, announces verified npm availability, and finally publishes the GitHub Release.
-The R2 marker means that all public workspace packages resolved at their exact release version and their tarballs were available.
-It does not independently guarantee that binary assets are already public.
+The release workflow verifies one immutable source commit, freezes model data and source inputs, builds the approved npm packages, retains their exact bytes, publishes missing versions, and announces verified npm availability.
+The R2 marker means all public workspace packages were downloaded at their exact release version and matched the retained approved artifact digests.
+Standalone binaries remain deferred, and the npm record contains no binary manifest.
+See [promotion and recovery](promotion.md) for the complete prerequisites, private artifact retention, and partial-failure procedures.
 This setup does not authorize running a release or bypass the repository's release requirements.
 
 ## Credentials and environment boundaries
@@ -27,7 +28,7 @@ The repository's GitHub plan rejected required-reviewer protection with HTTP 422
 The owner approved branch/tag restrictions without required reviewers on 2026-09-10.
 GitHub reports `can_admins_bypass: true`; there is no enforced human approval gate.
 Review release tags and any manually selected recovery source before dispatching a workflow.
-These restrictions apply to the workflow ref, so a recovery `source_ref` still needs maintainer review.
+These restrictions apply to the workflow ref; the resolver additionally rejects a recovery `source_ref` that differs from the immutable tag commit.
 Missing credentials fail before npm verification or storage access.
 Use an AWS CLI that supports `put-object --if-match` and `--if-none-match`.
 
@@ -49,10 +50,10 @@ If enforced read-only storage access is required, configure a separate read-only
 
 The [stable release contract](contract.md) specifies the exact stored schema and public HTTP projection.
 The publisher now enforces that schema for both new and existing records.
-The consumer fixture suite prepares strict parsing for the future endpoint migration.
+The unchanged consumer fixture suite verifies the deployed npm record shape and public response projection.
 
 Before any write, the publisher inventories every non-private workspace package and requires its version to match the requested canonical stable semver.
-It checks exact npm package identity and version, integrity metadata, and tarball availability for all packages.
+It checks exact npm package identity and version, downloads every canonical tarball without redirects, and compares its size, SHA-256, and SHA-512 with the retained manifest.
 Requests have a 30-second timeout, npm propagation retries have a ten-minute budget, and storage commands have a one-minute timeout.
 
 `releases/v1/releases/<version>.json` is created with `If-None-Match: *`.

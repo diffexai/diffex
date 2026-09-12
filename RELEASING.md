@@ -62,7 +62,7 @@ Use this bootstrap process only once, before the first normal release.
 
    Bootstrap publication deliberately omits provenance because it runs interactively outside the trusted CI environment.
    It does not assign the `latest` dist-tag.
-   The command is resumable after a partial failure: it skips packages already published at the exact workspace version and refuses packages that already exist only at other versions.
+   The command is resumable after a partial failure: it downloads and hashes packages already published at the exact workspace version against the retained approved artifacts and refuses packages that already exist only at other versions.
 
 4. Run every `npm trust github` command printed by the bootstrap command.
    The trusted publisher values must remain:
@@ -87,12 +87,15 @@ Run the appropriate release command only after local checks pass and the release
 ```bash
 npm run release:patch
 npm run release:minor
-npm run release:major
 ```
 
-The release command updates versions and generated artifacts, runs checks and tests, creates the release commits and tag, and pushes `main` plus the tag directly.
+The release command updates versions and generated artifacts, runs checks and tests, creates the release commits and tag, and requires interactive review of generated diffs, and pushes `main` plus the tag atomically.
+Only `patch` (fixes and additions) and `minor` (breaking changes) are supported.
+Major and explicit-version release commands are rejected.
 It is not a dry-run command.
 Review the target version and obtain approval for the remote push before running it.
 
 The pushed tag triggers `.github/workflows/build-binaries.yml`.
 Do not announce the release until the workflow verifies npm publication and writes the release announcement successfully.
+
+See [release promotion and recovery](docs/release/promotion.md) for immutable source selection, retained artifact recovery, and exact failure procedures.

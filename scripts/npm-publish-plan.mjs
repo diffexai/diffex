@@ -1,17 +1,21 @@
 export const BOOTSTRAP_DIST_TAG = "bootstrap";
 
-const USAGE = "Usage: node scripts/publish.mjs [--dry-run] [--bootstrap]";
+const USAGE = "Usage: node scripts/publish.mjs [--dry-run] [--bootstrap] [--artifacts DIRECTORY]";
 
 export function parsePublishArgs(args) {
-	const unknownArgs = args.filter((arg) => arg !== "--dry-run" && arg !== "--bootstrap");
-	if (unknownArgs.length > 0) {
-		throw new Error(USAGE);
+	const options = { bootstrap: false, dryRun: false };
+	const seen = new Set();
+	for (let index = 0; index < args.length; index++) {
+		const arg = args[index];
+		if (seen.has(arg)) throw new Error(USAGE);
+		seen.add(arg);
+		if (arg === "--bootstrap") options.bootstrap = true;
+		else if (arg === "--dry-run") options.dryRun = true;
+		else if (arg === "--artifacts" && args[index + 1] && !args[index + 1].startsWith("--"))
+			options.artifacts = args[++index];
+		else throw new Error(USAGE);
 	}
-
-	return {
-		bootstrap: args.includes("--bootstrap"),
-		dryRun: args.includes("--dry-run"),
-	};
+	return options;
 }
 
 export function createPublishArgs({ bootstrap }) {

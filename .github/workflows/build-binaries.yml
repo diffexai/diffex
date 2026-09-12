@@ -7,118 +7,196 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Tag to build (e.g., v0.12.0)'
+        description: Immutable release tag to recover
         required: true
         type: string
       source_ref:
-        description: 'Source ref to build/publish (defaults to tag; use only for release recovery)'
+        description: Optional recovery ref; must resolve to the release tag commit
         required: false
+        type: string
+      recovery_run_id:
+        description: Original release workflow run containing the retained approved artifacts
+        required: true
         type: string
 
 permissions: {}
 
 concurrency:
-  group: build-binaries-${{ github.event.inputs.tag || github.ref_name }}
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
+  resolve-source:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      commit: ${{ steps.source.outputs.commit }}
+    steps:
+      - name: Checkout release control code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: true
+          fetch-depth: 0
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22.19.0'
+      - name: Resolve and validate immutable release source
+        id: source
+        env:
+          RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+          SOURCE_REF: ${{ github.event.inputs.source_ref }}
+          EXPECTED_COMMIT: ${{ github.event_name == 'push' && github.sha || '' }}
+        run: node scripts/release-source.mjs
+
+  prepare-artifacts:
+    needs: resolve-source
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    env:
+      DIFFEX_SOURCE_COMMIT: ${{ needs.resolve-source.outputs.commit }}
+      RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+    steps:
+      - name: Checkout immutable release commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.resolve-source.outputs.commit }}
+          persist-credentials: false
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22.19.0'
+          registry-url: 'https://registry.npmjs.org'
+          cache: npm
+      - name: Restore original approved artifact bytes
+        id: restore
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RECOVERY_RUN_ID: ${{ inputs.recovery_run_id }}
+        run: node scripts/restore-release-artifacts.mjs
+      - name: Install pinned npm
+        if: steps.restore.outputs.restored != 'true'
+        run: npm install -g npm@11.16.0 --ignore-scripts
+      - name: Install system dependencies
+        if: steps.restore.outputs.restored != 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev fd-find ripgrep
+          sudo ln -s "$(command -v fdfind)" /usr/local/bin/fd
+      - name: Install locked dependencies
+        if: steps.restore.outputs.restored != 'true'
+        run: npm ci --ignore-scripts
+      - name: Freeze model data and build without catalog regeneration
+        if: steps.restore.outputs.restored != 'true'
+        run: |
+          npm run hydrate:model-data
+          node scripts/release-artifacts.mjs freeze .artifacts/release
+          npm run build:offline
+          git diff --exit-code HEAD
+      - name: Validate release candidate
+        if: steps.restore.outputs.restored != 'true'
+        run: |
+          npm run check
+          ./test.sh
+          git diff --exit-code HEAD
+      - name: Prepare reviewed tarballs and private source snapshot
+        if: steps.restore.outputs.restored != 'true'
+        run: node scripts/release-artifacts.mjs prepare .artifacts/release
+      - name: Verify retained input and artifact identities
+        run: node scripts/release-artifacts.mjs verify .artifacts/release
+      - name: Retain immutable private release inputs before publication
+        if: steps.restore.outputs.upload == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: private-release-${{ needs.resolve-source.outputs.commit }}
+          path: .artifacts/release/
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 90
+      - name: Retain private debug maps
+        if: always() && steps.restore.outputs.restored != 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: private-debug-${{ needs.resolve-source.outputs.commit }}
+          path: .artifacts/private-debug/
+          if-no-files-found: warn
+          include-hidden-files: true
+          retention-days: 90
+
   publish-npm:
+    needs: [resolve-source, prepare-artifacts]
     runs-on: ubuntu-latest
     environment: npm-publish
     permissions:
       contents: read
+      actions: read
       id-token: write
     env:
-      RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
-      SOURCE_REF: ${{ github.event.inputs.source_ref || github.event.inputs.tag || github.ref_name }}
+      DIFFEX_SOURCE_COMMIT: ${{ needs.resolve-source.outputs.commit }}
     steps:
-      - name: Checkout
+      - name: Checkout immutable release commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ env.SOURCE_REF }}
+          ref: ${{ needs.resolve-source.outputs.commit }}
           persist-credentials: false
-
-      - name: Setup Node.js
+      - name: Setup Node.js for trusted publishing
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: '22'
+          node-version: '22.19.0'
           registry-url: 'https://registry.npmjs.org'
-          cache: npm
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev fd-find ripgrep
-          sudo ln -s $(which fdfind) /usr/local/bin/fd
-
-      - name: Install dependencies
-        run: npm ci --ignore-scripts
-
-      - name: Build
-        run: npm run build
-
-      - name: Check
-        run: npm run check
-
-      - name: Test
-        run: npm test
-
-      - name: Upgrade npm for trusted publishing
-        run: |
-          npm install -g npm@11.16.0 --ignore-scripts
-          npm --version
-
-      - name: Publish npm packages
-        run: node scripts/publish.mjs
-
-      - name: Retain private payload inventory and debug maps
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: private-npm-evidence-${{ env.RELEASE_TAG }}
-          path: |
-            .artifacts/npm-payload-inventory.json
-            .artifacts/private-debug/
-          if-no-files-found: warn
-          include-hidden-files: true
-          retention-days: 14
+      - name: Download approved artifact bytes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run download "$GITHUB_RUN_ID" --repo diffexai/diffex --name "private-release-$DIFFEX_SOURCE_COMMIT" --dir .artifacts/release
+      - name: Install pinned npm for trusted publishing
+        run: npm install -g npm@11.16.0 --ignore-scripts
+      - name: Publish or verify exact npm tarballs
+        run: node scripts/publish.mjs --artifacts .artifacts/release
 
   announce-diffex-release:
+    needs: [resolve-source, publish-npm]
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    needs: publish-npm
     environment: diffex-release-upload
     concurrency:
       group: announce-diffex-release
       cancel-in-progress: false
     permissions:
       contents: read
+      actions: read
     env:
       RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
-      SOURCE_REF: ${{ github.event.inputs.source_ref || github.event.inputs.tag || github.ref_name }}
-      AWS_ACCESS_KEY_ID: ${{ secrets.DIFFEX_ARTIFACTS_R2_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.DIFFEX_ARTIFACTS_R2_SECRET_ACCESS_KEY }}
-      AWS_DEFAULT_REGION: auto
-      AWS_EC2_METADATA_DISABLED: 'true'
-      R2_ENDPOINT: https://6b24afa849f8254ab5e6e2d1956239cc.r2.cloudflarestorage.com
+      DIFFEX_SOURCE_COMMIT: ${{ needs.resolve-source.outputs.commit }}
     steps:
-      - name: Checkout
+      - name: Checkout immutable release commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ env.SOURCE_REF }}
+          ref: ${{ needs.resolve-source.outputs.commit }}
           persist-credentials: false
-
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: '22'
-
+          node-version: '22.19.0'
+      - name: Download approved artifact bytes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run download "$GITHUB_RUN_ID" --repo diffexai/diffex --name "private-release-$DIFFEX_SOURCE_COMMIT" --dir .artifacts/release
       - name: Verify AWS CLI
         run: aws --version
-
       - name: Announce verified Diffex release
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.DIFFEX_ARTIFACTS_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.DIFFEX_ARTIFACTS_R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          AWS_EC2_METADATA_DISABLED: 'true'
+          R2_ENDPOINT: https://6b24afa849f8254ab5e6e2d1956239cc.r2.cloudflarestorage.com
         run: |
           node scripts/publish-release-announcement.mjs \
             --version "${RELEASE_TAG#v}" \
+            --source-commit "$DIFFEX_SOURCE_COMMIT" \
+            --artifacts .artifacts/release \
             --bucket diffex-artifacts \
             --endpoint "$R2_ENDPOINT"

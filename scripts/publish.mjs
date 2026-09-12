@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { packReviewedPackage } from "./pack-reviewed-package.mjs";
+import { existsSync } from "node:fs";
+import { prepareReleaseArtifacts, readReleaseArtifacts } from "./release-artifacts.mjs";
+import { verifyNpmArtifact } from "./release-registry.mjs";
 import { join } from "node:path";
 import {
 	assertBootstrapPackageStates,
@@ -49,30 +49,6 @@ function run(command, args, options = {}) {
 	return result;
 }
 
-function assertBuildOutputExists(directory) {
-	if (!existsSync(join(directory, "dist"))) {
-		throw new Error(`${directory}/dist does not exist. Run npm run build before publishing.`);
-	}
-}
-
-function isPublished(name, version) {
-	const result = spawnSync(commandForPlatform("npm"), ["view", `${name}@${version}`, "version", "--json"], {
-		encoding: "utf8",
-		stdio: ["inherit", "pipe", "pipe"],
-	});
-
-	if (result.status === 0 && result.stdout.trim()) {
-		return true;
-	}
-
-	const output = [result.stdout, result.stderr].filter(Boolean).join("\n");
-	if (result.status !== 0 && (output.includes("E404") || output.includes("404 Not Found"))) {
-		return false;
-	}
-
-	throw new Error(output ? `Failed to query ${name}@${version}\n${output}` : `Failed to query ${name}@${version}`);
-}
-
 function isRegistered(name) {
 	const result = spawnSync(commandForPlatform("npm"), ["view", name, "version", "--json"], {
 		encoding: "utf8",
@@ -110,31 +86,23 @@ if (bootstrap) {
 	);
 }
 
-// Validate every final tarball before registry queries or any publication.
-const packDirectory = mkdtempSync(join(tmpdir(), "diffex-approved-npm-"));
-process.on("exit", () => rmSync(packDirectory, { recursive: true, force: true }));
-const packedPackages = new Map();
-for (const pkg of packages) {
-	assertBuildOutputExists(pkg.directory);
-	packedPackages.set(pkg.name, packReviewedPackage(pkg, packDirectory));
+const artifactDirectory = options.artifacts ?? (bootstrap ? ".artifacts/npm-bootstrap" : undefined);
+if (!artifactDirectory) throw new Error("Normal publication requires --artifacts DIRECTORY from the retained CI build");
+if (bootstrap && !existsSync(artifactDirectory)) prepareReleaseArtifacts(artifactDirectory);
+const manifest = readReleaseArtifacts(artifactDirectory, {
+	version: versions[0],
+	sourceCommit: process.env.DIFFEX_SOURCE_COMMIT,
+});
+// Verify every existing version before publishing any missing version.
+// A registry success or matching version string alone never authorizes a skip.
+const packageStates = [];
+for (const pkg of manifest.packages) {
+	packageStates.push({
+		...pkg,
+		published: Boolean(await verifyNpmArtifact(pkg, { allowMissing: true })),
+		registered: false,
+	});
 }
-
-mkdirSync(".artifacts", { recursive: true });
-writeFileSync(
-	".artifacts/npm-payload-inventory.json",
-	`${JSON.stringify(
-		[...packedPackages.values()].map(({ file, ...artifact }) => ({ ...artifact, filename: file.split("/").pop() })),
-		null,
-		2,
-	)}\n`,
-);
-
-const packageStates = packages.map((pkg) => ({
-	...pkg,
-	published: isPublished(pkg.name, packageVersions.get(pkg.name)),
-	registered: false,
-	version: packageVersions.get(pkg.name),
-}));
 
 if (bootstrap) {
 	for (const pkg of packageStates) {
@@ -144,14 +112,12 @@ if (bootstrap) {
 }
 
 for (const pkg of packageStates) {
-	assertBuildOutputExists(pkg.directory);
-
 	if (pkg.published) {
-		console.log(`${pkg.name}@${pkg.version} is already published; validating package contents only.`);
+		console.log(`${pkg.name}@${pkg.version} is already published; verified exact published tarball bytes.`);
 	} else {
 		console.log(`${pkg.name}@${pkg.version} is not published; validating package contents before publish.`);
 	}
-	console.log(`  Validated tarball SHA-256: ${packedPackages.get(pkg.name).sha256}`);
+	console.log(`  Validated tarball SHA-256: ${pkg.sha256}`);
 	console.log();
 }
 
@@ -174,7 +140,7 @@ for (const pkg of packageStates) {
 		continue;
 	}
 
-	run("npm", [...createPublishArgs({ bootstrap }), packedPackages.get(pkg.name).file]);
+	run("npm", [...createPublishArgs({ bootstrap }), join(artifactDirectory, pkg.filename)]);
 	console.log();
 }
 

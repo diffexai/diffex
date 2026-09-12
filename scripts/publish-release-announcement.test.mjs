@@ -74,7 +74,7 @@ test("publisher rejects missing credentials before package verification or stora
 	}
 });
 
-for (const failure of ["package", "tarball"]) {
+for (const failure of ["package", "tarball", "integrity", "bytes"]) {
 	test(`publisher leaves both records untouched when ${failure} verification fails`, () => {
 		const fixture = createPublicationFixture();
 		try {
@@ -199,7 +199,109 @@ test("publisher rejects a noncanonical source commit before storing records", ()
 	try {
 		const result = fixture.run("0.0.3", { commit: "not-a-commit" });
 		assert.equal(result.status, 1);
-		assert.match(result.stderr, /Invalid release record/);
+		assert.match(result.stderr, /Artifact source|Invalid release record/);
+		assert.deepEqual(fixture.state().objects, {});
+	} finally {
+		fixture.cleanup();
+	}
+});
+
+test("version record survives an actual pointer-write failure and recovery preserves its bytes", () => {
+	const fixture = createPublicationFixture();
+	try {
+		fixture.seed({}, "PointerFailure");
+		const failed = fixture.run("0.0.3");
+		assert.equal(failed.status, 1);
+		const versionKey = "releases/v1/releases/0.0.3.json";
+		const record = fixture.state().objects[versionKey];
+		assert.ok(record);
+		assert.equal(fixture.state().objects["releases/v1/latest.json"], undefined);
+		fixture.seed({ [versionKey]: record });
+		const retry = fixture.run("0.0.3");
+		assert.equal(retry.status, 0, retry.stderr);
+		assert.equal(fixture.state().objects["releases/v1/latest.json"], record);
+	} finally {
+		fixture.cleanup();
+	}
+});
+
+test("partial npm publication resumes original bytes and never republishes completed versions", () => {
+	const fixture = createPublicationFixture();
+	try {
+		const failed = fixture.run("0.0.3", { command: "publish", missing: true, failPublishAt: "@diffexai/diffex" });
+		assert.equal(failed.status, 1, failed.stdout);
+		const published = fixture.state().published;
+		assert.ok(published.length > 0 && published.length < fixture.packageCount);
+		assert.deepEqual(fixture.state().objects, {});
+		const retry = fixture.run("0.0.3", { command: "publish", missing: true });
+		assert.equal(retry.status, 0, retry.stderr);
+		assert.equal(fixture.state().published.length, fixture.packageCount);
+		assert.equal(fixture.run("0.0.3", { command: "publish", missing: true }).status, 0);
+		assert.equal(fixture.state().published.length, fixture.packageCount);
+		assert.equal(fixture.run("0.0.3", { missing: true }).status, 0);
+		assert.ok(fixture.state().objects["releases/v1/latest.json"]);
+	} finally {
+		fixture.cleanup();
+	}
+});
+
+for (const failure of ["bytes", "integrity", "tarball"])
+	test(`existing npm ${failure} failure blocks every publish and announcement`, () => {
+		const fixture = createPublicationFixture();
+		try {
+			const result = fixture.run("0.0.3", { command: "publish", failure });
+			assert.equal(result.status, 1);
+			assert.equal(fixture.state().published, undefined);
+			assert.deepEqual(fixture.state().objects, {});
+		} finally {
+			fixture.cleanup();
+		}
+	});
+
+for (const mutateManifest of [
+	(manifest) => {
+		manifest.source.commit = "b".repeat(40);
+	},
+	(manifest) => {
+		manifest.source.lockSha256 = "b".repeat(64);
+	},
+	(manifest) => {
+		manifest.packages[0].sha256 = "b".repeat(64);
+	},
+	(manifest) => {
+		manifest.snapshot.sha256 = "b".repeat(64);
+	},
+	(manifest) => {
+		manifest.packages.pop();
+	},
+	(manifest) => {
+		manifest.version = "0.0.4";
+	},
+])
+	test("artifact source, inventory, and byte tampering fail before network or storage", () => {
+		const fixture = createPublicationFixture();
+		try {
+			const result = fixture.run("0.0.3", { mutateManifest });
+			assert.equal(result.status, 1);
+			assert.equal(fixture.state().registryCalls, undefined);
+			assert.deepEqual(fixture.state().calls, []);
+		} finally {
+			fixture.cleanup();
+		}
+	});
+
+test("enabling public binary assets without an availability gate fails before promotion", () => {
+	const fixture = createPublicationFixture();
+	try {
+		const result = fixture.run("0.0.3", {
+			mutatePolicy: (policy) => {
+				policy.channels.standalone = "enable";
+				return policy;
+			},
+		});
+		assert.equal(result.status, 1);
+		assert.match(result.stderr, /public asset verification/);
+		assert.equal(fixture.state().registryCalls, undefined);
 		assert.deepEqual(fixture.state().objects, {});
 	} finally {
 		fixture.cleanup();

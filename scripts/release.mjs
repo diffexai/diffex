@@ -1,37 +1,24 @@
 #!/usr/bin/env node
-/**
- * Release script for Diffex
- *
- * Usage:
- *   node scripts/release.mjs <major|minor|patch>
- *   node scripts/release.mjs <x.y.z>
- *
- * Steps:
- * 1. Check for uncommitted changes
- * 2. Verify every public workspace package is registered on npm
- * 3. Bump version via npm run version:xxx or set an explicit version
- * 4. Update CHANGELOG.md files: [Unreleased] -> [version] - date
- * 5. Regenerate release artifacts
- * 6. Run checks and tests
- * 7. Commit and tag the release
- * 8. Add new [Unreleased] section to changelogs
- * 9. Commit next-cycle changelog updates
- * 10. Push main and the tag to trigger CI publication and verified Diffex release announcement
- */
+// Prepare a patch or minor release from synchronized main, review generated
+// changes, and atomically publish the release and next-cycle commits.
 
-import { execSync, spawnSync } from "node:child_process";
+import { execFileSync, execSync, spawnSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { findPackageDirectories } from "./package-workspaces.mjs";
 import { getPublicWorkspacePackages } from "./release-packages.mjs";
+import { createInterface } from "node:readline/promises";
+import { preflightRelease, pushPreparedRelease, assertPackageVersion } from "./release-source.mjs";
+
+if (process.argv[2] === "--push-prepared") {
+	if (process.argv.length !== 4) throw new Error("Usage: node scripts/release.mjs --push-prepared vX.Y.Z");
+	pushPreparedRelease(process.argv[3]);
+	process.exit(0);
+}
 
 const RELEASE_TARGET = process.argv[2];
-const BUMP_TYPES = new Set(["major", "minor", "patch"]);
-const SEMVER_RE = /^\d+\.\d+\.\d+$/;
-
-if (!RELEASE_TARGET || (!BUMP_TYPES.has(RELEASE_TARGET) && !SEMVER_RE.test(RELEASE_TARGET))) {
-	console.error("Usage: node scripts/release.mjs <major|minor|patch|x.y.z>");
-	process.exit(1);
+if (process.argv.length !== 3 || !["patch", "minor"].includes(RELEASE_TARGET)) {
+	throw new Error("Usage: node scripts/release.mjs <patch|minor>; major and explicit versions are unsupported");
 }
 
 function run(cmd, options = {}) {
@@ -58,10 +45,14 @@ function assertPackagesAreRegisteredWithNpm() {
 
 	console.log("Checking npm package registration...");
 	for (const packageName of packageNames) {
-		const result = spawnSync(process.platform === "win32" ? "npm.cmd" : "npm", ["view", packageName, "version", "--json"], {
-			encoding: "utf8",
-			stdio: ["ignore", "pipe", "pipe"],
-		});
+		const result = spawnSync(
+			process.platform === "win32" ? "npm.cmd" : "npm",
+			["view", packageName, "version", "--json"],
+			{
+				encoding: "utf8",
+				stdio: ["ignore", "pipe", "pipe"],
+			},
+		);
 
 		if (result.status === 0 && result.stdout.trim()) {
 			console.log(`  ${packageName}`);
@@ -74,38 +65,24 @@ function assertPackagesAreRegisteredWithNpm() {
 			continue;
 		}
 
-		throw new Error(output ? `Failed to query npm registration for ${packageName}\n${output}` : `Failed to query npm registration for ${packageName}`);
+		throw new Error(
+			output
+				? `Failed to query npm registration for ${packageName}\n${output}`
+				: `Failed to query npm registration for ${packageName}`,
+		);
 	}
 
 	if (unregisteredPackages.length > 0) {
-		throw new Error(`The following public workspace packages are not registered on npm:\n${unregisteredPackages.map((packageName) => `  ${packageName}`).join("\n")}\nFollow the first-publication process in RELEASING.md before running a release.`);
+		throw new Error(
+			`The following public workspace packages are not registered on npm:\n${unregisteredPackages.map((packageName) => `  ${packageName}`).join("\n")}\nFollow the first-publication process in RELEASING.md before running a release.`,
+		);
 	}
 
 	console.log("  All public workspace packages are registered on npm\n");
 }
 
-function compareVersions(a, b) {
-	const aParts = a.split(".").map(Number);
-	const bParts = b.split(".").map(Number);
-
-	for (let i = 0; i < 3; i++) {
-		const diff = (aParts[i] || 0) - (bParts[i] || 0);
-		if (diff !== 0) {
-			return diff;
-		}
-	}
-
-	return 0;
-}
-
-function shellQuote(value) {
-	return `'${value.replace(/'/g, `'\\''`)}'`;
-}
-
 function removeStaleWorkspaceLockEntries() {
-	const workspaceVersions = new Map(
-		getPublicWorkspacePackages().map((pkg) => [pkg.name, pkg.version]),
-	);
+	const workspaceVersions = new Map(getPublicWorkspacePackages().map((pkg) => [pkg.name, pkg.version]));
 	const lockPath = "package-lock.json";
 	const lock = JSON.parse(readFileSync(lockPath, "utf8"));
 	let removed = 0;
@@ -129,35 +106,18 @@ function removeStaleWorkspaceLockEntries() {
 	}
 }
 
-function stageChangedFiles() {
-	const output = run("git ls-files -m -o -d --exclude-standard", { silent: true });
-	const paths = [...new Set((output || "").split("\n").map((line) => line.trim()).filter(Boolean))];
-	if (paths.length === 0) {
-		return;
-	}
-
-	run(`git add -- ${paths.map(shellQuote).join(" ")}`);
+function stageChangedFiles(allowed) {
+	const paths = execFileSync("git", ["ls-files", "-m", "-o", "-d", "--exclude-standard", "-z"], { encoding: "utf8" })
+		.split("\0")
+		.filter(Boolean);
+	const unexpected = paths.filter((path) => !allowed.has(path));
+	if (unexpected.length)
+		throw new Error(`Unexpected generated changes; review before release: ${unexpected.join(", ")}`);
+	if (paths.length) execFileSync("git", ["add", "--", ...new Set(paths)], { stdio: "inherit" });
 }
 
-function bumpOrSetVersion(target) {
-	const currentVersion = getVersion();
-
-	if (BUMP_TYPES.has(target)) {
-		console.log(`Bumping version (${target})...`);
-		run(`npm run version:${target}`);
-	} else {
-		if (compareVersions(target, currentVersion) <= 0) {
-			console.error(`Error: explicit version ${target} must be greater than current version ${currentVersion}.`);
-			process.exit(1);
-		}
-
-		console.log(`Setting explicit version (${target})...`);
-		run(`npm version ${target} --workspaces --no-git-tag-version --no-workspaces-update && node scripts/sync-versions.js && npm install --package-lock-only --ignore-scripts`);
-	}
-
-	// npm version can temporarily install the previous workspace versions before
-	// sync-versions updates inter-package ranges. Remove those stale lock entries,
-	// refresh the lockfile, then hydrate from the final dependency graph.
+function bumpVersion(target) {
+	run(`npm run version:${target}`);
 	removeStaleWorkspaceLockEntries();
 	run("npm install --package-lock-only --ignore-scripts");
 	run("npm ci --ignore-scripts");
@@ -182,10 +142,7 @@ function updateChangelogsForRelease(version) {
 			continue;
 		}
 
-		const updated = content.replace(
-			"## [Unreleased]",
-			`## [${version}] - ${date}`
-		);
+		const updated = content.replace("## [Unreleased]", `## [${version}] - ${date}`);
 		writeFileSync(changelog, updated);
 		console.log(`  Updated ${changelog}`);
 	}
@@ -199,49 +156,37 @@ function addUnreleasedSection() {
 		const content = readFileSync(changelog, "utf-8");
 
 		// Insert after "# Changelog\n\n"
-		const updated = content.replace(
-			/^(# Changelog\n\n)/,
-			`$1${unreleasedSection}`
-		);
+		const updated = content.replace(/^(# Changelog\n\n)/, `$1${unreleasedSection}`);
 		writeFileSync(changelog, updated);
 		console.log(`  Added [Unreleased] to ${changelog}`);
 	}
 }
 
-// Main flow
-console.log("\n=== Release Script ===\n");
-
-// 1. Check for uncommitted changes
-console.log("Checking for uncommitted changes...");
-const status = run("git status --porcelain", { silent: true });
-if (status && status.trim()) {
-	console.error("Error: Uncommitted changes detected. Commit or stash first.");
-	console.error(status);
-	process.exit(1);
-}
-console.log("  Working directory clean\n");
-
-// 2. Verify npm package registration before modifying the worktree.
+console.log("Validating release source before mutation...");
+const expectedVersion = preflightRelease(RELEASE_TARGET);
 assertPackagesAreRegisteredWithNpm();
 
-// 3. Bump or set version
-const version = bumpOrSetVersion(RELEASE_TARGET);
+// Bump the approved release version
+const version = bumpVersion(RELEASE_TARGET);
+if (version !== expectedVersion) throw new Error("Version generator did not produce the preflighted release version");
+assertPackageVersion(version);
 console.log(`  New version: ${version}\n`);
 
-// 4. Update changelogs
+// Update changelogs
 console.log("Updating CHANGELOG.md files...");
 updateChangelogsForRelease(version);
 console.log();
 
-// 5. Regenerate release artifacts
+// Regenerate release artifacts
 console.log("Regenerating release artifacts...");
-run("npm run generate:models");
+// Catalog updates must be reviewed and merged before release preparation.
+run("npm run hydrate:model-data");
 run("npm run check:model-data");
 run("npm run shrinkwrap:coding-agent");
 run("npm run install-lock:coding-agent");
 console.log();
 
-// 6. Run checks and tests
+// Run checks and tests
 console.log("Running checks...");
 run("npm run check");
 console.log();
@@ -254,28 +199,67 @@ console.log("Running tests...");
 run("./test.sh");
 console.log();
 
-// 7. Commit and tag
+// Commit and tag
 console.log("Committing and tagging...");
-stageChangedFiles();
+const intendedOutputs = new Set([
+	"package.json",
+	"package-lock.json",
+	"packages/coding-agent/npm-shrinkwrap.json",
+	"packages/coding-agent/install-lock/package.json",
+	"packages/coding-agent/install-lock/package-lock.json",
+	...findPackageDirectories().map((directory) => join(directory, "package.json")),
+	...getChangelogs(),
+]);
+run("git diff --check");
+run("git diff --stat");
+run(
+	"git diff -- package.json package-lock.json packages/coding-agent/npm-shrinkwrap.json packages/coding-agent/install-lock",
+);
+if (!process.stdin.isTTY)
+	throw new Error("Review generated diffs in an interactive terminal before committing and pushing");
+const review = createInterface({ input: process.stdin, output: process.stdout });
+try {
+	if (
+		(
+			await review.question(
+				`Review all generated diffs with git diff in another terminal, then type ${version} to commit and push: `,
+			)
+		).trim() !== version
+	)
+		throw new Error("Release review was not confirmed; changes remain local");
+} finally {
+	review.close();
+}
+// Refresh again after the build/review interval, before creating release refs.
+execFileSync("git", ["fetch", "--no-tags", "origin", "+refs/heads/main:refs/remotes/origin/main"], {
+	stdio: "inherit",
+});
+if (
+	execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }) !==
+	execFileSync("git", ["rev-parse", "origin/main"], { encoding: "utf8" })
+)
+	throw new Error("origin/main changed during preparation; review the new main before releasing");
+stageChangedFiles(intendedOutputs);
 run(`git commit -m "Release v${version}"`);
 run(`git tag v${version}`);
 console.log();
 
-// 8. Add new [Unreleased] sections
+// Add new [Unreleased] sections
 console.log("Adding [Unreleased] sections for next cycle...");
 addUnreleasedSection();
 console.log();
 
-// 9. Commit
+// Commit
 console.log("Committing changelog updates...");
-stageChangedFiles();
+stageChangedFiles(new Set(getChangelogs()));
 run(`git commit -m "Add [Unreleased] section for next cycle"`);
 console.log();
 
-// 10. Push
+// Push
 console.log("Pushing to remote...");
-run("git push origin main");
-run(`git push origin v${version}`);
+pushPreparedRelease(`v${version}`);
 console.log();
 
-console.log(`=== Prepared release v${version}; CI publication and Diffex release announcement start after the tag push ===`);
+console.log(
+	`=== Prepared release v${version}; CI publication and Diffex release announcement start after the tag push ===`,
+);

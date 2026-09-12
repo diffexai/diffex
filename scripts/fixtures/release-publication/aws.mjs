@@ -8,7 +8,10 @@ const path = process.env.DIFFEX_PUBLICATION_STORAGE;
 const state = JSON.parse(readFileSync(path, "utf8"));
 const key = value("--key");
 const object = state.objects[key];
-if (state.failure) {
+if (
+	state.failure &&
+	(state.failure !== "PointerFailure" || (args[1] === "put-object" && key === "releases/v1/latest.json"))
+) {
 	console.error(`An error occurred (${state.failure}) when calling the fixture operation: fixture-secret`);
 	process.exit(1);
 }

@@ -1,11 +1,15 @@
 # Stable npm release contract
 
 This contract governs `releases/v1/latest.json`, `releases/v1/releases/<version>.json`, and unauthenticated `GET https://api.diffex.ai/api/latest-version`.
-The CLI monorepo publishes records after checking every public workspace package at its exact version and confirming tarball availability.
+The CLI monorepo publishes records only after downloading every public workspace package at its exact version and comparing the tarball bytes with the retained approved build manifest.
 The public API Worker validates the stored record and projects the public response without querying npm per request.
 The marker means npm-verified stable release availability at publication time.
-The release workflow publishes the GitHub Release after the announcement, so the marker alone does not guarantee publicly available binary assets or their upgrade path.
-Integrity metadata is validated structurally; this contract does not claim that the publisher downloads tarballs and recomputes their digests.
+The approved distribution policy currently enables npm and defers standalone binaries and other installation channels.
+The publisher rejects additional enabled channels until their required public asset verification is implemented.
+This schema remains an npm contract and does not describe binary assets, signatures, install locks, or a cross-channel release manifest.
+The private build manifest binds the release commit, source tree, lockfile, disclosure policy, frozen model data, private source archive, and exact npm tarball sizes, SHA-256 digests, and SHA-512 integrity values.
+Registry verification downloads each canonical npm tarball anonymously, rejects redirects, and recomputes both digests before accepting an existing npm version or advancing release storage.
+The stronger publisher prerequisites add no stored or HTTP fields and require no installed-client update.
 
 ## Stored record
 
@@ -94,9 +98,10 @@ All temporary publisher fixtures are removed after testing, and these checks nee
 
 ## Integration status
 
-Record validation and response projection are defined and tested locally.
-The existing Worker shell continues returning unavailable until R2 reads and lookup outcome mapping are connected.
-The live CLI checker still uses its previous authority and parsing behavior; the strict consumer parser is available for the separately planned endpoint migration.
-Its existing update-note behavior has not been changed by defining a response with no note field.
-There is no deployed R2-to-HTTP-to-CLI E2E path in this change, and fixture tests do not claim deployed routing or live installation readiness.
-The landing application and authenticated Render `/v1` contracts require no change for this contract definition.
+The public Worker serves the fixed R2 latest record, and the CLI consumes the exact canonical version endpoint with a pinned npm installation target.
+The cloud production and staging operations records retain their deployment and route evidence.
+This publisher hardening introduces no Worker deployment or live release publication.
+Command-level publication regressions use controlled npm bytes and intercepted storage operations.
+The unchanged cloud contract fixtures and Worker tests verify consumer compatibility.
+Live publication against actual approved packages remains gated by the separate release authorization and packaging prerequisites.
+The landing application and authenticated Render `/v1` contracts require no change.

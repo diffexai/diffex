@@ -1,0 +1,188 @@
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { basename, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { isDeepStrictEqual } from "node:util";
+import { packReviewedPackage } from "./pack-reviewed-package.mjs";
+import { integrity, sha256 } from "./release-registry.mjs";
+import { getPublicWorkspacePackages } from "./release-packages.mjs";
+import { assertPackageVersion, git, isStableVersion } from "./release-source.mjs";
+
+export function assertEnabledChannels(policy) {
+	if (
+		policy.status !== "approved" ||
+		policy.sourceRepository !== "diffexai/diffex" ||
+		policy.publicRegistry !== "https://registry.npmjs.org" ||
+		policy.publicHosting !== "npmjs" ||
+		policy.channels?.npmjs !== "enable" ||
+		Object.entries(policy.channels).some(([name, value]) => name !== "npmjs" && value !== "defer")
+	)
+		throw new Error(
+			"Unapproved distribution channels: public asset verification must be implemented before enabling another channel",
+		);
+}
+
+function sourceIdentity() {
+	const policyBytes = readFileSync("docs/release/distribution-policy.json");
+	assertEnabledChannels(JSON.parse(policyBytes));
+	return {
+		repository: "diffexai/diffex",
+		commit: git("rev-parse", "HEAD"),
+		tree: git("rev-parse", "HEAD^{tree}"),
+		lockSha256: sha256(readFileSync("package-lock.json")),
+		policySha256: sha256(policyBytes),
+	};
+}
+
+export function readReleaseArtifacts(directory, { version, sourceCommit } = {}) {
+	const manifest = JSON.parse(readFileSync(join(directory, "manifest.json"), "utf8"));
+	const identity = sourceIdentity();
+	if (
+		!/^[a-f0-9]{40}$/.test(identity.commit) ||
+		!isStableVersion(manifest.version) ||
+		manifest.schemaVersion !== 1 ||
+		!isDeepStrictEqual(manifest.source, identity) ||
+		(sourceCommit && identity.commit !== sourceCommit) ||
+		(version && manifest.version !== version)
+	)
+		throw new Error("Artifact source/version conflicts with the checked release commit and inputs");
+	const packages = assertPackageVersion(manifest.version);
+	if (
+		!Array.isArray(manifest.packages) ||
+		manifest.packages.length !== packages.length ||
+		new Set(manifest.packages.map((pkg) => pkg.name)).size !== packages.length
+	)
+		throw new Error("Artifact inventory must contain every public package exactly once");
+	for (const pkg of packages) {
+		const artifact = manifest.packages.find((artifact) => artifact.name === pkg.name);
+		if (
+			!artifact ||
+			artifact.version !== pkg.version ||
+			artifact.filename !== `${pkg.name.replace("@", "").replace("/", "-")}-${pkg.version}.tgz` ||
+			!/^[a-f0-9]{64}$/.test(artifact.sha256) ||
+			!/^sha512-[A-Za-z0-9+/]{86}==$/.test(artifact.integrity) ||
+			!Number.isSafeInteger(artifact.size) ||
+			artifact.size <= 0
+		)
+			throw new Error(`Invalid approved artifact: ${pkg.name}`);
+		{
+			const bytes = readFileSync(join(directory, artifact.filename));
+			if (
+				bytes.length !== artifact.size ||
+				sha256(bytes) !== artifact.sha256 ||
+				integrity(bytes) !== artifact.integrity
+			)
+				throw new Error(`Retained tarball identity mismatch: ${pkg.name}`);
+		}
+	}
+	if (
+		manifest.snapshot?.filename !== "source.tar.gz" ||
+		!/^[a-f0-9]{64}$/.test(manifest.snapshot.sha256) ||
+		!Array.isArray(manifest.modelData) ||
+		!manifest.modelData.length
+	)
+		throw new Error("Missing frozen source/model snapshot");
+	if (sha256(readFileSync(join(directory, "source.tar.gz"))) !== manifest.snapshot.sha256)
+		throw new Error("Frozen source snapshot integrity mismatch");
+	const inputs = JSON.parse(readFileSync(join(directory, "inputs.json"), "utf8"));
+	const { schemaVersion, packages: artifacts, ...recordedInputs } = manifest;
+	if (!isDeepStrictEqual(inputs, recordedInputs))
+		throw new Error("Approved manifest differs from the frozen build inputs");
+	return manifest;
+}
+
+function modelSnapshot() {
+	const modelRoot = "packages/ai/src/providers/data";
+	return readdirSync(modelRoot)
+		.filter((file) => file.endsWith(".json"))
+		.sort()
+		.map((file) => ({ path: `${modelRoot}/${file}`, sha256: sha256(readFileSync(join(modelRoot, file))) }));
+}
+
+export function freezeReleaseInputs(directory) {
+	if (existsSync(directory))
+		throw new Error("Artifact directory already exists; verify and reuse it instead of rebuilding");
+	if (git("status", "--porcelain", "--untracked-files=all"))
+		throw new Error("Artifact preparation requires clean tracked source and no untracked files");
+	const source = sourceIdentity();
+	const version = getPublicWorkspacePackages()[0]?.version;
+	assertPackageVersion(version);
+	if (process.env.DIFFEX_SOURCE_COMMIT && process.env.DIFFEX_SOURCE_COMMIT !== source.commit)
+		throw new Error("Build source differs from resolved release commit");
+	mkdirSync(directory, { recursive: true });
+	const modelData = modelSnapshot();
+	execFileSync(
+		"bash",
+		[
+			"scripts/create-source-archive.sh",
+			"--version",
+			version,
+			"--ref",
+			source.commit,
+			"--out",
+			resolve(directory, "source.tar.gz"),
+		],
+		{ stdio: "inherit" },
+	);
+	const inputs = {
+		version,
+		source,
+		modelData,
+		snapshot: { filename: "source.tar.gz", sha256: sha256(readFileSync(join(directory, "source.tar.gz"))) },
+		toolchain: {
+			node: process.version,
+			npm: execFileSync("npm", ["--version"], { encoding: "utf8" }).trim(),
+			platform: process.platform,
+			arch: process.arch,
+		},
+	};
+	writeFileSync(join(directory, "inputs.json"), `${JSON.stringify(inputs, null, 2)}\n`, { flag: "wx" });
+	return inputs;
+}
+
+export function prepareReleaseArtifacts(directory) {
+	if (!existsSync(directory)) freezeReleaseInputs(directory);
+	if (existsSync(join(directory, "manifest.json")))
+		throw new Error("Approved artifacts already exist; never repack a published version");
+	const inputs = JSON.parse(readFileSync(join(directory, "inputs.json"), "utf8"));
+	if (
+		!isDeepStrictEqual(inputs.source, sourceIdentity()) ||
+		!isDeepStrictEqual(inputs.modelData, modelSnapshot()) ||
+		sha256(readFileSync(join(directory, "source.tar.gz"))) !== inputs.snapshot.sha256
+	)
+		throw new Error("Frozen release inputs changed during the build");
+	const packages = assertPackageVersion(inputs.version);
+	const artifacts = packages.map((pkg) => {
+		const packed = packReviewedPackage(pkg, directory);
+		const bytes = readFileSync(packed.file);
+		return {
+			name: pkg.name,
+			version: inputs.version,
+			filename: basename(packed.file),
+			size: bytes.length,
+			sha256: packed.sha256,
+			integrity: integrity(bytes),
+		};
+	});
+	if (git("diff", "--name-only", "HEAD") || !isDeepStrictEqual(inputs.modelData, modelSnapshot()))
+		throw new Error("Build or packing changed release inputs");
+	const manifest = { schemaVersion: 1, ...inputs, packages: artifacts };
+	writeFileSync(join(directory, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, { flag: "wx" });
+	return readReleaseArtifacts(directory);
+}
+
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
+	const [command, directory] = process.argv.slice(2);
+	if (!directory || !["freeze", "prepare", "verify"].includes(command))
+		throw new Error("Usage: node scripts/release-artifacts.mjs <freeze|prepare|verify> DIRECTORY");
+	const manifest =
+		command === "freeze"
+			? freezeReleaseInputs(directory)
+			: command === "prepare"
+				? prepareReleaseArtifacts(directory)
+				: readReleaseArtifacts(directory, {
+						sourceCommit: process.env.DIFFEX_SOURCE_COMMIT,
+						version: process.env.RELEASE_TAG?.slice(1),
+					});
+	console.log(`Verified ${manifest.packages?.length ?? 0} retained artifacts for ${manifest.source.commit}`);
+}
