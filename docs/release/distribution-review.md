@@ -86,6 +86,52 @@ The tests also prove that reset changelogs block packing before registry queries
 The CLI quality gate, full isolated `./test.sh` suite, and focused changelog/config/version tests passed; the cloud quality gate and shared release contract checker passed.
 All eleven build directories passed the approved-input preparation check before final packing.
 The runtime checksum inventory also covers the TUI native prebuilds.
-Final acceptance must retain the regenerated changelog revision, actual eleven-package tarball hashes and file inventories, isolated installation/startup results, and private source-archive validation.
+Local artifact acceptance completed for source commit `196a385b4c24210522b50a6037355f1ef617545c` after `/cl` regeneration.
 Anonymous public download acceptance follows separately authorized npm publication and is not claimed by local fixtures.
 No npm packages, release records, deployments, sessions, or provider sandboxes have been published or created by this implementation.
+
+## Recorded local artifact acceptance
+
+Validation ran on Darwin arm64 with Node 22.19.0, npm 10.9.3, and Bun 1.3.11.
+The candidate version is 0.2.0; these artifacts were not published.
+The following commands completed successfully:
+
+```sh
+npm run check
+./test.sh
+node scripts/prepare-candidate-artifacts.mjs '/tmp/diffex npm distribution candidate'
+python3 scripts/verify-candidate-artifacts.py '/tmp/diffex npm distribution candidate'
+./scripts/create-source-archive.sh --version 0.2.0 --ref 196a385b4c24210522b50a6037355f1ef617545c --out /tmp/diffex-private-source-0.2.0.tar.gz
+```
+
+All eleven actual tarballs passed final-byte source, notice, component, runtime-hash, and identity inspection.
+Both isolated package-manager installations resolved all eleven local tarball identities, and every package entrypoint imported successfully with outbound sockets blocked.
+The installed CLI passed help, version, auth help, model listing, fixture inference, interactive prompt/reply, account-menu inspection, and clean exit in both installations.
+The fixture intercepted release discovery and inference; it did not authenticate a real account or invoke a real model provider.
+Native execution on other operating systems or architectures is not established by this host's results.
+The test homes and processes were cleaned up, and the temporary package installation directories were removed after retaining evidence.
+
+A rebuild from the committed source reproduced the exact runtime and generated metadata bytes in all eleven inspected tarballs.
+It retained 1,216 source maps under the matching commit in private debug storage.
+The runtime inventories cover 1,269 files, including four project-owned native prebuilds.
+The full source archive passed its independent required-file and model-snapshot checks.
+Its SHA-256 is `cd734c1ec4606c68f72c50e62c65554f9f3c36ff814b87eef378793bdf685f78`; it remains a private build input.
+
+The local evidence directory is `.artifacts/distribution-acceptance/196a385b4c24210522b50a6037355f1ef617545c/`.
+It retains the checked tarballs, full payload inventories, embedded manifest, command logs, terminal results, package import results, and environment identity.
+CI uses private workflow artifacts for its equivalent evidence.
+The following SHA-256 values cover the complete local tarballs:
+
+| Package | SHA-256 |
+| --- | --- |
+| `@diffexai/diffex-agent-core@0.2.0` | `14cc1d808e2a17e601758fa856f6aafe03a3d1ba7fab6f17aee6367188c957ca` |
+| `@diffexai/diffex-ai@0.2.0` | `307209b097f0ca349256de98b44555576c215a7dba9ca6e11a1ff318fb06e8bc` |
+| `@diffexai/diffex-client@0.2.0` | `d3ce06054506433edb3c7abec849f4bc9bdb3c83067b3dc08bf0e478557c9216` |
+| `@diffexai/diffex@0.2.0` | `97b327ac33c04e0dcabc4732f47ee72d0e98980c4a59cdd836d02dcb00c79260` |
+| `@diffexai/diffex-coding-agent-server@0.2.0` | `b7bf6181137f35bc0c119da969ffc26425756161547bc86654a782f2703ba7a5` |
+| `@diffexai/diffex-harness-state@0.2.0` | `b8eda020f0fb6449ea6cdac1e359b102318f0871317cef827b27dfafa2e2452f` |
+| `@diffexai/diffex-protocol@0.2.0` | `a9cd8f3983982d683f7c2a33c7dba96958234973abaca1533267daee1f8da706` |
+| `@diffexai/diffex-server@0.2.0` | `788a04fbeee68260b62da9c0dd2844422069117043d2940582543afad4f462ac` |
+| `@diffexai/diffex-session-backend-sqlite-node@0.2.0` | `647b5c93973f46d4be3f791bf1a8d6c5e08fc54309ec73d9a450abe1d27f9c67` |
+| `@diffexai/diffex-telemetry@0.2.0` | `d7d0d4478c38a4e521c3960833498fbb3a7d9e7658073a51f4938c46739ad657` |
+| `@diffexai/diffex-tui@0.2.0` | `55fd31269758777f6603709b343592370de3a67b37b3229727a358ec83fabe9c` |
