@@ -1,3 +1,4 @@
+import { isolatedEnvironment } from "./artifact-acceptance.mjs";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -34,7 +35,11 @@ for (const [consumer, command, args] of [
 		join(out, consumer, "package.json"),
 		JSON.stringify({ private: true, type: "module", dependencies, overrides: dependencies }, null, 2) + "\n",
 	);
-	execFileSync(command, args, { cwd: join(out, consumer), stdio: "inherit" });
+	execFileSync(command, args, {
+		cwd: join(out, consumer),
+		env: isolatedEnvironment(join(out, consumer)),
+		stdio: "inherit",
+	});
 	for (const pkg of packages) {
 		const installed = resolve(out, consumer, "node_modules", pkg.name, "package.json");
 		const info = JSON.parse(readFileSync(installed, "utf8"));

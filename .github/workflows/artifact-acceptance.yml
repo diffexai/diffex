@@ -1,0 +1,56 @@
+name: Artifact Acceptance
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: artifact-acceptance-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    outputs:
+      commit: ${{ steps.source.outputs.commit }}
+    steps:
+      - name: Checkout candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Resolve candidate commit
+        id: source
+        run: echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22.19.0'
+      - name: Install pinned npm and locked dependencies
+        run: |
+          npm install -g npm@11.16.0 --ignore-scripts
+          npm ci --ignore-scripts
+      - name: Freeze and build reviewed candidate artifacts
+        run: |
+          npm run hydrate:model-data
+          node scripts/release-artifacts.mjs freeze .artifacts/release
+          npm run build:offline
+          node scripts/release-artifacts.mjs prepare .artifacts/release
+      - name: Retain exact private release bytes
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: private-release-${{ steps.source.outputs.commit }}
+          path: .artifacts/release/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+
+  native-acceptance:
+    needs: prepare
+    uses: ./.github/workflows/native-artifact-acceptance.yml
+    with:
+      source_commit: ${{ needs.prepare.outputs.commit }}

@@ -203,3 +203,5 @@ If the user's instructions conflict with any rule in this document, ask for expl
 - 2026-09-12: Release preflight treated the private monorepo version as the public lockstep version -> Derive release identity from public workspaces and test against the actual repository inventory.
 
 - 2026-09-12: A shell commit body retained a literal newline escape -> Write multiline commit and PR text to a file and pass the file to Git or GitHub CLI.
+
+- 2026-09-12: Artifact smoke assumed an Agent mutator and reusable old consumers -> Check installed public API types, create fresh consumers, and retain failed acceptance with verified cleanup.

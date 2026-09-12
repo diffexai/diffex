@@ -17,6 +17,9 @@ test("derives all public packages and excludes source from upload assets", () =>
 	assert(!manifest.publicAssets.some((name) => name.includes("source")));
 	assert.equal(manifest.source.commit, "a".repeat(40));
 	assert.equal(manifest.disclosurePolicy.status, "pending-owner-review");
+	assert.deepEqual(manifest.binaryPlatforms, []);
+	assert.deepEqual(manifest.npmPlatforms.slice().sort(), ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64"]);
+	assert.deepEqual(manifest.deferredNpmPlatforms, ["windows-x64", "windows-arm64"]);
 });
 
 test("rejects incomplete, private, duplicate, and mixed-version package inventories", () => {

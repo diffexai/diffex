@@ -1,6 +1,6 @@
 import os, sys, json, subprocess, tempfile, shutil, pathlib, pty, select, time, re, fcntl, termios, struct
 
-if len(sys.argv) != 2:
+if len(sys.argv) not in (2, 3):
     raise SystemExit(
         "Usage: python3 scripts/verify-candidate-artifacts.py ARTIFACT_DIRECTORY"
     )
@@ -12,9 +12,12 @@ executables = {
     "node": str(out / "node/node_modules/.bin/diffex"),
     "bun-install": str(out / "bun-install/node_modules/.bin/diffex"),
 }
+if len(sys.argv) == 3:
+    executables = {"consumer": str(pathlib.Path(sys.argv[2]).resolve() / "node_modules/.bin/diffex")}
 results = []
 for runtime, exe in executables.items():
-    root = pathlib.Path(tempfile.mkdtemp(prefix="diffex-handoff-smoke-"))
+    root = pathlib.Path(tempfile.mkdtemp(prefix="diffex artifact terminal "))
+    fixture = None
     try:
         for d in ["home", "agent", "project"]:
             (root / d).mkdir()
@@ -35,7 +38,9 @@ for runtime, exe in executables.items():
             json.dumps({"theme": "dark", "packages": []})
         )
         (root / "events.jsonl").write_text("")
-        fixture = root / "fixture.ts"
+        fixture_fd, fixture_path = tempfile.mkstemp(prefix="artifact-fixture-", suffix=".mjs", dir=pathlib.Path(exe).parent.parent.parent)
+        os.close(fixture_fd)
+        fixture = pathlib.Path(fixture_path)
         shutil.copyfile(fixture_source, fixture)
         args = [
             exe,
@@ -169,6 +174,8 @@ for runtime, exe in executables.items():
                     pass
                 os.waitpid(pid, 0)
     finally:
+        if fixture is not None:
+            fixture.unlink(missing_ok=True)
         shutil.rmtree(root)
         assert not root.exists()
 (out / "smoke.json").write_text(json.dumps(results, indent=2) + "\n")

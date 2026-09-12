@@ -126,8 +126,17 @@ jobs:
           include-hidden-files: true
           retention-days: 90
 
-  publish-npm:
+  native-acceptance:
     needs: [resolve-source, prepare-artifacts]
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/native-artifact-acceptance.yml
+    with:
+      source_commit: ${{ needs.resolve-source.outputs.commit }}
+
+  publish-npm:
+    needs: [resolve-source, prepare-artifacts, native-acceptance]
     runs-on: ubuntu-latest
     environment: npm-publish
     permissions:

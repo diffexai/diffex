@@ -1,0 +1,55 @@
+name: Native Artifact Acceptance
+
+on:
+  workflow_call:
+    inputs:
+      source_commit:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  accept:
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm, macos-15, macos-15-intel]
+    runs-on: ${{ matrix.runner }}
+    env:
+      DIFFEX_SOURCE_COMMIT: ${{ inputs.source_commit }}
+    steps:
+      - name: Checkout exact artifact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source_commit }}
+          persist-credentials: false
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22.19.0'
+      - name: Setup Bun package manager
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: '1.3.11'
+      - name: Install pinned npm
+        run: npm install -g npm@11.16.0 --ignore-scripts
+      - name: Download exact retained tarballs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run download "$GITHUB_RUN_ID" --repo diffexai/diffex --name "private-release-$DIFFEX_SOURCE_COMMIT" --dir .artifacts/release
+      - name: Verify frozen source and archive bytes
+        run: node scripts/release-artifacts.mjs verify .artifacts/release
+      - name: Accept all packages and process boundaries outside the workspace
+        run: node scripts/artifact-acceptance.mjs .artifacts/release .artifacts/acceptance
+      - name: Retain private native acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: native-acceptance-${{ matrix.runner }}-${{ inputs.source_commit }}
+          path: .artifacts/acceptance/
+          if-no-files-found: error
+          retention-days: 90

@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 
+import { acceptArtifacts, isolatedEnvironment } from "./artifact-acceptance.mjs";
 import { getPublicWorkspacePackages } from "./release-packages.mjs";
 import { packReviewedPackage } from "./pack-reviewed-package.mjs";
 import { assertChangelogsReady } from "./prepare-distribution.mjs";
@@ -83,6 +84,7 @@ function run(command, args, options = {}) {
 	console.log(`$ ${[command, ...args].join(" ")}`);
 	const result = spawnSync(command, args, {
 		cwd: options.cwd,
+		env: options.env,
 		encoding: "utf8",
 		shell: process.platform === "win32",
 		stdio: options.capture ? ["inherit", "pipe", "inherit"] : "inherit",
@@ -180,12 +182,18 @@ if (!options.skipTest) {
 }
 
 const tarballs = new Map();
+const records = [];
 for (const pkg of packages) {
-	const { file: tarball } = packReviewedPackage(pkg, tarballDirectory);
+	const packed = packReviewedPackage(pkg, tarballDirectory);
+	const tarball = packed.file;
+	records.push({ name: pkg.name, version: pkg.version, filename: tarball.split(/[\\/]/).pop(), sha256: packed.sha256 });
 	tarballs.set(pkg.name, tarball);
 }
 
+writeFileSync(join(outDir, "manifest.json"), `${JSON.stringify(records, null, 2)}\n`);
+
 if (!options.skipInstall) {
+	acceptArtifacts(outDir, join(outDir, "acceptance"), { managers: options.skipBunInstall ? ["npm"] : ["npm", "bun"] });
 	// Standalone compilation is deliberately excluded by the approved policy.
 
 	mkdirSync(nodeInstallDirectory, { recursive: true });
@@ -195,7 +203,10 @@ if (!options.skipInstall) {
 	const installPackageJson = `${JSON.stringify({ private: true, dependencies, overrides: dependencies }, undefined, "\t")}\n`;
 	writeFileSync(join(nodeInstallDirectory, "package.json"), installPackageJson);
 
-	run("npm", ["install", "--omit=dev", "--ignore-scripts"], { cwd: nodeInstallDirectory });
+	run("npm", ["install", "--omit=dev", "--ignore-scripts"], {
+		cwd: nodeInstallDirectory,
+		env: isolatedEnvironment(nodeInstallDirectory),
+	});
 	createDiffexShim(nodeInstallDirectory);
 
 	if (!options.skipBunInstall) {
@@ -210,7 +221,10 @@ if (!options.skipInstall) {
 			join(bunInstallDirectory, "package.json"),
 			`${JSON.stringify({ private: true, dependencies: bunDependencies, overrides: bunDependencies }, undefined, "\t")}\n`,
 		);
-		run("bun", ["install", "--production", "--ignore-scripts"], { cwd: bunInstallDirectory });
+		run("bun", ["install", "--production", "--ignore-scripts"], {
+			cwd: bunInstallDirectory,
+			env: isolatedEnvironment(bunInstallDirectory),
+		});
 		createDiffexShim(bunInstallDirectory);
 	}
 }
