@@ -88,7 +88,7 @@ All eleven build directories passed the approved-input preparation check before 
 The runtime checksum inventory also covers the TUI native prebuilds.
 Local artifact acceptance completed for source commit `196a385b4c24210522b50a6037355f1ef617545c` after `/cl` regeneration.
 Anonymous public download acceptance follows separately authorized npm publication and is not claimed by local fixtures.
-No npm packages, release records, deployments, sessions, or provider sandboxes have been published or created by this implementation.
+This implementation did not publish npm packages or create production release records, deployments, hosted sessions, or provider sandboxes.
 
 ## Recorded local artifact acceptance
 
