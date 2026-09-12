@@ -1,0 +1,45 @@
+{
+  "status": "approved",
+  "sourceRepository": "diffexai/diffex",
+  "readableJavaScript": "allow-for-all-eleven-public-packages",
+  "declarations": "allow",
+  "typeScriptExamples": "exclude",
+  "nativeSources": "exclude-subject-to-redistribution-review",
+  "vendoredWorkspaces": {
+    "evolution": "allow-runtime-JavaScript-and-declarations",
+    "harness-trace": "allow-runtime-JavaScript-and-declarations"
+  },
+  "sourceMaps": "exclude-including-inline-and-embedded-sourcesContent",
+  "channels": {
+    "npmjs": "enable",
+    "standalone": "defer",
+    "python": "defer",
+    "homebrew": "defer",
+    "scoop": "defer",
+    "winget": "defer",
+    "chocolatey": "defer",
+    "nix": "defer",
+    "osPackages": "defer",
+    "githubPackages": "defer",
+    "interactiveContainer": "defer"
+  },
+  "approval": {
+    "date": "2026-09-12",
+    "authority": "owner explicit approval in implementation conversation"
+  },
+  "standaloneDeferral": "Bun static runtime redistribution and native dependency source/object review must be completed before enabling standalone publication.",
+  "approvedRuntimeAssets": [
+    "compiled JavaScript from public workspace src inputs",
+    "declarations from those inputs",
+    "evolution and harness-trace compiled runtime and declarations in CLI dist/vendor",
+    "HTML export templates and their reviewed marked/highlight.js bundles",
+    "runtime theme and model JSON",
+    "SQLite migration SQL",
+    "documentation including inline examples",
+    "Diffex-owned TUI native prebuilds using system APIs"
+  ],
+  "publicHosting": "npmjs",
+  "publicRegistry": "https://registry.npmjs.org",
+  "immutableTarballUrl": "https://registry.npmjs.org/<PACKAGE>/-/<UNSCOPED_NAME>-<VERSION>.tgz",
+  "verification": "npm dist.integrity verifies complete tarball bytes against registry metadata; distribution-files.json records SHA-256 for approved runtime files"
+}

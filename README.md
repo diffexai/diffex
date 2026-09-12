@@ -46,6 +46,16 @@ Use `./diffex-test.sh` to run the Diffex-branded coding agent directly from this
 | [`packages/coding-agent`](packages/coding-agent) | Interactive coding-agent CLI and extension system. |
 | [`packages/evals`](packages/evals) | Evaluation utilities and scenarios. |
 
+## Distribution policy
+
+The source repository remains private.
+The approved release channel is the eleven public npm packages, including `@diffexai/diffex`.
+Standalone archives, Python, secondary package registries, and interactive CLI containers are deferred.
+Public packages include readable JavaScript and declarations, with Apache-2.0 metadata and complete applicable upstream notices.
+They exclude source maps, TypeScript examples, and native source build files.
+Delivered implementation code remains inspectable; private source hosting and compilation do not guarantee confidentiality.
+See the [distribution review](docs/release/distribution-review.md) for exact scope and release prerequisites.
+
 ## Local Setup
 
 Diffex requires Node.js 22.19 or newer and npm.

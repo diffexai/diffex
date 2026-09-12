@@ -45,7 +45,12 @@
 	},
 	"files": [
 		"dist",
-		"README.md"
+		"README.md",
+		"LICENSE",
+		"NOTICE",
+		"THIRD-PARTY-NOTICES.txt",
+		"distribution-components.json",
+		"distribution-files.json"
 	],
 	"scripts": {
 		"clean": "shx rm -rf dist",
@@ -57,7 +62,8 @@
 		"build": "npm run generate-models && npm run build:offline",
 		"build:offline": "npm run check:model-data && tsgo -p tsconfig.build.json && shx rm -rf dist/providers/data && shx cp -r src/providers/data dist/providers/data",
 		"test": "vitest --run",
-		"prepublishOnly": "npm run clean && npm run build"
+		"prepublishOnly": "npm run clean && npm run build",
+		"prepack": "node ../../scripts/prepare-distribution.mjs packages/ai"
 	},
 	"dependencies": {
 		"@anthropic-ai/sdk": "0.91.1",
@@ -84,7 +90,7 @@
 		"api"
 	],
 	"author": "Mario Zechner",
-	"license": "MIT",
+	"license": "Apache-2.0",
 	"repository": {
 		"type": "git",
 		"url": "git+https://github.com/diffexai/diffex.git",

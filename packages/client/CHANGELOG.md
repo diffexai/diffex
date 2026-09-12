@@ -2,12 +2,10 @@
 
 ## [Unreleased]
 
-## [0.84.0] - 2026-08-06
-
 ### Breaking Changes
 
-- Replaced `SessionSummary` with durable `SessionMetadata` for `PiClient.listSessions()` and server snapshots; runtime state is available only from acquired session snapshots ([#7708](https://github.com/earendil-works/pi/pull/7708)).
+- Renamed the package to `@diffexai/diffex-client`; update dependencies and imports to the Diffex namespace.
 
 ### Added
 
-- Added the experimental transport-neutral `PiClient` and multi-session `PiSessionHandle` APIs with structured `PiServerError` responses.
+- Added experimental `DiffexClient` remote-session control with transport-neutral, Unix-socket, WebSocket, and authenticated cloud transport helpers ([#112](https://github.com/diffexai/diffex/pull/112) by [@jefft72](https://github.com/jefft72), [#113](https://github.com/diffexai/diffex/pull/113) by [@jefft72](https://github.com/jefft72)).

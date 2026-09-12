@@ -1,24 +1,15 @@
 #!/usr/bin/env node
 
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 
-const packages = [
-	{ directory: "packages/harness-state", name: "@diffexai/diffex-harness-state" },
-	{ directory: "packages/telemetry", name: "@diffexai/diffex-telemetry" },
-	{ directory: "packages/ai", name: "@diffexai/diffex-ai" },
-	{ directory: "packages/tui", name: "@diffexai/diffex-tui" },
-	{ directory: "packages/agent", name: "@diffexai/diffex-agent-core" },
-	{ directory: "packages/protocol", name: "@diffexai/diffex-protocol" },
-	{ directory: "packages/client", name: "@diffexai/diffex-client" },
-	{ directory: "packages/session-backends/sqlite-node", name: "@diffexai/diffex-session-backend-sqlite-node" },
-	{ directory: "packages/server", name: "@diffexai/diffex-server" },
-	{ directory: "packages/coding-agent", name: "@diffexai/diffex" },
-];
+import { getPublicWorkspacePackages } from "./release-packages.mjs";
+import { packReviewedPackage } from "./pack-reviewed-package.mjs";
+import { assertChangelogsReady } from "./prepare-distribution.mjs";
 
-const privateBuildPackages = [{ directory: "packages/harness-trace" }];
+const packages = getPublicWorkspacePackages();
 
 function printUsage() {
 	console.log(`Usage: node scripts/local-release.mjs [options]
@@ -144,35 +135,6 @@ function fileSpecifier(fromDirectory, file) {
 	return `file:${relativePath.startsWith(".") ? relativePath : `./${relativePath}`}`;
 }
 
-function currentBinaryPlatform() {
-	if (process.platform === "win32") return process.arch === "arm64" ? "windows-arm64" : "windows-x64";
-	if (process.platform === "darwin") return process.arch === "arm64" ? "darwin-arm64" : "darwin-x64";
-	if (process.platform === "linux") return process.arch === "arm64" ? "linux-arm64" : "linux-x64";
-	throw new Error(`Unsupported binary platform: ${process.platform} ${process.arch}`);
-}
-
-function buildBunBinaryRelease(targetDirectory, archiveDirectory) {
-	if (!commandExists("bun")) {
-		throw new Error("Bun is required for the local binary release build.");
-	}
-	const platform = currentBinaryPlatform();
-	const binaryBuildDirectory = join(archiveDirectory, "binary-build");
-	run("./scripts/build-binaries.sh", [
-		"--skip-install",
-		"--skip-deps",
-		"--skip-build",
-		"--platform",
-		platform,
-		"--out",
-		binaryBuildDirectory,
-	]);
-	rmSync(targetDirectory, { force: true, recursive: true });
-	cpSync(join(binaryBuildDirectory, platform), targetDirectory, { recursive: true });
-	const archiveName = platform.startsWith("windows-") ? `diffex-${platform}.zip` : `diffex-${platform}.tar.gz`;
-	cpSync(join(binaryBuildDirectory, archiveName), join(archiveDirectory, archiveName));
-	return platform;
-}
-
 function createDiffexShim(installDirectory) {
 	const binDirectory = join(installDirectory, "node_modules", ".bin");
 	if (process.platform === "win32") {
@@ -188,21 +150,8 @@ function createDiffexShim(installDirectory) {
 	symlinkSync(join("node_modules", ".bin", "diffex"), join(installDirectory, "diffex"));
 }
 
-function packPackage(pkg, tarballDirectory) {
-	const packageJson = readPackageJson(pkg.directory);
-	if (packageJson.name !== pkg.name) {
-		throw new Error(`${pkg.directory}/package.json has name ${packageJson.name}, expected ${pkg.name}`);
-	}
-
-	const output = run("npm", ["pack", "--json", "--pack-destination", tarballDirectory], {
-		capture: true,
-		cwd: pkg.directory,
-	});
-	const packed = JSON.parse(output)[0];
-	return join(tarballDirectory, packed.filename);
-}
-
 const options = parseArgs();
+assertChangelogsReady();
 const repoRoot = process.cwd();
 const rootPackageJson = readPackageJson(repoRoot);
 
@@ -214,7 +163,6 @@ const outDir = prepareOutputDirectory(options, repoRoot);
 const tarballDirectory = join(outDir, "tarballs");
 const nodeInstallDirectory = join(outDir, "node");
 const bunInstallDirectory = join(outDir, "bun-install");
-const binaryDirectory = join(outDir, "bun");
 mkdirSync(tarballDirectory, { recursive: true });
 
 // Release artifacts always use a freshly generated, strictly validated catalog,
@@ -225,10 +173,7 @@ if (!options.skipCheck) {
 	run("npm", ["run", "check"], { cwd: repoRoot });
 }
 
-for (const pkg of [...privateBuildPackages, ...packages]) {
-	run("npm", ["run", "clean"], { cwd: pkg.directory });
-	run("npm", ["run", pkg.directory === "packages/ai" ? "build:offline" : "build"], { cwd: pkg.directory });
-}
+run("npm", ["run", "build:offline"], { cwd: repoRoot });
 
 if (!options.skipTest) {
 	run("./test.sh", [], { cwd: repoRoot });
@@ -236,13 +181,12 @@ if (!options.skipTest) {
 
 const tarballs = new Map();
 for (const pkg of packages) {
-	const tarball = packPackage(pkg, tarballDirectory);
+	const { file: tarball } = packReviewedPackage(pkg, tarballDirectory);
 	tarballs.set(pkg.name, tarball);
 }
 
-let binaryPlatform;
 if (!options.skipInstall) {
-	binaryPlatform = buildBunBinaryRelease(binaryDirectory, outDir);
+	// Standalone compilation is deliberately excluded by the approved policy.
 
 	mkdirSync(nodeInstallDirectory, { recursive: true });
 	const dependencies = Object.fromEntries(
@@ -262,7 +206,10 @@ if (!options.skipInstall) {
 		const bunDependencies = Object.fromEntries(
 			packages.map((pkg) => [pkg.name, fileSpecifier(bunInstallDirectory, tarballs.get(pkg.name))]),
 		);
-		writeFileSync(join(bunInstallDirectory, "package.json"), `${JSON.stringify({ private: true, dependencies: bunDependencies, overrides: bunDependencies }, undefined, "\t")}\n`);
+		writeFileSync(
+			join(bunInstallDirectory, "package.json"),
+			`${JSON.stringify({ private: true, dependencies: bunDependencies, overrides: bunDependencies }, undefined, "\t")}\n`,
+		);
 		run("bun", ["install", "--production", "--ignore-scripts"], { cwd: bunInstallDirectory });
 		createDiffexShim(bunInstallDirectory);
 	}
@@ -276,12 +223,6 @@ for (const tarball of tarballs.values()) {
 }
 
 if (!options.skipInstall) {
-	console.log("\nLocal Bun binary release:");
-	console.log(`  ${binaryDirectory}`);
-	console.log(`  ${join(outDir, `diffex-${binaryPlatform}.${String(binaryPlatform).startsWith("windows-") ? "zip" : "tar.gz"}`)}`);
-	console.log("\nRun the local Bun binary release from outside the repository:");
-	console.log(`  ${join(binaryDirectory, String(binaryPlatform).startsWith("windows-") ? "diffex.exe" : "diffex")} --help`);
-
 	console.log("\nIsolated npm install:");
 	console.log(`  ${nodeInstallDirectory}`);
 	console.log("\nRun the locally packed npm CLI from outside the repository:");

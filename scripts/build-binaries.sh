@@ -25,6 +25,9 @@
 
 set -euo pipefail
 
+echo "Standalone distribution is deferred pending the Bun and native redistribution review." >&2
+exit 1
+
 cd "$(dirname "$0")/.."
 
 SKIP_INSTALL=false

@@ -1,0 +1,27 @@
+{
+  "highlight-11.9.0.LICENSE": [
+    "highlightjs/highlight.js",
+    "f47103d4f1ac1592c56904574d1fbf5bf2475605",
+    "LICENSE"
+  ],
+  "entities-2.1.0.LICENSE": [
+    "nodable/val-parsers",
+    "f1c61a65e7b967c17b13822ef71e91bd25f17ce2",
+    "LICENSE"
+  ],
+  "data-uri-to-buffer-4.0.1.LICENSE": [
+    "TooTallNate/node-data-uri-to-buffer",
+    "85cd8c854aefbf1bb636789d80364cfac8ea1583",
+    "README.md"
+  ],
+  "xml-naming-0.1.0.LICENSE": [
+    "NaturalIntelligence/xml-naming",
+    "0330d0cfa57ee483a834c474b2d0a4f0449ee81d",
+    "LICENSE"
+  ],
+  "bun-1.3.14.LICENSE": [
+    "oven-sh/bun",
+    "bun-v1.3.14",
+    "LICENSE.md"
+  ]
+}

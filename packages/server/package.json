@@ -26,7 +26,12 @@
 	"files": [
 		"dist",
 		"README.md",
-		"CHANGELOG.md"
+		"CHANGELOG.md",
+		"LICENSE",
+		"NOTICE",
+		"THIRD-PARTY-NOTICES.txt",
+		"distribution-components.json",
+		"distribution-files.json"
 	],
 	"scripts": {
 		"clean": "shx rm -rf dist",
@@ -34,14 +39,15 @@
 		"build": "tsgo -p tsconfig.build.json",
 		"test": "vitest --run",
 		"typecheck": "tsgo -p tsconfig.test.json",
-		"prepublishOnly": "npm run clean && npm run build"
+		"prepublishOnly": "npm run clean && npm run build",
+		"prepack": "node ../../scripts/prepare-distribution.mjs packages/server"
 	},
 	"keywords": [
 		"diffex",
 		"server"
 	],
 	"author": "DiffexAI",
-	"license": "MIT",
+	"license": "Apache-2.0",
 	"repository": {
 		"type": "git",
 		"url": "git+https://github.com/diffexai/diffex.git",

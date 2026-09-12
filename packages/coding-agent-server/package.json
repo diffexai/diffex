@@ -5,17 +5,35 @@
 	"type": "module",
 	"main": "./dist/index.js",
 	"types": "./dist/index.d.ts",
-	"bin": { "diffex-runtime-server": "./dist/cli.js" },
-	"exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
-	"files": ["dist", "README.md"],
+	"bin": {
+		"diffex-runtime-server": "./dist/cli.js"
+	},
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		}
+	},
+	"files": [
+		"dist",
+		"README.md",
+		"LICENSE",
+		"NOTICE",
+		"THIRD-PARTY-NOTICES.txt",
+		"distribution-components.json",
+		"distribution-files.json"
+	],
 	"scripts": {
 		"clean": "shx rm -rf dist",
 		"build": "tsgo -p tsconfig.build.json && shx chmod +x dist/cli.js",
 		"test": "vitest --run",
 		"typecheck": "tsgo -p tsconfig.test.json",
-		"prepublishOnly": "npm run clean && npm run build"
+		"prepublishOnly": "npm run clean && npm run build",
+		"prepack": "node ../../scripts/prepare-distribution.mjs packages/coding-agent-server"
 	},
-	"engines": { "node": ">=22.19.0" },
+	"engines": {
+		"node": ">=22.19.0"
+	},
 	"license": "Apache-2.0",
 	"repository": {
 		"type": "git",

@@ -10,19 +10,21 @@
 		"build:native:darwin": "native/darwin/build.sh",
 		"build:native:win32": "node native/win32/build.mjs",
 		"test": "node --test --test-reporter=dot --test-reporter-destination=stdout test/*.test.ts",
-		"prepublishOnly": "npm run clean && npm run build"
+		"prepublishOnly": "npm run clean && npm run build",
+		"prepack": "node ../../scripts/prepare-distribution.mjs packages/tui"
 	},
 	"files": [
 		"dist/**/*",
 		"native/win32/prebuilds/**/*.node",
-		"native/win32/src/**/*.c",
-		"native/win32/build.mjs",
 		"native/win32/README.md",
 		"native/darwin/prebuilds/**/*.node",
-		"native/darwin/src/**/*.c",
-		"native/darwin/build.sh",
 		"native/darwin/README.md",
-		"README.md"
+		"README.md",
+		"LICENSE",
+		"NOTICE",
+		"THIRD-PARTY-NOTICES.txt",
+		"distribution-components.json",
+		"distribution-files.json"
 	],
 	"keywords": [
 		"tui",
@@ -34,7 +36,7 @@
 		"cli"
 	],
 	"author": "Mario Zechner",
-	"license": "MIT",
+	"license": "Apache-2.0",
 	"repository": {
 		"type": "git",
 		"url": "git+https://github.com/diffexai/diffex.git",

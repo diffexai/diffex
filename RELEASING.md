@@ -1,7 +1,8 @@
 # Releasing Diffex
 
 Diffex publishes its public workspaces in lockstep and uses GitHub Actions trusted publishing for normal npm releases.
-The release tag also builds binaries, stages the GitHub release, announces the verified release, and publishes the staged GitHub release.
+The release tag publishes the approved npm packages and then announces the verified npm release.
+Standalone archives and other installation channels are deferred by the [approved distribution policy](docs/release/distribution-policy.json).
 
 ## Prerequisites
 
@@ -10,6 +11,31 @@ The release tag also builds binaries, stages the GitHub release, announces the v
 - Confirm the `@diffexai` npm organization exists and your npm account has package publishing permission with account-level two-factor authentication enabled.
 - Use npm 11.15.0 or newer when configuring trusted publishers.
 - Confirm every public package has repository metadata pointing to `diffexai/diffex`.
+
+## Approved payloads
+
+The eleven public packages are derived from `scripts/release-packages.mjs`.
+Every package declares Apache-2.0 and ships the full root license, including the complete MIT notice for Pi-derived portions.
+The generated `NOTICE`, `THIRD-PARTY-NOTICES.txt`, and `distribution-components.json` identify applicable portions and bundled components.
+Readable runtime JavaScript, declarations, runtime JSON/SQL data, HTML/CSS templates, and documentation are approved.
+Examples and native source build files are excluded; evolution and harness-trace runtime code is explicitly public when vendored in the CLI.
+Source maps move into ignored private debug storage, and final tarball inspection rejects embedded maps and prohibited files.
+The publisher checks every exact tarball before registry access and publishes those checked bytes.
+The same disclosure gate applies to bootstrap publication.
+
+All nine authorized project changelogs must be regenerated through the owner's `/cl` audit after the one-time reset.
+Empty or structurally invalid changelogs block packing.
+The pre-reset contents are retained at `ae811d134dd63b0a688aea10ea0368c0935e7e48`; never repeat that reset for later releases.
+
+The full source archive remains a private build input and is never a public release asset.
+The distribution manifest identifies the private source by its full commit string.
+The CLI tarball carries `release/distribution-manifest.json`, `release/install-package.json`, and `release/install-package-lock.json`.
+Each package carries `distribution-files.json` with SHA-256 hashes for its approved runtime files.
+The complete tarball's npm `dist.integrity` is the registry verification value.
+Versioned anonymous downloads use `https://registry.npmjs.org/<PACKAGE>/-/<UNSCOPED_NAME>-<VERSION>.tgz`.
+For the CLI at version 0.2.0, that URL is `https://registry.npmjs.org/@diffexai/diffex/-/diffex-0.2.0.tgz`; it becomes available only after separately authorized publication.
+No GitHub release publication or separate asset-repository credential is used.
+Npm trust remains bound to the private source repository and the existing workflow filename.
 
 ## First npm publication
 
@@ -69,4 +95,4 @@ It is not a dry-run command.
 Review the target version and obtain approval for the remote push before running it.
 
 The pushed tag triggers `.github/workflows/build-binaries.yml`.
-Do not announce the release until that workflow publishes npm packages, the verified release announcement, and the GitHub release successfully.
+Do not announce the release until the workflow verifies npm publication and writes the release announcement successfully.

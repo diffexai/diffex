@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Create the deterministic source archive uploaded with GitHub releases.
+# Create the deterministic private source build input. Never upload it to public releases.
 #
 # Usage:
 #   npm run hydrate:model-data
@@ -114,6 +114,7 @@ git archive --format=tar --prefix="${archive_root}/" --mtime="@${archive_mtime}"
 tar -tzf "$temporary_archive" > "$manifest"
 
 required_paths=(
+    "LICENSE"
     "package.json"
     "package-lock.json"
     "scripts/build-binaries.sh"

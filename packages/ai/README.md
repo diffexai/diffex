@@ -1675,4 +1675,6 @@ Add an entry to `packages/ai/CHANGELOG.md` under `## [Unreleased]`:
 
 ## License
 
-MIT
+Apache-2.0 for Diffex, copyright 2026 Luntraa, Inc.
+Pi-derived portions retain their MIT terms and upstream copyright notice.
+See LICENSE, NOTICE, and THIRD-PARTY-NOTICES.txt in the distribution.

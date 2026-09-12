@@ -10,7 +10,7 @@ fixture_source = (
 )
 executables = {
     "node": str(out / "node/node_modules/.bin/diffex"),
-    "bun": str(out / "binaries/darwin-arm64/diffex"),
+    "bun-install": str(out / "bun-install/node_modules/.bin/diffex"),
 }
 results = []
 for runtime, exe in executables.items():

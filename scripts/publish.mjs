@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { packReviewedPackage } from "./pack-reviewed-package.mjs";
 import { join } from "node:path";
 import {
 	assertBootstrapPackageStates,
@@ -37,7 +39,11 @@ function run(command, args, options = {}) {
 
 	if (result.status !== 0) {
 		const output = [result.stdout, result.stderr].filter(Boolean).join("\n");
-		throw new Error(output ? `Command failed: ${command} ${args.join(" ")}\n${output}` : `Command failed: ${command} ${args.join(" ")}`);
+		throw new Error(
+			output
+				? `Command failed: ${command} ${args.join(" ")}\n${output}`
+				: `Command failed: ${command} ${args.join(" ")}`,
+		);
 	}
 
 	return result;
@@ -47,12 +53,6 @@ function assertBuildOutputExists(directory) {
 	if (!existsSync(join(directory, "dist"))) {
 		throw new Error(`${directory}/dist does not exist. Run npm run build before publishing.`);
 	}
-}
-
-function validatePack(directory) {
-	const result = run("npm", ["pack", "--dry-run", "--ignore-scripts", "--json"], { capture: true, cwd: directory });
-	const packed = JSON.parse(result.stdout)[0];
-	console.log(`  ${packed.filename}: ${packed.files.length} files, ${packed.size} bytes packed, ${packed.unpackedSize} bytes unpacked`);
 }
 
 function isPublished(name, version) {
@@ -105,8 +105,29 @@ if (bootstrap) {
 	console.log(
 		`Bootstrap mode registers new packages under the non-default '${BOOTSTRAP_DIST_TAG}' tag without local provenance.`,
 	);
-	console.log("It skips packages already published at this exact version and rejects established packages at other versions.\n");
+	console.log(
+		"It skips packages already published at this exact version and rejects established packages at other versions.\n",
+	);
 }
+
+// Validate every final tarball before registry queries or any publication.
+const packDirectory = mkdtempSync(join(tmpdir(), "diffex-approved-npm-"));
+process.on("exit", () => rmSync(packDirectory, { recursive: true, force: true }));
+const packedPackages = new Map();
+for (const pkg of packages) {
+	assertBuildOutputExists(pkg.directory);
+	packedPackages.set(pkg.name, packReviewedPackage(pkg, packDirectory));
+}
+
+mkdirSync(".artifacts", { recursive: true });
+writeFileSync(
+	".artifacts/npm-payload-inventory.json",
+	`${JSON.stringify(
+		[...packedPackages.values()].map(({ file, ...artifact }) => ({ ...artifact, filename: file.split("/").pop() })),
+		null,
+		2,
+	)}\n`,
+);
 
 const packageStates = packages.map((pkg) => ({
 	...pkg,
@@ -130,7 +151,7 @@ for (const pkg of packageStates) {
 	} else {
 		console.log(`${pkg.name}@${pkg.version} is not published; validating package contents before publish.`);
 	}
-	validatePack(pkg.directory);
+	console.log(`  Validated tarball SHA-256: ${packedPackages.get(pkg.name).sha256}`);
 	console.log();
 }
 
@@ -153,7 +174,7 @@ for (const pkg of packageStates) {
 		continue;
 	}
 
-	run("npm", createPublishArgs({ bootstrap }), { cwd: pkg.directory });
+	run("npm", [...createPublishArgs({ bootstrap }), packedPackages.get(pkg.name).file]);
 	console.log();
 }
 

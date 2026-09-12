@@ -13,7 +13,11 @@
 		}
 	},
 	"files": [
-		"dist"
+		"dist",
+		"LICENSE",
+		"NOTICE",
+		"THIRD-PARTY-NOTICES.txt",
+		"distribution-components.json"
 	],
 	"scripts": {
 		"clean": "shx rm -rf dist",
@@ -22,7 +26,7 @@
 		"prepublishOnly": "npm run clean && npm run build"
 	},
 	"author": "DiffexAI",
-	"license": "MIT",
+	"license": "Apache-2.0",
 	"repository": {
 		"type": "git",
 		"url": "git+https://github.com/diffexai/diffex.git",

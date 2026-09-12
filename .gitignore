@@ -42,3 +42,11 @@ plans/
 .diffex/hf-sessions/
 .diffex/hf-sessions-backup/
 collect.sh
+
+# Generated distribution notices owned by scripts/prepare-distribution.mjs
+packages/**/LICENSE
+packages/**/NOTICE
+packages/**/THIRD-PARTY-NOTICES.txt
+packages/**/distribution-components.json
+packages/**/distribution-files.json
+packages/coding-agent/release/

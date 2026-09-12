@@ -120,6 +120,10 @@ Attribution:
 
 ## Releasing
 
+The approved distribution policy currently enables npm packages and defers standalone binaries.
+Use the npm and Bun package-manager smoke paths; the standalone build and runtime image publication paths are deliberately blocked pending their redistribution review.
+See `docs/release/distribution-policy.json` before applying binary-specific instructions below.
+
 **Lockstep versioning**: all packages share one version; every release updates all together. `patch` = fixes + additions, `minor` = breaking changes. No major releases.
 
 1. **Update CHANGELOGs**: ask the user whether they ran the `/cl` prompt on the latest commit on `main`. If not, they must run `/cl` first to audit and update each package's `[Unreleased]` section before releasing.
@@ -175,5 +179,17 @@ If the user's instructions conflict with any rule in this document, ask for expl
 - 2026-09-11: A multi-file rename stopped midway and validation loaded stale fixtures -> Preflight replacements and finish all edits before launching tests.
 - 2026-09-11: An SDK regression expected undefined headers although the SDK returns an empty object -> Assert header contents at the SDK boundary.
 
-- 2026-09-11: Rebuilding a lock from installed modules lost other-platform metadata -> Regenerate through the documented npm version and compare all retained versions, native targets, and libc fields.
+- 2026-09-11: Rebuilding locks with local npm or installed modules lost platform metadata -> Use the release workflow npm version for regeneration and compare every retained version, native target, and libc field.
 - 2026-09-11: Terminal automation assumed one authentication selector and immediate child exit -> Inspect menu transitions, dismiss nested selectors, and bound both interaction and process reaping.
+
+- 2026-09-12: macOS tar added resource-fork metadata to archive fixtures -> Set COPYFILE_DISABLE=1 when creating fixtures and reject platform metadata in distribution payloads.
+
+- 2026-09-12: An unquoted GitHub API query was expanded by zsh -> Quote complete API endpoints containing query strings or pass them as structured process arguments.
+
+- 2026-09-12: Entry detection silently skipped a script invoked through macOS /tmp -> Compare canonical real paths in ES module CLI guards and test execution outside the repository.
+
+- 2026-09-12: Archive checks treated parent vendor directories as file payloads -> Validate path safety for directories and apply vendor implementation rules to files, with allowed-vendor fixtures.
+
+- 2026-09-12: Private debug artifacts live under a hidden directory -> Enable hidden-file upload only for explicitly listed private evidence paths.
+
+- 2026-09-12: Artifact fixtures mixed a fixed version with current generated install locks -> Derive fixture identities from the same package inventory so lockstep releases keep tests valid.

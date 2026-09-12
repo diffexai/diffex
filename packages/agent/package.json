@@ -22,7 +22,12 @@
 	},
 	"files": [
 		"dist",
-		"README.md"
+		"README.md",
+		"LICENSE",
+		"NOTICE",
+		"THIRD-PARTY-NOTICES.txt",
+		"distribution-components.json",
+		"distribution-files.json"
 	],
 	"scripts": {
 		"clean": "shx rm -rf dist",
@@ -32,7 +37,8 @@
 		"test": "vitest --run",
 		"test:harness": "vitest --run --config vitest.harness.config.ts",
 		"coverage:harness": "vitest --run --config vitest.harness.config.ts --coverage",
-		"prepublishOnly": "npm run build"
+		"prepublishOnly": "npm run build",
+		"prepack": "node ../../scripts/prepare-distribution.mjs packages/agent"
 	},
 	"dependencies": {
 		"@diffexai/diffex-ai": "^0.2.0",
@@ -50,7 +56,7 @@
 		"state-management"
 	],
 	"author": "Mario Zechner",
-	"license": "MIT",
+	"license": "Apache-2.0",
 	"repository": {
 		"type": "git",
 		"url": "git+https://github.com/diffexai/diffex.git",
