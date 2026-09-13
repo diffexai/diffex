@@ -1,32 +1,22 @@
 import { cpSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { join, relative } from "node:path";
+import { dirname, join } from "node:path";
 import { cliDistribution } from "./cli-distribution.mjs";
 import { preparePackageDistribution } from "./prepare-distribution.mjs";
 
 export function stageCliDistribution(directory, stage) {
 	const { manifest, bundled } = cliDistribution();
 	mkdirSync(stage, { recursive: true });
-	const notices = [
-		"LICENSE",
-		"THIRD-PARTY-NOTICES.txt",
-		"distribution-components.json",
-		"distribution-files.json",
-	];
-	const excludedDocs = new Set([
-		"docs/development.md",
-		"docs/docs.json",
-		"docs/index.md",
-		"docs/invocation-traces.md",
-		"docs/images/doom-extension.png",
-		"docs/images/exy.png",
-	]);
-	for (const file of manifest.files)
-		cpSync(join(directory, file), join(stage, file), {
-			recursive: true,
-			filter: (source) => !excludedDocs.has(relative(directory, source).replaceAll("\\", "/")),
-		});
-	writeFileSync(join(stage, "README.md"), "");
+	const notices = ["LICENSE", "THIRD-PARTY-NOTICES.txt", "distribution-components.json", "distribution-files.json"];
+	for (const file of manifest.files) {
+		if (file === "README.md") continue;
+		mkdirSync(dirname(join(stage, file)), { recursive: true });
+		cpSync(join(directory, file), join(stage, file), { recursive: true });
+	}
+	writeFileSync(
+		join(stage, "README.md"),
+		"# Diffex\n\nCoding agent for your terminal.\nSee [installation, updates, and removal](docs/installation.md), [quickstart](docs/quickstart.md), and [usage](docs/usage.md).\n\nDiffex is licensed under Apache-2.0; Pi-derived portions retain their MIT terms.\nSee LICENSE and THIRD-PARTY-NOTICES.txt.\n",
+	);
 	const inventory = JSON.parse(readFileSync(join(directory, "distribution-files.json"), "utf8"));
 	const components = JSON.parse(readFileSync(join(directory, "distribution-components.json"), "utf8")).filter(
 		(component) => !bundled.some((pkg) => pkg.manifest.name === component.name),

@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 
+import { distributionDocs } from "./cli-distribution.mjs";
 import { createDistributionManifest } from "./release-distribution-manifest.mjs";
 import { getPublicWorkspacePackages } from "./release-packages.mjs";
 
@@ -16,6 +17,8 @@ const version = getPublicWorkspacePackages()[0].version;
 function fixture(extra, omit) {
 	const directory = mkdtempSync(join(tmpdir(), "diffex-payload-test-"));
 	const files = {
+		...Object.fromEntries(distributionDocs.map((path) => [path, "Reviewed user guide"])),
+		"README.md": "Diffex installation and usage",
 		"package.json": JSON.stringify({ name: "@diffexai/diffex", version, license: "Apache-2.0" }),
 		LICENSE: readFileSync(license),
 		NOTICE: "Diffex modifications copyright 2026 Luntraa, Inc. Pi-derived portions retain MIT terms in LICENSE.\n",
@@ -72,7 +75,7 @@ test("accepts a tarball with readable JavaScript, declarations, and complete not
 		"native/darwin/prebuilds/darwin-arm64/helper.node": Buffer.from("native fixture"),
 		"dist/vendor/evolution/index.js": "export const value = 1;",
 		"dist/vendor/harness-trace/index.d.ts": "export declare const value: number;",
-		"docs/context-files.md": "Diffex loads AGENTS.md from the user's project.\n",
+		"docs/usage.md": "Diffex loads AGENTS.md from the user's project.\n",
 	});
 	assert.equal(result.status, 0, result.stderr);
 });
@@ -96,6 +99,10 @@ test("accepts consolidated attribution without a separate NOTICE file", () => {
 });
 
 for (const [name, content, reason] of [
+	["docs/development.md", "Private build instructions", /unapproved distribution documentation/],
+	["docs/new-internal-audit.md", "Private evidence", /unapproved distribution documentation/],
+	["dist/internal-handoff.txt", "Private handoff", /unapproved distribution documentation/],
+	["dist/node_modules/@diffexai/diffex-ai/docs/audit.md", "Private audit", /unapproved distribution documentation/],
 	["dist/implementation.ts", "export const value = 1", /prohibited source file/],
 	["dist/renamed.js", "export interface Hidden {", /TypeScript implementation content/],
 	["dist/native.c", "int main() {}", /prohibited source file/],
@@ -107,7 +114,11 @@ for (const [name, content, reason] of [
 	["examples/example.ts", "export const value = 1", /prohibited source or private path/],
 	["AGENTS.md", "Private repository instructions", /prohibited repository instructions/],
 	["docs/agents.MD", "Private repository instructions", /prohibited repository instructions/],
-	["dist/node_modules/@diffexai/diffex-ai/AGENTS.md", "Private repository instructions", /prohibited repository instructions/],
+	[
+		"dist/node_modules/@diffexai/diffex-ai/AGENTS.md",
+		"Private repository instructions",
+		/prohibited repository instructions/,
+	],
 ]) {
 	test(`rejects prohibited content in ${name}`, () => {
 		const result = inspect({ [name]: content });
@@ -117,7 +128,7 @@ for (const [name, content, reason] of [
 }
 
 test("inspects a nested archive even when renamed to a binary resource", () => {
-	const nested = fixture({ "dist/private.ts": "export const hidden = 1" });
+	const nested = fixture({ "dist/private.ts": "export const hidden = 1" }, "README.md");
 	try {
 		const result = inspect({ "dist/resource.bin": readFileSync(nested.archive) });
 		assert.notEqual(result.status, 0);
@@ -128,7 +139,7 @@ test("inspects a nested archive even when renamed to a binary resource", () => {
 });
 
 test("rejects repository instructions inside a nested archive", () => {
-	const nested = fixture({ "docs/AGENTS.md": "Private repository instructions" });
+	const nested = fixture({ "docs/AGENTS.md": "Private repository instructions" }, "README.md");
 	try {
 		const result = inspect({ "dist/resource.bin": readFileSync(nested.archive) });
 		assert.notEqual(result.status, 0);
@@ -178,3 +189,11 @@ test("rejects duplicate members before interpreting package metadata", () => {
 		rmSync(directory, { recursive: true, force: true });
 	}
 });
+
+for (const guide of ["README.md", "docs/installation.md"]) {
+	test(`rejects a CLI artifact missing required user documentation ${guide}`, () => {
+		const result = inspect({}, guide);
+		assert.notEqual(result.status, 0);
+		assert.match(result.stderr, /missing required user documentation/);
+	});
+}

@@ -24,10 +24,11 @@ Only Daytona's opaque placeholder enters the sandbox environment, and the real p
 
 ## Runtime Image
 
-`Dockerfile.runtime` produces the AMD64 image used to create the Daytona sandbox snapshot.
-The runtime-image workflow is disabled during the identity migration, including manual dispatches.
-Re-enable the workflow for validation and immutable `ghcr.io/diffexai/diffex-runtime:sha-<commit>` publication after reviewing the image and its consumers.
-Keep production on its existing tested image and Daytona snapshot until the replacement image and snapshot pass release validation.
+`Dockerfile.runtime` produces a Linux amd64 candidate with a digest-pinned Node base image, compiled workspace outputs, user documentation, and legal notices.
+The Runtime Image workflow now permits manual validation and retains the tested image privately.
+Registry publication and automatic main-branch publication remain disabled.
+The owner confirmed on 2026-09-13 that no staging deployment or Daytona consumer is configured, so no existing production digest or snapshot can be assumed.
+See [runtime validation and promotion prerequisites](release/runtime-validation.md) for local commands and the pending hosted acceptance.
 
 Before a cloud release, register GHCR with Daytona, create a Daytona snapshot from that exact immutable image tag or digest, and set `DAYTONA_SANDBOX_SNAPSHOT` to the resulting snapshot name.
 Do not use a floating image tag for production.

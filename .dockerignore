@@ -11,3 +11,9 @@ packages/ai/src/providers/data
 packages/coding-agent/binaries
 *.log
 *.tsbuildinfo
+
+.env
+.env.*
+**/.env
+**/.env.*
+**/__pycache__

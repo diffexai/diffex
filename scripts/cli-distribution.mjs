@@ -1,6 +1,11 @@
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { join, relative } from "node:path";
 import { findPackageDirectories } from "./package-workspaces.mjs";
+
+export const distributionDocs = JSON.parse(
+	readFileSync(fileURLToPath(new URL("./distribution-docs.json", import.meta.url)), "utf8"),
+);
 
 export function cliDistribution(root = ".") {
 	const workspaces = new Map(
@@ -58,9 +63,18 @@ export function cliDistribution(root = ".") {
 	manifest.diffexConfig = { ...manifest.diffexConfig, production: true };
 	delete manifest.repository;
 	delete manifest.bugs;
-	manifest.files = manifest.files.filter(
-		(file) => !["notice", "contributing.md"].includes(file.split("/")[0].toLowerCase()),
-	);
+	manifest.files = [
+		"dist",
+		...distributionDocs,
+		"README.md",
+		"CHANGELOG.md",
+		"npm-shrinkwrap.json",
+		"LICENSE",
+		"THIRD-PARTY-NOTICES.txt",
+		"distribution-components.json",
+		"distribution-files.json",
+		"release",
+	];
 	manifest.dependencies = Object.fromEntries(Object.entries(dependencies).sort(([a], [b]) => a.localeCompare(b)));
 	manifest.optionalDependencies = Object.fromEntries(
 		Object.entries(optionalDependencies).sort(([a], [b]) => a.localeCompare(b)),

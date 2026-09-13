@@ -171,3 +171,7 @@ If the user's instructions conflict with any rule in this document, ask for expl
 - 2026-09-13: Node rejects package import targets containing node_modules -> Preserve existing package import targets and validate staged tarballs through installed CLI startup before publication.
 
 - 2026-09-13: npm accepted publication before registry metadata propagated -> Preserve the uploaded artifact identity and resume verification without republishing or rebuilding.
+
+- 2026-09-13: Guessed release helper paths and reused npm caches obscured validation -> Discover paths before reading and use a fresh cache when proving that an update downloads artifact bytes.
+
+- 2026-09-13: Assumed interrupted npm downloads preserve the prefix -> Test real npm processes, retain user data, and recover ENOTEMPTY by moving only the exact stale package backup before a pinned reinstall.

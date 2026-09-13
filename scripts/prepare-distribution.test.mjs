@@ -1,11 +1,21 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+	cpSync,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	rmSync,
+	statSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { PROJECT_CHANGELOGS } from "./prepare-distribution.mjs";
-import { cliDistribution } from "./cli-distribution.mjs";
+import { cliDistribution, distributionDocs } from "./cli-distribution.mjs";
 
 test("packed CLI exposes the product homepage and preserves referenced documentation", () => {
 	const root = mkdtempSync(join(tmpdir(), "diffex-cli-presentation-"));
@@ -20,9 +30,11 @@ test("packed CLI exposes the product homepage and preserves referenced documenta
 			"release-distribution-manifest.mjs",
 			"package-workspaces.mjs",
 			"check-distribution-payload.py",
+			"distribution-docs.json",
 			"cli-distribution.mjs",
 			"stage-cli-distribution.mjs",
-		]) copy(`scripts/${script}`);
+		])
+			copy(`scripts/${script}`);
 		for (const file of [
 			"LICENSE",
 			"docs/release/distribution-policy.json",
@@ -31,7 +43,8 @@ test("packed CLI exposes the product homepage and preserves referenced documenta
 			"packages/coding-agent/npm-shrinkwrap.json",
 			"packages/coding-agent/install-lock/package.json",
 			"packages/coding-agent/install-lock/package-lock.json",
-		]) copy(file);
+		])
+			copy(file);
 		const directories = [
 			"packages/coding-agent",
 			"packages/evolution",
@@ -40,8 +53,7 @@ test("packed CLI exposes the product homepage and preserves referenced documenta
 		];
 		for (const directory of directories) {
 			copy(`${directory}/package.json`);
-			for (const folder of ["src", "dist", "docs"])
-				mkdirSync(join(root, directory, folder), { recursive: true });
+			for (const folder of ["src", "dist", "docs"]) mkdirSync(join(root, directory, folder), { recursive: true });
 			writeFileSync(join(root, directory, "src/index.ts"), "export const value = 1;\n");
 			writeFileSync(join(root, directory, "dist/index.js"), "export const value = 1;\n");
 			for (const file of ["README.md", "CONTRIBUTING.md", "docs/skills.md", "CHANGELOG.md"])
@@ -56,7 +68,11 @@ test("packed CLI exposes the product homepage and preserves referenced documenta
 			"invocation-traces.md",
 			"images/doom-extension.png",
 			"images/exy.png",
+			"new-internal-audit.md",
+			"windows.md",
+			"termux.md",
 		];
+		writeFileSync(join(pkg, "docs/new-internal-audit.md"), "Private audit must never ship");
 		const metadata = JSON.parse(readFileSync(join(pkg, "package.json"), "utf8"));
 		metadata.files.push("CONTRIBUTING.md");
 		writeFileSync(join(pkg, "package.json"), JSON.stringify(metadata));
@@ -80,30 +96,44 @@ test("packed CLI exposes the product homepage and preserves referenced documenta
 			}),
 		);
 		const archive = join(root, "stage", packed.filename);
-		const published = JSON.parse(execFileSync("tar", ["-xOf", archive, "package/package.json"], { encoding: "utf8" }));
+		const published = JSON.parse(
+			execFileSync("tar", ["-xOf", archive, "package/package.json"], { encoding: "utf8" }),
+		);
 		assert.equal(published.homepage, "https://diffex.ai/");
 		assert.equal(published.repository, undefined);
 		assert.equal(published.bugs, undefined);
 		assert.equal(published.diffexConfig.production, true);
-		assert.equal(execFileSync("tar", ["-xOf", archive, "package/README.md"]).length, 0);
+		assert.match(
+			execFileSync("tar", ["-xOf", archive, "package/README.md"], { encoding: "utf8" }),
+			/docs\/installation\.md/,
+		);
 		for (const file of readdirSync(join(pkg, "docs"), { recursive: true })) {
 			const source = join(pkg, "docs", file);
 			if (!statSync(source).isFile()) continue;
 			const path = `docs/${file.replaceAll("\\", "/")}`;
-			if (excludedDocs.includes(file.replaceAll("\\", "/"))) {
+			if (!distributionDocs.includes(path)) {
 				assert(!packed.files.some((entry) => entry.path === path), `${path} must not ship`);
 			} else {
-				assert.deepEqual(execFileSync("tar", ["-xOf", archive, `package/${path}`]), readFileSync(source), `${path} must remain intact`);
+				assert.deepEqual(
+					execFileSync("tar", ["-xOf", archive, `package/${path}`]),
+					readFileSync(source),
+					`${path} must remain intact`,
+				);
 			}
 		}
 		for (const file of excludedDocs) assert(existsSync(join(pkg, "docs", file)), `${file} must remain in source`);
 		for (const { path } of packed.files)
 			assert(!path.split("/").some((part) => ["notice", "contributing.md"].includes(part.toLowerCase())), path);
-		const attribution = execFileSync("tar", ["-xOf", archive, "package/THIRD-PARTY-NOTICES.txt"], { encoding: "utf8" });
+		const attribution = execFileSync("tar", ["-xOf", archive, "package/THIRD-PARTY-NOTICES.txt"], {
+			encoding: "utf8",
+		});
 		assert(attribution.startsWith(readFileSync(join(pkg, "NOTICE"), "utf8")));
 		assert.match(attribution, /highlight\.js@11\.9\.0/);
 		assert.match(attribution, /marked@18\.0\.5/);
-		const result = spawnSync("python3", ["scripts/check-distribution-payload.py", archive], { cwd: root, encoding: "utf8" });
+		const result = spawnSync("python3", ["scripts/check-distribution-payload.py", archive], {
+			cwd: root,
+			encoding: "utf8",
+		});
 		assert.equal(result.status, 0, result.stderr);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
@@ -120,6 +150,7 @@ test("actual npm tarball carries notices and excludes debug sources after prepar
 			"release-distribution-manifest.mjs",
 			"package-workspaces.mjs",
 			"check-distribution-payload.py",
+			"distribution-docs.json",
 		])
 			cpSync(`scripts/${script}`, join(root, "scripts", script));
 		cpSync("LICENSE", join(root, "LICENSE"));

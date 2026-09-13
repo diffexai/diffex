@@ -4,33 +4,15 @@ This page gets you from install to a useful first Diffex session.
 
 ## Install
 
-Diffex is distributed as an npm package:
+Use Node.js 22.19.0 or newer on macOS or Linux, on arm64 or x64.
+Install the canonical package from npmjs.org:
 
 ```bash
-npm install -g --ignore-scripts @diffexai/diffex
+npm install -g --ignore-scripts --registry=https://registry.npmjs.org @diffexai/diffex
+diffex --version
 ```
 
-`--ignore-scripts` disables dependency lifecycle scripts during install. Diffex does not require install scripts for normal npm installs.
-
-### Uninstall
-
-Use the package manager that installed Diffex:
-
-```bash
-# npm
-npm uninstall -g @diffexai/diffex
-
-# pnpm
-pnpm remove -g @diffexai/diffex
-
-# Yarn
-yarn global remove @diffexai/diffex
-
-# Bun
-bun uninstall -g @diffexai/diffex
-```
-
-Uninstalling Diffex leaves settings, credentials, sessions, and installed Diffex packages in `~/.diffex/agent/`.
+See [Installation](installation.md) for PATH setup, pinned versions, updates, recovery, removal, and retained user data.
 
 Then start Diffex in the project directory you want it to work on:
 
@@ -175,4 +157,5 @@ Use `--mode json` for JSON event output or `--mode rpc` for process integration.
 - [Keybindings](keybindings.md) - shortcuts and customization.
 - [Diffex Packages](packages.md) - install shared extensions, skills, prompts, and themes.
 
-Platform notes: [Windows](windows.md), [Termux](termux.md), [tmux](tmux.md), [Terminal setup](terminal-setup.md), [Shell aliases](shell-aliases.md).
+Terminal notes: [tmux](tmux.md), [Terminal setup](terminal-setup.md), [Shell aliases](shell-aliases.md).
+Windows and Android/Termux are not accepted release targets.

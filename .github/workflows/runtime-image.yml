@@ -1,26 +1,6 @@
 name: Runtime Image
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/runtime-image.yml'
-      - '.dockerignore'
-      - 'Dockerfile.runtime'
-      - 'package.json'
-      - 'package-lock.json'
-      - 'packages/**'
-      - 'scripts/**'
-  pull_request:
-    branches: [main]
-    paths:
-      - '.github/workflows/runtime-image.yml'
-      - '.dockerignore'
-      - 'Dockerfile.runtime'
-      - 'package.json'
-      - 'package-lock.json'
-      - 'packages/**'
-      - 'scripts/**'
   workflow_dispatch:
 
 permissions:
@@ -28,40 +8,57 @@ permissions:
 
 concurrency:
   group: runtime-image-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
-  build:
-    # Publication is paused until the runtime image and deployment consumers are validated.
-    if: ${{ false }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
     steps:
-      - name: Checkout
+      - name: Checkout candidate
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
+        with:
+          persist-credentials: false
+      - name: Resolve candidate identity
+        id: source
+        run: echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
-
-      - name: Log in to GitHub Container Registry
-        if: github.event_name != 'pull_request'
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build and publish immutable runtime image
+      - name: Prepare private evidence directory
+        run: mkdir -p .artifacts/runtime
+      - name: Build Linux amd64 candidate locally
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           file: Dockerfile.runtime
           platforms: linux/amd64
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ghcr.io/diffexai/diffex-runtime:sha-${{ github.sha }}
+          load: true
+          push: false
+          tags: diffex-runtime:candidate
+          build-args: SOURCE_COMMIT=${{ steps.source.outputs.commit }}
           cache-from: type=gha,scope=diffex-runtime
           cache-to: type=gha,mode=max,scope=diffex-runtime
-          provenance: mode=max
-          sbom: true
+          # Docker's local exporter cannot retain attestations.
+          # GHCR publication requires a separate reviewed OCI attestation gate.
+          provenance: false
+          sbom: false
+      - name: Validate hosted process without external networking
+        run: |
+          docker run --rm --network none \
+            --mount "type=bind,src=$GITHUB_WORKSPACE/scripts/fixtures,dst=/acceptance,readonly" \
+            --entrypoint node diffex-runtime:candidate /acceptance/runtime-smoke.mjs \
+            > .artifacts/runtime/smoke.json
+      - name: Inspect every candidate image layer
+        run: |
+          docker save --output .artifacts/runtime/runtime.tar diffex-runtime:candidate
+          python3 scripts/check-runtime-image.py .artifacts/runtime/runtime.tar > .artifacts/runtime/payload.json
+          docker inspect diffex-runtime:candidate > .artifacts/runtime/image.json
+          sha256sum .artifacts/runtime/runtime.tar > .artifacts/runtime/SHA256SUMS
+      - name: Retain tested image and private evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: runtime-candidate-${{ steps.source.outputs.commit }}
+          path: .artifacts/runtime/
+          if-no-files-found: error
+          retention-days: 14

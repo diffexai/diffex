@@ -320,6 +320,17 @@ export function acceptArtifacts(artifactDirectory, outputDirectory, { managers =
 				helpers,
 			});
 		}
+		const cli = records.find((record) => record.name === "@diffexai/diffex");
+		execFileSync(
+			process.execPath,
+			[
+				join(root, "scripts/npm-lifecycle.mjs"),
+				join(tarballDirectory, cli.filename),
+				outputDirectory,
+				...(managers.includes("bun") ? [] : ["--skip-bun"]),
+			],
+			{ cwd: root, stdio: "inherit", timeout: 600000 },
+		);
 		verifyTarballs(tarballDirectory, records, packages);
 		writeFileSync(
 			join(outputDirectory, "SHA256SUMS"),

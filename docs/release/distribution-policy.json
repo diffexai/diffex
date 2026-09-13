@@ -35,7 +35,7 @@
     "HTML export templates and their reviewed marked/highlight.js bundles",
     "runtime theme and model JSON",
     "SQLite migration SQL",
-    "documentation including inline examples",
+    "user-facing documentation explicitly listed in scripts/distribution-docs.json",
     "Diffex-owned TUI native prebuilds using system APIs"
   ],
   "publicHosting": "npmjs",
@@ -55,5 +55,6 @@
     "protocol",
     "telemetry",
     "tui"
-  ]
+  ],
+  "developmentDocumentation": "exclude from all distribution artifacts, including bootstrap and hosted runtime; keep private development records in the source repository"
 }

@@ -15,6 +15,9 @@ import zipfile
 from pathlib import Path, PurePosixPath
 
 
+DOCUMENTATION = set(json.loads(Path(__file__).with_name('distribution-docs.json').read_text()))
+LEGAL_DOCUMENTS = {'LICENSE', 'NOTICE', 'THIRD-PARTY-NOTICES.txt'}
+
 MAX_BYTES = 1024 * 1024 * 1024
 MAX_FILES = 100000
 MAX_DEPTH = 8
@@ -40,6 +43,15 @@ def check_path(name, directory=False):
         fail(name, 'prohibited source or private path')
     if any(part.lower() == 'agents.md' for part in path.parts):
         fail(name, 'prohibited repository instructions')
+    if not directory:
+        if 'docs' in path.parts:
+            local = '/'.join(path.parts[path.parts.index('docs'):])
+            if local not in DOCUMENTATION:
+                fail(name, 'unapproved distribution documentation')
+        elif path.suffix.lower() in {'.md', '.mdx', '.rst', '.txt', '.pdf'} and path.name not in LEGAL_DOCUMENTS:
+            # Only the reviewed public README and release history belong at the distribution root.
+            if not (path.name in {'README.md', 'CHANGELOG.md'} and len(path.parts) <= 3 and 'dist' not in path.parts):
+                fail(name, 'unapproved distribution documentation')
     declaration = name.endswith(('.d.ts', '.d.mts', '.d.cts'))
     if path.suffix in SOURCE_SUFFIXES and not declaration:
         fail(name, 'prohibited source file')
@@ -150,6 +162,9 @@ def inspect_archive(file, license_file, expected_name=None, expected_version=Non
         if hashlib.sha256(entries[root + item['path']]).hexdigest() != item['sha256']:
             fail(str(file), 'runtime file hash mismatch')
     if metadata.get('name') == '@diffexai/diffex':
+        for document in DOCUMENTATION | {'README.md'}:
+            if not entries.get(root + document, b'').strip():
+                fail(str(file), 'missing required user documentation: ' + document)
         for field in ['dependencies', 'optionalDependencies', 'peerDependencies']:
             if any(name.startswith('@diffexai/') for name in metadata.get(field, {})):
                 fail(str(file), 'CLI must not fetch separate Diffex packages')

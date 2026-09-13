@@ -1,28 +1,42 @@
-FROM node:24-bookworm-slim AS build
+FROM node:24.16.0-bookworm-slim@sha256:2c87ef9bd3c6a3bd4b472b4bec2ce9d16354b0c574f736c476489d09f560a203 AS build
 
 WORKDIR /opt/diffex
 
-COPY package.json package-lock.json ./
-COPY tsconfig.base.json ./
+ARG SOURCE_COMMIT
+ENV DIFFEX_SOURCE_COMMIT=$SOURCE_COMMIT
+
+COPY package.json package-lock.json tsconfig.base.json ./
+COPY LICENSE ./
+COPY legal ./legal
+COPY docs/release/distribution-policy.json ./docs/release/distribution-policy.json
 COPY packages ./packages
 COPY scripts ./scripts
 
 RUN npm ci --ignore-scripts
-RUN npm run build
+RUN npm run hydrate:model-data && npm run build:offline
 RUN npm prune --omit=dev --ignore-scripts
+RUN node scripts/stage-runtime-distribution.mjs /opt/runtime
 
-FROM node:24-bookworm-slim AS runtime
+FROM node:24.16.0-bookworm-slim@sha256:2c87ef9bd3c6a3bd4b472b4bec2ce9d16354b0c574f736c476489d09f560a203 AS runtime
 
 RUN apt-get update \
+	&& apt-get install -y --no-install-recommends ca-certificates \
+	&& sed -i "s|http://deb.debian.org|https://deb.debian.org|g" /etc/apt/sources.list.d/debian.sources \
+	&& apt-get update \
 	&& apt-get install -y --no-install-recommends ca-certificates fd-find git openssh-client ripgrep \
 	&& ln -s /usr/bin/fdfind /usr/local/bin/fd \
 	&& rm -rf /var/lib/apt/lists/*
 
-COPY --from=build /opt/diffex /opt/diffex
+COPY --from=build /opt/runtime /opt/diffex
 
 RUN ln -s /opt/diffex/packages/coding-agent-server/dist/cli.js /usr/local/bin/diffex-runtime-server
 
 WORKDIR /workspace
 
+ARG SOURCE_COMMIT
 LABEL org.opencontainers.image.source="https://github.com/diffexai/diffex"
-LABEL org.opencontainers.image.description="Pi-based hosted Diffex coding-agent runtime"
+LABEL org.opencontainers.image.revision=$SOURCE_COMMIT
+LABEL org.opencontainers.image.licenses="Apache-2.0 AND MIT"
+LABEL org.opencontainers.image.description="Hosted Diffex coding-agent runtime"
+
+CMD ["diffex-runtime-server"]

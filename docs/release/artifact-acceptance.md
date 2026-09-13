@@ -28,6 +28,21 @@ Acceptance executes file discovery and content search, records their versions, a
 Native runners install those prerequisites through apt or Homebrew before package acceptance.
 This validates the npm installation with controlled system helpers; it does not establish the separate automatic-helper-download lifecycle.
 
+## Installed lifecycle acceptance
+
+The acceptance command also runs `scripts/npm-lifecycle.mjs` against the exact reviewed CLI tarball.
+It installs globally into an isolated prefix, checks PATH, version, help, and models, then invokes the installed self-updater with real npm subprocesses.
+Only discovery and the Diffex-scoped registry are controlled fixtures; dependency downloads use npmjs.org.
+An isolated version-metadata predecessor exercises upgrade to the reviewed candidate without publishing a fake release.
+Fresh caches require actual target downloads.
+Malformed and foreign metadata, redirects, outages, no release, and checksum mismatches are rejected without changing the installed prefix, including force.
+An interrupted npm download demonstrates the documented pinned repair and, when npm reports `ENOTEMPTY`, relocation of its exact stale backup before retrying.
+Interruption itself can mutate npm's prefix and is not claimed to preserve the executable.
+Uninstall verifies executable removal and retained global and project data.
+The same harness verifies Bun global installation and PATH, rejects a foreign release identity without mutation, upgrades with the real Bun subprocess, checks the installed runtime hashes, and uninstalls while retaining user and project data.
+An isolated Bun global scope registry ensures that the upgrade receives the reviewed candidate bytes.
+`npm-lifecycle.json` records commands, identities, results, limitations, and cleanup.
+
 ## Supported distribution scope
 
 The approved channel remains npm, installed with npm or Bun and executed on Node 22.19.0 or newer.
