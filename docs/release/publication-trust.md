@@ -78,7 +78,7 @@ At 14:20:48 UTC it confirmed both version records, the latest fixture pointer, a
 It made no production write and did not publish npm packages.
 This run predates the additional credential scope checks and does not claim to validate them live.
 
-## Outstanding acceptance
+## Bootstrap decisions and replacement
 
 The owner confirmed the current `/cl` refresh and approved public bootstrap publication of `0.2.0` once validation passes.
 The initial environment attempt was blocked by automatic approval review; the owner subsequently approved the exact settings and fallback, and configuration succeeded.
@@ -91,9 +91,9 @@ This failed the no-latest acceptance gate and no production announcement was mad
 The CLI trusted publisher was created and read back with the exact repository, file, environment, and current npm permission pair.
 The owner then requested a CLI-only distribution and approved `0.2.1` with retirement of `0.2.0`.
 The replacement tarball includes seven required workspace packages plus the existing evolution and harness-trace runtime modules.
-Replacement publication, old-package removal, final dist-tags, and traditional-token restrictions remain pending until their live results are retained.
+The final publication and retirement results below supersede the initial eleven-package bootstrap.
 No R2 production pointer or generally available release may be created by bootstrap.
-These pending items prevent publication-trust acceptance from being marked complete.
+Credential scope verification remains dependent on the workflow reaching `main`.
 
 ## CLI-only replacement validation
 
@@ -101,21 +101,36 @@ Final publication candidate `f2a661684af35fe6e9a3209c6f9720144e1fd423` packages 
 The [local candidate evidence](cli-only-candidate-evidence.json) retains its exact tarball size, SHA-256, SHA-512, supported entrypoints, npm/Bun acceptance, terminal outcomes, and cleanup.
 The source quality gate, full isolated `./test.sh` suite, package inventory regressions, and disclosure-policy rejection tests passed.
 The final local tarball passed both package managers with the separate Diffex registry scope blocked.
-These local bytes are not published.
+These bytes were retained before publication and selected for the owner-approved replacement.
 
 [Native run 34765040811](https://github.com/diffexai/diffex/actions/runs/34765040811) passed Darwin arm64 and both Linux targets on implementation commit `8c8d8f529`; Darwin x64 was cancelled when the final README revision was pushed.
 [Final candidate run 34765173973](https://github.com/diffexai/diffex/actions/runs/34765173973) failed before executing any build command.
 GitHub's job annotation reports failed account payments or an Actions spending limit and directs the owner to Billing and plans.
 Rerun that retained run after the account issue is resolved so source identity remains pinned to the final candidate.
-Download its private artifact, inspect its manifest and checksums, and require every native target to pass before replacement publication.
+The owner subsequently explicitly approved publication without the blocked GitHub CLI validation.
+The exact final local tarball recorded in `cli-only-candidate-evidence.json` was published with the incomplete native matrix retained as an owner-accepted limitation.
+Future normal releases retain their native acceptance gate.
 Do not substitute the earlier partial matrix or represent local validation as four-platform acceptance.
 
-The owner approved publishing the validated replacement under `bootstrap` and retiring the original CLI `0.2.0` plus the ten separate npm packages.
-The existing CLI `0.2.0` depends on those packages, so removal waits for validated replacement bytes.
-Reinspect registry versions before deletion, remove dependents before dependencies, preserve `@diffexai/diffex@0.2.1`, and verify all retired versions are absent.
-The existing first-registration bootstrap guard intentionally rejects established versions; this explicitly approved replacement requires the retained exact tarball command with `--access public --tag bootstrap --registry=https://registry.npmjs.org --provenance=false --ignore-scripts`.
-Verify bytes and final tags, then require package publishing 2FA with tokens disallowed and inspect trust again.
-No new general release tag or R2 announcement is part of this replacement.
+## Published CLI and retirement results
 
-At 15:21 UTC the production probe still returned no release on `/api/latest-version` (404), healthy Render readiness (200), and anonymous auth rejection (401).
-No current R2 or Worker credential was replaced or revoked.
+On 2026-09-13T15:44:11.177Z, anonymous registry verification confirmed only `@diffexai/diffex@0.2.1` remains from the approved original inventory.
+The ten separate npm packages and CLI `0.2.0` were unpublished in dependency order, and every retired version endpoint returns 404 or 410.
+The replacement was downloaded anonymously and matches source `f2a661684af35fe6e9a3209c6f9720144e1fd423`, SHA-256 `64c161d63ef416f6bf116a6b35953225dc49c236ccba0ef4b88c2ac8ff4452b0`, and the retained SHA-512 integrity.
+Final registry inspection found `bootstrap: 0.2.1` and `latest: 0.2.1`.
+The npm registry rejected removal of its automatic latest tag; the no-latest acceptance condition remains unresolved.
+npm accepted `npm access set mfa=publish @diffexai/diffex`, requiring publishing 2FA and disallowing traditional token overrides.
+The exact retained CLI trusted publisher was inspected again after package retirement.
+Fresh anonymous npm and Bun installations passed public imports, installed-file hashes, CLI version/help, native modules, WASM, and HTML export on Darwin arm64, with isolated directories removed afterward.
+The [publication evidence](cli-publication-evidence.json) retains exact identity, registry retirement results, trust, tags, and installation outcomes.
+The earlier [candidate evidence](cli-only-candidate-evidence.json) describes the retained prepublication validation snapshot.
+No R2 production pointer or general release announcement was created.
+The production probe after publication returned missing release (404), healthy readiness (200), and anonymous auth rejection (401).
+
+## Remaining live verification
+
+The new production/staging credential scope checks require the companion workflow on `main` and a subsequent dispatch.
+Existing environment ref restrictions were preserved.
+The npm no-latest acceptance condition remains open because tag deletion was rejected.
+GitHub native validation of the final candidate remains an explicitly owner-accepted exception for this replacement only.
+Future normal releases retain their native validation gate.

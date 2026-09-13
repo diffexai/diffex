@@ -169,3 +169,5 @@ If the user's instructions conflict with any rule in this document, ask for expl
 - 2026-09-13: npm created latest on first publication despite a bootstrap tag -> Verify registry behavior, clean only a newly uploaded exact bootstrap artifact, and retain a regression for partial retries.
 
 - 2026-09-13: Node rejects package import targets containing node_modules -> Preserve existing package import targets and validate staged tarballs through installed CLI startup before publication.
+
+- 2026-09-13: npm accepted publication before registry metadata propagated -> Preserve the uploaded artifact identity and resume verification without republishing or rebuilding.

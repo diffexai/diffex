@@ -1,0 +1,185 @@
+{
+  "verifiedAt": "2026-09-13T15:44:11.177Z",
+  "sourceCommit": "f2a661684af35fe6e9a3209c6f9720144e1fd423",
+  "artifact": {
+    "name": "@diffexai/diffex",
+    "version": "0.2.1",
+    "filename": "diffexai-diffex-0.2.1.tgz",
+    "size": 3530237,
+    "sha256": "64c161d63ef416f6bf116a6b35953225dc49c236ccba0ef4b88c2ac8ff4452b0",
+    "integrity": "sha512-ZBrTmPGnJy/C7u8DhZA/owIDELJGzPf2ujbRtZCPyvSfQEAtXGZk2C0PQ1/ctbyFKMXXpkXPlO7Asm5E/s//5g=="
+  },
+  "published": {
+    "name": "@diffexai/diffex",
+    "version": "0.2.1",
+    "tarball": "https://registry.npmjs.org/@diffexai/diffex/-/diffex-0.2.1.tgz",
+    "integrity": "sha512-ZBrTmPGnJy/C7u8DhZA/owIDELJGzPf2ujbRtZCPyvSfQEAtXGZk2C0PQ1/ctbyFKMXXpkXPlO7Asm5E/s//5g=="
+  },
+  "distTags": {
+    "bootstrap": "0.2.1",
+    "latest": "0.2.1"
+  },
+  "retired": [
+    {
+      "name": "@diffexai/diffex-agent-core",
+      "version": "0.2.0",
+      "absent": true,
+      "packageStatus": 404,
+      "versionStatus": 404,
+      "tarballStatus": 404,
+      "remainingVersions": []
+    },
+    {
+      "name": "@diffexai/diffex-ai",
+      "version": "0.2.0",
+      "absent": true,
+      "packageStatus": 404,
+      "versionStatus": 404,
+      "tarballStatus": 404,
+      "remainingVersions": []
+    },
+    {
+      "name": "@diffexai/diffex-client",
+      "version": "0.2.0",
+      "absent": true,
+      "packageStatus": 404,
+      "versionStatus": 404,
+      "tarballStatus": 404,
+      "remainingVersions": []
+    },
+    {
+      "name": "@diffexai/diffex",
+      "version": "0.2.0",
+      "absent": true,
+      "packageStatus": 200,
+      "versionStatus": 404,
+      "tarballStatus": 404,
+      "remainingVersions": [
+        "0.2.1"
+      ]
+    },
+    {
+      "name": "@diffexai/diffex-coding-agent-server",
+      "version": "0.2.0",
+      "absent": true,
+      "packageStatus": 404,
+      "versionStatus": 404,
+      "tarballStatus": 404,
+      "remainingVersions": []
+    },
+    {
+      "name": "@diffexai/diffex-harness-state",
+      "version": "0.2.0",
+      "absent": true,
+      "packageStatus": 404,
+      "versionStatus": 404,
+      "tarballStatus": 404,
+      "remainingVersions": []
+    },
+    {
+      "name": "@diffexai/diffex-protocol",
+      "version": "0.2.0",
+      "absent": true,
+      "packageStatus": 404,
+      "versionStatus": 404,
+      "tarballStatus": 404,
+      "remainingVersions": []
+    },
+    {
+      "name": "@diffexai/diffex-server",
+      "version": "0.2.0",
+      "absent": true,
+      "packageStatus": 404,
+      "versionStatus": 404,
+      "tarballStatus": 404,
+      "remainingVersions": []
+    },
+    {
+      "name": "@diffexai/diffex-session-backend-sqlite-node",
+      "version": "0.2.0",
+      "absent": true,
+      "packageStatus": 404,
+      "versionStatus": 404,
+      "tarballStatus": 404,
+      "remainingVersions": []
+    },
+    {
+      "name": "@diffexai/diffex-telemetry",
+      "version": "0.2.0",
+      "absent": true,
+      "packageStatus": 404,
+      "versionStatus": 404,
+      "tarballStatus": 404,
+      "remainingVersions": []
+    },
+    {
+      "name": "@diffexai/diffex-tui",
+      "version": "0.2.0",
+      "absent": true,
+      "packageStatus": 404,
+      "versionStatus": 404,
+      "tarballStatus": 404,
+      "remainingVersions": []
+    }
+  ],
+  "trust": {
+    "id": "a26ffd56-ad7f-4e22-bffa-9086e41a38fb",
+    "type": "github",
+    "file": "build-binaries.yml",
+    "repository": "diffexai/diffex",
+    "environment": "npm-publish",
+    "permissions": [
+      "createPackage",
+      "createStagedPackage"
+    ]
+  },
+  "traditionalTokenPublishing": {
+    "command": "npm access set mfa=publish @diffexai/diffex --registry=https://registry.npmjs.org",
+    "exitCode": 0,
+    "acceptedAt": "2026-09-13T15:44:07.515Z",
+    "publish_requires_tfa": true,
+    "automation_token_overrides_tfa": false,
+    "verification": "Authenticated npm access command accepted; flags follow the pinned npm 11.16.0 setMfa implementation"
+  },
+  "ownerApprovedSkippingBlockedGitHubValidation": true,
+  "publicRegistryInstall": {
+    "startedAt": "2026-09-13T15:43:37.001Z",
+    "package": "@diffexai/diffex@0.2.1",
+    "registry": "https://registry.npmjs.org",
+    "authenticated": false,
+    "platform": "darwin",
+    "arch": "arm64",
+    "managers": [
+      {
+        "manager": "npm",
+        "version": "0.2.1",
+        "entrypoints": [
+          "@diffexai/diffex",
+          "@diffexai/diffex/rpc-entry",
+          "@diffexai/diffex/client"
+        ],
+        "installedFileHashes": "passed",
+        "runtimeNativeWasmAndHtmlExport": "passed",
+        "help": "passed"
+      },
+      {
+        "manager": "bun",
+        "version": "0.2.1",
+        "entrypoints": [
+          "@diffexai/diffex",
+          "@diffexai/diffex/rpc-entry",
+          "@diffexai/diffex/client"
+        ],
+        "installedFileHashes": "passed",
+        "runtimeNativeWasmAndHtmlExport": "passed",
+        "help": "passed"
+      }
+    ],
+    "status": "passed",
+    "cleanup": true,
+    "finishedAt": "2026-09-13T15:43:48.479Z"
+  },
+  "issues": [
+    "npm rejected removal of latest tag"
+  ]
+}
