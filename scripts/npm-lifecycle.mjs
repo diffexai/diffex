@@ -19,7 +19,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { isolatedEnvironment } from "./artifact-acceptance.mjs";
-import { findNpmRecoveryBackup } from "./npm-recovery.mjs";
+import { findNpmRecoveryDirectory } from "./npm-recovery.mjs";
 
 const run = promisify(execFile);
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -255,7 +255,7 @@ try {
 			await command("npm", repairArgs);
 		} catch (error) {
 			if (fault !== "interrupt" || !error.stderr?.includes("ENOTEMPTY")) throw error;
-			const backup = findNpmRecoveryBackup(dirname(packageRoot), error.stderr);
+			const backup = findNpmRecoveryDirectory(dirname(packageRoot), error.stderr);
 			renameSync(backup, join(temporary, "retained-npm-recovery-backup"));
 			movedBackup = true;
 			await command("npm", repairArgs);

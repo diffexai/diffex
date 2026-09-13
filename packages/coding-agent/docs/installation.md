@@ -67,10 +67,13 @@ Npm owns replacement of an npm installation.
 If an update was interrupted or `diffex` no longer starts, repeat the pinned npm install command with the same verified version and prefix, then check `diffex --version` and `diffex --help`.
 Do not remove your user-data directory to repair an executable installation.
 Npm can begin filesystem replacement before a download finishes.
-If retrying reports `ENOTEMPTY` while renaming to a `.diffex-...` backup, move the exact destination shown by npm to a separate backup directory and retry:
+If retrying reports `ENOTEMPTY` while renaming to a `.diffex-...` backup, move that reported backup directory aside.
+If npm instead reports `ENOTEMPTY` while removing a dependency inside `$(npm root -g)/@diffexai/diffex`, move that complete CLI installation directory aside.
+This preserves the partially installed package and lets npm install into an empty destination.
+Use a separate backup directory and retry:
 
 ```sh
-DIFFEX_RECOVERY_FROM='/exact/destination/from/npm/error/.diffex-...'
+DIFFEX_RECOVERY_FROM='/exact/affected/CLI/installation/or/backup'
 DIFFEX_RECOVERY_DIR="$(mktemp -d)"
 mv "$DIFFEX_RECOVERY_FROM" "$DIFFEX_RECOVERY_DIR/"
 npm install -g --ignore-scripts --registry=https://registry.npmjs.org '@diffexai/diffex@<verified-version>'
@@ -78,8 +81,9 @@ diffex --version
 diffex --help
 ```
 
-Replace both placeholders with the reported Diffex backup path and verified version.
-Move only that package backup, preserving it until the repaired installation works.
+Replace both placeholders with the affected Diffex installation or backup path and the verified version.
+Move only the `@diffexai/diffex` package directory or its reported `.diffex-...` backup, preserving it until the repaired installation works.
+Do not move the global prefix, its shared `node_modules`, or another package.
 This procedure does not move or delete your settings or sessions.
 
 ## Remove
