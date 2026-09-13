@@ -473,6 +473,7 @@ interface PackageJson {
 	diffexConfig?: {
 		name?: string;
 		configDir?: string;
+		production?: boolean;
 	};
 }
 
@@ -490,6 +491,8 @@ export const APP_NAME: string = diffexConfigName || "diffex";
 export const APP_TITLE: string = diffexConfigName ? APP_NAME : "Diffex";
 export const CONFIG_DIR_NAME: string = pkg.diffexConfig?.configDir || ".diffex";
 export const VERSION: string = pkg.version || "0.0.0";
+/** Set by distribution staging, independently of the user's NODE_ENV. */
+export const IS_PRODUCTION_DISTRIBUTION: boolean = isBunBinary || pkg.diffexConfig?.production === true;
 
 export const ENV_AGENT_DIR = "DIFFEX_CODING_AGENT_DIR";
 export const ENV_SESSION_DIR = "DIFFEX_CODING_AGENT_SESSION_DIR";

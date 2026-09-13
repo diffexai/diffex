@@ -1,7 +1,42 @@
-import { describe, expect, test } from "vitest";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, test, vi } from "vitest";
 import { buildSystemPrompt } from "../src/core/system-prompt.ts";
 
 describe("buildSystemPrompt", () => {
+	test("uses installed reference docs without pointing to an empty README or absent examples", () => {
+		const directory = mkdtempSync(join(tmpdir(), "diffex-package-docs-"));
+		try {
+			mkdirSync(join(directory, "docs"));
+			writeFileSync(join(directory, "README.md"), "");
+			vi.stubEnv("DIFFEX_PACKAGE_DIR", directory);
+			const prompt = buildSystemPrompt({ cwd: process.cwd() });
+			expect(prompt).toContain(`Additional docs: ${join(directory, "docs")}`);
+			expect(prompt).toContain("skills (docs/skills.md)");
+			expect(prompt).toContain("https://diffex.ai/");
+			expect(prompt).not.toContain("README.md");
+			expect(prompt).not.toContain("Examples:");
+		} finally {
+			vi.unstubAllEnvs();
+			rmSync(directory, { recursive: true, force: true });
+		}
+	});
+	test("uses the product website when packaged documentation is absent", () => {
+		const directory = mkdtempSync(join(tmpdir(), "diffex-package-docs-"));
+		try {
+			vi.stubEnv("DIFFEX_PACKAGE_DIR", directory);
+			const prompt = buildSystemPrompt({ cwd: process.cwd() });
+			expect(prompt).toContain("https://diffex.ai/");
+			expect(prompt).not.toContain("Main documentation:");
+			expect(prompt).not.toContain("Additional docs:");
+			expect(prompt).not.toContain("Examples:");
+			expect(prompt).not.toContain(directory);
+		} finally {
+			vi.unstubAllEnvs();
+			rmSync(directory, { recursive: true, force: true });
+		}
+	});
 	describe("empty tools", () => {
 		test("shows (none) for empty tools list", () => {
 			const prompt = buildSystemPrompt({

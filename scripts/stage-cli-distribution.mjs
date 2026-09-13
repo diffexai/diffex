@@ -9,13 +9,12 @@ export function stageCliDistribution(directory, stage) {
 	mkdirSync(stage, { recursive: true });
 	const notices = [
 		"LICENSE",
-		"NOTICE",
 		"THIRD-PARTY-NOTICES.txt",
 		"distribution-components.json",
 		"distribution-files.json",
 	];
 	for (const file of manifest.files) cpSync(join(directory, file), join(stage, file), { recursive: true });
-	cpSync(join(directory, "README.md"), join(stage, "README.md"));
+	writeFileSync(join(stage, "README.md"), "");
 	const inventory = JSON.parse(readFileSync(join(directory, "distribution-files.json"), "utf8"));
 	const components = JSON.parse(readFileSync(join(directory, "distribution-components.json"), "utf8")).filter(
 		(component) => !bundled.some((pkg) => pkg.manifest.name === component.name),
@@ -33,6 +32,8 @@ export function stageCliDistribution(directory, stage) {
 			"peerDependencies",
 			"peerDependenciesMeta",
 			"files",
+			"repository",
+			"bugs",
 		])
 			delete metadata[field];
 		mkdirSync(target, { recursive: true });

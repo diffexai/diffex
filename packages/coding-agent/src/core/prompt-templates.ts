@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "fs";
 import { basename, dirname, join, resolve, sep } from "path";
-import { CONFIG_DIR_NAME } from "../config.ts";
+import { CONFIG_DIR_NAME, IS_PRODUCTION_DISTRIBUTION } from "../config.ts";
 import { parseFrontmatter } from "../utils/frontmatter.ts";
 import { resolvePath } from "../utils/paths.ts";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.ts";
@@ -107,6 +107,7 @@ function loadTemplateFromFile(filePath: string, sourceInfo: SourceInfo): PromptT
 		const { frontmatter, body } = parseFrontmatter<Record<string, string>>(rawContent);
 
 		const name = basename(filePath).replace(/\.md$/, "");
+		if (IS_PRODUCTION_DISTRIBUTION && name === "cl") return null;
 
 		// Get description from frontmatter or first non-empty line
 		let description = frontmatter.description || "";
@@ -273,6 +274,9 @@ export function expandPromptTemplate(text: string, templates: PromptTemplate[]):
 	if (!match) return text;
 
 	const templateName = match[1];
+	if (IS_PRODUCTION_DISTRIBUTION && templateName === "cl") {
+		throw new Error("/cl is unavailable in production Diffex installations.");
+	}
 	const argsString = match[2] ?? "";
 
 	const template = templates.find((t) => t.name === templateName);

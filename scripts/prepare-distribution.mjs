@@ -59,8 +59,9 @@ export function preparePackageDistribution(directory) {
 			notice: "LICENSE",
 		},
 	];
-	let notices =
-		"Diffex modifications copyright 2026 Luntraa, Inc.\nPi-derived portions retain the complete MIT terms in LICENSE.\n";
+	const notice =
+		"Diffex\nCopyright 2026 Luntraa, Inc.\n\nWhere this distribution contains Pi Agent Harness-derived portions,\nthose portions retain their MIT terms and copyright notice in LICENSE.\nThe Apache-2.0 package declaration does not replace third-party terms.\n";
+	let notices = notice;
 	if (pkg.name === "@diffexai/diffex") {
 		for (const workspace of ["evolution", "harness-trace"]) {
 			components.push({
@@ -95,10 +96,7 @@ export function preparePackageDistribution(directory) {
 		});
 	}
 	cpSync(join(root, "LICENSE"), join(absolute, "LICENSE"));
-	writeFileSync(
-		join(absolute, "NOTICE"),
-		`Diffex\nCopyright 2026 Luntraa, Inc.\n\nWhere this distribution contains Pi Agent Harness-derived portions,\nthose portions retain their MIT terms and copyright notice in LICENSE.\nThe Apache-2.0 package declaration does not replace third-party terms.\n`,
-	);
+	writeFileSync(join(absolute, "NOTICE"), notice);
 	writeFileSync(join(absolute, "THIRD-PARTY-NOTICES.txt"), notices);
 	for (const component of components) {
 		if (component.notice)

@@ -5,6 +5,91 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { PROJECT_CHANGELOGS } from "./prepare-distribution.mjs";
+import { cliDistribution } from "./cli-distribution.mjs";
+
+test("packed CLI exposes the product homepage and preserves referenced documentation", () => {
+	const root = mkdtempSync(join(tmpdir(), "diffex-cli-presentation-"));
+	try {
+		const copy = (file) => {
+			mkdirSync(join(root, file, ".."), { recursive: true });
+			cpSync(file, join(root, file));
+		};
+		for (const script of [
+			"prepare-distribution.mjs",
+			"release-packages.mjs",
+			"release-distribution-manifest.mjs",
+			"package-workspaces.mjs",
+			"check-distribution-payload.py",
+			"cli-distribution.mjs",
+			"stage-cli-distribution.mjs",
+		]) copy(`scripts/${script}`);
+		for (const file of [
+			"LICENSE",
+			"docs/release/distribution-policy.json",
+			"legal/upstream/highlight-11.9.0.LICENSE",
+			"node_modules/marked/LICENSE",
+			"packages/coding-agent/npm-shrinkwrap.json",
+			"packages/coding-agent/install-lock/package.json",
+			"packages/coding-agent/install-lock/package-lock.json",
+		]) copy(file);
+		const directories = [
+			"packages/coding-agent",
+			"packages/evolution",
+			"packages/harness-trace",
+			...cliDistribution().bundled.map((pkg) => pkg.directory),
+		];
+		for (const directory of directories) {
+			copy(`${directory}/package.json`);
+			for (const folder of ["src", "dist", "docs"])
+				mkdirSync(join(root, directory, folder), { recursive: true });
+			writeFileSync(join(root, directory, "src/index.ts"), "export const value = 1;\n");
+			writeFileSync(join(root, directory, "dist/index.js"), "export const value = 1;\n");
+			for (const file of ["README.md", "CONTRIBUTING.md", "docs/skills.md", "CHANGELOG.md"])
+				writeFileSync(join(root, directory, file), "Repository documentation\n");
+		}
+		const pkg = join(root, "packages/coding-agent");
+		const metadata = JSON.parse(readFileSync(join(pkg, "package.json"), "utf8"));
+		metadata.files.push("CONTRIBUTING.md");
+		writeFileSync(join(pkg, "package.json"), JSON.stringify(metadata));
+		for (const platform of ["darwin", "win32"])
+			mkdirSync(join(root, "packages/tui/native", platform, "prebuilds"), { recursive: true });
+		writeFileSync(
+			join(root, "prepare.mjs"),
+			'import { preparePackageDistribution } from "./scripts/prepare-distribution.mjs";\n' +
+				'import { stageCliDistribution } from "./scripts/stage-cli-distribution.mjs";\n' +
+				'preparePackageDistribution("packages/coding-agent");\n' +
+				'stageCliDistribution("packages/coding-agent", "stage");\n',
+		);
+		execFileSync("node", ["prepare.mjs"], {
+			cwd: root,
+			env: { ...process.env, DIFFEX_SOURCE_COMMIT: "a".repeat(40) },
+		});
+		const [packed] = JSON.parse(
+			execFileSync("npm", ["pack", "--ignore-scripts", "--json", "--cache", join(root, "cache")], {
+				cwd: join(root, "stage"),
+				encoding: "utf8",
+			}),
+		);
+		const archive = join(root, "stage", packed.filename);
+		const published = JSON.parse(execFileSync("tar", ["-xOf", archive, "package/package.json"], { encoding: "utf8" }));
+		assert.equal(published.homepage, "https://diffex.ai/");
+		assert.equal(published.repository, undefined);
+		assert.equal(published.bugs, undefined);
+		assert.equal(published.diffexConfig.production, true);
+		assert.equal(execFileSync("tar", ["-xOf", archive, "package/README.md"]).length, 0);
+		assert.equal(execFileSync("tar", ["-xOf", archive, "package/docs/skills.md"], { encoding: "utf8" }), "Repository documentation\n");
+		for (const { path } of packed.files)
+			assert(!path.split("/").some((part) => ["notice", "contributing.md"].includes(part.toLowerCase())), path);
+		const attribution = execFileSync("tar", ["-xOf", archive, "package/THIRD-PARTY-NOTICES.txt"], { encoding: "utf8" });
+		assert(attribution.startsWith(readFileSync(join(pkg, "NOTICE"), "utf8")));
+		assert.match(attribution, /highlight\.js@11\.9\.0/);
+		assert.match(attribution, /marked@18\.0\.5/);
+		const result = spawnSync("python3", ["scripts/check-distribution-payload.py", archive], { cwd: root, encoding: "utf8" });
+		assert.equal(result.status, 0, result.stderr);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
 
 test("actual npm tarball carries notices and excludes debug sources after preparation", () => {
 	const root = mkdtempSync(join(tmpdir(), "diffex-prepack-test-"));

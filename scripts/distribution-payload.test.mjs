@@ -79,7 +79,6 @@ test("accepts a tarball with readable JavaScript, declarations, and complete not
 
 for (const notice of [
 	"LICENSE",
-	"NOTICE",
 	"THIRD-PARTY-NOTICES.txt",
 	"distribution-components.json",
 	"distribution-files.json",
@@ -90,6 +89,11 @@ for (const notice of [
 		assert.match(result.stderr, /missing required notice/);
 	});
 }
+
+test("accepts consolidated attribution without a separate NOTICE file", () => {
+	const result = inspect({}, "NOTICE");
+	assert.equal(result.status, 0, result.stderr);
+});
 
 for (const [name, content, reason] of [
 	["dist/implementation.ts", "export const value = 1", /prohibited source file/],

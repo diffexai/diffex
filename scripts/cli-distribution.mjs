@@ -54,6 +54,13 @@ export function cliDistribution(root = ".") {
 			throw new Error(`Bundled workspace version differs from CLI: ${pkg.manifest.name}`);
 	for (const name of Object.keys(dependencies)) delete optionalDependencies[name];
 	const manifest = structuredClone(cli.manifest);
+	manifest.homepage = "https://diffex.ai/";
+	manifest.diffexConfig = { ...manifest.diffexConfig, production: true };
+	delete manifest.repository;
+	delete manifest.bugs;
+	manifest.files = manifest.files.filter(
+		(file) => !["notice", "contributing.md"].includes(file.split("/")[0].toLowerCase()),
+	);
 	manifest.dependencies = Object.fromEntries(Object.entries(dependencies).sort(([a], [b]) => a.localeCompare(b)));
 	manifest.optionalDependencies = Object.fromEntries(
 		Object.entries(optionalDependencies).sort(([a], [b]) => a.localeCompare(b)),

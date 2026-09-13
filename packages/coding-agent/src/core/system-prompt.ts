@@ -2,7 +2,8 @@
  * System prompt construction and project context loading
  */
 
-import { getDocsPath, getExamplesPath, getReadmePath } from "../config.ts";
+import { existsSync } from "node:fs";
+import { getDocsPath, getExamplesPath } from "../config.ts";
 import { formatSkillsForPrompt, type Skill } from "./skills.ts";
 
 export interface BuildSystemPromptOptions {
@@ -79,7 +80,6 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 	}
 
 	// Get absolute paths to documentation and examples
-	const readmePath = getReadmePath();
 	const docsPath = getDocsPath();
 	const examplesPath = getExamplesPath();
 
@@ -136,13 +136,16 @@ Guidelines:
 ${guidelines}
 
 Diffex documentation (read only when the user asks about Diffex itself, its SDK, extensions, themes, skills, or TUI):
-- Main documentation: ${readmePath}
+${
+	existsSync(docsPath)
+		? `- Product website: https://diffex.ai/
 - Additional docs: ${docsPath}
-- Examples: ${examplesPath} (extensions, custom tools, SDK)
-- When reading Diffex docs or examples, resolve docs/... under Additional docs and examples/... under Examples, not the current working directory
-- When asked about: extensions (docs/extensions.md, examples/extensions/), themes (docs/themes.md), skills (docs/skills.md), prompt templates (docs/prompt-templates.md), TUI components (docs/tui.md), keybindings (docs/keybindings.md), SDK integrations (docs/sdk.md), custom providers (docs/custom-provider.md), adding models (docs/models.md), Diffex packages (docs/packages.md), environment variables (docs/environment-variables.md)
-- When working on Diffex topics, read the docs and examples, and follow .md cross-references before implementing
-- Always read Diffex.md files completely and follow links to related docs (e.g., tui.md for TUI API details)`;
+${existsSync(examplesPath) ? `- Examples: ${examplesPath} (extensions, custom tools, SDK)\n- When reading Diffex docs or examples, resolve docs/... under Additional docs and examples/... under Examples, not the current working directory` : "- Resolve docs/... under Additional docs, not the current working directory; example source files are not included in this installation"}
+- When asked about: extensions (docs/extensions.md), themes (docs/themes.md), skills (docs/skills.md), prompt templates (docs/prompt-templates.md), TUI components (docs/tui.md), keybindings (docs/keybindings.md), SDK integrations (docs/sdk.md), custom providers (docs/custom-provider.md), adding models (docs/models.md), Diffex packages (docs/packages.md), environment variables (docs/environment-variables.md)
+- When working on Diffex topics, read the docs and follow .md cross-references before implementing
+- Always read Diffex.md files completely and follow links to related docs (e.g., tui.md for TUI API details)`
+		: "- Product website: https://diffex.ai/"
+}`;
 
 	if (appendSection) {
 		prompt += appendSection;

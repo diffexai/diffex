@@ -122,7 +122,7 @@ def inspect_archive(file, license_file, expected_name=None, expected_version=Non
     root = roots[0]
     if root and any(not name.startswith(root) for name in entries):
         fail(str(file), 'file outside distribution root')
-    for notice in ['LICENSE', 'NOTICE', 'THIRD-PARTY-NOTICES.txt', 'distribution-components.json', 'distribution-files.json']:
+    for notice in ['LICENSE', 'THIRD-PARTY-NOTICES.txt', 'distribution-components.json', 'distribution-files.json']:
         if not entries.get(root + notice, b'').strip():
             fail(str(file), 'missing required notice: ' + notice)
     if entries[root + 'LICENSE'] != Path(license_file).read_bytes():
