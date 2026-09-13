@@ -39,3 +39,24 @@ export async function verifyNpmArtifact(pkg, { allowMissing = false } = {}) {
 		throw new Error(`${pkg.name}: published tarball bytes conflict with approved artifact`);
 	return { name: pkg.name, version: pkg.version, tarball: expectedUrl, integrity: pkg.integrity };
 }
+
+export async function readNpmPackageState(name) {
+	const response = await fetch(`${REGISTRY}/${encodeURIComponent(name)}`, {
+		headers: { accept: "application/json" },
+		redirect: "error",
+		signal: AbortSignal.timeout(TIMEOUT),
+	});
+	if (response.status === 404) return { registered: false, distTags: {} };
+	if (!response.ok) throw new Error(`${name}: npm package inventory unavailable (${response.status})`);
+	const metadata = await response.json();
+	const tags = metadata?.["dist-tags"];
+	if (
+		metadata?.name !== name ||
+		!tags ||
+		typeof tags !== "object" ||
+		Array.isArray(tags) ||
+		Object.values(tags).some((version) => typeof version !== "string")
+	)
+		throw new Error(`${name}: invalid npm package inventory`);
+	return { registered: true, distTags: tags };
+}

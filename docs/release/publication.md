@@ -11,6 +11,8 @@ Standalone binaries remain deferred, and the npm record contains no binary manif
 See [promotion and recovery](promotion.md) for the complete prerequisites, private artifact retention, and partial-failure procedures.
 This setup does not authorize running a release or bypass the repository's release requirements.
 
+See [publication trust and bootstrap evidence](publication-trust.md) for the private-source OIDC decision and the current live verification record.
+
 ## Credentials and environment boundaries
 
 Release storage belongs to account `6b24afa849f8254ab5e6e2d1956239cc`.

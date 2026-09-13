@@ -21,6 +21,25 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  production-credential-scope:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: diffex-release-upload
+    steps:
+      - name: Checkout reviewed source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22.19.0'
+      - name: Verify production publisher bucket isolation without writes
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.DIFFEX_ARTIFACTS_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.DIFFEX_ARTIFACTS_R2_SECRET_ACCESS_KEY }}
+        run: node scripts/verify-release-credentials.mjs --production
+
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -39,6 +58,11 @@ jobs:
         run: npm ci --ignore-scripts
       - name: Verify AWS CLI
         run: aws --version
+      - name: Verify staging publisher bucket isolation
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.DIFFEX_ARTIFACTS_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.DIFFEX_ARTIFACTS_R2_SECRET_ACCESS_KEY }}
+        run: node scripts/verify-release-credentials.mjs --staging
       - name: Check controlled publisher regressions
         run: node --test scripts/publish-release-announcement.test.mjs
       - name: Verify publication against staging storage

@@ -19,12 +19,13 @@ describe("npm publish planning", () => {
 		assert.throws(() => parsePublishArgs(["--force"]), /Usage: node scripts\/publish\.mjs/);
 	});
 
-	it("uses provenance for releases and a non-default tag for bootstrap publication", () => {
+	it("disables unsupported private-source provenance and pins the bootstrap tag", () => {
 		assert.deepEqual(createPublishArgs({ bootstrap: false }), [
 			"publish",
 			"--access",
 			"public",
-			"--provenance",
+			"--registry=https://registry.npmjs.org",
+			"--provenance=false",
 			"--ignore-scripts",
 		]);
 		assert.deepEqual(createPublishArgs({ bootstrap: true }), [
@@ -33,6 +34,8 @@ describe("npm publish planning", () => {
 			"public",
 			"--tag",
 			BOOTSTRAP_DIST_TAG,
+			"--registry=https://registry.npmjs.org",
+			"--provenance=false",
 			"--ignore-scripts",
 		]);
 	});
@@ -58,7 +61,7 @@ describe("npm publish planning", () => {
 
 	it("builds the trusted-publisher command for the release workflow", () => {
 		assert.deepEqual(createTrustedPublisherCommands(["@scope/package"]), [
-			"npm trust github @scope/package --file build-binaries.yml --repo diffexai/diffex --env npm-publish --allow-publish --yes",
+			"npm trust github @scope/package --file build-binaries.yml --repo diffexai/diffex --env npm-publish --allow-publish --registry=https://registry.npmjs.org --yes",
 		]);
 	});
 });

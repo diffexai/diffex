@@ -161,3 +161,5 @@ Attribution:
 ## User Override
 
 If the user's instructions conflict with any rule in this document, ask for explicit confirmation before overriding. Only then execute their instructions.
+
+- 2026-09-13: Publication checks assumed an HTTPS repository field and invocation directory -> Inspect canonical package metadata and run workspace inventory from the owning repository before validating trust.

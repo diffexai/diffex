@@ -57,6 +57,10 @@ export function createPublicationFixture({ staging = false } = {}) {
 				failPublishAt,
 				mutateManifest,
 				mutatePolicy,
+				bootstrap = false,
+				dryRun = false,
+				latest,
+				wrongBootstrap = false,
 			} = {},
 		) {
 			writeFileSync(join(directory, "package.json"), JSON.stringify({ version, private: true }));
@@ -101,7 +105,10 @@ export function createPublicationFixture({ staging = false } = {}) {
 			writeFileSync(join(artifactDirectory, "inputs.json"), JSON.stringify(inputs));
 			if (mutateManifest) mutateManifest(manifest);
 			writeFileSync(join(artifactDirectory, "manifest.json"), JSON.stringify(manifest));
-			writeFileSync(fixturePath, JSON.stringify({ packages: manifests, failure, commit, missing, failPublishAt }));
+			writeFileSync(
+				fixturePath,
+				JSON.stringify({ packages: manifests, failure, commit, missing, failPublishAt, latest, wrongBootstrap }),
+			);
 			const env = {
 				PATH: `${join(directory, "bin")}:${process.env.PATH}`,
 				DIFFEX_FIXTURE_REAL_AWS: staging ? "true" : "",
@@ -120,7 +127,13 @@ export function createPublicationFixture({ staging = false } = {}) {
 					"--import",
 					registry,
 					...(command === "publish"
-						? [npmPublisher, "--artifacts", artifactDirectory]
+						? [
+								npmPublisher,
+								"--artifacts",
+								artifactDirectory,
+								...(bootstrap ? ["--bootstrap"] : []),
+								...(dryRun ? ["--dry-run"] : []),
+							]
 						: [
 								publisher,
 								"--artifacts",

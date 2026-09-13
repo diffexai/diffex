@@ -75,7 +75,8 @@ shasum -a 256 -c /path/to/private-evidence/SHA256SUMS
 
 On Linux, `sha256sum -c` accepts the same checksum file.
 Regression coverage alters archive bytes and confirms verification fails before installation.
-The release workflow retains the source snapshot and manifests privately, while npm publication supplies registry integrity and provenance through the existing publisher.
+The release workflow retains the source snapshot and manifests privately, while npm publication supplies registry integrity through the existing publisher.
+Trusted publishing authenticates the private source workflow, but npm does not generate provenance for private repositories.
 Public acceptance must compare the actual downloaded npm bytes with these retained identities after separately authorized publication.
 
 The baseline CLI-only acceptance passed on Darwin arm64 but emitted no per-package operation or hosted-server result.

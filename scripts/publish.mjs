@@ -3,7 +3,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { prepareReleaseArtifacts, readReleaseArtifacts } from "./release-artifacts.mjs";
-import { verifyNpmArtifact } from "./release-registry.mjs";
+import { readNpmPackageState, verifyNpmArtifact } from "./release-registry.mjs";
 import { join } from "node:path";
 import {
 	assertBootstrapPackageStates,
@@ -49,24 +49,6 @@ function run(command, args, options = {}) {
 	return result;
 }
 
-function isRegistered(name) {
-	const result = spawnSync(commandForPlatform("npm"), ["view", name, "version", "--json"], {
-		encoding: "utf8",
-		stdio: ["inherit", "pipe", "pipe"],
-	});
-
-	if (result.status === 0 && result.stdout.trim()) {
-		return true;
-	}
-
-	const output = [result.stdout, result.stderr].filter(Boolean).join("\n");
-	if (result.status !== 0 && (output.includes("E404") || output.includes("404 Not Found"))) {
-		return false;
-	}
-
-	throw new Error(output ? `Failed to query ${name}\n${output}` : `Failed to query ${name}`);
-}
-
 const packageVersions = new Map(packages.map((pkg) => [pkg.name, pkg.version]));
 
 const versions = [...new Set(packageVersions.values())];
@@ -106,7 +88,12 @@ for (const pkg of manifest.packages) {
 
 if (bootstrap) {
 	for (const pkg of packageStates) {
-		pkg.registered = pkg.published || isRegistered(pkg.name);
+		const state = await readNpmPackageState(pkg.name);
+		pkg.registered = state.registered;
+		if (state.distTags.latest !== undefined || (pkg.published && state.distTags.bootstrap !== pkg.version))
+			throw new Error(
+				`${pkg.name}: bootstrap requires no latest tag and an exact bootstrap tag for existing artifacts`,
+			);
 	}
 	assertBootstrapPackageStates(packageStates);
 }
@@ -145,6 +132,12 @@ for (const pkg of packageStates) {
 }
 
 if (bootstrap) {
+	for (const pkg of packageStates) {
+		await verifyNpmArtifact(pkg);
+		const state = await readNpmPackageState(pkg.name);
+		if (state.distTags.latest !== undefined || state.distTags.bootstrap !== pkg.version)
+			throw new Error(`${pkg.name}: bootstrap tag verification failed; do not announce this version`);
+	}
 	console.log("Bootstrap publication is complete. Configure trusted publishing with:\n");
 	for (const command of createTrustedPublisherCommands(packages.map((pkg) => pkg.name))) {
 		console.log(`  ${command}`);

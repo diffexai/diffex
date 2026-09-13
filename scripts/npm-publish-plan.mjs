@@ -23,7 +23,9 @@ export function createPublishArgs({ bootstrap }) {
 		"publish",
 		"--access",
 		"public",
-		...(bootstrap ? ["--tag", BOOTSTRAP_DIST_TAG] : ["--provenance"]),
+		...(bootstrap ? ["--tag", BOOTSTRAP_DIST_TAG] : []),
+		"--registry=https://registry.npmjs.org",
+		"--provenance=false",
 		"--ignore-scripts",
 	];
 }
@@ -42,6 +44,6 @@ export function assertBootstrapPackageStates(packageStates) {
 export function createTrustedPublisherCommands(packageNames) {
 	return packageNames.map(
 		(packageName) =>
-			`npm trust github ${packageName} --file build-binaries.yml --repo diffexai/diffex --env npm-publish --allow-publish --yes`,
+			`npm trust github ${packageName} --file build-binaries.yml --repo diffexai/diffex --env npm-publish --allow-publish --registry=https://registry.npmjs.org --yes`,
 	);
 }

@@ -27,6 +27,19 @@ globalThis.fetch = async (input, options) => {
 	state.registryCalls.push({ url: url.href, method: options?.method ?? "GET" });
 	writeFileSync(process.env.DIFFEX_PUBLICATION_STORAGE, JSON.stringify(state));
 	if (url.origin !== "https://registry.npmjs.org") throw new Error("Unexpected publication fixture origin");
+	const inventory = fixture.packages.find((pkg) => url.pathname === `/${encodeURIComponent(pkg.name)}`);
+	if (inventory) {
+		if (fixture.missing && !state.published?.includes(inventory.name)) return new Response(null, { status: 404 });
+		return Response.json({
+			name: inventory.name,
+			"dist-tags": {
+				...(state.bootstrap?.includes(inventory.name)
+					? { bootstrap: fixture.wrongBootstrap ? "0.0.1" : inventory.version }
+					: {}),
+				...(fixture.latest ? { latest: fixture.latest } : {}),
+			},
+		});
+	}
 	const pkg = fixture.packages.find((pkg) => url.pathname === `/${encodeURIComponent(pkg.name)}/${pkg.version}`);
 	if (pkg) {
 		if (

@@ -39,14 +39,14 @@ Npm trust remains bound to the private source repository and the existing workfl
 
 ## First npm publication
 
+The owner has already verified npm account and organization prerequisites; do not repeat login or ownership checks unless authentication fails.
+Use the approved interactive npm session for bootstrap and trust configuration.
 npm requires a package to exist before a trusted publisher can be configured.
 Use this bootstrap process only once, before the first normal release.
 
-1. Sign in with an npm account that can publish public packages under `@diffexai`.
-
-   ```bash
-   npm login
-   ```
+1. Confirm the current candidate has the owner's `/cl` refresh, approved payload review, and local/native artifact acceptance.
+   Configure the reviewed `npm-publish` GitHub environment before public bootstrap publication.
+   See [publication trust and bootstrap evidence](docs/release/publication-trust.md) for the exact settings and outstanding owner decisions.
 
 2. Build and validate every package without publishing anything.
 
@@ -54,14 +54,31 @@ Use this bootstrap process only once, before the first normal release.
    npm run release:bootstrap-npm:dry
    ```
 
+   For frozen candidate inputs, use the same offline build path as normal CI from a clean committed checkout:
+
+   ```bash
+   npm run hydrate:model-data
+   node scripts/release-artifacts.mjs freeze /tmp/diffex-bootstrap-candidate
+   npm run build:offline
+   node scripts/release-artifacts.mjs prepare /tmp/diffex-bootstrap-candidate
+   node scripts/publish.mjs --bootstrap --dry-run --artifacts /tmp/diffex-bootstrap-candidate
+   ```
+
+   Retain the entire private directory, including `manifest.json` and frozen source inputs.
+   Publish or retry these exact reviewed bytes with `node scripts/publish.mjs --bootstrap --artifacts /tmp/diffex-bootstrap-candidate`; do not rebuild them.
+   A new source commit requires a new reviewed candidate directory before any publication.
+
 3. Publish the current lockstep version under the non-default `bootstrap` dist-tag.
 
    ```bash
    npm run release:bootstrap-npm
    ```
 
-   Bootstrap publication deliberately omits provenance because it runs interactively outside the trusted CI environment.
+   Both bootstrap and normal publication explicitly disable provenance because npm does not support it for the private source repository.
+   Normal CI still authenticates through the exact OIDC trusted publisher; it needs no npm token secret.
    It does not assign the `latest` dist-tag.
+   It reads registry package metadata directly, rejects any existing `latest` tag, and verifies every downloaded tarball and exact `bootstrap` tag after publication.
+   A propagation failure remains incomplete; rerun against the same retained artifact directory without rebuilding.
    The command is resumable after a partial failure: it downloads and hashes packages already published at the exact workspace version against the retained approved artifacts and refuses packages that already exist only at other versions.
 
 4. Run every `npm trust github` command printed by the bootstrap command.
@@ -75,10 +92,12 @@ Use this bootstrap process only once, before the first normal release.
 5. Verify each package has the expected trusted publisher.
 
    ```bash
-   npm trust list @diffexai/diffex
+   node scripts/npm-publication-trust.mjs --verify
    ```
 
 6. Restrict traditional token publishing after trusted publishing is verified.
+   In every package's npm access settings, require two-factor authentication and disallow tokens, then retain the reviewed settings alongside the trust evidence.
+   Do not revoke unrelated account tokens or claim enforcement from an OIDC configuration alone.
 
 ## Normal release
 

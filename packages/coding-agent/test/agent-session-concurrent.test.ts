@@ -3,7 +3,7 @@ import { createModelRegistry, getModelRuntime } from "./model-runtime-test-utils
  * Tests for AgentSession concurrent prompt guard.
  */
 
-import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Agent } from "@diffexai/diffex-agent-core";
@@ -61,16 +61,17 @@ function createAssistantMessage(text: string): AssistantMessage {
 describe("AgentSession concurrent prompt guard", () => {
 	let session: AgentSession;
 	let tempDir: string;
+	let streamStarted: Promise<void>;
 
 	beforeEach(async () => {
-		tempDir = join(tmpdir(), `pi-concurrent-test-${Date.now()}`);
-		mkdirSync(tempDir, { recursive: true });
+		tempDir = mkdtempSync(join(tmpdir(), "diffex-concurrent-test-"));
 	});
 
 	afterEach(async () => {
 		delete (globalThis as typeof globalThis & { testExtensionApi?: unknown }).testExtensionApi;
 		delete (globalThis as typeof globalThis & { testCommandRuns?: unknown }).testCommandRuns;
 		if (session) {
+			await session.abort();
 			await session.dispose();
 		}
 		if (tempDir && existsSync(tempDir)) {
@@ -79,6 +80,10 @@ describe("AgentSession concurrent prompt guard", () => {
 	});
 
 	async function createSession() {
+		let notifyStreamStarted!: () => void;
+		streamStarted = new Promise<void>((resolve) => {
+			notifyStreamStarted = resolve;
+		});
 		const model = getModel("anthropic", "claude-sonnet-4-5")!;
 		let abortSignal: AbortSignal | undefined;
 
@@ -95,6 +100,7 @@ describe("AgentSession concurrent prompt guard", () => {
 				const stream = new MockAssistantStream();
 				queueMicrotask(() => {
 					stream.push({ type: "start", partial: createAssistantMessage("") });
+					notifyStreamStarted();
 					const checkAbort = () => {
 						if (abortSignal?.aborted) {
 							stream.push({ type: "error", reason: "aborted", error: createAssistantMessage("Aborted") });
@@ -133,8 +139,8 @@ describe("AgentSession concurrent prompt guard", () => {
 		// Start first prompt (don't await, it will block until abort)
 		const firstPrompt = session.prompt("First message");
 
-		// Wait a tick for isStreaming to be set
-		await new Promise((resolve) => setTimeout(resolve, 10));
+		// Wait for the actual mock stream, or surface prompt startup failure.
+		await Promise.race([streamStarted, firstPrompt]);
 
 		// Verify we're streaming
 		expect(session.isStreaming).toBe(true);
@@ -154,7 +160,7 @@ describe("AgentSession concurrent prompt guard", () => {
 
 		// Start first prompt
 		const firstPrompt = session.prompt("First message");
-		await new Promise((resolve) => setTimeout(resolve, 10));
+		await Promise.race([streamStarted, firstPrompt]);
 
 		// steer should work while streaming
 		expect(() => session.steer("Steering message")).not.toThrow();
@@ -170,7 +176,7 @@ describe("AgentSession concurrent prompt guard", () => {
 
 		// Start first prompt
 		const firstPrompt = session.prompt("First message");
-		await new Promise((resolve) => setTimeout(resolve, 10));
+		await Promise.race([streamStarted, firstPrompt]);
 
 		// followUp should work while streaming
 		expect(() => session.followUp("Follow-up message")).not.toThrow();

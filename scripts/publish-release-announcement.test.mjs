@@ -307,3 +307,52 @@ test("enabling public binary assets without an availability gate fails before pr
 		fixture.cleanup();
 	}
 });
+
+test("bootstrap dry run writes nothing and completion verifies all packages without latest or R2", () => {
+	const fixture = createPublicationFixture();
+	try {
+		const options = { command: "publish", missing: true, bootstrap: true };
+		const dry = fixture.run("0.0.3", { ...options, dryRun: true });
+		assert.equal(dry.status, 0, dry.stderr);
+		assert.equal(fixture.state().published, undefined);
+		const partial = fixture.run("0.0.3", { ...options, failPublishAt: "@diffexai/diffex" });
+		assert.equal(partial.status, 1);
+		assert.ok(fixture.state().published.length > 0);
+		for (let attempt = 0; attempt < 2; attempt++) {
+			const result = fixture.run("0.0.3", options);
+			assert.equal(result.status, 0, result.stderr);
+			assert.equal(fixture.state().published.length, fixture.packageCount);
+			assert.equal(fixture.state().bootstrap.length, fixture.packageCount);
+			assert.deepEqual(fixture.state().objects, {});
+			assert.deepEqual(fixture.state().calls, []);
+		}
+	} finally {
+		fixture.cleanup();
+	}
+});
+
+test("bootstrap rejects established latest tags before publishing", () => {
+	const fixture = createPublicationFixture();
+	try {
+		const result = fixture.run("0.0.3", { command: "publish", bootstrap: true, latest: "0.0.3" });
+		assert.equal(result.status, 1);
+		assert.match(result.stderr, /bootstrap requires no latest/);
+		assert.equal(fixture.state().published, undefined);
+		assert.deepEqual(fixture.state().objects, {});
+	} finally {
+		fixture.cleanup();
+	}
+});
+
+test("bootstrap cannot claim completion when registry tags disagree", () => {
+	const fixture = createPublicationFixture();
+	try {
+		const result = fixture.run("0.0.3", { command: "publish", bootstrap: true, missing: true, wrongBootstrap: true });
+		assert.equal(result.status, 1);
+		assert.match(result.stderr, /bootstrap tag verification failed/);
+		assert.doesNotMatch(result.stdout, /Bootstrap publication is complete/);
+		assert.deepEqual(fixture.state().objects, {});
+	} finally {
+		fixture.cleanup();
+	}
+});
