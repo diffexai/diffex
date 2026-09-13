@@ -96,7 +96,7 @@ export function preparePackageDistribution(directory) {
 		});
 	}
 	cpSync(join(root, "LICENSE"), join(absolute, "LICENSE"));
-	writeFileSync(join(absolute, "NOTICE"), notice);
+	rmSync(join(absolute, "NOTICE"), { force: true });
 	writeFileSync(join(absolute, "THIRD-PARTY-NOTICES.txt"), notices);
 	for (const component of components) {
 		if (component.notice)

@@ -51,7 +51,7 @@ def inspect_image(filename):
                     if relative.startswith('node_modules/'):
                         continue
                     workspaces.add(workspace)
-                    if relative not in {'package.json', 'LICENSE', 'NOTICE', 'THIRD-PARTY-NOTICES.txt', 'distribution-components.json', 'distribution-files.json'} and not relative.startswith(('dist/', 'native/', 'docs/')):
+                    if relative not in {'package.json', 'LICENSE', 'THIRD-PARTY-NOTICES.txt', 'distribution-components.json', 'distribution-files.json'} and not relative.startswith(('dist/', 'native/', 'docs/')):
                         raise ValueError(f'Unexpected runtime workspace file: {local}')
                     content = archive.extractfile(entry).read()
                     payload.scan_bytes(content, 'package/' + relative, {'bytes': 0, 'files': 0})

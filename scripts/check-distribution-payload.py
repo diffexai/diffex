@@ -16,7 +16,7 @@ from pathlib import Path, PurePosixPath
 
 
 DOCUMENTATION = set(json.loads(Path(__file__).with_name('distribution-docs.json').read_text()))
-LEGAL_DOCUMENTS = {'LICENSE', 'NOTICE', 'THIRD-PARTY-NOTICES.txt'}
+LEGAL_DOCUMENTS = {'LICENSE', 'THIRD-PARTY-NOTICES.txt'}
 
 MAX_BYTES = 1024 * 1024 * 1024
 MAX_FILES = 100000
@@ -43,6 +43,8 @@ def check_path(name, directory=False):
         fail(name, 'prohibited source or private path')
     if any(part.lower() == 'agents.md' for part in path.parts):
         fail(name, 'prohibited repository instructions')
+    if not directory and path.name.upper() == 'NOTICE':
+        fail(name, 'separate NOTICE file is excluded; attribution belongs in THIRD-PARTY-NOTICES.txt')
     if not directory:
         if 'docs' in path.parts:
             local = '/'.join(path.parts[path.parts.index('docs'):])

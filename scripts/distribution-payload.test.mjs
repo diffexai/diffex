@@ -21,7 +21,6 @@ function fixture(extra, omit) {
 		"README.md": "Diffex installation and usage",
 		"package.json": JSON.stringify({ name: "@diffexai/diffex", version, license: "Apache-2.0" }),
 		LICENSE: readFileSync(license),
-		NOTICE: "Diffex modifications copyright 2026 Luntraa, Inc. Pi-derived portions retain MIT terms in LICENSE.\n",
 		"THIRD-PARTY-NOTICES.txt": "Test fixture with no external bundled dependencies.\n",
 		"distribution-components.json": JSON.stringify([{ name: "Diffex", license: "Apache-2.0 AND MIT" }]),
 		"dist/index.js": "export const value = 1;\n",
@@ -93,9 +92,10 @@ for (const notice of [
 	});
 }
 
-test("accepts consolidated attribution without a separate NOTICE file", () => {
-	const result = inspect({}, "NOTICE");
-	assert.equal(result.status, 0, result.stderr);
+test("rejects a separate NOTICE file because attribution is consolidated", () => {
+	const result = inspect({ NOTICE: "Duplicate project attribution" });
+	assert.notEqual(result.status, 0);
+	assert.match(result.stderr, /separate NOTICE file/);
 });
 
 for (const [name, content, reason] of [

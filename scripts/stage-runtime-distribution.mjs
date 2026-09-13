@@ -30,13 +30,7 @@ visit("@diffexai/diffex-coding-agent-server");
 visit("@diffexai/diffex-evolution");
 visit("@diffexai/diffex-harness-trace");
 mkdirSync(output);
-const notices = [
-	"LICENSE",
-	"NOTICE",
-	"THIRD-PARTY-NOTICES.txt",
-	"distribution-components.json",
-	"distribution-files.json",
-];
+const notices = ["LICENSE", "THIRD-PARTY-NOTICES.txt", "distribution-components.json", "distribution-files.json"];
 for (const pkg of selected.values()) {
 	const prepared = preparePackageDistribution(pkg.directory);
 	const target = join(output, pkg.directory);

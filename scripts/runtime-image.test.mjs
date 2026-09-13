@@ -6,7 +6,7 @@ import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 import { distributionDocs } from "./cli-distribution.mjs";
 
-test("image inspection rejects development documents in an earlier layer even if later removed", () => {
+test("image inspection rejects separate NOTICE files and development documents in earlier layers", () => {
 	const directory = mkdtempSync(join(tmpdir(), "diffex runtime layers "));
 	try {
 		const write = (file, content) => {
@@ -57,6 +57,11 @@ test("image inspection rejects development documents in an earlier layer even if
 		};
 		const valid = inspect();
 		assert.equal(valid.status, 0, valid.stderr);
+		write(`${workspace}NOTICE`, "Duplicate project attribution");
+		const notice = inspect();
+		assert.notEqual(notice.status, 0);
+		assert.match(notice.stderr, /NOTICE/);
+		rmSync(join(directory, workspace, "NOTICE"));
 		write(`${workspace}docs/development.md`, "Private development handoff");
 		const invalid = inspect();
 		assert.notEqual(invalid.status, 0);

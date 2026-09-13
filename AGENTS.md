@@ -175,3 +175,5 @@ If the user's instructions conflict with any rule in this document, ask for expl
 - 2026-09-13: Guessed release helper paths and reused npm caches obscured validation -> Discover paths before reading and use a fresh cache when proving that an update downloads artifact bytes.
 
 - 2026-09-13: Assumed interrupted npm downloads preserve the prefix -> Test real npm processes, retain user data, and recover ENOTEMPTY by matching the affected installation or backup against actual isolated directories instead of assuming every failure is a backup rename.
+
+- 2026-09-13: Runtime staging copied a redundant project NOTICE after attribution was consolidated -> Generate only the consolidated attribution file and reject separate NOTICE payloads.

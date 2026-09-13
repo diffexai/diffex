@@ -127,7 +127,8 @@ test("packed CLI exposes the product homepage and preserves referenced documenta
 		const attribution = execFileSync("tar", ["-xOf", archive, "package/THIRD-PARTY-NOTICES.txt"], {
 			encoding: "utf8",
 		});
-		assert(attribution.startsWith(readFileSync(join(pkg, "NOTICE"), "utf8")));
+		assert.match(attribution, /^Diffex\nCopyright 2026 Luntraa, Inc\./);
+		assert(!existsSync(join(pkg, "NOTICE")));
 		assert.match(attribution, /highlight\.js@11\.9\.0/);
 		assert.match(attribution, /marked@18\.0\.5/);
 		const result = spawnSync("python3", ["scripts/check-distribution-payload.py", archive], {
@@ -179,6 +180,7 @@ test("actual npm tarball carries notices and excludes debug sources after prepar
 				],
 			}),
 		);
+		writeFileSync(join(pkg, "NOTICE"), "Stale generated attribution");
 		writeFileSync(join(pkg, "dist/index.js"), "export const value = 1;\n//# sourceMappingURL=index.js.map\n");
 		writeFileSync(join(pkg, "dist/index.js.map"), '{"sourcesContent":["private TypeScript"]}');
 		writeFileSync(
@@ -190,6 +192,7 @@ test("actual npm tarball carries notices and excludes debug sources after prepar
 			cwd: tmpdir(),
 			env: { ...process.env, DIFFEX_SOURCE_COMMIT: "a".repeat(40) },
 		});
+		assert.equal(existsSync(join(pkg, "NOTICE")), false);
 		assert.equal(existsSync(join(pkg, "dist/index.js.map")), false);
 		assert.match(
 			readFileSync(
