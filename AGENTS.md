@@ -174,4 +174,4 @@ If the user's instructions conflict with any rule in this document, ask for expl
 
 - 2026-09-13: Guessed release helper paths and reused npm caches obscured validation -> Discover paths before reading and use a fresh cache when proving that an update downloads artifact bytes.
 
-- 2026-09-13: Assumed interrupted npm downloads preserve the prefix -> Test real npm processes, retain user data, and recover ENOTEMPTY by moving only the exact stale package backup before a pinned reinstall.
+- 2026-09-13: Assumed interrupted npm downloads preserve the prefix -> Test real npm processes, retain user data, and recover ENOTEMPTY by matching its reported backup against actual isolated directories instead of depending on one npm log format.
