@@ -715,11 +715,10 @@ Apache-2.0 for Diffex, copyright 2026 Luntraa, Inc.
 Pi-derived portions retain their MIT terms and upstream copyright notice.
 See LICENSE, NOTICE, and THIRD-PARTY-NOTICES.txt in the distribution.
 
-## See Also
+## Included modules
 
-- [@diffexai/diffex-ai](https://www.npmjs.com/package/@diffexai/diffex-ai): Core LLM toolkit
-- [@diffexai/diffex-agent-core](https://www.npmjs.com/package/@diffexai/diffex-agent-core): Agent framework
-- [@diffexai/diffex-tui](https://www.npmjs.com/package/@diffexai/diffex-tui): Terminal UI components
+The CLI package includes the Diffex AI toolkit, agent framework, terminal UI, and other required internal runtime modules.
+Install only `@diffexai/diffex`; separate Diffex module packages are not required or published.
 
 <p align="center">
   The upstream project's domain was graciously donated by
