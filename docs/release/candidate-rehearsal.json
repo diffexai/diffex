@@ -1,0 +1,1157 @@
+{
+  "date": "2026-09-13",
+  "status": "accepted-at-configured-boundaries-with-pending-live-client-matrix",
+  "productionAcceptance": false,
+  "cliSource": {
+    "repository": "diffexai/diffex",
+    "commit": "af5e64d09f95f5db28883421599769dbdf8bc796",
+    "tree": "f35d4481684bdaa942c3eb8c6b8aa73cadd13f15",
+    "lockSha256": "d835f2dbd577807a540bc59d85131d7ec849044bce94e49c2757ee12a7983a20",
+    "policySha256": "fdbd700159c01b9643cbe57c5d7d4b809568c94609a8ebd766ae91e77f4d4853"
+  },
+  "cloudSourceCommit": "4a87c4492804f68fea380debc43cafa86d0d1fa5",
+  "workflowRestrictionCommit": "16f94e40a8d6e73414c226e216891da62eed8332",
+  "version": "0.2.1",
+  "artifacts": [
+    {
+      "name": "@diffexai/diffex",
+      "version": "0.2.1",
+      "filename": "diffexai-diffex-0.2.1.tgz",
+      "size": 1878842,
+      "sha256": "8c1a93885226b877c075d49fb4b610b62f4ef8427b13002ff7300920a0786054",
+      "integrity": "sha512-zgDL8WC21g38g6zfpEi0HlxNG66v06ZZMW0x+5CvbiglJPd7BHdI73tvrFFMgsvtXdIQLxVi3FVLlKYeJzcooQ=="
+    }
+  ],
+  "snapshot": {
+    "filename": "source.tar.gz",
+    "sha256": "c01cf701399740a9a6489de02a50d624942b1c309b9c881d539c1eaa731af852"
+  },
+  "buildToolchain": {
+    "node": "v22.19.0",
+    "npm": "11.16.0",
+    "platform": "linux",
+    "arch": "x64"
+  },
+  "manifestSha256": "a46071be950e7bfb5215efdd7d5160b785dd3e0baf62666983aa0888d1bd74d9",
+  "inputsSha256": "d402446eb13f3bee4ff80cec525254a2589609f9f75d3003797355ca29030e17",
+  "scope": {
+    "packages": [
+      "@diffexai/diffex"
+    ],
+    "binaryPlatforms": [],
+    "managers": [
+      "npm",
+      "bun"
+    ]
+  },
+  "workflows": {
+    "nativeAcceptance": "https://github.com/diffexai/diffex/actions/runs/34784995881",
+    "runtime": "https://github.com/diffexai/diffex/actions/runs/34784999538",
+    "stagingStorageRecovery": "https://github.com/diffexai/diffex/actions/runs/34785182715",
+    "reproducedStartupFailure": "https://github.com/diffexai/diffex/actions/runs/34784741853",
+    "environmentRejectedRetry": "https://github.com/diffexai/diffex/actions/runs/34784991684"
+  },
+  "commands": [
+    {
+      "cwd": "CLI",
+      "command": "npm run check:model-data",
+      "exitCode": 0
+    },
+    {
+      "cwd": "CLI",
+      "command": "npm run build:offline",
+      "exitCode": 0
+    },
+    {
+      "cwd": "CLI",
+      "command": "npm run check",
+      "exitCode": 0
+    },
+    {
+      "cwd": "CLI",
+      "command": "./test.sh",
+      "exitCode": 0,
+      "scriptTestsPassed": 248,
+      "vitestPassed": 4948,
+      "vitestSkipped": 893
+    },
+    {
+      "cwd": "CLI/packages/coding-agent",
+      "command": "node ../../node_modules/vitest/dist/cli.js --run test/version-update-e2e.test.ts",
+      "exitCode": 0,
+      "testsPassed": 32
+    },
+    {
+      "cwd": "CLI",
+      "command": "actionlint .github/workflows/verify-release-publication.yml",
+      "exitCode": 0
+    },
+    {
+      "cwd": "CLI",
+      "command": "node scripts/release-artifacts.mjs verify /tmp/diffex-candidate-rehearsal/final-artifacts",
+      "exitCode": 0
+    },
+    {
+      "cwd": "CLI",
+      "command": "node scripts/artifact-acceptance.mjs /tmp/diffex-candidate-rehearsal/final-artifacts /tmp/diffex-candidate-rehearsal/local-acceptance",
+      "exitCode": 0
+    },
+    {
+      "cwd": "CLI",
+      "command": "python3 scripts/check-distribution-payload.py /tmp/diffex-candidate-rehearsal/final-artifacts/diffexai-diffex-0.2.1.tgz --name @diffexai/diffex --version 0.2.1",
+      "exitCode": 0
+    },
+    {
+      "cwd": "Cloud",
+      "command": "npm run check",
+      "exitCode": 0,
+      "unitPassed": 546,
+      "integrationPassed": 23
+    },
+    {
+      "cwd": "Cloud/services/public-api",
+      "command": "npm run check",
+      "exitCode": 0,
+      "testsPassed": 352
+    },
+    {
+      "cwd": "Cloud",
+      "command": "node scripts/check-release-contract.mjs /Users/jialeyu/Projects/diffex-new",
+      "exitCode": 0
+    }
+  ],
+  "native": [
+    {
+      "artifactName": "native-acceptance-macos-15-af5e64d09f95f5db28883421599769dbdf8bc796",
+      "platform": "darwin",
+      "arch": "arm64",
+      "node": "v22.19.0",
+      "npm": "11.16.0",
+      "bun": "1.3.11",
+      "status": "passed",
+      "cleanup": true,
+      "packages": [
+        {
+          "manager": "npm",
+          "managerVersion": "11.16.0",
+          "name": "@diffexai/diffex",
+          "version": "0.2.1",
+          "entrypoints": [
+            "@diffexai/diffex",
+            "@diffexai/diffex/rpc-entry",
+            "@diffexai/diffex/client"
+          ],
+          "operation": "passed",
+          "localDependencies": [
+            "@diffexai/diffex"
+          ]
+        },
+        {
+          "manager": "bun",
+          "managerVersion": "1.3.11",
+          "name": "@diffexai/diffex",
+          "version": "0.2.1",
+          "entrypoints": [
+            "@diffexai/diffex",
+            "@diffexai/diffex/rpc-entry",
+            "@diffexai/diffex/client"
+          ],
+          "operation": "passed",
+          "localDependencies": [
+            "@diffexai/diffex"
+          ]
+        }
+      ],
+      "processes": [
+        {
+          "manager": "npm",
+          "server": "Excluded from CLI distribution; hosted runtime remains private",
+          "terminal": "passed",
+          "helpers": {
+            "fd": "fd 10.5.0",
+            "rg": "ripgrep 15.2.0\n\nfeatures:+pcre2\nsimd(compile):+NEON\nsimd(runtime):+NEON\n\nPCRE2 10.45 is available (JIT is available)"
+          }
+        },
+        {
+          "manager": "bun",
+          "server": "Excluded from CLI distribution; hosted runtime remains private",
+          "terminal": "passed",
+          "helpers": {
+            "fd": "fd 10.5.0",
+            "rg": "ripgrep 15.2.0\n\nfeatures:+pcre2\nsimd(compile):+NEON\nsimd(runtime):+NEON\n\nPCRE2 10.45 is available (JIT is available)"
+          }
+        }
+      ],
+      "lifecycleChecks": [
+        {
+          "invalid": {
+            "status": 200,
+            "body": "{"
+          },
+          "installationUnchanged": true
+        },
+        {
+          "invalid": {
+            "status": 200,
+            "body": "{\"packageName\":\"@foreign/cli\",\"version\":\"0.2.1\"}"
+          },
+          "installationUnchanged": true
+        },
+        {
+          "invalid": {
+            "status": 200,
+            "body": "{\"packageName\":\"@diffexai/diffex\",\"version\":\"1.2.3-beta.1\"}"
+          },
+          "installationUnchanged": true
+        },
+        {
+          "invalid": {
+            "status": 302,
+            "body": "{}",
+            "headers": {
+              "location": "https://foreign.invalid"
+            }
+          },
+          "installationUnchanged": true
+        },
+        {
+          "invalid": {
+            "status": 503,
+            "body": "{}"
+          },
+          "installationUnchanged": true
+        },
+        {
+          "invalid": {
+            "status": 404,
+            "body": "{\"error\":\"no_published_release\"}"
+          },
+          "installationUnchanged": true
+        },
+        {
+          "upgrade": "0.0.0 metadata fixture to reviewed candidate",
+          "realNpm": true
+        },
+        {
+          "fault": "corrupt",
+          "installationUnchanged": true,
+          "movedBackup": false,
+          "pinnedRepair": "passed"
+        },
+        {
+          "fault": "interrupt",
+          "installationUnchanged": false,
+          "movedBackup": false,
+          "pinnedRepair": "passed"
+        },
+        {
+          "uninstall": "passed",
+          "userDataRetained": true,
+          "projectDataRetained": true
+        },
+        {
+          "manager": "bun",
+          "install": "passed",
+          "upgrade": "metadata fixture to reviewed candidate",
+          "foreignIdentityRejected": true,
+          "uninstall": "passed",
+          "userDataRetained": true
+        }
+      ],
+      "acceptanceSha256": "18867b91576826c1c96fe751e433f6ad47933136d3da9949ab0896b883961cfb",
+      "lifecycleSha256": "15f73d350b12b060b423716e59a618b3a66a38e72e512207eb7976d30255da2b"
+    },
+    {
+      "artifactName": "native-acceptance-macos-15-intel-af5e64d09f95f5db28883421599769dbdf8bc796",
+      "platform": "darwin",
+      "arch": "x64",
+      "node": "v22.19.0",
+      "npm": "11.16.0",
+      "bun": "1.3.11",
+      "status": "passed",
+      "cleanup": true,
+      "packages": [
+        {
+          "manager": "npm",
+          "managerVersion": "11.16.0",
+          "name": "@diffexai/diffex",
+          "version": "0.2.1",
+          "entrypoints": [
+            "@diffexai/diffex",
+            "@diffexai/diffex/rpc-entry",
+            "@diffexai/diffex/client"
+          ],
+          "operation": "passed",
+          "localDependencies": [
+            "@diffexai/diffex"
+          ]
+        },
+        {
+          "manager": "bun",
+          "managerVersion": "1.3.11",
+          "name": "@diffexai/diffex",
+          "version": "0.2.1",
+          "entrypoints": [
+            "@diffexai/diffex",
+            "@diffexai/diffex/rpc-entry",
+            "@diffexai/diffex/client"
+          ],
+          "operation": "passed",
+          "localDependencies": [
+            "@diffexai/diffex"
+          ]
+        }
+      ],
+      "processes": [
+        {
+          "manager": "npm",
+          "server": "Excluded from CLI distribution; hosted runtime remains private",
+          "terminal": "passed",
+          "helpers": {
+            "fd": "fd 10.4.2",
+            "rg": "ripgrep 15.2.0\n\nfeatures:+pcre2\nsimd(compile):+SSE2,+SSSE3,-AVX2\nsimd(runtime):+SSE2,+SSSE3,+AVX2\n\nPCRE2 10.45 is available (JIT is available)"
+          }
+        },
+        {
+          "manager": "bun",
+          "server": "Excluded from CLI distribution; hosted runtime remains private",
+          "terminal": "passed",
+          "helpers": {
+            "fd": "fd 10.4.2",
+            "rg": "ripgrep 15.2.0\n\nfeatures:+pcre2\nsimd(compile):+SSE2,+SSSE3,-AVX2\nsimd(runtime):+SSE2,+SSSE3,+AVX2\n\nPCRE2 10.45 is available (JIT is available)"
+          }
+        }
+      ],
+      "lifecycleChecks": [
+        {
+          "invalid": {
+            "status": 200,
+            "body": "{"
+          },
+          "installationUnchanged": true
+        },
+        {
+          "invalid": {
+            "status": 200,
+            "body": "{\"packageName\":\"@foreign/cli\",\"version\":\"0.2.1\"}"
+          },
+          "installationUnchanged": true
+        },
+        {
+          "invalid": {
+            "status": 200,
+            "body": "{\"packageName\":\"@diffexai/diffex\",\"version\":\"1.2.3-beta.1\"}"
+          },
+          "installationUnchanged": true
+        },
+        {
+          "invalid": {
+            "status": 302,
+            "body": "{}",
+            "headers": {
+              "location": "https://foreign.invalid"
+            }
+          },
+          "installationUnchanged": true
+        },
+        {
+          "invalid": {
+            "status": 503,
+            "body": "{}"
+          },
+          "installationUnchanged": true
+        },
+        {
+          "invalid": {
+            "status": 404,
+            "body": "{\"error\":\"no_published_release\"}"
+          },
+          "installationUnchanged": true
+        },
+        {
+          "upgrade": "0.0.0 metadata fixture to reviewed candidate",
+          "realNpm": true
+        },
+        {
+          "fault": "corrupt",
+          "installationUnchanged": true,
+          "movedBackup": false,
+          "pinnedRepair": "passed"
+        },
+        {
+          "fault": "interrupt",
+          "installationUnchanged": false,
+          "movedBackup": true,
+          "pinnedRepair": "passed"
+        },
+        {
+          "uninstall": "passed",
+          "userDataRetained": true,
+          "projectDataRetained": true
+        },
+        {
+          "manager": "bun",
+          "install": "passed",
+          "upgrade": "metadata fixture to reviewed candidate",
+          "foreignIdentityRejected": true,
+          "uninstall": "passed",
+          "userDataRetained": true
+        }
+      ],
+      "acceptanceSha256": "02c4fa81e4645075a95686600a41c832bb675ea4fd15b36542f27a36f6987c0f",
+      "lifecycleSha256": "2dcca1cb9ecb18718b9a782761205a9254feedf7f2d3cbcf09af3bffc4f4c462"
+    },
+    {
+      "artifactName": "native-acceptance-ubuntu-24.04-af5e64d09f95f5db28883421599769dbdf8bc796",
+      "platform": "linux",
+      "arch": "x64",
+      "node": "v22.19.0",
+      "npm": "11.16.0",
+      "bun": "1.3.11",
+      "status": "passed",
+      "cleanup": true,
+      "packages": [
+        {
+          "manager": "npm",
+          "managerVersion": "11.16.0",
+          "name": "@diffexai/diffex",
+          "version": "0.2.1",
+          "entrypoints": [
+            "@diffexai/diffex",
+            "@diffexai/diffex/rpc-entry",
+            "@diffexai/diffex/client"
+          ],
+          "operation": "passed",
+          "localDependencies": [
+            "@diffexai/diffex"
+          ]
+        },
+        {
+          "manager": "bun",
+          "managerVersion": "1.3.11",
+          "name": "@diffexai/diffex",
+          "version": "0.2.1",
+          "entrypoints": [
+            "@diffexai/diffex",
+            "@diffexai/diffex/rpc-entry",
+            "@diffexai/diffex/client"
+          ],
+          "operation": "passed",
+          "localDependencies": [
+            "@diffexai/diffex"
+          ]
+        }
+      ],
+      "processes": [
+        {
+          "manager": "npm",
+          "server": "Excluded from CLI distribution; hosted runtime remains private",
+          "terminal": "passed",
+          "helpers": {
+            "fd": "fdfind 9.0.0",
+            "rg": "ripgrep 14.1.0\n\nfeatures:-simd-accel,+pcre2\nsimd(compile):+SSE2,-SSSE3,-AVX2\nsimd(runtime):+SSE2,+SSSE3,+AVX2\n\nPCRE2 10.42 is available (JIT is available)"
+          }
+        },
+        {
+          "manager": "bun",
+          "server": "Excluded from CLI distribution; hosted runtime remains private",
+          "terminal": "passed",
+          "helpers": {
+            "fd": "fdfind 9.0.0",
+            "rg": "ripgrep 14.1.0\n\nfeatures:-simd-accel,+pcre2\nsimd(compile):+SSE2,-SSSE3,-AVX2\nsimd(runtime):+SSE2,+SSSE3,+AVX2\n\nPCRE2 10.42 is available (JIT is available)"
+          }
+        }
+      ],
+      "lifecycleChecks": [
+        {
+          "invalid": {
+            "status": 200,
+            "body": "{"
+          },
+          "installationUnchanged": true
+        },
+        {
+          "invalid": {
+            "status": 200,
+            "body": "{\"packageName\":\"@foreign/cli\",\"version\":\"0.2.1\"}"
+          },
+          "installationUnchanged": true
+        },
+        {
+          "invalid": {
+            "status": 200,
+            "body": "{\"packageName\":\"@diffexai/diffex\",\"version\":\"1.2.3-beta.1\"}"
+          },
+          "installationUnchanged": true
+        },
+        {
+          "invalid": {
+            "status": 302,
+            "body": "{}",
+            "headers": {
+              "location": "https://foreign.invalid"
+            }
+          },
+          "installationUnchanged": true
+        },
+        {
+          "invalid": {
+            "status": 503,
+            "body": "{}"
+          },
+          "installationUnchanged": true
+        },
+        {
+          "invalid": {
+            "status": 404,
+            "body": "{\"error\":\"no_published_release\"}"
+          },
+          "installationUnchanged": true
+        },
+        {
+          "upgrade": "0.0.0 metadata fixture to reviewed candidate",
+          "realNpm": true
+        },
+        {
+          "fault": "corrupt",
+          "installationUnchanged": true,
+          "movedBackup": false,
+          "pinnedRepair": "passed"
+        },
+        {
+          "fault": "interrupt",
+          "installationUnchanged": false,
+          "movedBackup": false,
+          "pinnedRepair": "passed"
+        },
+        {
+          "uninstall": "passed",
+          "userDataRetained": true,
+          "projectDataRetained": true
+        },
+        {
+          "manager": "bun",
+          "install": "passed",
+          "upgrade": "metadata fixture to reviewed candidate",
+          "foreignIdentityRejected": true,
+          "uninstall": "passed",
+          "userDataRetained": true
+        }
+      ],
+      "acceptanceSha256": "a6faf3103c394140f0ce09ab39d90f0d953c1eca80db2188ed55ceb57da2c211",
+      "lifecycleSha256": "e4b96b0d56780164310412c5e570b155eb1089ca2c08de3d3ce73b3ebe64b8db"
+    },
+    {
+      "artifactName": "native-acceptance-ubuntu-24.04-arm-af5e64d09f95f5db28883421599769dbdf8bc796",
+      "platform": "linux",
+      "arch": "arm64",
+      "node": "v22.19.0",
+      "npm": "11.16.0",
+      "bun": "1.3.11",
+      "status": "passed",
+      "cleanup": true,
+      "packages": [
+        {
+          "manager": "npm",
+          "managerVersion": "11.16.0",
+          "name": "@diffexai/diffex",
+          "version": "0.2.1",
+          "entrypoints": [
+            "@diffexai/diffex",
+            "@diffexai/diffex/rpc-entry",
+            "@diffexai/diffex/client"
+          ],
+          "operation": "passed",
+          "localDependencies": [
+            "@diffexai/diffex"
+          ]
+        },
+        {
+          "manager": "bun",
+          "managerVersion": "1.3.11",
+          "name": "@diffexai/diffex",
+          "version": "0.2.1",
+          "entrypoints": [
+            "@diffexai/diffex",
+            "@diffexai/diffex/rpc-entry",
+            "@diffexai/diffex/client"
+          ],
+          "operation": "passed",
+          "localDependencies": [
+            "@diffexai/diffex"
+          ]
+        }
+      ],
+      "processes": [
+        {
+          "manager": "npm",
+          "server": "Excluded from CLI distribution; hosted runtime remains private",
+          "terminal": "passed",
+          "helpers": {
+            "fd": "fdfind 9.0.0",
+            "rg": "ripgrep 14.1.0\n\nfeatures:-simd-accel,+pcre2\nsimd(compile):+NEON\nsimd(runtime):+NEON\n\nPCRE2 10.42 is available (JIT is available)"
+          }
+        },
+        {
+          "manager": "bun",
+          "server": "Excluded from CLI distribution; hosted runtime remains private",
+          "terminal": "passed",
+          "helpers": {
+            "fd": "fdfind 9.0.0",
+            "rg": "ripgrep 14.1.0\n\nfeatures:-simd-accel,+pcre2\nsimd(compile):+NEON\nsimd(runtime):+NEON\n\nPCRE2 10.42 is available (JIT is available)"
+          }
+        }
+      ],
+      "lifecycleChecks": [
+        {
+          "invalid": {
+            "status": 200,
+            "body": "{"
+          },
+          "installationUnchanged": true
+        },
+        {
+          "invalid": {
+            "status": 200,
+            "body": "{\"packageName\":\"@foreign/cli\",\"version\":\"0.2.1\"}"
+          },
+          "installationUnchanged": true
+        },
+        {
+          "invalid": {
+            "status": 200,
+            "body": "{\"packageName\":\"@diffexai/diffex\",\"version\":\"1.2.3-beta.1\"}"
+          },
+          "installationUnchanged": true
+        },
+        {
+          "invalid": {
+            "status": 302,
+            "body": "{}",
+            "headers": {
+              "location": "https://foreign.invalid"
+            }
+          },
+          "installationUnchanged": true
+        },
+        {
+          "invalid": {
+            "status": 503,
+            "body": "{}"
+          },
+          "installationUnchanged": true
+        },
+        {
+          "invalid": {
+            "status": 404,
+            "body": "{\"error\":\"no_published_release\"}"
+          },
+          "installationUnchanged": true
+        },
+        {
+          "upgrade": "0.0.0 metadata fixture to reviewed candidate",
+          "realNpm": true
+        },
+        {
+          "fault": "corrupt",
+          "installationUnchanged": true,
+          "movedBackup": false,
+          "pinnedRepair": "passed"
+        },
+        {
+          "fault": "interrupt",
+          "installationUnchanged": false,
+          "movedBackup": false,
+          "pinnedRepair": "passed"
+        },
+        {
+          "uninstall": "passed",
+          "userDataRetained": true,
+          "projectDataRetained": true
+        },
+        {
+          "manager": "bun",
+          "install": "passed",
+          "upgrade": "metadata fixture to reviewed candidate",
+          "foreignIdentityRejected": true,
+          "uninstall": "passed",
+          "userDataRetained": true
+        }
+      ],
+      "acceptanceSha256": "d767a0be8c8d72da456242f495ccd1c37e35db741c10f5df8a65f7e69b922b41",
+      "lifecycleSha256": "6a9668825d8c3fbe3c4546cdbd8aaf7782c6df05c5b08bbc4873f4ba2ea5d55d"
+    }
+  ],
+  "local": {
+    "platform": "darwin",
+    "arch": "arm64",
+    "osVersion": "macOS 26.1 (25B78)",
+    "node": "v22.19.0",
+    "npm": "10.9.3",
+    "bun": "1.3.11",
+    "status": "passed",
+    "cleanup": true,
+    "lifecycleChecks": [
+      {
+        "invalid": {
+          "status": 200,
+          "body": "{"
+        },
+        "installationUnchanged": true
+      },
+      {
+        "invalid": {
+          "status": 200,
+          "body": "{\"packageName\":\"@foreign/cli\",\"version\":\"0.2.1\"}"
+        },
+        "installationUnchanged": true
+      },
+      {
+        "invalid": {
+          "status": 200,
+          "body": "{\"packageName\":\"@diffexai/diffex\",\"version\":\"1.2.3-beta.1\"}"
+        },
+        "installationUnchanged": true
+      },
+      {
+        "invalid": {
+          "status": 302,
+          "body": "{}",
+          "headers": {
+            "location": "https://foreign.invalid"
+          }
+        },
+        "installationUnchanged": true
+      },
+      {
+        "invalid": {
+          "status": 503,
+          "body": "{}"
+        },
+        "installationUnchanged": true
+      },
+      {
+        "invalid": {
+          "status": 404,
+          "body": "{\"error\":\"no_published_release\"}"
+        },
+        "installationUnchanged": true
+      },
+      {
+        "upgrade": "0.0.0 metadata fixture to reviewed candidate",
+        "realNpm": true
+      },
+      {
+        "fault": "corrupt",
+        "installationUnchanged": true,
+        "movedBackup": false,
+        "pinnedRepair": "passed"
+      },
+      {
+        "fault": "interrupt",
+        "installationUnchanged": false,
+        "movedBackup": true,
+        "pinnedRepair": "passed"
+      },
+      {
+        "uninstall": "passed",
+        "userDataRetained": true,
+        "projectDataRetained": true
+      },
+      {
+        "manager": "bun",
+        "install": "passed",
+        "upgrade": "metadata fixture to reviewed candidate",
+        "foreignIdentityRejected": true,
+        "uninstall": "passed",
+        "userDataRetained": true
+      }
+    ],
+    "acceptanceSha256": "2b0dfcb6aeaff9a772fa2b14caaa2ad301ae4328eddbe849c552bc082c0ff61c",
+    "lifecycleSha256": "3a46b7023742e199b864cdb59cc5dcd3b867fdc62ef8c8e517bab05719e6a11b",
+    "terminalSmokes": {
+      "npm": [
+        {
+          "runtime": "consumer",
+          "command": [
+            "--version"
+          ],
+          "exitCode": 0
+        },
+        {
+          "runtime": "consumer",
+          "command": [
+            "--help"
+          ],
+          "exitCode": 0
+        },
+        {
+          "runtime": "consumer",
+          "command": [
+            "auth",
+            "--help"
+          ],
+          "exitCode": 0
+        },
+        {
+          "runtime": "consumer",
+          "command": [
+            "--list-models"
+          ],
+          "exitCode": 0,
+          "expected": "fixture"
+        },
+        {
+          "runtime": "consumer",
+          "command": [
+            "-p",
+            "Reply with the fixture confirmation."
+          ],
+          "exitCode": 0,
+          "expected": "handoff-fixture-ok"
+        },
+        {
+          "runtime": "consumer",
+          "command": "interactive prompt, login selector, exit",
+          "exitCode": 0,
+          "events": [
+            {
+              "type": "inference",
+              "provider": "handoff"
+            },
+            {
+              "type": "request",
+              "url": "https://api.diffex.ai/api/latest-version"
+            },
+            {
+              "type": "inference",
+              "provider": "handoff"
+            }
+          ],
+          "accounts": [
+            "OpenAI Codex",
+            "Radius",
+            "xAI"
+          ],
+          "cleanup": "process exited and isolated directories removed"
+        }
+      ],
+      "bun": [
+        {
+          "runtime": "consumer",
+          "command": [
+            "--version"
+          ],
+          "exitCode": 0
+        },
+        {
+          "runtime": "consumer",
+          "command": [
+            "--help"
+          ],
+          "exitCode": 0
+        },
+        {
+          "runtime": "consumer",
+          "command": [
+            "auth",
+            "--help"
+          ],
+          "exitCode": 0
+        },
+        {
+          "runtime": "consumer",
+          "command": [
+            "--list-models"
+          ],
+          "exitCode": 0,
+          "expected": "fixture"
+        },
+        {
+          "runtime": "consumer",
+          "command": [
+            "-p",
+            "Reply with the fixture confirmation."
+          ],
+          "exitCode": 0,
+          "expected": "handoff-fixture-ok"
+        },
+        {
+          "runtime": "consumer",
+          "command": "interactive prompt, login selector, exit",
+          "exitCode": 0,
+          "events": [
+            {
+              "type": "inference",
+              "provider": "handoff"
+            },
+            {
+              "type": "request",
+              "url": "https://api.diffex.ai/api/latest-version"
+            },
+            {
+              "type": "inference",
+              "provider": "handoff"
+            }
+          ],
+          "accounts": [
+            "OpenAI Codex",
+            "Radius",
+            "xAI"
+          ],
+          "cleanup": "process exited and isolated directories removed"
+        }
+      ]
+    }
+  },
+  "runtime": {
+    "imageId": "sha256:383b8f6070db8e8a8a636b91e323065d1a022535ee1b003557ee82d55f2fbb05",
+    "archiveSha256": "22546e4a9f004f06615055b6c876261dd24c62bdef0e6e11a00659d368c44222",
+    "smoke": {
+      "status": "passed",
+      "platform": "linux",
+      "architecture": "x64",
+      "node": "v24.16.0",
+      "startup": true,
+      "anonymousRejected": true,
+      "wrongCredentialRejected": true,
+      "foreignSessionRejected": true,
+      "promptReply": "mock-provider",
+      "usage": "mock-endpoint",
+      "restartPersistence": true,
+      "shutdown": true,
+      "externalNetwork": "disabled by container",
+      "sourceCommit": "af5e64d09f95f5db28883421599769dbdf8bc796"
+    },
+    "payload": {
+      "status": "passed",
+      "projectFiles": 1414,
+      "workspaces": 12,
+      "documentation": [
+        "docs/compaction.md",
+        "docs/containerization.md",
+        "docs/custom-provider.md",
+        "docs/environment-variables.md",
+        "docs/evolution.md",
+        "docs/extensions.md",
+        "docs/images/interactive-mode.png",
+        "docs/images/tree-view.png",
+        "docs/installation.md",
+        "docs/json.md",
+        "docs/keybindings.md",
+        "docs/llama-cpp.md",
+        "docs/models.md",
+        "docs/packages.md",
+        "docs/prompt-templates.md",
+        "docs/providers.md",
+        "docs/quickstart.md",
+        "docs/rpc.md",
+        "docs/sdk.md",
+        "docs/security.md",
+        "docs/session-format.md",
+        "docs/sessions.md",
+        "docs/settings.md",
+        "docs/shell-aliases.md",
+        "docs/skills.md",
+        "docs/terminal-setup.md",
+        "docs/themes.md",
+        "docs/tmux.md",
+        "docs/tui.md",
+        "docs/usage.md"
+      ],
+      "sourceCommit": "af5e64d09f95f5db28883421599769dbdf8bc796",
+      "architecture": "amd64"
+    },
+    "registryPublished": false,
+    "providerResourcesCreated": false
+  },
+  "identityScan": {
+    "sourceFiles": 915,
+    "sourceOccurrences": 17,
+    "artifactFiles": 9,
+    "artifactOccurrences": 16,
+    "review": "Every artifact match maps to approved OAuth, Radius, provider attribution, or model catalog source entries.",
+    "files": [
+      {
+        "path": "package/dist/node_modules/@diffexai/diffex-ai/dist/api/openai-codex-responses.js",
+        "sha256": "26fa632e8e492396357cd72adb94fad316c5ab65426b65e85b7cb4031250f31b",
+        "matches": [
+          {
+            "identity": "pi",
+            "context": "oken}`);\n    headers.set(\"chatgpt-account-id\", accountId);\n    headers.set(\"originator\", \"pi\");\n    const userAgent = _os ? `pi (${_os.platform()} ${_os.release()}; ${_os.arch()})` : \"pi (brow"
+          },
+          {
+            "identity": "pi",
+            "context": "ccount-id\", accountId);\n    headers.set(\"originator\", \"pi\");\n    const userAgent = _os ? `pi (${_os.platform()} ${_os.release()}; ${_os.arch()})` : \"pi (browser)\";\n    headers.set(\"User-Agent\""
+          },
+          {
+            "identity": "pi",
+            "context": ";\n    const userAgent = _os ? `pi (${_os.platform()} ${_os.release()}; ${_os.arch()})` : \"pi (browser)\";\n    headers.set(\"User-Agent\", userAgent);\n    return headers;\n}\nfunction buildSSEHeader"
+          }
+        ]
+      },
+      {
+        "path": "package/dist/node_modules/@diffexai/diffex-ai/dist/auth/oauth/openai-codex.js",
+        "sha256": "c090c687c3b1a0ba989911318b4eba4717685eef8fa6252c090a0b8c5a83ec81",
+        "matches": [
+          {
+            "identity": "pi",
+            "context": "\n            };\n        },\n    });\n}\nasync function createAuthorizationFlow(originator = \"pi\") {\n    const { verifier, challenge } = await generatePKCE();\n    const state = createState();\n    "
+          }
+        ]
+      },
+      {
+        "path": "package/dist/core/provider-attribution.js",
+        "sha256": "0a8c1bb97930191739b9042fcd378dc4c9c50b24ceb23b003fc978ee11bbc9b1",
+        "matches": [
+          {
+            "identity": "pi.dev",
+            "context": "    if (isOpenRouterModel(model)) {\n        return {\n            \"HTTP-Referer\": \"https://pi.dev\",\n            \"X-OpenRouter-Title\": \"pi\",\n            \"X-OpenRouter-Categories\": \"cli-agent\",\n     "
+          },
+          {
+            "identity": "pi",
+            "context": "return {\n            \"HTTP-Referer\": \"https://pi.dev\",\n            \"X-OpenRouter-Title\": \"pi\",\n            \"X-OpenRouter-Categories\": \"cli-agent\",\n        };\n    }\n    if (isNvidiaNimModel(mod"
+          },
+          {
+            "identity": "Pi",
+            "context": "  if (isNvidiaNimModel(model)) {\n        return {\n            \"X-BILLING-INVOKE-ORIGIN\": \"Pi\",\n        };\n    }\n    if (isCloudflareModel(model)) {\n        return {\n            \"User-Agent\": \""
+          },
+          {
+            "identity": "pi-coding-agent",
+            "context": " };\n    }\n    if (isCloudflareModel(model)) {\n        return {\n            \"User-Agent\": \"pi-coding-agent\",\n        };\n    }\n    return undefined;\n}\nfunction getSessionHeaders(model, sessionId) {\n    if (!"
+          },
+          {
+            "identity": "pi",
+            "context": "turn undefined;\n    }\n    return { \"x-opencode-session\": sessionId, \"x-opencode-client\": \"pi\" };\n}\nexport function mergeProviderAttributionHeaders(model, settingsManager, sessionId, ...headerS"
+          }
+        ]
+      },
+      {
+        "path": "package/dist/node_modules/@diffexai/diffex-ai/dist/providers/radius-config.js",
+        "sha256": "a7ed64608190af2d66b84263831e36fd544adfb6f2c3abc5cb699128b5f7d48c",
+        "matches": [
+          {
+            "identity": "radius.pi.dev",
+            "context": "export const DEFAULT_RADIUS_GATEWAY = \"https://radius.pi.dev\";\nfunction isRadiusGatewayModel(value) {\n    if (typeof value !== \"object\" || value === null || Arr"
+          }
+        ]
+      },
+      {
+        "path": "package/dist/node_modules/@diffexai/diffex-ai/dist/auth/oauth/radius.js",
+        "sha256": "1a118a3c2a8683efb83e1beffce07dbdaec376a8689b2f0c437605f2b1637ee0",
+        "matches": [
+          {
+            "identity": "pi-gateway",
+            "context": "SER = \"browser\";\nconst LOGIN_METHOD_DEVICE_CODE = \"device-code\";\nconst OAUTH_CLIENT_ID = \"pi-gateway\";\nconst OAUTH_SCOPE = \"gateway offline_access\";\nconst OAUTH_DEVICE_CODE_GRANT_TYPE = \"urn:ietf:para"
+          }
+        ]
+      },
+      {
+        "path": "package/dist/core/remote-catalog-provider.js",
+        "sha256": "6a02ac6407b173cd21677588e5a7fff20757a5c010316b7d2a751694c107603d",
+        "matches": [
+          {
+            "identity": "pi.dev",
+            "context": "WithRetry } from \"../utils/management-http.js\";\nconst DEFAULT_CATALOG_BASE_URL = \"https://pi.dev\";\nexport const REMOTE_CATALOG_REFRESH_INTERVAL_MS = 4 * 60 * 60 * 1000;\nfunction mergeModels(baseli"
+          },
+          {
+            "identity": "pi.dev",
+            "context": "alGeneratedAt)) {\n        return [];\n    }\n    return entry.models;\n}\n/** Add a persisted pi.dev catalog overlay to a static built-in provider. */\nexport function withRemoteCatalog(provider, catal"
+          }
+        ]
+      },
+      {
+        "path": "package/dist/node_modules/@diffexai/diffex-ai/dist/auth/oauth/xai.js",
+        "sha256": "958decb827df0ae79a981eb30aee116369c40654289c9f76f666bc0200d20494",
+        "matches": [
+          {
+            "identity": "pi",
+            "context": "ODE_URL, {\n        client_id: XAI_CLIENT_ID,\n        scope: XAI_SCOPE,\n        referrer: \"pi\",\n    }, signal);\n    if (!response.ok) {\n        throw requestFailure(\"device authorization\", resp"
+          }
+        ]
+      },
+      {
+        "path": "package/dist/node_modules/@diffexai/diffex-ai/dist/providers/radius-config.d.ts",
+        "sha256": "a01643a058921789e7ca13101080b7ce913e14b4aa3325de8c9e47ee060c1728",
+        "matches": [
+          {
+            "identity": "radius.pi.dev",
+            "context": "kingLevelMap } from \"../types.ts\";\nexport declare const DEFAULT_RADIUS_GATEWAY = \"https://radius.pi.dev\";\nexport type RadiusGatewayModel = {\n    id: string;\n    name: string;\n    reasoning: boolean;\n    "
+          }
+        ]
+      },
+      {
+        "path": "package/dist/core/remote-catalog-provider.d.ts",
+        "sha256": "881b87302b710b12ec77784b315edaa6371e53e117cef8a221aaf9b56bd96f10",
+        "matches": [
+          {
+            "identity": "pi.dev",
+            "context": "ai\";\nexport declare const REMOTE_CATALOG_REFRESH_INTERVAL_MS: number;\n/** Add a persisted pi.dev catalog overlay to a static built-in provider. */\nexport declare function withRemoteCatalog(provide"
+          }
+        ]
+      }
+    ]
+  },
+  "staging": {
+    "storageSourceCommit": "c5dc431bb94fe1bd572be18a8d1403176e77ef13",
+    "command": "node scripts/verify-release-publication.mjs --staging --public-api",
+    "environment": "diffex-release-staging",
+    "bucket": "diffex-artifacts-staging",
+    "versions": [
+      "0.1789336470229.0",
+      "0.1789336470229.1"
+    ],
+    "exitCode": 0,
+    "cleanup": "Both version records, latest pointer, and verification lock confirmed absent.",
+    "latest": {
+      "status": 404,
+      "body": {
+        "error": "no_published_release"
+      }
+    },
+    "readiness": {
+      "status": 200,
+      "body": {
+        "status": "ready",
+        "release": "missing"
+      }
+    },
+    "sourceClientReadonly": {
+      "code": 1,
+      "events": [
+        {
+          "type": "request",
+          "url": "https://api.diffex.ai/api/latest-version",
+          "method": "GET",
+          "userAgent": "diffex/0.2.1 (darwin; node/v22.19.0; arm64)",
+          "redirect": "manual"
+        },
+        {
+          "type": "staging-connect",
+          "host": "diffex-public-api-staging.yibai14651.workers.dev",
+          "port": 443
+        },
+        {
+          "type": "staging-response",
+          "url": "https://diffex-public-api-staging.yibai14651.workers.dev/api/latest-version",
+          "status": 404,
+          "body": "{\"error\":\"no_published_release\"}",
+          "cacheControl": "no-store",
+          "contentType": "application/json; charset=utf-8"
+        }
+      ],
+      "output": "Error: No published Diffex release is available yet.\n"
+    },
+    "fullCorrectedClientMatrix": "Pending main-only environment policy; no branch access was granted."
+  },
+  "limitations": [
+    "No real provider login or inference environment is configured; prompt/reply and account-menu results use controlled fixtures.",
+    "Full corrected staging source-client matrix needs explicit temporary staging branch access or execution after merge.",
+    "Source canaries intercept npm installation; installed lifecycle evidence uses real npm and Bun with controlled discovery and canonical scoped registry.",
+    "The local predecessor changes only isolated installed version metadata; no public-to-public upgrade is claimed.",
+    "893 default-suite tests are skipped and do not count as accepted external or unsupported-platform behavior.",
+    "Application network guards and fixture events are not whole-host packet capture or live provider egress acceptance.",
+    "No standalone binaries, Windows npm acceptance, provider sandboxes, registry images, attestations, hosted deployments, or production metadata writes.",
+    "Local catalog refresh failed at transport; existing generated data validated, while CI froze a freshly hydrated snapshot."
+  ]
+}

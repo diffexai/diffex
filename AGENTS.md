@@ -177,3 +177,5 @@ If the user's instructions conflict with any rule in this document, ask for expl
 - 2026-09-13: Assumed interrupted npm downloads preserve the prefix -> Test real npm processes, retain user data, and recover ENOTEMPTY by matching the affected installation or backup against actual isolated directories instead of assuming every failure is a backup rename.
 
 - 2026-09-13: Runtime staging copied a redundant project NOTICE after attribution was consolidated -> Generate only the consolidated attribution file and reject separate NOTICE payloads.
+
+- 2026-09-13: A staging branch dispatch was rejected by main-only environment rules -> Inspect environment branch policies before dispatch and keep production credential checks on main.
