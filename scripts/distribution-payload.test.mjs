@@ -72,6 +72,7 @@ test("accepts a tarball with readable JavaScript, declarations, and complete not
 		"native/darwin/prebuilds/darwin-arm64/helper.node": Buffer.from("native fixture"),
 		"dist/vendor/evolution/index.js": "export const value = 1;",
 		"dist/vendor/harness-trace/index.d.ts": "export declare const value: number;",
+		"docs/context-files.md": "Diffex loads AGENTS.md from the user's project.\n",
 	});
 	assert.equal(result.status, 0, result.stderr);
 });
@@ -100,6 +101,9 @@ for (const [name, content, reason] of [
 	["dist/vendor/evals/index.js", "export const hidden = 1", /unapproved vendored workspace/],
 	["dist/vendor/evolution/dist/index.js", "export const hidden = 1", /duplicated or malformed/],
 	["examples/example.ts", "export const value = 1", /prohibited source or private path/],
+	["AGENTS.md", "Private repository instructions", /prohibited repository instructions/],
+	["docs/agents.MD", "Private repository instructions", /prohibited repository instructions/],
+	["dist/node_modules/@diffexai/diffex-ai/AGENTS.md", "Private repository instructions", /prohibited repository instructions/],
 ]) {
 	test(`rejects prohibited content in ${name}`, () => {
 		const result = inspect({ [name]: content });
@@ -114,6 +118,17 @@ test("inspects a nested archive even when renamed to a binary resource", () => {
 		const result = inspect({ "dist/resource.bin": readFileSync(nested.archive) });
 		assert.notEqual(result.status, 0);
 		assert.match(result.stderr, /prohibited source file/);
+	} finally {
+		rmSync(nested.directory, { recursive: true, force: true });
+	}
+});
+
+test("rejects repository instructions inside a nested archive", () => {
+	const nested = fixture({ "docs/AGENTS.md": "Private repository instructions" });
+	try {
+		const result = inspect({ "dist/resource.bin": readFileSync(nested.archive) });
+		assert.notEqual(result.status, 0);
+		assert.match(result.stderr, /prohibited repository instructions/);
 	} finally {
 		rmSync(nested.directory, { recursive: true, force: true });
 	}

@@ -38,6 +38,8 @@ def check_path(name, directory=False):
         fail(name, 'unsafe archive path')
     if any(part in {'.git', '.env', 'src', 'examples', '__MACOSX'} or part.startswith(('._', '.env.')) for part in path.parts):
         fail(name, 'prohibited source or private path')
+    if any(part.lower() == 'agents.md' for part in path.parts):
+        fail(name, 'prohibited repository instructions')
     declaration = name.endswith(('.d.ts', '.d.mts', '.d.cts'))
     if path.suffix in SOURCE_SUFFIXES and not declaration:
         fail(name, 'prohibited source file')
