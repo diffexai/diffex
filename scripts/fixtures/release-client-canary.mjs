@@ -8,7 +8,7 @@ export async function checkStagingClient(name, options, expected) {
 	const interceptedOtherRequests = result.events.filter((event) => event.type === "request" && event.url !== endpoint);
 	assert.deepEqual(interceptedOtherRequests, [], "Unexpected startup request");
 	const connections = result.events.filter((event) => event.type === "staging-connect");
-	assert.equal(connections.length > 0, expected.requests > 0);
+	assert.equal(connections.length > 0, expected.requests > 0, result.output);
 	for (const connection of connections) {
 		assert.equal(connection.host, "diffex-public-api-staging.yibai14651.workers.dev");
 		assert.equal(connection.port, 443);

@@ -52,10 +52,19 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: '22'
+          node-version: '22.19.0'
       - name: Install canary dependencies without lifecycle scripts
         if: inputs.check_client_canaries
         run: npm ci --ignore-scripts
+      - name: Prepare and verify source CLI startup
+        if: inputs.check_client_canaries
+        env:
+          DIFFEX_OFFLINE: '1'
+          DIFFEX_NO_LOCAL_LLM: '1'
+        run: |
+          npm run hydrate:model-data
+          npm run check:model-data
+          node --import=tsx packages/coding-agent/src/cli.ts --version
       - name: Verify AWS CLI
         run: aws --version
       - name: Verify staging publisher bucket isolation
