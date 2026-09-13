@@ -120,10 +120,6 @@ Attribution:
 
 ## Releasing
 
-The approved distribution policy currently enables npm packages and defers standalone binaries.
-Use the npm and Bun package-manager smoke paths; the standalone build and runtime image publication paths are deliberately blocked pending their redistribution review.
-See `docs/release/distribution-policy.json` before applying binary-specific instructions below.
-
 **Lockstep versioning**: all packages share one version; every release updates all together. `patch` = fixes + additions, `minor` = breaking changes. No major releases.
 
 1. **Update CHANGELOGs**: ask the user whether they ran the `/cl` prompt on the latest commit on `main`. If not, they must run `/cl` first to audit and update each package's `[Unreleased]` section before releasing.
@@ -156,50 +152,12 @@ See `docs/release/distribution-policy.json` before applying binary-specific inst
    ```
    Use `npm_config_min_release_age=0` only for the release command. The repo's normal npm age gate can otherwise block the release lockfile refresh when the current workspace package version was published recently. Review any lockfile or shrinkwrap diffs the release creates before push.
 
-   The release script bumps all package versions, updates changelogs, regenerates release artifacts, runs `npm run check`, commits `Release vX.Y.Z`, tags `vX.Y.Z`, adds fresh `## [Unreleased]` changelog sections, commits `Add [Unreleased] section for next cycle`, then pushes `main` and the tag atomically after interactive generated-diff review.
-   Do not rerun the release script after a tag was pushed.
+   The release script bumps all package versions, updates changelogs, regenerates release artifacts, runs `npm run check`, commits `Release vX.Y.Z`, tags `vX.Y.Z`, adds fresh `## [Unreleased]` changelog sections, commits `Add [Unreleased] section for next cycle`, then pushes `main` and the tag. Do not rerun the release script after a tag was pushed.
 
 4. **CI verifies and announces the npm release**: pushing the `vX.Y.Z` tag triggers `.github/workflows/build-binaries.yml`. The `publish-npm` job uses npm trusted publishing through GitHub Actions OIDC with environment `npm-publish`; no local `npm publish`, `npm whoami`, OTP, or WebAuthn flow is required. After publishing, `announce-diffex-release` verifies every public workspace package resolves at the exact release version and that its npm tarball is available, then writes the verified release marker to R2. The release marker must never be published before npm verification succeeds.
 
-5. **If CI publish or announcement fails**: inspect the failed job.
-   The publish helper requires the retained approved artifact directory and downloads existing npm tarballs to verify their bytes before skipping them; announcement repeats digest verification before updating R2.
-   Rerun the failed job or workflow after fixing CI or transient npm issues.
-   Do not rerun `npm run release:patch` or `npm run release:minor` for the same version.
+5. **If CI publish or announcement fails**: inspect the failed job. The publish helper is idempotent and skips package versions already present on npm; the announcement job rechecks availability before updating the R2 marker. Rerun the failed job or workflow after fixing CI or transient npm issues. Do not rerun `npm run release:patch` or `npm run release:minor` for the same version.
 
 ## User Override
 
 If the user's instructions conflict with any rule in this document, ask for explicit confirmation before overriding. Only then execute their instructions.
-
-## Learning Log
-
-- 2026-09-10: CLI reproduction assumed a preload fetch stub survived HTTP setup and used an unsupported quit command -> Install the stub after importing HTTP setup, retain a socket guard, and verify the real `/exit` command before terminal automation.
-- 2026-09-10: The system Python could not bootstrap an isolated AWS CLI -> Use an explicit supported Python runtime for temporary publication tooling.
-- 2026-09-10: Vitest expanded an empty-array JSON fixture into no arguments -> Wrap payloads in named case objects so array and null validation cases exercise their intended values.
-- 2026-09-10: Node ambient fetch types omitted the runtime-supported cache option -> Validate request options against the installed Undici types used by the HTTP dispatcher.
-
-- 2026-09-10: A staging canary counted intercepted install telemetry as version traffic -> Assert version requests and actual socket destinations separately, and report blocked unrelated dependencies.
-
-- 2026-09-11: Install-report tests confused the package version with the inherited changelog checkpoint -> Derive checkpoint fixtures from changelog entries and assert attempted requests independently.
-- 2026-09-11: A multi-file rename stopped midway and validation loaded stale fixtures -> Preflight replacements and finish all edits before launching tests.
-- 2026-09-11: An SDK regression expected undefined headers although the SDK returns an empty object -> Assert header contents at the SDK boundary.
-
-- 2026-09-11: Rebuilding locks with local npm or installed modules lost platform metadata -> Use the release workflow npm version for regeneration and compare every retained version, native target, and libc field.
-- 2026-09-11: Terminal automation assumed one authentication selector and immediate child exit -> Inspect menu transitions, dismiss nested selectors, and bound both interaction and process reaping.
-
-- 2026-09-12: macOS tar added resource-fork metadata to archive fixtures -> Set COPYFILE_DISABLE=1 when creating fixtures and reject platform metadata in distribution payloads.
-
-- 2026-09-12: An unquoted GitHub API query was expanded by zsh -> Quote complete API endpoints containing query strings or pass them as structured process arguments.
-
-- 2026-09-12: Entry detection silently skipped a script invoked through macOS /tmp -> Compare canonical real paths in ES module CLI guards and test execution outside the repository.
-
-- 2026-09-12: Archive checks treated parent vendor directories as file payloads -> Validate path safety for directories and apply vendor implementation rules to files, with allowed-vendor fixtures.
-
-- 2026-09-12: Private debug artifacts live under a hidden directory -> Enable hidden-file upload only for explicitly listed private evidence paths.
-
-- 2026-09-12: Artifact fixtures mixed a fixed version with current generated install locks -> Derive fixture identities from the same package inventory so lockstep releases keep tests valid.
-
-- 2026-09-12: A bare Git fixture ref targeted an object stored only in another checkout -> Transfer objects with a real push before testing remote divergence or recovery.
-
-- 2026-09-12: Release preflight treated the private monorepo version as the public lockstep version -> Derive release identity from public workspaces and test against the actual repository inventory.
-
-- 2026-09-12: A shell commit body retained a literal newline escape -> Write multiline commit and PR text to a file and pass the file to Git or GitHub CLI.
