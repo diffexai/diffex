@@ -94,3 +94,28 @@ The replacement tarball includes seven required workspace packages plus the exis
 Replacement publication, old-package removal, final dist-tags, and traditional-token restrictions remain pending until their live results are retained.
 No R2 production pointer or generally available release may be created by bootstrap.
 These pending items prevent publication-trust acceptance from being marked complete.
+
+## CLI-only replacement validation
+
+Final publication candidate `f2a661684af35fe6e9a3209c6f9720144e1fd423` packages only `@diffexai/diffex@0.2.1`.
+The [local candidate evidence](cli-only-candidate-evidence.json) retains its exact tarball size, SHA-256, SHA-512, supported entrypoints, npm/Bun acceptance, terminal outcomes, and cleanup.
+The source quality gate, full isolated `./test.sh` suite, package inventory regressions, and disclosure-policy rejection tests passed.
+The final local tarball passed both package managers with the separate Diffex registry scope blocked.
+These local bytes are not published.
+
+[Native run 34765040811](https://github.com/diffexai/diffex/actions/runs/34765040811) passed Darwin arm64 and both Linux targets on implementation commit `8c8d8f529`; Darwin x64 was cancelled when the final README revision was pushed.
+[Final candidate run 34765173973](https://github.com/diffexai/diffex/actions/runs/34765173973) failed before executing any build command.
+GitHub's job annotation reports failed account payments or an Actions spending limit and directs the owner to Billing and plans.
+Rerun that retained run after the account issue is resolved so source identity remains pinned to the final candidate.
+Download its private artifact, inspect its manifest and checksums, and require every native target to pass before replacement publication.
+Do not substitute the earlier partial matrix or represent local validation as four-platform acceptance.
+
+The owner approved publishing the validated replacement under `bootstrap` and retiring the original CLI `0.2.0` plus the ten separate npm packages.
+The existing CLI `0.2.0` depends on those packages, so removal waits for validated replacement bytes.
+Reinspect registry versions before deletion, remove dependents before dependencies, preserve `@diffexai/diffex@0.2.1`, and verify all retired versions are absent.
+The existing first-registration bootstrap guard intentionally rejects established versions; this explicitly approved replacement requires the retained exact tarball command with `--access public --tag bootstrap --registry=https://registry.npmjs.org --provenance=false --ignore-scripts`.
+Verify bytes and final tags, then require package publishing 2FA with tokens disallowed and inspect trust again.
+No new general release tag or R2 announcement is part of this replacement.
+
+At 15:21 UTC the production probe still returned no release on `/api/latest-version` (404), healthy Render readiness (200), and anonymous auth rejection (401).
+No current R2 or Worker credential was replaced or revoked.
