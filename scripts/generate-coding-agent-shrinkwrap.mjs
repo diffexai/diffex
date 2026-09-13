@@ -3,6 +3,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, posix, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { cliDistribution } from "./cli-distribution.mjs";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptDir, "..");
@@ -142,7 +143,10 @@ function getInternalWorkspaces(lockPackages) {
 
 		workspaces.set(entry.name, {
 			lockPath,
-			packageJson: readJson(join(repoRoot, lockPath, "package.json")),
+			packageJson:
+				entry.name === "@diffexai/diffex"
+					? cliDistribution(repoRoot).manifest
+					: readJson(join(repoRoot, lockPath, "package.json")),
 		});
 	}
 
@@ -269,7 +273,8 @@ function validateShrinkwrap(shrinkwrap, internalNames) {
 	for (const [lockPath, entry] of Object.entries(shrinkwrap.packages)) {
 		for (const dependencyName of Object.keys(packageDependencies(entry))) {
 			const dependencyIncluded = [...includedPaths].some(
-				(candidate) => candidate === `node_modules/${dependencyName}` || candidate.endsWith(`/node_modules/${dependencyName}`),
+				(candidate) =>
+					candidate === `node_modules/${dependencyName}` || candidate.endsWith(`/node_modules/${dependencyName}`),
 			);
 			if (!dependencyIncluded) {
 				errors.push(`${lockPath || "root"} dependency ${dependencyName} is missing`);
@@ -277,7 +282,9 @@ function validateShrinkwrap(shrinkwrap, internalNames) {
 		}
 	}
 
-	const platformPackageCount = Object.values(shrinkwrap.packages).filter((entry) => entry.os || entry.cpu || entry.libc).length;
+	const platformPackageCount = Object.values(shrinkwrap.packages).filter(
+		(entry) => entry.os || entry.cpu || entry.libc,
+	).length;
 	if (platformPackageCount === 0) {
 		errors.push("no platform-specific optional dependency entries found");
 	}
@@ -294,7 +301,7 @@ function generateShrinkwrap() {
 	}
 
 	const lockPackages = rootLock.packages;
-	const codingAgentPackage = readJson(join(codingAgentDir, "package.json"));
+	const codingAgentPackage = cliDistribution(repoRoot).manifest;
 	const internalWorkspaces = getInternalWorkspaces(lockPackages);
 	const shrinkwrapPackages = {
 		"": copyPackageJsonEntry(codingAgentPackage, { includeName: true }),
@@ -354,7 +361,9 @@ try {
 	} else {
 		writeFileSync(shrinkwrapPath, content);
 		const packageCount = Object.keys(shrinkwrap.packages).length - 1;
-		const platformPackageCount = Object.values(shrinkwrap.packages).filter((entry) => entry.os || entry.cpu || entry.libc).length;
+		const platformPackageCount = Object.values(shrinkwrap.packages).filter(
+			(entry) => entry.os || entry.cpu || entry.libc,
+		).length;
 		console.log(
 			`Wrote packages/coding-agent/npm-shrinkwrap.json (${packageCount} packages, ${platformPackageCount} platform-specific).`,
 		);

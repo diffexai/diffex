@@ -1,6 +1,6 @@
 {
 	"name": "@diffexai/diffex-harness-state",
-	"version": "0.2.0",
+	"version": "0.2.1",
 	"description": "Persistent harness state schema and bundle storage for Diffex",
 	"type": "module",
 	"main": "./dist/index.js",
@@ -51,5 +51,6 @@
 		"@types/proper-lockfile": "4.1.4",
 		"shx": "0.4.0",
 		"vitest": "4.1.9"
-	}
+	},
+	"private": true
 }

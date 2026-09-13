@@ -36,6 +36,7 @@ globalThis.fetch = async (input, options) => {
 				...(state.bootstrap?.includes(inventory.name)
 					? { bootstrap: fixture.wrongBootstrap ? "0.0.1" : inventory.version }
 					: {}),
+				...(state.automaticLatest?.[inventory.name] ? { latest: state.automaticLatest[inventory.name] } : {}),
 				...(fixture.latest ? { latest: fixture.latest } : {}),
 			},
 		});

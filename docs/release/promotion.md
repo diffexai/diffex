@@ -1,7 +1,7 @@
 # Release promotion and recovery
 
 This implementation builds on CLI PR #209 and cloud PR #150.
-The approved policy enables the eleven npm packages and defers standalone binaries, Python, secondary installers, and runtime images.
+The approved policy enables only the CLI npm package and defers standalone binaries, Python, secondary installers, and runtime images.
 No binary or GitHub Release is created, and the private source repository stays private.
 Enabling another channel fails closed until required asset enumeration, immutable publication, and anonymous byte verification exist for that channel.
 The R2 schema remains the [npm release contract](contract.md), without a binary manifest or new client fields.
@@ -44,7 +44,7 @@ The source archive and `inputs.json` freeze inputs before the build.
 Packing rejects changes to tracked source or frozen model data, and `manifest.json` must agree with those original inputs.
 Registry requests reject redirects and use thirty-second timeouts; tarballs are streamed with a 256 MiB limit.
 Missing packages are eligible for publication, while mismatched existing bytes abort before publishing any missing package.
-Announcement re-downloads all eleven tarballs and verifies their bytes before either R2 write.
+Announcement re-downloads the CLI tarball and verifies its bytes before either R2 write.
 No failed prerequisite advances the pointer.
 
 ## Retained artifacts and retries

@@ -13,19 +13,10 @@ Runtime imports and representative operations execute in fresh Node processes.
 Installed runtime inventories must equal the inventory extracted from the checked tarball, and every recorded installed file must match its SHA-256 digest.
 The operation inventory fails closed if a new public package has no representative operation.
 
-| Package | Representative operation |
-| --- | --- |
-| `diffex-agent-core` | Construct an agent and change its state |
-| `diffex-ai` | Complete and consume an assistant event stream |
-| `diffex-client` | Construct and dispose a client; additionally list a hosted session over WebSocket |
-| `diffex` | Initialize model runtime, load clipboard native module, execute image WASM, export a session to HTML |
-| `diffex-coding-agent-server` | Close usage reporter; start its actual executable, reject wrong credentials, list its session, terminate cleanly |
-| `diffex-harness-state` | Persist and reload the initial harness version |
-| `diffex-protocol` | Encode and decode CBOR |
-| `diffex-server` | Start and close a loopback WebSocket listener |
-| `diffex-session-backend-sqlite-node` | Create, write, and query SQLite |
-| `diffex-telemetry` | Execute a telemetry span callback |
-| `diffex-tui` | Render text and load the current platform's native modifier helper where applicable |
+The current public inventory contains only `@diffexai/diffex`.
+Its required internal modules ship inside the tarball, and installation must succeed while separate Diffex registry requests are blocked.
+The representative CLI operation initializes model runtime, loads clipboard native code, executes image WASM, and exports a session to HTML.
+Hosted server packages remain private and are covered by repository tests rather than public npm artifact acceptance.
 
 The packed CLI additionally executes help, version, model listing, controlled inference, a terminal prompt/reply, account-menu inspection, and clean exit.
 The terminal path exercises packaged themes and the HTML export path exercises its templates, CSS, and bundled renderer resources.
@@ -80,7 +71,8 @@ Trusted publishing authenticates the private source workflow, but npm does not g
 Public acceptance must compare the actual downloaded npm bytes with these retained identities after separately authorized publication.
 
 The baseline CLI-only acceptance passed on Darwin arm64 but emitted no per-package operation or hosted-server result.
-The expanded local acceptance covers all eleven packages for both managers and the server lifecycle.
+The previous expanded acceptance covered eleven packages and the hosted server lifecycle before the owner reduced the public inventory on 2026-09-13.
+Current acceptance validates the complete CLI-only tarball through both managers.
 The owner specified that no live provider test environment is available, so real login and inference remain pending.
 Native runner results and exact committed-candidate evidence are recorded in the implementation pull request and accompanying acceptance record.
 Public downloads and public-to-public upgrades remain unexecuted until publication; local fixture inference does not establish those results.

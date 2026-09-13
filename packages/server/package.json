@@ -1,6 +1,6 @@
 {
 	"name": "@diffexai/diffex-server",
-	"version": "0.2.0",
+	"version": "0.2.1",
 	"description": "Experimental server package for Diffex",
 	"type": "module",
 	"main": "./dist/index.js",
@@ -57,13 +57,14 @@
 		"node": ">=22.19.0"
 	},
 	"dependencies": {
-		"@diffexai/diffex-ai": "^0.2.0",
-		"@diffexai/diffex-protocol": "^0.2.0",
+		"@diffexai/diffex-ai": "^0.2.1",
+		"@diffexai/diffex-protocol": "^0.2.1",
 		"ws": "8.21.0"
 	},
 	"devDependencies": {
 		"@types/ws": "8.18.1",
 		"shx": "0.4.0",
 		"vitest": "4.1.9"
-	}
+	},
+	"private": true
 }

@@ -34,7 +34,7 @@ export function createPublicationFixture({ staging = false } = {}) {
 	mkdirSync(artifactDirectory);
 	writeFileSync(join(artifactDirectory, "source.tar.gz"), "fixture frozen source");
 	if (staging) rmSync(aws);
-	const packages = getPublicWorkspacePackages();
+	const packages = [{ name: "@diffexai/diffex-agent-core" }, ...getPublicWorkspacePackages()];
 	const bucket = staging ? "diffex-artifacts-staging" : "fixture-releases";
 	const endpoint = staging
 		? "https://6b24afa849f8254ab5e6e2d1956239cc.r2.cloudflarestorage.com"
@@ -61,6 +61,8 @@ export function createPublicationFixture({ staging = false } = {}) {
 				dryRun = false,
 				latest,
 				wrongBootstrap = false,
+				newLatest,
+				failTagRemoval = false,
 			} = {},
 		) {
 			writeFileSync(join(directory, "package.json"), JSON.stringify({ version, private: true }));
@@ -107,7 +109,17 @@ export function createPublicationFixture({ staging = false } = {}) {
 			writeFileSync(join(artifactDirectory, "manifest.json"), JSON.stringify(manifest));
 			writeFileSync(
 				fixturePath,
-				JSON.stringify({ packages: manifests, failure, commit, missing, failPublishAt, latest, wrongBootstrap }),
+				JSON.stringify({
+					packages: manifests,
+					failure,
+					commit,
+					missing,
+					failPublishAt,
+					latest,
+					wrongBootstrap,
+					newLatest,
+					failTagRemoval,
+				}),
 			);
 			const env = {
 				PATH: `${join(directory, "bin")}:${process.env.PATH}`,

@@ -113,7 +113,9 @@ Dispatch it from `main` once the workflow is merged; adding a workflow on a pull
 
 On 2026-09-10, both newly supplied keys successfully listed release records in their own buckets and received `AccessDenied` for the other release bucket and the unrelated `image-converter` bucket.
 Both release namespaces were empty before the staging check.
-The previous shared key was not installed in GitHub; revoking it remains a separate Cloudflare owner action.
+The original record referred to a previous shared R2 key that was not installed in GitHub.
+That record retained no credential name, identifier, location, or confirmed scope, so it does not establish that an active credential exists or justify revocation.
+Only an identified, verified superseded credential could be considered for owner-directed retirement; the current dedicated R2 keys and Worker deployment token are unaffected.
 The 14 focused publisher regressions, `npm run check`, `./test.sh`, and actionlint 1.7.12 checks of both changed workflows passed.
 No real release was run.
 

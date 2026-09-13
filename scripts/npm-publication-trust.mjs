@@ -12,8 +12,9 @@ export function assertTrustedPublisher(value) {
 		value.file !== "build-binaries.yml" ||
 		value.environment !== "npm-publish" ||
 		!Array.isArray(value.permissions) ||
-		value.permissions.length !== 1 ||
-		value.permissions[0] !== "createPackage"
+		value.permissions.length !== 2 ||
+		!value.permissions.includes("createPackage") ||
+		!value.permissions.includes("createStagedPackage")
 	)
 		throw new Error("Expected exactly the Diffex GitHub npm publish relationship");
 }

@@ -3,8 +3,10 @@
 ## Supported npm identity
 
 The source repository remains private at `diffexai/diffex`.
-Normal publication uses GitHub Actions OIDC with workflow `build-binaries.yml`, environment `npm-publish`, and only the `npm publish` permission.
-The inventory comes from `scripts/release-packages.mjs` and includes all eleven packages, including `@diffexai/diffex` and `@diffexai/diffex-coding-agent-server`.
+Normal publication uses GitHub Actions OIDC with workflow `build-binaries.yml`, environment `npm-publish`, and direct `npm publish` permission.
+Since 2026-09-03 npm automatically also grants `npm stage publish` on new trusted relationships.
+The current inventory comes from `scripts/release-packages.mjs` and contains only `@diffexai/diffex`.
+The owner approved replacing the initial eleven-package `0.2.0` bootstrap with CLI-only `0.2.1` and retiring the old versions after replacement validation.
 No npm token secret belongs in the release workflow.
 
 [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/) supports private repositories, but does not generate provenance for them.
@@ -16,7 +18,7 @@ Source snapshots and debugging maps remain in private artifact storage.
 
 The workflow pins Node 22.19.0 and npm 11.16.0.
 [npm trust](https://docs.npmjs.com/cli/v11/commands/npm-trust/) requires npm 11.15.0 or newer and an existing package.
-Its verified JSON output must contain GitHub type, the exact repository/file/environment, and only `createPackage` permission.
+Its verified JSON output must contain GitHub type, the exact repository/file/environment, and exactly `createPackage` plus npm's automatically granted `createStagedPackage` permission.
 Missing, foreign, or broader relationships fail verification.
 
 ```sh
@@ -80,7 +82,15 @@ This run predates the additional credential scope checks and does not claim to v
 
 The owner confirmed the current `/cl` refresh and approved public bootstrap publication of `0.2.0` once validation passes.
 The initial environment attempt was blocked by automatic approval review; the owner subsequently approved the exact settings and fallback, and configuration succeeded.
-The credential owner must confirm retirement of the previous shared Cloudflare key or provide an explicit retirement plan.
-All eleven public package versions, downloaded bootstrap tarball checksums, exact trusted publishers, and token-publishing restrictions remain unverified until bootstrap completes.
+The historical shared-key sentence refers to R2, not Worker deployment.
+It has no retained credential identifier, location, or current-state evidence and is not an actionable revocation requirement.
+No credential was revoked or replaced on the strength of that note.
+All eleven original `0.2.0` packages were uploaded from native-accepted source `e3f96b95ebc7fdad96220e315ec144f74383de22`.
+Registry read-back unexpectedly showed both `bootstrap` and `latest` on all names despite explicit `--tag bootstrap`; a reviewed removal attempt returned HTTP 400.
+This failed the no-latest acceptance gate and no production announcement was made.
+The CLI trusted publisher was created and read back with the exact repository, file, environment, and current npm permission pair.
+The owner then requested a CLI-only distribution and approved `0.2.1` with retirement of `0.2.0`.
+The replacement tarball includes seven required workspace packages plus the existing evolution and harness-trace runtime modules.
+Replacement publication, old-package removal, final dist-tags, and traditional-token restrictions remain pending until their live results are retained.
 No R2 production pointer or generally available release may be created by bootstrap.
 These pending items prevent publication-trust acceptance from being marked complete.

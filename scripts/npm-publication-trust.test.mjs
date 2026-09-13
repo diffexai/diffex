@@ -8,7 +8,7 @@ const expected = {
 	repository: "diffexai/diffex",
 	file: "build-binaries.yml",
 	environment: "npm-publish",
-	permissions: ["createPackage"],
+	permissions: ["createPackage", "createStagedPackage"],
 };
 
 test("verifies every public package including the exceptional CLI name", () => {
@@ -17,9 +17,9 @@ test("verifies every public package including the exceptional CLI name", () => {
 		visited.push(name);
 		return expected;
 	});
-	assert.equal(results.length, 11);
+	assert.equal(results.length, 1);
 	assert.ok(visited.includes("@diffexai/diffex"));
-	assert.ok(visited.includes("@diffexai/diffex-coding-agent-server"));
+	assert.ok(!visited.includes("@diffexai/diffex-coding-agent-server"));
 	assert.ok(!visited.includes("@diffexai/diffex-coding-agent"));
 });
 
@@ -32,7 +32,8 @@ for (const invalid of [
 	{ ...expected, file: "other.yml" },
 	{ ...expected, environment: "" },
 	{ ...expected, permissions: [] },
-	{ ...expected, permissions: ["createPackage", "createStagedPackage"] },
+	{ ...expected, permissions: ["createPackage", "createStagedPackage", "deletePackage"] },
+	{ ...expected, permissions: ["createStagedPackage"] },
 ]) {
 	test("rejects missing, broader, or foreign publication trust", () => {
 		assert.throws(() => assertTrustedPublisher(invalid), /Expected exactly/);

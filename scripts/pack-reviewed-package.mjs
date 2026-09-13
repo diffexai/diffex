@@ -1,6 +1,8 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { stageCliDistribution } from "./stage-cli-distribution.mjs";
 import { join, resolve } from "node:path";
 import { assertChangelogsReady, preparePackageDistribution } from "./prepare-distribution.mjs";
 
@@ -9,21 +11,27 @@ import { assertChangelogsReady, preparePackageDistribution } from "./prepare-dis
 export function packReviewedPackage(pkg, outputDirectory) {
 	assertChangelogsReady();
 	preparePackageDistribution(pkg.directory);
-	const [packed] = JSON.parse(
-		execFileSync("npm", ["pack", "--ignore-scripts", "--json", "--pack-destination", resolve(outputDirectory)], {
-			cwd: pkg.directory,
-			encoding: "utf8",
-			maxBuffer: 20 * 1024 * 1024,
-		}),
-	);
-	const file = join(resolve(outputDirectory), packed.filename);
-	const inspection = JSON.parse(
-		execFileSync(
-			"python3",
-			["scripts/check-distribution-payload.py", file, "--name", pkg.name, "--version", pkg.version],
-			{ encoding: "utf8", maxBuffer: 20 * 1024 * 1024 },
-		),
-	);
-	const sha256 = createHash("sha256").update(readFileSync(file)).digest("hex");
-	return { file, sha256, name: pkg.name, version: pkg.version, payloadFiles: inspection.payloadFiles };
+	const stage = pkg.name === "@diffexai/diffex" ? mkdtempSync(join(tmpdir(), "diffex-cli-pack-")) : undefined;
+	try {
+		if (stage) stageCliDistribution(pkg.directory, stage);
+		const [packed] = JSON.parse(
+			execFileSync("npm", ["pack", "--ignore-scripts", "--json", "--pack-destination", resolve(outputDirectory)], {
+				cwd: stage ?? pkg.directory,
+				encoding: "utf8",
+				maxBuffer: 20 * 1024 * 1024,
+			}),
+		);
+		const file = join(resolve(outputDirectory), packed.filename);
+		const inspection = JSON.parse(
+			execFileSync(
+				"python3",
+				["scripts/check-distribution-payload.py", file, "--name", pkg.name, "--version", pkg.version],
+				{ encoding: "utf8", maxBuffer: 20 * 1024 * 1024 },
+			),
+		);
+		const sha256 = createHash("sha256").update(readFileSync(file)).digest("hex");
+		return { file, sha256, name: pkg.name, version: pkg.version, payloadFiles: inspection.payloadFiles };
+	} finally {
+		if (stage) rmSync(stage, { recursive: true, force: true });
+	}
 }

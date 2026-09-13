@@ -9,13 +9,15 @@ This work does not authorize npm bootstrap or production publication.
 ## Distributions and source disclosure
 
 [distribution-policy.json](distribution-policy.json) records the approved decisions.
-The manifest generator derives all eleven public packages from `scripts/release-packages.mjs`, including `@diffexai/diffex-coding-agent-server` and canonical CLI `@diffexai/diffex`.
+On 2026-09-13 the owner revised the public inventory to only `@diffexai/diffex` and approved a bundled `0.2.1` replacement with retirement of `0.2.0`.
+The manifest generator now rejects every additional public package.
 It rejects private workspace names, the generated private installer package as an npm publication, obsolete `@diffexai/diffex-coding-agent`, incomplete inventories, and mixed versions.
 The source commit is a full identity string and is not copied into another repository's Git history.
 
 Readable JavaScript and declarations ship in all public packages.
 The CLI also ships runtime JavaScript and declarations from `dist/vendor/evolution` and `dist/vendor/harness-trace`; their private workspace flags do not make those delivered files private.
-These are the only private workspace implementations approved for vendoring.
+The approved CLI-only replacement also includes the agent, AI, client, harness-state, protocol, telemetry, and TUI runtime workspaces under `dist/node_modules/@diffexai`.
+Their previously reviewed runtime assets and complete notices are preserved, while publication and installation locks exclude separate Diffex registry dependencies.
 TypeScript examples and native source/build files are excluded.
 Runtime JSON, SQLite migration SQL, HTML/CSS export templates, documentation with inline examples, and Diffex-owned TUI native prebuilds remain included.
 The TUI helpers call system APIs; their source remains in the private build input and their project notices remain in the package.
@@ -30,7 +32,7 @@ Delivered code remains inspectable; repository privacy, minification, obfuscatio
 
 ## License and notice inventory
 
-All eleven shipped package manifests declare `Apache-2.0`.
+The CLI and all bundled workspace manifests declare `Apache-2.0`.
 The two vendored Diffex workspaces also declare `Apache-2.0`.
 Each public package receives the complete root `LICENSE`, preserving the full Apache text, Luntraa, Inc. ownership, and the complete upstream MIT license and copyright notice for Pi-derived portions.
 The package declaration does not replace the MIT terms of those portions or other third-party terms.
@@ -67,7 +69,7 @@ The full source archive remains a private build input and is excluded from all p
 Its owning validator requires the root license and model snapshot invariants.
 The public cloud release record remains the existing npm publication contract; the richer embedded manifest is not a replacement R2 schema.
 
-## Changelog reset and local acceptance
+## Historical changelog reset and local acceptance
 
 The owner explicitly approved the one-time reset after automatic review required direct authorization.
 Only the nine paths listed in the release audit were cleared; their previous contents remain at `ae811d134dd63b0a688aea10ea0368c0935e7e48`.

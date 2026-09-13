@@ -12,13 +12,12 @@ import {
 	packageClosure,
 	verifyTarballs,
 } from "./artifact-acceptance.mjs";
+import { cliDistribution } from "./cli-distribution.mjs";
 import { getPublicWorkspacePackages } from "./release-packages.mjs";
 
 test("every public package has an operation and a dependency-first local closure", () => {
-	const packages = getPublicWorkspacePackages().map((pkg) =>
-		JSON.parse(readFileSync(join(pkg.directory, "package.json"), "utf8")),
-	);
-	assert.equal(packages.length, 11);
+	const packages = getPublicWorkspacePackages().map((pkg) => cliDistribution().manifest);
+	assert.equal(packages.length, 1);
 	for (const pkg of packages) {
 		assert(operations[pkg.name]);
 		const closure = packageClosure(pkg.name, packages);

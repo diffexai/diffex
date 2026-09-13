@@ -15,6 +15,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { cliDistribution } from "./cli-distribution.mjs";
 import { getPublicWorkspacePackages } from "./release-packages.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -220,7 +221,7 @@ export function acceptArtifacts(artifactDirectory, outputDirectory, { managers =
 		"Expected npm or Bun acceptance",
 	);
 	const packages = getPublicWorkspacePackages().map((pkg) => ({
-		...readJson(join(root, pkg.directory, "package.json")),
+		...cliDistribution(root).manifest,
 		directory: pkg.directory,
 	}));
 	const raw = readJson(join(artifactDirectory, "manifest.json"));
@@ -299,13 +300,6 @@ export function acceptArtifacts(artifactDirectory, outputDirectory, { managers =
 				["fd", "rg"].map((tool) => [tool, execFileSync(tool, ["--version"], helperOptions).trim()]),
 			);
 			cpSync(join(root, "scripts/fixtures/artifact-network-guard.mjs"), join(consumer, "guard.mjs"));
-			cpSync(join(root, "scripts/fixtures/artifact-server.mjs"), join(consumer, "server-smoke.mjs"));
-			execFileSync(process.execPath, ["--import", join(consumer, "guard.mjs"), join(consumer, "server-smoke.mjs")], {
-				cwd: join(consumer, "project"),
-				env,
-				stdio: "inherit",
-				timeout: 45_000,
-			});
 			const layout = join(temporary, manager, "terminal");
 			mkdirSync(layout);
 			// The terminal harness accepts explicit consumer paths, avoiding workspace resolution.
@@ -319,7 +313,12 @@ export function acceptArtifacts(artifactDirectory, outputDirectory, { managers =
 			} finally {
 				cpSync(layout, join(outputDirectory, manager), { recursive: true });
 			}
-			evidence.processes.push({ manager, server: "passed", terminal: "passed", helpers });
+			evidence.processes.push({
+				manager,
+				server: "Excluded from CLI distribution; hosted runtime remains private",
+				terminal: "passed",
+				helpers,
+			});
 		}
 		verifyTarballs(tarballDirectory, records, packages);
 		writeFileSync(

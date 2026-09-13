@@ -128,6 +128,23 @@ for (const pkg of packageStates) {
 	}
 
 	run("npm", [...createPublishArgs({ bootstrap }), join(artifactDirectory, pkg.filename)]);
+	if (bootstrap) {
+		await verifyNpmArtifact(pkg);
+		const state = await readNpmPackageState(pkg.name);
+		if (
+			state.distTags.bootstrap !== pkg.version ||
+			(state.distTags.latest !== undefined && state.distTags.latest !== pkg.version)
+		)
+			throw new Error(`${pkg.name}: bootstrap tag verification failed; inspect registry state before retrying`);
+		// npm can create latest on first registration even with --tag bootstrap.
+		// Only remove it for an exact artifact newly published by this invocation.
+		if (state.distTags.latest === pkg.version) {
+			run("npm", ["dist-tag", "rm", pkg.name, "latest", "--registry=https://registry.npmjs.org"]);
+			const cleaned = await readNpmPackageState(pkg.name);
+			if (cleaned.distTags.latest !== undefined || cleaned.distTags.bootstrap !== pkg.version)
+				throw new Error(`${pkg.name}: bootstrap tag cleanup failed; inspect registry state before retrying`);
+		}
+	}
 	console.log();
 }
 

@@ -45,5 +45,5 @@ for (const [consumer, command, args] of [
 		const info = JSON.parse(readFileSync(installed, "utf8"));
 		if (info.name !== pkg.name || info.version !== pkg.version) throw new Error("Installed identity mismatch");
 	}
-	console.log(`All eleven local tarball identities verified in ${consumer} outside the workspace.`);
+	console.log(`All selected local tarball identities verified in ${consumer} outside the workspace.`);
 }

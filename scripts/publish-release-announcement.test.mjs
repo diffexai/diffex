@@ -323,6 +323,8 @@ test("bootstrap dry run writes nothing and completion verifies all packages with
 			assert.equal(result.status, 0, result.stderr);
 			assert.equal(fixture.state().published.length, fixture.packageCount);
 			assert.equal(fixture.state().bootstrap.length, fixture.packageCount);
+			assert.deepEqual(fixture.state().automaticLatest, {});
+			assert.equal(fixture.state().removedLatest.length, fixture.packageCount);
 			assert.deepEqual(fixture.state().objects, {});
 			assert.deepEqual(fixture.state().calls, []);
 		}
@@ -356,3 +358,20 @@ test("bootstrap cannot claim completion when registry tags disagree", () => {
 		fixture.cleanup();
 	}
 });
+
+for (const options of [{ newLatest: "0.0.4" }, { failTagRemoval: true }]) {
+	test("bootstrap stops after the first upload when automatic tag cleanup is unsafe or fails", () => {
+		const fixture = createPublicationFixture();
+		try {
+			const result = fixture.run("0.0.3", { command: "publish", bootstrap: true, missing: true, ...options });
+			assert.equal(result.status, 1);
+			assert.equal(fixture.state().published.length, 1);
+			assert.equal(fixture.state().removedLatest, undefined);
+			assert.deepEqual(fixture.state().objects, {});
+			assert.deepEqual(fixture.state().calls, []);
+			assert.doesNotMatch(result.stdout, /Bootstrap publication is complete/);
+		} finally {
+			fixture.cleanup();
+		}
+	});
+}

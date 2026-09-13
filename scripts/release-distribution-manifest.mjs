@@ -23,27 +23,8 @@ export const VERIFICATION_ASSETS = ["release/distribution-manifest.json", "distr
 export function createDistributionManifest({ packages, sourceCommit, policy, artifacts = [] }) {
 	if (!/^[0-9a-f]{40}$/.test(sourceCommit)) throw new Error("Source commit must be a full Git object ID");
 	const names = packages.map((pkg) => pkg.name);
-	if (
-		names.length !== 11 ||
-		new Set(names).size !== 11 ||
-		!names.includes("@diffexai/diffex") ||
-		!names.includes("@diffexai/diffex-coding-agent-server")
-	) {
-		throw new Error("Reviewed distribution requires all eleven public packages");
-	}
-	if (
-		names.some((name) =>
-			[
-				"@diffexai/diffex-coding-agent",
-				"@diffexai/diffex-coding-agent-install",
-				"@diffexai/diffex-evolution",
-				"@diffexai/diffex-harness-trace",
-				"@diffexai/diffex-evals",
-			].includes(name),
-		)
-	) {
-		throw new Error("Distribution inventory contains a prohibited package");
-	}
+	if (names.length !== 1 || names[0] !== "@diffexai/diffex")
+		throw new Error("Reviewed distribution requires only the CLI package");
 	const versions = new Set(packages.map((pkg) => pkg.version));
 	if (versions.size !== 1 || !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(packages[0].version))
 		throw new Error("Public packages must use one stable version");

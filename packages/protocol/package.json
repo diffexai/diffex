@@ -1,6 +1,6 @@
 {
 	"name": "@diffexai/diffex-protocol",
-	"version": "0.2.0",
+	"version": "0.2.1",
 	"description": "Transport-neutral CBOR protocol for remote Diffex sessions",
 	"type": "module",
 	"main": "./dist/index.js",
@@ -50,5 +50,6 @@
 	"devDependencies": {
 		"shx": "0.4.0",
 		"vitest": "4.1.9"
-	}
+	},
+	"private": true
 }

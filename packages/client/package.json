@@ -1,6 +1,6 @@
 {
 	"name": "@diffexai/diffex-client",
-	"version": "0.2.0",
+	"version": "0.2.1",
 	"description": "Transport-neutral client for remote Diffex sessions over framed CBOR bytes",
 	"type": "module",
 	"main": "./dist/index.js",
@@ -61,10 +61,11 @@
 		"node": ">=22.19.0"
 	},
 	"dependencies": {
-		"@diffexai/diffex-protocol": "^0.2.0"
+		"@diffexai/diffex-protocol": "^0.2.1"
 	},
 	"devDependencies": {
 		"shx": "0.4.0",
 		"vitest": "4.1.9"
-	}
+	},
+	"private": true
 }

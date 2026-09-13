@@ -148,6 +148,9 @@ def inspect_archive(file, license_file, expected_name=None, expected_version=Non
         if hashlib.sha256(entries[root + item['path']]).hexdigest() != item['sha256']:
             fail(str(file), 'runtime file hash mismatch')
     if metadata.get('name') == '@diffexai/diffex':
+        for field in ['dependencies', 'optionalDependencies', 'peerDependencies']:
+            if any(name.startswith('@diffexai/') for name in metadata.get(field, {})):
+                fail(str(file), 'CLI must not fetch separate Diffex packages')
         release_files = ['release/distribution-manifest.json', 'release/install-package.json', 'release/install-package-lock.json']
         for name in release_files:
             if not entries.get(root + name, b'').strip():
@@ -161,7 +164,7 @@ def inspect_archive(file, license_file, expected_name=None, expected_version=Non
             fail(str(file), 'release manifest violates approved channels')
         packages = manifest.get('packages', [])
         names = [package['name'] for package in packages]
-        if len(names) != 11 or len(set(names)) != 11 or '@diffexai/diffex' not in names or '@diffexai/diffex-coding-agent-server' not in names:
+        if names != ['@diffexai/diffex']:
             fail(str(file), 'release manifest package inventory mismatch')
         for package in packages:
             name = package['name']

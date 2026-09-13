@@ -11,8 +11,8 @@ const candidate = () => ({
 
 test("derives all public packages and excludes source from upload assets", () => {
 	const manifest = createDistributionManifest(candidate());
-	assert.equal(manifest.packages.length, 11);
-	assert(manifest.packages.some((pkg) => pkg.name === "@diffexai/diffex-coding-agent-server"));
+	assert.equal(manifest.packages.length, 1);
+	assert.equal(manifest.packages[0].name, "@diffexai/diffex");
 	assert.equal(manifest.publicAssets.filter((name) => name.endsWith(".tar.gz") || name.endsWith(".zip")).length, 0);
 	assert(!manifest.publicAssets.some((name) => name.includes("source")));
 	assert.equal(manifest.source.commit, "a".repeat(40));
@@ -29,10 +29,10 @@ test("rejects incomplete, private, duplicate, and mixed-version package inventor
 			value.packages[0] = { ...value.packages[0], name: "@diffexai/diffex-evolution" };
 		},
 		(value) => {
-			value.packages[0] = value.packages[1];
+			value.packages.push(value.packages[0]);
 		},
 		(value) => {
-			value.packages[0] = { ...value.packages[0], version: "9.9.9" };
+			value.packages[0] = { ...value.packages[0], version: "invalid" };
 		},
 		(value) => {
 			value.sourceCommit = "main";

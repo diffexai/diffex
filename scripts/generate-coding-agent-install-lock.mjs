@@ -3,6 +3,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, posix, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { cliDistribution } from "./cli-distribution.mjs";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptDir, "..");
@@ -149,7 +150,10 @@ function getInternalWorkspaces(lockPackages) {
 
 		workspaces.set(entry.name, {
 			lockPath,
-			packageJson: readJson(join(repoRoot, lockPath, "package.json")),
+			packageJson:
+				entry.name === "@diffexai/diffex"
+					? cliDistribution(repoRoot).manifest
+					: readJson(join(repoRoot, lockPath, "package.json")),
 		});
 	}
 
@@ -298,7 +302,9 @@ function validateGeneratedFiles(installerPackageJson, installLock, internalNames
 			(packageName === "@diffexai/diffex" || packageName?.startsWith(internalPackagePrefix)) &&
 			entry.version !== installerPackageJson.version
 		) {
-			errors.push(`${lockPath} internal package version ${entry.version} does not match ${installerPackageJson.version}`);
+			errors.push(
+				`${lockPath} internal package version ${entry.version} does not match ${installerPackageJson.version}`,
+			);
 		}
 		if (entry.hasInstallScript) {
 			if (!packageName || !entry.version) {
@@ -347,8 +353,9 @@ function validateGeneratedFiles(installerPackageJson, installLock, internalNames
 		}
 	}
 
-	const platformPackageCount = Object.values(installLock.packages).filter((entry) => entry.os || entry.cpu || entry.libc)
-		.length;
+	const platformPackageCount = Object.values(installLock.packages).filter(
+		(entry) => entry.os || entry.cpu || entry.libc,
+	).length;
 	if (platformPackageCount === 0) {
 		errors.push("no platform-specific optional dependency entries found");
 	}
@@ -365,7 +372,7 @@ function generateInstallLock() {
 	}
 
 	const lockPackages = rootLock.packages;
-	const codingAgentPackage = readJson(join(codingAgentDir, "package.json"));
+	const codingAgentPackage = cliDistribution(repoRoot).manifest;
 	const installerPackageJson = createInstallerPackageJson(codingAgentPackage);
 	const internalWorkspaces = getInternalWorkspaces(lockPackages);
 	const installLockPackages = {
@@ -430,8 +437,9 @@ try {
 		writeFileSync(outputPackageJsonPath, packageJsonContent);
 		writeFileSync(outputLockfilePath, lockfileContent);
 		const packageCount = Object.keys(installLock.packages).length - 1;
-		const platformPackageCount = Object.values(installLock.packages).filter((entry) => entry.os || entry.cpu || entry.libc)
-			.length;
+		const platformPackageCount = Object.values(installLock.packages).filter(
+			(entry) => entry.os || entry.cpu || entry.libc,
+		).length;
 		console.log(
 			`Wrote packages/coding-agent/install-lock/package.json and package-lock.json (${packageCount} packages, ${platformPackageCount} platform-specific).`,
 		);
