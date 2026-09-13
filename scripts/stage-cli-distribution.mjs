@@ -1,6 +1,6 @@
 import { cpSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { cliDistribution } from "./cli-distribution.mjs";
 import { preparePackageDistribution } from "./prepare-distribution.mjs";
 
@@ -13,7 +13,19 @@ export function stageCliDistribution(directory, stage) {
 		"distribution-components.json",
 		"distribution-files.json",
 	];
-	for (const file of manifest.files) cpSync(join(directory, file), join(stage, file), { recursive: true });
+	const excludedDocs = new Set([
+		"docs/development.md",
+		"docs/docs.json",
+		"docs/index.md",
+		"docs/invocation-traces.md",
+		"docs/images/doom-extension.png",
+		"docs/images/exy.png",
+	]);
+	for (const file of manifest.files)
+		cpSync(join(directory, file), join(stage, file), {
+			recursive: true,
+			filter: (source) => !excludedDocs.has(relative(directory, source).replaceAll("\\", "/")),
+		});
 	writeFileSync(join(stage, "README.md"), "");
 	const inventory = JSON.parse(readFileSync(join(directory, "distribution-files.json"), "utf8"));
 	const components = JSON.parse(readFileSync(join(directory, "distribution-components.json"), "utf8")).filter(

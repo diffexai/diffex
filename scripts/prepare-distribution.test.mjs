@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -48,6 +48,15 @@ test("packed CLI exposes the product homepage and preserves referenced documenta
 				writeFileSync(join(root, directory, file), "Repository documentation\n");
 		}
 		const pkg = join(root, "packages/coding-agent");
+		cpSync("packages/coding-agent/docs", join(pkg, "docs"), { recursive: true });
+		const excludedDocs = [
+			"development.md",
+			"docs.json",
+			"index.md",
+			"invocation-traces.md",
+			"images/doom-extension.png",
+			"images/exy.png",
+		];
 		const metadata = JSON.parse(readFileSync(join(pkg, "package.json"), "utf8"));
 		metadata.files.push("CONTRIBUTING.md");
 		writeFileSync(join(pkg, "package.json"), JSON.stringify(metadata));
@@ -77,7 +86,17 @@ test("packed CLI exposes the product homepage and preserves referenced documenta
 		assert.equal(published.bugs, undefined);
 		assert.equal(published.diffexConfig.production, true);
 		assert.equal(execFileSync("tar", ["-xOf", archive, "package/README.md"]).length, 0);
-		assert.equal(execFileSync("tar", ["-xOf", archive, "package/docs/skills.md"], { encoding: "utf8" }), "Repository documentation\n");
+		for (const file of readdirSync(join(pkg, "docs"), { recursive: true })) {
+			const source = join(pkg, "docs", file);
+			if (!statSync(source).isFile()) continue;
+			const path = `docs/${file.replaceAll("\\", "/")}`;
+			if (excludedDocs.includes(file.replaceAll("\\", "/"))) {
+				assert(!packed.files.some((entry) => entry.path === path), `${path} must not ship`);
+			} else {
+				assert.deepEqual(execFileSync("tar", ["-xOf", archive, `package/${path}`]), readFileSync(source), `${path} must remain intact`);
+			}
+		}
+		for (const file of excludedDocs) assert(existsSync(join(pkg, "docs", file)), `${file} must remain in source`);
 		for (const { path } of packed.files)
 			assert(!path.split("/").some((part) => ["notice", "contributing.md"].includes(part.toLowerCase())), path);
 		const attribution = execFileSync("tar", ["-xOf", archive, "package/THIRD-PARTY-NOTICES.txt"], { encoding: "utf8" });
