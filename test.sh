@@ -76,4 +76,7 @@ for name in CI GITHUB_ACTIONS; do
 done
 
 echo "Running tests without API keys in isolated home: $test_root/home"
-env -i "${test_env[@]}" npm test
+# Optional groups let CI split suites without bypassing credential isolation.
+# ./test.sh coding-agent --shard=1/4
+# ./test.sh other
+env -i "${test_env[@]}" node scripts/run-tests.mjs "$@"

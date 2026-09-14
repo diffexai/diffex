@@ -1,0 +1,75 @@
+name: CI benchmark
+
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [labeled]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-benchmark-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  workers:
+    if: github.event_name == 'workflow_dispatch' || github.event.label.name == 'ci-benchmark'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        pool: [forks, threads]
+        workers: [1, 2]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup
+      - name: Compare isolated worker configurations
+        env:
+          POOL: ${{ matrix.pool }}
+          WORKERS: ${{ matrix.workers }}
+        run: |
+          for sample in 1 2 3; do
+            echo "Worker sample $sample: pool=$POOL workers=$WORKERS"
+            ./test.sh coding-agent --pool="$POOL" --maxWorkers="$WORKERS" --isolate --experimental.fsModuleCache=false
+          done
+
+  cache-seed:
+    if: github.event_name == 'workflow_dispatch' || github.event.label.name == 'ci-benchmark'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup
+        id: setup
+      - name: Populate a cold module cache
+        run: ./test.sh coding-agent --pool=forks --maxWorkers=1 --isolate
+      - name: Measure cache save
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: node_modules/.experimental-vitest-cache
+          key: ci-benchmark-${{ runner.os }}-${{ runner.arch }}-node-${{ steps.setup.outputs.node-version }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+  cache:
+    needs: cache-seed
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [uncached, restored]
+        sample: [1, 2, 3]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup
+        id: setup
+      - name: Measure cache restore
+        if: matrix.mode == 'restored'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: node_modules/.experimental-vitest-cache
+          key: ci-benchmark-${{ runner.os }}-${{ runner.arch }}-node-${{ steps.setup.outputs.node-version }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          fail-on-cache-miss: true
+      - name: Measure complete suite
+        run: ./test.sh coding-agent --pool=forks --maxWorkers=1 --isolate

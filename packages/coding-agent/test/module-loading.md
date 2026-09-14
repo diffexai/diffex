@@ -4,6 +4,9 @@ Import `userMsg`, `assistantMsg`, and `buildTestTree` directly from `message-fix
 That module has no runtime imports.
 Import extension and resource-loader factories and their option types directly from `extension-test-utils.ts`.
 Keep authenticated session construction in `utilities.ts`; do not re-export the extracted helpers from it.
+Inline extension fixtures import `core/extensions/factory.ts`, which constructs registration state without loading jiti, the CLI, or the provider catalog.
+Disk extension discovery continues through `core/extensions/loader.ts` and uses the same factory implementation.
+Tool tests import the individual `core/tools` modules rather than the package entry point.
 
 The coding-agent Vitest configuration caches transformed modules on disk while retaining default test-file isolation, pool selection, worker counts, and workspace source aliases.
 The default cache directory is the workspace-root `node_modules/.experimental-vitest-cache`.
@@ -67,4 +70,26 @@ Record total job time, the coding-agent duration, and the restore/save step time
 Confirm equivalent test counts and outcomes for cold and warm runs.
 Keep persistence enabled only if the median total job saving is positive after restore/save overhead.
 Disable the repository variable if that condition is not met.
-Hosted measurements remain pending; this branch had no pull request during local validation.
+The first hosted run after release-test and CLI consolidation reduced the main CI job from 14m34s to 12m56s.
+See [the baseline run](https://github.com/diffexai/diffex/actions/runs/34796513283) and [the improved run](https://github.com/diffexai/diffex/actions/runs/34891736038).
+Cache restore/save remained disabled in that comparison, so it does not establish a persistent-cache benefit.
+
+## CI groups and benchmarks
+
+CI runs four coding-agent shards alongside a separate scripts/other-workspace job and a build/check job.
+All test jobs use `test.sh` to isolate credentials and user resources.
+The `other` group discovers test workspaces from the root workspace manifest, so new packages are included automatically.
+The existing `build-check-test` required check succeeds only when every group succeeds.
+Cache keys include the shard number and count to avoid reusing a partial cache from a different shard.
+
+```bash
+./test.sh coding-agent --shard=1/4
+./test.sh other
+```
+
+Run `CI benchmark` manually, or add the `ci-benchmark` label to a pull request containing that workflow.
+It compares one and two workers in both forks and threads, with file isolation enabled and three samples per supported configuration.
+The complete suite includes native image/SQLite code and tests that change process state; a faster pool is acceptable only if those tests pass.
+A separate cache benchmark seeds a cache and compares three uncached jobs with three jobs restoring that exact cache on the same source.
+Include the measured save/restore overhead when deciding whether persistence saves time.
+Benchmark runs are opt-in and do not extend the normal CI critical path.
