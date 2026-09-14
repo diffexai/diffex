@@ -1,10 +1,11 @@
 // Loaded only by the controlled CLI reproduction, before application imports.
 import childProcess from "node:child_process";
 import { EventEmitter } from "node:events";
-import { appendFileSync } from "node:fs";
+import { appendFileSync, existsSync } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import { Socket } from "node:net";
 import { basename, dirname, join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { Agent, fetch as requestStaging } from "undici";
 import "../../src/core/http-dispatcher.ts";
 
@@ -17,7 +18,7 @@ const stagingUrl = "https://diffex-public-api-staging.yibai14651.workers.dev/api
 const stagingHost = new URL(stagingUrl).hostname;
 const dispatcher = staging ? new Agent() : undefined;
 
-globalThis.fetch = async (input, init) => {
+async function controlledFetch(input, init) {
 	const url = input instanceof Request ? input.url : String(input);
 	const headers = new Headers(init?.headers);
 	record({
@@ -28,6 +29,11 @@ globalThis.fetch = async (input, init) => {
 		redirect: init?.redirect,
 	});
 	if (url !== "https://api.diffex.ai/api/latest-version") return new Response(null, { status: 503 });
+	if (process.env.DIFFEX_REPRO_RELEASE_RESPONSE) {
+		while (!existsSync(process.env.DIFFEX_REPRO_RELEASE_RESPONSE)) {
+			await delay(10, undefined, { signal: init?.signal });
+		}
+	}
 	if (staging) {
 		if ((init?.method ?? "GET") !== "GET" || init?.redirect !== "manual") {
 			throw new Error("Unexpected staging request options");
@@ -58,6 +64,28 @@ globalThis.fetch = async (input, init) => {
 		version: process.env.DIFFEX_REPRO_VERSION,
 		packageName: process.env.DIFFEX_REPRO_PACKAGE,
 	});
+}
+
+globalThis.fetch = async (input, init) => {
+	try {
+		const response = await controlledFetch(input, init);
+		const json = response.json.bind(response);
+		response.json = async () => {
+			try {
+				return await json();
+			} finally {
+				// Drain validation and notification promise continuations before the parent sends more input.
+				setImmediate(() => record({ type: "discovery-settled" }));
+			}
+		};
+		if (response.status !== 200 && response.status !== 404) {
+			setImmediate(() => record({ type: "discovery-settled" }));
+		}
+		return response;
+	} catch (error) {
+		setImmediate(() => record({ type: "discovery-settled" }));
+		throw error;
+	}
 };
 
 // Prevent alternate HTTP clients from reaching the network too.

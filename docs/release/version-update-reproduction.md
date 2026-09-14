@@ -25,16 +25,23 @@ No build, release, npm installation, production credentials, or live endpoint is
 From `packages/coding-agent`:
 
 ```sh
-node ../../node_modules/vitest/dist/cli.js --run test/version-update-e2e.test.ts --reporter=verbose
+node ../../node_modules/vitest/dist/cli.js --run test/version-update-e2e.test.ts test/package-command-paths.test.ts test/version-check.test.ts --maxWorkers=1 --reporter=verbose
 ```
 
 The source entrypoint is `src/cli.ts`, loaded with `tsx` and the repository's TypeScript path mappings.
 Manual cases pass `update --self`, optionally followed by `--force`.
-Interactive cases pass `--no-session --no-extensions --no-skills`, render the real startup UI in a 100-column, 30-row PTY, and submit `/exit` through the editor after the welcome header appears.
+Interactive cases pass `--no-session --no-extensions --no-skills` and render the real startup UI in a 100-column, 30-row PTY.
+After the welcome header appears, the fixture submits `/name ci-ready` and waits for its rendered confirmation.
+The delayed-discovery journey releases its controlled response only after that confirmation proves input works while discovery is pending.
+After response parsing or failure and its promise continuations finish, the fixture submits `/name ci-settled`, waits for confirmation, then submits `/exit`.
 No model prompt is submitted.
 The expected no-model warning reflects the deliberately empty credential configuration.
 
 Each case gets a fresh temporary home, agent directory, project directory, and event record.
+The seven source-CLI launches share one suite-owned directory through `TMPDIR`, `TMP`, and `TEMP` so the installed `tsx` can reuse its compilation cache.
+After every launch, the suite verifies that only compiler cache directories remain and that previously cached files were not rewritten.
+The shared directory is removed after all children exit, and every complete suite run begins with an empty directory.
+Other reproduction callers, including staging canaries, keep isolated temporary-directory defaults.
 The child environment is constructed from an allowlist and does not inherit credentials, proxy settings, user resource configuration, or loader options.
 Manual cases model a writable global npm installation with a temporary package manifest and an overridden package/runtime path; install-method detection, update planning, command construction, and command dispatch remain real application code.
 
@@ -43,6 +50,30 @@ The interceptor records the actual requested URL, method, and user agent, suppli
 A socket guard rejects alternate network access.
 Child-process APIs are intercepted before application imports; npm root discovery is simulated, install/uninstall attempts are recorded without execution, and other application subprocesses are blocked.
 Only the local `tsx` compiler's esbuild service may execute.
+
+## Coverage consolidation (2026-09-14)
+
+The source-CLI boundary now runs seven launches, including four interactive terminals, instead of 40 launches and 15 terminals.
+The four terminal journeys cover fresh installation with a canonical newer release, upgrade with legacy telemetry enabled and delayed network failure, current installation with automatic checks disabled and provider attribution enabled, and fresh offline installation.
+The upgrade journey supplies a temporary two-release changelog because the repository currently has only one released entry.
+Every journey verifies input, normal exit, persisted settings, absence of install reporting, and absence of installation attempts.
+The three manual journeys retain exact canonical installation after automatic opt-out, forced foreign-package rejection, and forced offline suppression.
+Detailed safety and failure permutations execute through the real package-command handler, while transport redirect, cancellation, and retry tests remain unchanged.
+
+On macOS arm64 with Node `22.19.0`, the original two E2E files passed 40 tests in 57.88 seconds with one worker.
+Three complete runs of the command, version, and consolidated E2E suites each passed 125 tests with one worker and a fresh suite compilation cache:
+
+| Run | Total | Fresh install PTY | Delayed upgrade PTY | Checks disabled PTY | Offline PTY |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 13.71 s | 2.485 s | 2.288 s | 2.275 s | 2.280 s |
+| 2 | 13.57 s | 2.397 s | 2.295 s | 2.279 s | 2.296 s |
+| 3 | 13.59 s | 2.384 s | 2.317 s | 2.280 s | 2.292 s |
+
+The median complete run was 13.59 seconds, below the 20-second target without a wall-clock assertion.
+Every run verified scenario cleanup and unchanged compilation cache files between launches, then removed the shared directory.
+A temporary negative check emitted a diagnostic after delayed discovery failed and confirmed that the quiet-startup assertion caught it.
+The diagnostic injection was removed before the benchmark runs.
+`npm run check` passed, and all retained coverage remains in ordinary CI with no workflow parallelism or release-script changes.
 
 ## Observed requests and commands
 
@@ -88,7 +119,7 @@ Startup remains silent even for a valid newer response because `DIFFEX_UPDATE_AV
 
 ## Validation and cleanup
 
-The dedicated reproduction passed all 10 cases.
+The original dedicated reproduction passed all 10 cases.
 `npm run check` passed, including type checking, dependency checks, and the browser smoke check.
 `./test.sh` passed after refreshing local workspace links with `npm install --ignore-scripts --offline` and adding the missing agent `/node` source alias in `vitest.base.ts`.
 The checked-in lockfile is unchanged.

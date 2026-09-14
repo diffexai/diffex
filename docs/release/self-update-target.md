@@ -60,12 +60,13 @@ node ../../node_modules/vitest/dist/cli.js --run test/version-check.test.ts test
 
 The checker suite applies the shared HTTP corpus through the production consumer and covers strict JSON content types, unsupported semver ranges, exact no-release classification, retries, timeout cancellation, offline mode, and automatic opt-out.
 Redirect tests run the real Undici fetch implementation against an isolated `MockAgent` with external network access disabled and assert zero requests to the redirected host.
-The source CLI suite captures actual startup and manual discovery requests and package-command dispatch, including forced updates and adversarial responses.
-Interactive cases use a real 100-column, 30-row PTY and exit through `/exit` without submitting model prompts.
+The source CLI suite retains four terminal journeys and three manual update scenarios for canonical installation, forced foreign-package rejection, and offline suppression.
+The command integration suite exercises the real handler and validation with isolated settings, controlled HTTP responses, and a recording installer for detailed response permutations, retry exhaustion, equal and older versions, forced reinstall, and manual checks after automatic opt-out.
+Interactive cases use a real 100-column, 30-row PTY, verify rendered `/name` confirmations around discovery completion, and exit through `/exit` without submitting model prompts.
 The harness isolates home, credentials, project resources, and package prefix, blocks alternate network paths, intercepts package-manager execution, and removes every temporary directory.
 All accepted installation attempts are pinned to the canonical package and explicit validated version; no install or uninstall executes.
 
-The final checker and source-CLI run passed 101 cases: 69 checker cases and 32 source-CLI cases.
+The original migration's final checker and source-CLI run passed 101 cases: 69 checker cases and 32 source-CLI cases.
 The package-command integration and consumer fixture suites also passed all 31 and 23 cases respectively.
 `npm run check` and the complete isolated `./test.sh` suite passed.
 The Cloud-to-CLI contract document and fixture comparison passed, and the executable consumer paths contain no Pi version endpoint.

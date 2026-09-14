@@ -1,105 +1,119 @@
-import { describe, expect, it } from "vitest";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { endpoint, installed, type RecordedEvent, reproduce } from "./fixtures/version-update-client.ts";
 
-function versionRequests(events: RecordedEvent[]) {
-	return events.filter((event) => event.type === "request" && event.url === endpoint);
+const changelog = readFileSync(new URL("../CHANGELOG.md", import.meta.url), "utf8");
+const [checkpoint] = [...changelog.matchAll(/^## \[([0-9]+\.[0-9]+\.[0-9]+)\]/gm)].map((match) => match[1]);
+
+function expectCanonicalRequest(events: RecordedEvent[]) {
+	expect(events.filter((event) => event.type === "request")).toEqual([
+		{
+			type: "request",
+			url: endpoint,
+			method: "GET",
+			userAgent: expect.stringMatching(/^diffex\//),
+			redirect: "manual",
+		},
+	]);
 }
 
-// The source CLI must reject untrusted targets before dispatching package commands.
+// Keep real startup and dispatch coverage here; response permutations live in package-command-paths.test.ts.
 describe.skipIf(process.platform === "win32")("version discovery through the source CLI", () => {
-	it("contacts only the canonical authority with redirects disabled", async () => {
-		const result = await reproduce({ packageName: "@diffexai/diffex" });
-		expect(result.code, result.output).toBe(0);
-		expect(result.events.filter((event) => event.type === "request")).toEqual([
-			{
-				type: "request",
-				url: endpoint,
-				method: "GET",
-				userAgent: expect.stringMatching(/^diffex\//),
-				redirect: "manual",
-			},
-		]);
+	let sharedTempDir: string;
+	let cacheFiles = new Map<string, number>();
+
+	beforeAll(() => {
+		sharedTempDir = mkdtempSync(join(tmpdir(), "diffex-version-suite-"));
+		expect(readdirSync(sharedTempDir)).toEqual([]);
+	});
+
+	afterEach(() => {
+		// Every child has exited and removed its own application state. Only tsx's compiler cache survives.
+		const cacheDirectories = readdirSync(sharedTempDir);
+		expect(cacheDirectories.length).toBeGreaterThan(0);
+		const nextCacheFiles = new Map<string, number>();
+		for (const directory of cacheDirectories) {
+			expect(directory).toMatch(/^tsx-/);
+			for (const entry of readdirSync(join(sharedTempDir, directory), { withFileTypes: true })) {
+				if (!entry.isFile()) continue;
+				const path = join(sharedTempDir, directory, entry.name);
+				nextCacheFiles.set(path, statSync(path).mtimeMs);
+			}
+		}
+		expect(nextCacheFiles.size).toBeGreaterThan(0);
+		for (const [path, modified] of cacheFiles) expect(nextCacheFiles.get(path), path).toBe(modified);
+		cacheFiles = nextCacheFiles;
+	});
+
+	afterAll(() => {
+		rmSync(sharedTempDir, { recursive: true, force: true });
+		expect(existsSync(sharedTempDir)).toBe(false);
 	});
 
 	it.each([
+		{ name: "fresh install with a newer release", settings: {}, expectedRequests: 1, showChangelog: false },
 		{
-			name: "no published release",
-			status: 404,
-			response: '{"error":"no_published_release"}',
-			requests: 1,
-			message: "No published Diffex release is available yet.",
+			name: "upgrade with legacy telemetry enabled and delayed network failure",
+			settings: { lastChangelogVersion: "0.0.0", collapseChangelog: true, enableInstallTelemetry: true },
+			changelog: `# Changelog\n\n## [${checkpoint}]\n\n- Controlled upgrade release.\n\n## [0.0.0]\n\n- Previous fixture release.\n`,
+			legacyTelemetryEnv: "1",
+			delayResponse: true,
+			failure: true,
+			expectedRequests: 1,
+			showChangelog: true,
 		},
 		{
-			name: "service unavailable",
-			status: 503,
-			response: '{"error":"release_unavailable"}',
-			requests: 3,
-			message: "Diffex update service is unavailable.",
+			name: "current install with automatic checks disabled and provider attribution enabled",
+			settings: { lastChangelogVersion: checkpoint, enableProviderAttribution: true },
+			providerAttributionEnv: "1",
+			skip: true,
+			expectedRequests: 0,
+			showChangelog: false,
 		},
 		{
-			name: "unrelated not found",
-			status: 404,
-			response: '{"error":"not_found"}',
-			requests: 1,
-			message: "Diffex update service is unavailable.",
+			name: "fresh install offline with automatic checks enabled",
+			settings: {},
+			offline: true,
+			expectedRequests: 0,
+			showChangelog: false,
 		},
-		{
-			name: "invalid JSON",
-			status: 200,
-			response: "{",
-			requests: 1,
-			message: "Diffex update service is unavailable.",
-		},
-		{
-			name: "missing identity",
-			status: 200,
-			response: '{"version":"9999.0.0"}',
-			requests: 1,
-			message: "Refusing self-update",
-		},
-		{
-			name: "unexpected note",
-			status: 200,
-			response: '{"version":"9999.0.0","packageName":"@diffexai/diffex","note":"unverified note"}',
-			requests: 1,
-			message: "Refusing self-update",
-		},
-		{
-			name: "foreign redirect",
-			status: 302,
-			response: "{}",
-			redirect: "https://unreviewed.invalid/latest",
-			requests: 1,
-			message: "Diffex update service is unavailable.",
-		},
-	])("reports $name without package mutation, including force", async ({ requests, message, ...options }) => {
-		const result = await reproduce({ ...options, force: true });
-		expect(result.code, result.output).toBe(1);
-		expect(result.output).toContain(message);
-		expect(versionRequests(result.events)).toHaveLength(requests);
-		expect(result.events.filter((event) => event.type === "spawn")).toEqual([]);
-	});
-
-	it.each(["0.0.0", installed.version])("does not install an older or equal release %s", async (version) => {
-		const result = await reproduce({ packageName: "@diffexai/diffex", version });
+	])("accepts input and exits quietly for $name", async ({ expectedRequests, showChangelog, ...options }) => {
+		const result = await reproduce({ ...options, interactive: true, sharedTempDir, packageName: installed.name });
 		expect(result.code, result.output).toBe(0);
-		expect(versionRequests(result.events)).toHaveLength(1);
-		expect(result.events.filter((event) => event.type === "spawn")).toEqual([]);
-		expect(result.output).toContain("already up to date");
+		expect(result.quitSent).toBe(true);
+		expect(result.interactions).toEqual(["ci-ready", "ci-settled"]);
+		expect(result.inputBeforeResponse).toBe(options.delayResponse === true);
+		expect(result.settings).toEqual({
+			theme: "dark",
+			packages: [],
+			...options.settings,
+			lastChangelogVersion: checkpoint,
+		});
+		if (expectedRequests) {
+			expectCanonicalRequest(result.events);
+			expect(result.events.filter((event) => event.type === "discovery-settled")).toHaveLength(1);
+		} else {
+			expect(
+				result.events.filter((event) => event.type === "request" || event.type === "discovery-settled"),
+			).toEqual([]);
+		}
+		expect(result.events.filter((event) => event.type === "spawn" || event.type === "spawnSync")).toEqual([
+			{ type: "spawnSync", command: "fd", args: ["--version"] },
+			{ type: "spawnSync", command: "rg", args: ["--version"] },
+		]);
+		expect(result.output.includes("What's new"), result.output).toBe(showChangelog);
+		expect(result.output.includes("Controlled upgrade release."), result.output).toBe(showChangelog);
+		expect(result.output).not.toMatch(
+			/New version|Could not determine latest|controlled network failure|update service|No published Diffex release|Refusing self-update/,
+		);
 	});
 
-	it.each([false, true])("rejects foreign packages before any command with force=%s", async (force) => {
-		const result = await reproduce({ force });
-		expect(result.code, result.output).toBe(1);
-		expect(versionRequests(result.events)).toHaveLength(1);
-		expect(result.events.filter((event) => event.type === "spawn")).toEqual([]);
-		expect(result.output).toContain("Refusing self-update: expected a stable @diffexai/diffex release.");
-	});
-
-	it.each([false, true])("pins canonical installation without uninstall with force=%s", async (force) => {
-		const result = await reproduce({ force, packageName: "@diffexai/diffex" });
+	it("installs the exact canonical newer version after automatic opt-out without uninstalling", async () => {
+		const result = await reproduce({ sharedTempDir, skip: true, packageName: installed.name });
 		expect(result.code, result.output).toBe(0);
-		expect(versionRequests(result.events)).toHaveLength(1);
+		expectCanonicalRequest(result.events);
 		expect(result.events.filter((event) => event.type === "spawn")).toEqual([
 			{
 				type: "spawn",
@@ -111,69 +125,28 @@ describe.skipIf(process.platform === "win32")("version discovery through the sou
 					"-g",
 					"--ignore-scripts",
 					"--min-release-age=0",
-					`@diffexai/diffex@${force ? installed.version : "9999.0.0"}`,
+					`${installed.name}@9999.0.0`,
 				],
 			},
 		]);
+		expect(result.output).toContain(`Updated diffex from ${installed.version} to 9999.0.0`);
+		expect(result.settings).toEqual({ theme: "dark", packages: [] });
 	});
 
-	it.each([
-		"npm:foreign@1.2.3",
-		"https://example.invalid/install.tgz",
-		"1.2.3-beta.1",
-		"1.2.3+build",
-		"v1.2.3",
-		"01.2.3",
-		"9007199254740992.0.0",
-	])("rejects unsafe version %s even with force", async (version) => {
-		const result = await reproduce({ force: true, packageName: "@diffexai/diffex", version });
+	it("rejects a foreign package with force before any installation command", async () => {
+		const result = await reproduce({ sharedTempDir, force: true });
 		expect(result.code, result.output).toBe(1);
-		expect(result.events.filter((event) => event.type === "spawn")).toEqual([]);
-		expect(result.output).toContain("Refusing self-update");
+		expectCanonicalRequest(result.events);
+		expect(result.events.filter((event) => event.type === "spawn" || event.type === "spawnSync")).toEqual([]);
+		expect(result.output).toContain("Refusing self-update: expected a stable @diffexai/diffex release.");
+		expect(result.settings).toEqual({ theme: "dark", packages: [] });
 	});
 
-	it.each([false, true])("offline suppresses manual discovery and commands with force=%s", async (force) => {
-		const result = await reproduce({ offline: true, force });
+	it("suppresses manual discovery and installation with force while offline", async () => {
+		const result = await reproduce({ sharedTempDir, offline: true, force: true });
 		expect(result.code, result.output).toBe(1);
 		expect(result.events).toEqual([]);
 		expect(result.output).toContain("Could not determine latest diffex version.");
-	});
-
-	it("automatic opt-out permits manual discovery but cannot bypass package validation", async () => {
-		const result = await reproduce({ skip: true });
-		expect(result.code, result.output).toBe(1);
-		expect(versionRequests(result.events)).toHaveLength(1);
-		expect(result.events.filter((event) => event.type === "spawn")).toEqual([]);
-	});
-
-	it("manual network failure retries twice without attempting package mutation", async () => {
-		const result = await reproduce({ failure: true });
-		expect(result.code, result.output).toBe(1);
-		expect(versionRequests(result.events)).toHaveLength(3);
-		expect(result.events.filter((event) => event.type === "spawn")).toEqual([]);
-		expect(result.output).toContain("Diffex update service is unavailable: controlled network failure");
-	});
-
-	it.each([
-		{ name: "foreign response", expectedRequests: 1 },
-		{ name: "canonical response", packageName: "@diffexai/diffex", expectedRequests: 1 },
-		{ name: "offline", offline: true, expectedRequests: 0 },
-		{ name: "automatic opt-out", skip: true, expectedRequests: 0 },
-		{ name: "network failure", failure: true, expectedRequests: 1 },
-		{ name: "no release", status: 404, response: '{"error":"no_published_release"}', expectedRequests: 1 },
-		{ name: "service failure", status: 503, response: '{"error":"release_unavailable"}', expectedRequests: 1 },
-	])("interactive startup stays quiet for $name", async ({ expectedRequests, ...options }) => {
-		const result = await reproduce({ ...options, interactive: true });
-		expect(result.code, result.output).toBe(0);
-		expect(result.quitSent).toBe(true);
-		expect(versionRequests(result.events)).toHaveLength(expectedRequests);
-		expect(result.events.filter((event) => event.type === "request" && event.url !== endpoint)).toEqual([]);
-		expect(result.events.filter((event) => event.type === "spawn")).toEqual([]);
-		expect(result.output).not.toContain("New version");
-		expect(result.output).not.toContain("Could not determine latest");
-		expect(result.output).not.toContain("controlled network failure");
-		expect(result.output).not.toContain("update service");
-		expect(result.output).not.toContain("No published Diffex release");
-		expect(result.output).not.toContain("Refusing self-update");
+		expect(result.settings).toEqual({ theme: "dark", packages: [] });
 	});
 });
