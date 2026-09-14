@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import chalk from "chalk";
-import { CONFIG_DIR_NAME } from "../config.ts";
+import { CONFIG_DIR_NAME, getPackageDir, IS_PRODUCTION_DISTRIBUTION } from "../config.ts";
 import { loadThemeFromPath, type Theme } from "../modes/interactive/theme/theme.ts";
 import type { ResourceDiagnostic } from "./diagnostics.ts";
 
@@ -125,8 +125,14 @@ export function loadProjectContextFiles(options: {
 	const contextFiles: Array<{ path: string; content: string }> = [];
 	const seenPaths = new Set<string>();
 
+	if (IS_PRODUCTION_DISTRIBUTION) {
+		const path = join(getPackageDir(), "dist", "AGENTS.md");
+		contextFiles.push({ path, content: readFileSync(path, "utf-8") });
+		seenPaths.add(path);
+	}
+
 	const globalContext = loadContextFileFromDir(resolvedAgentDir);
-	if (globalContext) {
+	if (globalContext && !seenPaths.has(globalContext.path)) {
 		contextFiles.push(globalContext);
 		seenPaths.add(globalContext.path);
 	}
