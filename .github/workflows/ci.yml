@@ -18,6 +18,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Node.js
+        id: setup-node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
@@ -32,6 +33,23 @@ jobs:
       - name: Install dependencies
         run: npm ci --ignore-scripts
 
+      # Opt in for hosted benchmarks; retain only after restore/save overhead is recovered.
+      - name: Compute Vitest cache compatibility
+        if: vars.VITEST_FS_CACHE == 'true'
+        id: vitest-cache-key
+        env:
+          CACHE_PREFIX: vitest-fs-v1-${{ runner.os }}-${{ runner.arch }}-node-${{ steps.setup-node.outputs.node-version }}-${{ hashFiles('package-lock.json') }}-${{ hashFiles('vitest.base.ts', 'packages/coding-agent/vitest.config.ts', '**/tsconfig*.json') }}-
+        run: echo "prefix=$CACHE_PREFIX" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Vitest module cache
+        if: vars.VITEST_FS_CACHE == 'true'
+        id: vitest-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: node_modules/.experimental-vitest-cache
+          key: ${{ steps.vitest-cache-key.outputs.prefix }}${{ github.sha }}
+          restore-keys: ${{ steps.vitest-cache-key.outputs.prefix }}
+
       - name: Build
         run: npm run build
 
@@ -40,3 +58,10 @@ jobs:
 
       - name: Test
         run: npm test
+
+      - name: Save Vitest module cache
+        if: success() && vars.VITEST_FS_CACHE == 'true' && steps.vitest-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: node_modules/.experimental-vitest-cache
+          key: ${{ steps.vitest-cache.outputs.cache-primary-key }}

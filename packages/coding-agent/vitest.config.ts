@@ -6,6 +6,9 @@ export default mergeConfig(
 	baseConfig,
 	defineConfig({
 		test: {
+			// Cache transformations while retaining Vitest's default test-file isolation.
+			// Custom transform plugins must include external inputs in their cache keys.
+			experimental: { fsModuleCache: true },
 			globals: true,
 			environment: "node",
 			testTimeout: 30000,
