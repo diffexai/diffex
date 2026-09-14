@@ -8,7 +8,8 @@ Inline extension fixtures import `core/extensions/factory.ts`, which constructs 
 Disk extension discovery continues through `core/extensions/loader.ts` and uses the same factory implementation.
 Tool tests import the individual `core/tools` modules rather than the package entry point.
 
-The coding-agent Vitest configuration caches transformed modules on disk while retaining default test-file isolation, pool selection, worker counts, and workspace source aliases.
+The coding-agent Vitest configuration caches transformed modules on disk while retaining default test-file isolation and workspace source aliases.
+Local runs retain default worker selection; CI explicitly uses two isolated fork workers per shard.
 The default cache directory is the workspace-root `node_modules/.experimental-vitest-cache`.
 A missing cache falls back to normal transformation.
 Vitest validates source contents and configuration before reusing cached transformations.
@@ -95,3 +96,24 @@ The complete suite includes native image/SQLite code and tests that change proce
 A separate cache benchmark seeds a cache and compares three uncached jobs with three jobs restoring that exact cache on the same source.
 Include the measured save/restore overhead when deciding whether persistence saves time.
 Benchmark runs are opt-in and do not extend the normal CI critical path.
+
+## Hosted results - 2026-09-14
+
+[The first sharded run](https://github.com/diffexai/diffex/actions/runs/34899734233) passed in 4m30s from the first job starting to the required gate finishing, versus 12m56s previously.
+That single comparison shows 65.2% lower elapsed latency, with aggregate runner time increasing from 12m56s to 18m02s.
+It predates the additional split into two other-workspace shards and the two-worker setting.
+
+[The worker benchmark](https://github.com/diffexai/diffex/actions/runs/34899782204) used Node 22.23.2, the complete coding-agent suite, isolation enabled, and filesystem transformation caching disabled in both configurations.
+
+| Pool | Workers | Three full-suite durations | Median | Outcome |
+| --- | ---: | --- | ---: | --- |
+| Forks | 1 | 403.82s, 399.21s, 401.86s | 401.86s | All passed |
+| Forks | 2 | 366.87s, 362.32s, 365.85s | 365.85s | All passed |
+
+Each run passed 2,863 tests with 49 expected skips, including native dependencies and process-state tests.
+Two fork workers reduced the median by 9.0%; CI now selects that configuration.
+Both thread configurations failed 58 tests because worker threads do not support `process.chdir()`.
+Those tests remain intact.
+
+The cold-cache seed passed, but GitHub blocked all six cache comparison jobs before startup due to account billing/spending limits.
+This does not establish a cache benefit; hosted persistence remains opt-in pending successful measurements.

@@ -68,7 +68,7 @@ jobs:
           restore-keys: ${{ steps.vitest-cache-key.outputs.prefix }}
 
       - name: Test
-        run: ./test.sh coding-agent --shard=${{ matrix.shard }}/4
+        run: ./test.sh coding-agent --shard=${{ matrix.shard }}/4 --pool=forks --maxWorkers=2 --isolate
 
       - name: Save Vitest module cache
         if: success() && vars.VITEST_FS_CACHE == 'true' && steps.vitest-cache.outputs.cache-hit != 'true'
