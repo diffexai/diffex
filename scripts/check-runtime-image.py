@@ -54,7 +54,10 @@ def inspect_image(filename):
                     if relative not in {'package.json', 'LICENSE', 'THIRD-PARTY-NOTICES.txt', 'distribution-components.json', 'distribution-files.json'} and not relative.startswith(('dist/', 'native/', 'docs/')):
                         raise ValueError(f'Unexpected runtime workspace file: {local}')
                     content = archive.extractfile(entry).read()
-                    payload.scan_bytes(content, 'package/' + relative, {'bytes': 0, 'files': 0})
+                    payload.scan_bytes(
+                        content, 'package/' + relative, {'bytes': 0, 'files': 0},
+                        default_agents=workspace == 'packages/coding-agent' and relative == 'dist/AGENTS.md',
+                    )
                     if relative.startswith('docs/'):
                         documents.add(relative)
                     if relative in {'LICENSE', 'THIRD-PARTY-NOTICES.txt'} and content.strip():

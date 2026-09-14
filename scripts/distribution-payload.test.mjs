@@ -25,6 +25,7 @@ function fixture(extra, omit) {
 		"distribution-components.json": JSON.stringify([{ name: "Diffex", license: "Apache-2.0 AND MIT" }]),
 		"dist/index.js": "export const value = 1;\n",
 		"dist/index.d.ts": "export declare const value: number;\n",
+		"dist/AGENTS.md": readFileSync("AGENTS_release.md"),
 		"release/distribution-manifest.json": JSON.stringify(
 			createDistributionManifest({
 				packages: getPublicWorkspacePackages(),
@@ -40,7 +41,9 @@ function fixture(extra, omit) {
 		sourceCommit: "a".repeat(40),
 		algorithm: "sha256",
 		files: Object.entries(files)
-			.filter(([name]) => name.startsWith("dist/") || (name.startsWith("native/") && name.endsWith(".node")))
+			.filter(
+				([name]) => name !== omit && (name.startsWith("dist/") || (name.startsWith("native/") && name.endsWith(".node"))),
+			)
 			.map(([name, data]) => ({ path: name, sha256: createHash("sha256").update(data).digest("hex") })),
 	});
 	for (const [name, data] of Object.entries(files)) {
@@ -113,6 +116,8 @@ for (const [name, content, reason] of [
 	["dist/vendor/evolution/dist/index.js", "export const hidden = 1", /duplicated or malformed/],
 	["examples/example.ts", "export const value = 1", /prohibited source or private path/],
 	["AGENTS.md", "Private repository instructions", /prohibited repository instructions/],
+	["dist/AGENTS.md", "Private repository instructions", /prohibited repository instructions/],
+	["AGENTS_release.md", readFileSync("AGENTS_release.md"), /unapproved distribution documentation/],
 	["docs/agents.MD", "Private repository instructions", /prohibited repository instructions/],
 	[
 		"dist/node_modules/@diffexai/diffex-ai/AGENTS.md",
@@ -146,6 +151,42 @@ test("rejects repository instructions inside a nested archive", () => {
 		assert.match(result.stderr, /prohibited repository instructions/);
 	} finally {
 		rmSync(nested.directory, { recursive: true, force: true });
+	}
+});
+
+test("rejects the approved default instructions inside a nested archive", () => {
+	const nested = fixture({}, "README.md");
+	try {
+		const result = inspect({ "dist/resource.bin": readFileSync(nested.archive) });
+		assert.notEqual(result.status, 0);
+		assert.match(result.stderr, /prohibited repository instructions/);
+	} finally {
+		rmSync(nested.directory, { recursive: true, force: true });
+	}
+});
+
+test("rejects a CLI artifact missing the default instructions", () => {
+	const result = inspect({}, "dist/AGENTS.md");
+	assert.notEqual(result.status, 0);
+	assert.match(result.stderr, /missing required default instructions/);
+});
+
+test("rejects a case variant of the approved default path", () => {
+	const result = inspect({ "dist/agents.MD": readFileSync("AGENTS_release.md") }, "dist/AGENTS.md");
+	assert.notEqual(result.status, 0);
+	assert.match(result.stderr, /prohibited repository instructions/);
+});
+
+test("rejects default instructions in a non-CLI package", () => {
+	const { directory, archive } = fixture({
+		"package.json": JSON.stringify({ name: "@diffexai/diffex-agent-core", version, license: "Apache-2.0" }),
+	});
+	try {
+		const result = spawnSync("python3", [checker, archive, "--license", license], { encoding: "utf8" });
+		assert.notEqual(result.status, 0);
+		assert.match(result.stderr, /prohibited repository instructions/);
+	} finally {
+		rmSync(directory, { recursive: true, force: true });
 	}
 });
 

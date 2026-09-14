@@ -37,6 +37,7 @@ test("packed CLI exposes the product homepage and preserves referenced documenta
 			copy(`scripts/${script}`);
 		for (const file of [
 			"LICENSE",
+			"AGENTS_release.md",
 			"docs/release/distribution-policy.json",
 			"legal/upstream/highlight-11.9.0.LICENSE",
 			"node_modules/marked/LICENSE",
@@ -60,6 +61,8 @@ test("packed CLI exposes the product homepage and preserves referenced documenta
 				writeFileSync(join(root, directory, file), "Repository documentation\n");
 		}
 		const pkg = join(root, "packages/coding-agent");
+		writeFileSync(join(root, "AGENTS.md"), "Private repository instructions must never ship");
+		writeFileSync(join(pkg, "AGENTS.md"), "Private package instructions must never ship");
 		cpSync("packages/coding-agent/docs", join(pkg, "docs"), { recursive: true });
 		const excludedDocs = [
 			"development.md",
@@ -96,6 +99,14 @@ test("packed CLI exposes the product homepage and preserves referenced documenta
 			}),
 		);
 		const archive = join(root, "stage", packed.filename);
+		assert.deepEqual(
+			execFileSync("tar", ["-xOf", archive, "package/dist/AGENTS.md"]),
+			readFileSync("AGENTS_release.md"),
+		);
+		assert.deepEqual(
+			packed.files.filter(({ path }) => /agents.*\.md$/i.test(path)).map(({ path }) => path),
+			["dist/AGENTS.md"],
+		);
 		const published = JSON.parse(
 			execFileSync("tar", ["-xOf", archive, "package/package.json"], { encoding: "utf8" }),
 		);

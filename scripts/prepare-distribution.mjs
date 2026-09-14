@@ -117,6 +117,9 @@ export function preparePackageDistribution(directory) {
 		} else if (!local.endsWith(".ts")) allowedSources.set(`dist/${local}`, source);
 	}
 	if (pkg.name === "@diffexai/diffex") {
+		const defaultInstructions = join(root, "AGENTS_release.md");
+		cpSync(defaultInstructions, join(dist, "AGENTS.md"));
+		allowedSources.set("dist/AGENTS.md", defaultInstructions);
 		for (const workspace of ["evolution", "harness-trace"]) {
 			const sourceRoot = join(root, "packages", workspace, "src");
 			for (const source of walk(sourceRoot)) {
