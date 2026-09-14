@@ -520,195 +520,231 @@ describe("package commands", () => {
 		}
 	});
 
-	it("allows explicit self-update checks when automatic version checks are disabled", async () => {
-		const previousSkipVersionCheck = process.env.DIFFEX_SKIP_VERSION_CHECK;
-		process.env.DIFFEX_SKIP_VERSION_CHECK = "1";
-		const fetchMock = vi.fn(async () => Response.json({ version: VERSION, packageName: PACKAGE_NAME }));
-		vi.stubGlobal("fetch", fetchMock);
-		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+	describe("self-update validation and installation", () => {
+		let globalPrefix: string;
+		let recordPath: string;
+		let preservedFiles: Map<string, string>;
+		let stdout: string[];
+		let stderr: string[];
 
-		try {
-			await expect(runPackageCommandDirectly(["update", "--self"])).resolves.toBeUndefined();
-
-			expect(fetchMock).toHaveBeenCalledOnce();
-			expect(logSpy.mock.calls.map(([message]) => String(message)).join("\n")).toContain(
-				`diffex is already up to date (v${VERSION})`,
-			);
-			expect(errorSpy).not.toHaveBeenCalled();
-			expect(process.exitCode).toBeUndefined();
-		} finally {
-			if (previousSkipVersionCheck === undefined) {
-				delete process.env.DIFFEX_SKIP_VERSION_CHECK;
-			} else {
-				process.env.DIFFEX_SKIP_VERSION_CHECK = previousSkipVersionCheck;
-			}
-		}
-	});
-
-	it("retries a transient self-update version check", async () => {
-		const previousSkipVersionCheck = process.env.DIFFEX_SKIP_VERSION_CHECK;
-		delete process.env.DIFFEX_SKIP_VERSION_CHECK;
-		const fetchMock = vi
-			.fn()
-			.mockRejectedValueOnce(new Error("fetch failed"))
-			.mockRejectedValueOnce(new Error("fetch failed"))
-			.mockResolvedValueOnce(Response.json({ version: VERSION, packageName: PACKAGE_NAME }));
-		vi.stubGlobal("fetch", fetchMock);
-		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-
-		try {
-			await expect(runPackageCommandDirectly(["update", "--self"])).resolves.toBeUndefined();
-			expect(fetchMock).toHaveBeenCalledTimes(3);
-			expect(errorSpy).not.toHaveBeenCalled();
-		} finally {
-			if (previousSkipVersionCheck === undefined) delete process.env.DIFFEX_SKIP_VERSION_CHECK;
-			else process.env.DIFFEX_SKIP_VERSION_CHECK = previousSkipVersionCheck;
-			logSpy.mockRestore();
-			errorSpy.mockRestore();
-		}
-	});
-
-	it("uses the update check version for forced self updates even when current", async () => {
-		const globalPrefix = join(tempDir, "global-prefix");
-		const projectPrefix = join(tempDir, "project-prefix");
-		const selfPackageDir = join(globalPrefix, "lib", "node_modules", "@diffexai", "diffex");
-		const fakeNpmPath = join(tempDir, "fake-npm.cjs");
-		const recordPath = join(tempDir, "self-update.json");
-		mkdirSync(selfPackageDir, { recursive: true });
-		mkdirSync(join(projectDir, ".diffex"), { recursive: true });
-		writeFileSync(
-			fakeNpmPath,
-			`const fs=require("node:fs"),path=require("node:path"),args=process.argv.slice(2),prefix=args[args.indexOf("--prefix")+1];
-if(args.includes("root")) console.log(path.join(prefix,"lib","node_modules"));
-else fs.writeFileSync(${JSON.stringify(recordPath)},JSON.stringify(args));
-`,
-		);
-		writeFileSync(
-			join(agentDir, "settings.json"),
-			JSON.stringify({ npmCommand: [originalExecPath, fakeNpmPath, "--prefix", globalPrefix] }, null, 2),
-		);
-		writeFileSync(
-			join(projectDir, ".diffex", "settings.json"),
-			JSON.stringify({ npmCommand: [originalExecPath, fakeNpmPath, "--prefix", projectPrefix] }, null, 2),
-		);
-		process.env.DIFFEX_PACKAGE_DIR = selfPackageDir;
-		Object.defineProperty(process, "execPath", {
-			value: join(selfPackageDir, "dist", "cli.js"),
-			configurable: true,
-		});
-		const fetchMock = vi.fn(async () => Response.json({ version: VERSION, packageName: PACKAGE_NAME }));
-		vi.stubGlobal("fetch", fetchMock);
-
-		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-
-		try {
-			await expect(runPackageCommandDirectly(["update", "--self", "--force"])).resolves.toBeUndefined();
-
-			expect(process.exitCode).toBeUndefined();
-			expect(errorSpy).not.toHaveBeenCalled();
-			expect(fetchMock).toHaveBeenCalledOnce();
-			const stdout = logSpy.mock.calls.map(([message]) => String(message)).join("\n");
-			const recordedArgs = JSON.parse(readFileSync(recordPath, "utf-8")) as string[];
-			expect(recordedArgs).toContain(globalPrefix);
-			expect(recordedArgs).toContain(`${PACKAGE_NAME}@${VERSION}`);
-			expect(recordedArgs).not.toContain(PACKAGE_NAME);
-			expect(recordedArgs).not.toContain(projectPrefix);
-			expect(stdout).toContain(`Updated diffex from ${VERSION} to ${VERSION}`);
-		} finally {
-			logSpy.mockRestore();
-			errorSpy.mockRestore();
-		}
-	});
-
-	it("rejects a self-update response that omits packageName", async () => {
-		const globalPrefix = join(tempDir, "global-prefix");
-		const selfPackageDir = join(globalPrefix, "lib", "node_modules", "@mariozechner", "pi-coding-agent");
-		const fakeNpmPath = join(tempDir, "fake-npm.cjs");
-		const recordPath = join(tempDir, "self-update.json");
-		mkdirSync(selfPackageDir, { recursive: true });
-		writeFileSync(
-			fakeNpmPath,
-			`const fs=require("node:fs"),path=require("node:path"),args=process.argv.slice(2),prefix=args[args.indexOf("--prefix")+1];
-if(args.includes("root")) console.log(path.join(prefix,"lib","node_modules"));
-else fs.writeFileSync(${JSON.stringify(recordPath)},JSON.stringify(args));
-`,
-		);
-		writeFileSync(
-			join(agentDir, "settings.json"),
-			JSON.stringify({ npmCommand: [originalExecPath, fakeNpmPath, "--prefix", globalPrefix] }, null, 2),
-		);
-		process.env.DIFFEX_PACKAGE_DIR = selfPackageDir;
-		Object.defineProperty(process, "execPath", {
-			value: join(selfPackageDir, "dist", "cli.js"),
-			configurable: true,
-		});
-		const targetVersion = getNewerPatchVersion();
-		const fetchMock = vi.fn(async () => Response.json({ version: targetVersion }));
-		vi.stubGlobal("fetch", fetchMock);
-
-		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-
-		try {
-			await expect(runPackageCommandDirectly(["update", "--self"])).resolves.toBeUndefined();
-
-			expect(process.exitCode).toBe(1);
-			expect(existsSync(recordPath)).toBe(false);
-			expect(errorSpy.mock.calls.flat().join("\n")).toContain("Refusing self-update");
-		} finally {
-			logSpy.mockRestore();
-			errorSpy.mockRestore();
-		}
-	});
-
-	it("rejects a foreign package before uninstalling or installing", async () => {
-		const globalPrefix = join(tempDir, "global-prefix");
-		const selfPackageDir = join(globalPrefix, "lib", "node_modules", "@mariozechner", "pi-coding-agent");
-		const fakeNpmPath = join(tempDir, "fake-npm.cjs");
-		const recordPath = join(tempDir, "self-update.json");
-		mkdirSync(selfPackageDir, { recursive: true });
-		writeFileSync(
-			fakeNpmPath,
-			`const fs=require("node:fs"),path=require("node:path"),args=process.argv.slice(2),prefix=args[args.indexOf("--prefix")+1];
+		beforeEach(() => {
+			globalPrefix = join(tempDir, "global-prefix");
+			const selfPackageDir = join(globalPrefix, "lib", "node_modules", ...PACKAGE_NAME.split("/"));
+			const fakeNpmPath = join(tempDir, "fake-npm.cjs");
+			recordPath = join(tempDir, "self-update.json");
+			mkdirSync(selfPackageDir, { recursive: true });
+			mkdirSync(join(projectDir, ".diffex"), { recursive: true });
+			writeFileSync(recordPath, "[]");
+			writeFileSync(
+				fakeNpmPath,
+				`const fs=require("node:fs"),path=require("node:path"),args=process.argv.slice(2),prefix=args[args.indexOf("--prefix")+1];
 if(args.includes("root")) console.log(path.join(prefix,"lib","node_modules"));
 else {
-	const records=fs.existsSync(${JSON.stringify(recordPath)})?JSON.parse(fs.readFileSync(${JSON.stringify(recordPath)},"utf-8")):[];
+	const records=JSON.parse(fs.readFileSync(${JSON.stringify(recordPath)},"utf-8"));
 	records.push(args);
 	fs.writeFileSync(${JSON.stringify(recordPath)},JSON.stringify(records));
 }
 `,
-		);
-		writeFileSync(
-			join(agentDir, "settings.json"),
-			JSON.stringify({ npmCommand: [originalExecPath, fakeNpmPath, "--prefix", globalPrefix] }, null, 2),
-		);
-		process.env.DIFFEX_PACKAGE_DIR = selfPackageDir;
-		Object.defineProperty(process, "execPath", {
-			value: join(selfPackageDir, "dist", "cli.js"),
-			configurable: true,
+			);
+			preservedFiles = new Map([
+				[
+					join(agentDir, "settings.json"),
+					JSON.stringify({ npmCommand: [originalExecPath, fakeNpmPath, "--prefix", globalPrefix] }),
+				],
+				[
+					join(projectDir, ".diffex", "settings.json"),
+					JSON.stringify({
+						npmCommand: [originalExecPath, fakeNpmPath, "--prefix", join(tempDir, "project-prefix")],
+					}),
+				],
+				[join(selfPackageDir, "package.json"), JSON.stringify({ name: PACKAGE_NAME, version: VERSION })],
+				[join(selfPackageDir, "sentinel"), "existing installation"],
+			]);
+			for (const [path, contents] of preservedFiles) writeFileSync(path, contents);
+			process.env.DIFFEX_PACKAGE_DIR = selfPackageDir;
+			Object.defineProperty(process, "execPath", {
+				value: join(selfPackageDir, "dist", "cli.js"),
+				configurable: true,
+			});
+			stdout = [];
+			stderr = [];
+			vi.spyOn(console, "log").mockImplementation((message: unknown) => stdout.push(String(message)));
+			vi.spyOn(console, "error").mockImplementation((message: unknown) => stderr.push(String(message)));
 		});
-		const activePackageName = PACKAGE_NAME === "@new-scope/pi" ? "@newer-scope/pi" : "@new-scope/pi";
-		vi.stubGlobal(
-			"fetch",
-			vi.fn(async () => Response.json({ packageName: activePackageName, version: "0.73.0" })),
-		);
 
-		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+		afterEach(() => {
+			for (const [path, contents] of preservedFiles) expect(readFileSync(path, "utf8")).toBe(contents);
+		});
 
-		try {
-			await expect(runPackageCommandDirectly(["update", "--self"])).resolves.toBeUndefined();
+		function expectNoInstallation() {
+			expect(JSON.parse(readFileSync(recordPath, "utf8"))).toEqual([]);
+			expect(stdout.join("\n")).not.toContain("Updated diffex");
+		}
+
+		it.each(["0.0.0", VERSION])("keeps release %s without installing after automatic opt-out", async (version) => {
+			vi.stubEnv("DIFFEX_SKIP_VERSION_CHECK", "1");
+			const fetchMock = vi.fn(async () => Response.json({ version, packageName: PACKAGE_NAME }));
+			vi.stubGlobal("fetch", fetchMock);
+
+			await runPackageCommandDirectly(["update", "--self"]);
+
+			expect(fetchMock).toHaveBeenCalledOnce();
+			expect(stdout.join("\n")).toContain(`diffex is already up to date (v${VERSION})`);
+			expect(stderr).toEqual([]);
+			expect(process.exitCode).toBeUndefined();
+			expectNoInstallation();
+		});
+
+		it("retries a transient self-update version check", async () => {
+			const fetchMock = vi
+				.fn()
+				.mockRejectedValueOnce(new Error("fetch failed"))
+				.mockRejectedValueOnce(new Error("fetch failed"))
+				.mockResolvedValueOnce(Response.json({ version: VERSION, packageName: PACKAGE_NAME }));
+			vi.stubGlobal("fetch", fetchMock);
+
+			await runPackageCommandDirectly(["update", "--self"]);
+
+			expect(fetchMock).toHaveBeenCalledTimes(3);
+			expect(stdout.join("\n")).toContain(`diffex is already up to date (v${VERSION})`);
+			expect(stderr).toEqual([]);
+			expect(process.exitCode).toBeUndefined();
+			expectNoInstallation();
+		});
+
+		it.each([
+			{ name: "newer release after automatic opt-out", version: getNewerPatchVersion(), force: false },
+			{ name: "forced current release", version: VERSION, force: true },
+		])("pins the $name in the global prefix without uninstalling", async ({ version, force }) => {
+			vi.stubEnv("DIFFEX_SKIP_VERSION_CHECK", "1");
+			const fetchMock = vi.fn(async () => Response.json({ version, packageName: PACKAGE_NAME }));
+			vi.stubGlobal("fetch", fetchMock);
+
+			await runPackageCommandDirectly(["update", "--self", ...(force ? ["--force"] : [])]);
+
+			expect(process.exitCode).toBeUndefined();
+			expect(stderr).toEqual([]);
+			expect(fetchMock).toHaveBeenCalledOnce();
+			expect(JSON.parse(readFileSync(recordPath, "utf8"))).toEqual([
+				[
+					"--prefix",
+					globalPrefix,
+					"install",
+					"-g",
+					"--ignore-scripts",
+					"--min-release-age=0",
+					`${PACKAGE_NAME}@${version}`,
+				],
+			]);
+			expect(stdout.join("\n")).toContain(`Updated diffex from ${VERSION} to ${version}`);
+		});
+
+		it.each([
+			{ name: "missing identity", body: { version: "9999.0.0" } },
+			{ name: "foreign package", body: { version: "9999.0.0", packageName: "@foreign/untrusted-cli" } },
+			{ name: "unexpected note", body: { version: "9999.0.0", packageName: PACKAGE_NAME, note: "unverified note" } },
+			...[
+				"npm:foreign@1.2.3",
+				"https://example.invalid/install.tgz",
+				"1.2.3-beta.1",
+				"1.2.3+build",
+				"v1.2.3",
+				"01.2.3",
+				"9007199254740992.0.0",
+			].map((version) => ({ name: `unsafe version ${version}`, body: { version, packageName: PACKAGE_NAME } })),
+		])("rejects $name even with force and automatic checks disabled", async ({ body }) => {
+			vi.stubEnv("DIFFEX_SKIP_VERSION_CHECK", "1");
+			const fetchMock = vi.fn(async () => Response.json(body));
+			vi.stubGlobal("fetch", fetchMock);
+
+			await runPackageCommandDirectly(["update", "--self", "--force"]);
 
 			expect(process.exitCode).toBe(1);
-			expect(existsSync(recordPath)).toBe(false);
-			expect(errorSpy.mock.calls.flat().join("\n")).toContain("Refusing self-update");
-		} finally {
-			logSpy.mockRestore();
-			errorSpy.mockRestore();
-		}
+			expect(fetchMock).toHaveBeenCalledOnce();
+			expect(stderr.join("\n")).toContain("Refusing self-update: expected a stable @diffexai/diffex release.");
+			expectNoInstallation();
+		});
+
+		it.each([
+			{
+				name: "no published release",
+				status: 404,
+				response: '{"error":"no_published_release"}',
+				requests: 1,
+				message: "No published Diffex release is available yet.",
+			},
+			{
+				name: "service unavailable",
+				status: 503,
+				response: '{"error":"release_unavailable"}',
+				requests: 3,
+				message: "Diffex update service is unavailable.",
+			},
+			{
+				name: "unrelated not found",
+				status: 404,
+				response: '{"error":"not_found"}',
+				requests: 1,
+				message: "Diffex update service is unavailable.",
+			},
+			{
+				name: "invalid JSON",
+				status: 200,
+				response: "{",
+				requests: 1,
+				message: "Diffex update service is unavailable.",
+			},
+			{
+				name: "foreign redirect",
+				status: 302,
+				response: "{}",
+				requests: 1,
+				message: "Diffex update service is unavailable.",
+			},
+			{
+				name: "exhausted network retries",
+				failure: true,
+				status: 200,
+				response: "{}",
+				requests: 3,
+				message: "Diffex update service is unavailable: controlled network failure",
+			},
+		])(
+			"reports $name without installation, including force",
+			async ({ status, response, requests, message, ...options }) => {
+				const fetchMock = vi.fn(async () => {
+					if (options.failure) throw new Error("controlled network failure");
+					return new Response(response, {
+						status,
+						headers: {
+							"Content-Type": "application/json",
+							...(status === 302 ? { Location: "https://unreviewed.invalid/latest" } : {}),
+						},
+					});
+				});
+				vi.stubGlobal("fetch", fetchMock);
+
+				await runPackageCommandDirectly(["update", "--self", "--force"]);
+
+				expect(process.exitCode).toBe(1);
+				expect(fetchMock).toHaveBeenCalledTimes(requests);
+				expect(stderr.join("\n")).toContain(message);
+				expectNoInstallation();
+			},
+		);
+
+		it.each([false, true])("skips manual discovery and installation offline with force=%s", async (force) => {
+			vi.stubEnv("DIFFEX_OFFLINE", "1");
+			const fetchMock = vi.fn();
+			vi.stubGlobal("fetch", fetchMock);
+
+			await runPackageCommandDirectly(["update", "--self", ...(force ? ["--force"] : [])]);
+
+			expect(process.exitCode).toBe(1);
+			expect(fetchMock).not.toHaveBeenCalled();
+			expect(stderr.join("\n")).toContain("Could not determine latest diffex version.");
+			expectNoInstallation();
+		});
 	});
 
 	it("prints a pnpm metadata hint when self-update fails", async () => {
