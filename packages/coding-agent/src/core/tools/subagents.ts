@@ -165,6 +165,7 @@ export function createSpawnAgentTool(
 		description:
 			"Start an independent child agent asynchronously. The tool returns after acceptance, but the enclosing parent prompt remains active until coordinated child work is delivered.",
 		promptGuidelines: [
+			"For broad research, audits, or implementation work with independent areas, use spawn_agent to delegate focused subtasks in parallel when available. Request file references and supporting evidence for research and audits, and assign clear, non-overlapping file ownership for implementation work.",
 			"After spawning child agents, you may finish the current response. The session waits for the frozen child batch and automatically sends one hidden, name-sorted result message before the parent prompt settles.",
 		],
 		parameters: spawnAgentSchema,
