@@ -76,15 +76,17 @@ Cache restore/save remained disabled in that comparison, so it does not establis
 
 ## CI groups and benchmarks
 
-CI runs four coding-agent shards alongside a separate scripts/other-workspace job and a build/check job.
+CI runs four coding-agent shards alongside two scripts/other-workspace shards and a build/check job.
 All test jobs use `test.sh` to isolate credentials and user resources.
 The `other` group discovers test workspaces from the root workspace manifest, so new packages are included automatically.
+Its shards alternate sorted workspace names, with script tests assigned only to the first shard.
 The existing `build-check-test` required check succeeds only when every group succeeds.
 Cache keys include the shard number and count to avoid reusing a partial cache from a different shard.
 
 ```bash
 ./test.sh coding-agent --shard=1/4
 ./test.sh other
+./test.sh other --shard=1/2
 ```
 
 Run `CI benchmark` manually, or add the `ci-benchmark` label to a pull request containing that workflow.

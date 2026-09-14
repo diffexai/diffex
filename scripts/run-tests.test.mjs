@@ -12,7 +12,11 @@ test("CI groups include every npm test workspace exactly once", () => {
 		.filter(([, script]) => typeof script === "string")
 		.map(([name]) => name)
 		.sort();
-	const commands = [...testCommands("coding-agent"), ...testCommands("other")];
+	const commands = [
+		...testCommands("coding-agent"),
+		...testCommands("other", ["--shard=1/2"]),
+		...testCommands("other", ["--shard=2/2"]),
+	];
 	const actual = commands.flat().filter((arg) => arg.startsWith("--workspace=")).map((arg) => arg.slice(12)).sort();
 	assert.deepEqual(actual, expected);
 	assert.equal(commands.filter((command) => command.includes("test:scripts")).length, 1);
@@ -24,5 +28,8 @@ test("default invocation keeps the complete suite and coding-agent forwards shar
 		["test", "--workspace=@diffexai/diffex", "--", "--shard=2/4", "--maxWorkers=1"],
 	]);
 	assert.throws(() => testCommands("missing"), /Unknown test group/);
-	assert.throws(() => testCommands("other", ["--shard=1/4"]), /Only the coding-agent group/);
+	assert.throws(() => testCommands("other", ["--pool=threads"]), /only accepts --shard/);
+	assert.throws(() => testCommands("other", ["--shard=0/2"]), /only accepts --shard/);
+	assert.throws(() => testCommands("other", ["--shard=3/2"]), /Invalid workspace shard/);
+	assert.throws(() => testCommands("other", ["--shard=999/999"]), /No test workspaces/);
 });
