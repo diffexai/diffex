@@ -161,21 +161,3 @@ Attribution:
 ## User Override
 
 If the user's instructions conflict with any rule in this document, ask for explicit confirmation before overriding. Only then execute their instructions.
-
-- 2026-09-13: Publication checks assumed an HTTPS repository field and invocation directory -> Inspect canonical package metadata and run workspace inventory from the owning repository before validating trust.
-
-- 2026-09-13: An unnamed historical credential note was presented as a known active key -> Identify the credential and verify its current scope/state before proposing retirement or treating it as a blocker.
-
-- 2026-09-13: npm created latest on first publication despite a bootstrap tag -> Verify registry behavior, clean only a newly uploaded exact bootstrap artifact, and retain a regression for partial retries.
-
-- 2026-09-13: Node rejects package import targets containing node_modules -> Preserve existing package import targets and validate staged tarballs through installed CLI startup before publication.
-
-- 2026-09-13: npm accepted publication before registry metadata propagated -> Preserve the uploaded artifact identity and resume verification without republishing or rebuilding.
-
-- 2026-09-14: Guessed helper paths, manifest fields, and reused npm caches obscured validation -> Discover paths, inspect the owning generator and real manifest, and use a fresh cache when proving that an update downloads artifact bytes.
-
-- 2026-09-13: Assumed interrupted npm downloads preserve the prefix -> Test real npm processes, retain user data, and recover ENOTEMPTY by matching the affected installation or backup against actual isolated directories instead of assuming every failure is a backup rename.
-
-- 2026-09-13: Runtime staging copied a redundant project NOTICE after attribution was consolidated -> Generate only the consolidated attribution file and reject separate NOTICE payloads.
-
-- 2026-09-13: A staging branch dispatch was rejected by main-only environment rules -> Inspect environment branch policies before dispatch and keep production credential checks on main.
