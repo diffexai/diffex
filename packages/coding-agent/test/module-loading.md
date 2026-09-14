@@ -60,7 +60,7 @@ The suite required execution outside the filesystem/network sandbox for localhos
 
 ## Hosted CI acceptance
 
-CI persistence is opt-in through the repository Actions variable `VITEST_FS_CACHE=true` until hosted measurements demonstrate positive net savings.
+CI persistence remains opt-in through the repository Actions variable `VITEST_FS_CACHE=true`; the hosted measurements below did not demonstrate positive net savings.
 The variable controls restore/save only; local transformation caching remains enabled.
 The cache restores after dependency installation and saves only after a successful test job, using commit-pinned actions.
 Its compatibility prefix includes a format revision, runner OS and architecture, the resolved Node version, the lockfile hash, and the Vitest/TypeScript configuration hash.
@@ -103,6 +103,13 @@ Benchmark runs are opt-in and do not extend the normal CI critical path.
 That single comparison shows 65.2% lower elapsed latency, with aggregate runner time increasing from 12m56s to 18m02s.
 It predates the additional split into two other-workspace shards and the two-worker setting.
 
+[CI with both refinements](https://github.com/diffexai/diffex/actions/runs/34901877173/attempts/2) passed in 3m06s using Node 22.23.2, the same version as the baseline.
+That is 76.0% below the 12m56s baseline and 31.1% below the first sharded run.
+Aggregate runner time was 16m45s, compared with 12m56s for the baseline and 18m02s for the first sharded run.
+These are individual hosted comparisons, not repeated-run medians.
+All four coding-agent shards passed 2,863 tests with 49 expected skips, all 347 script tests passed, and every other workspace passed across its two shards.
+[Artifact acceptance](https://github.com/diffexai/diffex/actions/runs/34901877395/attempts/2) also passed on Linux and macOS, both Intel and ARM.
+
 [The worker benchmark](https://github.com/diffexai/diffex/actions/runs/34899782204) used Node 22.23.2, the complete coding-agent suite, isolation enabled, and filesystem transformation caching disabled in both configurations.
 
 | Pool | Workers | Three full-suite durations | Median | Outcome |
@@ -115,5 +122,18 @@ Two fork workers reduced the median by 9.0%; CI now selects that configuration.
 Both thread configurations failed 58 tests because worker threads do not support `process.chdir()`.
 Those tests remain intact.
 
-The cold-cache seed passed, but GitHub blocked all six cache comparison jobs before startup due to account billing/spending limits.
-This does not establish a cache benefit; hosted persistence remains opt-in pending successful measurements.
+[The cache comparison](https://github.com/diffexai/diffex/actions/runs/34899782204/attempts/2) completed after the account billing limit was resolved.
+All six jobs used the same source, Node version, Ubuntu runner label, one isolated fork worker, and enabled filesystem transformation caching.
+Cold jobs started without a persisted cache; restored jobs all hit the same 6.25MB seed.
+Each job passed 2,863 tests with 49 expected skips.
+
+| Cache state | Three complete job times | Median job | Median suite | Median transform |
+| --- | --- | ---: | ---: | ---: |
+| Cold | 386s, 396s, 387s | 387s | 333.93s | 7.50s |
+| Restored | 458s, 499s, 484s | 484s | 423.69s | 1.98s |
+
+Restore steps took 1s, 0s, and 2s, already included in the restored job times; the seed save took 1s.
+Adding that save cost makes the restored median 485s, versus 387s cold.
+The transform saving did not produce a total-job saving in these hosted samples.
+Runner variation means this comparison does not establish that cache restoration caused the entire slowdown.
+Hosted persistence remains disabled; the benchmark is available for future evaluation.
