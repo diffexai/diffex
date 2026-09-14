@@ -222,15 +222,21 @@ The selected collaboration mode is restored independently for the active interac
 
 ## Context Files
 
-Diffex loads `AGENTS.md` or `CLAUDE.md` at startup from:
+Diffex loads context files at startup in this order:
 
+- the bundled `dist/AGENTS.md` for default instructions in production installations
 - `~/.diffex/agent/AGENTS.md` for global instructions
-- parent directories, walking up from the current working directory
+- parent directories, from the outermost directory toward the current working directory
 - the current directory
 
-If a directory contains `AGENTS.override.md`, Diffex loads it instead of `AGENTS.md` or `CLAUDE.md` from that directory. Context files from other directories still layer normally.
+The bundled defaults are loaded from the installed package without creating or overwriting user or project files.
+Use global and project instructions to customize these defaults.
 
-Use context files for project conventions, commands, safety rules, and preferences. Disable loading with `--no-context-files` or `-nc`.
+If a user or project directory contains `AGENTS.override.md`, Diffex loads it instead of `AGENTS.md` or `CLAUDE.md` from that directory.
+Context files from other directories still layer normally.
+
+Use context files for project conventions, commands, safety rules, and preferences.
+Disable all context loading, including the bundled defaults, with `--no-context-files` or `-nc`.
 
 ### System Prompt Files
 
