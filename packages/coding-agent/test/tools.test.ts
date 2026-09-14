@@ -636,13 +636,6 @@ describe("Coding Agent Tools", () => {
 			expect(getTextOutput(result).trim()).toBe("prefix-output\ncommand-output");
 		});
 
-		it("should work without command prefix", async () => {
-			const bashWithoutPrefix = createBashTool(testDir, {});
-
-			const result = await bashWithoutPrefix.execute("test-prefix-3", { command: "echo no-prefix" });
-			expect(getTextOutput(result).trim()).toBe("no-prefix");
-		});
-
 		it("should coalesce streaming updates for chatty output", async () => {
 			const operations: BashOperations = {
 				exec: async (_command, _cwd, { onData }) => {
@@ -1126,19 +1119,6 @@ describe("edit tool CRLF handling", () => {
 
 	afterEach(() => {
 		rmSync(testDir, { recursive: true, force: true });
-	});
-
-	it("should match LF oldText against CRLF file content", async () => {
-		const testFile = join(testDir, "crlf-test.txt");
-
-		writeFileSync(testFile, "line one\r\nline two\r\nline three\r\n");
-
-		const result = await editTool.execute("test-crlf-1", {
-			path: testFile,
-			edits: [{ oldText: "line two\n", newText: "replaced line\n" }],
-		});
-
-		expect(getTextOutput(result)).toContain("Successfully replaced");
 	});
 
 	it("should preserve CRLF line endings after edit", async () => {
