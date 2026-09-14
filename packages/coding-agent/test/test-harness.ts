@@ -37,7 +37,7 @@ import {
 	type CreateTestExtensionsResultInput,
 	createTestExtensionsResult,
 	createTestResourceLoader,
-} from "./utilities.ts";
+} from "./extension-test-utils.ts";
 
 // ============================================================================
 // Faux model

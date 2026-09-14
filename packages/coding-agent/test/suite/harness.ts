@@ -30,7 +30,7 @@ import {
 	type CreateTestExtensionsResultInput,
 	createTestExtensionsResult,
 	createTestResourceLoader,
-} from "../utilities.ts";
+} from "../extension-test-utils.ts";
 
 type MessageTextPart = { type: "text"; text: string };
 

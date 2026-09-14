@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { SessionManager } from "../../src/core/session-manager.ts";
-import { assistantMsg, userMsg } from "../utilities.ts";
+import { assistantMsg, userMsg } from "../message-fixtures.ts";
 
 describe("SessionManager forkBranch", () => {
 	const tempDirs: string[] = [];

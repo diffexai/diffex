@@ -1,6 +1,6 @@
 import { fauxAssistantMessage } from "@diffexai/diffex-ai";
 import { describe, expect, it } from "vitest";
-import { userMsg } from "../../utilities.ts";
+import { userMsg } from "../../message-fixtures.ts";
 import { createHarness } from "../harness.ts";
 
 describe("tree navigation during an active response", () => {

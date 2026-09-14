@@ -18,7 +18,7 @@ import {
 import type { ExtensionFactory } from "../../src/core/extensions/index.ts";
 import { SessionManager } from "../../src/core/session-manager.ts";
 import * as publicApi from "../../src/index.ts";
-import { createTestExtensionsResult, createTestResourceLoader } from "../utilities.ts";
+import { createTestExtensionsResult, createTestResourceLoader } from "../extension-test-utils.ts";
 import { createHarness, getAssistantTexts, type Harness } from "./harness.ts";
 
 function createTool(name: string, output = name, onExecute?: () => void): AgentTool {

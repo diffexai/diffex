@@ -7,7 +7,8 @@ import { AgentSession } from "../../src/core/agent-session.ts";
 import { createAgentSession } from "../../src/core/sdk.ts";
 import { SessionManager } from "../../src/core/session-manager.ts";
 import type { ExtensionContext, ToolDefinition } from "../../src/index.ts";
-import { assistantMsg, createTestResourceLoader, userMsg } from "../utilities.ts";
+import { createTestResourceLoader } from "../extension-test-utils.ts";
+import { assistantMsg, userMsg } from "../message-fixtures.ts";
 import { createHarness, type Harness } from "./harness.ts";
 import { deferred } from "./subagent-harness.ts";
 

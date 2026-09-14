@@ -23,7 +23,7 @@ import {
 	RootLocalEphemeralSubagentSessionManagerFactory,
 	type SubagentSessionManagerRequest,
 } from "../../src/core/subagents/session-manager-factory.ts";
-import { createTestExtensionsResult, createTestResourceLoader } from "../utilities.ts";
+import { createTestExtensionsResult, createTestResourceLoader } from "../extension-test-utils.ts";
 import { createHarness, getMessageText, type Harness } from "./harness.ts";
 import { getLastUserText } from "./subagent-harness.ts";
 

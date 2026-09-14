@@ -6,7 +6,7 @@ import type { ExtensionContext } from "../../src/core/extensions/types.ts";
 import type { CustomMessage } from "../../src/core/messages.ts";
 import { createAgentSession } from "../../src/core/sdk.ts";
 import { SessionManager } from "../../src/core/session-manager.ts";
-import { createTestResourceLoader } from "../utilities.ts";
+import { createTestResourceLoader } from "../extension-test-utils.ts";
 import { createHarness, getMessageText, type Harness } from "./harness.ts";
 import { deferred, getLastUserText } from "./subagent-harness.ts";
 

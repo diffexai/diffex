@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { PLAN_MODE_SYSTEM_PROMPT, setCollaborationMode } from "../../../src/core/collaboration-mode.ts";
 import { createSkill } from "../../../src/core/skills.ts";
 import { createSyntheticSourceInfo } from "../../../src/core/source-info.ts";
-import { createTestExtensionsResult, createTestResourceLoader } from "../../utilities.ts";
+import { createTestExtensionsResult, createTestResourceLoader } from "../../extension-test-utils.ts";
 import { createHarness, getAssistantTexts, type Harness } from "../harness.ts";
 
 const skillPath = "/workspace/.diffex/skills/focused/SKILL.md";

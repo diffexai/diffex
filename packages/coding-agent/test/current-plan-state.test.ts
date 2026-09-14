@@ -9,7 +9,7 @@ import {
 } from "../src/core/current-plan-state.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
 import { createUpdatePlanTool } from "../src/core/tools/update-plan.ts";
-import { assistantMsg, userMsg } from "./utilities.ts";
+import { assistantMsg, userMsg } from "./message-fixtures.ts";
 
 describe("current plan state", () => {
 	const tempDirs: string[] = [];

@@ -8,7 +8,7 @@ import { Type } from "typebox";
 import { afterEach, describe, expect, it } from "vitest";
 import { createSkill } from "../../src/core/skills.ts";
 import { createSyntheticSourceInfo } from "../../src/core/source-info.ts";
-import { createTestResourceLoader } from "../utilities.ts";
+import { createTestResourceLoader } from "../extension-test-utils.ts";
 import { createHarness, getAssistantTexts, getMessageText, getUserTexts, type Harness } from "./harness.ts";
 
 async function createWaitingHarness(

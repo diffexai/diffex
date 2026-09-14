@@ -1,7 +1,7 @@
 import type { Usage } from "@diffexai/diffex-ai/compat";
 import { afterEach, describe, expect, it } from "vitest";
+import { assistantMsg, userMsg } from "./message-fixtures.ts";
 import { createHarness, type Harness } from "./suite/harness.ts";
-import { assistantMsg, userMsg } from "./utilities.ts";
 
 describe("Branch summary extensions", () => {
 	const harnesses: Harness[] = [];

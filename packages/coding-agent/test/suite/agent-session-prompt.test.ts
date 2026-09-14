@@ -11,7 +11,7 @@ import type { PromptTemplate } from "../../src/core/prompt-templates.ts";
 import { SessionManager } from "../../src/core/session-manager.ts";
 import { createSkill } from "../../src/core/skills.ts";
 import { createSyntheticSourceInfo } from "../../src/core/source-info.ts";
-import { createTestResourceLoader } from "../utilities.ts";
+import { createTestResourceLoader } from "../extension-test-utils.ts";
 import { createHarness, getMessageText, type Harness } from "./harness.ts";
 
 function deferred(): { promise: Promise<void>; resolve: () => void } {
