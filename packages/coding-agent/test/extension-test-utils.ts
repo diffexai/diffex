@@ -1,11 +1,11 @@
 import { createEventBus } from "../src/core/event-bus.ts";
+import { createExtensionRuntime, loadExtensionFromFactory } from "../src/core/extensions/factory.ts";
 import type {
 	Extension,
 	ExtensionFactory,
 	InlineExtension,
 	LoadExtensionsResult,
 } from "../src/core/extensions/index.ts";
-import { createExtensionRuntime, loadExtensionFromFactory } from "../src/core/extensions/loader.ts";
 import type { ResourceLoader } from "../src/core/resource-loader.ts";
 import type { SkillCatalog } from "../src/core/skills.ts";
 

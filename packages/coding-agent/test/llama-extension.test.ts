@@ -4,7 +4,7 @@ import type { AddressInfo } from "node:net";
 import type { AuthContext, AuthPrompt, ModelsPublication, ModelsStoreEntry } from "@diffexai/diffex-ai";
 import { afterEach, describe, expect, it } from "vitest";
 import { createEventBus } from "../src/core/event-bus.ts";
-import { createExtensionRuntime, loadExtensionFromFactory } from "../src/core/extensions/loader.ts";
+import { createExtensionRuntime, loadExtensionFromFactory } from "../src/core/extensions/factory.ts";
 import { LlamaClient, type LlamaProgress, normalizeLlamaServerUrl } from "../src/extensions/llama/client.ts";
 import { findHuggingFaceToken, HuggingFaceClient } from "../src/extensions/llama/huggingface.ts";
 import llamaExtension from "../src/extensions/llama/index.ts";
