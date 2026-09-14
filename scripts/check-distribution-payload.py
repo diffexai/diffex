@@ -17,6 +17,7 @@ from pathlib import Path, PurePosixPath
 
 DOCUMENTATION = set(json.loads(Path(__file__).with_name('distribution-docs.json').read_text()))
 LEGAL_DOCUMENTS = {'LICENSE', 'THIRD-PARTY-NOTICES.txt'}
+DEFAULT_AGENT_PATHS = {'dist/AGENTS.md', 'package/dist/AGENTS.md', 'diffex/dist/AGENTS.md'}
 
 MAX_BYTES = 1024 * 1024 * 1024
 MAX_FILES = 100000
@@ -35,13 +36,13 @@ def fail(path, reason):
     raise PayloadError(f'{path}: {reason}')
 
 
-def check_path(name, directory=False):
+def check_path(name, directory=False, default_agents=False):
     path = PurePosixPath(name)
     if not name or name.startswith('/') or '\\' in name or '..' in path.parts or ':' in name or str(path) != name.rstrip('/'):
         fail(name, 'unsafe archive path')
     if any(part in {'.git', '.env', 'src', 'examples', '__MACOSX'} or part.startswith(('._', '.env.')) for part in path.parts):
         fail(name, 'prohibited source or private path')
-    if any(part.lower() == 'agents.md' for part in path.parts):
+    if any(part.lower() == 'agents.md' for part in path.parts) and not default_agents:
         fail(name, 'prohibited repository instructions')
     if not directory and path.name.upper() == 'NOTICE':
         fail(name, 'separate NOTICE file is excluded; attribution belongs in THIRD-PARTY-NOTICES.txt')
@@ -50,7 +51,7 @@ def check_path(name, directory=False):
             local = '/'.join(path.parts[path.parts.index('docs'):])
             if local not in DOCUMENTATION:
                 fail(name, 'unapproved distribution documentation')
-        elif path.suffix.lower() in {'.md', '.mdx', '.rst', '.txt', '.pdf'} and path.name not in LEGAL_DOCUMENTS:
+        elif path.suffix.lower() in {'.md', '.mdx', '.rst', '.txt', '.pdf'} and path.name not in LEGAL_DOCUMENTS and not default_agents:
             # Only the reviewed public README and release history belong at the distribution root.
             if not (path.name in {'README.md', 'CHANGELOG.md'} and len(path.parts) <= 3 and 'dist' not in path.parts):
                 fail(name, 'unapproved distribution documentation')
@@ -68,14 +69,16 @@ def check_path(name, directory=False):
     return declaration
 
 
-def scan_bytes(data, path, budget, depth=0):
+def scan_bytes(data, path, budget, depth=0, default_agents=False):
     if depth > MAX_DEPTH:
         fail(path, 'archive nesting limit exceeded')
     budget['bytes'] += len(data)
     budget['files'] += 1
     if budget['bytes'] > MAX_BYTES or budget['files'] > MAX_FILES:
         fail(path, 'inspection resource limit exceeded')
-    declaration = check_path(path)
+    declaration = check_path(path, default_agents=default_agents)
+    if default_agents and data != Path(__file__).resolve().parent.parent.joinpath('AGENTS_release.md').read_bytes():
+        fail(path, 'prohibited repository instructions: default AGENTS.md differs from AGENTS_release.md')
     if MAP_DIRECTIVE.search(data) or MAP_CONTENT.search(data):
         fail(path, 'embedded source map')
     if not declaration and PurePosixPath(path).suffix not in {'.md', '.html'} and TS_CONTENT.search(data):
@@ -85,7 +88,8 @@ def scan_bytes(data, path, budget, depth=0):
         with zipfile.ZipFile(stream) as archive:
             seen = set()
             for item in archive.infolist():
-                check_path(item.filename, directory=item.is_dir())
+                approved_default = depth == 0 and not item.is_dir() and item.filename in DEFAULT_AGENT_PATHS
+                check_path(item.filename, directory=item.is_dir(), default_agents=approved_default)
                 if item.filename.rstrip('/') in seen:
                     fail(item.filename, 'duplicate archive path')
                 seen.add(item.filename.rstrip('/'))
@@ -95,8 +99,7 @@ def scan_bytes(data, path, budget, depth=0):
                     fail(path, 'archive expansion limit exceeded')
                 if (item.external_attr >> 16) & 0o170000 == 0o120000:
                     fail(item.filename, 'archive links are prohibited')
-                check_path(item.filename)
-                scan_bytes(archive.read(item), path + '/' + item.filename, budget, depth + 1)
+                scan_bytes(archive.read(item), path + '/' + item.filename, budget, depth + 1, approved_default)
         return
     stream.seek(0)
     try:
@@ -106,7 +109,8 @@ def scan_bytes(data, path, budget, depth=0):
     with archive:
         seen = set()
         for item in archive:
-            check_path(item.name, directory=item.isdir())
+            approved_default = depth == 0 and item.isfile() and item.name in DEFAULT_AGENT_PATHS
+            check_path(item.name, directory=item.isdir(), default_agents=approved_default)
             if item.name.rstrip('/') in seen:
                 fail(item.name, 'duplicate archive path')
             seen.add(item.name.rstrip('/'))
@@ -116,8 +120,7 @@ def scan_bytes(data, path, budget, depth=0):
                 fail(item.name, 'archive links and special files are prohibited')
             if item.size > MAX_BYTES - budget['bytes']:
                 fail(path, 'archive expansion limit exceeded')
-            check_path(item.name)
-            scan_bytes(archive.extractfile(item).read(), path + '/' + item.name, budget, depth + 1)
+            scan_bytes(archive.extractfile(item).read(), path + '/' + item.name, budget, depth + 1, approved_default)
 
 
 def inspect_archive(file, license_file, expected_name=None, expected_version=None):
@@ -150,6 +153,8 @@ def inspect_archive(file, license_file, expected_name=None, expected_version=Non
         fail(str(file), 'package name mismatch')
     if expected_version and metadata.get('version') != expected_version:
         fail(str(file), 'package version mismatch')
+    if metadata.get('name') != '@diffexai/diffex' and root + 'dist/AGENTS.md' in entries:
+        fail(str(file), 'prohibited repository instructions: default AGENTS.md is only allowed in the CLI package')
     inventory = json.loads(entries[root + 'distribution-components.json'])
     if not isinstance(inventory, list) or not inventory:
         fail(str(file), 'missing component inventory')
@@ -164,6 +169,8 @@ def inspect_archive(file, license_file, expected_name=None, expected_version=Non
         if hashlib.sha256(entries[root + item['path']]).hexdigest() != item['sha256']:
             fail(str(file), 'runtime file hash mismatch')
     if metadata.get('name') == '@diffexai/diffex':
+        if not entries.get(root + 'dist/AGENTS.md', b'').strip():
+            fail(str(file), 'missing required default instructions: dist/AGENTS.md')
         for document in DOCUMENTATION | {'README.md'}:
             if not entries.get(root + document, b'').strip():
                 fail(str(file), 'missing required user documentation: ' + document)
