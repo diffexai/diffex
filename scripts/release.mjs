@@ -9,6 +9,7 @@ import { findPackageDirectories } from "./package-workspaces.mjs";
 import { getPublicWorkspacePackages } from "./release-packages.mjs";
 import { createInterface } from "node:readline/promises";
 import { preflightRelease, pushPreparedRelease, assertPackageVersion } from "./release-source.mjs";
+import { releaseOutputPaths, stageReleaseOutputs } from "./release-outputs.mjs";
 
 if (process.argv[2] === "--push-prepared") {
 	if (process.argv.length !== 4) throw new Error("Usage: node scripts/release.mjs --push-prepared vX.Y.Z");
@@ -106,16 +107,6 @@ function removeStaleWorkspaceLockEntries() {
 	}
 }
 
-function stageChangedFiles(allowed) {
-	const paths = execFileSync("git", ["ls-files", "-m", "-o", "-d", "--exclude-standard", "-z"], { encoding: "utf8" })
-		.split("\0")
-		.filter(Boolean);
-	const unexpected = paths.filter((path) => !allowed.has(path));
-	if (unexpected.length)
-		throw new Error(`Unexpected generated changes; review before release: ${unexpected.join(", ")}`);
-	if (paths.length) execFileSync("git", ["add", "--", ...new Set(paths)], { stdio: "inherit" });
-}
-
 function bumpVersion(target) {
 	run(`npm run version:${target}`);
 	removeStaleWorkspaceLockEntries();
@@ -165,6 +156,8 @@ function addUnreleasedSection() {
 console.log("Validating release source before mutation...");
 const expectedVersion = preflightRelease(RELEASE_TARGET);
 assertPackagesAreRegisteredWithNpm();
+// Capture tracked workspace lockfiles before npm version updates them.
+const intendedOutputs = releaseOutputPaths(getChangelogs());
 
 // Bump the approved release version
 const version = bumpVersion(RELEASE_TARGET);
@@ -201,15 +194,6 @@ console.log();
 
 // Commit and tag
 console.log("Committing and tagging...");
-const intendedOutputs = new Set([
-	"package.json",
-	"package-lock.json",
-	"packages/coding-agent/npm-shrinkwrap.json",
-	"packages/coding-agent/install-lock/package.json",
-	"packages/coding-agent/install-lock/package-lock.json",
-	...findPackageDirectories().map((directory) => join(directory, "package.json")),
-	...getChangelogs(),
-]);
 run("git diff --check");
 run("git diff --stat");
 run(
@@ -239,7 +223,7 @@ if (
 	execFileSync("git", ["rev-parse", "origin/main"], { encoding: "utf8" })
 )
 	throw new Error("origin/main changed during preparation; review the new main before releasing");
-stageChangedFiles(intendedOutputs);
+stageReleaseOutputs(intendedOutputs);
 run(`git commit -m "Release v${version}"`);
 run(`git tag v${version}`);
 console.log();
@@ -251,7 +235,7 @@ console.log();
 
 // Commit
 console.log("Committing changelog updates...");
-stageChangedFiles(new Set(getChangelogs()));
+stageReleaseOutputs(new Set(getChangelogs()));
 run(`git commit -m "Add [Unreleased] section for next cycle"`);
 console.log();
 
