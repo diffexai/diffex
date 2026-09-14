@@ -132,6 +132,11 @@ function readRelease(bucket, endpoint, key, outputPath) {
 	const metadata = JSON.parse(result);
 	if (typeof metadata.ETag !== "string") throw new Error("Diffex release record has no ETag.");
 	const body = readFileSync(outputPath, "utf8");
+	const release = parseStoredRelease(body);
+	return { etag: metadata.ETag, version: release.version, release, body };
+}
+
+export function parseStoredRelease(body) {
 	let release;
 	try {
 		release = JSON.parse(body);
@@ -141,7 +146,7 @@ function readRelease(bucket, endpoint, key, outputPath) {
 	if (!isReleaseRecord(release)) {
 		throw new Error("Invalid release record in storage.");
 	}
-	return { etag: metadata.ETag, version: release.version, release, body };
+	return release;
 }
 
 function putJson(bucket, endpoint, path, key, cacheControl, condition) {

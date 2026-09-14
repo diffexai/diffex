@@ -3,11 +3,22 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { isLatestVersion, isReleaseRecord } from "../packages/coding-agent/src/utils/release-contract.ts";
 import { createPublicationFixture } from "./fixtures/release-publication/harness.mjs";
+import { parseStoredRelease } from "./publish-release-announcement.mjs";
 
 const fixtures = JSON.parse(readFileSync(new URL("./fixtures/release-contract.json", import.meta.url), "utf8"));
 for (const { name, value } of fixtures.valid) {
 	test(`accepts ${name}`, () => assert.equal(isReleaseRecord(value), true));
+	test(`parses stored ${name} without changing its data`, () => {
+		assert.deepEqual(parseStoredRelease(JSON.stringify(value)), value);
+	});
 }
+
+test("stored release parser redacts malformed JSON", () => {
+	assert.throws(() => parseStoredRelease("malformed fixture-secret"), {
+		name: "Error",
+		message: "Diffex release record is not valid JSON.",
+	});
+});
 for (const { name, value } of fixtures.invalid) {
 	test(`rejects ${name}`, () => assert.equal(isReleaseRecord(value), false));
 }
