@@ -1,0 +1,22 @@
+[project]
+name = "diffex-terminal-bench"
+version = "0.1.0"
+description = "Private Harbor integration for Diffex Terminal-Bench evaluations"
+requires-python = ">=3.13,<3.14"
+dependencies = ["harbor==0.23.0"]
+classifiers = ["Private :: Do Not Upload"]
+
+[build-system]
+requires = ["hatchling==1.27.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/diffex_terminal_bench"]
+
+[tool.uv]
+default-groups = []
+
+[[tool.uv.index]]
+name = "pypi"
+url = "https://pypi.org/simple"
+default = true
