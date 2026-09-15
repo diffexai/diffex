@@ -8,10 +8,11 @@ from pathlib import Path
 import tempfile
 
 from harbor.models.agent.context import AgentContext
+from harbor.models.trial.config import AgentConfig, EnvironmentConfig, TrialConfig
 from harbor.utils.trajectory_validator import TrajectoryValidator
 
 from diffex_terminal_bench.config import PINS
-from diffex_terminal_bench.execution import SUBAGENT_TOOLS
+from diffex_terminal_bench.execution import PROVIDER_ENV, SUBAGENT_TOOLS
 from diffex_terminal_bench.outcome import parse_outcome
 from diffex_terminal_bench.trajectory import CONTEXT_FIELDS, export_trajectory
 
@@ -97,6 +98,27 @@ def validate_trial(directory: Path, task: str, identity: dict, *, oracle: bool =
     lock = read_json(directory / "lock.json")
     if lock["task"]["digest"] != identity["task_digests"][task]:
         raise ValueError("Task digest differs from the pinned dataset")
+    config = TrialConfig.model_validate_json((directory / "config.json").read_text())
+    credentials = config.agent.env
+    allowed = PROVIDER_ENV[identity["model"].split("/", 1)[0]]
+    if (oracle and credentials) or (not oracle and not credentials) or any(
+        key not in allowed or value != f"${{{key}}}" for key, value in credentials.items()
+    ):
+        raise ValueError("Credentials must use selected-provider environment references")
+    agent_config = AgentConfig(name="oracle") if oracle else AgentConfig(
+        import_path="diffex_terminal_bench.adapter:DiffexAgent", model_name=identity["model"],
+        override_setup_timeout_sec=630, kwargs=identity["policy"], env=credentials)
+    label = read_json(directory / "cleanup-request.json")["label"]
+    expected_config = TrialConfig(task=config.task, trial_name=config.trial_name, trials_dir=config.trials_dir,
+        agent=agent_config, environment=EnvironmentConfig(
+            import_path="diffex_terminal_bench.daytona_backend:RecordedDaytonaEnvironment", delete=True,
+            kwargs={"labels": {"diffex.gate_trial": label}}))
+    if config.model_dump() != expected_config.model_dump():
+        raise ValueError("Harbor configuration changed task limits, policy, or isolation")
+    for key in ("agent", "environment", "timeout_multiplier", "agent_timeout_multiplier", "verifier_timeout_multiplier",
+                "agent_setup_timeout_multiplier", "environment_build_timeout_multiplier", "install_only"):
+        if lock.get(key) != config.model_dump(mode="json")[key]:
+            raise ValueError(f"Harbor lock does not match configuration: {key}")
     cleanup = read_json(directory / "sandbox-cleanup.json")
     if cleanup.get("confirmed") is not True or cleanup.get("unexpected_sandboxes") != []:
         raise ValueError("Sandbox cleanup failed or required recovery")
@@ -118,6 +140,7 @@ def validate_trial(directory: Path, task: str, identity: dict, *, oracle: bool =
     if oracle:
         if any(value != 1 for value in rewards.values()):
             raise ValueError("Oracle smoke must earn full reward")
+        (directory / "agent/oracle.txt").read_bytes()
         return {"rewards": rewards, "usage": "not_applicable", "trajectory": "not_applicable"}
 
     agent = directory / "agent"

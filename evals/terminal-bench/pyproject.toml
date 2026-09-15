@@ -3,7 +3,7 @@ name = "diffex-terminal-bench"
 version = "0.1.0"
 description = "Private Harbor integration for Diffex Terminal-Bench evaluations"
 requires-python = ">=3.13,<3.14"
-dependencies = ["harbor==0.23.0", "pydantic==2.13.5", "pyyaml==6.0.3"]
+dependencies = ["harbor[daytona]==0.23.0", "daytona==0.210.0", "pydantic==2.13.5", "pyyaml==6.0.3"]
 classifiers = ["Private :: Do Not Upload"]
 
 [build-system]

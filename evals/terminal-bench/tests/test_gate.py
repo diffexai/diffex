@@ -7,6 +7,7 @@ import tempfile
 import unittest
 
 from harbor.models.agent.context import AgentContext
+from harbor.models.trial.config import AgentConfig, EnvironmentConfig, TaskConfig, TrialConfig
 
 from diffex_terminal_bench.config import PINS
 from diffex_terminal_bench.gate import inventory, require_previous, sha256, stage_tasks, validate_trial, write_json
@@ -58,7 +59,14 @@ class GateTests(unittest.TestCase):
         for name in ("version", "help", "list-models"):
             (setup / f"{name}.stdout.txt").write_text("ok")
             (setup / f"{name}.stderr.txt").touch()
-        write_json(self.directory / "lock.json", {"task": {"digest": "sha256:task"}})
+        config = TrialConfig(task=TaskConfig(path=Path("/task")),
+            agent=AgentConfig(import_path="diffex_terminal_bench.adapter:DiffexAgent", model_name="openai/gpt-5",
+                              override_setup_timeout_sec=630, kwargs=self.identity["policy"], env={"OPENAI_API_KEY": "${OPENAI_API_KEY}"}),
+            environment=EnvironmentConfig(import_path="diffex_terminal_bench.daytona_backend:RecordedDaytonaEnvironment",
+                                          kwargs={"labels": {"diffex.gate_trial": "unique"}}))
+        write_json(self.directory / "config.json", config.model_dump(mode="json"))
+        write_json(self.directory / "lock.json", {**config.model_dump(mode="json"), "task": {"digest": "sha256:task"}})
+        write_json(self.directory / "cleanup-request.json", {"label": "unique"})
         write_json(self.directory / "sandbox-created.json", {"sandboxes": [{"id": "sandbox"}]})
         write_json(self.directory / "sandbox-cleanup.json", {"confirmed": True, "unexpected_sandboxes": []})
         write_json(self.directory / "result.json", {"finished_at": "2026-09-15T00:00:00Z",
@@ -131,6 +139,9 @@ class GateTests(unittest.TestCase):
         result["verifier_result"]["rewards"]["reward"] = 1
         write_json(self.directory / "result.json", result)
         (self.directory / "verifier/reward.txt").write_text("1")
+        (self.directory / "agent/oracle.txt").write_text("oracle")
+        for name in ("config.json", "lock.json"):
+            self.mutate(self.directory / name, "agent", AgentConfig(name="oracle").model_dump(mode="json"))
         report = {"passed": True, "identity": self.identity, "trials": [
             {"task": "task", "directory": "task-1", "files": inventory(self.directory)}]}
         write_json(self.directory.parent / "gate.json", report)
@@ -140,6 +151,20 @@ class GateTests(unittest.TestCase):
         (self.directory / "verifier/test-stdout.txt").unlink()
         with self.assertRaisesRegex(ValueError, "evidence changed"):
             require_previous(self.root, "trial", self.identity, pilot, pilot)
+
+    def test_timeout_and_resource_overrides_cannot_qualify(self):
+        path = self.directory / "config.json"
+        original = path.read_bytes()
+        for field, value in (("timeout_multiplier", 2), ("extra_instructions", ["task hint"])):
+            self.mutate(path, field, value)
+            with self.subTest(field=field), self.assertRaisesRegex(ValueError, "configuration changed"):
+                validate_trial(self.directory, "task", self.identity)
+            path.write_bytes(original)
+        config = json.loads(original)
+        config["environment"]["override_cpus"] = 8
+        write_json(path, config)
+        with self.assertRaisesRegex(ValueError, "configuration changed"):
+            validate_trial(self.directory, "task", self.identity)
 
     def test_stage_coverage_and_repetitions(self):
         pilot = [f"task-{i}" for i in range(10)]

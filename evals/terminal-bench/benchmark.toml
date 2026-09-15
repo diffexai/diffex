@@ -1,0 +1,30 @@
+# Integration qualification uses the original Terminal-Bench 2.0 dataset.
+# Review this file before spending provider or Daytona credits.
+model = "openai/gpt-5"
+pilot_tasks = [
+  "openssl-selfsigned-cert",
+  "log-summary-date-ranges",
+  "fix-git",
+  "nginx-request-logging",
+  "sanitize-git-repo",
+  "db-wal-recovery",
+  "build-cython-ext",
+  "multi-source-data-merger",
+  "polyglot-c-py",
+  "sqlite-db-truncate",
+]
+
+[dataset]
+name = "terminal-bench"
+version = "2.0"
+git_url = "https://github.com/laude-institute/terminal-bench-2.git"
+git_commit = "69671fbaac6d67a7ef0dfec016cc38a64ef7a77c"
+archive_url = "https://codeload.github.com/laude-institute/terminal-bench-2/tar.gz/69671fbaac6d67a7ef0dfec016cc38a64ef7a77c"
+archive_sha256 = "afcd2b9813fc08e8d2b955db8165cc057acf0e37f74e55d26fc2506da196cebe"
+task_count = 89
+
+[policy]
+thinking = "high"
+tools = "read,bash,edit,write,update_plan"
+subagents = "disabled"
+project_resources = "context-only"
