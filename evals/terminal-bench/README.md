@@ -3,7 +3,8 @@
 This private Python package installs and executes the pinned Diffex release through Harbor.
 Execution uses explicit model and harness policies, fresh trial state, and retained native sessions.
 Execution outcomes include native stream completion, terminal assistant state, retries, process status, configuration, and cleanup verification.
-ATIF trajectories, usage accounting, and the staged benchmark release gate remain subsequent implementation steps.
+ATIF export and usage accounting run after evidence recovery, including interrupted trials.
+The staged benchmark release gate remains a subsequent implementation step.
 This integration is not yet ready for leaderboard runs.
 
 ## Host setup
@@ -78,16 +79,19 @@ uv run --locked python scripts/check_production_contents.py
 
 The unit checks cover installation pins, configuration validation, explicit credentials, prompt uploads, fresh trial paths, and subagent policy.
 They also cover outcome parsing, incomplete streams, transport failures, log-collection failures, and repeated cancellation during recovery.
+Converter checks cover deduplication, tool observations, nested child trajectories, auxiliary usage, unknown telemetry, images, and partial messages.
 The execution smoke installs the real npm release, then redirects a fixture model to a loopback faux provider with a test-only wrapper.
 It exercises shell and file tools, multiline instructions with shell metacharacters and Unicode, repeated trials, enabled child agents, and non-root execution without paid API calls.
 The fixture checks the actual request credentials without storing their values, verifies empty initial sessions and state, and scans retained artifacts for the fixture secrets.
 It also checks that task context and the exact release instructions reach the system prompt while project settings, extensions, and `SYSTEM.md` are ignored.
 Only the agent log directory is mounted, and each invocation removes its container in a `finally` block.
 Generated evidence is retained under `results/diffex-execution-*/`.
+Each execution smoke validates ATIF with Harbor's validator and reconciles nonzero input, output, cached-token, and cost totals against every root and child response.
 The outcome smoke exercises success, authentication failure, exhausted retry, recovered retry, interrupted JSON output, and a Harbor-style execution timeout as both root and a non-root user.
 It uses the pinned npm release with a loopback provider and confirms that zero-exit failures are rejected.
 Success and timeout cases create a detached tool descendant that ignores TERM, then verify that cleanup stops it before the next trial.
 Evidence is retained under `results/diffex-outcomes-*/`, including partial stdout, stderr, native sessions, process status, cleanup, and outcomes.
+The outcome smoke also validates recoverable ATIF steps and checks that interrupted runs report incomplete accounting.
 The packaging check packs every public npm workspace into temporary tarballs with lifecycle scripts disabled, inspects their contents for benchmark paths, and records file counts and SHA-256 hashes in `results/production-contents.json`.
 It requires existing production build output, including `packages/coding-agent/dist/cli.js`, and fails if that CLI entrypoint is missing.
 It does not build, publish, or regenerate release artifacts.
@@ -121,6 +125,15 @@ The prior execution smoke also passed again on both architectures, including ena
 The 22 adapter unit tests, 11 source print-mode tests, production-content check, and repository `npm run check` passed.
 An initial arm64 installation encountered an Ubuntu mirror hash mismatch; the subsequent clean installation passed without changing installation pins or weakening integrity checks.
 These results validate controlled execution outcomes and cleanup, not model quality, ATIF export, or the later benchmark release gate.
+
+On 2026-09-15, ATIF validation passed four execution trials and 12 outcome trials on each pinned Linux image.
+The execution trials covered single agents, an enabled child agent, and non-root execution, using 16 loopback model responses per platform.
+Each single-agent execution reconciled to 57 input tokens, 21 output tokens, 15 cache hits, and USD 0.0000915 in fixture cost telemetry.
+Each enabled-subagent execution reconciled to 133 input tokens, 49 output tokens, 35 cache hits, and USD 0.0002135 across seven root/child responses.
+The outcome trials retained valid trajectories for authentication errors, exhausted/recovered retries, truncated output, and timeouts; missing telemetry and interrupted accounting remained explicitly unknown.
+Both smoke runners confirmed process and container cleanup on both architectures.
+The 37 adapter tests, repository `npm run check`, and production-content inspection passed; the public tarball contained no benchmark files.
+These checks use controlled responses without paid model calls and do not establish leaderboard readiness or remote artifact-upload completion.
 
 ## Execute a controlled task
 
@@ -195,10 +208,12 @@ Each run directory retains:
 - `launcher.json` and `cleanup.json`: launcher process identity and verified cleanup status.
 - `launcher.stdout.log` and `launcher.stderr.log`: launcher diagnostics, including failures before CLI startup.
 - `outcome.json`: execution classification, stream completeness, final assistant stop reason, retry counts, interruption state, and recovery errors.
+- `accounting.json`: observed usage, nullable totals, per-model observations, and reasons accounting is incomplete.
 - `sessions/` and `state/`: native root/child history and isolated harness state.
 
 Harbor collects the agent log tree after the run; avoid log filters that exclude these paths.
-Provider usage fields in `AgentContext` remain unset until the accounting implementation is added.
+`trajectory.json` sits directly under Harbor's agent log directory, with embedded child trajectories and optional `trajectory-media/` image files.
+Provider usage fields in `AgentContext` contain reconciled totals when the evidence establishes them.
 `AgentContext.metadata.diffex_outcome` contains the execution outcome, and `diffex_run_dir` identifies its artifacts.
 
 ### Execution outcomes and interruption recovery
@@ -242,6 +257,70 @@ The final summary is written directly to host agent logs after recovery, so late
 These bounded recovery operations can extend the task deadline; they do not grant the agent additional task execution time.
 If the sandbox transport becomes unavailable, available host logs and recovery diagnostics remain, cleanup is not reported as successful, and Harbor's environment teardown remains necessary.
 Avoid log filters that discard the retained evidence.
+
+### ATIF export and accounting
+
+The converter emits `ATIF-v1.8` using the models and validator shipped with pinned Harbor 0.23.0.
+See [Harbor's ATIF documentation](https://www.harborframework.com/docs/agents/trajectory-format) for the schema and validation command.
+It writes the final trajectory atomically after cleanup and evidence collection, before returning to Harbor.
+Export failure changes an otherwise completed execution to `infrastructure_failure`; it preserves an existing provider failure or cancellation.
+An empty run with no recoverable steps retains accounting diagnostics without fabricating a trajectory.
+
+Native session message entries are authoritative, including history retained before compaction.
+Unmatched root `message_end` events supplement responses absent from persistence, such as discarded retries.
+Matching uses provider/model/response ID within a session, falling back to the complete message including its native timestamp when no response ID exists.
+Repeated native entry IDs and assistant response identities count once.
+`message_start`, `message_update`, `turn_end`, and `agent_end` copies never add another charge for a completed response.
+The last unfinished streamed assistant message is retained as partial, with unknown usage.
+Malformed JSONL records do not discard intact earlier or later records, but they make accounting incomplete.
+
+Assistant tool calls and their native `toolResult` observations share an ATIF step and match by tool-call ID.
+Completed `tool_execution_end` events recover observations missing from message persistence.
+Unresolved observations remain system observations with their original call ID in metadata.
+User messages, custom context messages, visible thinking, tool errors, and summary text remain in the trajectory.
+Images are decoded into content-addressed files under `trajectory-media/`, with paths relative to `trajectory.json`.
+
+Child sessions are collected recursively, including hidden `.subagents` directories.
+The parent roster's `childSessionId` identifies each child, and its agent name links the child trajectory to the matching `spawn_agent` observation.
+Repeated roster snapshots do not duplicate children or their usage.
+Nested child trajectories are embedded with resolvable `trajectory_id` references so uploading the root JSON also uploads their steps.
+Missing child sessions, missing observations, and incomplete child execution are explicit accounting gaps.
+Recoverable orphan child histories are embedded with an unresolved-link diagnostic.
+
+| Native Diffex usage | ATIF step metric | Harbor `AgentContext` |
+| --- | --- | --- |
+| `input + cacheRead + cacheWrite` | `prompt_tokens` | `n_input_tokens` |
+| `output` | `completion_tokens` | `n_output_tokens` |
+| `cacheRead` | `cached_tokens` | `n_cache_tokens` |
+| `cost.total` | `cost_usd` | `cost_usd` |
+
+Cache writes contribute to prompt tokens, but are not cache hits.
+`metrics.extra.cache_write_tokens`, uncached input, and the native usage object preserve the additional detail.
+`totalTokens` is not added separately because it already aggregates token categories.
+Native cost is reported as recorded; the converter does not reprice responses or claim it is an independently verified provider invoice.
+Every trajectory's final token and cost totals include its descendants; `total_steps` counts its own steps.
+The root context totals visit each native session exactly once, without summing child-inclusive parent totals again.
+
+Compaction and branch-summary entries contribute their `usage` when available, without dropping the earlier responses they summarize.
+Their model attribution is `unattributed` because those entries do not identify the model that produced the summary.
+Missing summary usage or a compaction start without a persisted summary marks accounting incomplete.
+Work with no native telemetry cannot be reconstructed, and interrupted runs cannot establish a complete total.
+An all-zero native usage object is treated as unverified because Diffex initializes those fields before receiving provider usage.
+Missing or invalid individual usage fields remain unknown; other measured fields can still have totals when the rest of the execution evidence is complete.
+
+`AgentContext.metadata.diffex_accounting` and `accounting.json` retain observed lower bounds, missing fields, and structural gaps.
+Unknown context totals are `null`, and unknown ATIF totals are omitted.
+`model_usage` contains per-model totals when accounting is complete; otherwise it is empty to prevent Harbor from backfilling incomplete token data as zero.
+`diffex_trajectory.validated` records successful export, and `accounting_complete` separately records accounting completeness.
+Verifier reward is independent of accounting completeness.
+
+For leaderboard validation, require a validated trajectory and complete accounting for every rewarded trial, then upload the entire agent log tree including `trajectory.json` and `trajectory-media/`.
+Validate the downloaded/uploaded artifact copy using the command below; a local export alone is not proof of remote upload.
+Submission destination, credentials, and the benchmark release gate belong to the later benchmark-validation stage.
+
+```bash
+uv run --locked python -m harbor.utils.trajectory_validator /path/to/trial/agent/trajectory.json
+```
 
 ## Production exclusion
 
