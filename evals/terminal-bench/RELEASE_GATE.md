@@ -27,7 +27,7 @@ The preparation command writes `results/release-gate/dataset.json` without creat
 
 Harbor 0.23.0 and Daytona SDK 0.210.0 are locked in the benchmark's private Python environment.
 Node 22.23.2, Diffex 0.2.4, npm integrity, registry, and Node archive checksums come from [pins.toml](src/diffex_terminal_bench/pins.toml).
-The default is `openai/gpt-5`, `high` thinking, tools `read,bash,edit,write,update_plan`, disabled subagents, disabled evolution, and `context-only` project resources.
+The default is `openai/gpt-5.5`, `xhigh` thinking, tools `read,bash,edit,write,update_plan`, disabled subagents, disabled evolution, and `context-only` project resources.
 Change and commit the configuration before starting a new qualification sequence.
 Every subsequent stage must match the exact recorded identity, including the adapter commit and dependency lock.
 The earlier TB 2.0 / Diffex 0.2.2 oracle evidence cannot qualify this configuration.
@@ -50,6 +50,30 @@ Record the created sandbox IDs, snapshots, and actual CPU, memory, and disk from
 The pinned dataset includes upstream image tags and network-installed dependencies; archive verification does not make those external services immutable.
 
 ## Ordered stages
+
+### Shared dataset cache and run index
+
+All runs share content-addressed archives in `results/dataset-cache/` by default, including runs with a custom `--output` directory.
+Use `--dataset-cache /path/to/cache` to choose another shared cache.
+Each use verifies the pinned SHA-256 and extracts independent temporary task files.
+Concurrent preparation uses a per-digest file lock and atomic publication so another run cannot read a partial download.
+Locks cover preparation only; benchmark execution proceeds independently.
+Existing per-run caches remain untouched and can be deleted when no older benchmark process is using them.
+
+The runner updates `index.md` in the output directory's parent after preparation, stage start, each checked trial, and stage completion or failure.
+It links each qualification run and its stage reports, showing the model, thinking level, dataset, recorded gate status, checked-trial counts, and full-reward counts.
+Smoke-test directories are excluded because they use separate report formats.
+The index summarizes recorded reports and does not replace `--verify-through` evidence verification.
+An unfinished stage may be running or may have stopped without writing a final report.
+Neither caching nor index generation adds model calls.
+Rebuild the index from existing local reports without credentials, dataset downloads, or a clean checkout:
+
+```bash
+uv run --locked python -m diffex_terminal_bench.benchmark --refresh-index --results-dir results
+open results/index.md
+```
+
+### Stage sequence
 
 | Stage | Trials | Required evidence |
 | --- | ---: | --- |

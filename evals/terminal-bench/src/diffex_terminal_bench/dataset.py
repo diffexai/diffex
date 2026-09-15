@@ -1,6 +1,8 @@
 """Download verified benchmark inputs independently of mutable registries."""
 
 from contextlib import contextmanager
+import fcntl
+import os
 from pathlib import Path
 import re
 import shutil
@@ -53,19 +55,26 @@ def prepare_dataset(config: BenchmarkConfig, cache: Path):
     """Re-extract the verified archive each time; never trust an edited cache."""
     cache.mkdir(parents=True, exist_ok=True)
     archive = cache / f"{config.dataset.archive_sha256}.tar.gz"
-    if not archive.exists():
-        with tempfile.NamedTemporaryFile(dir=cache, suffix=".download") as download:
-            with urlopen(config.dataset.archive_url, timeout=60) as response:
-                shutil.copyfileobj(response, download)
-            download.flush()
-            if sha256(Path(download.name)) != config.dataset.archive_sha256:
-                raise ValueError("Dataset download SHA-256 differs from benchmark.toml")
-            shutil.copyfile(download.name, archive)
-    if sha256(archive) != config.dataset.archive_sha256:
-        raise ValueError("Cached dataset archive SHA-256 differs from benchmark.toml")
     with tempfile.TemporaryDirectory(prefix="diffex-tb-inputs-") as temp:
-        with tarfile.open(archive) as tar:
-            tar.extractall(temp, filter="data")
+        # Serialize publication and extraction for this digest, not execution.
+        # Separate runs can share the archive but never their extracted tasks.
+        with (cache / f"{config.dataset.archive_sha256}.lock").open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            if not archive.exists():
+                with tempfile.TemporaryDirectory(dir=cache, prefix=".download-") as staging:
+                    downloaded = Path(staging) / archive.name
+                    with downloaded.open("wb") as download, urlopen(config.dataset.archive_url, timeout=60) as response:
+                        shutil.copyfileobj(response, download)
+                        download.flush()
+                        os.fsync(download.fileno())
+                    if sha256(downloaded) != config.dataset.archive_sha256:
+                        raise ValueError("Dataset download SHA-256 differs from benchmark.toml")
+                    # Readers can never observe an incomplete published archive.
+                    os.replace(downloaded, archive)
+            if sha256(archive) != config.dataset.archive_sha256:
+                raise ValueError("Cached dataset archive SHA-256 differs from benchmark.toml")
+            with tarfile.open(archive) as tar:
+                tar.extractall(temp, filter="data")
         roots = list(Path(temp).iterdir())
         if len(roots) != 1 or not roots[0].is_dir():
             raise ValueError("Expected a single dataset archive root")

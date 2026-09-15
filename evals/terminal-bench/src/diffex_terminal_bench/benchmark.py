@@ -23,6 +23,7 @@ from diffex_terminal_bench.dataset import BenchmarkConfig, load_config, prepare_
 from diffex_terminal_bench.daytona_backend import confirm_cleanup
 from diffex_terminal_bench.execution import PROVIDER_ENV
 from diffex_terminal_bench.gate import STAGES, fingerprint, inventory, require_previous, sha256, stage_tasks, validate_trial, write_json
+from diffex_terminal_bench.summary import refresh_index, write_index
 
 
 PACKAGE = Path(__file__).resolve().parents[2]
@@ -78,6 +79,7 @@ async def run_stage(config: BenchmarkConfig, tasks: dict[str, Path], identity: d
     report = {"schema_version": 1, "stage": stage, "identity": identity, "identity_sha256": fingerprint(identity),
               "started_at": datetime.now(timezone.utc).isoformat(), "passed": False, "trials": []}
     write_json(directory / "gate.json", report)
+    refresh_index(root.parent)
     try:
         async with AsyncDaytona() as client:
             for index, task in enumerate(selected, 1):
@@ -108,6 +110,7 @@ async def run_stage(config: BenchmarkConfig, tasks: dict[str, Path], identity: d
                 report["trials"].append({"task": task, "directory": trial_dir.name,
                                          "evidence": evidence, "files": inventory(trial_dir)})
                 write_json(directory / "gate.json", report)
+                refresh_index(root.parent)
         report["passed"] = True
     except BaseException as exc:
         report["failure"] = {"error": type(exc).__name__, "trial_index": len(report["trials"]) + 1}
@@ -115,6 +118,7 @@ async def run_stage(config: BenchmarkConfig, tasks: dict[str, Path], identity: d
     finally:
         report["finished_at"] = datetime.now(timezone.utc).isoformat()
         write_json(directory / "gate.json", report)
+        refresh_index(root.parent)
         # Harbor owns a separate singleton HTTP client; close it on this loop.
         manager = await DaytonaClientManager.get_instance()
         await manager._cleanup()
@@ -136,27 +140,40 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=PACKAGE / "benchmark.toml")
     parser.add_argument("--output", type=Path, default=PACKAGE / "results/release-gate")
+    parser.add_argument("--dataset-cache", type=Path, default=PACKAGE / "results/dataset-cache",
+                        help="Shared archive cache; every use verifies the pinned SHA-256")
+    parser.add_argument("--results-dir", type=Path, help="Directory to scan with --refresh-index (defaults to the output parent)")
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--prepare", action="store_true", help="Verify dataset and report stage sizes without creating sandboxes")
+    mode.add_argument("--refresh-index", action="store_true", help="Rebuild index.md from local reports without downloads or API calls")
     mode.add_argument("--stage", choices=STAGES)
     mode.add_argument("--verify-through", choices=STAGES, help="Recheck retained or downloaded stage evidence without API calls")
     mode.add_argument("--through", choices=STAGES[:-1], help="Run prerequisite stages in order; stops on first failure")
     args = parser.parse_args()
+    if args.results_dir is not None and not args.refresh_index:
+        parser.error("--results-dir requires --refresh-index")
     os.umask(0o077)
-    config = load_config(args.config)
     root = args.output.resolve()
+    if args.refresh_index:
+        directory = args.results_dir.resolve() if args.results_dir is not None else root.parent
+        print(f"Updated run index: {write_index(directory)}")
+        return
+    config = load_config(args.config)
     stage = args.stage or args.through
     if not args.prepare and not args.verify_through:
         preflight(config, oracle=stage == "oracle")
-    with prepare_dataset(config, root / "dataset-cache") as (tasks, digests):
+    with prepare_dataset(config, args.dataset_cache.resolve()) as (tasks, digests):
         if args.prepare:
             write_json(root / "dataset.json", {"dataset": config.dataset.model_dump(), "task_digests": digests,
+                       "model": config.model, "policy": config.policy.model_dump(),
                        "stages": {name: len(stage_tasks(name, config.pilot_tasks, list(tasks))) for name in STAGES}})
+            refresh_index(root.parent)
             print(f"Verified {len(tasks)} pinned tasks: {root / 'dataset.json'}")
             return
         identity = run_identity(config, digests)
         if args.verify_through:
             require_previous(root, args.verify_through, identity, config.pilot_tasks, list(tasks), include_current=True)
+            refresh_index(root.parent)
             print(f"Verified retained evidence through {args.verify_through}: {root}")
             return
         asyncio.run(execute(config, tasks, identity, root, stage, bool(args.through)))
