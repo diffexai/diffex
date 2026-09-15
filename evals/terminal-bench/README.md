@@ -140,10 +140,10 @@ These checks use controlled responses without paid model calls and do not establ
 
 ### Diffex 0.2.4 pin validation
 
-On 2026-09-15, Diffex 0.2.4 passed four execution trials and 12 outcome trials on the pinned Linux arm64 image.
+On 2026-09-15, Diffex 0.2.4 passed four execution trials and 12 outcome trials on each pinned Linux image (arm64 native and amd64 emulated).
 Installation integrity and CLI checks passed, the packaged release context loaded without duplication, and both runners confirmed process and container cleanup.
 Execution trajectories reconciled root and child usage; failed and interrupted outcomes retained validated ATIF with incomplete accounting where appropriate.
-All 55 adapter tests, `npm run check`, and production-content inspection passed.
+All 55 adapter tests, `npm run check`, `./test.sh`, and production-content inspection passed.
 Dataset preparation verified all 89 Terminal-Bench 2.1 tasks and the ten declared pilot selections from the pinned source archive.
 These controlled tests use a loopback provider; a new Daytona oracle and live Diffex trial remain necessary for the updated qualification identity.
 
