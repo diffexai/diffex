@@ -159,7 +159,7 @@ uv run --locked harbor run --config execution.yaml \
 
 [execution.yaml](execution.yaml) records the default policy and allows 630 seconds for Harbor setup, encompassing the installer's 600-second deadline and transport overhead.
 The task's agent timeout remains in effect.
-Use `--ak thinking=medium`, `--ak tools=read,bash,edit,write`, or `--ak subagents=enabled` to change the corresponding policy explicitly.
+Use `--ak thinking=medium`, `--ak tools=read,bash,edit,write`, or `--ak subagents=disabled` to change the corresponding policy explicitly.
 Inspect accepted options with `uv run --locked harbor agent schema diffex_terminal_bench.adapter:DiffexAgent`.
 Unknown options, arbitrary native config, prompt templates, injected skills, and MCP servers are rejected.
 Model IDs must include a supported provider prefix; fuzzy patterns and thinking suffixes are rejected.
@@ -204,8 +204,11 @@ The pinned npm `0.2.4` release includes `dist/AGENTS.md`, which matches the adap
 The adapter retains that packaged context without adding a global duplicate.
 The effective system prompt must contain the release instructions, and their SHA-256 is recorded.
 
-Subagents are disabled by omitting coordination tools from the explicit tool allowlist.
-Enabling them adds `spawn_agent`, `agent_action`, and `agents`; the pinned CLI owns child scheduling and its default concurrency limit.
+The checked-in `benchmark.toml` and `execution.yaml` enable subagents, adding `spawn_agent`, `agent_action`, and `agents` to the explicit tool allowlist.
+Diffex decides whether to call those tools; enabling them does not require a child on every task.
+Children share their trial's sandbox, and the pinned CLI owns child scheduling and its default concurrency limit.
+The staged runner's `-n/--concurrency` controls simultaneous trials and sandboxes separately.
+An adapter invocation that omits the subagent policy still defaults to disabled, omitting coordination tools.
 Root and child sessions are retained together beneath `run-<uuid>/sessions/`, including the parent-owned child session directories.
 
 ### Execution evidence

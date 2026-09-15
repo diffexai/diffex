@@ -28,5 +28,5 @@ task_count = 89
 [policy]
 thinking = "xhigh"
 tools = "read,bash,edit,write,update_plan"
-subagents = "disabled"
+subagents = "enabled"
 project_resources = "context-only"

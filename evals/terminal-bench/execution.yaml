@@ -11,5 +11,5 @@ agents:
     kwargs:
       thinking: high
       tools: read,bash,edit,write,update_plan
-      subagents: disabled
+      subagents: enabled
       project_resources: context-only

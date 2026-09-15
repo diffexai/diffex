@@ -14,6 +14,8 @@ from harbor.models.job.config import JobConfig
 import yaml
 
 from diffex_terminal_bench.adapter import DiffexAgent
+from diffex_terminal_bench.benchmark import PACKAGE, trial_config
+from diffex_terminal_bench.dataset import load_config
 
 
 class ExecutionTests(unittest.IsolatedAsyncioTestCase):
@@ -101,6 +103,27 @@ class ExecutionTests(unittest.IsolatedAsyncioTestCase):
         await agent.run("Task", environment, AgentContext())
         self.assertTrue({"spawn_agent", "agent_action", "agents"}.issubset(configs[0]["tools"]))
         self.assertTrue(any("chown -R 1000" in call.kwargs["command"] for call in environment.exec.call_args_list))
+
+    async def test_checked_in_eval_policies_expose_subagent_tools(self):
+        benchmark = load_config(PACKAGE / "benchmark.toml")
+        staged = trial_config(benchmark, Path("/task"), Path("/runs/one"), "unique", oracle=False).agent
+        controlled = JobConfig.model_validate(yaml.safe_load((PACKAGE / "execution.yaml").read_text())).agents[0]
+        for config in (staged, controlled):
+            with self.subTest(model=config.model_name):
+                environment = self.make_environment()
+                requested = []
+
+                async def upload(source, target):
+                    if target.endswith("requested.json"):
+                        requested.append(json.loads(Path(source).read_text()))
+
+                environment.upload_file.side_effect = upload
+                agent = DiffexAgent(logs_dir=self.logs_dir, model_name=config.model_name, **config.kwargs,
+                                    extra_env={"OPENAI_API_KEY": "test-only"})
+                await agent.run("Task", environment, AgentContext())
+                self.assertEqual(requested[0]["subagents"], "enabled")
+                self.assertEqual(requested[0]["tools"], ["read", "bash", "edit", "write", "update_plan",
+                                                       "spawn_agent", "agent_action", "agents"])
 
     async def test_missing_credentials_and_ambiguous_models_fail_before_exec(self):
         with patch.dict(os.environ, {}, clear=True):

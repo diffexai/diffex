@@ -27,7 +27,9 @@ The preparation command writes `results/release-gate/dataset.json` without creat
 
 Harbor 0.23.0 and Daytona SDK 0.210.0 are locked in the benchmark's private Python environment.
 Node 22.23.2, Diffex 0.2.4, npm integrity, registry, and Node archive checksums come from [pins.toml](src/diffex_terminal_bench/pins.toml).
-The default is `openai/gpt-5.5`, `xhigh` thinking, tools `read,bash,edit,write,update_plan`, disabled subagents, disabled evolution, and `context-only` project resources.
+The default is `openai/gpt-5.5`, `xhigh` thinking, tools `read,bash,edit,write,update_plan`, enabled subagents, disabled evolution, and `context-only` project resources.
+Enabled subagents add `spawn_agent`, `agent_action`, and `agents` to the model's tools; Diffex chooses whether to use them.
+Children execute inside the parent trial's sandbox and their sessions and usage remain in the trial evidence.
 Change and commit the configuration before starting a new qualification sequence.
 Every subsequent stage must match the exact recorded identity, including the adapter commit and dependency lock.
 The earlier TB 2.0 / Diffex 0.2.2 oracle evidence cannot qualify this configuration.
@@ -50,6 +52,46 @@ Record the created sandbox IDs, snapshots, and actual CPU, memory, and disk from
 The pinned dataset includes upstream image tags and network-installed dependencies; archive verification does not make those external services immutable.
 
 ## Ordered stages
+
+### Refresh and restart with parallel trials
+
+The adapter runs from the local uv project, and a newly started command reads the current Python source and `benchmark.toml`.
+An already running command keeps its loaded code and policy; let it finish or interrupt it once with Ctrl-C and wait for cleanup before restarting.
+No Diffex npm release or product rebuild is needed for these runner and policy changes; new sandboxes install the existing pinned release with the updated tool allowlist.
+
+After updating the checkout, run the following in your Mac's zsh terminal with `DAYTONA_API_KEY` and `OPENAI_API_KEY` exported.
+`git status --short` must produce no output.
+Use a fresh output directory because the adapter commit, concurrency, and subagent policy must match across the entire sequence; old prerequisites cannot qualify the new configuration.
+
+```zsh
+cd /Users/jialeyu/Projects/diffex-new/evals/terminal-bench
+git status --short
+uv sync --locked
+
+TB_OUTPUT="results/qualification-tb21-$(date +%Y%m%d-%H%M%S)"
+
+# Step 3: verify all dataset inputs.
+uv run --locked python -m diffex_terminal_bench.benchmark \
+  --prepare -n 3 --output "$TB_OUTPUT"
+
+# Step 4: oracle, single trial, then three concurrent integration trials.
+uv run --locked python -m diffex_terminal_bench.benchmark \
+  --through integration -n 3 --output "$TB_OUTPUT"
+
+# Step 5: after step 4 passes, ten total trials with at most three active.
+uv run --locked python -m diffex_terminal_bench.benchmark \
+  --stage pilot -n 3 --output "$TB_OUTPUT"
+
+# Step 6: verify using the same checkout, output, and concurrency.
+uv run --locked python -m diffex_terminal_bench.benchmark \
+  --verify-through pilot -n 3 --output "$TB_OUTPUT"
+open "$TB_OUTPUT/pilot"
+```
+
+Keep the same terminal or restore the exact `TB_OUTPUT` value when continuing later.
+Do not change the checkout, configuration, or concurrency between steps 4-6.
+The recorded `gate.json` identity shows `concurrency: 3` and `policy.subagents: enabled`.
+Each Diffex run's `requested.json` and `effective.json` show the coordination tool allowlist; native sessions and `trajectory.json` show actual calls and child execution.
 
 ### Shared dataset cache and run index
 
