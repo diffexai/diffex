@@ -2,8 +2,9 @@
 
 This private Python package installs and executes the pinned Diffex release through Harbor.
 Execution uses explicit model and harness policies, fresh trial state, and retained native sessions.
-Outcome parsing, interrupted-run recovery, ATIF trajectories, and usage accounting remain subsequent implementation steps.
-Process exit and configuration checks alone do not establish a valid benchmark outcome; this integration is not yet ready for scored benchmark runs.
+Execution outcomes include native stream completion, terminal assistant state, retries, process status, configuration, and cleanup verification.
+ATIF trajectories, usage accounting, and the staged benchmark release gate remain subsequent implementation steps.
+This integration is not yet ready for leaderboard runs.
 
 ## Host setup
 
@@ -70,16 +71,23 @@ These are installation checks, not Terminal-Bench task scores.
 uv run --locked python -m unittest discover -s tests -v
 uv run --locked python scripts/smoke_execution.py --platform linux/arm64
 uv run --locked python scripts/smoke_execution.py --platform linux/amd64
+uv run --locked python scripts/smoke_outcomes.py --platform linux/arm64
+uv run --locked python scripts/smoke_outcomes.py --platform linux/amd64
 uv run --locked python scripts/check_production_contents.py
 ```
 
 The unit checks cover installation pins, configuration validation, explicit credentials, prompt uploads, fresh trial paths, and subagent policy.
+They also cover outcome parsing, incomplete streams, transport failures, log-collection failures, and repeated cancellation during recovery.
 The execution smoke installs the real npm release, then redirects a fixture model to a loopback faux provider with a test-only wrapper.
 It exercises shell and file tools, multiline instructions with shell metacharacters and Unicode, repeated trials, enabled child agents, and non-root execution without paid API calls.
 The fixture checks the actual request credentials without storing their values, verifies empty initial sessions and state, and scans retained artifacts for the fixture secrets.
 It also checks that task context and the exact release instructions reach the system prompt while project settings, extensions, and `SYSTEM.md` are ignored.
 Only the agent log directory is mounted, and each invocation removes its container in a `finally` block.
 Generated evidence is retained under `results/diffex-execution-*/`.
+The outcome smoke exercises success, authentication failure, exhausted retry, recovered retry, interrupted JSON output, and a Harbor-style execution timeout as both root and a non-root user.
+It uses the pinned npm release with a loopback provider and confirms that zero-exit failures are rejected.
+Success and timeout cases create a detached tool descendant that ignores TERM, then verify that cleanup stops it before the next trial.
+Evidence is retained under `results/diffex-outcomes-*/`, including partial stdout, stderr, native sessions, process status, cleanup, and outcomes.
 The packaging check packs every public npm workspace into temporary tarballs with lifecycle scripts disabled, inspects their contents for benchmark paths, and records file counts and SHA-256 hashes in `results/production-contents.json`.
 It requires existing production build output, including `packages/coding-agent/dist/cli.js`, and fails if that CLI entrypoint is missing.
 It does not build, publish, or regenerate release artifacts.
@@ -104,6 +112,15 @@ Each platform covered two isolated single-agent trials, an enabled-subagent tria
 All trials preserved the instruction bytes, selected `openai/gpt-5` with `high` thinking, retained the exact release context, executed shell/file tasks in `/task/work`, and retained their native sessions.
 The credential-leak scans, ten unit tests, production package-content check, and repository `npm run check` passed.
 These controlled provider responses validate execution plumbing; they do not measure model task performance or validate item 3's outcome handling.
+
+On 2026-09-15, the outcome smoke passed 12 trials on each pinned Linux image, covering all six outcome cases as root and UID 65534.
+Authentication failures, exhausted retries, and truncated output from the pinned CLI all exited zero and were correctly rejected by the adapter.
+Recovered retries completed successfully, and timeout trials retained their logs and sessions while stopping TERM-resistant detached descendants.
+Every successful smoke invocation confirmed container removal.
+The prior execution smoke also passed again on both architectures, including enabled subagents.
+The 22 adapter unit tests, 11 source print-mode tests, production-content check, and repository `npm run check` passed.
+An initial arm64 installation encountered an Ubuntu mirror hash mismatch; the subsequent clean installation passed without changing installation pins or weakening integrity checks.
+These results validate controlled execution outcomes and cleanup, not model quality, ATIF export, or the later benchmark release gate.
 
 ## Execute a controlled task
 
@@ -175,11 +192,56 @@ Each run directory retains:
 - `effective.json`: resolved model, thinking, tools, working directory, session path, prompt hashes, and release-context verification.
 - `system-prompt.txt`: the effective system prompt, including release and task context.
 - `stdout.jsonl`, `stderr.log`, and `process.json`: native JSON events, diagnostics, and process status.
+- `launcher.json` and `cleanup.json`: launcher process identity and verified cleanup status.
+- `launcher.stdout.log` and `launcher.stderr.log`: launcher diagnostics, including failures before CLI startup.
+- `outcome.json`: execution classification, stream completeness, final assistant stop reason, retry counts, interruption state, and recovery errors.
 - `sessions/` and `state/`: native root/child history and isolated harness state.
 
 Harbor collects the agent log tree after the run; avoid log filters that exclude these paths.
 Provider usage fields in `AgentContext` remain unset until the accounting implementation is added.
-Terminal JSON errors, retries, timeouts, and incomplete streams still require the outcome handling in checklist item 3.
+`AgentContext.metadata.diffex_outcome` contains the execution outcome, and `diffex_run_dir` identifies its artifacts.
+
+### Execution outcomes and interruption recovery
+
+A completed execution requires zero CLI and launcher exit codes, no terminating signal or spawn error, matching effective configuration, and verified cleanup.
+The parser reads JSONL incrementally and requires matching assistant messages, a final `stop` response, closed message/run boundaries, resolved retries, and the native `agent_settled` event.
+Malformed or truncated lines, missing completion events, pending tool use, token-limit termination, and unresolved retries cannot count as completed runs.
+Earlier provider errors are recoverable when retry events and the subsequent terminal assistant state establish success.
+Tool errors alone do not fail execution: the assistant can inspect and recover from them.
+
+| Evidence | Adapter outcome | Harbor behavior |
+| --- | --- | --- |
+| Complete successful run, including recovered retry | `completed` | Return normally; verifier determines reward |
+| Terminal authentication error | `authentication_failure` | Raise `AgentAuthenticationError` |
+| Terminal assistant error or failed retry | `provider_failure` | Raise `DiffexExecutionError` |
+| Nonzero process, signal, or spawn error | `process_failure` | Raise `DiffexExecutionError` |
+| Missing, truncated, or unfinished native stream | `incomplete` | Raise `DiffexExecutionError` |
+| Effective configuration mismatch | `configuration_failure` | Raise `DiffexExecutionError` |
+| Unverified cleanup or failed evidence collection | `cleanup_failure` / `infrastructure_failure` | Raise `DiffexExecutionError` |
+| Harbor task deadline cancels `run()` | `cancelled` | Preserve cancellation; Harbor raises `AgentTimeoutError` |
+| Environment transport timeout or failure | `timeout` / `transport_failure` | Preserve the original exception |
+
+`DiffexExecutionError` subclasses Harbor's `NonZeroAgentExitCodeError`, so infrastructure failures retain exception information rather than becoming ordinary zero-reward results.
+The adapter never sets or infers verifier reward.
+A completed assistant that produces an incorrect solution returns normally and can earn zero from the verifier.
+The pinned `0.2.2` release remains unchanged; adapter parsing handles its zero-exit terminal errors.
+The source CLI fix makes terminal assistant errors and aborts return nonzero in JSON mode as well as text mode, and requires a future release to reach the pinned installation.
+
+The launcher writes stdout and stderr directly to files and retains native sessions during execution.
+On success, failure, or cancellation, an independent Harbor exec requests launcher shutdown, stops the CLI process group, and scans Linux `/proc` for same-user descendants carrying the trial's unique environment marker.
+Process start times protect against signaling a reused PID.
+Cleanup escalates from TERM to KILL after five seconds, waits up to two more seconds, and records whether any live tracked processes remain.
+Already exited zombies cannot execute and are left for sandbox init to reap.
+A stop-request file prevents delayed launch after transport cancellation.
+Task commands must preserve the inherited trial environment marker for detached descendants to remain discoverable.
+Harbor must still delete the sandbox after the trial for complete environment isolation.
+
+Recovery is shielded against repeated cancellation and runs before `run()` returns or re-raises the interruption.
+It allows up to 15 seconds for the cleanup transport and 15 seconds for mounted-log preparation or 30 seconds for remote log download.
+The final summary is written directly to host agent logs after recovery, so later remote log collection cannot overwrite a cancellation classification.
+These bounded recovery operations can extend the task deadline; they do not grant the agent additional task execution time.
+If the sandbox transport becomes unavailable, available host logs and recovery diagnostics remain, cleanup is not reported as successful, and Harbor's environment teardown remains necessary.
+Avoid log filters that discard the retained evidence.
 
 ## Production exclusion
 
