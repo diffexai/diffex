@@ -226,6 +226,63 @@ Recovery records `sandbox-recovery.json` and preserves the original cleanup repo
 It does not turn a failed sequence into a passing one.
 It requires the original output directory and access to the same Daytona account.
 
+## Export retained trials for Harbor Hub
+
+The staged runner writes individual Harbor trials and `gate.json`, so its stage directories cannot be passed directly to `harbor upload`.
+Export a stage into a new job directory first:
+
+```zsh
+cd /Users/jialeyu/Projects/diffex-new/evals/terminal-bench
+uv sync --locked
+
+TB_JOB="results/harbor-exports/pilot-$(date +%Y%m%d-%H%M%S)"
+uv run --locked python -m diffex_terminal_bench.export_job \
+  "$TB_OUTPUT/pilot" --output "$TB_JOB"
+```
+
+The default requires a stopped stage with recorded passing status and complete trial coverage.
+To share a failed or incomplete stopped stage for diagnosis, explicitly include every retained terminal result:
+
+```zsh
+uv run --locked python -m diffex_terminal_bench.export_job \
+  "$TB_OUTPUT/pilot" --output "$TB_JOB" --allow-partial
+```
+
+Use one of those export commands, not both with the same destination.
+The exporter refuses to overwrite an existing job, copy a running stage, omit a started trial without a terminal result/lock, or accept changed evidence for a checked trial.
+It works offline with old recorded configurations and does not require the original clean checkout, provider credentials, or temporary dataset extraction.
+It neither reruns trials nor changes source results.
+
+The job contains Harbor `config.json`, `result.json`, and `lock.json`, plus independent copies of all trial files.
+Rewards, exception records, trial IDs, native sessions, ATIF trajectories, and media remain unchanged.
+Job totals retain the planned trial count and separately count terminal results, errors, and unrun tasks.
+Unknown usage in failed trials remains unknown in those trials; job usage is an observed sum, not a claim of complete accounting.
+`analysis.md` explains whether the source gate passed, and `export.json` records source hashes and missing trials.
+This packaging check does not requalify the source stage or establish leaderboard eligibility.
+The exported configuration retains original task paths for provenance; use the custom staged runner for future evaluations, not `harbor job resume` on an export.
+
+Harbor's upload archive filters omit custom files at the trial root.
+The exporter also places sandbox lifecycle evidence under each trial's `artifacts/diffex-qualification/`, with the source gate and export manifest under the first trial's artifact directory, so those files survive Hub downloads.
+Hidden child-session directories remain under `agent/` and are included in Harbor's archives.
+Repeated exports of the same source snapshot have a stable job ID; retry an upload from the same exported directory.
+
+Authenticate and upload the exported job privately:
+
+```zsh
+uv run --locked harbor auth login
+uv run --locked harbor upload "$TB_JOB" --private
+```
+
+To publish it publicly instead, use:
+
+```zsh
+uv run --locked harbor upload "$TB_JOB" --public
+```
+
+Harbor prints the Hub viewing link after upload.
+The export command does not upload anything or change visibility.
+See the [Harbor job sharing documentation](https://www.harborframework.com/docs/sharing/jobs) for visibility and download options.
+
 ## CI and remote evidence
 
 [terminal-bench.yml](../../.github/workflows/terminal-bench.yml) is separate from product CI.

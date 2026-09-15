@@ -5,6 +5,7 @@ Execution uses explicit model and harness policies, fresh trial state, and retai
 Execution outcomes include native stream completion, terminal assistant state, retries, process status, configuration, and cleanup verification.
 ATIF export and usage accounting run after evidence recovery, including interrupted trials.
 The [staged benchmark release gate](RELEASE_GATE.md) pins dataset inputs and verifies retained evidence before larger Daytona runs.
+Use the [offline job exporter](RELEASE_GATE.md#export-retained-trials-for-harbor-hub) to package existing stage results for Harbor Hub without rerunning evaluations.
 This integration is not yet ready for leaderboard runs.
 
 ## Host setup
