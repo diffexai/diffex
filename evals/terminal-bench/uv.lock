@@ -284,10 +284,16 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "harbor" },
+    { name = "pydantic" },
+    { name = "pyyaml" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "harbor", specifier = "==0.23.0" }]
+requires-dist = [
+    { name = "harbor", specifier = "==0.23.0" },
+    { name = "pydantic", specifier = "==2.13.5" },
+    { name = "pyyaml", specifier = "==6.0.3" },
+]
 
 [[package]]
 name = "dirhash"

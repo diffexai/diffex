@@ -1,8 +1,9 @@
-# Diffex Terminal-Bench installation
+# Diffex Terminal-Bench integration
 
-This private Python package implements the installation stage of a Harbor adapter.
-Task execution, credentials, trial isolation, outcome parsing, and trajectories belong to subsequent implementation steps.
-Calling `DiffexAgent.run()` currently raises `NotImplementedError` so an installation check cannot be mistaken for a benchmark result.
+This private Python package installs and executes the pinned Diffex release through Harbor.
+Execution uses explicit model and harness policies, fresh trial state, and retained native sessions.
+Outcome parsing, interrupted-run recovery, ATIF trajectories, and usage accounting remain subsequent implementation steps.
+Process exit and configuration checks alone do not establish a valid benchmark outcome; this integration is not yet ready for scored benchmark runs.
 
 ## Host setup
 
@@ -67,10 +68,18 @@ These are installation checks, not Terminal-Bench task scores.
 
 ```bash
 uv run --locked python -m unittest discover -s tests -v
+uv run --locked python scripts/smoke_execution.py --platform linux/arm64
+uv run --locked python scripts/smoke_execution.py --platform linux/amd64
 uv run --locked python scripts/check_production_contents.py
 ```
 
-The unit checks reject changed Harbor or Diffex versions, failed installation commands, altered registry integrity or tarball URLs, and attempts to execute tasks with the installation-only adapter.
+The unit checks cover installation pins, configuration validation, explicit credentials, prompt uploads, fresh trial paths, and subagent policy.
+The execution smoke installs the real npm release, then redirects a fixture model to a loopback faux provider with a test-only wrapper.
+It exercises shell and file tools, multiline instructions with shell metacharacters and Unicode, repeated trials, enabled child agents, and non-root execution without paid API calls.
+The fixture checks the actual request credentials without storing their values, verifies empty initial sessions and state, and scans retained artifacts for the fixture secrets.
+It also checks that task context and the exact release instructions reach the system prompt while project settings, extensions, and `SYSTEM.md` are ignored.
+Only the agent log directory is mounted, and each invocation removes its container in a `finally` block.
+Generated evidence is retained under `results/diffex-execution-*/`.
 The packaging check packs every public npm workspace into temporary tarballs with lifecycle scripts disabled, inspects their contents for benchmark paths, and records file counts and SHA-256 hashes in `results/production-contents.json`.
 It requires existing production build output, including `packages/coding-agent/dist/cli.js`, and fails if that CLI entrypoint is missing.
 It does not build, publish, or regenerate release artifacts.
@@ -88,7 +97,89 @@ On 2026-09-14, both pinned Ubuntu images passed through Harbor 0.23.0 on Docker 
 Both installations reported Diffex 0.2.2, Node 22.23.2, npm 10.9.8, and the pinned npm integrity, with empty stderr for the three CLI checks.
 The production content check inspected the current checkout's public `@diffexai/diffex@0.2.4` tarball (1,170 entries) and found no benchmark content.
 The five unit tests and repository `npm run check` passed.
-These observations validate installation on the specified images; broader task-environment coverage and benchmark execution remain later steps.
+These observations validate installation on the specified images; broader task-environment coverage remains a later step.
+
+On 2026-09-15, the execution smoke passed four controlled trials on each pinned Linux image (amd64 emulated and arm64 native).
+Each platform covered two isolated single-agent trials, an enabled-subagent trial, and a non-root trial, with 16 loopback provider requests and successful container cleanup.
+All trials preserved the instruction bytes, selected `openai/gpt-5` with `high` thinking, retained the exact release context, executed shell/file tasks in `/task/work`, and retained their native sessions.
+The credential-leak scans, ten unit tests, production package-content check, and repository `npm run check` passed.
+These controlled provider responses validate execution plumbing; they do not measure model task performance or validate item 3's outcome handling.
+
+## Execute a controlled task
+
+Start Docker and make the selected provider credential available in the host environment through your normal secret-loading mechanism.
+Set the exact `model_name` in `execution.yaml`, then run from this directory with your task path:
+
+```bash
+uv run --locked harbor run --config execution.yaml \
+  --path /absolute/path/to/task
+```
+
+[execution.yaml](execution.yaml) records the default policy and allows 630 seconds for Harbor setup, encompassing the installer's 600-second deadline and transport overhead.
+The task's agent timeout remains in effect.
+Use `--ak thinking=medium`, `--ak tools=read,bash,edit,write`, or `--ak subagents=enabled` to change the corresponding policy explicitly.
+Inspect accepted options with `uv run --locked harbor agent schema diffex_terminal_bench.adapter:DiffexAgent`.
+Unknown options, arbitrary native config, prompt templates, injected skills, and MCP servers are rejected.
+Model IDs must include a supported provider prefix; fuzzy patterns and thinking suffixes are rejected.
+The adapter also checks the resolved model, thinking level, and active tools against the requested configuration after execution.
+
+Supported credential environments are:
+
+| Provider | Credential variables |
+| --- | --- |
+| `anthropic` | `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_OAUTH_TOKEN` |
+| `openai` | `OPENAI_API_KEY` |
+| `google` | `GEMINI_API_KEY` |
+| `openrouter` | `OPENROUTER_API_KEY` |
+| `deepseek` | `DEEPSEEK_API_KEY` |
+| `groq` | `GROQ_API_KEY` |
+| `xai` | `XAI_API_KEY` |
+| `mistral` | `MISTRAL_API_KEY` |
+
+Harbor's agent `extra_env` takes precedence over the host environment.
+Only the selected provider's credential variables are forwarded, using Harbor's `environment.exec(env=...)` mechanism along with the model and thinking configuration.
+Credential values never appear in adapter commands or configuration artifacts.
+The launcher starts Diffex with an explicit environment, discarding inherited agent directories, credentials for other providers, and configuration overrides.
+Stored OAuth accounts, host credentials files, and custom provider endpoints are not imported.
+
+### Prompt and harness policy
+
+The adapter uploads the complete UTF-8 instruction and runs `diffex --mode json --print @instruction.txt` in the task's default working directory and as Harbor's configured agent user.
+The CLI receives stdin EOF through `/dev/null` and the launcher's ignored stdin.
+Native `@file` transport adds Diffex's standard `<file name="...">` wrapper while retaining all instruction bytes, including leading/trailing whitespace and CRLF line endings.
+Instruction contents never become shell command text or command-line flags.
+The observer extension checks that the first user message contains exactly that wrapper and the original instruction.
+It registers only a `message_start` observer, preserving compatibility with child agents.
+
+Each invocation creates an exclusive `run-<uuid>/` under Harbor's agent logs.
+Its fresh `state/` is the `DIFFEX_CODING_AGENT_DIR`, with a fresh home and global `settings.json` containing `{"evolution":{"enabled":false}}` before startup.
+No prior settings, credentials, sessions, or evolved harness selections are copied into it.
+Startup network updates are disabled with the supported offline setting so the pinned model catalog remains stable.
+
+The `context-only` project policy retains ancestor `AGENTS.md`/`CLAUDE.md` context and disables project trust, discovered extensions, skills, prompt templates, and themes.
+It does not pass `--no-context-files` or replace the system prompt.
+The pinned npm `0.2.2` release lacks `dist/AGENTS.md`, so the adapter supplies an exact copy of the repository's `AGENTS_release.md` in fresh global context.
+If an installed release provides that packaged file, the adapter retains it without adding a global duplicate.
+The effective system prompt must contain the release instructions, and their SHA-256 is recorded.
+
+Subagents are disabled by omitting coordination tools from the explicit tool allowlist.
+Enabling them adds `spawn_agent`, `agent_action`, and `agents`; the pinned CLI owns child scheduling and its default concurrency limit.
+Root and child sessions are retained together beneath `run-<uuid>/sessions/`, including the parent-owned child session directories.
+
+### Execution evidence
+
+Each run directory retains:
+
+- `requested.json`: pins, model, thinking, tools, subagent policy, project policy, credential variable names, and instruction hash.
+- `instruction.txt`: the original instruction.
+- `effective.json`: resolved model, thinking, tools, working directory, session path, prompt hashes, and release-context verification.
+- `system-prompt.txt`: the effective system prompt, including release and task context.
+- `stdout.jsonl`, `stderr.log`, and `process.json`: native JSON events, diagnostics, and process status.
+- `sessions/` and `state/`: native root/child history and isolated harness state.
+
+Harbor collects the agent log tree after the run; avoid log filters that exclude these paths.
+Provider usage fields in `AgentContext` remain unset until the accounting implementation is added.
+Terminal JSON errors, retries, timeouts, and incomplete streams still require the outcome handling in checklist item 3.
 
 ## Production exclusion
 

@@ -106,13 +106,13 @@ class DiffexAgent(BaseInstalledAgent):
             "credential_env_names": sorted(credentials),
             "instruction_sha256": hashlib.sha256(instruction.encode("utf-8")).hexdigest(),
         }
-        await self.exec_as_agent(environment, command=f"umask 077 && mkdir -p {shlex.quote(str(self.environment_logs_dir))} && mkdir {shlex.quote(str(run_dir))}")
+        await self.exec_as_root(environment, command=f"umask 077 && mkdir -p {shlex.quote(str(self.environment_logs_dir))} && mkdir {shlex.quote(str(run_dir))}")
         with tempfile.TemporaryDirectory(prefix="diffex-trial-") as temp:
             for name, content in (("instruction.txt", instruction), ("requested.json", json.dumps(requested, indent=2))):
                 source = Path(temp, name)
                 source.write_text(content, encoding="utf-8")
                 await environment.upload_file(source, str(run_dir / name))
-            for name in ("run.cjs", "observe.mjs"):
+            for name in ("run.cjs", "observe.mjs", "release-agents.md"):
                 with as_file(files(__package__).joinpath(name)) as source:
                     await environment.upload_file(source, str(run_dir / name))
         # Uploads may be root-owned even when the task selects a non-root user.
@@ -123,5 +123,6 @@ class DiffexAgent(BaseInstalledAgent):
         await self.exec_as_agent(
             environment,
             command=shlex.join(["/opt/diffex-terminal-bench/node/bin/node", str(run_dir / "run.cjs"), str(run_dir)]) + " </dev/null",
-            env=credentials,
+            env={**credentials, "DIFFEX_TB_PROVIDER": provider,
+                 "DIFFEX_TB_MODEL": model, "DIFFEX_TB_THINKING": options.thinking},
         )

@@ -1,0 +1,138 @@
+"""Run the pinned CLI through Harbor against a loopback faux provider."""
+
+import argparse
+import asyncio
+import hashlib
+import json
+from pathlib import Path
+import subprocess
+import tempfile
+import tomllib
+import uuid
+
+from harbor.environments.docker.docker import DockerEnvironment
+from harbor.models.agent.context import AgentContext
+from harbor.models.task.config import EnvironmentConfig
+from harbor.models.trial.paths import TrialPaths
+
+from diffex_terminal_bench.adapter import DiffexAgent
+from diffex_terminal_bench.config import PINS
+
+
+async def smoke(platform: str) -> None:
+    config = tomllib.loads(Path("smoke.toml").read_text())
+    session_id = f"diffex-execution-{uuid.uuid4().hex[:12]}"
+    trial = TrialPaths(Path("results", session_id).resolve())
+    trial.mkdir()
+    report = {"platform": platform, "image": config["images"][platform], "pins": PINS,
+              "passed": False, "cleanup_passed": False}
+    print(f"Execution evidence: {trial.trial_dir}", flush=True)
+    with tempfile.TemporaryDirectory(prefix="diffex-execution-") as temp:
+        directory = Path(temp)
+        overlay = directory / "platform.yaml"
+        overlay.write_text(f"services:\n  main:\n    platform: {platform}\n")
+        environment = DockerEnvironment(
+            environment_dir=directory, environment_name="diffex-execution-smoke", session_id=session_id,
+            trial_paths=trial, task_env_config=EnvironmentConfig(docker_image=config["images"][platform]),
+            extra_docker_compose=[overlay],
+            mounts=[{"type": "bind", "source": str(trial.agent_dir), "target": "/logs/agent"}],
+        )
+        try:
+            async with asyncio.timeout(config["environment_timeout_sec"]):
+                await environment.start(force_build=False)
+            agent = DiffexAgent(logs_dir=trial.agent_dir, model_name="openai/gpt-5", thinking="high",
+                                extra_env={"OPENAI_API_KEY": "fixture-secret-never-log"})
+            async with asyncio.timeout(PINS["setup_timeout_sec"] + 15):
+                await agent.setup(environment)
+            await environment.upload_file(Path("tests/faux-provider.cjs"), "/tmp/faux-provider.cjs")
+            wrapper = directory / "diffex"
+            wrapper.write_text(
+                "#!/bin/sh\n"
+                "/opt/diffex-terminal-bench/node/bin/node /tmp/faux-provider.cjs prepare\n"
+                "exec /usr/local/bin/diffex-release \"$@\"\n"
+            )
+            await agent.exec_as_root(environment, command="mv /usr/local/bin/diffex /usr/local/bin/diffex-release")
+            await environment.upload_file(wrapper, "/usr/local/bin/diffex")
+            await agent.exec_as_root(environment, command="chmod 755 /usr/local/bin/diffex && mkdir -p /task/work/.diffex/extensions")
+            # Task context must remain visible while executable resources and
+            # project settings cannot replace the chosen benchmark harness.
+            for name, content in {
+                "AGENTS.md": "Task context marker: PRESERVE_TASK_CONTEXT\n",
+                ".diffex/settings.json": '{"evolution":{"enabled":true},"defaultThinkingLevel":"off"}',
+                ".diffex/SYSTEM.md": "DO_NOT_LOAD_PROJECT_SYSTEM",
+                ".diffex/extensions/trap.mjs": 'throw new Error("DO_NOT_LOAD_PROJECT_EXTENSION");',
+            }.items():
+                source = directory / "resource"
+                source.write_text(content)
+                await environment.upload_file(source, f"/task/work/{name}")
+            environment.task_env_config.workdir = "/task/work"
+            await agent.exec_as_root(environment, command="nohup /opt/diffex-terminal-bench/node/bin/node /tmp/faux-provider.cjs >/tmp/faux-provider.log 2>&1 </dev/null &")
+            await agent.exec_as_root(environment, command="wget --retry-connrefused --tries=20 --waitretry=1 -qO /dev/null http://127.0.0.1:8765/health")
+            instruction = "\n  --literal @file 'single' \"double\" $HOME $(touch /task/work/INJECTED) `pwd`\r\nWrite shell.txt and result.txt. Unicode 雪.\n\n"
+            run_dirs = []
+            for subagents, user in (("disabled", None), ("disabled", None), ("enabled", None), ("disabled", "65534")):
+                if user is not None:
+                    await agent.exec_as_root(environment, command="chown -R 65534 /task/work")
+                environment.default_user = user
+                current = DiffexAgent(logs_dir=trial.agent_dir, model_name="openai/gpt-5", thinking="high", subagents=subagents,
+                                      extra_env={"OPENAI_API_KEY": "fixture-secret-never-log"})
+                before = set(trial.agent_dir.glob("run-*"))
+                async with asyncio.timeout(60):
+                    # Exercise Harbor's environment overlay as used by Trial.
+                    with environment.scoped_exec_env({"ANTHROPIC_API_KEY": "unrelated-fixture-secret", "DIFFEX_CODING_AGENT_DIR": "/stale-state"}):
+                        await current.run(instruction, environment, AgentContext())
+                run_dir, = set(trial.agent_dir.glob("run-*")) - before
+                run_dirs.append(run_dir)
+                effective = json.loads((run_dir / "effective.json").read_text())
+                assert effective["instruction_sha256"] == hashlib.sha256(instruction.encode()).hexdigest()
+                assert effective["cwd"] == "/task/work"
+                assert effective["model"] == "gpt-5" and effective["thinking"] == "high"
+                prompt = (run_dir / "system-prompt.txt").read_text()
+                assert "PRESERVE_TASK_CONTEXT" in prompt and "DO_NOT_LOAD_PROJECT_SYSTEM" not in prompt
+                assert effective["release_agents_sha256"] == hashlib.sha256(Path("../../AGENTS_release.md").read_bytes()).hexdigest()
+                initial = json.loads((run_dir / "fixture-start.json").read_text())
+                assert initial == {"state_entries": ["AGENTS.md", "home", "settings.json"], "session_entries": [],
+                                   "settings": {"evolution": {"enabled": False}}, "unrelated_credential_present": False}
+                assert (run_dir / "sessions/root.jsonl").stat().st_size > 0
+                events = [json.loads(line) for line in (run_dir / "stdout.jsonl").read_text().splitlines()]
+                assert not any(event.get("isError") for event in events)
+                if subagents == "enabled":
+                    assert len(list((run_dir / "sessions").rglob("*.jsonl"))) >= 2
+                # Contaminate the previous trial after it completes, proving
+                # the next run never inherits auth, sessions, or harness state.
+                (run_dir / "state/auth.json").write_text('{"stale":true}')
+                (run_dir / "state/SYSTEM.md").write_text("STALE_HARNESS_SELECTION")
+                for selection in (run_dir / "state/harness-state/selections").glob("*.json"):
+                    selection.write_text('{"stale_harness_selection":true}')
+            await agent.exec_as_root(environment, command="test ! -e /task/work/INJECTED && test \"$(cat cwd.txt)\" = /task/work && test \"$(cat shell.txt)\" = shell-ok && test \"$(cat result.txt)\" = file-ok && test \"$(cat child.txt)\" = child-ok")
+            requests = [json.loads(line) for line in (trial.agent_dir / "fixture-requests.jsonl").read_text().splitlines()]
+            assert requests and all(entry["credential_received"] for entry in requests)
+            assert all(entry["body"]["reasoning_effort"] == "high" for entry in requests)
+            for run_dir in run_dirs:
+                remote_instruction = f"/logs/agent/{run_dir.name}/instruction.txt"
+                expected_prompt = f'<file name="{remote_instruction}">\n{instruction}\n</file>\n'
+                assert any(message.get("content") in (expected_prompt, [{"type": "text", "text": expected_prompt}])
+                           for entry in requests for message in entry["body"]["messages"])
+            for run_dir in run_dirs:
+                assert "STALE_HARNESS_SELECTION" not in (run_dir / "system-prompt.txt").read_text()
+            for path in trial.agent_dir.rglob("*"):
+                if path.is_file():
+                    contents = path.read_bytes()
+                    assert b"fixture-secret-never-log" not in contents, path
+                    assert b"unrelated-fixture-secret" not in contents, path
+            report.update(passed=True, trials=len(run_dirs), provider_requests=len(requests))
+        finally:
+            await environment.stop(delete=True)
+            remaining = subprocess.check_output(["docker", "ps", "-aq", "--filter", f"label=com.docker.compose.project={session_id}"], text=True).strip()
+            report["cleanup_passed"] = not remaining
+            (trial.trial_dir / "smoke.json").write_text(json.dumps(report, indent=2) + "\n")
+            if remaining:
+                raise RuntimeError("Execution smoke container was not removed")
+    print(json.dumps(report, indent=2))
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--platform", choices=("linux/amd64", "linux/arm64"), default="linux/amd64")
+    args = parser.parse_args()
+    asyncio.run(smoke(args.platform))

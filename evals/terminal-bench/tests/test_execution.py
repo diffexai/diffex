@@ -1,6 +1,7 @@
 """Execution contract tests without provider calls."""
 
 import json
+from importlib.resources import files
 import os
 from pathlib import Path, PurePosixPath
 import unittest
@@ -8,11 +9,22 @@ from unittest.mock import create_autospec, patch
 
 from harbor.environments.base import BaseEnvironment, ExecResult
 from harbor.models.agent.context import AgentContext
+from harbor.models.job.config import JobConfig
+import yaml
 
 from diffex_terminal_bench.adapter import DiffexAgent
 
 
 class ExecutionTests(unittest.IsolatedAsyncioTestCase):
+    def test_release_context_and_example_config(self):
+        root = Path(__file__).resolve().parents[3]
+        self.assertEqual(files("diffex_terminal_bench").joinpath("release-agents.md").read_bytes(),
+                         (root / "AGENTS_release.md").read_bytes())
+        config = JobConfig.model_validate(yaml.safe_load((Path(__file__).resolve().parents[1] / "execution.yaml").read_text()))
+        self.assertEqual(config.agents[0].import_path, DiffexAgent.import_path())
+        self.assertEqual(config.agents[0].model_name, "openai/gpt-5")
+        DiffexAgent.preflight(config.agents[0].kwargs)
+
     def make_environment(self):
         environment = create_autospec(BaseEnvironment, instance=True)
         environment.default_user = None
@@ -46,7 +58,8 @@ class ExecutionTests(unittest.IsolatedAsyncioTestCase):
         calls = [call.kwargs for call in environment.exec.call_args_list if call.kwargs.get("env")]
         self.assertEqual(len(calls), 2)
         for call in calls:
-            self.assertEqual(call["env"], {"OPENAI_API_KEY": "selected-secret"})
+            self.assertEqual(call["env"], {"OPENAI_API_KEY": "selected-secret", "DIFFEX_TB_PROVIDER": "openai",
+                                           "DIFFEX_TB_MODEL": "gpt-5", "DIFFEX_TB_THINKING": "high"})
             self.assertIsNone(call["cwd"])
             self.assertIsNone(call["user"])
             self.assertIn("</dev/null", call["command"])
