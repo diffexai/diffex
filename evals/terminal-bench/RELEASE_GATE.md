@@ -165,6 +165,27 @@ The gate hashes and revalidates their evidence before allowing progression.
 
 ## Evidence and failure policy
 
+### Diagnose a stopped trial
+
+Inspect a retained trial without credentials, downloads, a clean checkout, or another evaluation:
+
+```zsh
+uv run --locked python -m diffex_terminal_bench.benchmark \
+  --diagnose-trial "$TB_OUTPUT/pilot/007-build-cython-ext"
+```
+
+The command reports the Harbor exception, a recorded agent deadline, scheduled retry counts, and observed rate-limit retries without printing raw provider errors.
+New live-stage failures also record these diagnostics in `gate.json` and print the evidence directory instead of a generic traceback.
+Scheduled backoff is the sum of requested retry delays, not a measurement of all time spent waiting on the provider.
+
+The retained `qualification-tb21-gpt55-xhigh-20260915-132556` pilot stopped on `build-cython-ext` at its 900-second agent deadline after 68 rate-limit retry events and 210 seconds of scheduled backoff.
+Its sandbox cleanup succeeded and the verifier awarded full reward, but timed-out execution still fails qualification.
+That run already used concurrency 1; lowering concurrency alone cannot resolve a single trial's provider limit.
+Ensure enough available provider token capacity, including other traffic using the same limits, before starting a fresh qualification sequence.
+Use `-n 1` throughout that sequence while capacity remains constrained; task deadlines and resource limits stay unchanged.
+
+### Retained evidence
+
 Each stage writes `gate.json` before starting remote work and updates it after every verified trial.
 It records dataset/archive and per-task digests, adapter commit, Harbor/Daytona/Python versions, dependency lock hash, installation pins, model, thinking, tools, subagent policy, and hashes of adapter/harness files and the release instructions.
 Each Diffex trial additionally retains the effective system prompt and its SHA-256.

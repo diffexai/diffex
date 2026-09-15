@@ -12,6 +12,7 @@ from harbor.models.trial.config import AgentConfig, EnvironmentConfig, TrialConf
 from harbor.utils.trajectory_validator import TrajectoryValidator
 
 from diffex_terminal_bench.config import PINS
+from diffex_terminal_bench.diagnostics import TrialExecutionFailure
 from diffex_terminal_bench.execution import PROVIDER_ENV, SUBAGENT_TOOLS
 from diffex_terminal_bench.outcome import parse_outcome
 from diffex_terminal_bench.trajectory import CONTEXT_FIELDS, export_trajectory
@@ -94,7 +95,7 @@ def validate_trial(directory: Path, task: str, identity: dict, *, oracle: bool =
     """A wrong solution is a result; broken execution or missing evidence is not."""
     result = read_json(directory / "result.json")
     if result.get("exception_info") or not result.get("finished_at"):
-        raise ValueError("Harbor trial did not finish without an exception")
+        raise TrialExecutionFailure(directory, result)
     lock = read_json(directory / "lock.json")
     if lock["task"]["digest"] != identity["task_digests"][task]:
         raise ValueError("Task digest differs from the pinned dataset")

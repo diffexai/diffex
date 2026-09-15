@@ -8,9 +8,10 @@ import tempfile
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
 
-from diffex_terminal_bench.benchmark import PACKAGE, main, run_identity, run_stage
+from diffex_terminal_bench.benchmark import PACKAGE, StageFailedError, main, run_identity, run_stage
 from diffex_terminal_bench.dataset import BenchmarkConfig, load_config
-from diffex_terminal_bench.gate import read_json
+from diffex_terminal_bench.diagnostics import TrialExecutionFailure
+from diffex_terminal_bench.gate import read_json, write_json
 
 
 class ConcurrencyConfigTests(unittest.TestCase):
@@ -99,6 +100,11 @@ class ParallelStageTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn(index, self.cleaned)
             if index == 2 and self.failure_phase == "validate":
                 raise ValueError("invalid evidence")
+            if index == 2 and self.failure_phase == "timeout":
+                result = {"finished_at": "2026-09-15T00:00:00Z", "exception_info": {
+                    "exception_type": "AgentTimeoutError", "exception_message": "Agent execution timed out after 900.0 seconds"}}
+                write_json(directory / "result.json", result)
+                raise TrialExecutionFailure(directory, result)
             return {"rewards": {"reward": 1}}
 
         async def close(*args):
@@ -180,6 +186,13 @@ class ParallelStageTests(unittest.IsolatedAsyncioTestCase):
         self.failure_phase = "run"
         await self.check_failure()
 
+    async def test_harbor_timeout_retains_cause_after_cleanup(self):
+        self.failure_phase = "timeout"
+        await self.check_failure()
+        failure = read_json(self.root / "pilot/gate.json")["failure"]
+        self.assertEqual(failure["diagnostics"]["harbor_exception"], "AgentTimeoutError")
+        self.assertEqual(failure["diagnostics"]["agent_timeout_sec"], 900)
+
     async def check_failure(self):
         task = self.start_stage()
         await self.wait_events(self.started, (1, 2, 3))
@@ -191,12 +204,17 @@ class ParallelStageTests(unittest.IsolatedAsyncioTestCase):
         self.manager._cleanup.assert_not_awaited()
         self.finish_cleanup[1].set()
         self.finish_cleanup[3].set()
-        with self.assertRaises(ExceptionGroup):
+        with self.assertRaises(StageFailedError if self.failure_phase == "timeout" else ExceptionGroup) as error:
             await asyncio.wait_for(task, 5)
         report = read_json(self.root / "pilot/gate.json")
         self.assertFalse(report["passed"])
-        self.assertEqual(report["failure"], {"error": "ValueError", "trial_index": 2,
-            "task": self.config.pilot_tasks[1], "directory": f"002-{self.config.pilot_tasks[1]}"})
+        self.assertEqual(report["failure"]["error"], "TrialExecutionFailure" if self.failure_phase == "timeout" else "ValueError")
+        self.assertEqual(report["failure"]["trial_index"], 2)
+        self.assertEqual(report["failure"]["task"], self.config.pilot_tasks[1])
+        self.assertEqual(report["failure"]["directory"], f"002-{self.config.pilot_tasks[1]}")
+        if self.failure_phase == "timeout":
+            self.assertIn(str(self.root / "pilot" / report["failure"]["directory"]), str(error.exception))
+            self.assertIn("AgentTimeoutError at the 900s task deadline", str(error.exception))
         self.assertEqual(self.cleaned, {1, 2, 3})
 
     async def test_repeated_cancellation_waits_for_all_cleanup(self):

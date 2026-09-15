@@ -21,6 +21,7 @@ from diffex_terminal_bench.adapter import DiffexAgent
 from diffex_terminal_bench.config import PINS
 from diffex_terminal_bench.dataset import BenchmarkConfig, load_config, prepare_dataset
 from diffex_terminal_bench.daytona_backend import confirm_cleanup
+from diffex_terminal_bench.diagnostics import TrialExecutionFailure, describe_failure, diagnose_trial
 from diffex_terminal_bench.execution import PROVIDER_ENV
 from diffex_terminal_bench.gate import STAGES, fingerprint, inventory, require_previous, sha256, stage_tasks, validate_trial, write_json
 from diffex_terminal_bench.summary import refresh_index, write_index
@@ -28,6 +29,10 @@ from diffex_terminal_bench.summary import refresh_index, write_index
 
 PACKAGE = Path(__file__).resolve().parents[2]
 REPOSITORY = PACKAGE.parents[1]
+
+
+class StageFailedError(RuntimeError):
+    """Expected qualification failure after all started trials are cleaned up."""
 
 
 def preflight(config: BenchmarkConfig, *, oracle: bool) -> None:
@@ -85,8 +90,11 @@ async def run_stage(config: BenchmarkConfig, tasks: dict[str, Path], identity: d
             pending = iter(enumerate(selected, 1))
 
             def record_failure(index: int, task: str, exc: BaseException) -> None:
-                report.setdefault("failure", {"error": type(exc).__name__, "trial_index": index,
-                                              "task": task, "directory": f"{index:03d}-{task}"})
+                failure = {"error": type(exc).__name__, "trial_index": index,
+                           "task": task, "directory": f"{index:03d}-{task}"}
+                if isinstance(exc, TrialExecutionFailure):
+                    failure["diagnostics"] = exc.details
+                report.setdefault("failure", failure)
 
             async def run_trial(index: int, task: str) -> None:
                 trial_dir = directory / f"{index:03d}-{task}"
@@ -150,6 +158,12 @@ async def run_stage(config: BenchmarkConfig, tasks: dict[str, Path], identity: d
         report["passed"] = True
     except BaseException as exc:
         report.setdefault("failure", {"error": type(exc).__name__})
+        if isinstance(exc, Exception) and "diagnostics" in report["failure"]:
+            failure = report["failure"]
+            location = directory / failure["directory"]
+            reason = describe_failure(failure["diagnostics"])
+            raise StageFailedError(f"{stage}: qualification failed: {reason}. Evidence: {location}. "
+                                   "The stage remains unqualified; no existing trial will be overwritten.") from exc
         raise
     finally:
         report["finished_at"] = datetime.now(timezone.utc).isoformat()
@@ -184,6 +198,7 @@ def main() -> None:
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--prepare", action="store_true", help="Verify dataset and report stage sizes without creating sandboxes")
     mode.add_argument("--refresh-index", action="store_true", help="Rebuild index.md from local reports without downloads or API calls")
+    mode.add_argument("--diagnose-trial", type=Path, help="Explain a retained trial failure without downloads or API calls")
     mode.add_argument("--stage", choices=STAGES)
     mode.add_argument("--verify-through", choices=STAGES, help="Recheck retained or downloaded stage evidence without API calls")
     mode.add_argument("--through", choices=STAGES[:-1], help="Run prerequisite stages in order; stops on first failure")
@@ -194,6 +209,11 @@ def main() -> None:
         parser.error("--concurrency must be a positive integer")
     os.umask(0o077)
     root = args.output.resolve()
+    if args.diagnose_trial:
+        directory = args.diagnose_trial.resolve()
+        print(f"{directory.name}: {describe_failure(diagnose_trial(directory))}")
+        print(f"Retained evidence: {directory}")
+        return
     if args.refresh_index:
         directory = args.results_dir.resolve() if args.results_dir is not None else root.parent
         print(f"Updated run index: {write_index(directory)}")
@@ -218,7 +238,10 @@ def main() -> None:
             refresh_index(root.parent)
             print(f"Verified retained evidence through {args.verify_through}: {root}")
             return
-        asyncio.run(execute(config, tasks, identity, root, stage, bool(args.through)))
+        try:
+            asyncio.run(execute(config, tasks, identity, root, stage, bool(args.through)))
+        except StageFailedError as exc:
+            raise SystemExit(str(exc)) from None
 
 
 if __name__ == "__main__":
