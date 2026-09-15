@@ -4,7 +4,7 @@ This private Python package installs and executes the pinned Diffex release thro
 Execution uses explicit model and harness policies, fresh trial state, and retained native sessions.
 Execution outcomes include native stream completion, terminal assistant state, retries, process status, configuration, and cleanup verification.
 ATIF export and usage accounting run after evidence recovery, including interrupted trials.
-The staged benchmark release gate remains a subsequent implementation step.
+The [staged benchmark release gate](RELEASE_GATE.md) pins dataset inputs and verifies retained evidence before larger Daytona runs.
 This integration is not yet ready for leaderboard runs.
 
 ## Host setup
@@ -316,7 +316,7 @@ Verifier reward is independent of accounting completeness.
 
 For leaderboard validation, require a validated trajectory and complete accounting for every rewarded trial, then upload the entire agent log tree including `trajectory.json` and `trajectory-media/`.
 Validate the downloaded/uploaded artifact copy using the command below; a local export alone is not proof of remote upload.
-Submission destination, credentials, and the benchmark release gate belong to the later benchmark-validation stage.
+The [release gate](RELEASE_GATE.md) documents staged execution, CI artifact verification, and the separate official submission requirements.
 
 ```bash
 uv run --locked python -m harbor.utils.trajectory_validator /path/to/trial/agent/trajectory.json

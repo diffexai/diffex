@@ -28,7 +28,7 @@ class RecordedDaytonaEnvironment(DaytonaEnvironment):
                 write_json(path, record)
 
 
-async def confirm_cleanup(client: AsyncDaytona, directory: Path, label: str) -> dict:
+async def confirm_cleanup(client: AsyncDaytona, directory: Path, label: str, *, report_path: Path | None = None) -> dict:
     """Delete only this trial's orphans; recovered leaks still fail the gate."""
     report = {"confirmed": False, "unexpected_sandboxes": [], "absent_ids": [], "label": label}
     try:
@@ -69,5 +69,5 @@ async def confirm_cleanup(client: AsyncDaytona, directory: Path, label: str) -> 
         report["error"] = type(exc).__name__
     finally:
         report["checked_at"] = datetime.now(timezone.utc).isoformat()
-        write_json(directory / "sandbox-cleanup.json", report)
+        write_json(report_path or directory / "sandbox-cleanup.json", report)
     return report

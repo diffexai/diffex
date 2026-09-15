@@ -139,13 +139,14 @@ def main() -> None:
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--prepare", action="store_true", help="Verify dataset and report stage sizes without creating sandboxes")
     mode.add_argument("--stage", choices=STAGES)
+    mode.add_argument("--verify-through", choices=STAGES, help="Recheck retained or downloaded stage evidence without API calls")
     mode.add_argument("--through", choices=STAGES[:-1], help="Run prerequisite stages in order; stops on first failure")
     args = parser.parse_args()
     os.umask(0o077)
     config = load_config(args.config)
     root = args.output.resolve()
     stage = args.stage or args.through
-    if not args.prepare:
+    if not args.prepare and not args.verify_through:
         preflight(config, oracle=stage == "oracle")
     with prepare_dataset(config, root / "dataset-cache") as (tasks, digests):
         if args.prepare:
@@ -154,6 +155,10 @@ def main() -> None:
             print(f"Verified {len(tasks)} pinned tasks: {root / 'dataset.json'}")
             return
         identity = run_identity(config, digests)
+        if args.verify_through:
+            require_previous(root, args.verify_through, identity, config.pilot_tasks, list(tasks), include_current=True)
+            print(f"Verified retained evidence through {args.verify_through}: {root}")
+            return
         asyncio.run(execute(config, tasks, identity, root, stage, bool(args.through)))
 
 

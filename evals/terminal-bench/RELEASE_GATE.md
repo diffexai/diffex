@@ -1,0 +1,167 @@
+# Terminal-Bench release gate
+
+This gate qualifies a specific Diffex adapter, dataset, model, and harness configuration for a larger benchmark run.
+It does not publish a product release or submit a leaderboard entry.
+The implementation supports all qualification stages; live Diffex qualification remains pending a model-provider credential.
+
+## Configuration and prerequisites
+
+Use a clean committed checkout, Python 3.13, uv 0.11.2, Git, and a Daytona Cloud account.
+Run all commands below from `evals/terminal-bench/`.
+No Docker installation is needed for the Daytona runner.
+Docker is required for the separate controlled Linux smoke tests.
+
+```bash
+uv sync --locked
+uv run --locked python -m unittest discover -s tests -v
+uv run --locked python -m diffex_terminal_bench.benchmark --prepare
+```
+
+[benchmark.toml](benchmark.toml) pins the original Terminal-Bench 2.0 dataset at Git commit `69671fbaac6d67a7ef0dfec016cc38a64ef7a77c`.
+The archive SHA-256 is `afcd2b9813fc08e8d2b955db8165cc057acf0e37f74e55d26fc2506da196cebe`.
+The runner verifies the archive before extraction, checks all 89 tasks, and calculates Harbor content digests for every task.
+Each invocation extracts a fresh copy of the verified archive; it does not reuse editable extracted task directories or resolve a mutable dataset alias.
+The preparation command writes `results/release-gate/dataset.json` without creating sandboxes or calling a model.
+
+Harbor 0.23.0 and Daytona SDK 0.210.0 are locked in the benchmark's private Python environment.
+Node 22.23.2, Diffex 0.2.2, npm integrity, registry, and Node archive checksums come from [pins.toml](src/diffex_terminal_bench/pins.toml).
+The default is `openai/gpt-5`, `high` thinking, tools `read,bash,edit,write,update_plan`, disabled subagents, disabled evolution, and `context-only` project resources.
+Change and commit the configuration before starting a new qualification sequence.
+Every subsequent stage must match the exact recorded identity, including the adapter commit and dependency lock.
+
+Load `DAYTONA_API_KEY` through your normal secret-loading mechanism.
+The key needs permission to create, inspect, list, and delete sandboxes.
+The oracle uses only this key.
+Diffex stages additionally require the selected model's credential, such as `OPENAI_API_KEY` for the default model.
+A Daytona key does not authenticate OpenAI model requests.
+Never put credential values in benchmark configuration or command-line arguments.
+The runner records provider environment-variable references and lets Harbor resolve and scrub their values.
+
+Optional `DAYTONA_TARGET` and `DAYTONA_API_URL` settings are recorded in the run identity.
+If omitted, Daytona selects the organization's default region.
+The account needs sufficient sandbox resources and access to task dependencies, npm, Node downloads, apt mirrors, and the chosen model endpoint.
+Task resource requests vary; the runner uses the dataset's resource limits without overrides.
+Provision quota and network access in the account instead of changing benchmark task limits.
+Record the created sandbox IDs, snapshots, and actual CPU, memory, and disk from `sandbox-created.json` when diagnosing backend differences.
+The pinned dataset includes upstream image tags and network-installed dependencies; archive verification does not make those external services immutable.
+
+## Ordered stages
+
+| Stage | Trials | Required evidence |
+| --- | ---: | --- |
+| `oracle` | 1 | Official solution earns full reward; logs and sandbox deletion retained |
+| `trial` | 1 | Diffex installs and completes the same task with validated ATIF and reconciled usage |
+| `integration` | 3 | Certificate/file work, log processing, and Git repair with the same configuration |
+| `pilot` | 10 | All ten declared tasks complete the integration checks |
+| `reliability` | 30 | Three additional passes over the ten tasks with fresh state and no unexplained infrastructure failures |
+| `full` | 445 | Five attempts per task across all 89 tasks, after all prerequisites pass |
+
+The pilot task order is declared before observing model results.
+It covers certificates, text processing, Git, service configuration, database recovery, compilation, and data manipulation.
+The runner uses one concurrent trial and no Harbor retries.
+Task execution and verifier timeouts remain unchanged.
+Only Diffex installation receives the existing 630-second setup allowance.
+
+Run the stages separately to inspect evidence between them:
+
+```bash
+uv run --locked python -m diffex_terminal_bench.benchmark --stage oracle
+uv run --locked python -m diffex_terminal_bench.benchmark --stage trial
+uv run --locked python -m diffex_terminal_bench.benchmark --stage integration
+uv run --locked python -m diffex_terminal_bench.benchmark --stage pilot
+uv run --locked python -m diffex_terminal_bench.benchmark --stage reliability
+```
+
+Alternatively, `--through reliability` runs the first five stages in order and stops on the first failed gate.
+Each stage requires a new output directory and refuses to overwrite an earlier attempt.
+Use `--output results/qualification-NAME` to start a new sequence after investigating a failure or changing configuration.
+Keep failed sequences for diagnosis; do not delete failed trials or edit a report to qualify a stage.
+The full run is explicit and is never started by `--through`:
+
+```bash
+uv run --locked python -m diffex_terminal_bench.benchmark --stage full
+```
+
+Before full execution, run the repository's `npm run check`, controlled Linux smokes, and production-content inspection documented in [README.md](README.md#local-validation), or require the corresponding benchmark CI jobs.
+Every previous stage must still have its original artifacts and matching identity.
+The gate hashes and revalidates their evidence before allowing progression.
+
+## Evidence and failure policy
+
+Each stage writes `gate.json` before starting remote work and updates it after every verified trial.
+It records dataset/archive and per-task digests, adapter commit, Harbor/Daytona/Python versions, dependency lock hash, installation pins, model, thinking, tools, subagent policy, and hashes of adapter/harness files and the release instructions.
+Each Diffex trial additionally retains the effective system prompt and its SHA-256.
+Full system prompt hashes can differ between isolated trials because context includes trial-specific paths.
+The release instructions and harness source identity must remain consistent.
+
+Trial directories contain Harbor `config.json`, `lock.json`, `result.json`, verifier reward and combined stdout/stderr, agent logs, native sessions, and sandbox lifecycle evidence.
+Diffex installation evidence includes the three CLI checks and verified npm/Node pins.
+The oracle does not install Diffex or call a model, so its Diffex installation, model usage, and ATIF checks are not applicable.
+
+The gate re-parses native process/stream evidence instead of trusting the outcome summary alone.
+It regenerates ATIF into a temporary directory, validates it with Harbor, and compares it with retained trajectories and image attachments.
+Native totals, per-model totals, `accounting.json`, and `AgentContext` must reconcile.
+Unknown telemetry remains unknown and cannot satisfy complete accounting.
+Verifier reward must agree with the retained reward file.
+A completed, fully accounted Diffex trial with reward zero passes integration checks and remains a zero-reward benchmark result.
+An oracle with reward zero fails the smoke.
+
+Timeouts, provider errors, missing telemetry, missing logs, invalid ATIF, altered configuration, and cleanup failures retain their original evidence and stop qualification for investigation.
+The runner does not convert them to successful executions or silently rerun them.
+This conservative integration gate can stop on a legitimate task timeout; the timeout remains a recorded task result and must not be described as an installation failure.
+No failed or interrupted run establishes readiness merely because its process exited zero.
+
+The backend records sandbox IDs before Harbor tears them down.
+Cleanup independently checks known IDs and lists all sandboxes with the trial's unique label, allowing bounded time for asynchronous deletion.
+Only a Daytona not-found response establishes absence; authentication or transport errors do not.
+An orphan is deleted when possible, but needing recovery still fails qualification.
+SIGTERM and cancellation preserve cleanup and reports.
+After a host crash, forced kill, or interrupted CI job, recheck only the sandboxes belonging to the retained sequence:
+
+```bash
+uv run --locked python -m diffex_terminal_bench.recover results/release-gate
+```
+
+Recovery records `sandbox-recovery.json` and preserves the original cleanup report.
+It does not turn a failed sequence into a passing one.
+It requires the original output directory and access to the same Daytona account.
+
+## CI and remote evidence
+
+[terminal-bench.yml](../../.github/workflows/terminal-bench.yml) is separate from product CI.
+Pull requests and benchmark branch pushes run deterministic adapter/converter/gate tests, dataset verification, controlled Linux execution/outcome smokes, and production-tarball exclusion checks.
+These jobs require no Daytona or model credentials.
+
+For live runs, configure the `terminal-bench` GitHub environment with `DAYTONA_API_KEY` and `OPENAI_API_KEY` secrets for the checked-in default model.
+Dispatch the workflow on the committed benchmark branch and select the last qualification stage to run.
+If selecting another provider, update the checked-in configuration and workflow's credential environment together.
+Live stages never run automatically on pull requests.
+Full benchmark execution and official submission are not workflow-dispatch options.
+The live job leaves time for cleanup and artifact upload before its six-hour GitHub job limit; use the local stage commands if a sequence needs longer.
+
+CI retains complete evidence, including hidden child-session directories, even when a stage fails.
+Successful uploads record the artifact URL and archive SHA-256 in the job summary.
+Successful live runs download the uploaded archive and revalidate all stage evidence, including trajectories and usage.
+To check a downloaded artifact yourself, use the same clean adapter commit and configuration:
+
+```bash
+uv run --locked python -m diffex_terminal_bench.benchmark \
+  --verify-through reliability --output /path/to/downloaded-evidence
+```
+
+This command verifies dataset inputs and artifacts without Daytona or model calls.
+Local validation is not an upload receipt.
+Retain the CI artifact URL/digest or equivalent durable storage receipt with any future submission.
+
+## Official submission gate
+
+Rules and availability were checked on 2026-09-15.
+The [official Terminal-Bench 2.0 submission repository](https://huggingface.co/datasets/harborframework/terminal-bench-2-leaderboard/blob/main/README.md) currently says submissions are closed pending a replacement process.
+Its published validation requirements include five trials per task, unchanged task timeouts and resources, and complete run artifacts.
+The [leaderboard integrity policy](https://www.tbench.ai/news/leaderboard-integrity-update) requires ATIF for passing trials and prohibits cheating and reward hacking.
+
+Treat this integration's outputs as internal qualification evidence until the applicable submission process is open and its current requirements have been reviewed again.
+Before planning an official submission, record the date, source links, availability, required dataset version, repeat count, limits, and artifact-upload requirements in a new review record.
+Inspect passing trajectories for prohibited task-specific assistance, solution access, and verifier leakage.
+Require remote evidence receipts and validation of every rewarded trial's uploaded ATIF, including child trajectories and media.
+Do not infer official eligibility from a passing internal gate or an npm publication.

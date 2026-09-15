@@ -18,6 +18,7 @@ from diffex_terminal_bench.benchmark import PACKAGE, preflight, run_stage, trial
 from diffex_terminal_bench.dataset import load_config, prepare_dataset
 from diffex_terminal_bench.daytona_backend import confirm_cleanup
 from diffex_terminal_bench.gate import read_json, sha256, write_json
+from diffex_terminal_bench.recover import recover
 
 
 class BenchmarkTests(unittest.TestCase):
@@ -117,6 +118,18 @@ class CleanupTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(report["confirmed"])
         self.assertEqual(report["error"], "RuntimeError")
         self.assertEqual(read_json(self.directory / "sandbox-cleanup.json"), report)
+
+    async def test_recovery_preserves_original_evidence(self):
+        trial_dir = self.directory / "oracle/one"
+        write_json(trial_dir / "cleanup-request.json", {"label": "unique"})
+        write_json(trial_dir / "sandbox-cleanup.json", {"confirmed": False})
+        original = (trial_dir / "sandbox-cleanup.json").read_bytes()
+        with patch("diffex_terminal_bench.recover.AsyncDaytona") as client:
+            client.return_value.__aenter__ = AsyncMock(return_value=self.client)
+            client.return_value.__aexit__ = AsyncMock(return_value=False)
+            await recover(self.directory)
+        self.assertEqual((trial_dir / "sandbox-cleanup.json").read_bytes(), original)
+        self.assertTrue(read_json(trial_dir / "sandbox-recovery.json")["confirmed"])
 
     async def test_orphan_recovery_is_retained_as_gate_failure(self):
         orphan = Mock(id="orphan")
