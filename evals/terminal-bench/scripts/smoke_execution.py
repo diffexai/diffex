@@ -93,7 +93,8 @@ async def smoke(platform: str) -> None:
                 assert "PRESERVE_TASK_CONTEXT" in prompt and "DO_NOT_LOAD_PROJECT_SYSTEM" not in prompt
                 assert effective["release_agents_sha256"] == hashlib.sha256(Path("../../AGENTS_release.md").read_bytes()).hexdigest()
                 initial = json.loads((run_dir / "fixture-start.json").read_text())
-                assert initial == {"state_entries": ["AGENTS.md", "home", "settings.json"], "session_entries": [],
+                assert effective["release_agents_path"] == "/opt/diffex-terminal-bench/cli/node_modules/@diffexai/diffex/dist/AGENTS.md"
+                assert initial == {"state_entries": ["home", "settings.json"], "session_entries": [],
                                    "settings": {"evolution": {"enabled": False}}, "unrelated_credential_present": False}
                 assert (run_dir / "sessions/root.jsonl").stat().st_size > 0
                 events = [json.loads(line) for line in (run_dir / "stdout.jsonl").read_text().splitlines()]

@@ -1,8 +1,8 @@
 harbor_version = "0.23.0"
 node_version = "22.23.2"
-diffex_version = "0.2.2"
+diffex_version = "0.2.4"
 npm_registry = "https://registry.npmjs.org/"
-diffex_integrity = "sha512-aYtN1dDJCtTw5CVBTLYNVmu3UMpe4JEuWIAL2ztjruI/D7t+V4ec6bI9VDmCBODiBfc/pgOvdzFMIpq0dK3Eiw=="
+diffex_integrity = "sha512-n/QPYjhc7jVM5y63iSVhmENJswMSDWT/35pInu1Nu8EJotwIDhQCfPvYSwuNlVqFpT6KXdMRgBc8nzgtxNI44Q=="
 setup_timeout_sec = 600
 
 [node_sha256]

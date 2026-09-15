@@ -29,12 +29,12 @@ The task container must provide Debian/Ubuntu Linux with glibc, root access, Bas
 Linux x86_64 and aarch64 have separate pinned Node archive checksums.
 The installer fails explicitly on unsupported platforms and refuses to reuse an existing installation.
 
-[pins.toml](src/diffex_terminal_bench/pins.toml) records Node `22.23.2`, Diffex `0.2.2`, the public npm registry, archive checksums, npm integrity, and a 600-second installation deadline.
+[pins.toml](src/diffex_terminal_bench/pins.toml) records Node `22.23.2`, Diffex `0.2.4`, the public npm registry, archive checksums, npm integrity, and a 600-second installation deadline.
 The deadline includes apt prerequisites, Node download, npm installation, and all three CLI checks.
 GNU `timeout` terminates the installer process group at the deadline and kills it after a ten-second grace period.
 Harbor's command transport allows another five seconds to collect the result.
 
-Setup installs Node under `/opt/diffex-terminal-bench/node` and uses `npm install --ignore-scripts --save-exact --registry=https://registry.npmjs.org/ @diffexai/diffex@0.2.2` with a private prefix.
+Setup installs Node under `/opt/diffex-terminal-bench/node` and uses `npm install --ignore-scripts --save-exact --registry=https://registry.npmjs.org/ @diffexai/diffex@0.2.4` with a private prefix.
 An isolated home and npm cache prevent host or task npm settings from changing installation.
 Node archive SHA-256, registry metadata, installed package version, and npm lockfile integrity must match the checked-in pins.
 The `/usr/local/bin/diffex` wrapper always invokes the pinned Node binary.
@@ -99,6 +99,9 @@ Run `npm run check` from the repository root after changing code.
 
 ### Recorded validation
 
+The following historical smoke records used Diffex 0.2.2.
+They do not qualify the updated Diffex 0.2.4 / Terminal-Bench 2.1 configuration.
+
 On 2026-09-14, both pinned Ubuntu images passed through Harbor 0.23.0 on Docker Desktop with an arm64 host.
 
 | Container platform | Setup wall time | CLI checks | Cleanup |
@@ -134,6 +137,15 @@ The outcome trials retained valid trajectories for authentication errors, exhaus
 Both smoke runners confirmed process and container cleanup on both architectures.
 The 37 adapter tests, repository `npm run check`, and production-content inspection passed; the public tarball contained no benchmark files.
 These checks use controlled responses without paid model calls and do not establish leaderboard readiness or remote artifact-upload completion.
+
+### Diffex 0.2.4 pin validation
+
+On 2026-09-15, Diffex 0.2.4 passed four execution trials and 12 outcome trials on the pinned Linux arm64 image.
+Installation integrity and CLI checks passed, the packaged release context loaded without duplication, and both runners confirmed process and container cleanup.
+Execution trajectories reconciled root and child usage; failed and interrupted outcomes retained validated ATIF with incomplete accounting where appropriate.
+All 55 adapter tests, `npm run check`, and production-content inspection passed.
+Dataset preparation verified all 89 Terminal-Bench 2.1 tasks and the ten declared pilot selections from the pinned source archive.
+These controlled tests use a loopback provider; a new Daytona oracle and live Diffex trial remain necessary for the updated qualification identity.
 
 ## Execute a controlled task
 
@@ -188,8 +200,8 @@ Startup network updates are disabled with the supported offline setting so the p
 
 The `context-only` project policy retains ancestor `AGENTS.md`/`CLAUDE.md` context and disables project trust, discovered extensions, skills, prompt templates, and themes.
 It does not pass `--no-context-files` or replace the system prompt.
-The pinned npm `0.2.2` release lacks `dist/AGENTS.md`, so the adapter supplies an exact copy of the repository's `AGENTS_release.md` in fresh global context.
-If an installed release provides that packaged file, the adapter retains it without adding a global duplicate.
+The pinned npm `0.2.4` release includes `dist/AGENTS.md`, which matches the adapter's checked-in release instructions.
+The adapter retains that packaged context without adding a global duplicate.
 The effective system prompt must contain the release instructions, and their SHA-256 is recorded.
 
 Subagents are disabled by omitting coordination tools from the explicit tool allowlist.
@@ -239,7 +251,7 @@ Tool errors alone do not fail execution: the assistant can inspect and recover f
 `DiffexExecutionError` subclasses Harbor's `NonZeroAgentExitCodeError`, so infrastructure failures retain exception information rather than becoming ordinary zero-reward results.
 The adapter never sets or infers verifier reward.
 A completed assistant that produces an incorrect solution returns normally and can earn zero from the verifier.
-The pinned `0.2.2` release remains unchanged; adapter parsing handles its zero-exit terminal errors.
+The pinned `0.2.4` release still exits zero for terminal errors in JSON mode; adapter parsing handles those failures.
 The source CLI fix makes terminal assistant errors and aborts return nonzero in JSON mode as well as text mode, and requires a future release to reach the pinned installation.
 
 The launcher writes stdout and stderr directly to files and retains native sessions during execution.

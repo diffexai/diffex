@@ -1,10 +1,10 @@
-# Integration qualification uses the original Terminal-Bench 2.0 dataset.
+# Integration qualification uses the pinned Terminal-Bench 2.1 tasks/ tree.
 # Review this file before spending provider or Daytona credits.
 model = "openai/gpt-5"
 pilot_tasks = [
+  "fix-git",
   "openssl-selfsigned-cert",
   "log-summary-date-ranges",
-  "fix-git",
   "nginx-request-logging",
   "sanitize-git-repo",
   "db-wal-recovery",
@@ -16,11 +16,11 @@ pilot_tasks = [
 
 [dataset]
 name = "terminal-bench"
-version = "2.0"
-git_url = "https://github.com/laude-institute/terminal-bench-2.git"
-git_commit = "69671fbaac6d67a7ef0dfec016cc38a64ef7a77c"
-archive_url = "https://codeload.github.com/laude-institute/terminal-bench-2/tar.gz/69671fbaac6d67a7ef0dfec016cc38a64ef7a77c"
-archive_sha256 = "afcd2b9813fc08e8d2b955db8165cc057acf0e37f74e55d26fc2506da196cebe"
+version = "2.1"
+git_url = "https://github.com/harbor-framework/terminal-bench-2-1.git"
+git_commit = "7131e4375048a0e408a8fb404b5f499d726b695b"
+archive_url = "https://codeload.github.com/harbor-framework/terminal-bench-2-1/tar.gz/7131e4375048a0e408a8fb404b5f499d726b695b"
+archive_sha256 = "aa992a8848a1f3ed5191a34fa72ed5700d67dd9f968413a0e0a567b6188cb527"
 task_count = 89
 
 [policy]

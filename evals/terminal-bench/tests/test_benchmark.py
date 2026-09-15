@@ -57,7 +57,7 @@ class BenchmarkTests(unittest.TestCase):
             root = Path(temp)
             tree = root / "tree"
             for name in self.config.pilot_tasks:
-                path = tree / name
+                path = tree / "tasks" / name
                 (path / "environment").mkdir(parents=True)
                 (path / "environment/Dockerfile").write_text("FROM ubuntu:24.04\n")
                 (path / "task.toml").write_text('version = "1.0"\n')
@@ -65,6 +65,9 @@ class BenchmarkTests(unittest.TestCase):
                 (path / "tests").mkdir()
                 (path / "tests/test.sh").write_text("exit 0\n")
                 self.assertTrue(Task.is_valid_dir(path))
+            # The upstream repository also contains a valid analysis task
+            # template outside tasks/. It must never enter the benchmark.
+            shutil.copytree(tree / "tasks" / self.config.pilot_tasks[0], tree / "analysis-task-template")
             archive = root / "fixture.tar.gz"
             with tarfile.open(archive, "w:gz") as tar:
                 tar.add(tree, arcname="dataset")
@@ -77,6 +80,8 @@ class BenchmarkTests(unittest.TestCase):
             shutil.copyfile(archive, saved)
             with prepare_dataset(config, cache) as (tasks, digests):
                 self.assertEqual(len(tasks), 10)
+                self.assertEqual(set(tasks), set(self.config.pilot_tasks))
+                self.assertNotIn("analysis-task-template", tasks)
                 (tasks[config.pilot_tasks[0]] / "instruction.md").write_text("changed")
             with prepare_dataset(config, cache) as (tasks, repeated):
                 self.assertEqual(digests, repeated)

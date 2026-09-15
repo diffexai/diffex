@@ -69,7 +69,9 @@ def prepare_dataset(config: BenchmarkConfig, cache: Path):
         roots = list(Path(temp).iterdir())
         if len(roots) != 1 or not roots[0].is_dir():
             raise ValueError("Expected a single dataset archive root")
-        tasks = {path.name: path for path in sorted(roots[0].iterdir()) if Task.is_valid_dir(path)}
+        # TB 2.1 keeps benchmark tasks under tasks/. Repository templates and
+        # leaderboard tooling outside this directory are not benchmark inputs.
+        tasks = {path.name: path for path in sorted((roots[0] / "tasks").iterdir()) if Task.is_valid_dir(path)}
         if len(tasks) != config.dataset.task_count:
             raise ValueError("Dataset task count differs from the pin")
         stage_tasks("pilot", config.pilot_tasks, list(tasks))

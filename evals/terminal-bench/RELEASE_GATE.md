@@ -17,17 +17,21 @@ uv run --locked python -m unittest discover -s tests -v
 uv run --locked python -m diffex_terminal_bench.benchmark --prepare
 ```
 
-[benchmark.toml](benchmark.toml) pins the original Terminal-Bench 2.0 dataset at Git commit `69671fbaac6d67a7ef0dfec016cc38a64ef7a77c`.
-The archive SHA-256 is `afcd2b9813fc08e8d2b955db8165cc057acf0e37f74e55d26fc2506da196cebe`.
-The runner verifies the archive before extraction, checks all 89 tasks, and calculates Harbor content digests for every task.
+[benchmark.toml](benchmark.toml) pins Terminal-Bench 2.1 at Git commit `7131e4375048a0e408a8fb404b5f499d726b695b` from the [upstream repository](https://github.com/harbor-framework/terminal-bench-2-1/tree/7131e4375048a0e408a8fb404b5f499d726b695b).
+The archive SHA-256 is `aa992a8848a1f3ed5191a34fa72ed5700d67dd9f968413a0e0a567b6188cb527`.
+The runner verifies the archive before extraction, checks all 89 tasks under `tasks/`, and calculates Harbor content digests for every task.
+Repository templates outside `tasks/` are excluded.
+This source archive pin identifies internal qualification inputs; it does not claim equivalence to an independently versioned Harbor Hub dataset digest.
 Each invocation extracts a fresh copy of the verified archive; it does not reuse editable extracted task directories or resolve a mutable dataset alias.
 The preparation command writes `results/release-gate/dataset.json` without creating sandboxes or calling a model.
 
 Harbor 0.23.0 and Daytona SDK 0.210.0 are locked in the benchmark's private Python environment.
-Node 22.23.2, Diffex 0.2.2, npm integrity, registry, and Node archive checksums come from [pins.toml](src/diffex_terminal_bench/pins.toml).
+Node 22.23.2, Diffex 0.2.4, npm integrity, registry, and Node archive checksums come from [pins.toml](src/diffex_terminal_bench/pins.toml).
 The default is `openai/gpt-5`, `high` thinking, tools `read,bash,edit,write,update_plan`, disabled subagents, disabled evolution, and `context-only` project resources.
 Change and commit the configuration before starting a new qualification sequence.
 Every subsequent stage must match the exact recorded identity, including the adapter commit and dependency lock.
+The earlier TB 2.0 / Diffex 0.2.2 oracle evidence cannot qualify this configuration.
+Start a fresh sequence with `--output results/qualification-tb21` and use that output argument for every stage, recovery, and evidence verification command.
 
 Load `DAYTONA_API_KEY` through your normal secret-loading mechanism.
 The key needs permission to create, inspect, list, and delete sandboxes.
@@ -51,12 +55,14 @@ The pinned dataset includes upstream image tags and network-installed dependenci
 | --- | ---: | --- |
 | `oracle` | 1 | Official solution earns full reward; logs and sandbox deletion retained |
 | `trial` | 1 | Diffex installs and completes the same task with validated ATIF and reconciled usage |
-| `integration` | 3 | Certificate/file work, log processing, and Git repair with the same configuration |
+| `integration` | 3 | Git repair, certificate/file work, and log processing with the same configuration |
 | `pilot` | 10 | All ten declared tasks complete the integration checks |
 | `reliability` | 30 | Three additional passes over the ten tasks with fresh state and no unexplained infrastructure failures |
 | `full` | 445 | Five attempts per task across all 89 tasks, after all prerequisites pass |
 
 The pilot task order is declared before observing model results.
+The first trial uses TB 2.1's updated `fix-git` task, followed by `openssl-selfsigned-cert` and `log-summary-date-ranges` for integration.
+The remaining pilot tasks are `nginx-request-logging`, `sanitize-git-repo`, `db-wal-recovery`, `build-cython-ext`, `multi-source-data-merger`, `polyglot-c-py`, and `sqlite-db-truncate`, all from the same verified 2.1 archive.
 It covers certificates, text processing, Git, service configuration, database recovery, compilation, and data manipulation.
 The runner uses one concurrent trial and no Harbor retries.
 Task execution and verifier timeouts remain unchanged.
@@ -156,8 +162,9 @@ Retain the CI artifact URL/digest or equivalent durable storage receipt with any
 ## Official submission gate
 
 Rules and availability were checked on 2026-09-15.
-The [official Terminal-Bench 2.0 submission repository](https://huggingface.co/datasets/harborframework/terminal-bench-2-leaderboard/blob/main/README.md) currently says submissions are closed pending a replacement process.
-Its published validation requirements include five trials per task, unchanged task timeouts and resources, and complete run artifacts.
+The [official Terminal-Bench 2.1 repository](https://github.com/harbor-framework/terminal-bench-2-1#submitting-to-the-leaderboard) currently accepts only maintainer-run submissions; community submissions are closed.
+Its published submission instructions require at least five trials per task and public Harbor Hub uploads using `--upload --public`.
+Official runs must use the required Hub dataset revision and preserve task timeouts and resources.
 The [leaderboard integrity policy](https://www.tbench.ai/news/leaderboard-integrity-update) requires ATIF for passing trials and prohibits cheating and reward hacking.
 
 Treat this integration's outputs as internal qualification evidence until the applicable submission process is open and its current requirements have been reviewed again.
