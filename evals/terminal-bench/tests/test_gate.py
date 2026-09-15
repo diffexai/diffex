@@ -65,7 +65,7 @@ class GateTests(unittest.TestCase):
             environment=EnvironmentConfig(import_path="diffex_terminal_bench.daytona_backend:RecordedDaytonaEnvironment",
                                           kwargs={"labels": {"diffex.gate_trial": "unique"}}))
         write_json(self.directory / "config.json", config.model_dump(mode="json"))
-        write_json(self.directory / "lock.json", {**config.model_dump(mode="json"), "task": {"digest": "sha256:task"}})
+        write_json(self.directory / "lock.json", {**config.model_dump(mode="json", exclude_none=True), "task": {"digest": "sha256:task"}})
         write_json(self.directory / "cleanup-request.json", {"label": "unique"})
         write_json(self.directory / "sandbox-created.json", {"sandboxes": [{"id": "sandbox"}]})
         write_json(self.directory / "sandbox-cleanup.json", {"confirmed": True, "unexpected_sandboxes": []})
@@ -75,7 +75,6 @@ class GateTests(unittest.TestCase):
         verifier.mkdir()
         (verifier / "reward.txt").write_text("0")
         (verifier / "test-stdout.txt").write_text("task failed")
-        (verifier / "test-stderr.txt").touch()
 
     def mutate(self, path, key, value):
         data = json.loads(path.read_text())
@@ -141,7 +140,7 @@ class GateTests(unittest.TestCase):
         (self.directory / "verifier/reward.txt").write_text("1")
         (self.directory / "agent/oracle.txt").write_text("oracle")
         for name in ("config.json", "lock.json"):
-            self.mutate(self.directory / name, "agent", AgentConfig(name="oracle").model_dump(mode="json"))
+            self.mutate(self.directory / name, "agent", AgentConfig(name="oracle").model_dump(mode="json", exclude_none=True))
         report = {"passed": True, "identity": self.identity, "trials": [
             {"task": "task", "directory": "task-1", "files": inventory(self.directory)}]}
         write_json(self.directory.parent / "gate.json", report)

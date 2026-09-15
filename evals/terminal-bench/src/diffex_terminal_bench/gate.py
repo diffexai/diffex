@@ -69,9 +69,9 @@ def inventory(directory: Path) -> dict[str, str]:
     return result
 
 
-def require_previous(root: Path, stage: str, identity: dict, pilot: list[str], tasks: list[str]) -> None:
+def require_previous(root: Path, stage: str, identity: dict, pilot: list[str], tasks: list[str], *, include_current: bool = False) -> None:
     """Recheck every prior artifact, not just a cached 'passed' flag."""
-    for previous in STAGES[:STAGES.index(stage)]:
+    for previous in STAGES[:STAGES.index(stage) + int(include_current)]:
         directory = root / previous
         report = read_json(directory / "gate.json")
         if report.get("passed") is not True or report.get("identity") != identity:
@@ -117,7 +117,7 @@ def validate_trial(directory: Path, task: str, identity: dict, *, oracle: bool =
         raise ValueError("Harbor configuration changed task limits, policy, or isolation")
     for key in ("agent", "environment", "timeout_multiplier", "agent_timeout_multiplier", "verifier_timeout_multiplier",
                 "agent_setup_timeout_multiplier", "environment_build_timeout_multiplier", "install_only"):
-        if lock.get(key) != config.model_dump(mode="json")[key]:
+        if lock.get(key) != config.model_dump(mode="json", exclude_none=True).get(key):
             raise ValueError(f"Harbor lock does not match configuration: {key}")
     cleanup = read_json(directory / "sandbox-cleanup.json")
     if cleanup.get("confirmed") is not True or cleanup.get("unexpected_sandboxes") != []:
@@ -134,9 +134,9 @@ def validate_trial(directory: Path, task: str, identity: dict, *, oracle: bool =
     saved_rewards = read_json(reward_path) if reward_path.exists() else {"reward": float((verifier / "reward.txt").read_text())}
     if saved_rewards != rewards:
         raise ValueError("Verifier reward does not reconcile with Harbor")
-    for name in ("test-stdout.txt", "test-stderr.txt"):
-        if not (verifier / name).is_file():
-            raise ValueError(f"Missing verifier log: {name}")
+    # Harbor 0.23.0 redirects both verifier streams to test-stdout.txt.
+    if not (verifier / "test-stdout.txt").is_file():
+        raise ValueError("Missing combined verifier log: test-stdout.txt")
     if oracle:
         if any(value != 1 for value in rewards.values()):
             raise ValueError("Oracle smoke must earn full reward")
