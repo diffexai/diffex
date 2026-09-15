@@ -17,7 +17,7 @@ if (process.argv[2] === "prepare") {
 	writeFileSync(join(state, "models.json"), JSON.stringify({ providers: { openai: {
 		baseUrl: "http://127.0.0.1:8765/v1", api: "openai-completions", models: [{
 			id: "gpt-5", name: "Controlled smoke model", reasoning: true, input: ["text"],
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			cost: { input: 1, output: 2, cacheRead: 0.5, cacheWrite: 1 },
 			contextWindow: 128000, maxTokens: 4096,
 		}],
 	} } }));
@@ -56,5 +56,8 @@ createServer(async (request, response) => {
 	if (tool) send({ tool_calls: [{ index: 0, id: `call-${requestNumber}`, type: "function", function: tool }] });
 	else send({ content: "controlled-ok" });
 	send({}, tool ? "tool_calls" : "stop");
+	response.write(`data: ${JSON.stringify({ id, object: "chat.completion.chunk", choices: [],
+		usage: { prompt_tokens: 19, completion_tokens: 7, total_tokens: 26, prompt_tokens_details: { cached_tokens: 5 } },
+	})}\n\n`);
 	response.end("data: [DONE]\n\n");
 }).listen(8765, "127.0.0.1");

@@ -14,6 +14,7 @@ from harbor.environments.docker.docker import DockerEnvironment
 from harbor.models.agent.context import AgentContext
 from harbor.models.task.config import EnvironmentConfig
 from harbor.models.trial.paths import TrialPaths
+from harbor.utils.trajectory_validator import TrajectoryValidator
 
 from diffex_terminal_bench.adapter import DiffexAgent
 from diffex_terminal_bench.config import PINS
@@ -25,7 +26,7 @@ async def smoke(platform: str) -> None:
     trial = TrialPaths(Path("results", session_id).resolve())
     trial.mkdir()
     report = {"platform": platform, "image": config["images"][platform], "pins": PINS,
-              "passed": False, "cleanup_passed": False}
+              "passed": False, "cleanup_passed": False, "trajectories": []}
     print(f"Execution evidence: {trial.trial_dir}", flush=True)
     with tempfile.TemporaryDirectory(prefix="diffex-execution-") as temp:
         directory = Path(temp)
@@ -77,10 +78,11 @@ async def smoke(platform: str) -> None:
                 current = DiffexAgent(logs_dir=trial.agent_dir, model_name="openai/gpt-5", thinking="high", subagents=subagents,
                                       extra_env={"OPENAI_API_KEY": "fixture-secret-never-log"})
                 before = set(trial.agent_dir.glob("run-*"))
+                context = AgentContext()
                 async with asyncio.timeout(60):
                     # Exercise Harbor's environment overlay as used by Trial.
                     with environment.scoped_exec_env({"ANTHROPIC_API_KEY": "unrelated-fixture-secret", "DIFFEX_CODING_AGENT_DIR": "/stale-state"}):
-                        await current.run(instruction, environment, AgentContext())
+                        await current.run(instruction, environment, context)
                 run_dir, = set(trial.agent_dir.glob("run-*")) - before
                 run_dirs.append(run_dir)
                 effective = json.loads((run_dir / "effective.json").read_text())
@@ -98,6 +100,20 @@ async def smoke(platform: str) -> None:
                 assert not any(event.get("isError") for event in events)
                 if subagents == "enabled":
                     assert len(list((run_dir / "sessions").rglob("*.jsonl"))) >= 2
+                validator = TrajectoryValidator()
+                assert validator.validate(trial.agent_dir / "trajectory.json"), validator.get_errors()
+                trajectory = json.loads((trial.agent_dir / "trajectory.json").read_text())
+                assert bool(trajectory.get("subagent_trajectories")) == (subagents == "enabled")
+                messages = [record["message"] for path in (run_dir / "sessions").rglob("*.jsonl")
+                            for line in path.read_text().splitlines() if (record := json.loads(line)).get("type") == "message"
+                            and record["message"].get("role") == "assistant"]
+                assert context.metadata["diffex_accounting"]["complete"], context.metadata["diffex_accounting"]
+                assert context.n_input_tokens == len(messages) * 19
+                assert context.n_output_tokens == len(messages) * 7
+                assert context.n_cache_tokens == len(messages) * 5
+                native_cost = sum(message["usage"]["cost"]["total"] for message in messages)
+                assert abs(context.cost_usd - native_cost) < 1e-12 and native_cost > 0
+                report["trajectories"].append({"run": run_dir.name, "validated": True, "context": context.model_dump()})
                 # Contaminate the previous trial after it completes, proving
                 # the next run never inherits auth, sessions, or harness state.
                 (run_dir / "state/auth.json").write_text('{"stale":true}')

@@ -6,6 +6,7 @@ from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import create_autospec
+from unittest.mock import patch
 
 from harbor.environments.base import BaseEnvironment, ExecResult
 from harbor.models.agent.context import AgentContext
@@ -13,6 +14,7 @@ from harbor.models.agent.context import AgentContext
 from diffex_terminal_bench.adapter import DiffexAgent
 from diffex_terminal_bench.outcome import DiffexExecutionError
 from test_outcome import write_evidence
+from test_trajectory import assistant, entry
 
 
 class RecoveryTests(unittest.IsolatedAsyncioTestCase):
@@ -34,6 +36,38 @@ class RecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.environment.download_dir.assert_awaited_once()
         self.assertEqual(self.context.metadata["diffex_outcome"]["status"], "completed")
         self.assertTrue(next(self.logs.glob("run-*/outcome.json")).is_file())
+        self.assertTrue((self.logs / "trajectory.json").is_file())
+        self.assertTrue(self.context.metadata["diffex_trajectory"]["validated"])
+
+    async def test_export_failure_blocks_completed_run(self):
+        with patch("diffex_terminal_bench.adapter.export_trajectory", side_effect=ValueError("fixture")):
+            with self.assertRaises(DiffexExecutionError):
+                await self.agent.run("Task", self.environment, self.context)
+        self.assertEqual(self.context.metadata["diffex_outcome"]["reason"], "trajectory_export_failed")
+        self.assertIsNone(self.context.n_input_tokens)
+
+    async def test_complete_usage_populates_harbor_context(self):
+        def download(source, target):
+            write_evidence(Path(target))
+            sessions = Path(target) / "sessions"
+            sessions.mkdir()
+            (sessions / "root.jsonl").write_text(json.dumps({"type": "session", "id": "root"}) + "\n"
+                                               + json.dumps(entry("one", assistant("one"))) + "\n")
+            # Match the complete assistant emitted in native persistence.
+            events = [json.loads(line) for line in (Path(target) / "stdout.jsonl").read_text().splitlines()]
+            for event in events:
+                if "message" in event:
+                    event["message"] = assistant("one")
+                if "messages" in event:
+                    event["messages"] = [assistant("one")]
+            (Path(target) / "stdout.jsonl").write_text("".join(json.dumps(event) + "\n" for event in events))
+
+        self.environment.download_dir.side_effect = download
+        await self.agent.run("Task", self.environment, self.context)
+        self.assertEqual(self.context.n_input_tokens, 19)
+        self.assertEqual(self.context.n_output_tokens, 7)
+        self.assertEqual(self.context.n_cache_tokens, 5)
+        self.assertEqual(self.context.cost_usd, 0.125)
 
     async def test_timeout_waits_for_recovery_even_when_cancelled_twice(self):
         started = asyncio.Event()
@@ -62,6 +96,8 @@ class RecoveryTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.wait_for(task, 2)
         self.environment.download_dir.assert_awaited_once()
         self.assertEqual(self.context.metadata["diffex_outcome"]["status"], "cancelled")
+        self.assertTrue((self.logs / "trajectory.json").is_file())
+        self.assertFalse(self.context.metadata["diffex_accounting"]["complete"])
 
     async def test_cancellation_during_collection_is_not_swallowed(self):
         collecting = asyncio.Event()

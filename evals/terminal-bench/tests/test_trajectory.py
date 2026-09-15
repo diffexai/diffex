@@ -159,6 +159,37 @@ class TrajectoryTests(unittest.TestCase):
             self.export("cancelled")
         self.assertTrue((self.directory / "accounting.json").is_file())
 
+    def test_nested_children_include_descendants_in_each_total(self):
+        for identifier, child in (("root", "child"), ("child", "grandchild")):
+            spawn = assistant(identifier, [{"type": "toolCall", "id": identifier, "name": "spawn_agent", "arguments": {"name": child}}])
+            self.session([entry(f"call-{identifier}", spawn), entry("result", {"role": "toolResult", "toolCallId": identifier, "content": "accepted"}),
+                          {"type": "custom", "id": "snapshot", "customType": "diffex.subagents",
+                           "data": {"agents": [{"name": child, "childSessionId": child}]}},
+                          entry("final", assistant(f"{identifier}-final"))], identifier)
+        self.session([entry("final", assistant("grandchild-final"))], "grandchild")
+        document, accounting = self.export()
+        self.assertTrue(accounting["complete"])
+        self.assertEqual(document["final_metrics"]["total_prompt_tokens"], 95)
+        child = document["subagent_trajectories"][0]
+        self.assertEqual(child["final_metrics"]["total_prompt_tokens"], 57)
+        self.assertEqual(child["subagent_trajectories"][0]["final_metrics"]["total_prompt_tokens"], 19)
+
+    def test_tool_end_recovers_observation_before_message_persistence(self):
+        self.session([entry("one", assistant("one", [{"type": "toolCall", "id": "call", "name": "bash", "arguments": {}}]))])
+        (self.directory / "stdout.jsonl").write_text(json.dumps({"type": "tool_execution_end", "toolCallId": "call",
+                                                               "result": {"content": [{"type": "text", "text": "recovered"}]}}) + "\n")
+        document, _ = self.export("cancelled")
+        self.assertEqual(document["steps"][0]["observation"]["results"][0]["content"], "recovered")
+
+    def test_partial_tool_arguments_do_not_discard_recoverable_text(self):
+        self.session([])
+        message = assistant("one", [{"type": "text", "text": "recoverable"}, {"type": "toolCall", "name": "bash"}])
+        (self.directory / "stdout.jsonl").write_text(json.dumps({"type": "message_update", "message": message}) + "\n")
+        document, accounting = self.export("cancelled")
+        self.assertEqual(document["steps"][0]["message"], "recoverable")
+        self.assertTrue(document["steps"][0]["extra"]["incomplete_tool_calls"])
+        self.assertFalse(accounting["complete"])
+
 
 if __name__ == "__main__":
     unittest.main()

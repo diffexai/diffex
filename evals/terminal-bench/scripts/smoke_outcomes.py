@@ -14,6 +14,7 @@ from harbor.environments.docker.docker import DockerEnvironment
 from harbor.models.agent.context import AgentContext
 from harbor.models.task.config import EnvironmentConfig
 from harbor.models.trial.paths import TrialPaths
+from harbor.utils.trajectory_validator import TrajectoryValidator
 
 from diffex_terminal_bench.adapter import DiffexAgent
 from diffex_terminal_bench.config import PINS
@@ -88,6 +89,12 @@ async def smoke(platform):
                     assert (run_dir / "stderr.log").exists()
                     assert (run_dir / "sessions/root.jsonl").stat().st_size > 0
                     assert (run_dir / "process.json").exists()
+                    validator = TrajectoryValidator()
+                    assert validator.validate(trial.agent_dir / "trajectory.json"), validator.get_errors()
+                    assert context.metadata["diffex_trajectory"]["validated"]
+                    if expected != "completed":
+                        assert not context.metadata["diffex_accounting"]["complete"]
+                        assert context.n_input_tokens is None and context.cost_usd is None
                     if scenario in ("authentication", "exhausted", "interrupted-output"):
                         assert outcome["process"]["exit_code"] == 0, outcome
                     if scenario == "recovered":
@@ -97,7 +104,8 @@ async def smoke(platform):
                         pid = int(pid_path.read_text())
                         # Zombies cannot execute and will be reaped by sandbox init.
                         await agent.exec_as_root(environment, command=f"test ! -e /proc/{pid}/stat || test \"$(cut -d ' ' -f 3 /proc/{pid}/stat)\" = Z")
-                    report["outcomes"].append({"scenario": scenario, "user": user, "outcome": outcome})
+                    report["outcomes"].append({"scenario": scenario, "user": user, "outcome": outcome,
+                                               "trajectory_validated": True, "accounting": context.metadata["diffex_accounting"]})
                     print(f"{scenario} user={user}: {outcome['status']}, cleanup confirmed", flush=True)
             for path in trial.agent_dir.rglob("*"):
                 if path.is_file():

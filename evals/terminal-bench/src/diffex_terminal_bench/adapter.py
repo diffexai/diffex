@@ -17,6 +17,7 @@ from harbor.models.agent.context import AgentContext
 from diffex_terminal_bench.config import PINS
 from diffex_terminal_bench.execution import ExecutionOptions, PROVIDER_ENV, SUBAGENT_TOOLS
 from diffex_terminal_bench.outcome import parse_outcome, require_completed
+from diffex_terminal_bench.trajectory import export_trajectory
 
 
 class DiffexAgent(BaseInstalledAgent):
@@ -161,6 +162,22 @@ class DiffexAgent(BaseInstalledAgent):
             if execution["interruption"]:
                 outcome.update(status=execution["interruption"], interruption=execution["interruption"],
                                reason="execution_interrupted")
+            directory = self.logs_dir / run_dir.name
+            try:
+                accounting = export_trajectory(directory, self.logs_dir / "trajectory.json", context, outcome)
+                context.metadata = {**(context.metadata or {}), "diffex_trajectory": {
+                    "path": "trajectory.json", "validated": True,
+                    "accounting_complete": accounting["complete"],
+                }}
+            except Exception as exc:
+                # Export failure must not replace the original cancellation or
+                # provider exception, or let a completed run omit its ATIF file.
+                outcome.setdefault("recovery_errors", []).append({"phase": "trajectory_export", "error": type(exc).__name__})
+                context.n_input_tokens = context.n_output_tokens = context.n_cache_tokens = context.cost_usd = None
+                context.model_usage = {}
+                context.metadata = {**(context.metadata or {}), "diffex_trajectory": {"validated": False}}
+                if outcome["status"] == "completed":
+                    outcome.update(status="infrastructure_failure", reason="trajectory_export_failed")
             (self.logs_dir / run_dir.name / "outcome.json").write_text(json.dumps(outcome, indent=2) + "\n")
         if execution["interruption"] == "cancelled":
             raise asyncio.CancelledError

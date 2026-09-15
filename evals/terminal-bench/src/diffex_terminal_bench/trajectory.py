@@ -89,6 +89,7 @@ class Session:
         available = Counter(message_key(record["message"]) for record in self.records
                             if record.get("type") == "message")
         pending = None
+        tool_results = {}
         compactions = sum(record.get("type") == "compaction" for record in self.records)
         for index, event in enumerate(events):
             kind = event.get("type")
@@ -107,6 +108,17 @@ class Session:
                     compactions -= 1
                 else:
                     self.gaps.append("compaction_telemetry_missing")
+            elif kind == "tool_execution_end" and isinstance(event.get("result"), dict):
+                tool_results[event.get("toolCallId")] = event
+        known_results = {record["message"].get("toolCallId") for record in self.records
+                         if record.get("type") == "message" and record["message"].get("role") == "toolResult"}
+        for call_id, event in tool_results.items():
+            if call_id not in known_results:
+                self.records.append({"type": "message", "id": f"tool-event-{call_id}", "message": {
+                    "role": "toolResult", "toolCallId": call_id, "toolName": event.get("toolName"),
+                    "content": event["result"].get("content", []), "details": event["result"].get("details"),
+                    "isError": event.get("isError"),
+                }})
         if isinstance(pending, dict) and pending.get("role") == "assistant":
             # A persisted final message can outlive a torn stdout message_end.
             if not any(record.get("message", {}).get("timestamp") == pending.get("timestamp")
@@ -191,13 +203,24 @@ class Session:
                         reasoning = [block["thinking"] for block in blocks if block.get("type") == "thinking" and "thinking" in block]
                         if reasoning:
                             step["reasoning_content"] = "\n".join(reasoning)
-                        calls = [{"tool_call_id": block["id"], "function_name": block["name"],
-                                  "arguments": block["arguments"]} for block in blocks if block.get("type") == "toolCall"]
+                        calls = []
+                        for block in blocks:
+                            if block.get("type") != "toolCall":
+                                continue
+                            if not block.get("id") or not block.get("name") or not isinstance(block.get("arguments"), dict):
+                                extra.setdefault("incomplete_tool_calls", []).append(block)
+                                self.gaps.append("incomplete_tool_call")
+                                continue
+                            calls.append({"tool_call_id": block["id"], "function_name": block["name"],
+                                          "arguments": block["arguments"]})
                         if calls:
                             step["tool_calls"] = calls
                             for call in calls:
                                 self.calls[call["tool_call_id"]] = step
                 self.steps.append(step)
+        for call_id, step in self.calls.items():
+            if not any(result.get("source_call_id") == call_id for result in step.get("observation", {}).get("results", [])):
+                self.gaps.append("missing_tool_result")
         for index, step in enumerate(self.steps, 1):
             step["step_id"] = index
         return {"schema_version": "ATIF-v1.8", "session_id": self.id, "trajectory_id": self.id,
@@ -284,6 +307,17 @@ def export_trajectory(directory: Path, destination: Path, context: AgentContext,
         if session.id not in linked and documents[session.id]["steps"]:
             root_document.setdefault("subagent_trajectories", []).append(documents[session.id])
             gaps.append("unlinked_child_trajectory")
+        assistants = [step for step in session.steps if step.get("extra", {}).get("native_role") == "assistant"]
+        if not assistants or assistants[-1]["extra"].get("stop_reason") != "stop":
+            session.gaps.append("child_execution_incomplete")
+    for session in sessions:
+        for step in session.steps:
+            for call in step.get("tool_calls", []):
+                if call["function_name"] == "spawn_agent":
+                    results = [result for result in step.get("observation", {}).get("results", [])
+                               if result.get("source_call_id") == call["tool_call_id"]]
+                    if any(not result.get("extra", {}).get("is_error") and not result.get("subagent_trajectory_ref") for result in results):
+                        session.gaps.append("missing_child_link")
     if outcome.get("status") != "completed" or not outcome.get("stream_complete"):
         gaps.append("execution_incomplete")
     for session in sessions:
@@ -307,9 +341,21 @@ def export_trajectory(directory: Path, destination: Path, context: AgentContext,
                     observed[field] += value
                     by_model[step.get("model_name", "unattributed")][field] += value
         documents[session.id]["final_metrics"] = {
-            **{f"total_{field}": None if field in own_missing or session.gaps else value for field, value in own.items()},
+            **{f"total_{field}": None if field in own_missing or session.gaps or gaps else value for field, value in own.items()},
             "total_steps": len(session.steps), "extra": {"scope": "this_session", "observed_usage": own},
         }
+    # Each nested trajectory includes its descendants in its totals. Global
+    # usage above still visits each native session exactly once.
+    def aggregate(document):
+        metrics = document["final_metrics"]
+        for child in document.get("subagent_trajectories", []):
+            aggregate(child)
+            for field in FIELDS:
+                key = f"total_{field}"
+                values = (metrics[key], child["final_metrics"][key])
+                metrics[key] = sum(values) if None not in values else None
+        metrics["extra"]["scope"] = "session_and_descendants"
+    aggregate(root_document)
     totals = {field: None if gaps or field in missing else value for field, value in observed.items()}
     accounting = {"complete": not gaps and not missing, "gaps": sorted(set(gaps)),
                   "missing_fields": sorted(missing), "observed_usage": observed,
