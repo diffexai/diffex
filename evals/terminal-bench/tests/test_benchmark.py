@@ -138,6 +138,7 @@ class CleanupTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_orphan_recovery_is_retained_as_gate_failure(self):
         orphan = Mock(id="orphan")
+        self.client.get.side_effect = [DaytonaNotFoundError("gone"), orphan, DaytonaNotFoundError("gone")]
         calls = 0
 
         async def listing(query, request_timeout):
@@ -151,6 +152,71 @@ class CleanupTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(report["confirmed"])
         self.assertEqual(report["unexpected_sandboxes"], ["orphan"])
         self.client.delete.assert_awaited_once_with(orphan, wait=True, timeout=60)
+
+    async def test_stale_list_entries_are_checked_by_id_before_recovery(self):
+        for identifier in ("known", "unrecorded"):
+            with self.subTest(identifier=identifier):
+                sandbox = Mock(id=identifier)
+
+                async def listing(query, request_timeout):
+                    self.queries.append(query)
+                    yield sandbox
+
+                self.client.list = listing
+                self.client.delete.side_effect = DaytonaNotFoundError("already deleted")
+                report = await confirm_cleanup(self.client, self.directory, "trial-only")
+                self.assertTrue(report["confirmed"])
+                self.assertEqual(report["unexpected_sandboxes"], [])
+                self.assertEqual(set(report["absent_ids"]), {"known", identifier})
+                self.assertEqual(len(report["absent_ids"]), len(set(report["absent_ids"])))
+                self.client.delete.assert_not_awaited()
+                self.assertEqual(len(self.queries), 2)
+                self.assertTrue(all(query.labels == {"diffex.gate_trial": "trial-only"} for query in self.queries))
+                self.queries.clear()
+
+    async def test_deletion_race_requires_independent_absence_confirmation(self):
+        sandbox = Mock(id="unrecorded")
+
+        async def listing(query, request_timeout):
+            yield sandbox
+
+        self.client.list = listing
+        self.client.delete.side_effect = DaytonaNotFoundError("already deleted")
+        for observation, confirmed in ((DaytonaNotFoundError("gone"), True),
+                                       (sandbox, False), (RuntimeError("transport unavailable"), False)):
+            with self.subTest(observation=type(observation).__name__, confirmed=confirmed):
+                self.client.get.side_effect = [DaytonaNotFoundError("gone"), sandbox, observation,
+                                               DaytonaNotFoundError("gone")]
+                report = await confirm_cleanup(self.client, self.directory, "trial-only")
+                self.assertEqual(report["confirmed"], confirmed)
+                self.assertEqual(report["unexpected_sandboxes"], [])
+
+    async def test_list_lookup_errors_do_not_establish_absence(self):
+        async def listing(query, request_timeout):
+            yield Mock(id="unrecorded")
+
+        self.client.list = listing
+        self.client.get.side_effect = [DaytonaNotFoundError("gone"), RuntimeError("transport unavailable")]
+        report = await confirm_cleanup(self.client, self.directory, "trial-only")
+        self.assertFalse(report["confirmed"])
+        self.assertEqual(report["error"], "RuntimeError")
+        self.client.delete.assert_not_awaited()
+
+    async def test_final_listing_rechecks_previously_absent_ids(self):
+        calls = 0
+
+        async def listing(query, request_timeout):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                yield Mock(id="known")
+
+        self.client.list = listing
+        self.client.get.side_effect = [DaytonaNotFoundError("gone"), Mock(id="known")]
+        report = await confirm_cleanup(self.client, self.directory, "trial-only")
+        self.assertFalse(report["confirmed"])
+        self.assertEqual(report["error"], "RuntimeError")
+        self.assertNotIn("known", report["absent_ids"])
 
     async def test_asynchronous_deletion_gets_a_bounded_grace_period(self):
         self.client.get.side_effect = [Mock(), DaytonaNotFoundError("gone")]

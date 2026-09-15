@@ -31,6 +31,18 @@ class RecordedDaytonaEnvironment(DaytonaEnvironment):
 async def confirm_cleanup(client: AsyncDaytona, directory: Path, label: str, *, report_path: Path | None = None) -> dict:
     """Delete only this trial's orphans; recovered leaks still fail the gate."""
     report = {"confirmed": False, "unexpected_sandboxes": [], "absent_ids": [], "label": label}
+
+    async def is_absent(identifier: str) -> bool:
+        try:
+            await client.get(identifier, request_timeout=10)
+        except DaytonaNotFoundError:
+            if identifier not in report["absent_ids"]:
+                report["absent_ids"].append(identifier)
+            return True
+        if identifier in report["absent_ids"]:
+            report["absent_ids"].remove(identifier)
+        return False
+
     try:
         # List is paginated by the SDK. The unique trial label also catches a
         # sandbox created remotely during a timed-out create request.
@@ -40,28 +52,32 @@ async def confirm_cleanup(client: AsyncDaytona, directory: Path, label: str, *, 
             for identifier in sorted({row["id"] for row in created}):
                 # Deletion may be asynchronous even when Harbor stop returns.
                 for attempt in range(10):
-                    try:
-                        await client.get(identifier, request_timeout=10)
-                    except DaytonaNotFoundError:
-                        report["absent_ids"].append(identifier)
+                    if await is_absent(identifier):
                         break
                     if attempt == 9:
                         break
                     await asyncio.sleep(2)
             remaining = [sandbox async for sandbox in client.list(
                 ListSandboxesQuery(labels={"diffex.gate_trial": label}), request_timeout=20)]
-            report["unexpected_sandboxes"] = [sandbox.id for sandbox in remaining]
             for sandbox in remaining:
-                await client.delete(sandbox, wait=True, timeout=60)
+                # Listings can retain deleted sandboxes after get() returns
+                # not-found. Confirm existence before classifying a leak.
+                if await is_absent(sandbox.id):
+                    continue
                 try:
-                    await client.get(sandbox.id, request_timeout=10)
+                    await client.delete(sandbox, wait=True, timeout=60)
                 except DaytonaNotFoundError:
-                    report["absent_ids"].append(sandbox.id)
+                    # Harbor's deletion may finish between lookup and delete.
+                    # A fresh lookup must independently establish absence.
+                    pass
                 else:
+                    report["unexpected_sandboxes"].append(sandbox.id)
+                if not await is_absent(sandbox.id):
                     raise RuntimeError("Sandbox remains after recovery deletion")
-            if [sandbox.id async for sandbox in client.list(
-                ListSandboxesQuery(labels={"diffex.gate_trial": label}), request_timeout=20)]:
-                raise RuntimeError("Sandbox appeared after cleanup")
+            async for sandbox in client.list(
+                ListSandboxesQuery(labels={"diffex.gate_trial": label}), request_timeout=20):
+                if not await is_absent(sandbox.id):
+                    raise RuntimeError("Sandbox appeared after cleanup")
             if not {row["id"] for row in created}.issubset(report["absent_ids"]):
                 raise RuntimeError("Known sandbox deletion could not be confirmed")
             report["confirmed"] = True
