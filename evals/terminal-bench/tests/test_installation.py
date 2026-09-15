@@ -43,10 +43,10 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(RuntimeError, "Integrity mismatch"):
             await agent.install(environment)
 
-    async def test_installation_adapter_cannot_execute_task(self):
+    async def test_execution_requires_explicit_model(self):
         environment = create_autospec(BaseEnvironment, instance=True)
         agent = DiffexAgent(logs_dir=Path("unused"))
-        with self.assertRaises(NotImplementedError):
+        with self.assertRaisesRegex(ValueError, "provider/model"):
             await agent.run("Do a task", environment, AgentContext())
         environment.exec.assert_not_called()
 

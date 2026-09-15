@@ -1,17 +1,25 @@
-"""Harbor setup contract; benchmark execution is a separate implementation step."""
+"""Pinned Harbor installation and isolated headless execution."""
 
 from importlib.metadata import version
 from importlib.resources import as_file, files
 import shlex
+import hashlib
+import json
+from pathlib import Path
+import tempfile
+import uuid
 
 from harbor.agents.installed.base import BaseInstalledAgent
 from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
 
 from diffex_terminal_bench.config import PINS
+from diffex_terminal_bench.execution import ExecutionOptions, PROVIDER_ENV, SUBAGENT_TOOLS
 
 
 class DiffexAgent(BaseInstalledAgent):
+    options_model = ExecutionOptions
+
     @staticmethod
     def name() -> str:
         return "diffex"
@@ -66,7 +74,54 @@ class DiffexAgent(BaseInstalledAgent):
     async def run(
         self, instruction: str, environment: BaseEnvironment, context: AgentContext
     ) -> None:
-        raise NotImplementedError(
-            "This adapter currently validates installation only. "
-            "Task execution, trial isolation, and outcome parsing are not implemented."
+        if version("harbor") != PINS["harbor_version"] or self._version not in (None, PINS["diffex_version"]):
+            raise ValueError("Execution requires the checked-in Harbor and Diffex pins")
+        if not self.model_name or "/" not in self.model_name:
+            raise ValueError("model_name must be an exact provider/model ID")
+        provider, model = self.model_name.split("/", 1)
+        if provider not in PROVIDER_ENV or not model or any(char in model for char in "*?:\n\r"):
+            raise ValueError("Select a supported provider and exact model ID without a thinking suffix")
+        if not instruction.strip():
+            raise ValueError("The trial instruction must not be empty")
+        if self.mcp_servers or self.skills_dir:
+            raise ValueError("Task MCP servers and injected skills are outside the context-only policy")
+        credentials = {
+            name: value for name in PROVIDER_ENV[provider]
+            if (value := self._get_env(name))
+        }
+        if not credentials:
+            raise ValueError(f"Missing provider credentials: set one of {', '.join(PROVIDER_ENV[provider])}")
+        options = self.options
+        if not isinstance(options, ExecutionOptions):
+            raise TypeError("Expected validated execution options")
+        tools = options.tools.split(",")
+        if options.subagents == "enabled":
+            tools.extend(SUBAGENT_TOOLS)
+        run_dir = self.environment_logs_dir / f"run-{uuid.uuid4().hex}"
+        requested = {
+            "pins": PINS, "provider": provider, "model": model,
+            "thinking": options.thinking, "tools": tools,
+            "subagents": options.subagents, "project_resources": options.project_resources,
+            "evolution": {"enabled": False}, "state_policy": "fresh-per-run",
+            "credential_env_names": sorted(credentials),
+            "instruction_sha256": hashlib.sha256(instruction.encode("utf-8")).hexdigest(),
+        }
+        await self.exec_as_agent(environment, command=f"umask 077 && mkdir -p {shlex.quote(str(self.environment_logs_dir))} && mkdir {shlex.quote(str(run_dir))}")
+        with tempfile.TemporaryDirectory(prefix="diffex-trial-") as temp:
+            for name, content in (("instruction.txt", instruction), ("requested.json", json.dumps(requested, indent=2))):
+                source = Path(temp, name)
+                source.write_text(content, encoding="utf-8")
+                await environment.upload_file(source, str(run_dir / name))
+            for name in ("run.cjs", "observe.mjs"):
+                with as_file(files(__package__).joinpath(name)) as source:
+                    await environment.upload_file(source, str(run_dir / name))
+        # Uploads may be root-owned even when the task selects a non-root user.
+        if environment.default_user is not None:
+            await self.exec_as_root(environment, command=f"chown -R {shlex.quote(str(environment.default_user))} {shlex.quote(str(run_dir))}")
+        # Credentials travel only through Harbor's env parameter. The launcher
+        # discards all unselected inherited variables before starting Diffex.
+        await self.exec_as_agent(
+            environment,
+            command=shlex.join(["/opt/diffex-terminal-bench/node/bin/node", str(run_dir / "run.cjs"), str(run_dir)]) + " </dev/null",
+            env=credentials,
         )
