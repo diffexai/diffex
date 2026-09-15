@@ -1,6 +1,6 @@
 # Integration qualification uses the pinned Terminal-Bench 2.1 tasks/ tree.
 # Review this file before spending provider or Daytona credits.
-model = "openai/gpt-5"
+model = "openai/gpt-5.5"
 pilot_tasks = [
   "fix-git",
   "openssl-selfsigned-cert",
@@ -24,7 +24,7 @@ archive_sha256 = "aa992a8848a1f3ed5191a34fa72ed5700d67dd9f968413a0e0a567b6188cb5
 task_count = 89
 
 [policy]
-thinking = "high"
+thinking = "xhigh"
 tools = "read,bash,edit,write,update_plan"
 subagents = "disabled"
 project_resources = "context-only"
