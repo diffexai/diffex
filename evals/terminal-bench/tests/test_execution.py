@@ -4,6 +4,7 @@ import json
 from importlib.resources import files
 import os
 from pathlib import Path, PurePosixPath
+import tempfile
 import unittest
 from unittest.mock import create_autospec, patch
 
@@ -16,6 +17,20 @@ from diffex_terminal_bench.adapter import DiffexAgent
 
 
 class ExecutionTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        # These tests isolate the launch contract; recovery has separate tests
+        # and a Linux smoke using the real launcher and provider.
+        async def finish_run(agent, environment, run_dir, context, execution):
+            (agent.logs_dir / run_dir.name).mkdir(parents=True, exist_ok=True)
+            return {"status": "completed"}
+
+        finish = patch.object(DiffexAgent, "_finish_run", autospec=True, side_effect=finish_run)
+        finish.start()
+        self.addCleanup(finish.stop)
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.logs_dir = Path(temporary.name)
+
     def test_release_context_and_example_config(self):
         root = Path(__file__).resolve().parents[3]
         self.assertEqual(files("diffex_terminal_bench").joinpath("release-agents.md").read_bytes(),
@@ -42,7 +57,7 @@ class ExecutionTests(unittest.IsolatedAsyncioTestCase):
         instruction = "\n  --literal @file 'quote' \"double\" $HOME $(touch /tmp/injected) `pwd`\nUnicode: 雪\n\n"
         with patch.dict(os.environ, {"OPENAI_API_KEY": "host-secret", "ANTHROPIC_API_KEY": "unrelated-secret"}, clear=True):
             agent = DiffexAgent(
-                logs_dir=Path("unused"), model_name="openai/gpt-5", thinking="high",
+                logs_dir=self.logs_dir, model_name="openai/gpt-5", thinking="high",
                 extra_env={"OPENAI_API_KEY": "selected-secret", "DIFFEX_CODING_AGENT_DIR": "/stale"},
                 environment_logs_dir=PurePosixPath("/logs/agent custom"),
             )
@@ -78,7 +93,7 @@ class ExecutionTests(unittest.IsolatedAsyncioTestCase):
                 configs.append(json.loads(Path(source).read_text()))
 
         environment.upload_file.side_effect = upload
-        agent = DiffexAgent(logs_dir=Path("unused"), model_name="openai/gpt-5", subagents="enabled",
+        agent = DiffexAgent(logs_dir=self.logs_dir, model_name="openai/gpt-5", subagents="enabled",
                             extra_env={"OPENAI_API_KEY": "test-only"})
         await agent.run("Task", environment, AgentContext())
         self.assertTrue({"spawn_agent", "agent_action", "agents"}.issubset(configs[0]["tools"]))

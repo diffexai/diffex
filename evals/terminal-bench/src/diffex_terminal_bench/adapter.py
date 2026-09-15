@@ -2,19 +2,21 @@
 
 from importlib.metadata import version
 from importlib.resources import as_file, files
+import asyncio
 import shlex
 import hashlib
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import tempfile
 import uuid
 
-from harbor.agents.installed.base import BaseInstalledAgent
+from harbor.agents.installed.base import BaseInstalledAgent, NonZeroAgentExitCodeError
 from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
 
 from diffex_terminal_bench.config import PINS
 from diffex_terminal_bench.execution import ExecutionOptions, PROVIDER_ENV, SUBAGENT_TOOLS
+from diffex_terminal_bench.outcome import parse_outcome, require_completed
 
 
 class DiffexAgent(BaseInstalledAgent):
@@ -112,7 +114,7 @@ class DiffexAgent(BaseInstalledAgent):
                 source = Path(temp, name)
                 source.write_text(content, encoding="utf-8")
                 await environment.upload_file(source, str(run_dir / name))
-            for name in ("run.cjs", "observe.mjs", "release-agents.md"):
+            for name in ("run.cjs", "cleanup.cjs", "observe.mjs", "release-agents.md"):
                 with as_file(files(__package__).joinpath(name)) as source:
                     await environment.upload_file(source, str(run_dir / name))
         # Uploads may be root-owned even when the task selects a non-root user.
@@ -120,9 +122,77 @@ class DiffexAgent(BaseInstalledAgent):
             await self.exec_as_root(environment, command=f"chown -R {shlex.quote(str(environment.default_user))} {shlex.quote(str(run_dir))}")
         # Credentials travel only through Harbor's env parameter. The launcher
         # discards all unselected inherited variables before starting Diffex.
-        await self.exec_as_agent(
-            environment,
-            command=shlex.join(["/opt/diffex-terminal-bench/node/bin/node", str(run_dir / "run.cjs"), str(run_dir)]) + " </dev/null",
-            env={**credentials, "DIFFEX_TB_PROVIDER": provider,
-                 "DIFFEX_TB_MODEL": model, "DIFFEX_TB_THINKING": options.thinking},
-        )
+        execution = {"interruption": None, "launcher_exit_code": None}
+        try:
+            result = await self.exec_as_agent(
+                environment,
+                command="umask 077; " + shlex.join(["/opt/diffex-terminal-bench/node/bin/node", str(run_dir / "run.cjs"), str(run_dir)])
+                + f" </dev/null >{shlex.quote(str(run_dir / 'launcher.stdout.log'))} 2>{shlex.quote(str(run_dir / 'launcher.stderr.log'))}",
+                env={**credentials, "DIFFEX_TB_PROVIDER": provider,
+                     "DIFFEX_TB_MODEL": model, "DIFFEX_TB_THINKING": options.thinking},
+            )
+            execution["launcher_exit_code"] = result.return_code
+        except NonZeroAgentExitCodeError:
+            # The persisted process status and stream provide the actual cause.
+            execution["launcher_exit_code"] = 1
+        except asyncio.CancelledError:
+            execution["interruption"] = "cancelled"
+            raise
+        except TimeoutError:
+            execution["interruption"] = "timeout"
+            raise
+        except Exception:
+            execution["interruption"] = "transport_failure"
+            raise
+        finally:
+            # Harbor cancels run() at the task deadline. An independent exec
+            # must stop the remote process before Harbor downloads logs/verifies.
+            finish = asyncio.create_task(self._finish_run(
+                environment, run_dir, context, execution,
+            ))
+            while not finish.done():
+                try:
+                    await asyncio.shield(finish)
+                except asyncio.CancelledError:
+                    # A second cancellation must not abandon remote cleanup.
+                    execution["interruption"] = execution["interruption"] or "cancelled"
+            outcome = finish.result()
+            # A deadline can arrive just as recovery completes.
+            if execution["interruption"]:
+                outcome.update(status=execution["interruption"], interruption=execution["interruption"],
+                               reason="execution_interrupted")
+            (self.logs_dir / run_dir.name / "outcome.json").write_text(json.dumps(outcome, indent=2) + "\n")
+        if execution["interruption"] == "cancelled":
+            raise asyncio.CancelledError
+        require_completed(outcome)
+
+    async def _finish_run(self, environment: BaseEnvironment, run_dir: PurePosixPath,
+                          context: AgentContext, execution: dict) -> dict:
+        directory = self.logs_dir / run_dir.name
+        directory.mkdir(parents=True, exist_ok=True)
+        failures = []
+        try:
+            await asyncio.wait_for(self.exec_as_agent(
+                environment,
+                command=shlex.join(["/opt/diffex-terminal-bench/node/bin/node", str(run_dir / "cleanup.cjs"), str(run_dir)]),
+                timeout_sec=10,
+            ), timeout=15)
+        except Exception as exc:
+            failures.append({"phase": "cleanup", "error": type(exc).__name__})
+        try:
+            if environment.capabilities.mounted:
+                await asyncio.wait_for(environment.prepare_logs_for_host(), timeout=15)
+            else:
+                await asyncio.wait_for(environment.download_dir(str(run_dir), directory), timeout=30)
+        except Exception as exc:
+            failures.append({"phase": "log_collection", "error": type(exc).__name__})
+        outcome = parse_outcome(directory, execution["interruption"], execution["launcher_exit_code"])
+        if failures:
+            outcome["recovery_errors"] = failures
+            if not execution["interruption"]:
+                outcome.update(status="infrastructure_failure", reason="recovery_failed")
+        context.metadata = {**(context.metadata or {}), "diffex_outcome": outcome, "diffex_run_dir": str(run_dir)}
+        # The caller writes the summary to host logs after shielded recovery.
+        # Do not upload a second copy that could overwrite a later cancellation
+        # classification when Harbor collects the remote tree again.
+        return outcome

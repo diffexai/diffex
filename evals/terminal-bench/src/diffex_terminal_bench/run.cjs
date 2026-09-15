@@ -1,9 +1,12 @@
 // Launch the installed CLI with only the explicitly selected environment.
-const { spawnSync } = require("node:child_process");
+const { spawn } = require("node:child_process");
 const { mkdirSync, readFileSync, writeFileSync, openSync, closeSync, existsSync, copyFileSync } = require("node:fs");
 const { join } = require("node:path");
+const { identity } = require("./cleanup.cjs");
 
 const runDir = process.argv[2];
+writeFileSync(join(runDir, "launcher.json"), JSON.stringify({ pid: process.pid, start: identity(process.pid) }), { mode: 0o600 });
+if (existsSync(join(runDir, "stop-requested"))) process.exit(1);
 const config = JSON.parse(readFileSync(join(runDir, "requested.json"), "utf8"));
 if (process.env.DIFFEX_TB_PROVIDER !== config.provider || process.env.DIFFEX_TB_MODEL !== config.model ||
 	process.env.DIFFEX_TB_THINKING !== config.thinking) throw new Error("Harbor environment differs from requested.json");
@@ -42,21 +45,35 @@ const args = [
 ];
 const stdout = openSync(join(runDir, "stdout.jsonl"), "wx", 0o600);
 const stderr = openSync(join(runDir, "stderr.log"), "wx", 0o600);
-const result = spawnSync("/usr/local/bin/diffex", args, {
-	cwd: process.cwd(), env, stdio: ["ignore", stdout, stderr],
+// Even an uncatchable launcher kill leaves explicit unknown process status.
+writeFileSync(join(runDir, "process.json"), JSON.stringify({
+	exit_code: null, signal: null, spawn_error: null, interrupted: false,
+}), { mode: 0o600 });
+const child = spawn("/usr/local/bin/diffex", args, {
+	cwd: process.cwd(), env, stdio: ["ignore", stdout, stderr], detached: true,
 });
 closeSync(stdout);
 closeSync(stderr);
-writeFileSync(join(runDir, "process.json"), JSON.stringify({
-	exit_code: result.status, signal: result.signal, spawn_error: result.error?.code ?? null,
-}));
-if (result.status !== 0) process.exit(result.status ?? 1);
-// Fuzzy model resolution and unsupported thinking levels must not silently
-// change a benchmark configuration. The observer records actual CLI state.
-const effective = JSON.parse(readFileSync(join(runDir, "effective.json"), "utf8"));
-if (effective.provider !== config.provider || effective.model !== config.model ||
-	effective.thinking !== config.thinking || !effective.release_agents_loaded ||
-	!effective.instruction_delivered || effective.instruction_sha256 !== config.instruction_sha256 ||
-	effective.tools.slice().sort().join(",") !== config.tools.slice().sort().join(",")) {
-	throw new Error("Effective Diffex configuration differs from requested.json");
+let spawnError = null;
+let interrupted = false;
+let killTimer;
+function stop() {
+	if (interrupted) return;
+	interrupted = true;
+	if (!child.pid) return;
+	try { process.kill(-child.pid, "SIGTERM"); } catch (error) { if (error.code !== "ESRCH") throw error; }
+	killTimer = setTimeout(() => {
+		try { process.kill(-child.pid, "SIGKILL"); } catch (error) { if (error.code !== "ESRCH") throw error; }
+	}, 5000);
 }
+for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"]) process.on(signal, stop);
+child.on("error", (error) => { spawnError = error.code ?? error.name; });
+child.on("close", (code, signal) => {
+	clearTimeout(killTimer);
+	writeFileSync(join(runDir, "process.json"), JSON.stringify({
+		exit_code: code, signal, spawn_error: spawnError, interrupted,
+	}), { mode: 0o600 });
+	process.exitCode = interrupted ? 1 : (code ?? 1);
+});
+// Close the race with a stop request written during synchronous initialization.
+if (existsSync(join(runDir, "stop-requested"))) stop();
