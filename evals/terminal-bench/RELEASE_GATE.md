@@ -88,7 +88,12 @@ The pilot task order is declared before observing model results.
 The first trial uses TB 2.1's updated `fix-git` task, followed by `openssl-selfsigned-cert` and `log-summary-date-ranges` for integration.
 The remaining pilot tasks are `nginx-request-logging`, `sanitize-git-repo`, `db-wal-recovery`, `build-cython-ext`, `multi-source-data-merger`, `polyglot-c-py`, and `sqlite-db-truncate`, all from the same verified 2.1 archive.
 It covers certificates, text processing, Git, service configuration, database recovery, compilation, and data manipulation.
-The runner uses one concurrent trial and no Harbor retries.
+The runner defaults to one concurrent trial and accepts `-n 3` (or `--concurrency 3`) for up to three simultaneous trials.
+The limit includes sandbox creation, installation, execution, verification, and confirmed cleanup; a replacement starts only after that slot finishes.
+Set `concurrency` in `benchmark.toml` to change the checked-in default.
+Use the same concurrency for preparation, every stage, and `--verify-through`, because it is part of the qualification identity.
+Stages remain sequential, so the one-task oracle and trial stages each create only one sandbox even with `-n 3`.
+There are no Harbor retries.
 Task execution and verifier timeouts remain unchanged.
 Only Diffex installation receives the existing 630-second setup allowance.
 
@@ -146,6 +151,8 @@ Cleanup independently checks known IDs and lists all sandboxes with the trial's 
 Only a Daytona not-found response establishes absence; authentication or transport errors do not.
 An orphan is deleted when possible, but needing recovery still fails qualification.
 SIGTERM and cancellation preserve cleanup and reports.
+If a parallel trial fails, the runner stops queued work, cancels active peers, and waits for their cleanup before closing the clients.
+Completed trial entries stay in declared task order even when they finish out of order, and the failure identifies the actual trial directory and index.
 After a host crash, forced kill, or interrupted CI job, recheck only the sandboxes belonging to the retained sequence:
 
 ```bash

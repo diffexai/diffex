@@ -33,6 +33,7 @@ class DatasetPin(BaseModel):
 class BenchmarkConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     model: str
+    concurrency: int = Field(default=1, ge=1, strict=True)
     pilot_tasks: list[str]
     dataset: DatasetPin
     policy: ExecutionOptions

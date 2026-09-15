@@ -53,7 +53,7 @@ def run_identity(config: BenchmarkConfig, digests: dict) -> dict:
             "daytona_api_url": os.environ.get("DAYTONA_API_URL", "https://app.daytona.io/api"),
             "harness_files": {path.name: sha256(path) for path in sorted(Path(__file__).parent.iterdir()) if path.is_file()},
             "release_agents_sha256": sha256(Path(__file__).with_name("release-agents.md")),
-            "timeout_multiplier": 1.0, "resource_overrides": None, "concurrency": 1, "harbor_retries": 0}
+            "timeout_multiplier": 1.0, "resource_overrides": None, "concurrency": config.concurrency, "harbor_retries": 0}
 
 
 def trial_config(config: BenchmarkConfig, task_path: Path, directory: Path, label: str, *, oracle: bool) -> TrialConfig:
@@ -82,7 +82,13 @@ async def run_stage(config: BenchmarkConfig, tasks: dict[str, Path], identity: d
     refresh_index(root.parent)
     try:
         async with AsyncDaytona() as client:
-            for index, task in enumerate(selected, 1):
+            pending = iter(enumerate(selected, 1))
+
+            def record_failure(index: int, task: str, exc: BaseException) -> None:
+                report.setdefault("failure", {"error": type(exc).__name__, "trial_index": index,
+                                              "task": task, "directory": f"{index:03d}-{task}"})
+
+            async def run_trial(index: int, task: str) -> None:
                 trial_dir = directory / f"{index:03d}-{task}"
                 label = uuid.uuid4().hex
                 trial_dir.mkdir()
@@ -93,6 +99,11 @@ async def run_stage(config: BenchmarkConfig, tasks: dict[str, Path], identity: d
                         raise ValueError("Task content changed after dataset verification")
                     trial = await Trial.create(trial_config(config, tasks[task], trial_dir, label, oracle=stage == "oracle"))
                     await trial.run()
+                except BaseException as exc:
+                    # Stop queued work immediately, including while cleanup of
+                    # the failed trial is still in progress.
+                    record_failure(index, task, exc)
+                    raise
                 finally:
                     cleanup = asyncio.create_task(confirm_cleanup(client, trial_dir, label))
                     cancelled = False
@@ -109,11 +120,36 @@ async def run_stage(config: BenchmarkConfig, tasks: dict[str, Path], identity: d
                 evidence = validate_trial(trial_dir, task, identity, oracle=stage == "oracle")
                 report["trials"].append({"task": task, "directory": trial_dir.name,
                                          "evidence": evidence, "files": inventory(trial_dir)})
+                report["trials"].sort(key=lambda row: row["directory"])
                 write_json(directory / "gate.json", report)
                 refresh_index(root.parent)
+
+            async def worker() -> None:
+                # A slot includes installation, execution, verification, and
+                # confirmed cleanup. Do not launch queued work after a failure.
+                while "failure" not in report:
+                    item = next(pending, None)
+                    if item is None:
+                        return
+                    index, task = item
+                    try:
+                        await run_trial(index, task)
+                    except BaseException as exc:
+                        record_failure(index, task, exc)
+                        raise
+
+            # TaskGroup cancels peers on failure and waits for their shielded
+            # cleanup before either Daytona client can close.
+            async with asyncio.TaskGroup() as group:
+                for _ in range(min(config.concurrency, len(selected))):
+                    group.create_task(worker())
+            # TaskGroup permits a worker to cancel itself without propagating
+            # an exception. Missing trials must still fail qualification.
+            if "failure" in report or len(report["trials"]) != len(selected):
+                raise RuntimeError("Stage did not complete every selected trial")
         report["passed"] = True
     except BaseException as exc:
-        report["failure"] = {"error": type(exc).__name__, "trial_index": len(report["trials"]) + 1}
+        report.setdefault("failure", {"error": type(exc).__name__})
         raise
     finally:
         report["finished_at"] = datetime.now(timezone.utc).isoformat()
@@ -140,6 +176,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=PACKAGE / "benchmark.toml")
     parser.add_argument("--output", type=Path, default=PACKAGE / "results/release-gate")
+    parser.add_argument("-n", "--concurrency", type=int,
+                        help="Maximum simultaneous trials, including cleanup (default: config concurrency or 1); use the same value for every stage and verification")
     parser.add_argument("--dataset-cache", type=Path, default=PACKAGE / "results/dataset-cache",
                         help="Shared archive cache; every use verifies the pinned SHA-256")
     parser.add_argument("--results-dir", type=Path, help="Directory to scan with --refresh-index (defaults to the output parent)")
@@ -152,6 +190,8 @@ def main() -> None:
     args = parser.parse_args()
     if args.results_dir is not None and not args.refresh_index:
         parser.error("--results-dir requires --refresh-index")
+    if args.concurrency is not None and args.concurrency < 1:
+        parser.error("--concurrency must be a positive integer")
     os.umask(0o077)
     root = args.output.resolve()
     if args.refresh_index:
@@ -159,13 +199,15 @@ def main() -> None:
         print(f"Updated run index: {write_index(directory)}")
         return
     config = load_config(args.config)
+    if args.concurrency is not None:
+        config = BenchmarkConfig.model_validate({**config.model_dump(), "concurrency": args.concurrency})
     stage = args.stage or args.through
     if not args.prepare and not args.verify_through:
         preflight(config, oracle=stage == "oracle")
     with prepare_dataset(config, args.dataset_cache.resolve()) as (tasks, digests):
         if args.prepare:
             write_json(root / "dataset.json", {"dataset": config.dataset.model_dump(), "task_digests": digests,
-                       "model": config.model, "policy": config.policy.model_dump(),
+                       "model": config.model, "policy": config.policy.model_dump(), "concurrency": config.concurrency,
                        "stages": {name: len(stage_tasks(name, config.pilot_tasks, list(tasks))) for name in STAGES}})
             refresh_index(root.parent)
             print(f"Verified {len(tasks)} pinned tasks: {root / 'dataset.json'}")
