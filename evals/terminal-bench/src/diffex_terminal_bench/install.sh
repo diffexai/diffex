@@ -29,18 +29,21 @@ if [ -e /usr/local/bin/diffex ] || [ -L /usr/local/bin/diffex ]; then
 fi
 mkdir -p "$HOME" "$prefix/node" "$prefix/cli" "$prefix/work"
 cd "$prefix/work"
-apt-get update
-apt-get install -y --no-install-recommends ca-certificates curl xz-utils
+apt-get -o Acquire::Retries=3 -o Acquire::http::No-Cache=true update
+apt-get -o Acquire::Retries=3 -o Acquire::http::No-Cache=true \
+    install -y --no-install-recommends ca-certificates wget xz-utils
 archive="node-v$NODE_VERSION-linux-$arch.tar.xz"
-curl --fail --silent --show-error --location --retry 2 --connect-timeout 20 \
-    "https://nodejs.org/dist/v$NODE_VERSION/$archive" --output "$archive"
+wget --https-only --tries=3 --timeout=20 --output-document="$archive" \
+    "https://nodejs.org/dist/v$NODE_VERSION/$archive"
 printf '%s  %s\n' "$checksum" "$archive" | sha256sum --check --strict
 tar -xJf "$archive" -C "$prefix/node" --strip-components=1
 rm "$archive"
 export PATH="$prefix/node/bin:$PATH"
 test "$(node --version)" = "v$NODE_VERSION"
 
-export NPM_CONFIG_USERCONFIG=/dev/null NPM_CONFIG_GLOBALCONFIG=/dev/null
+touch "$prefix/npm-user.npmrc" "$prefix/npm-global.npmrc"
+export NPM_CONFIG_USERCONFIG="$prefix/npm-user.npmrc"
+export NPM_CONFIG_GLOBALCONFIG="$prefix/npm-global.npmrc"
 export NPM_CONFIG_CACHE="$prefix/npm-cache"
 export NPM_CONFIG_REGISTRY="$NPM_REGISTRY" NPM_CONFIG_IGNORE_SCRIPTS=true
 npm view "@diffexai/diffex@$DIFFEX_VERSION" version dist engines \
