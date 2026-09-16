@@ -13,6 +13,9 @@ from urllib.parse import quote
 from diffex_terminal_bench.gate import STAGES
 
 
+REPORT_STAGES = (*STAGES, "sample")
+
+
 def read_report(path: Path) -> dict:
     if path.is_symlink():
         raise ValueError("Summary reports must not be symlinks")
@@ -31,7 +34,7 @@ def cell(value: object) -> str:
 
 def run_row(root: Path) -> str | None:
     dataset_path = root / "dataset.json"
-    gates = [root / stage / "gate.json" for stage in STAGES]
+    gates = [root / stage / "gate.json" for stage in REPORT_STAGES]
     if not dataset_path.exists() and not any(path.exists() for path in gates):
         return None
     model, thinking, dataset = "unknown", "unknown", "unknown"
@@ -46,7 +49,7 @@ def run_row(root: Path) -> str | None:
         except (OSError, ValueError, KeyError, TypeError, AttributeError):
             dataset = "unreadable dataset report"
     stages = []
-    for stage, path in zip(STAGES, gates):
+    for stage, path in zip(REPORT_STAGES, gates):
         if not path.exists():
             stages.append("not started")
             continue
@@ -103,8 +106,8 @@ def write_index(results: Path) -> Path:
             "A passed gate checks execution and evidence; full reward counts task solutions among checked trials.",
             "Unfinished means running or interrupted before a final report was written.",
             "Refresh with `python -m diffex_terminal_bench.benchmark --refresh-index --results-dir PATH`.", "",
-            "| Run | Model | Thinking | Dataset | " + " | ".join(STAGES) + " |",
-            "| " + " | ".join(["---"] * (4 + len(STAGES))) + " |",
+            "| Run | Model | Thinking | Dataset | " + " | ".join(REPORT_STAGES) + " |",
+            "| " + " | ".join(["---"] * (4 + len(REPORT_STAGES))) + " |",
             *rows, "",
         ]
         with tempfile.TemporaryDirectory(dir=results, prefix=".index-") as staging:

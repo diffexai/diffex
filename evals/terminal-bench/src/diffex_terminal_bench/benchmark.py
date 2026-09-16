@@ -7,6 +7,7 @@ from importlib.metadata import version
 import os
 from pathlib import Path
 import platform
+import secrets
 import signal
 import subprocess
 import uuid
@@ -23,7 +24,7 @@ from diffex_terminal_bench.dataset import BenchmarkConfig, load_config, prepare_
 from diffex_terminal_bench.daytona_backend import confirm_cleanup
 from diffex_terminal_bench.diagnostics import TrialExecutionFailure, describe_failure, diagnose_trial
 from diffex_terminal_bench.execution import PROVIDER_ENV
-from diffex_terminal_bench.gate import STAGES, fingerprint, inventory, require_previous, sha256, stage_tasks, validate_trial, write_json
+from diffex_terminal_bench.gate import STAGES, fingerprint, inventory, read_json, require_previous, sample_tasks, sha256, stage_tasks, validate_trial, verify_stage, write_json
 from diffex_terminal_bench.summary import refresh_index, write_index
 
 
@@ -77,8 +78,9 @@ def trial_config(config: BenchmarkConfig, task_path: Path, directory: Path, labe
 
 
 async def run_stage(config: BenchmarkConfig, tasks: dict[str, Path], identity: dict, root: Path, stage: str) -> None:
-    require_previous(root, stage, identity, config.pilot_tasks, list(tasks))
-    selected = stage_tasks(stage, config.pilot_tasks, list(tasks))
+    if stage != "sample":
+        require_previous(root, stage, identity, config.pilot_tasks, list(tasks))
+    selected = stage_tasks(stage, config.pilot_tasks, list(tasks), sample=identity.get("sample"))
     directory = root / stage
     directory.mkdir(parents=True)  # Never overwrite a previous attempt.
     report = {"schema_version": 1, "stage": stage, "identity": identity, "identity_sha256": fingerprint(identity),
@@ -219,6 +221,7 @@ def main() -> None:
     parser.add_argument("--dataset-cache", type=Path, default=PACKAGE / "results/dataset-cache",
                         help="Shared archive cache; every use verifies the pinned SHA-256")
     parser.add_argument("--results-dir", type=Path, help="Directory to scan with --refresh-index (defaults to the output parent)")
+    parser.add_argument("--seed", type=int, help="Reproducible task selection for --sample (default: generate and record a seed)")
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--prepare", action="store_true", help="Verify dataset and report stage sizes without creating sandboxes")
     mode.add_argument("--refresh-index", action="store_true", help="Rebuild index.md from local reports without downloads or API calls")
@@ -226,7 +229,13 @@ def main() -> None:
     mode.add_argument("--stage", choices=STAGES)
     mode.add_argument("--verify-through", choices=STAGES, help="Recheck retained or downloaded stage evidence without API calls")
     mode.add_argument("--through", choices=STAGES[:-1], help="Run prerequisite stages in order; stops on first failure")
+    mode.add_argument("--sample", type=int, metavar="COUNT", help="Run COUNT distinct random tasks once, without prerequisite stages")
+    mode.add_argument("--verify-sample", action="store_true", help="Recheck the saved sample selection and evidence without sandbox or model calls")
     args = parser.parse_args()
+    if args.seed is not None and args.sample is None:
+        parser.error("--seed requires --sample")
+    if args.sample is not None and args.sample < 1:
+        parser.error("--sample must be a positive integer")
     if args.results_dir is not None and not args.refresh_index:
         parser.error("--results-dir requires --refresh-index")
     if args.concurrency is not None and args.concurrency < 1:
@@ -243,10 +252,12 @@ def main() -> None:
         print(f"Updated run index: {write_index(directory)}")
         return
     config = load_config(args.config)
+    if args.sample is not None and args.sample > config.dataset.task_count:
+        parser.error(f"--sample cannot exceed the dataset's {config.dataset.task_count} tasks")
     if args.concurrency is not None:
         config = BenchmarkConfig.model_validate({**config.model_dump(), "concurrency": args.concurrency})
-    stage = args.stage or args.through
-    if not args.prepare and not args.verify_through:
+    stage = "sample" if args.sample is not None or args.verify_sample else args.stage or args.through
+    if not args.prepare and not args.verify_through and not args.verify_sample:
         preflight(config, oracle=stage == "oracle")
     with prepare_dataset(config, args.dataset_cache.resolve()) as (tasks, digests):
         if args.prepare:
@@ -257,6 +268,17 @@ def main() -> None:
             print(f"Verified {len(tasks)} pinned tasks: {root / 'dataset.json'}")
             return
         identity = run_identity(config, digests)
+        if args.verify_sample:
+            identity["sample"] = read_json(root / "sample/gate.json")["identity"].get("sample")
+            verify_stage(root, "sample", identity, config.pilot_tasks, list(tasks))
+            refresh_index(root.parent)
+            print(f"Verified retained sample evidence: {root / 'sample'}")
+            return
+        if args.sample is not None:
+            seed = args.seed if args.seed is not None else secrets.randbits(64)
+            selected = sample_tasks(list(tasks), args.sample, seed)
+            identity["sample"] = {"count": args.sample, "seed": seed, "tasks": selected}
+            print(f"Sample seed: {seed}; {len(selected)} tasks: {', '.join(selected)}", flush=True)
         if args.verify_through:
             require_previous(root, args.verify_through, identity, config.pilot_tasks, list(tasks), include_current=True)
             refresh_index(root.parent)

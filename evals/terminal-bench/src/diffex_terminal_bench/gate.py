@@ -5,6 +5,7 @@ import hashlib
 import json
 import math
 from pathlib import Path
+import random
 import tempfile
 
 from harbor.models.agent.context import AgentContext
@@ -44,7 +45,24 @@ def fingerprint(value: dict) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
-def stage_tasks(stage: str, pilot: list[str], all_tasks: list[str]) -> list[str]:
+def sample_tasks(all_tasks: list[str], count: int, seed: int) -> list[str]:
+    if type(count) is not int or not 1 <= count <= len(all_tasks):
+        raise ValueError(f"Sample count must be between 1 and {len(all_tasks)}")
+    if type(seed) is not int:
+        raise ValueError("Sample seed must be an integer")
+    if len(set(all_tasks)) != len(all_tasks):
+        raise ValueError("Sample population must contain distinct tasks")
+    return random.Random(seed).sample(sorted(all_tasks), count)
+
+
+def stage_tasks(stage: str, pilot: list[str], all_tasks: list[str], *, sample: dict | None = None) -> list[str]:
+    if stage == "sample":
+        if not isinstance(sample, dict) or set(sample) != {"count", "seed", "tasks"}:
+            raise ValueError("Missing or invalid sample selection")
+        selected = sample_tasks(all_tasks, sample["count"], sample["seed"])
+        if sample["tasks"] != selected:
+            raise ValueError("Sample tasks do not match the recorded seed and dataset")
+        return selected
     if len(pilot) != 10 or len(set(pilot)) != 10 or not set(pilot).issubset(all_tasks):
         raise ValueError("The pilot must select ten distinct pinned tasks")
     if stage in ("oracle", "trial"):
@@ -73,22 +91,35 @@ def inventory(directory: Path) -> dict[str, str]:
 def require_previous(root: Path, stage: str, identity: dict, pilot: list[str], tasks: list[str], *, include_current: bool = False) -> None:
     """Recheck every prior artifact, not just a cached 'passed' flag."""
     for previous in STAGES[:STAGES.index(stage) + int(include_current)]:
-        directory = root / previous
-        report = read_json(directory / "gate.json")
-        if report.get("passed") is not True or report.get("identity") != identity:
-            raise ValueError(f"{previous}: missing qualification for this exact configuration")
-        trials = report.get("trials", [])
-        if Counter(row["task"] for row in trials) != Counter(stage_tasks(previous, pilot, tasks)):
-            raise ValueError(f"{previous}: trial coverage does not match the stage")
-        if len({row["directory"] for row in trials}) != len(trials):
-            raise ValueError(f"{previous}: duplicate trial evidence")
-        for row in trials:
-            trial_dir = directory / row["directory"]
-            if trial_dir.resolve().parent != directory.resolve():
-                raise ValueError("Trial evidence must be a direct child of its stage")
-            if inventory(trial_dir) != row["files"]:
-                raise ValueError(f"{previous}: retained evidence changed or is missing")
-            validate_trial(trial_dir, row["task"], identity, oracle=previous == "oracle")
+        verify_stage(root, previous, identity, pilot, tasks)
+
+
+def verify_stage(root: Path, stage: str, identity: dict, pilot: list[str], tasks: list[str]) -> None:
+    directory = root / stage
+    report = read_json(directory / "gate.json")
+    if report.get("passed") is not True or report.get("identity") != identity:
+        raise ValueError(f"{stage}: missing qualification for this exact configuration")
+    selected = stage_tasks(stage, pilot, tasks, sample=identity.get("sample"))
+    trials = report.get("trials", [])
+    if Counter(row["task"] for row in trials) != Counter(selected):
+        raise ValueError(f"{stage}: trial coverage does not match the stage")
+    if len({row["directory"] for row in trials}) != len(trials):
+        raise ValueError(f"{stage}: duplicate trial evidence")
+    if stage == "sample":
+        if (report.get("stage") != stage or report.get("identity_sha256") != fingerprint(identity)
+                or not report.get("finished_at") or report.get("failure") or report.get("failures")):
+            raise ValueError("Sample report is unfinished, failed, or inconsistent")
+        if [(row["task"], row["directory"]) for row in trials] != [
+            (task, f"{index:03d}-{task}") for index, task in enumerate(selected, 1)
+        ]:
+            raise ValueError("Sample trial order differs from the recorded selection")
+    for row in trials:
+        trial_dir = directory / row["directory"]
+        if trial_dir.resolve().parent != directory.resolve():
+            raise ValueError("Trial evidence must be a direct child of its stage")
+        if inventory(trial_dir) != row["files"]:
+            raise ValueError(f"{stage}: retained evidence changed or is missing")
+        validate_trial(trial_dir, row["task"], identity, oracle=stage == "oracle")
 
 
 def validate_trial(directory: Path, task: str, identity: dict, *, oracle: bool = False) -> dict:

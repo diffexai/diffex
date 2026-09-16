@@ -40,7 +40,7 @@ def export_job(source: Path, output: Path, *, allow_partial: bool = False) -> Pa
         raise ValueError("Export requires the Harbor version recorded by the stage")
     if not gate.get("finished_at"):
         raise ValueError("Stage has not stopped; wait for its final gate.json before exporting")
-    selected = stage_tasks(gate["stage"], identity["pilot_tasks"], list(identity["task_digests"]))
+    selected = stage_tasks(gate["stage"], identity["pilot_tasks"], list(identity["task_digests"]), sample=identity.get("sample"))
     planned = {f"{index:03d}-{task}": task for index, task in enumerate(selected, 1)}
     checked = {row["directory"]: row for row in gate["trials"]}
     if len(checked) != len(gate["trials"]) or not checked.keys() <= planned.keys():

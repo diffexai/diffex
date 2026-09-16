@@ -51,6 +51,50 @@ Provision quota and network access in the account instead of changing benchmark 
 Record the created sandbox IDs, snapshots, and actual CPU, memory, and disk from `sandbox-created.json` when diagnosing backend differences.
 The pinned dataset includes upstream image tags and network-installed dependencies; archive verification does not make those external services immutable.
 
+## Run five random tasks
+
+Use `--sample 5` for a standalone run of five distinct tasks selected uniformly from all 89 pinned tasks, with one trial per task and no prerequisite stages.
+Use a clean committed checkout and load the Daytona and model credentials described above.
+The command verifies the full dataset automatically, preserves task limits and the configured agent policy, and uses the same bounded concurrency, evidence collection, cleanup, and continue-on-trial-failure behavior as the staged runner.
+
+```zsh
+TB_SAMPLE_OUTPUT="results/sample-tb21-$(date +%Y%m%d-%H%M%S)"
+TB_SAMPLE_CONCURRENCY=1
+
+uv run --locked python -m diffex_terminal_bench.benchmark \
+  --sample 5 -n "$TB_SAMPLE_CONCURRENCY" --output "$TB_SAMPLE_OUTPUT"
+```
+
+The runner prints the seed and selected task names, then saves them in `$TB_SAMPLE_OUTPUT/sample/gate.json` under `identity.sample` before creating sandboxes.
+Omitting `--seed` generates a new seed; add `--seed 42` to repeat a selection with the same dataset and pinned Python runtime.
+A repeated selection still requires a fresh output directory and produces new model executions, which can have different outcomes.
+The count can be any integer from 1 to 89; `-n` controls simultaneous trials, not the sample size.
+Sample runs appear in the local results index and never qualify prerequisite stages.
+
+After `sample: passed`, verify using the same checkout, configuration, and concurrency:
+
+```zsh
+uv run --locked python -m diffex_terminal_bench.benchmark \
+  --verify-sample -n "$TB_SAMPLE_CONCURRENCY" --output "$TB_SAMPLE_OUTPUT"
+
+open "$TB_SAMPLE_OUTPUT/sample"
+```
+
+Verification reads the retained selection, reproduces it from the saved seed, and rechecks all selected trial evidence without creating sandboxes or calling a model.
+It uses the shared verified dataset cache and may download the pinned archive if that cache is missing.
+Export a passing sample as a Harbor job using the same exporter as qualification stages:
+
+```zsh
+TB_SAMPLE_JOB="results/harbor-exports/$(basename "$TB_SAMPLE_OUTPUT")-sample"
+uv run --locked python -m diffex_terminal_bench.export_job \
+  "$TB_SAMPLE_OUTPUT/sample" --output "$TB_SAMPLE_JOB"
+```
+
+If trials fail, the remaining selected tasks still run before the command exits nonzero.
+Use `--allow-partial` on the export command to retain failed terminal results for diagnosis; every started trial still needs its terminal result and lock.
+Use `python -m diffex_terminal_bench.recover "$TB_SAMPLE_OUTPUT"` for sandbox recovery after an interruption.
+The Harbor authentication and upload commands below also apply to the exported sample job.
+
 ## Ordered stages
 
 ### Refresh and restart with parallel trials

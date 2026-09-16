@@ -20,7 +20,7 @@ from harbor.upload.uploader import _create_job_archive_file, _load_job_from_disk
 from diffex_terminal_bench.benchmark import PACKAGE, trial_config
 from diffex_terminal_bench.dataset import load_config
 from diffex_terminal_bench.export_job import export_job
-from diffex_terminal_bench.gate import fingerprint, inventory, read_json, write_json
+from diffex_terminal_bench.gate import fingerprint, inventory, read_json, sample_tasks, write_json
 
 
 class ExportJobTests(unittest.TestCase):
@@ -114,6 +114,58 @@ class ExportJobTests(unittest.TestCase):
         self.assertEqual(trials[6].exception_info.exception_type, "AgentTimeoutError")
         self.assertIsNone(trials[6].agent_result)
         self.assertEqual(len(read_json(self.output / "export.json")["missing_trials"]), 3)
+
+    def test_sample_exports_only_selected_tasks_with_one_attempt_each(self):
+        source = self.root / "sample-run/sample"
+        selected = sample_tasks(list(self.identity["task_digests"]), 5, 42)
+        identity = {**self.identity, "sample": {"count": 5, "seed": 42, "tasks": selected}}
+        report = {**self.report, "stage": "sample", "identity": identity,
+                  "identity_sha256": fingerprint(identity), "trials": []}
+        originals = {row["task"]: self.source / row["directory"] for row in self.report["trials"]}
+        for index, task in enumerate(selected, 1):
+            directory = source / f"{index:03d}-{task}"
+            shutil.copytree(originals[task], directory)
+            result = TrialResult.model_validate_json((directory / "result.json").read_text())
+            result.trial_name = directory.name
+            result.trial_uri = directory.as_uri()
+            result.config.trial_name = directory.name
+            result.config.trials_dir = source
+            write_json(directory / "result.json", result.model_dump(mode="json"))
+            write_json(directory / "config.json", result.config.model_dump(mode="json"))
+            report["trials"].append({"task": task, "directory": directory.name, "files": inventory(directory)})
+        write_json(source / "gate.json", report)
+        export_job(source, self.output)
+        result, config, trials, _ = _load_job_from_disk(self.output)
+        self.assertEqual(result.n_total_trials, 5)
+        self.assertEqual(result.stats.n_completed_trials, 5)
+        self.assertEqual(config.n_attempts, 1)
+        self.assertEqual([task.path.name for task in config.tasks], selected)
+        self.assertEqual(len(trials), 5)
+        provenance = self.output / report["trials"][0]["directory"] / "artifacts/diffex-qualification/gate.json"
+        self.assertEqual(read_json(provenance)["identity"]["sample"], identity["sample"])
+
+        # A failed sample can still export its terminal results for diagnosis.
+        directory = source / report["trials"][-1]["directory"]
+        result = TrialResult.model_validate_json((directory / "result.json").read_text())
+        result.exception_info = ExceptionInfo(exception_type="AgentTimeoutError", exception_message="900 seconds",
+                                              exception_traceback="retained traceback", occurred_at=result.finished_at)
+        write_json(directory / "result.json", result.model_dump(mode="json"))
+        report.update(passed=False, trials=report["trials"][:-1])
+        write_json(source / "gate.json", report)
+        partial = self.root / "partial-export"
+        with self.assertRaisesRegex(ValueError, "allow-partial"):
+            export_job(source, partial)
+        export_job(source, partial, allow_partial=True)
+        result, _, _, _ = _load_job_from_disk(partial)
+        self.assertEqual(result.n_total_trials, 5)
+        self.assertEqual(result.stats.n_errored_trials, 1)
+        self.assertEqual(read_json(partial / "export.json")["missing_trials"], [])
+
+        identity["sample"]["tasks"].reverse()
+        report["identity_sha256"] = fingerprint(identity)
+        write_json(source / "gate.json", report)
+        with self.assertRaisesRegex(ValueError, "recorded seed"):
+            export_job(source, self.root / "tampered-export", allow_partial=True)
 
     def test_changed_checked_evidence_is_rejected(self):
         (self.directories[0] / "agent/trajectory.json").write_text("changed")
