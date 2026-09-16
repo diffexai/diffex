@@ -82,18 +82,25 @@ async def run_stage(config: BenchmarkConfig, tasks: dict[str, Path], identity: d
     directory = root / stage
     directory.mkdir(parents=True)  # Never overwrite a previous attempt.
     report = {"schema_version": 1, "stage": stage, "identity": identity, "identity_sha256": fingerprint(identity),
-              "started_at": datetime.now(timezone.utc).isoformat(), "passed": False, "trials": []}
+              "started_at": datetime.now(timezone.utc).isoformat(), "passed": False, "trials": [],
+              "failures": [], "completed_trials": 0, "expected_trials": len(selected)}
     write_json(directory / "gate.json", report)
     refresh_index(root.parent)
     try:
         async with AsyncDaytona() as client:
             pending = iter(enumerate(selected, 1))
 
-            def record_failure(index: int, task: str, exc: BaseException) -> None:
+            def record_failure(index: int, task: str, exc: BaseException, phase: str) -> None:
                 failure = {"error": type(exc).__name__, "trial_index": index,
-                           "task": task, "directory": f"{index:03d}-{task}"}
+                           "task": task, "directory": f"{index:03d}-{task}", "phase": phase}
                 if isinstance(exc, TrialExecutionFailure):
                     failure["diagnostics"] = exc.details
+                previous = next((row for row in report["failures"] if row["trial_index"] == index), None)
+                if previous is not None:
+                    previous.setdefault("additional_errors", []).append(failure)
+                    return
+                report["failures"].append(failure)
+                report["failures"].sort(key=lambda row: row["trial_index"])
                 report.setdefault("failure", failure)
 
             async def run_trial(index: int, task: str) -> None:
@@ -108,9 +115,7 @@ async def run_stage(config: BenchmarkConfig, tasks: dict[str, Path], identity: d
                     trial = await Trial.create(trial_config(config, tasks[task], trial_dir, label, oracle=stage == "oracle"))
                     await trial.run()
                 except BaseException as exc:
-                    # Stop queued work immediately, including while cleanup of
-                    # the failed trial is still in progress.
-                    record_failure(index, task, exc)
+                    record_failure(index, task, exc, "execution")
                     raise
                 finally:
                     cleanup = asyncio.create_task(confirm_cleanup(client, trial_dir, label))
@@ -122,56 +127,75 @@ async def run_stage(config: BenchmarkConfig, tasks: dict[str, Path], identity: d
                             # Preserve evidence and finish remote deletion even
                             # when SIGTERM arrives during a cancelled trial.
                             cancelled = True
-                    cleanup.result()
-                    if cancelled:
-                        raise asyncio.CancelledError
+                        except Exception:
+                            break
+                    try:
+                        cleanup_report = cleanup.result()
+                        if cleanup_report.get("confirmed") is not True or cleanup_report.get("unexpected_sandboxes", []):
+                            raise ValueError("Sandbox cleanup failed or required recovery")
+                    except BaseException as exc:
+                        record_failure(index, task, exc, "cleanup")
+                        raise
+                    finally:
+                        if cancelled:
+                            raise asyncio.CancelledError
                 evidence = validate_trial(trial_dir, task, identity, oracle=stage == "oracle")
                 report["trials"].append({"task": task, "directory": trial_dir.name,
                                          "evidence": evidence, "files": inventory(trial_dir)})
                 report["trials"].sort(key=lambda row: row["directory"])
-                write_json(directory / "gate.json", report)
-                refresh_index(root.parent)
 
             async def worker() -> None:
                 # A slot includes installation, execution, verification, and
-                # confirmed cleanup. Do not launch queued work after a failure.
-                while "failure" not in report:
+                # the cleanup attempt, even when this trial fails.
+                while True:
                     item = next(pending, None)
                     if item is None:
                         return
                     index, task = item
                     try:
                         await run_trial(index, task)
-                    except BaseException as exc:
-                        record_failure(index, task, exc)
-                        raise
+                    except (Exception, asyncio.CancelledError) as exc:
+                        if not any(row["trial_index"] == index for row in report["failures"]):
+                            record_failure(index, task, exc, "trial")
+                        # A cancelled stage still stops scheduling. A trial
+                        # raising CancelledError on its own must not lose a slot.
+                        if asyncio.current_task().cancelling():
+                            raise asyncio.CancelledError from exc
+                        failure = next(row for row in report["failures"] if row["trial_index"] == index)
+                        reason = describe_failure(failure["diagnostics"]) if "diagnostics" in failure else failure["error"]
+                        print(f"{stage} {index}/{len(selected)}: failed: {reason}. "
+                              f"Evidence: {directory / failure['directory']}. Continuing remaining trials.", flush=True)
+                    report["completed_trials"] += 1
+                    write_json(directory / "gate.json", report)
+                    refresh_index(root.parent)
 
-            # TaskGroup cancels peers on failure and waits for their shielded
-            # cleanup before either Daytona client can close.
+            # Only stage-level failures or explicit cancellation cancel peers.
+            # Wait for every started trial's cleanup before closing clients.
             async with asyncio.TaskGroup() as group:
                 for _ in range(min(config.concurrency, len(selected))):
                     group.create_task(worker())
-            # TaskGroup permits a worker to cancel itself without propagating
-            # an exception. Missing trials must still fail qualification.
-            if "failure" in report or len(report["trials"]) != len(selected):
+            if report["completed_trials"] != len(selected):
                 raise RuntimeError("Stage did not complete every selected trial")
+        if report["failures"]:
+            failure = report["failure"]
+            reason = describe_failure(failure["diagnostics"]) if "diagnostics" in failure else failure["error"]
+            raise StageFailedError(f"{stage}: completed {len(selected)} trials with {len(report['failures'])} failed; "
+                                   f"qualification failed. First failure: {reason}. "
+                                   f"Evidence: {directory / failure['directory']}. All failures: {directory / 'gate.json'}.")
         report["passed"] = True
     except BaseException as exc:
         report.setdefault("failure", {"error": type(exc).__name__})
-        if isinstance(exc, Exception) and "diagnostics" in report["failure"]:
-            failure = report["failure"]
-            location = directory / failure["directory"]
-            reason = describe_failure(failure["diagnostics"])
-            raise StageFailedError(f"{stage}: qualification failed: {reason}. Evidence: {location}. "
-                                   "The stage remains unqualified; no existing trial will be overwritten.") from exc
         raise
     finally:
         report["finished_at"] = datetime.now(timezone.utc).isoformat()
-        write_json(directory / "gate.json", report)
-        refresh_index(root.parent)
-        # Harbor owns a separate singleton HTTP client; close it on this loop.
-        manager = await DaytonaClientManager.get_instance()
-        await manager._cleanup()
+        try:
+            write_json(directory / "gate.json", report)
+            refresh_index(root.parent)
+        finally:
+            # Harbor owns a separate singleton HTTP client; close it even if
+            # writing the final report fails.
+            manager = await DaytonaClientManager.get_instance()
+            await manager._cleanup()
     print(f"{stage}: passed; evidence: {directory}", flush=True)
 
 

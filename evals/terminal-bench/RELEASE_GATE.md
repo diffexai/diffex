@@ -102,8 +102,8 @@ Concurrent preparation uses a per-digest file lock and atomic publication so ano
 Locks cover preparation only; benchmark execution proceeds independently.
 Existing per-run caches remain untouched and can be deleted when no older benchmark process is using them.
 
-The runner updates `index.md` in the output directory's parent after preparation, stage start, each checked trial, and stage completion or failure.
-It links each qualification run and its stage reports, showing the model, thinking level, dataset, recorded gate status, checked-trial counts, and full-reward counts.
+The runner updates `index.md` in the output directory's parent after preparation, stage start, each completed trial, and stage completion or failure.
+It links each qualification run and its stage reports, showing the model, thinking level, dataset, recorded gate status, completed-trial counts, checked-trial counts, failure counts, and full-reward counts.
 Smoke-test directories are excluded because they use separate report formats.
 The index summarizes recorded reports and does not replace `--verify-through` evidence verification.
 An unfinished stage may be running or may have stopped without writing a final report.
@@ -131,7 +131,7 @@ The first trial uses TB 2.1's updated `fix-git` task, followed by `openssl-selfs
 The remaining pilot tasks are `nginx-request-logging`, `sanitize-git-repo`, `db-wal-recovery`, `build-cython-ext`, `multi-source-data-merger`, `polyglot-c-py`, and `sqlite-db-truncate`, all from the same verified 2.1 archive.
 It covers certificates, text processing, Git, service configuration, database recovery, compilation, and data manipulation.
 The runner defaults to one concurrent trial and accepts `-n 3` (or `--concurrency 3`) for up to three simultaneous trials.
-The limit includes sandbox creation, installation, execution, verification, and confirmed cleanup; a replacement starts only after that slot finishes.
+The limit includes sandbox creation, installation, execution, verification, and the bounded cleanup attempt; a replacement starts only after that slot finishes.
 Set `concurrency` in `benchmark.toml` to change the checked-in default.
 Use the same concurrency for preparation, every stage, and `--verify-through`, because it is part of the qualification identity.
 Stages remain sequential, so the one-task oracle and trial stages each create only one sandbox even with `-n 3`.
@@ -150,6 +150,7 @@ uv run --locked python -m diffex_terminal_bench.benchmark --stage reliability
 ```
 
 Alternatively, `--through reliability` runs the first five stages in order and stops on the first failed gate.
+Every selected task in that stage is attempted before reporting the failed gate.
 Each stage requires a new output directory and refuses to overwrite an earlier attempt.
 Use `--output results/qualification-NAME` to start a new sequence after investigating a failure or changing configuration.
 Keep failed sequences for diagnosis; do not delete failed trials or edit a report to qualify a stage.
@@ -186,7 +187,9 @@ Use `-n 1` throughout that sequence while capacity remains constrained; task dea
 
 ### Retained evidence
 
-Each stage writes `gate.json` before starting remote work and updates it after every verified trial.
+Each stage writes `gate.json` before starting remote work and updates it after every completed trial, including failures.
+The report separates verified `trials` from `failures`, records `completed_trials` and `expected_trials`, and keeps `failure` as the first observed failure.
+Failure entries identify the task, trial index, evidence directory, error type, and phase; a cleanup error following an execution error is retained in `additional_errors`.
 It records dataset/archive and per-task digests, adapter commit, Harbor/Daytona/Python versions, dependency lock hash, installation pins, model, thinking, tools, subagent policy, and hashes of adapter/harness files and the release instructions.
 Each Diffex trial additionally retains the effective system prompt and its SHA-256.
 Full system prompt hashes can differ between isolated trials because context includes trial-specific paths.
@@ -208,18 +211,22 @@ Verifier reward must agree with the retained reward file.
 A completed Diffex trial with valid evidence and reward zero passes integration checks and remains a zero-reward benchmark result.
 An oracle with reward zero fails the smoke.
 
-Timeouts, provider errors, unexplained child interruptions, invalid usage values, missing logs, invalid ATIF, altered configuration, and cleanup failures retain their original evidence and stop qualification for investigation.
+Timeouts, unrecovered provider or process errors, unexplained child interruptions, invalid usage values, missing logs, invalid ATIF, altered configuration, and cleanup failures retain their original evidence and mark the trial as failed.
+The runner continues active peers and queued tasks after these failures, in both serial and concurrent stages.
 The runner does not convert them to successful executions or silently rerun them.
-This conservative integration gate can stop on a legitimate task timeout; the timeout remains a recorded task result and must not be described as an installation failure.
+After every selected task finishes, a stage with any failed trials reports failed qualification and exits nonzero with an evidence summary instead of a trial-error traceback.
+Later prerequisite-dependent stages remain blocked by that failed gate.
+A legitimate task timeout remains a recorded task result and must not be described as an installation failure.
 No failed or interrupted run establishes readiness merely because its process exited zero.
 
 The backend records sandbox IDs before Harbor tears them down.
 Cleanup independently checks known IDs and lists all sandboxes with the trial's unique label, allowing bounded time for asynchronous deletion.
 Only a Daytona not-found response establishes absence; authentication or transport errors do not.
 An orphan is deleted when possible, but needing recovery still fails qualification.
-SIGTERM and cancellation preserve cleanup and reports.
-If a parallel trial fails, the runner stops queued work, cancels active peers, and waits for their cleanup before closing the clients.
-Completed trial entries stay in declared task order even when they finish out of order, and the failure identifies the actual trial directory and index.
+SIGTERM and explicit stage cancellation stop queued work, cancel active peers, and preserve cleanup and reports.
+Trial failures do not cancel peers; every started trial finishes its bounded cleanup attempt before releasing its slot or closing the clients.
+Stage-wide failures such as an inability to persist `gate.json` can still stop execution.
+Verified trial entries and failure entries stay in declared task order even when they finish out of order.
 After a host crash, forced kill, or interrupted CI job, recheck only the sandboxes belonging to the retained sequence:
 
 ```bash

@@ -61,6 +61,18 @@ class SummaryTests(unittest.TestCase):
         self.assertTrue((self.root / "index.md").is_file())
         self.assertFalse((self.root / "dataset-cache").exists())
 
+    def test_trial_errors_show_progress_until_the_stage_finishes(self):
+        gate = {**self.gate, "completed_trials": 2, "expected_trials": 10,
+                "failure": {"error": "ValueError"}, "failures": [{"error": "ValueError"}],
+                "trials": [{"evidence": {"rewards": {"reward": 0}}}]}
+        write_json(self.run / "trial/gate.json", gate)
+        self.assertIn("unfinished; 2/10 completed; 1 checked; 1 failed; 0 full reward",
+                      write_index(self.root).read_text())
+        gate["finished_at"] = "2026-09-15T00:01:00Z"
+        write_json(self.run / "trial/gate.json", gate)
+        self.assertIn("failed; 2/10 completed; 1 checked; 1 failed; 0 full reward",
+                      write_index(self.root).read_text())
+
     def test_index_failure_is_nonfatal(self):
         with patch("diffex_terminal_bench.summary.write_index", side_effect=OSError("disk full")), \
              patch("sys.stderr") as stderr:

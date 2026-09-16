@@ -61,7 +61,9 @@ def run_row(root: Path) -> str | None:
             trials = gate["trials"]
             full_reward = sum(bool(rewards) and all(value == 1 for value in rewards.values())
                               for trial in trials for rewards in [trial["evidence"]["rewards"]])
-            if gate.get("failure") or (gate.get("finished_at") and gate.get("passed") is not True):
+            if "completed_trials" in gate and not gate.get("finished_at"):
+                status = "unfinished"
+            elif gate.get("failure") or (gate.get("finished_at") and gate.get("passed") is not True):
                 status = "failed"
             elif gate.get("passed") is True:
                 status = "passed"
@@ -70,6 +72,9 @@ def run_row(root: Path) -> str | None:
             total = sizes.get(stage)
             progress = f"{len(trials)}/{total}" if total is not None else str(len(trials))
             label = f"{status}; {progress} checked; {full_reward} full reward"
+            if "completed_trials" in gate:
+                label = (f"{status}; {gate['completed_trials']}/{gate['expected_trials']} completed; "
+                         f"{len(trials)} checked; {len(gate['failures'])} failed; {full_reward} full reward")
         except (OSError, ValueError, KeyError, TypeError, AttributeError):
             label = "unreadable report"
         stages.append(f"[{cell(label)}]({quote(f'{root.name}/{stage}/gate.json', safe='/')})")

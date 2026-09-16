@@ -67,6 +67,7 @@ class ParallelStageTests(unittest.IsolatedAsyncioTestCase):
         self.configs = []
         self.peak = 0
         self.failure_phase = None
+        self.cleanup_failure = False
 
         async def create(config):
             index = int(config.trial_name.split("-", 1)[0])
@@ -93,11 +94,17 @@ class ParallelStageTests(unittest.IsolatedAsyncioTestCase):
             await self.finish_cleanup[index].wait()
             self.active.remove(index)
             self.cleaned.add(index)
+            if index == 2 and self.failure_phase == "cleanup":
+                raise ValueError("cleanup failed")
+            if index == 2 and self.cleanup_failure:
+                return {"confirmed": False, "error": "RuntimeError"}
             return {"confirmed": True}
 
         def validate(directory, *args, **kwargs):
             index = int(directory.name.split("-", 1)[0])
             self.assertIn(index, self.cleaned)
+            if index in (2, 4) and self.failure_phase == "multiple":
+                raise ValueError("invalid evidence")
             if index == 2 and self.failure_phase == "validate":
                 raise ValueError("invalid evidence")
             if index == 2 and self.failure_phase == "timeout":
@@ -174,7 +181,7 @@ class ParallelStageTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.peak, 1)
         self.assertEqual(self.cleaned, set(range(1, 11)))
 
-    async def test_failure_stops_queue_and_cleans_peers(self):
+    async def test_failure_continues_queue_without_cancelling_peers(self):
         self.failure_phase = "validate"
         await self.check_failure()
 
@@ -185,6 +192,36 @@ class ParallelStageTests(unittest.IsolatedAsyncioTestCase):
     async def test_execution_failure_cleans_started_trials(self):
         self.failure_phase = "run"
         await self.check_failure()
+
+    async def test_cleanup_exception_continues_queue(self):
+        self.failure_phase = "cleanup"
+        await self.check_failure()
+
+    async def test_unconfirmed_cleanup_continues_queue(self):
+        self.cleanup_failure = True
+        await self.check_failure()
+
+    async def test_execution_and_cleanup_failures_are_both_retained(self):
+        self.failure_phase = "run"
+        self.cleanup_failure = True
+        await self.check_failure()
+        failure = read_json(self.root / "pilot/gate.json")["failures"][0]
+        self.assertEqual(failure["phase"], "execution")
+        self.assertEqual(failure["additional_errors"][0]["phase"], "cleanup")
+
+    async def test_serial_stage_records_every_failure_and_finishes_queue(self):
+        self.config.concurrency = 1
+        self.failure_phase = "multiple"
+        for event in (*self.finish_run.values(), *self.finish_cleanup.values()):
+            event.set()
+        with self.assertRaisesRegex(StageFailedError, "completed 10 trials with 2 failed"):
+            await asyncio.wait_for(self.start_stage(), 5)
+        report = read_json(self.root / "pilot/gate.json")
+        self.assertEqual([row["trial_index"] for row in report["failures"]], [2, 4])
+        self.assertEqual(len(report["trials"]), 8)
+        self.assertEqual(report["completed_trials"], 10)
+        self.assertEqual(self.cleaned, set(range(1, 11)))
+        self.assertEqual(self.peak, 1)
 
     async def test_harbor_timeout_retains_cause_after_cleanup(self):
         self.failure_phase = "timeout"
@@ -197,14 +234,19 @@ class ParallelStageTests(unittest.IsolatedAsyncioTestCase):
         task = self.start_stage()
         await self.wait_events(self.started, (1, 2, 3))
         self.finish_run[2].set()
-        self.finish_cleanup[2].set()
-        await self.wait_events(self.cleaning, (1, 2, 3))
-        self.assertFalse(task.done())
+        await self.wait_events(self.cleaning, (2,))
         self.assertFalse(self.started[4].is_set())
+        self.finish_cleanup[2].set()
+        await self.wait_events(self.started, (4,))
+        self.assertFalse(task.done())
+        self.assertFalse(self.cleaning[1].is_set())
+        self.assertFalse(self.cleaning[3].is_set())
         self.manager._cleanup.assert_not_awaited()
-        self.finish_cleanup[1].set()
-        self.finish_cleanup[3].set()
-        with self.assertRaises(StageFailedError if self.failure_phase == "timeout" else ExceptionGroup) as error:
+        interim = read_json(self.root / "pilot/gate.json")
+        self.assertEqual(interim["failures"][0]["trial_index"], 2)
+        for event in (*self.finish_run.values(), *self.finish_cleanup.values()):
+            event.set()
+        with self.assertRaises(StageFailedError) as error:
             await asyncio.wait_for(task, 5)
         report = read_json(self.root / "pilot/gate.json")
         self.assertFalse(report["passed"])
@@ -215,7 +257,11 @@ class ParallelStageTests(unittest.IsolatedAsyncioTestCase):
         if self.failure_phase == "timeout":
             self.assertIn(str(self.root / "pilot" / report["failure"]["directory"]), str(error.exception))
             self.assertIn("AgentTimeoutError at the 900s task deadline", str(error.exception))
-        self.assertEqual(self.cleaned, {1, 2, 3})
+        self.assertEqual(self.cleaned, set(range(1, 11)))
+        self.assertEqual(len(report["trials"]), 9)
+        self.assertEqual(len(report["failures"]), 1)
+        self.assertEqual(report["completed_trials"], 10)
+        self.assertEqual(self.peak, 3)
 
     async def test_repeated_cancellation_waits_for_all_cleanup(self):
         task = self.start_stage()
@@ -236,7 +282,7 @@ class ParallelStageTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.cleaned, {1, 2, 3})
         self.assertFalse(self.started[4].is_set())
 
-    async def test_worker_cancellation_cannot_pass_incomplete_coverage(self):
+    async def test_trial_cancellation_does_not_cancel_the_worker(self):
         self.failure_phase = "cancel"
         task = self.start_stage()
         await self.wait_events(self.started, (1, 2, 3))
@@ -244,11 +290,11 @@ class ParallelStageTests(unittest.IsolatedAsyncioTestCase):
         await self.wait_events(self.cleaning, (2,))
         for event in (*self.finish_run.values(), *self.finish_cleanup.values()):
             event.set()
-        with self.assertRaisesRegex(RuntimeError, "every selected trial"):
+        with self.assertRaisesRegex(StageFailedError, "completed 10 trials with 1 failed"):
             await asyncio.wait_for(task, 5)
         self.assertFalse(read_json(self.root / "pilot/gate.json")["passed"])
-        self.assertEqual(self.cleaned, {1, 2, 3})
-        self.assertFalse(self.started[4].is_set())
+        self.assertEqual(self.cleaned, set(range(1, 11)))
+        self.assertTrue(self.started[4].is_set())
 
 
 if __name__ == "__main__":
