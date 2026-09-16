@@ -3,6 +3,8 @@
 from contextlib import ExitStack, redirect_stderr, redirect_stdout
 import io
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
@@ -118,8 +120,11 @@ class SamplingTests(unittest.TestCase):
             self.cli("--sample", "5", "--seed", "42")
         self.assertEqual(len(self.started), 5)
         self.assertEqual(len(self.cleaned), 5)
-        with self.assertRaisesRegex(ValueError, "missing qualification"):
+        self.prepare.reset_mock()
+        with self.assertRaisesRegex(SystemExit, "recorded run did not pass.*--allow-partial") as error:
             self.cli("--verify-sample")
+        self.assertTrue(error.exception.__suppress_context__)
+        self.prepare.assert_not_called()
 
     def test_verification_rejects_selection_and_evidence_tampering(self):
         self.cli("--sample", "5", "--seed", "42")
@@ -129,13 +134,48 @@ class SamplingTests(unittest.TestCase):
         gate["identity"]["sample"]["tasks"].reverse()
         gate["identity_sha256"] = fingerprint(gate["identity"])
         write_json(path, gate)
-        with self.assertRaisesRegex(ValueError, "recorded seed"):
+        with self.assertRaisesRegex(SystemExit, "recorded seed"):
             self.cli("--verify-sample")
         path.write_bytes(original)
         trial = self.root / "sample" / read_json(path)["trials"][0]["directory"]
         (trial / "sandbox-cleanup.json").unlink()
-        with self.assertRaisesRegex(ValueError, "evidence changed"):
+        with self.assertRaisesRegex(SystemExit, "evidence changed"):
             self.cli("--verify-sample")
+
+    def test_failed_sample_cli_explains_timeout_without_traceback_or_dataset_access(self):
+        report = {"passed": False, "finished_at": "2026-09-16T23:34:06Z", "completed_trials": 5, "expected_trials": 5,
+                  "failure": {"directory": "003-extract-moves-from-video", "diagnostics": {
+                      "harbor_exception": "AgentTimeoutError", "agent_timeout_sec": 1800,
+                      "retry_attempts": 0, "rate_limit_retries": 0, "retry_evidence_complete": True}}}
+        path = self.root / "sample/gate.json"
+        write_json(path, report)
+        before = path.read_bytes()
+        cache = self.root / "unused-cache"
+        result = subprocess.run([sys.executable, "-m", "diffex_terminal_bench.benchmark", "--verify-sample",
+                                 "--output", str(self.root), "--dataset-cache", str(cache)],
+                                capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("5/5 trials completed", result.stderr)
+        self.assertIn("003-extract-moves-from-video: AgentTimeoutError at the 1800s task deadline", result.stderr)
+        self.assertIn("--allow-partial", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertNotIn("missing qualification", result.stderr)
+        self.assertFalse(cache.exists())
+        self.assertEqual(path.read_bytes(), before)
+
+    def test_missing_corrupt_and_unfinished_sample_reports_exit_cleanly(self):
+        path = self.root / "sample/gate.json"
+        with self.assertRaisesRegex(SystemExit, "Sample verification failed"):
+            self.cli("--verify-sample")
+        write_json(path, {"passed": False})
+        with self.assertRaisesRegex(SystemExit, "no final report"):
+            self.cli("--verify-sample")
+        path.write_text("{")
+        with self.assertRaisesRegex(SystemExit, "Sample verification failed"):
+            self.cli("--verify-sample")
+        self.prepare.assert_not_called()
+        self.preflight.assert_not_called()
+        self.create.assert_not_called()
 
     def test_invalid_flags_fail_before_dataset_or_remote_work(self):
         cases = [("--sample", "0"), ("--sample", "-1"), ("--sample", "90"), ("--sample", "1.5"),

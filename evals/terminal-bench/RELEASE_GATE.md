@@ -91,6 +91,7 @@ uv run --locked python -m diffex_terminal_bench.export_job \
 ```
 
 If trials fail, the remaining selected tasks still run before the command exits nonzero.
+Skip `--verify-sample` for a failed run; it requires a passing sample and reports the retained failure without rerunning any tasks.
 Use `--allow-partial` on the export command to retain failed terminal results for diagnosis; every started trial still needs its terminal result and lock.
 Use `python -m diffex_terminal_bench.recover "$TB_SAMPLE_OUTPUT"` for sandbox recovery after an interruption.
 The Harbor authentication and upload commands below also apply to the exported sample job.

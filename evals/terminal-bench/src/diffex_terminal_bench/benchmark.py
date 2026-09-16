@@ -212,6 +212,28 @@ async def execute(config: BenchmarkConfig, tasks: dict, identity: dict, root: Pa
         loop.remove_signal_handler(signal.SIGTERM)
 
 
+def verify_sample(config: BenchmarkConfig, root: Path, cache: Path) -> None:
+    directory = root / "sample"
+    report = read_json(directory / "gate.json")
+    if not report.get("finished_at"):
+        raise ValueError(f"sample: no final report; the run is still running or was interrupted. "
+                         f"Wait for completion before verification. Evidence: {directory / 'gate.json'}")
+    if report.get("passed") is not True:
+        failure = report.get("failure") or {}
+        reason = describe_failure(failure["diagnostics"]) if "diagnostics" in failure else failure.get("error", "unknown error")
+        raise ValueError(f"sample: recorded run did not pass ({report.get('completed_trials', 'unknown')}/"
+                         f"{report.get('expected_trials', 'unknown')} trials completed). "
+                         f"First failure: {failure.get('directory', 'see gate.json')}: {reason}. "
+                         f"Evidence: {directory / 'gate.json'}. --verify-sample requires a passing run. "
+                         "To export retained terminal results, use diffex_terminal_bench.export_job with --allow-partial.")
+    with prepare_dataset(config, cache) as (tasks, digests):
+        identity = run_identity(config, digests)
+        identity["sample"] = report["identity"].get("sample")
+        verify_stage(root, "sample", identity, config.pilot_tasks, list(tasks))
+    refresh_index(root.parent)
+    print(f"Verified retained sample evidence: {directory}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=PACKAGE / "benchmark.toml")
@@ -256,8 +278,14 @@ def main() -> None:
         parser.error(f"--sample cannot exceed the dataset's {config.dataset.task_count} tasks")
     if args.concurrency is not None:
         config = BenchmarkConfig.model_validate({**config.model_dump(), "concurrency": args.concurrency})
-    stage = "sample" if args.sample is not None or args.verify_sample else args.stage or args.through
-    if not args.prepare and not args.verify_through and not args.verify_sample:
+    if args.verify_sample:
+        try:
+            verify_sample(config, root, args.dataset_cache.resolve())
+        except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
+            raise SystemExit(f"Sample verification failed: {exc}") from None
+        return
+    stage = "sample" if args.sample is not None else args.stage or args.through
+    if not args.prepare and not args.verify_through:
         preflight(config, oracle=stage == "oracle")
     with prepare_dataset(config, args.dataset_cache.resolve()) as (tasks, digests):
         if args.prepare:
@@ -268,12 +296,6 @@ def main() -> None:
             print(f"Verified {len(tasks)} pinned tasks: {root / 'dataset.json'}")
             return
         identity = run_identity(config, digests)
-        if args.verify_sample:
-            identity["sample"] = read_json(root / "sample/gate.json")["identity"].get("sample")
-            verify_stage(root, "sample", identity, config.pilot_tasks, list(tasks))
-            refresh_index(root.parent)
-            print(f"Verified retained sample evidence: {root / 'sample'}")
-            return
         if args.sample is not None:
             seed = args.seed if args.seed is not None else secrets.randbits(64)
             selected = sample_tasks(list(tasks), args.sample, seed)
