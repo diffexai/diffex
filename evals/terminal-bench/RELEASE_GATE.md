@@ -200,11 +200,15 @@ The gate re-parses native process/stream evidence instead of trusting the outcom
 It regenerates ATIF into a temporary directory, validates it with Harbor, and compares it with retained trajectories and image attachments.
 Native totals, per-model totals, `accounting.json`, and `AgentContext` must reconcile.
 Unknown telemetry remains unknown and cannot satisfy complete accounting.
+Valid executions with missing usage telemetry retain their known usage sums as partial totals and continue qualification.
+Each checked trial records `usage_complete` and `usage_missing_fields` alongside its usage and verifier reward.
+An intentionally interrupted child is valid when its parent roster records `interrupted` and a successful parent interrupt call establishes intent.
+An aborted request without usage telemetry makes accounting partial; it does not invalidate the completed parent trial.
 Verifier reward must agree with the retained reward file.
-A completed, fully accounted Diffex trial with reward zero passes integration checks and remains a zero-reward benchmark result.
+A completed Diffex trial with valid evidence and reward zero passes integration checks and remains a zero-reward benchmark result.
 An oracle with reward zero fails the smoke.
 
-Timeouts, provider errors, missing telemetry, missing logs, invalid ATIF, altered configuration, and cleanup failures retain their original evidence and stop qualification for investigation.
+Timeouts, provider errors, unexplained child interruptions, invalid usage values, missing logs, invalid ATIF, altered configuration, and cleanup failures retain their original evidence and stop qualification for investigation.
 The runner does not convert them to successful executions or silently rerun them.
 This conservative integration gate can stop on a legitimate task timeout; the timeout remains a recorded task result and must not be described as an installation failure.
 No failed or interrupted run establishes readiness merely because its process exited zero.

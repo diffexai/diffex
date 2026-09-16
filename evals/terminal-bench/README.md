@@ -229,7 +229,7 @@ Each run directory retains:
 
 Harbor collects the agent log tree after the run; avoid log filters that exclude these paths.
 `trajectory.json` sits directly under Harbor's agent log directory, with embedded child trajectories and optional `trajectory-media/` image files.
-Provider usage fields in `AgentContext` contain reconciled totals when the evidence establishes them.
+Provider usage fields in `AgentContext` contain reconciled sums of recorded usage, with accounting completeness recorded separately.
 `AgentContext.metadata.diffex_outcome` contains the execution outcome, and `diffex_run_dir` identifies its artifacts.
 
 ### Execution outcomes and interruption recovery
@@ -302,6 +302,9 @@ Repeated roster snapshots do not duplicate children or their usage.
 Nested child trajectories are embedded with resolvable `trajectory_id` references so uploading the root JSON also uploads their steps.
 Missing child sessions, missing observations, and incomplete child execution are explicit accounting gaps.
 Recoverable orphan child histories are embedded with an unresolved-link diagnostic.
+A child marked `interrupted` in the parent roster is a valid terminal state when a successful parent `agent_action` interrupt call establishes intent.
+An intentional stop can end during a model response or tool execution; it does not require an additional final assistant reply.
+Child provider errors and interruptions without that evidence remain invalid.
 
 | Native Diffex usage | ATIF step metric | Harbor `AgentContext` |
 | --- | --- | --- |
@@ -319,16 +322,21 @@ The root context totals visit each native session exactly once, without summing 
 
 Compaction and branch-summary entries contribute their `usage` when available, without dropping the earlier responses they summarize.
 Their model attribution is `unattributed` because those entries do not identify the model that produced the summary.
-Missing summary usage or a compaction start without a persisted summary marks accounting incomplete.
-Work with no native telemetry cannot be reconstructed, and interrupted runs cannot establish a complete total.
+Missing summary usage marks accounting incomplete; a compaction start without a persisted summary also leaves an evidence gap.
+Work with no native telemetry cannot be reconstructed; an aborted request without telemetry prevents a complete total.
 An all-zero native usage object is treated as unverified because Diffex initializes those fields before receiving provider usage.
-Missing or invalid individual usage fields remain unknown; other measured fields can still have totals when the rest of the execution evidence is complete.
+Missing individual usage fields remain unknown; invalid values are evidence errors.
 
 `AgentContext.metadata.diffex_accounting` and `accounting.json` retain observed lower bounds, missing fields, and structural gaps.
-Unknown context totals are `null`, and unknown ATIF totals are omitted.
+When execution evidence is valid, totals retain the known usage across the root and all children even if individual requests lack telemetry.
+Such totals are partial lower bounds, with `complete: false` in accounting and `accounting_complete: false` in ATIF final-metric metadata.
+Fields with no known observations remain `null` in context totals and are omitted from ATIF totals.
+Structural evidence gaps still invalidate totals and fail qualification.
 `model_usage` contains per-model totals when accounting is complete; otherwise it is empty to prevent Harbor from backfilling incomplete token data as zero.
+Per-model observations remain available in `observed_model_usage` even when accounting is partial.
 `diffex_trajectory.validated` records successful export, and `accounting_complete` separately records accounting completeness.
 Verifier reward is independent of accounting completeness.
+The internal qualification gate accepts valid executions with partial accounting, records `usage_complete` and `usage_missing_fields`, and continues the stage.
 
 For leaderboard validation, require a validated trajectory and complete accounting for every rewarded trial, then upload the entire agent log tree including `trajectory.json` and `trajectory-media/`.
 Validate the downloaded/uploaded artifact copy using the command below; a local export alone is not proof of remote upload.

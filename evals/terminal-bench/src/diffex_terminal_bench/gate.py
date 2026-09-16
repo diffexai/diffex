@@ -199,17 +199,22 @@ def validate_trial(directory: Path, task: str, identity: dict, *, oracle: bool =
             target.write_bytes(path.read_bytes())
         context = AgentContext()
         accounting = export_trajectory(source, Path(temp) / "trajectory.json", context, outcome)
-        if not accounting["complete"] or accounting != read_json(run / "accounting.json"):
-            raise ValueError("Usage is incomplete or does not reconcile with native sessions")
+        if accounting["gaps"]:
+            raise ValueError(f"Native evidence is incomplete: {', '.join(accounting['gaps'])}")
+        if accounting != read_json(run / "accounting.json"):
+            raise ValueError("Usage does not reconcile with native sessions")
         if read_json(Path(temp) / "trajectory.json") != read_json(agent / "trajectory.json"):
             raise ValueError("ATIF differs from authoritative native evidence")
         for path in (Path(temp) / "trajectory-media").glob("*"):
             if sha256(path) != sha256(agent / "trajectory-media" / path.name):
                 raise ValueError("Trajectory media changed")
         saved_context = result.get("agent_result") or {}
+        if (saved_context.get("metadata") or {}).get("diffex_accounting") != accounting:
+            raise ValueError("Harbor accounting metadata differs from native evidence")
         if any(saved_context.get(field) != getattr(context, field) for field in CONTEXT_FIELDS):
             raise ValueError("Harbor usage differs from native usage")
         if saved_context.get("model_usage") != context.model_dump(mode="json")["model_usage"]:
             raise ValueError("Per-model usage differs from native usage")
-    return {"rewards": rewards, "usage": accounting["totals"], "trajectory": "validated",
+    return {"rewards": rewards, "usage": accounting["totals"], "usage_complete": accounting["complete"],
+            "usage_missing_fields": accounting["missing_fields"], "trajectory": "validated",
             "system_prompt_sha256": effective["system_prompt_sha256"], "installation": installation}

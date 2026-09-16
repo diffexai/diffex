@@ -27,6 +27,24 @@ def entry(identifier, message):
             "timestamp": "1970-01-01T00:00:01Z" if message.get("timestamp", 1000) == 1000 else "1970-01-01T00:00:02Z"}
 
 
+def interrupted_child_records(*, status="interrupted", stop_reason="aborted", interrupt_error=False, usage=None):
+    root = [entry("spawn", assistant("spawn", [{"type": "toolCall", "id": "spawn", "name": "spawn_agent",
+                                              "arguments": {"name": "helper"}}])),
+            entry("spawn-result", {"role": "toolResult", "toolCallId": "spawn", "content": "accepted", "isError": False}),
+            entry("interrupt", assistant("interrupt", [{"type": "toolCall", "id": "interrupt", "name": "agent_action",
+                                                       "arguments": {"target": "helper", "action": "interrupt"}}])),
+            entry("interrupt-result", {"role": "toolResult", "toolCallId": "interrupt", "content": "interrupted",
+                                       "isError": interrupt_error}),
+            {"type": "custom", "id": "snapshot", "customType": "diffex.subagents",
+             "data": {"agents": [{"name": "helper", "childSessionId": "child", "status": status}]}},
+            entry("done", assistant("done"))]
+    child = [entry("child-first", assistant("child-first", model="gpt-4")),
+             entry("child-last", assistant("child-last", model="gpt-4", stopReason=stop_reason,
+                   usage=usage if usage is not None else {"input": 0, "output": 0, "cacheRead": 0,
+                                                         "cacheWrite": 0, "cost": {"total": 0}}))]
+    return root, child
+
+
 class TrajectoryTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -96,13 +114,102 @@ class TrajectoryTests(unittest.TestCase):
         self.assertEqual(self.context.model_usage["unattributed"].n_input_tokens, 38)
         self.assertEqual(document["steps"][1]["model_name"], "unattributed")
 
+    def test_intentional_child_interruption_retains_partial_aggregate(self):
+        root, child = interrupted_child_records()
+        self.session(root)
+        self.session(child, "child", "root")
+        document, accounting = self.export()
+        self.assertFalse(accounting["complete"])
+        self.assertEqual(accounting["gaps"], [])
+        self.assertEqual(accounting["missing_fields"], ["cached_tokens", "completion_tokens", "cost_usd", "prompt_tokens"])
+        self.assertEqual(accounting["totals"], {"prompt_tokens": 76, "completion_tokens": 28, "cached_tokens": 20, "cost_usd": 0.5})
+        self.assertEqual(self.context.n_input_tokens, 76)
+        self.assertEqual(self.context.cost_usd, 0.5)
+        self.assertFalse(self.context.metadata["diffex_accounting"]["complete"])
+        self.assertEqual(accounting["observed_model_usage"]["openai/gpt-4"]["prompt_tokens"], 19)
+        self.assertEqual(document["final_metrics"]["total_prompt_tokens"], 76)
+        child_document = document["subagent_trajectories"][0]
+        self.assertEqual(child_document["extra"]["execution_status"], "interrupted")
+        self.assertEqual(child_document["final_metrics"]["total_prompt_tokens"], 19)
+        self.assertFalse(child_document["final_metrics"]["extra"]["accounting_complete"])
+        self.assertNotIn("prompt_tokens", child_document["steps"][-1]["metrics"])
+
+    def test_intentional_child_interruption_with_telemetry_is_complete(self):
+        root, child = interrupted_child_records(usage=USAGE)
+        self.session(root)
+        self.session(child, "child", "root")
+        _, accounting = self.export()
+        self.assertTrue(accounting["complete"])
+        self.assertEqual(self.context.n_input_tokens, 95)
+        self.assertEqual(self.context.model_usage["openai/gpt-4"].n_input_tokens, 38)
+
+    def test_child_errors_and_unproven_interruptions_remain_invalid(self):
+        for options in ({"status": "running"}, {"interrupt_error": True}, {"stop_reason": "error"}):
+            with self.subTest(options=options):
+                root, child = interrupted_child_records(**options)
+                self.session(root)
+                self.session(child, "child", "root")
+                _, accounting = self.export()
+                self.assertIn("child:child_execution_incomplete", accounting["gaps"])
+                self.assertIsNone(self.context.n_input_tokens)
+
+    def test_intentional_abort_can_end_during_tool_call_generation(self):
+        for call in ({"type": "toolCall", "id": "pending", "name": "bash", "arguments": {}},
+                     {"type": "toolCall", "name": "bash"}):
+            with self.subTest(call=call):
+                root, child = interrupted_child_records()
+                child[-1]["message"]["content"] = [call]
+                self.session(root)
+                self.session(child, "child", "root")
+                _, accounting = self.export()
+                self.assertEqual(accounting["gaps"], [])
+                self.assertFalse(accounting["complete"])
+                self.assertEqual(self.context.n_input_tokens, 76)
+                # Missing results from earlier dispatched calls remain errors.
+                child[0]["message"]["content"] = [{"type": "toolCall", "id": "earlier", "name": "bash", "arguments": {}}]
+                self.session(child, "child", "root")
+                _, accounting = self.export()
+                self.assertIn("child:missing_tool_result", accounting["gaps"])
+
+    def test_intentional_interruption_during_tool_execution_is_valid(self):
+        root, child = interrupted_child_records(stop_reason="toolUse", usage=USAGE)
+        child[-1]["message"]["content"] = [{"type": "toolCall", "id": "bash", "name": "bash", "arguments": {}}]
+        child.append(entry("cancelled-tool", {"role": "toolResult", "toolCallId": "bash", "content": "cancelled", "isError": True}))
+        self.session(root)
+        self.session(child, "child", "root")
+        _, accounting = self.export()
+        self.assertTrue(accounting["complete"])
+        self.assertEqual(self.context.n_input_tokens, 95)
+
+    def test_nested_partial_child_totals_preserve_known_descendant_usage(self):
+        root, child = interrupted_child_records()
+        self.session(child, "grandchild", "child")
+        # Rename the interrupted child reference inside the intermediate parent.
+        root[-2]["data"]["agents"][0]["childSessionId"] = "grandchild"
+        self.session(root, "child", "root")
+        self.session([entry("spawn", assistant("spawn", [{"type": "toolCall", "id": "spawn", "name": "spawn_agent",
+                                                         "arguments": {"name": "helper"}}])),
+                      entry("spawn-result", {"role": "toolResult", "toolCallId": "spawn", "content": "accepted"}),
+                      {"type": "custom", "id": "snapshot", "customType": "diffex.subagents",
+                       "data": {"agents": [{"name": "helper", "childSessionId": "child", "status": "idle"}]}},
+                      entry("done", assistant("done"))])
+        document, accounting = self.export()
+        self.assertEqual(accounting["gaps"], [])
+        self.assertFalse(accounting["complete"])
+        self.assertEqual(self.context.n_input_tokens, 114)
+        middle = document["subagent_trajectories"][0]
+        self.assertEqual(middle["final_metrics"]["total_prompt_tokens"], 76)
+        self.assertFalse(middle["final_metrics"]["extra"]["accounting_complete"])
+        self.assertEqual(middle["subagent_trajectories"][0]["final_metrics"]["total_prompt_tokens"], 19)
+
     def test_missing_compaction_usage_does_not_invent_zero(self):
         self.session([entry("one", assistant("one")), {"type": "compaction", "id": "compact", "summary": "summary"}])
         document, accounting = self.export()
         self.assertFalse(accounting["complete"])
-        self.assertIsNone(self.context.n_input_tokens)
+        self.assertEqual(self.context.n_input_tokens, 19)
         self.assertEqual(accounting["observed_usage"]["prompt_tokens"], 19)
-        self.assertNotIn("total_prompt_tokens", document["final_metrics"])
+        self.assertEqual(document["final_metrics"]["total_prompt_tokens"], 19)
+        self.assertNotIn("prompt_tokens", document["steps"][-1]["metrics"])
         self.assertEqual(self.context.model_usage, {})
 
     def test_interrupted_output_keeps_pending_message_and_intact_records(self):

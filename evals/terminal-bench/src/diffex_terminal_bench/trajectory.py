@@ -48,13 +48,17 @@ def message_key(message: dict) -> str:
 
 
 def metrics_for(usage: object) -> dict:
+    invalid = usage is not None and not isinstance(usage, dict)
     usage = usage if isinstance(usage, dict) else {}
     values = {}
     for key in ("input", "output", "cacheRead", "cacheWrite"):
         value = usage.get(key)
         values[key] = value if type(value) is int and value >= 0 else None
+        invalid |= value is not None and values[key] is None
     cost = usage.get("cost", {})
+    invalid |= cost is not None and not isinstance(cost, dict)
     cost = cost.get("total") if isinstance(cost, dict) else None
+    invalid |= cost is not None and not (type(cost) in (int, float) and math.isfinite(cost) and cost >= 0)
     cost = cost if type(cost) in (int, float) and math.isfinite(cost) and cost >= 0 else None
     inputs = [values[key] for key in ("input", "cacheRead", "cacheWrite")]
     # Native providers initialize usage to zero before receiving telemetry.
@@ -67,7 +71,7 @@ def metrics_for(usage: object) -> dict:
         "completion_tokens": values["output"], "cached_tokens": values["cacheRead"],
         "cost_usd": cost,
         "extra": {"input_tokens_uncached": values["input"], "cache_write_tokens": values["cacheWrite"],
-                  "native_usage": usage},
+                  "native_usage": usage, **({"invalid_usage": True} if invalid else {})},
     }
 
 
@@ -161,8 +165,6 @@ class Session:
                 self.steps.append({"source": "agent", "message": record.get("summary", ""),
                                    "model_name": "unattributed", "metrics": metrics, "extra": {"native_type": kind, "native_entry_id": entry_id,
                                                                  "model_attribution": "unavailable"}})
-                if not record.get("usage"):
-                    self.gaps.append(f"{kind}_telemetry_missing")
             elif kind == "custom_message":
                 self.steps.append({"source": "user", "message": self.content(record.get("content", "")),
                                    "extra": {"native_type": kind, "custom_type": record.get("customType")}})
@@ -209,7 +211,6 @@ class Session:
                                 continue
                             if not block.get("id") or not block.get("name") or not isinstance(block.get("arguments"), dict):
                                 extra.setdefault("incomplete_tool_calls", []).append(block)
-                                self.gaps.append("incomplete_tool_call")
                                 continue
                             calls.append({"tool_call_id": block["id"], "function_name": block["name"],
                                           "arguments": block["arguments"]})
@@ -218,9 +219,9 @@ class Session:
                             for call in calls:
                                 self.calls[call["tool_call_id"]] = step
                 self.steps.append(step)
-        for call_id, step in self.calls.items():
-            if not any(result.get("source_call_id") == call_id for result in step.get("observation", {}).get("results", [])):
-                self.gaps.append("missing_tool_result")
+        for step in self.steps:
+            if step.get("metrics", {}).get("extra", {}).get("invalid_usage"):
+                self.gaps.append("invalid_usage")
         for index, step in enumerate(self.steps, 1):
             step["step_id"] = index
         return {"schema_version": "ATIF-v1.8", "session_id": self.id, "trajectory_id": self.id,
@@ -271,6 +272,7 @@ def export_trajectory(directory: Path, destination: Path, context: AgentContext,
         raise ValueError("duplicate native session IDs")
     root_document = documents[root.id]
     linked = set()
+    interrupted = set()
     for session in sessions:
         document = documents[session.id]
         children = []
@@ -283,6 +285,19 @@ def export_trajectory(directory: Path, destination: Path, context: AgentContext,
                 raise ValueError("cyclic or multiply-owned child session")
             linked.add(child_id)
             children.append(child_document)
+            # Shutdown can also mark children interrupted. Accept a deliberate
+            # stop only when the parent retained a successful interrupt call.
+            if child.get("status") == "interrupted" and any(
+                call["function_name"] == "agent_action"
+                and call["arguments"].get("action") == "interrupt"
+                and call["arguments"].get("target") == child.get("name")
+                and any(result.get("source_call_id") == call["tool_call_id"]
+                        and result.get("extra", {}).get("is_error") is False
+                        for result in step.get("observation", {}).get("results", []))
+                for step in document["steps"] for call in step.get("tool_calls", [])
+            ):
+                interrupted.add(child_id)
+                child_document["extra"]["execution_status"] = "interrupted"
             attached = False
             for step in document["steps"]:
                 for call in step.get("tool_calls", []):
@@ -308,14 +323,25 @@ def export_trajectory(directory: Path, destination: Path, context: AgentContext,
             root_document.setdefault("subagent_trajectories", []).append(documents[session.id])
             gaps.append("unlinked_child_trajectory")
         assistants = [step for step in session.steps if step.get("extra", {}).get("native_role") == "assistant"]
-        if not assistants or assistants[-1]["extra"].get("stop_reason") != "stop":
+        stop_reason = assistants[-1]["extra"].get("stop_reason") if assistants else None
+        if stop_reason != "stop" and not (session.id in interrupted and stop_reason in (None, "aborted", "toolUse")):
             session.gaps.append("child_execution_incomplete")
     for session in sessions:
+        last_assistant = next((step for step in reversed(session.steps)
+                               if step.get("extra", {}).get("native_role") == "assistant"), None)
         for step in session.steps:
+            # A deliberately aborted response may contain unfinished calls
+            # that were never dispatched. Earlier calls still need results.
+            aborted = (session.id in interrupted and step is last_assistant
+                       and step.get("extra", {}).get("stop_reason") == "aborted")
+            if step.get("extra", {}).get("incomplete_tool_calls") and not aborted:
+                session.gaps.append("incomplete_tool_call")
             for call in step.get("tool_calls", []):
+                results = [result for result in step.get("observation", {}).get("results", [])
+                           if result.get("source_call_id") == call["tool_call_id"]]
+                if not results and not aborted:
+                    session.gaps.append("missing_tool_result")
                 if call["function_name"] == "spawn_agent":
-                    results = [result for result in step.get("observation", {}).get("results", [])
-                               if result.get("source_call_id") == call["tool_call_id"]]
                     if any(not result.get("extra", {}).get("is_error") and not result.get("subagent_trajectory_ref") for result in results):
                         session.gaps.append("missing_child_link")
     if outcome.get("status") != "completed" or not outcome.get("stream_complete"):
@@ -323,10 +349,12 @@ def export_trajectory(directory: Path, destination: Path, context: AgentContext,
     for session in sessions:
         gaps.extend(f"{session.id}:{gap}" for gap in session.gaps)
     observed = dict.fromkeys(FIELDS, 0)
+    known = set()
     missing = set()
     by_model = defaultdict(lambda: dict.fromkeys(FIELDS, 0))
     for session in sessions:
         own = dict.fromkeys(FIELDS, 0)
+        own_known = set()
         own_missing = set()
         for step in session.steps:
             if "metrics" not in step:
@@ -337,12 +365,16 @@ def export_trajectory(directory: Path, destination: Path, context: AgentContext,
                     missing.add(field)
                     own_missing.add(field)
                 else:
+                    known.add(field)
+                    own_known.add(field)
                     own[field] += value
                     observed[field] += value
                     by_model[step.get("model_name", "unattributed")][field] += value
         documents[session.id]["final_metrics"] = {
-            **{f"total_{field}": None if field in own_missing or session.gaps or gaps else value for field, value in own.items()},
-            "total_steps": len(session.steps), "extra": {"scope": "this_session", "observed_usage": own},
+            **{f"total_{field}": None if gaps or (field in own_missing and field not in own_known) else value
+               for field, value in own.items()},
+            "total_steps": len(session.steps),
+            "extra": {"scope": "this_session", "observed_usage": own, "accounting_complete": not gaps and not own_missing},
         }
     # Each nested trajectory includes its descendants in its totals. Global
     # usage above still visits each native session exactly once.
@@ -352,18 +384,21 @@ def export_trajectory(directory: Path, destination: Path, context: AgentContext,
             aggregate(child)
             for field in FIELDS:
                 key = f"total_{field}"
-                values = (metrics[key], child["final_metrics"][key])
-                metrics[key] = sum(values) if None not in values else None
+                values = [value for value in (metrics[key], child["final_metrics"][key]) if value is not None]
+                metrics[key] = sum(values) if values else None
+            metrics["extra"]["accounting_complete"] &= child["final_metrics"]["extra"]["accounting_complete"]
         metrics["extra"]["scope"] = "session_and_descendants"
     aggregate(root_document)
-    totals = {field: None if gaps or field in missing else value for field, value in observed.items()}
+    # Missing telemetry affects completeness, not the usage already recorded.
+    # Keep unknown-only fields null and retain known sums as partial totals.
+    totals = {field: None if gaps or (field in missing and field not in known) else value for field, value in observed.items()}
     accounting = {"complete": not gaps and not missing, "gaps": sorted(set(gaps)),
                   "missing_fields": sorted(missing), "observed_usage": observed,
                   "observed_model_usage": dict(by_model), "totals": totals}
     root_document["extra"].update(accounting=accounting, execution_status=outcome.get("status"))
     root_document["final_metrics"] = {
         **{f"total_{field}": value for field, value in totals.items()}, "total_steps": len(root.steps),
-        "extra": {"scope": "root_and_all_descendants", "observed_usage": observed},
+        "extra": {"scope": "root_and_all_descendants", "observed_usage": observed, "accounting_complete": accounting["complete"]},
     }
     for field, target in zip(FIELDS, CONTEXT_FIELDS):
         setattr(context, target, totals[field])
