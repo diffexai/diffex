@@ -93,7 +93,7 @@ describe("automatic subagent coordination", () => {
 			resourceLoader: createTestResourceLoader(),
 			sessionManager: SessionManager.inMemory(harness.tempDir),
 			model: harness.getModel(),
-			tools: ["spawn_agent", "agent_action", "agents"],
+			tools: ["spawn_agent", "agent_action", "wait_for_agents"],
 			subagents: { maxConcurrent },
 		});
 		roots.push(root);
@@ -514,7 +514,7 @@ describe("automatic subagent coordination", () => {
 		expect(getToolResultCount({ messages: root.messages } as Context, "agent_action")).toBe(0);
 	});
 
-	it("treats terminal agents tool results as already consumed", async () => {
+	it("treats terminal wait_for_agents tool results as already consumed", async () => {
 		const { root, harness } = await createRoot();
 		harness.setResponses(
 			Array.from({ length: 8 }, () => async (context: Context) => {
@@ -524,9 +524,9 @@ describe("automatic subagent coordination", () => {
 						stopReason: "toolUse",
 					});
 				}
-				if (!hasToolResult(context, "agents")) {
+				if (!hasToolResult(context, "wait_for_agents")) {
 					return fauxAssistantMessage(
-						fauxToolCall("agents", { timeout_ms: 1_000, targets: ["worker"], until: "all" }),
+						fauxToolCall("wait_for_agents", { timeout_ms: 1_000, targets: ["worker"], until: "all" }),
 						{ stopReason: "toolUse" },
 					);
 				}
@@ -575,7 +575,7 @@ describe("automatic subagent coordination", () => {
 		expect(root.getSubagents()).toEqual([{ name: "manual", status: "running", task: "manual work" }]);
 		releaseChild.resolve();
 		await root
-			.getToolDefinition("agents")
+			.getToolDefinition("wait_for_agents")
 			?.execute(
 				"manual-wait",
 				{ timeout_ms: 1_000, targets: ["manual"], until: "all" },
@@ -638,7 +638,7 @@ describe("automatic subagent coordination", () => {
 
 		releaseRetry.resolve();
 		await root
-			.getToolDefinition("agents")
+			.getToolDefinition("wait_for_agents")
 			?.execute(
 				"manual-wait",
 				{ timeout_ms: 1_000, targets: ["manual"], until: "all" },

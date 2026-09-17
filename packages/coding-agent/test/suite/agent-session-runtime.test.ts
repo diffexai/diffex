@@ -255,7 +255,7 @@ describe("AgentSessionRuntime characterization", () => {
 			]);
 			const outgoing = runtime.session;
 			const spawn = outgoing.getToolDefinition("spawn_agent")!;
-			const agents = outgoing.getToolDefinition("agents")!;
+			const agents = outgoing.getToolDefinition("wait_for_agents")!;
 			await spawn.execute("spawn-worker", { name: "worker", task: "wait" }, undefined, undefined, extensionContext);
 			await childProviderStarted.promise;
 			await spawn.execute("spawn-queued", { name: "queued", task: "wait" }, undefined, undefined, extensionContext);
@@ -295,7 +295,7 @@ describe("AgentSessionRuntime characterization", () => {
 			expect(runtime.session).not.toBe(outgoing);
 			await expect(oldWaitResult).resolves.toMatchObject({ message: "Subagent controller is shut down" });
 
-			const nextAgents = runtime.session.getToolDefinition("agents")!;
+			const nextAgents = runtime.session.getToolDefinition("wait_for_agents")!;
 			await expect(
 				nextAgents.execute("list-replacement", { timeout_ms: 0 }, undefined, undefined, extensionContext),
 			).resolves.toMatchObject({
@@ -354,7 +354,7 @@ describe("AgentSessionRuntime characterization", () => {
 		]);
 		const outgoing = runtime.session;
 		const spawn = outgoing.getToolDefinition("spawn_agent")!;
-		const agents = outgoing.getToolDefinition("agents")!;
+		const agents = outgoing.getToolDefinition("wait_for_agents")!;
 		await spawn.execute("spawn-active", { name: "active", task: "wait" }, undefined, undefined, extensionContext);
 		await childProviderStarted.promise;
 		await spawn.execute("spawn-queued", { name: "queued", task: "wait" }, undefined, undefined, extensionContext);

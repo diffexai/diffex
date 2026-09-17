@@ -323,10 +323,10 @@ describe("subagent queries", () => {
 		});
 		await waitForStatus(subject, "worker", "failed");
 
-		const agentsTool = subject.createToolDefinitions().find((tool) => tool.name === "agents") as
+		const agentsTool = subject.createToolDefinitions().find((tool) => tool.name === "wait_for_agents") as
 			| AgentsTool
 			| undefined;
-		if (!agentsTool) throw new Error("agents tool is unavailable");
+		if (!agentsTool) throw new Error("wait_for_agents tool is unavailable");
 
 		const retry = subject.message("worker", "correct the failure", true, true);
 		const explicitQuery = executeAgents(agentsTool, { timeout_ms: 0 });
@@ -368,7 +368,7 @@ describe("subagent queries", () => {
 		}
 	});
 
-	it("defines a strict agents tool schema", () => {
+	it("defines a strict wait_for_agents tool schema", () => {
 		const tool = createAgentsTool(() => Promise.resolve({ timedOut: false, agents: [] }));
 
 		expect(tool.executionMode).toBe("parallel");
@@ -389,7 +389,7 @@ describe("subagent queries", () => {
 		}
 	});
 
-	it("defensively validates agents tool requests", async () => {
+	it("defensively validates wait_for_agents tool requests", async () => {
 		const tool = createAgentsTool(() => Promise.resolve({ timedOut: false, agents: [] }));
 
 		await expect(executeAgents(tool, {} as AgentsRequest)).rejects.toThrow(
@@ -446,7 +446,7 @@ describe("subagent queries", () => {
 		expect(result.content).toEqual([{ type: "text", text: JSON.stringify(result.details) }]);
 	});
 
-	it("surfaces controller target errors through the agents tool", async () => {
+	it("surfaces controller target errors through the wait_for_agents tool", async () => {
 		const subject = controller();
 		const tool = createAgentsTool((options) => subject.queryAgents(options));
 

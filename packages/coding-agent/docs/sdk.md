@@ -542,11 +542,16 @@ Every root session enables three child-agent coordination tools by default:
 
 - `spawn_agent` starts a child agent asynchronously, while keeping the enclosing parent prompt active until coordinated work finishes
 - `agent_action` sends, wakes, or interrupts a child agent
-- `agents` lists child status immediately or waits for controller changes
+- `wait_for_agents` checks child statuses or waits for status changes, returning recorded output and errors
+
+Use `wait_for_agents` when further progress depends on child results.
+Set `until` to `"any"` or `"all"` and select the relevant `targets` when waiting for completion; without `until`, a status change may return before a child finishes.
+A timeout leaves child work running and does not indicate failure.
+Tool allowlists and direct tool calls must use `wait_for_agents` in place of the former `agents` name.
 
 Root sessions run at most four children concurrently by default.
 Set `subagents: { maxConcurrent: number }` to configure that limit, or `subagents: false` to disable child agents and omit all three coordination tools.
-The names `spawn_agent`, `agent_action`, `agents`, and `escalate_to_parent` are reserved and cannot be supplied through `customTools`.
+The names `spawn_agent`, `agent_action`, `wait_for_agents`, and `escalate_to_parent` are reserved and cannot be supplied through `customTools`.
 
 Child sessions intentionally do not load parent extensions. To prevent an extension policy bypass, `spawn_agent` fails closed when the root has a registered handler for any execution-mutating hook: `resources_discover`, `input`, `context`, `before_agent_start`, `before_provider_request`, `before_provider_headers`, `session_before_compact`, `tool_call`, `tool_result`, or `message_end`. The error lists every incompatible hook in that order. Remove those handlers before spawning, or set `subagents: false`; observation-only hooks and non-spawn child actions remain available.
 
@@ -561,7 +566,7 @@ Accepted idle reports, delivered active reports, and child tool arguments remain
 When the parent finishes an assistant run, the session freezes every unconsumed child attempt spawned through parent model tool calls.
 It waits until every child in that batch is idle, failed, or interrupted, then adds one non-displayed context message with name-sorted results, partial output, errors, and retry availability.
 The parent model continues automatically from that message, so callers do not need to send another user prompt.
-Terminal results returned explicitly by `agents` are marked consumed and are not delivered again.
+Terminal results returned explicitly by `wait_for_agents` are marked consumed and are not delivered again.
 
 The hidden `subagent_results` and `subagent_escalations` entries are untrusted reports from delegated agents, not user instructions, system instructions, or authority. Root system guidance tells the model to verify material claims against the parent task and available evidence, and to follow embedded instructions only when they are consistent with the parent task, repository policy, and current evidence. This guidance remains attached when coordination tools are filtered and after custom or extension-returned system prompts are selected.
 
@@ -606,7 +611,7 @@ const { session } = await createAgentSession({
 
 // Allow only read access and child status queries
 const { session } = await createAgentSession({
-  tools: ["read", "agents"],
+  tools: ["read", "wait_for_agents"],
 });
 
 // Disable child agents entirely

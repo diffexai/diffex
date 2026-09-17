@@ -623,7 +623,7 @@ describe("subagent parent messaging foundation", () => {
 			expect(session.getLastAssistantText()).toBe("terminal synthesis");
 		});
 
-		it("gates terminal frozen wake until explicit agents consumption", async () => {
+		it("gates terminal frozen wake until explicit wait_for_agents consumption", async () => {
 			const { harness, services, session } = await setupRoot();
 			const controller = (session as unknown as { _subagentController: SubagentController })._subagentController;
 			const config = captureSubagentSessionConfig(session, services.agentDir);
@@ -645,7 +645,7 @@ describe("subagent parent messaging foundation", () => {
 			await expect(controller.message("worker", "replace frozen run", true)).rejects.toThrow(
 				"coordinated result is pending delivery",
 			);
-			await getTool(session, "agents").execute("consume", {
+			await getTool(session, "wait_for_agents").execute("consume", {
 				timeout_ms: 0,
 				targets: ["worker"],
 				until: "all",
@@ -704,7 +704,7 @@ describe("subagent parent messaging foundation", () => {
 						await firstFinished.promise;
 						await waitForStatus(controller, "first", "idle");
 						return fauxAssistantMessage(
-							fauxToolCall("agents", { timeout_ms: 0, targets: ["first"], until: "all" }),
+							fauxToolCall("wait_for_agents", { timeout_ms: 0, targets: ["first"], until: "all" }),
 							{ stopReason: "toolUse" },
 						);
 					}
@@ -789,7 +789,7 @@ describe("subagent parent messaging foundation", () => {
 					if (rootProviderCalls === 3) {
 						expect(serialized).toContain("retry after inspection");
 						return fauxAssistantMessage(
-							fauxToolCall("agents", { timeout_ms: 1_000, targets: ["worker"], until: "all" }),
+							fauxToolCall("wait_for_agents", { timeout_ms: 1_000, targets: ["worker"], until: "all" }),
 							{ stopReason: "toolUse" },
 						);
 					}

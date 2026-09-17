@@ -1090,7 +1090,7 @@ Diffex then supplies one hidden, non-displayed context message to the parent wit
 That payload is model context, not a result-bearing session event.
 The parent continues automatically, and a later `agent_settled` marks completion.
 
-Terminal child results explicitly returned by the `agents` tool are consumed and excluded from automatic delivery.
+Terminal child results explicitly returned by the `wait_for_agents` tool are consumed and excluded from automatic delivery.
 An initial failure offers one corrective wake through `agent_action` per child for the current parent prompt cycle.
 A second retry in the same cycle is rejected, while a later explicit user prompt starts a fresh cycle.
 The parent can decline a retry and settle normally.

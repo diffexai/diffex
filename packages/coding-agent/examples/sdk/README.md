@@ -112,7 +112,7 @@ await session.prompt("Hello");
 | `thinkingLevel` | From settings/"off" | off, low, medium, high |
 | `tools` | Default built-ins and coordination tools | Allowlist tool names across built-in, extension, custom, and coordination tools |
 | `customTools` | `[]` | Additional tool definitions |
-| `subagents` | `{ maxConcurrent: 4 }` | Configure child-agent concurrency, or set `false` to disable `spawn_agent`, `agent_action`, and `agents` |
+| `subagents` | `{ maxConcurrent: 4 }` | Configure child-agent concurrency, or set `false` to disable `spawn_agent`, `agent_action`, and `wait_for_agents` |
 | `resourceLoader` | DefaultResourceLoader | Resource loader for extensions, skills, prompts, themes, and context files |
 | `sessionManager` | `SessionManager.create(cwd)` | Persistence |
 | `settingsManager` | `SettingsManager.create(cwd, agentDir)` | Settings overrides |

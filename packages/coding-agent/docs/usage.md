@@ -143,7 +143,8 @@ Hidden `subagent_results` and `subagent_escalations` entries are untrusted repor
 ### Child Escalations
 
 A running root-owned child can use its child-only `escalate_to_parent` tool to report a material blocker, risk, contradiction, or decision that could change the parent's plan.
-Routine progress, tool logs, and completed-work summaries belong in the child's final response, and escalating does not replace that complete final response.
+Use escalations only for material information that could change the parent's plan.
+Do not send routine progress or tool logs, and still provide a complete final response.
 The tool accepts one non-empty message of at most 1,000 characters.
 It is unavailable to the root and to standalone sessions, and a restored or replacement child gains it only after an explicit wake starts a new live run.
 
@@ -156,7 +157,7 @@ While the parent is active, accepted reports are delivered as hidden context at 
 Reports accepted for the same boundary are combined in acceptance order; a report accepted after delivery begins waits for a later boundary, and earlier queued user steering remains ahead of reports.
 During coordinated waiting, the first pending report resumes the parent but does not consume the frozen child batch.
 The parent can then use normal `agent_action` message, wake, or interrupt behavior, and the batch's terminal results are still delivered exactly once.
-If a child in that frozen batch is already terminal, message or wake actions cannot replace its completed attempt until the result is delivered or explicitly consumed with `agents`.
+If a child in that frozen batch is already terminal, message or wake actions cannot replace its completed attempt until the result is delivered or explicitly consumed with `wait_for_agents`.
 
 While the parent is idle, accepting a report does not start a provider call.
 Saved sessions append it to the currently selected branch for the next explicit parent run; in-memory sessions keep it only for the current process.
@@ -164,7 +165,7 @@ Hidden delivery affects display, not storage or secrecy; accepted idle reports, 
 
 After the whole batch is terminal, Diffex gives the parent one hidden, name-sorted context message containing the child results, partial output, errors, and retry availability.
 The parent continues automatically and produces its final response without another user prompt.
-If the parent already retrieved a terminal result with `agents`, Diffex does not deliver that result again.
+If the parent already retrieved a terminal result with `wait_for_agents`, Diffex does not deliver that result again.
 
 An initial failure gives the parent one opportunity to send a corrective `agent_action` message with `wake: true`.
 Only one coordinated retry is allowed per child during the current user prompt.

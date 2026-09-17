@@ -55,7 +55,7 @@ describe("AgentSession subagent lifecycle", () => {
 			sessionManager: SessionManager.inMemory(harness.tempDir),
 			model: harness.getModel(),
 			customTools,
-			tools: [...customTools.map((tool) => tool.name), "spawn_agent", "agent_action", "agents"],
+			tools: [...customTools.map((tool) => tool.name), "spawn_agent", "agent_action", "wait_for_agents"],
 			subagents: { maxConcurrent: 1 },
 		});
 		roots.push(root);
@@ -95,7 +95,7 @@ describe("AgentSession subagent lifecycle", () => {
 			fauxAssistantMessage("queued done"),
 		]);
 		const spawn = root.getToolDefinition("spawn_agent")!;
-		const agents = root.getToolDefinition("agents")!;
+		const agents = root.getToolDefinition("wait_for_agents")!;
 
 		await spawn.execute(
 			"spawn-zeta",
@@ -167,7 +167,7 @@ describe("AgentSession subagent lifecycle", () => {
 
 		const spawn = root.getToolDefinition("spawn_agent")!;
 		const action = root.getToolDefinition("agent_action")!;
-		const agents = root.getToolDefinition("agents")!;
+		const agents = root.getToolDefinition("wait_for_agents")!;
 		const originalDispose = AgentSession.prototype.dispose;
 		const disposedSessions: AgentSession[] = [];
 		vi.spyOn(AgentSession.prototype, "dispose").mockImplementation(function (this: AgentSession) {
@@ -407,7 +407,7 @@ describe("AgentSession subagent lifecycle", () => {
 				}),
 		]);
 		const spawn = root.getToolDefinition("spawn_agent")!;
-		const agents = root.getToolDefinition("agents")!;
+		const agents = root.getToolDefinition("wait_for_agents")!;
 		await spawn.execute("spawn-worker", { name: "worker", task: "wait" }, undefined, undefined, extensionContext);
 		await childProviderStarted.promise;
 		await spawn.execute("spawn-queued", { name: "queued", task: "wait" }, undefined, undefined, extensionContext);

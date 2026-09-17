@@ -14,7 +14,7 @@ const spawnAgentSchema = Type.Object({
 		description: "Unique lowercase name for the child agent",
 		pattern: SUBAGENT_NAME_PATTERN.source,
 	}),
-	task: Type.String({ description: "Focused task for the child agent", minLength: 1 }),
+	task: Type.String({ description: "The focused task for the child agent", minLength: 1 }),
 });
 
 const escalateToParentSchema = Type.Object(
@@ -100,8 +100,9 @@ export function createEscalateToParentTool(
 		label: "Escalate to Parent",
 		description:
 			"Report a material blocker, risk, contradiction, or decision that may require the parent to redirect or interrupt work.",
+		promptSnippet: "Report blockers, risks, or uncertainties to the parent agent",
 		promptGuidelines: [
-			"Use escalate_to_parent only for material information that could change the parent's plan. Do not send routine progress, tool logs, or completed-work summaries, and still provide a complete final response.",
+			"Use escalate_to_parent only for material information that could change the parent's plan. Do not send routine progress or tool logs, and still provide a complete final response.",
 		],
 		parameters: escalateToParentSchema,
 		executionMode: "parallel",
@@ -163,10 +164,11 @@ export function createSpawnAgentTool(
 		name: "spawn_agent",
 		label: "Spawn Agent",
 		description:
-			"Start an independent child agent asynchronously. The tool returns after acceptance, but the enclosing parent prompt remains active until coordinated child work is delivered.",
+			"Start an independent child agent to work on a focused task asynchronously. Returns the child’s name and queued status without waiting for completion.",
+		promptSnippet: "Delegate a focused task to an independent child agent",
 		promptGuidelines: [
-			"For broad research, audits, or implementation work with independent areas, use spawn_agent to delegate focused subtasks in parallel when available. Request file references and supporting evidence for research and audits, and assign clear, non-overlapping file ownership for implementation work.",
-			"After spawning child agents, you may finish the current response. The session waits for the frozen child batch and automatically sends one hidden, name-sorted result message before the parent prompt settles.",
+			"Use for focused subtasks that can run independently alongside other work. Request file references and supporting evidence for research or audits, and assign non-overlapping file ownership for edit and write operations.",
+			"Continue independent work while child agents run. You may end your current response while they are running; the session waits for those children and delivers their results to you automatically before the parent task finishes.",
 		],
 		parameters: spawnAgentSchema,
 		executionMode: "parallel",
@@ -193,7 +195,14 @@ export function createAgentActionTool(
 	return {
 		name: "agent_action",
 		label: "Agent Action",
-		description: "Message, wake, or interrupt an existing child agent.",
+		description:
+			"Send a message to drive an existing child agent, optionally waking it to resume work, or interrupt its current work.",
+		promptSnippet: "Message, wake, or interrupt an existing child agent",
+		promptGuidelines: [
+			"Use to provide clarifications or corrections to a child agent. Set wake: true when the message should resume an idle child.",
+			"Let child agents complete delegated work that is still needed. Interrupt only when the work is no longer needed, is proceeding in the wrong direction, or must stop because of a user request or material risk.",
+			"When waiting for needed child results, continue independent work or use wait_for_agents to wait. A wait timeout does not mean the child has failed and is not by itself a reason to interrupt it.",
+		],
 		parameters: agentActionSchema,
 		executionMode: "parallel",
 		execute: async (_toolCallId, request) => {
@@ -232,9 +241,15 @@ export function createAgentsTool(
 	query: (options: SubagentQueryOptions) => Promise<SubagentQueryResult>,
 ): ToolDefinition<typeof agentsSchema, AgentsDetails> {
 	return {
-		name: "agents",
-		label: "Agents",
-		description: "List child agents immediately or wait for controller changes and terminal statuses.",
+		name: "wait_for_agents",
+		label: "Wait For Agents",
+		description:
+			"Check child agent statuses or wait for status changes. Returns statuses and any recorded output or errors.",
+		promptSnippet: "Wait for delegated work",
+		promptGuidelines: [
+			"Use wait_for_agents when further progress depends on child results. When waiting for completion, explicitly set until to 'any' or 'all' and select the relevant targets. Without until, the call may return before a child finishes.",
+			"A wait timeout does not stop child agents or mean they have failed. If their work is still needed, continue other work or wait again rather than interrupting them.",
+		],
 		parameters: agentsSchema,
 		executionMode: "parallel",
 		execute: async (_toolCallId, request, signal) => {

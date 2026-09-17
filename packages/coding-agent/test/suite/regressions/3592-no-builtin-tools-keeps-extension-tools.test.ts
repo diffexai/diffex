@@ -80,7 +80,6 @@ describe("regression #3592: no-builtin-tools keeps extension tools enabled", () 
 				.sort(),
 		).toEqual([
 			"agent_action",
-			"agents",
 			"bash",
 			"dynamic_tool",
 			"edit",
@@ -90,9 +89,10 @@ describe("regression #3592: no-builtin-tools keeps extension tools enabled", () 
 			"read",
 			"spawn_agent",
 			"update_plan",
+			"wait_for_agents",
 			"write",
 		]);
-		expect(session.getActiveToolNames()).toEqual(["spawn_agent", "agent_action", "agents", "dynamic_tool"]);
+		expect(session.getActiveToolNames()).toEqual(["spawn_agent", "agent_action", "wait_for_agents", "dynamic_tool"]);
 		expect(session.systemPrompt).toContain("- dynamic_tool: Run dynamic test behavior");
 		expect(session.systemPrompt).not.toContain("- read:");
 		expect(session.systemPrompt).not.toContain("- bash:");
@@ -124,8 +124,8 @@ describe("regression #3592: no-builtin-tools keeps extension tools enabled", () 
 			noTools: "builtin",
 		});
 
-		expect(session.getActiveToolNames()).toEqual(["spawn_agent", "agent_action", "agents"]);
-		expect(session.systemPrompt).toContain("Available tools:\n(none)");
+		expect(session.getActiveToolNames()).toEqual(["spawn_agent", "agent_action", "wait_for_agents"]);
+		expect(session.systemPrompt).toContain("- wait_for_agents: Wait for delegated work");
 		expect(session.systemPrompt).not.toContain("- read:");
 		await session.dispose();
 	});
