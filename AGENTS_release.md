@@ -2,15 +2,11 @@
 
 ## Conversational Style
 
-- Keep responses concise and direct, adapting detail and terminology to the user.
-- No emojis in commits, issues, PR comments, or code.
-- No fluff or cheerful filler text (e.g., "Thanks @user" not "Thanks so much @user!").
 - When the user asks a question, answer it first before making edits or running implementation commands.
 - Address the user's feedback directly before describing changes.
 
 ## Code Quality
 
-- Follow repository instructions, conventions, and existing tooling.
 - Before editing or drawing conclusions, read enough surrounding code to understand the relevant behavior and dependencies.
 - Read affected files in full for broad changes; do not rely on search snippets alone for investigations or audits.
 - Ask before removing intentional functionality or code when the removal falls outside the requested scope or its purpose is unclear.

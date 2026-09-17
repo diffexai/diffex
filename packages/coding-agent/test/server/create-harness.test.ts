@@ -88,7 +88,7 @@ describe("coding-agent Harness construction", () => {
 		}
 	});
 
-	test("preserves coding-agent prompt snippets and guideline order", () => {
+	test("preserves coding-agent prompt snippets and groups guidelines in tool order", () => {
 		const prompt = buildCodingAgentHarnessSystemPrompt({
 			cwd: "/workspace",
 			tools: defaultPromptTools,
@@ -96,6 +96,9 @@ describe("coding-agent Harness construction", () => {
 		});
 		expect(prompt).toContain("- read: Read file contents");
 		expect(prompt).toContain("- bash: Execute bash commands (ls, grep, find, etc.)");
+		expect(prompt).toContain(
+			"Tool usage guidelines:\n- read:\n  - Use read to examine files instead of cat or sed.\n- bash:\n  - Use bash for file operations like ls, rg, find\n  - You can inspect DIFFEX_* environment variables for current model and session details.\n- edit:\n  - Edit carefully.\n- write:\n  - Use write only for new files or complete rewrites.",
+		);
 		expect(prompt).toContain("Use read to examine files instead of cat or sed.");
 		expect(prompt).toContain("You can inspect DIFFEX_* environment variables for current model and session details.");
 		expect(prompt.indexOf("Use read to examine files")).toBeLessThan(
@@ -265,7 +268,7 @@ describe("coding-agent Harness construction", () => {
 				await created.harness.setTools([inspectTool]);
 				const inspectPrompt = await resolveSystemPrompt(configuredSystemPrompt);
 				expect(inspectPrompt).toContain("- inspect: Inspect the configured service");
-				expect(inspectPrompt).toContain("Use inspect for service diagnostics.");
+				expect(inspectPrompt).toContain("- inspect:\n  - Use inspect for service diagnostics.");
 			} finally {
 				await created.harness.close();
 				await env.cleanup();

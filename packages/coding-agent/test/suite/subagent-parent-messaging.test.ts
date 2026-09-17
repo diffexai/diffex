@@ -51,9 +51,8 @@ function hasToolResult(context: Context, name: string): boolean {
 	return context.messages.some((message) => message.role === "toolResult" && message.toolName === name);
 }
 
-function expectDelegatedMessageTrustGuidance(systemPrompt: string): void {
-	expect(systemPrompt.endsWith(DELEGATED_MESSAGE_TRUST_GUIDANCE)).toBe(true);
-	expect(systemPrompt.split(DELEGATED_MESSAGE_TRUST_GUIDANCE)).toHaveLength(2);
+function expectNoDelegatedMessageTrustGuidance(systemPrompt: string): void {
+	expect(systemPrompt).not.toContain(DELEGATED_MESSAGE_TRUST_GUIDANCE);
 }
 
 describe("subagent parent messaging foundation", () => {
@@ -119,23 +118,23 @@ describe("subagent parent messaging foundation", () => {
 		return { harness, harnessStateStore, harnessVersionBundle, services, session };
 	}
 
-	it("composes combined trust guidance once for default, custom, and tool-filtered root prompts", async () => {
+	it("omits delegated-message trust guidance from default, custom, and tool-filtered root prompts", async () => {
 		const defaultRoot = await setupRoot();
-		expectDelegatedMessageTrustGuidance(defaultRoot.session.systemPrompt);
+		expectNoDelegatedMessageTrustGuidance(defaultRoot.session.systemPrompt);
 
 		const customRoot = await setupRoot({ systemPrompt: () => "Custom root policy" });
 		expect(customRoot.session.systemPrompt).toBe(
-			`Custom root policy\nCurrent working directory: ${customRoot.services.cwd.replace(/\\/g, "/")}\n\n${DELEGATED_MESSAGE_TRUST_GUIDANCE}`,
+			`Custom root policy\nCurrent working directory: ${customRoot.services.cwd.replace(/\\/g, "/")}`,
 		);
-		expectDelegatedMessageTrustGuidance(customRoot.session.systemPrompt);
+		expectNoDelegatedMessageTrustGuidance(customRoot.session.systemPrompt);
 
 		const filteredRoot = await setupRoot({ tools: [] });
 		expect(filteredRoot.session.getToolDefinition("spawn_agent")).toBeUndefined();
 		expect(filteredRoot.session.getActiveToolNames()).toEqual([]);
-		expectDelegatedMessageTrustGuidance(filteredRoot.session.systemPrompt);
+		expectNoDelegatedMessageTrustGuidance(filteredRoot.session.systemPrompt);
 	});
 
-	it("appends combined trust guidance after extension prompt replacement and later tool rebuilds", async () => {
+	it("omits delegated-message trust guidance after extension prompt replacement and later tool rebuilds", async () => {
 		let extensionInputPrompt = "";
 		const extension: InlineExtension = {
 			name: "replace-root-prompt",
@@ -158,27 +157,27 @@ describe("subagent parent messaging foundation", () => {
 		await session.prompt("replace the prompt");
 
 		expect(extensionInputPrompt).not.toContain(DELEGATED_MESSAGE_TRUST_GUIDANCE);
-		expect(providerSystemPrompt).toBe(`Extension-returned root policy\n\n${DELEGATED_MESSAGE_TRUST_GUIDANCE}`);
-		expectDelegatedMessageTrustGuidance(providerSystemPrompt);
+		expect(providerSystemPrompt).toBe("Extension-returned root policy");
+		expectNoDelegatedMessageTrustGuidance(providerSystemPrompt);
 
 		session.setActiveToolsByName([]);
-		expectDelegatedMessageTrustGuidance(session.systemPrompt);
+		expectNoDelegatedMessageTrustGuidance(session.systemPrompt);
 		expect(session.systemPrompt).not.toContain("Extension-returned root policy");
 	});
 
-	it("preserves combined trust guidance across resource reload and harness activation", async () => {
+	it("keeps delegated-message trust guidance absent across resource reload and harness activation", async () => {
 		let resourcePrompt = "Resource root policy v1";
 		const { harnessStateStore, harnessVersionBundle, session } = await setupRoot({
 			systemPrompt: () => resourcePrompt,
 			withHarness: true,
 		});
 		if (!harnessStateStore || !harnessVersionBundle) throw new Error("Expected harness state");
-		expectDelegatedMessageTrustGuidance(session.systemPrompt);
+		expectNoDelegatedMessageTrustGuidance(session.systemPrompt);
 
 		resourcePrompt = "Resource root policy v2";
 		await session.reload();
 		expect(session.systemPrompt).toContain("Resource root policy v2");
-		expectDelegatedMessageTrustGuidance(session.systemPrompt);
+		expectNoDelegatedMessageTrustGuidance(session.systemPrompt);
 
 		const advance = await harnessStateStore.advance(
 			{ memory: "Use the activated root harness." },
@@ -188,10 +187,10 @@ describe("subagent parent messaging foundation", () => {
 		await session.switchHarnessVersion(advance.bundle.manifest.version);
 
 		expect(session.systemPrompt).toContain("Use the activated root harness.");
-		expectDelegatedMessageTrustGuidance(session.systemPrompt);
+		expectNoDelegatedMessageTrustGuidance(session.systemPrompt);
 	});
 
-	it("preserves combined trust guidance after extension resource discovery", async () => {
+	it("keeps delegated-message trust guidance absent after extension resource discovery", async () => {
 		const resourceExtension: InlineExtension = {
 			name: "root-resource-discovery",
 			factory: (diffex) => {
@@ -209,15 +208,15 @@ describe("subagent parent messaging foundation", () => {
 		await session.bindExtensions({});
 
 		expect(session.systemPrompt).toContain("extension-trust-skill");
-		expectDelegatedMessageTrustGuidance(session.systemPrompt);
+		expectNoDelegatedMessageTrustGuidance(session.systemPrompt);
 	});
 
 	it("activates only controller-owned live children and rejects stale capabilities", async () => {
 		const { harness, services, session } = await setupRoot();
 		const activeToolNames = session.getActiveToolNames();
-		expectDelegatedMessageTrustGuidance(session.systemPrompt);
+		expectNoDelegatedMessageTrustGuidance(session.systemPrompt);
 		session.setActiveToolsByName([]);
-		expectDelegatedMessageTrustGuidance(session.systemPrompt);
+		expectNoDelegatedMessageTrustGuidance(session.systemPrompt);
 		session.setActiveToolsByName(activeToolNames);
 		const definition = createEscalateToParentTool(async () => {});
 		expect(Check(definition.parameters, { message: "x".repeat(1_000) })).toBe(true);

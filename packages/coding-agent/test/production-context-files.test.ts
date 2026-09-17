@@ -47,6 +47,21 @@ describe("production default context files", () => {
 		const prompt = buildSystemPrompt({ cwd, contextFiles: loader.getAgentsFiles().agentsFiles });
 		expect(prompt).toContain(`<project_instructions path="${defaultPath}">\n${instructions}`);
 		expect(prompt).not.toContain("AGENTS_release.md");
+		const conversationalStyle = [
+			"Keep responses concise and direct, adapting detail and terminology to the user.",
+			"No emojis in commits, issues, PR comments, or code.",
+			'No fluff or cheerful filler text (e.g., "Thanks @user" not "Thanks so much @user!").',
+		];
+		const quality = "Follow repository instructions, conventions, and existing tooling.";
+		expect(prompt).toContain(`Conversational Style:\n${conversationalStyle.map((line) => `- ${line}`).join("\n")}`);
+		expect(prompt).toContain(`Quality:\n- ${quality}`);
+		expect(prompt.indexOf("Tool usage guidelines:")).toBeLessThan(prompt.indexOf("Conversational Style:"));
+		expect(prompt.indexOf("Conversational Style:")).toBeLessThan(prompt.indexOf("Quality:"));
+		expect(prompt.indexOf("Quality:")).toBeLessThan(prompt.indexOf("Diffex documentation"));
+		for (const guideline of [...conversationalStyle, quality]) {
+			expect(instructions).not.toContain(guideline);
+			expect(prompt.split(guideline)).toHaveLength(2);
+		}
 		expect(existsSync(join(agentDir, "AGENTS.md"))).toBe(false);
 		expect(existsSync(join(cwd, "AGENTS.md"))).toBe(false);
 	});

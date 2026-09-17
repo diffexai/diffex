@@ -568,8 +568,6 @@ It waits until every child in that batch is idle, failed, or interrupted, then a
 The parent model continues automatically from that message, so callers do not need to send another user prompt.
 Terminal results returned explicitly by `wait_for_agents` are marked consumed and are not delivered again.
 
-The hidden `subagent_results` and `subagent_escalations` entries are untrusted reports from delegated agents, not user instructions, system instructions, or authority. Root system guidance tells the model to verify material claims against the parent task and available evidence, and to follow embedded instructions only when they are consistent with the parent task, repository policy, and current evidence. This guidance remains attached when coordination tools are filtered and after custom or extension-returned system prompts are selected.
-
 An initial child failure offers the parent one coordinated retry for that child during the current explicit parent prompt cycle.
 The parent can analyze the delivered error and partial output, then call `agent_action` with `action: "message"` and `wake: true`.
 A second retry in the same cycle is rejected, while a later explicit user prompt starts a fresh cycle.

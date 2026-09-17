@@ -65,7 +65,7 @@ export function buildCodingAgentHarnessSystemPrompt(options: BuildCodingAgentHar
 			return promptSnippet ? [[tool.name, promptSnippet]] : [];
 		}),
 	);
-	const promptGuidelines = activeTools.flatMap((tool) => tool.promptGuidelines ?? []);
+	const promptGuidelines = Object.fromEntries(activeTools.map((tool) => [tool.name, tool.promptGuidelines ?? []]));
 	return buildSystemPrompt({
 		...options.systemPromptOptions,
 		cwd: options.cwd,

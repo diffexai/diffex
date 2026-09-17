@@ -3,8 +3,9 @@
  */
 
 import { existsSync } from "node:fs";
-import { getDocsPath, getExamplesPath } from "../config.ts";
+import { getDocsPath, getExamplesPath, IS_PRODUCTION_DISTRIBUTION } from "../config.ts";
 import { formatSkillsForPrompt, type Skill } from "./skills.ts";
+import { buildProductionSystemPrompt } from "./system-prompt-production.ts";
 
 export interface BuildSystemPromptOptions {
 	/** Custom system prompt (replaces default). */
@@ -13,8 +14,8 @@ export interface BuildSystemPromptOptions {
 	selectedTools?: string[];
 	/** Optional one-line tool snippets keyed by tool name. */
 	toolSnippets?: Record<string, string>;
-	/** Additional guideline bullets appended to the default system prompt guidelines. */
-	promptGuidelines?: string[];
+	/** Guideline bullets keyed by tool name, grouped under active tools in the default system prompt. */
+	promptGuidelines?: Record<string, readonly string[]>;
 	/** Text to append to system prompt. */
 	appendSystemPrompt?: string;
 	/** Activated harness evolution memory. Empty memory is omitted from the prompt. */
@@ -29,6 +30,8 @@ export interface BuildSystemPromptOptions {
 
 /** Build the system prompt with tools, guidelines, and context */
 export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
+	if (IS_PRODUCTION_DISTRIBUTION) return buildProductionSystemPrompt(options);
+
 	const {
 		customPrompt,
 		selectedTools,
@@ -90,55 +93,53 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 	const toolsList =
 		visibleTools.length > 0 ? visibleTools.map((name) => `- ${name}: ${toolSnippets![name]}`).join("\n") : "(none)";
 
-	// Build guidelines based on which tools are actually available
-	const guidelinesList: string[] = [];
-	const guidelinesSet = new Set<string>();
-	const addGuideline = (guideline: string): void => {
-		if (guidelinesSet.has(guideline)) {
-			return;
-		}
-		guidelinesSet.add(guideline);
-		guidelinesList.push(guideline);
-	};
-
-	const hasBash = tools.includes("bash");
 	const hasGrep = tools.includes("grep");
 	const hasFind = tools.includes("find");
 	const hasLs = tools.includes("ls");
 	const hasRead = tools.includes("read");
 
-	// File exploration guidelines
-	if (hasBash && !hasGrep && !hasFind && !hasLs) {
-		addGuideline("Use bash for file operations like ls, rg, find");
-	}
-
-	for (const guideline of promptGuidelines ?? []) {
-		const normalized = guideline.trim();
-		if (normalized.length > 0) {
-			addGuideline(normalized);
+	// Preserve each active tool's guidelines and deduplicate only within that tool.
+	const guidelinesByTool = new Map(Object.entries(promptGuidelines ?? {}));
+	const guidelineGroups: string[] = [];
+	for (const name of new Set(tools)) {
+		const toolGuidelines = new Set<string>();
+		if (name === "bash" && !hasGrep && !hasFind && !hasLs) {
+			toolGuidelines.add("Use bash for file operations like ls, rg, find");
+		}
+		for (const guideline of guidelinesByTool.get(name) ?? []) {
+			const normalized = guideline.trim();
+			if (normalized) toolGuidelines.add(normalized);
+		}
+		if (toolGuidelines.size > 0) {
+			const bullets = [...toolGuidelines].map((guideline) => `  - ${guideline.replace(/\r?\n/g, "\n    ")}`);
+			guidelineGroups.push(`- ${name}:\n${bullets.join("\n")}`);
 		}
 	}
+	const guidelines = guidelineGroups.length > 0 ? guidelineGroups.join("\n") : "(none)";
 
-	// Always include these
-	addGuideline("Be concise in your responses");
-	addGuideline("Show file paths clearly when working with files");
-
-	const guidelines = guidelinesList.map((g) => `- ${g}`).join("\n");
-
-	let prompt = `You are Diffex, an expert coding agent. You help users by reading files, executing commands, editing code, and writing new files.
+	let prompt = `You are Diffex, a coding agent. You help users by reading files, executing commands, editing code, and writing new files.
 
 Available tools:
 ${toolsList}
 
-In addition to the tools above, you may have access to other custom tools depending on the project.
+In addition to the tools above, you may have access to other custom project-related tools.
 
-Guidelines:
+Tool usage guidelines:
 ${guidelines}
+
+Conversational Style:
+- Keep responses concise and direct, adapting detail and terminology to the user.
+- No emojis in commits, issues, PR comments, or code.
+- No fluff or cheerful filler text (e.g., "Thanks @user" not "Thanks so much @user!").
+- Show file paths clearly when working with files
+
+Quality:
+- Follow repository instructions, conventions, and existing tooling.
 
 Diffex documentation (read only when the user asks about Diffex itself, its SDK, extensions, themes, skills, or TUI):
 ${
 	existsSync(docsPath)
-		? `- Product website: https://diffex.ai/
+		? `- Documentation website: https://diffex.ai/docs/overview/
 - Additional docs: ${docsPath}
 ${existsSync(examplesPath) ? `- Examples: ${examplesPath} (extensions, custom tools, SDK)\n- When reading Diffex docs or examples, resolve docs/... under Additional docs and examples/... under Examples, not the current working directory` : "- Resolve docs/... under Additional docs, not the current working directory; example source files are not included in this installation"}
 - When asked about: extensions (docs/extensions.md), themes (docs/themes.md), skills (docs/skills.md), prompt templates (docs/prompt-templates.md), TUI components (docs/tui.md), keybindings (docs/keybindings.md), SDK integrations (docs/sdk.md), custom providers (docs/custom-provider.md), adding models (docs/models.md), Diffex packages (docs/packages.md), environment variables (docs/environment-variables.md)

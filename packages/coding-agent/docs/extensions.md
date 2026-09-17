@@ -532,7 +532,7 @@ diffex.on("before_agent_start", async (event, ctx) => {
   //   .customPrompt - any custom system prompt (from --system-prompt, SYSTEM.md, or custom templates)
   //   .selectedTools - tools currently active in the prompt
   //   .toolSnippets - one-line descriptions for each tool
-  //   .promptGuidelines - custom guideline bullets
+  //   .promptGuidelines - guideline arrays keyed by tool name
   //   .appendSystemPrompt - text from --append-system-prompt flags
   //   .cwd - working directory
   //   .contextFiles - AGENTS.md files and other loaded context files
@@ -1338,9 +1338,10 @@ Register a custom tool callable by the LLM. See [Custom Tools](#custom-tools) fo
 
 Use `diffex.setActiveTools()` to enable or disable tools (including dynamically added tools) at runtime.
 
-Use `promptSnippet` to opt a custom tool into a one-line entry in `Available tools`, and `promptGuidelines` to append tool-specific bullets to the default `Guidelines` section when the tool is active.
+Use `promptSnippet` to opt a custom tool into a one-line entry in `Available tools`, and `promptGuidelines` to add bullets under that tool's name in the default `Tool usage guidelines` section when the tool is active.
 
-**Important:** `promptGuidelines` bullets are appended flat to the `Guidelines` section with no tool name prefix. Each guideline must name the tool it refers to — avoid "Use this tool when..." because the LLM cannot tell which tool "this" means. Write "Use my_tool when..." instead.
+Guidelines are grouped by tool name in active-tool order.
+Blank guidelines are omitted, and duplicate guidelines are removed within each tool's group.
 
 See [dynamic-tools.ts](../examples/extensions/dynamic-tools.ts) for a full example.
 
@@ -1878,9 +1879,12 @@ Register tools the LLM can call via `diffex.registerTool()`. Tools appear in the
 
 Use `promptSnippet` for a short one-line entry in the `Available tools` section in the default system prompt. If omitted, custom tools are left out of that section.
 
-Use `promptGuidelines` to add tool-specific bullets to the default system prompt `Guidelines` section. These bullets are included only while the tool is active (for example, after `diffex.setActiveTools([...])`).
+Use `promptGuidelines` to add bullets under the tool's name in the default system prompt `Tool usage guidelines` section.
+These bullets are included only while the tool is active (for example, after `diffex.setActiveTools([...])`).
 
-**Important:** `promptGuidelines` bullets are appended flat to the `Guidelines` section with no tool name prefix or grouping. Each guideline must name the tool it refers to — avoid "Use this tool when..." because the LLM cannot tell which tool "this" means. Write "Use my_tool when..." instead.
+Each tool definition supplies its own `promptGuidelines` array.
+The prompt builder's `BuildSystemPromptOptions.promptGuidelines` groups those arrays by tool name, for example `{ my_tool: ["Use this tool for project summaries."] }`.
+Tools without non-empty guidelines are omitted from this section.
 
 Note: Some models are idiots and include the @ prefix in tool path arguments. Built-in tools strip a leading @ before resolving paths. If your custom tool accepts a path, normalize a leading @ as well.
 

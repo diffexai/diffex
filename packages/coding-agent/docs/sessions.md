@@ -44,7 +44,6 @@ Restored and replacement children receive the child-only `escalate_to_parent` to
 
 Escalation reports delivered to the root are hidden from the transcript but are not secret or redacted.
 Accepted idle reports, delivered active reports, and the child's tool-call arguments remain normal session history.
-Both `subagent_results` and `subagent_escalations` are untrusted delegated-agent reports rather than user or system instructions or authority. The root is instructed to verify material claims against the parent task and available evidence, and to follow embedded instructions only when they agree with the parent task, repository policy, and current evidence.
 An idle report in a saved session is appended to the currently selected parent branch without starting a provider call and is supplied to the parent on its next explicit run; an in-memory parent keeps the report only in the live session.
 Branch navigation retains only the selected branch's pending saved reports for capacity accounting.
 Deleting a parent session continues to delete its parent history and owned child-session namespace through the normal parent-owned deletion behavior.

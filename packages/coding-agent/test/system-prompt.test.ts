@@ -125,28 +125,70 @@ describe("buildSystemPrompt", () => {
 	});
 
 	describe("prompt guidelines", () => {
-		test("appends promptGuidelines to default guidelines", () => {
+		test("groups guidelines under active tools in tool order without requiring snippets", () => {
 			const prompt = buildSystemPrompt({
 				selectedTools: ["read", "dynamic_tool"],
-				promptGuidelines: ["Use dynamic_tool for project summaries."],
+				promptGuidelines: {
+					dynamic_tool: ["Use this tool for project summaries.", "Verify the summary."],
+					read: ["Read relevant files."],
+					inactive_tool: ["Do not include this."],
+				},
 				contextFiles: [],
 				skills: [],
 				cwd: process.cwd(),
 			});
 
-			expect(prompt).toContain("- Use dynamic_tool for project summaries.");
+			expect(prompt).toContain(
+				"Tool usage guidelines:\n- read:\n  - Read relevant files.\n- dynamic_tool:\n  - Use this tool for project summaries.\n  - Verify the summary.\n\nConversational Style:",
+			);
+			expect(prompt).not.toContain("inactive_tool");
+			expect(prompt).not.toContain("Do not include this.");
 		});
 
-		test("deduplicates and trims promptGuidelines", () => {
+		test("trims and deduplicates guidelines within each tool while preserving shared guidance", () => {
 			const prompt = buildSystemPrompt({
-				selectedTools: ["read", "dynamic_tool"],
-				promptGuidelines: ["Use dynamic_tool for summaries.", "  Use dynamic_tool for summaries.  ", "   "],
+				selectedTools: ["read", "dynamic_tool", "dynamic_tool", "empty_tool"],
+				promptGuidelines: {
+					read: ["Verify results."],
+					dynamic_tool: ["Verify results.", "  Verify results.  ", "   ", "First line.\nSecond line."],
+					empty_tool: ["   "],
+				},
 				contextFiles: [],
 				skills: [],
 				cwd: process.cwd(),
 			});
 
-			expect(prompt.match(/- Use dynamic_tool for summaries\./g)).toHaveLength(1);
+			expect(prompt).toContain(
+				"Tool usage guidelines:\n- read:\n  - Verify results.\n- dynamic_tool:\n  - Verify results.\n  - First line.\n    Second line.\n\nConversational Style:",
+			);
+			expect(prompt).not.toContain("empty_tool");
+		});
+
+		test("groups conditional file exploration guidance under bash", () => {
+			const options = {
+				cwd: process.cwd(),
+				promptGuidelines: { bash: ["Use bash for file operations like ls, rg, find", "Inspect the environment."] },
+			};
+			const prompt = buildSystemPrompt({ ...options, selectedTools: ["bash"] });
+			expect(prompt).toContain(
+				"Tool usage guidelines:\n- bash:\n  - Use bash for file operations like ls, rg, find\n  - Inspect the environment.\n\nConversational Style:",
+			);
+			const searchPrompt = buildSystemPrompt({
+				cwd: process.cwd(),
+				selectedTools: ["bash", "grep"],
+				promptGuidelines: { bash: ["Inspect the environment."] },
+			});
+			expect(searchPrompt).toContain("- bash:\n  - Inspect the environment.");
+			expect(searchPrompt).not.toContain("Use bash for file operations");
+		});
+
+		test("keeps general response guidance outside the tool section when no tools are active", () => {
+			const prompt = buildSystemPrompt({ cwd: process.cwd(), selectedTools: [] });
+			expect(prompt).toContain("Tool usage guidelines:\n(none)\n\nConversational Style:");
+			expect(prompt.indexOf("Keep responses concise and direct")).toBeGreaterThan(
+				prompt.indexOf("Conversational Style:"),
+			);
+			expect(prompt.indexOf("Show file paths clearly")).toBeGreaterThan(prompt.indexOf("Conversational Style:"));
 		});
 	});
 
