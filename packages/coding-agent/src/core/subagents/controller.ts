@@ -507,7 +507,7 @@ export class SubagentController {
 			) {
 				supervision.checkpointRequested = true;
 				await record.session?.steer(
-					"Your renewable work allowance is nearly exhausted. If work remains necessary, use escalate_to_parent now with a concise checkpoint: current progress, remaining work, the goal, and the decision or extension needed. If more time is needed, request an extension without estimating its duration. The parent can approve by calling agent_action with action: 'renew' and a reason, adding another configured allowance (15 minutes by default), capped by its deadline. Stop if the task is solved.",
+					"Your renewable work allowance is nearly exhausted. If work remains necessary, use escalate_to_parent now with a concise checkpoint: current progress, remaining work, the goal, and the decision or extension needed. If more time is needed, request an extension. Stop if the task is solved.",
 				);
 			}
 		} catch (error) {
