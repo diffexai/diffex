@@ -8,6 +8,7 @@ import { keyHint } from "../../modes/interactive/components/keybinding-hints.ts"
 import { truncateToVisualLines } from "../../modes/interactive/components/visual-truncate.ts";
 import { theme } from "../../modes/interactive/theme/theme.ts";
 import { waitForChildProcess } from "../../utils/child-process.ts";
+import type { OwnedShellProcesses } from "../../utils/owned-shell-processes.ts";
 import {
 	getShellConfig,
 	getShellEnv,
@@ -84,7 +85,10 @@ export interface BashOperations {
  * This is useful for extensions that intercept user_bash and still want Diffex's
  * standard local shell behavior while wrapping or rewriting commands.
  */
-export function createLocalBashOperations(options?: { shellPath?: string }): BashOperations {
+export function createLocalBashOperations(options?: {
+	shellPath?: string;
+	owner?: OwnedShellProcesses;
+}): BashOperations {
 	return {
 		exec: async (command, cwd, { onData, signal, timeout, env }) => {
 			const timeoutMs = resolveTimeoutMs(timeout);
@@ -98,6 +102,7 @@ export function createLocalBashOperations(options?: { shellPath?: string }): Bas
 				throw new Error(`Working directory does not exist: ${cwd}\nCannot execute bash commands.`);
 			}
 
+			signal?.throwIfAborted();
 			const commandFromStdin = shellConfig.commandTransport === "stdin";
 			const child = spawn(shellConfig.shell, commandFromStdin ? shellConfig.args : [...shellConfig.args, command], {
 				cwd,
@@ -110,7 +115,10 @@ export function createLocalBashOperations(options?: { shellPath?: string }): Bas
 				child.stdin?.on("error", () => {});
 				child.stdin?.end(command);
 			}
-			if (child.pid) trackDetachedChildPid(child.pid);
+			if (child.pid) {
+				if (options?.owner) options.owner.track(child.pid);
+				else trackDetachedChildPid(child.pid);
+			}
 			let timedOut = false;
 			let timeoutHandle: NodeJS.Timeout | undefined;
 			const onAbort = () => {
@@ -144,7 +152,10 @@ export function createLocalBashOperations(options?: { shellPath?: string }): Bas
 				}
 				return { exitCode };
 			} finally {
-				if (child.pid) untrackDetachedChildPid(child.pid);
+				if (child.pid) {
+					if (options?.owner) options.owner.releaseIfExited(child.pid);
+					else untrackDetachedChildPid(child.pid);
+				}
 				if (timeoutHandle) clearTimeout(timeoutHandle);
 				if (signal) signal.removeEventListener("abort", onAbort);
 			}
@@ -189,6 +200,8 @@ function resolveSpawnContext(
 }
 
 export interface BashToolOptions {
+	/** Session ownership for cancellation of background shell jobs. */
+	owner?: OwnedShellProcesses;
 	/** Custom operations for command execution. Default: local shell */
 	operations?: BashOperations;
 	/** Command prefix prepended to every command (for example shell setup commands) */
@@ -322,7 +335,8 @@ export function createBashToolDefinition(
 	cwd: string,
 	options?: BashToolOptions,
 ): ToolDefinition<typeof bashSchema, BashToolDetails | undefined, BashRenderState> {
-	const ops = options?.operations ?? createLocalBashOperations({ shellPath: options?.shellPath });
+	const ops =
+		options?.operations ?? createLocalBashOperations({ shellPath: options?.shellPath, owner: options?.owner });
 	const commandPrefix = options?.commandPrefix;
 	const exposeSessionEnvironment = options?.exposeSessionEnvironment ?? true;
 	const spawnHook = options?.spawnHook;

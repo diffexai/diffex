@@ -258,7 +258,7 @@ describe("AgentSession subagent lifecycle", () => {
 		await expect(
 			action.execute(
 				"queue-follow-up",
-				{ target: "worker", action: "message", message: "queued during shutdown" },
+				{ target: "worker", action: "message", message: "queued during shutdown", delivery: "follow_up" },
 				undefined,
 				undefined,
 				extensionContext,

@@ -1332,11 +1332,7 @@ export class SubagentController {
 
 		record.interruptionRequested = true;
 		const run = record.run;
-		try {
-			await this.#requestRunCancellation(record, new Error(`Subagent interrupted: ${name}`));
-		} catch {
-			// The captured run still determines the settled controller state.
-		}
+		await this.#requestRunCancellation(record, new Error(`Subagent interrupted: ${name}`));
 		await run;
 		if (record.status === "queued" || record.status === "running") {
 			this.markInterrupted(name);
@@ -1435,6 +1431,7 @@ export class SubagentController {
 				}
 			});
 			await activeSession.prompt(prompt, { signal: runController.signal });
+			await activeSession.terminateOwnedShellProcesses();
 			if (this.#closed) return;
 
 			const terminalMessage = assistantMessages.at(-1);
@@ -1503,21 +1500,8 @@ export class SubagentController {
 	#requestRunCancellation(record: SubagentRecord, reason: Error): Promise<void> {
 		if (record.runCancellation) return record.runCancellation;
 
-		let cancellation: Promise<void>;
-		// AgentSession marks streaming before awaiting agent_start hooks, while this record can still be queued.
-		if (record.runController && !record.session?.isStreaming) {
-			record.runController.abort(reason);
-			cancellation = Promise.resolve();
-		} else if (record.session) {
-			try {
-				cancellation = record.session.abort();
-			} catch (error) {
-				cancellation = Promise.reject(error);
-			}
-		} else {
-			record.runController?.abort(reason);
-			cancellation = Promise.resolve();
-		}
+		record.runController?.abort(reason);
+		const cancellation = record.session?.abort() ?? Promise.resolve();
 
 		record.runCancellation = cancellation;
 		void cancellation.catch(() => {
