@@ -94,7 +94,7 @@ class ParentExhaustionTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(failed["lastMessage"]["stopReason"], "error")
             self.assertEqual(failed["error"], "429 rate limit exhausted")
             successful = read_json(root / "sample" / f"002-{selected[1]}" / "parent.json")
-            self.assertEqual(successful["parentCalls"], 3)
+            self.assertEqual(successful["parentCalls"], 4)
             self.assertTrue(successful["childSettled"])
             self.assertEqual(successful["children"][0]["status"], "idle")
             self.assertEqual(successful["lastMessage"]["stopReason"], "stop")

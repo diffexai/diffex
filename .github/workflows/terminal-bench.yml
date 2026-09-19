@@ -42,6 +42,11 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22.23.2
+      - name: Install source fixture dependencies
+        working-directory: .
+        run: |
+          npm ci --ignore-scripts
+          npm run hydrate:model-data
       - uses: astral-sh/setup-uv@94527f2e458b27549849d47d273a16bec83a01e9 # v7
         with:
           version: 0.11.2

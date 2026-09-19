@@ -105,6 +105,7 @@ describe("AgentSessionRuntime characterization", () => {
 					sessionStartEvent,
 					model: runtimeOptions.model,
 					thinkingLevel: runtimeOptions.thinkingLevel,
+					subagents: { maxConcurrent: 1 },
 				})),
 				services,
 				diagnostics: services.diagnostics,
@@ -358,6 +359,7 @@ describe("AgentSessionRuntime characterization", () => {
 		await spawn.execute("spawn-active", { name: "active", task: "wait" }, undefined, undefined, extensionContext);
 		await childProviderStarted.promise;
 		await spawn.execute("spawn-queued", { name: "queued", task: "wait" }, undefined, undefined, extensionContext);
+		expect(outgoing.getSubagents().find((child) => child.name === "queued")?.status).toBe("queued");
 		const agentsResult = agents
 			.execute(
 				"wait-agents",
