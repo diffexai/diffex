@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added optional `prepareRequest` hooks for prompt and continuation requests, with persistent context replacement, public state synchronization, and cancellation before provider streaming.
+
 ## [0.2.7] - 2026-09-18
 
 ## [0.2.6] - 2026-09-18

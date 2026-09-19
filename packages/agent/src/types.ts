@@ -199,6 +199,20 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 	convertToLlm: (messages: AgentMessage[]) => Message[] | Promise<Message[]>;
 
 	/**
+	 * Called before every request, after prompt and queued messages are admitted,
+	 * and before `transformContext`, conversion, or streaming.
+	 * Return replacement context for this request and later loop iterations.
+	 * Return undefined to preserve the supplied context. The Agent wrapper also
+	 * synchronizes replacements into public state before the request proceeds.
+	 * Honor the abort signal; an aborted run never starts the pending request.
+	 * Contract: must not throw or reject except when the run signal is aborted.
+	 */
+	prepareRequest?: (
+		context: AgentContext,
+		signal?: AbortSignal,
+	) => AgentContext | undefined | Promise<AgentContext | undefined>;
+
+	/**
 	 * Optional transform applied to the context before `convertToLlm`.
 	 *
 	 * Use this for operations that work at the AgentMessage level:

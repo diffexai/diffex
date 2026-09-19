@@ -101,6 +101,7 @@ export interface AgentOptions {
 	initialState?: Partial<Omit<AgentState, "pendingToolCalls" | "isStreaming" | "streamingMessage" | "errorMessage">>;
 	convertToLlm?: (messages: AgentMessage[]) => Message[] | Promise<Message[]>;
 	transformContext?: (messages: AgentMessage[], signal?: AbortSignal) => Promise<AgentMessage[]>;
+	prepareRequest?: AgentLoopConfig["prepareRequest"];
 	streamFn: StreamFn;
 	preparePrivateContinuation?: AgentLoopConfig["preparePrivateContinuation"];
 	/** When private continuations settle. Default: "per-output". */
@@ -185,6 +186,7 @@ export class Agent {
 
 	public convertToLlm: (messages: AgentMessage[]) => Message[] | Promise<Message[]>;
 	public transformContext?: (messages: AgentMessage[], signal?: AbortSignal) => Promise<AgentMessage[]>;
+	public prepareRequest?: AgentLoopConfig["prepareRequest"];
 	public streamFunction: StreamFn;
 	public preparePrivateContinuation?: AgentLoopConfig["preparePrivateContinuation"];
 	/** Controls whether private continuations settle per output or once per run. */
@@ -231,6 +233,7 @@ export class Agent {
 		this._state = createMutableAgentState(runtimeOptions.initialState);
 		this.convertToLlm = runtimeOptions.convertToLlm ?? defaultConvertToLlm;
 		this.transformContext = runtimeOptions.transformContext;
+		this.prepareRequest = runtimeOptions.prepareRequest;
 		this.streamFunction = runtimeOptions.streamFn ?? getDefaultStreamFn();
 		this.preparePrivateContinuation = runtimeOptions.preparePrivateContinuation;
 		this.privateContinuationMode = runtimeOptions.privateContinuationMode ?? "per-output";
@@ -485,6 +488,15 @@ export class Agent {
 							return await this.prepareNextTurn?.(this.signal);
 						}
 					: undefined,
+			prepareRequest: async (context, signal) => {
+				const replacement = await this.prepareRequest?.(context, signal);
+				if (replacement) {
+					this._state.systemPrompt = replacement.systemPrompt;
+					this._state.messages = replacement.messages;
+					this._state.tools = replacement.tools ?? [];
+				}
+				return replacement;
+			},
 			preparePrivateContinuation: this.preparePrivateContinuation,
 			privateContinuationMode: this.privateContinuationMode,
 			convertToLlm: this.convertToLlm,

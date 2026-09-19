@@ -9,8 +9,8 @@ import {
 import { Type } from "typebox";
 import { describe, expect, it } from "vitest";
 import { agentLoop, agentLoopContinue } from "../src/agent-loop.ts";
-import { setDefaultStreamFn } from "../src/index.ts";
-import type { AgentContext, AgentEvent, AgentLoopConfig, AgentMessage, AgentTool } from "../src/types.ts";
+import { InMemoryTelemetryContext, setDefaultStreamFn } from "../src/index.ts";
+import type { AgentContext, AgentEvent, AgentLoopConfig, AgentMessage, AgentTool, StreamFn } from "../src/types.ts";
 
 // Mock stream for testing - mimics MockAssistantStream
 class MockAssistantStream extends EventStream<AssistantMessageEvent, AssistantMessage> {
@@ -1799,4 +1799,260 @@ describe("agentLoopContinue with AgentMessage", () => {
 		expect(messages.length).toBe(1);
 		expect(messages[0].role).toBe("assistant");
 	});
+});
+
+describe("request preparation", () => {
+	it("prepares admitted prompts, complete tool batches, steering, and follow-ups before transforms", async () => {
+		const schema = Type.Object({});
+		const executed: string[] = [];
+		const tool: AgentTool<typeof schema, Record<string, never>> = {
+			name: "echo",
+			label: "Echo",
+			description: "Echo",
+			parameters: schema,
+			async execute(id) {
+				executed.push(id);
+				return { content: [{ type: "text", text: id }], details: {} };
+			},
+		};
+		const prompt: UserMessage = {
+			role: "user",
+			content: [
+				{ type: "text", text: "start" },
+				{ type: "image", data: "aGVsbG8=", mimeType: "image/png" },
+			],
+			timestamp: 1,
+		};
+		const initialSteering = createUserMessage("initial steering");
+		const steering = createUserMessage("after tools");
+		const followUp = createUserMessage("follow up");
+		const summary = createUserMessage("summary");
+		const requestOnly = createUserMessage("request-only transform");
+		const prepared: AgentMessage[][] = [];
+		const requested: Message[][] = [];
+		const order: string[] = [];
+		let steeringPolls = 0;
+		let followUpPolls = 0;
+		const signal = new AbortController().signal;
+		const responses = [
+			createAssistantMessage(
+				[
+					{ type: "toolCall", id: "a", name: "echo", arguments: {} },
+					{ type: "toolCall", id: "b", name: "echo", arguments: {} },
+				],
+				"toolUse",
+			),
+			createAssistantMessage([{ type: "toolCall", id: "c", name: "echo", arguments: {} }], "toolUse"),
+			createAssistantMessage([{ type: "text", text: "done" }]),
+			createAssistantMessage([{ type: "text", text: "followed up" }]),
+		];
+		const config: AgentLoopConfig = {
+			model: createModel(),
+			getSteeringMessages: async () => {
+				steeringPolls++;
+				return steeringPolls === 1 ? [initialSteering] : steeringPolls === 2 ? [steering] : [];
+			},
+			getFollowUpMessages: async () => (followUpPolls++ === 0 ? [followUp] : []),
+			prepareRequest: (context, receivedSignal) => {
+				expect(receivedSignal).toBe(signal);
+				order.push("prepare");
+				prepared.push(structuredClone(context.messages));
+				if (prepared.length === 1) {
+					return { systemPrompt: "prepared", tools: [tool], messages: context.messages.slice(1) };
+				}
+				if (prepared.length === 2) {
+					expect(executed).toEqual(["a", "b"]);
+					return Promise.resolve({ ...context, messages: [summary, ...context.messages.slice(2)] });
+				}
+				return undefined;
+			},
+			transformContext: async (messages) => {
+				order.push("transform");
+				return [...messages, requestOnly];
+			},
+			convertToLlm: (messages) => {
+				order.push("convert");
+				return identityConverter(messages);
+			},
+		};
+		const stream = agentLoop(
+			[prompt],
+			{ systemPrompt: "old", messages: [createUserMessage("old")] },
+			config,
+			signal,
+			(_model, context) => {
+				order.push("request");
+				expect(context.systemPrompt).toBe("prepared");
+				expect(context.tools).toEqual([tool]);
+				requested.push(structuredClone(context.messages));
+				const response = new MockAssistantStream();
+				const message = responses[requested.length - 1];
+				response.push({ type: "done", reason: message.stopReason === "toolUse" ? "toolUse" : "stop", message });
+				return response;
+			},
+		);
+		const events: AgentEvent[] = [];
+		for await (const event of stream) events.push(event);
+		const result = await stream.result();
+
+		expect(order).toEqual(Array.from({ length: 4 }, () => ["prepare", "transform", "convert", "request"]).flat());
+		expect(prepared[0]).toEqual([expect.objectContaining({ content: "old" }), prompt, initialSteering]);
+		expect(prepared[1]).toEqual([
+			prompt,
+			initialSteering,
+			responses[0],
+			expect.objectContaining({ toolCallId: "a" }),
+			expect.objectContaining({ toolCallId: "b" }),
+			steering,
+		]);
+		expect(prepared[2]).toEqual([
+			summary,
+			...prepared[1].slice(2),
+			responses[1],
+			expect.objectContaining({ toolCallId: "c" }),
+		]);
+		expect(prepared[3]).toEqual([...prepared[2], responses[2], followUp]);
+		expect(requested[0]).toEqual([prompt, initialSteering, requestOnly]);
+		expect(requested[1]).toEqual([summary, ...prepared[1].slice(2), requestOnly]);
+		expect(requested[2]).toEqual([...prepared[2], requestOnly]);
+		expect(requested[3]).toEqual([...prepared[3], requestOnly]);
+		expect(executed).toEqual(["a", "b", "c"]);
+		expect(result.filter((message) => message.role === "user")).toEqual([
+			prompt,
+			initialSteering,
+			steering,
+			followUp,
+		]);
+		expect(events.filter((event) => event.type === "agent_start")).toHaveLength(1);
+		expect(events.filter((event) => event.type === "agent_end")).toHaveLength(1);
+	});
+
+	it.each(["prompt", "continue"] as const)(
+		"preserves context when preparation returns undefined for %s",
+		async (mode) => {
+			const prompt = createUserMessage("pending");
+			const context: AgentContext = {
+				systemPrompt: "original",
+				tools: [],
+				messages: mode === "prompt" ? [] : [prompt],
+			};
+			let prepared: AgentContext | undefined;
+			let requests = 0;
+			const config: AgentLoopConfig = {
+				model: createModel(),
+				convertToLlm: identityConverter,
+				prepareRequest: (current) => {
+					prepared = current;
+					return undefined;
+				},
+			};
+			const streamFn: StreamFn = (_model, request) => {
+				requests++;
+				expect(request.systemPrompt).toBe("original");
+				expect(request.messages).toEqual([prompt]);
+				const response = new MockAssistantStream();
+				response.push({ type: "done", reason: "stop", message: createAssistantMessage([]) });
+				return response;
+			};
+			const stream =
+				mode === "prompt"
+					? agentLoop([prompt], context, config, undefined, streamFn)
+					: agentLoopContinue(context, config, undefined, streamFn);
+			await stream.result();
+			expect(prepared?.messages[0]).toBe(prompt);
+			expect(requests).toBe(1);
+		},
+	);
+
+	it.each([
+		["prompt", false],
+		["prompt", true],
+		["continue", false],
+		["continue", true],
+	] as const)("settles %s after cancellation during preparation (reject=%s)", async (mode, reject) => {
+		const controller = new AbortController();
+		const prompt = createUserMessage("pending");
+		const config: AgentLoopConfig = {
+			model: createModel(),
+			prepareRequest: async (_context, signal) => {
+				expect(signal).toBe(controller.signal);
+				await Promise.resolve();
+				controller.abort();
+				if (reject) signal?.throwIfAborted();
+				return undefined;
+			},
+			transformContext: async () => {
+				throw new Error("Unexpected transform");
+			},
+			convertToLlm: () => {
+				throw new Error("Unexpected conversion");
+			},
+		};
+		let requests = 0;
+		const streamFn = () => {
+			requests++;
+			throw new Error("Unexpected request");
+		};
+		const context: AgentContext = { systemPrompt: "", messages: mode === "prompt" ? [] : [prompt] };
+		const stream =
+			mode === "prompt"
+				? agentLoop([prompt], context, config, controller.signal, streamFn)
+				: agentLoopContinue(context, config, controller.signal, streamFn);
+		const events: AgentEvent[] = [];
+		for await (const event of stream) events.push(event);
+		const messages = await stream.result();
+		expect(requests).toBe(0);
+		expect(messages.at(-1)).toMatchObject({ role: "assistant", stopReason: "aborted" });
+		expect(events.slice(-4).map((event) => event.type)).toEqual([
+			"message_start",
+			"message_end",
+			"turn_end",
+			"agent_end",
+		]);
+	});
+	it.each(["transform", "convert", "key"] as const)(
+		"prevents requests after cancellation during async %s",
+		async (stage) => {
+			const controller = new AbortController();
+			const telemetryContext = new InMemoryTelemetryContext();
+			const config: AgentLoopConfig = {
+				model: createModel(),
+				telemetryContext,
+				prepareRequest: () => undefined,
+				transformContext: async (messages) => {
+					await Promise.resolve();
+					if (stage === "transform") controller.abort();
+					return messages;
+				},
+				convertToLlm: async (messages) => {
+					await Promise.resolve();
+					if (stage === "convert") controller.abort();
+					return identityConverter(messages);
+				},
+				getApiKey: async () => {
+					await Promise.resolve();
+					if (stage === "key") controller.abort();
+					return undefined;
+				},
+			};
+			let requests = 0;
+			const stream = agentLoop(
+				[createUserMessage("pending")],
+				{ systemPrompt: "", messages: [] },
+				config,
+				controller.signal,
+				() => {
+					requests++;
+					throw new Error("Unexpected request");
+				},
+			);
+			const messages = await stream.result();
+			expect(requests).toBe(0);
+			expect(messages.at(-1)).toMatchObject({ stopReason: "aborted" });
+			expect(telemetryContext.getSpans().find((span) => span.name === "diffex.ai.request")).toMatchObject({
+				attributes: { "diffex.ai.response.stop_reason": "aborted" },
+				status: { status: "error" },
+			});
+		},
+	);
 });

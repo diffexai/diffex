@@ -59,8 +59,15 @@ AgentMessage[] → transformContext() → AgentMessage[] → convertToLlm() → 
                     (optional)                           (required)
 ```
 
-1. **transformContext**: Prune old messages, inject external context
-2. **convertToLlm**: Filter out UI-only messages, convert custom types to LLM format
+Before this pipeline, optional `prepareRequest(context, signal)` receives the assembled `AgentContext` after prompt, steering, and follow-up admission. It runs before every request, including tool continuations and `continue()`.
+
+1. **prepareRequest**: Return durable replacement context, for example after application-owned compaction
+2. **transformContext**: Prune old messages or inject external context for the request
+3. **convertToLlm**: Filter out UI-only messages, convert custom types to LLM format
+
+`prepareRequest` may return an `AgentContext` synchronously or asynchronously. Returning `undefined` preserves the supplied context. A replacement supplies the system prompt, messages, and tools for the pending request and later loop iterations; the `Agent` class synchronizes it into public state before transforms and streaming. The hook does not replay message events or start a new run, and the loop result still contains the messages emitted during this invocation. Applications own persistence and must retain any newly admitted messages and complete tool-call/result pairs they need.
+
+The hook is available in `AgentOptions`, as mutable `agent.prepareRequest`, and in `AgentLoopConfig`. It must honor the run's abort signal and return a safe fallback on ordinary failure. Cancelling the run while preparing prevents the pending provider call and emits the normal aborted assistant and run-end events. Compaction policy remains in the application.
 
 ## Event Flow
 
@@ -189,7 +196,10 @@ const agent = new Agent({
   // Convert AgentMessage[] to LLM Message[] (required for custom message types)
   convertToLlm: (messages) => messages.filter(...),
 
-  // Transform context before convertToLlm (for pruning, compaction)
+  // Prepare persistent context before every request, after queued message admission
+  prepareRequest: async (context, signal) => prepareSessionContext(context, signal),
+
+  // Transform context before convertToLlm (request-only pruning or injection)
   transformContext: async (messages, signal) => pruneOldMessages(messages),
 
   // Steering mode: "one-at-a-time" (default) or "all"

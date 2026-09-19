@@ -365,6 +365,12 @@ async function runTurn(options: RunTurnOptions): Promise<RunTurnResult> {
 		pendingMessages = [];
 	}
 
+	try {
+		currentContext = (await config.prepareRequest?.(currentContext, options.signal)) ?? currentContext;
+	} catch (error) {
+		if (!options.signal?.aborted) throw error;
+	}
+
 	const { message, privateContinuation } = await streamAssistantResponse(
 		currentContext,
 		config,
@@ -486,6 +492,8 @@ async function streamAssistantResponse(
 	emit: AgentEventSink,
 	streamFunction: StreamFn,
 ): Promise<{ message: AssistantMessage; privateContinuation?: PrivateContinuation }> {
+	if (signal?.aborted) return emitAbortedResponse(context, config, emit);
+
 	// Apply context transform if configured (AgentMessage[] → AgentMessage[])
 	let messages = context.messages;
 	if (config.transformContext) {
@@ -533,6 +541,11 @@ async function streamAssistantResponse(
 			const startedAt = performance.now();
 			let firstChunkAt: number | undefined;
 			let chunkCount = 0;
+			if (signal?.aborted) {
+				const response = await emitAbortedResponse(context, config, emit);
+				settleAiRequestSpan(span, response.message, chunkCount, startedAt, firstChunkAt);
+				return response;
+			}
 			const response = await streamFunction(config.model, llmContext, {
 				...config,
 				apiKey: resolvedApiKey,
@@ -604,6 +617,35 @@ async function streamAssistantResponse(
 			return { message: finalMessage, privateContinuation };
 		},
 	);
+}
+
+async function emitAbortedResponse(
+	context: AgentContext,
+	config: AgentLoopConfig,
+	emit: AgentEventSink,
+): Promise<{ message: AssistantMessage }> {
+	const message: AssistantMessage = {
+		role: "assistant",
+		content: [],
+		api: config.model.api,
+		provider: config.model.provider,
+		model: config.model.id,
+		usage: {
+			input: 0,
+			output: 0,
+			cacheRead: 0,
+			cacheWrite: 0,
+			totalTokens: 0,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		},
+		stopReason: "aborted",
+		errorMessage: "Operation aborted",
+		timestamp: Date.now(),
+	};
+	context.messages.push(message);
+	await emit({ type: "message_start", message });
+	await emit({ type: "message_end", message });
+	return { message };
 }
 
 function settleAiRequestSpan(

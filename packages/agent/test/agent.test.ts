@@ -3,6 +3,7 @@ import { Type } from "typebox";
 import { describe, expect, it } from "vitest";
 import {
 	Agent,
+	type AgentContext,
 	type AgentEvent,
 	type AgentTool,
 	type AgentToolUpdateCallback,
@@ -905,6 +906,107 @@ describe("Agent", () => {
 				"diffex.ai.error.type": "AssistantMessageError",
 			},
 			status: { status: "error" },
+		});
+	});
+	describe("request preparation", () => {
+		it("synchronizes replacements before streaming and retains them across runs", async () => {
+			const schema = Type.Object({});
+			const tool: AgentTool<typeof schema, Record<string, never>> = {
+				name: "unused",
+				label: "Unused",
+				description: "Unused",
+				parameters: schema,
+				execute: async () => ({ content: [], details: {} }),
+			};
+			const summary = { role: "user" as const, content: "summary", timestamp: 1 };
+			let replacement: AgentContext | undefined;
+			let requests = 0;
+			const agent = new Agent({
+				initialState: { systemPrompt: "old", messages: [{ role: "user", content: "old", timestamp: 0 }] },
+				prepareRequest: (context, signal) => {
+					expect(signal).toBe(agent.signal);
+					expect(agent.state.messages).toEqual(context.messages);
+					replacement = {
+						systemPrompt: "prepared",
+						tools: [tool],
+						messages: [summary, ...context.messages.slice(1)],
+					};
+					return replacement;
+				},
+				transformContext: async (messages) => {
+					expect(agent.state.messages).toEqual(messages);
+					expect(agent.state.messages).not.toBe(messages);
+					return messages;
+				},
+				streamFn: (_model, context) => {
+					requests++;
+					expect(agent.state.systemPrompt).toBe(context.systemPrompt);
+					expect(agent.state.messages).toEqual(context.messages);
+					expect(agent.state.tools).toEqual(context.tools ?? []);
+					expect(agent.state.tools).not.toBe(replacement?.tools);
+					const stream = new MockAssistantStream();
+					const message = createAssistantMessage(`answer ${requests}`);
+					stream.push({ type: "start", partial: createAssistantMessage("") });
+					stream.push({ type: "done", reason: "stop", message });
+					return stream;
+				},
+			});
+			await agent.prompt("first");
+			expect(agent.state.messages.map((message) => message.role)).toEqual(["user", "user", "assistant"]);
+			expect(agent.state.messages[0]).toBe(summary);
+			expect(agent.state.systemPrompt).toBe("prepared");
+			expect(agent.state.tools).toEqual([tool]);
+			agent.prepareRequest = async (context) => {
+				expect(context.messages[0]).toBe(summary);
+				return { systemPrompt: "continued", messages: context.messages };
+			};
+			agent.state.messages.push({ role: "user", content: "continue", timestamp: 2 });
+			await agent.continue();
+			expect(requests).toBe(2);
+			expect(agent.state.systemPrompt).toBe("continued");
+			expect(agent.state.tools).toEqual([]);
+			expect(agent.state.messages.map((message) => message.role)).toEqual([
+				"user",
+				"user",
+				"assistant",
+				"user",
+				"assistant",
+			]);
+		});
+
+		it("keeps the run busy during preparation and settles after abort without calling the provider", async () => {
+			const started = createDeferred();
+			const release = createDeferred();
+			const events: AgentEvent[] = [];
+			let requests = 0;
+			const agent = new Agent({
+				prepareRequest: async (_context, signal) => {
+					started.resolve();
+					await release.promise;
+					signal?.throwIfAborted();
+					return undefined;
+				},
+				streamFn: () => {
+					requests++;
+					throw new Error("Unexpected request");
+				},
+			});
+			agent.subscribe((event) => {
+				events.push(event);
+			});
+			const prompt = agent.prompt("pending");
+			await started.promise;
+			expect(agent.state.isStreaming).toBe(true);
+			expect(agent.state.messages).toHaveLength(1);
+			agent.abort();
+			release.resolve();
+			await prompt;
+			await agent.waitForIdle();
+			expect(requests).toBe(0);
+			expect(agent.state.isStreaming).toBe(false);
+			expect(agent.signal).toBeUndefined();
+			expect(agent.state.messages.at(-1)).toMatchObject({ role: "assistant", stopReason: "aborted" });
+			expect(events.filter((event) => event.type === "agent_end")).toHaveLength(1);
 		});
 	});
 });
