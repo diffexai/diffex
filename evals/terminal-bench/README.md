@@ -61,12 +61,12 @@ The task container must provide Debian/Ubuntu Linux with glibc, root access, Bas
 Linux x86_64 and aarch64 have separate pinned Node archive checksums.
 The installer fails explicitly on unsupported platforms and refuses to reuse an existing installation.
 
-[pins.toml](src/diffex_terminal_bench/pins.toml) records Node `22.23.2`, Diffex `0.2.6`, the public npm registry, archive checksums, npm integrity, and a 600-second installation deadline.
+[pins.toml](src/diffex_terminal_bench/pins.toml) records Node `22.23.2`, Diffex `0.2.7`, the public npm registry, archive checksums, npm integrity, and a 600-second installation deadline.
 The deadline includes apt prerequisites, Node download, npm installation, and all three CLI checks.
 GNU `timeout` terminates the installer process group at the deadline and kills it after a ten-second grace period.
 Harbor's command transport allows another five seconds to collect the result.
 
-Setup installs Node under `/opt/diffex-terminal-bench/node` and uses `npm install --ignore-scripts --save-exact --registry=https://registry.npmjs.org/ @diffexai/diffex@0.2.6` with a private prefix.
+Setup installs Node under `/opt/diffex-terminal-bench/node` and uses `npm install --ignore-scripts --save-exact --registry=https://registry.npmjs.org/ @diffexai/diffex@0.2.7` with a private prefix.
 An isolated home and npm cache prevent host or task npm settings from changing installation.
 Node archive SHA-256, registry metadata, installed package version, and npm lockfile integrity must match the checked-in pins.
 The `/usr/local/bin/diffex` wrapper always invokes the pinned Node binary.
