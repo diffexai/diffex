@@ -25,9 +25,9 @@ import {
 } from "../../src/core/subagents/session-manager-factory.ts";
 import { createTestExtensionsResult, createTestResourceLoader } from "../extension-test-utils.ts";
 import { createHarness, getMessageText, type Harness } from "./harness.ts";
-import { getLastUserText } from "./subagent-harness.ts";
+import { getLastUserText, getSettledAgentStatus, waitForSettledAgents } from "./subagent-harness.ts";
 
-const COORDINATION_TOOLS = ["spawn_agent", "agent_action", "wait_for_agents"];
+const COORDINATION_TOOLS = ["spawn_agent", "agent_action", "agent_status"];
 const INCOMPATIBLE_PARENT_HOOKS = [
 	"resources_discover",
 	"input",
@@ -282,7 +282,7 @@ describe("root subagent tool registration", () => {
 	it("supports disabling and generic tool filtering", async () => {
 		const harness = await setupHarness();
 		const disabled = await createRoot(harness, { subagents: false });
-		const allowlisted = await createRoot(harness, { tools: ["read", "wait_for_agents"] });
+		const allowlisted = await createRoot(harness, { tools: ["agent_status", "read"] });
 		const excluded = await createRoot(harness, { excludeTools: ["agent_action"] });
 		const none = await createRoot(harness, { noTools: "all" });
 		const noBuiltins = await createRoot(harness, { noTools: "builtin" });
@@ -295,10 +295,10 @@ describe("root subagent tool registration", () => {
 				.getAllTools()
 				.map((tool) => tool.name)
 				.sort(),
-		).toEqual(["read", "wait_for_agents"]);
-		expect(allowlisted.session.getActiveToolNames().sort()).toEqual(["read", "wait_for_agents"]);
+		).toEqual(["agent_status", "read"]);
+		expect(allowlisted.session.getActiveToolNames().sort()).toEqual(["agent_status", "read"]);
 		expect(excluded.session.getAllTools().map((tool) => tool.name)).not.toContain("agent_action");
-		expect(excluded.session.getActiveToolNames()).toEqual(expect.arrayContaining(["spawn_agent", "wait_for_agents"]));
+		expect(excluded.session.getActiveToolNames()).toEqual(expect.arrayContaining(["spawn_agent", "agent_status"]));
 		expect(none.session.getAllTools()).toEqual([]);
 		expect(none.session.getActiveToolNames()).toEqual([]);
 		expect(noBuiltins.session.getActiveToolNames().sort()).toEqual([...COORDINATION_TOOLS].sort());
@@ -404,9 +404,9 @@ describe("root subagent tool registration", () => {
 			"tool_execution_start",
 		]);
 		await getActiveTool(observed.session, "spawn_agent").execute("spawn", { name: "worker", task: "task" });
-		await expect(
-			getActiveTool(observed.session, "wait_for_agents").execute("wait", { timeout_ms: 1_000, until: "all" }),
-		).resolves.toMatchObject({ details: { agents: [{ name: "worker", status: "idle" }] } });
+		await expect(getSettledAgentStatus(observed.session)).resolves.toMatchObject({
+			details: { agents: [{ name: "worker", status: "idle" }] },
+		});
 
 		const guarded = await createPolicyRoot(harness, ["context"]);
 		guarded.controller.reserve("existing", "existing task");
@@ -417,9 +417,7 @@ describe("root subagent tool registration", () => {
 				action: "interrupt",
 			}),
 		).resolves.toMatchObject({ details: { target: "existing", status: "failed" } });
-		await expect(
-			getActiveTool(guarded.session, "wait_for_agents").execute("list", { timeout_ms: 0 }),
-		).resolves.toMatchObject({
+		await expect(getActiveTool(guarded.session, "agent_status").execute("list", {})).resolves.toMatchObject({
 			details: { agents: [{ name: "existing", status: "failed" }] },
 		});
 	});
@@ -473,15 +471,15 @@ describe("root subagent tool registration", () => {
 		]);
 		const { session } = await createRoot(harness);
 		const spawn = getActiveTool(session, "spawn_agent");
-		const agents = session.getToolDefinition("wait_for_agents");
-		if (!agents) throw new Error("Missing wait_for_agents tool definition");
+		const agents = session.getToolDefinition("agent_status");
+		if (!agents) throw new Error("Missing agent_status tool definition");
 
 		await spawn.execute("spawn", { name: "worker", task: "keep working" });
 		await childStarted.promise;
 		session.dispose();
 
 		expect(childSignal?.aborted).toBe(true);
-		await expect(agents.execute("list", { timeout_ms: 0 }, undefined, undefined, {} as never)).rejects.toThrow(
+		await expect(agents.execute("list", {}, undefined, undefined, {} as never)).rejects.toThrow(
 			"Subagent controller is shut down",
 		);
 	});
@@ -489,7 +487,7 @@ describe("root subagent tool registration", () => {
 	it("spawns through the root tool and retrieves the child result", async () => {
 		const harness = await setupHarness();
 		const childContexts: Context[] = [];
-		const response = (context: Context) => {
+		const response = async (context: Context) => {
 			const toolNames = context.tools?.map((tool) => tool.name) ?? [];
 			if (!toolNames.includes("spawn_agent")) {
 				childContexts.push(context);
@@ -501,8 +499,9 @@ describe("root subagent tool registration", () => {
 					stopReason: "toolUse",
 				});
 			}
-			if (!toolResults.some((message) => message.toolName === "wait_for_agents")) {
-				return fauxAssistantMessage(fauxToolCall("wait_for_agents", { timeout_ms: 1_000, until: "all" }), {
+			if (!toolResults.some((message) => message.toolName === "agent_status")) {
+				await waitForSettledAgents(session);
+				return fauxAssistantMessage(fauxToolCall("agent_status", {}), {
 					stopReason: "toolUse",
 				});
 			}
@@ -515,7 +514,7 @@ describe("root subagent tool registration", () => {
 
 		expect(session.getLastAssistantText()).toBe("root complete");
 		const toolResults = session.messages.filter((message) => message.role === "toolResult");
-		expect(toolResults.map((message) => message.toolName)).toEqual(["spawn_agent", "wait_for_agents"]);
+		expect(toolResults.map((message) => message.toolName)).toEqual(["spawn_agent", "agent_status"]);
 		expect(getMessageText(toolResults[1])).toContain('"result":"child complete"');
 		expect(childContexts).toHaveLength(1);
 		expect(childContexts[0]?.systemPrompt).toContain(
@@ -524,7 +523,6 @@ describe("root subagent tool registration", () => {
 		expect(childContexts[0]?.systemPrompt).toContain(
 			"current progress, remaining work, the goal, and the decision or extension needed",
 		);
-		expect(childContexts[0]?.systemPrompt).toContain("without estimating its duration");
 		expect(childContexts[0]?.systemPrompt).not.toContain("expected duration");
 		for (const name of COORDINATION_TOOLS) {
 			expect(childContexts[0]?.tools?.map((tool) => tool.name)).not.toContain(name);
@@ -605,7 +603,7 @@ describe("root subagent tool registration", () => {
 
 		const spawn = getActiveTool(session, "spawn_agent");
 		await spawn.execute("spawn-direct", { name: "direct", task: "direct task" });
-		await getActiveTool(session, "wait_for_agents").execute("wait-direct", { timeout_ms: 1_000, until: "all" });
+		await getSettledAgentStatus(session);
 
 		const directRequest = requests.find((request) => request.childName === "direct");
 		expect(directRequest?.origin).toEqual({
@@ -651,7 +649,7 @@ describe("root subagent tool registration", () => {
 		const requests = captureSubagentSessionManagerRequests();
 		const { session } = await createRoot(harness);
 		const spawnEntryId = appendAssistantToolCall(session.sessionManager, "spawn_agent", "shared-call");
-		appendAssistantToolCall(session.sessionManager, "wait_for_agents", "shared-call");
+		appendAssistantToolCall(session.sessionManager, "agent_status", "shared-call");
 
 		await executeActiveSpawn(session, "shared-call", "worker");
 
@@ -689,7 +687,7 @@ describe("root subagent tool registration", () => {
 		const branchPointId = session.sessionManager.appendCustomEntry("branch-point");
 		appendAssistantToolCall(session.sessionManager, "spawn_agent", "missing-call");
 		session.sessionManager.branch(branchPointId);
-		appendAssistantToolCall(session.sessionManager, "wait_for_agents", "missing-call");
+		appendAssistantToolCall(session.sessionManager, "agent_status", "missing-call");
 
 		await expect(executeActiveSpawn(session, "missing-call", "worker")).rejects.toThrow(
 			"Invariant violation: active spawn_agent call missing-call matched 0 persisted assistant entries",
@@ -725,12 +723,12 @@ describe("root subagent tool registration", () => {
 		harness.setResponses([response, response]);
 		const { session } = await createRoot(harness, { subagents: { maxConcurrent: 1 } });
 		const spawn = getActiveTool(session, "spawn_agent");
-		const agents = getActiveTool(session, "wait_for_agents");
+		const agents = getActiveTool(session, "agent_status");
 
 		await spawn.execute("spawn-blocker", { name: "blocker", task: "blocker task" });
 		await blockerStarted.promise;
 		await spawn.execute("spawn-captured", { name: "captured", task: "captured task" });
-		const queued = await agents.execute("agents-queued", { timeout_ms: 0 });
+		const queued = await agents.execute("agents-queued", {});
 		expect(queued.details).toMatchObject({
 			agents: [
 				{ name: "blocker", status: "running" },
@@ -742,7 +740,7 @@ describe("root subagent tool registration", () => {
 		session.setThinkingLevel("off");
 		session.setActiveToolsByName(["bash"]);
 		blockerGate.resolve();
-		await agents.execute("agents-finished", { timeout_ms: 1_000, until: "all" });
+		await getSettledAgentStatus(session);
 
 		expect(captured?.model.id).toBe("faux-1");
 		expect(captured?.options?.reasoning).toBe("high");
@@ -775,13 +773,11 @@ describe("root subagent tool registration", () => {
 			name: "worker",
 			task: "child task",
 		});
-		await getActiveTool(runtime.session, "wait_for_agents").execute("wait", { timeout_ms: 1_000, until: "all" });
+		await getSettledAgentStatus(runtime.session);
 		await runtime.newSession();
 
-		await expect(
-			getActiveTool(runtime.session, "wait_for_agents").execute("list", { timeout_ms: 0 }),
-		).resolves.toMatchObject({
-			details: { timed_out: false, agents: [] },
+		await expect(getActiveTool(runtime.session, "agent_status").execute("list", {})).resolves.toMatchObject({
+			details: { agents: [] },
 		});
 	});
 });

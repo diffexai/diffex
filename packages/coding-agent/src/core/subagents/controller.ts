@@ -3,7 +3,7 @@ import type { AssistantMessage } from "@diffexai/diffex-ai";
 import type { AgentSession } from "../agent-session.ts";
 import type { ToolDefinition } from "../extensions/types.ts";
 import { startCodingAgentSpan } from "../telemetry.ts";
-import { createAgentActionTool, createAgentsTool, createSpawnAgentTool } from "../tools/subagents.ts";
+import { createAgentActionTool, createAgentStatusTool, createSpawnAgentTool } from "../tools/subagents.ts";
 import type { ChildSnapshotV1 } from "./persistence.ts";
 import { reportSubagentRuntimeWarning } from "./runtime-diagnostics.ts";
 import type {
@@ -263,8 +263,8 @@ export class SubagentController {
 					? this.message(request.target, request.message, request.wake, parent.isStreaming, request.delivery)
 					: this.interrupt(request.target);
 			}),
-			createAgentsTool(async (options) => {
-				const result = await this.queryAgents(options);
+			createAgentStatusTool(async (options) => {
+				const result = await this.queryAgents({ ...options, timeoutMs: 0 });
 				this.#consumeTerminalQueryResults(result);
 				return result;
 			}),

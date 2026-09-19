@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { createAllToolDefinitions } from "../src/core/tools/index.ts";
-import { createAgentActionTool, createAgentsTool, createSpawnAgentTool } from "../src/core/tools/subagents.ts";
+import { createAgentActionTool, createAgentStatusTool, createSpawnAgentTool } from "../src/core/tools/subagents.ts";
 
 const PROHIBITED_ROOT_KEYWORDS = ["oneOf", "anyOf", "allOf", "enum", "const", "not"] as const;
 
@@ -12,7 +12,7 @@ describe("built-in tool schema compatibility", () => {
 			createAgentActionTool(async () => {
 				throw new Error("Not executed by schema test");
 			}),
-			createAgentsTool(async () => ({ timedOut: false, agents: [] })),
+			createAgentStatusTool(async () => ({ timedOut: false, agents: [] })),
 		];
 
 		for (const definition of definitions) {

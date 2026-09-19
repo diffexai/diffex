@@ -8,7 +8,7 @@ import { createAgentSession } from "../../src/core/sdk.ts";
 import { SessionManager } from "../../src/core/session-manager.ts";
 import { createTestResourceLoader } from "../extension-test-utils.ts";
 import { createHarness, getMessageText, type Harness } from "./harness.ts";
-import { deferred, getLastUserText } from "./subagent-harness.ts";
+import { deferred, getLastUserText, getSettledAgentStatus, waitForSettledAgents } from "./subagent-harness.ts";
 
 interface BatchPayload {
 	readonly type: "subagent_batch_results";
@@ -93,7 +93,7 @@ describe("automatic subagent coordination", () => {
 			resourceLoader: createTestResourceLoader(),
 			sessionManager: SessionManager.inMemory(harness.tempDir),
 			model: harness.getModel(),
-			tools: ["spawn_agent", "agent_action", "wait_for_agents"],
+			tools: ["spawn_agent", "agent_action", "agent_status"],
 			subagents: { maxConcurrent },
 		});
 		roots.push(root);
@@ -675,7 +675,7 @@ describe("automatic subagent coordination", () => {
 		expect(getToolResultCount({ messages: root.messages } as Context, "agent_action")).toBe(0);
 	});
 
-	it("treats terminal wait_for_agents tool results as already consumed", async () => {
+	it("treats terminal agent_status tool results as already consumed", async () => {
 		const { root, harness } = await createRoot();
 		harness.setResponses(
 			Array.from({ length: 8 }, () => async (context: Context) => {
@@ -685,11 +685,11 @@ describe("automatic subagent coordination", () => {
 						stopReason: "toolUse",
 					});
 				}
-				if (!hasToolResult(context, "wait_for_agents")) {
-					return fauxAssistantMessage(
-						fauxToolCall("wait_for_agents", { timeout_ms: 1_000, targets: ["worker"], until: "all" }),
-						{ stopReason: "toolUse" },
-					);
+				if (!hasToolResult(context, "agent_status")) {
+					await waitForSettledAgents(root, ["worker"]);
+					return fauxAssistantMessage(fauxToolCall("agent_status", { targets: ["worker"] }), {
+						stopReason: "toolUse",
+					});
 				}
 				return fauxAssistantMessage("explicit synthesis");
 			}),
@@ -735,15 +735,7 @@ describe("automatic subagent coordination", () => {
 		expect(root.getLastAssistantText()).toBe("ordinary parent answer");
 		expect(root.getSubagents()).toEqual([{ name: "manual", status: "running", task: "manual work" }]);
 		releaseChild.resolve();
-		await root
-			.getToolDefinition("wait_for_agents")
-			?.execute(
-				"manual-wait",
-				{ timeout_ms: 1_000, targets: ["manual"], until: "all" },
-				undefined,
-				undefined,
-				{} as ExtensionContext,
-			);
+		await getSettledAgentStatus(root, ["manual"]);
 	});
 
 	it("leaves retries of failed direct SDK children manually managed", async () => {
@@ -798,15 +790,7 @@ describe("automatic subagent coordination", () => {
 		expect(getHiddenResultMessages(root)).toHaveLength(0);
 
 		releaseRetry.resolve();
-		await root
-			.getToolDefinition("wait_for_agents")
-			?.execute(
-				"manual-wait",
-				{ timeout_ms: 1_000, targets: ["manual"], until: "all" },
-				undefined,
-				undefined,
-				{} as ExtensionContext,
-			);
+		await getSettledAgentStatus(root, ["manual"]);
 	});
 
 	it("preserves cancellation before the subagent wait is installed", async () => {

@@ -8,12 +8,12 @@ import type {
 	SubagentQueryOptions,
 	SubagentQueryResult,
 } from "../../src/core/subagents/types.ts";
-import { type AgentsRequest, createAgentsTool } from "../../src/core/tools/subagents.ts";
+import { type AgentStatusRequest, createAgentStatusTool } from "../../src/core/tools/subagents.ts";
 import { createSubagentTestHarness, deferred, type SubagentTestHarness, waitForStatus } from "./subagent-harness.ts";
 
-type AgentsTool = ReturnType<typeof createAgentsTool>;
+type AgentStatusTool = ReturnType<typeof createAgentStatusTool>;
 
-function executeAgents(tool: AgentsTool, request: AgentsRequest, signal?: AbortSignal) {
+function executeStatus(tool: AgentStatusTool, request: AgentStatusRequest, signal?: AbortSignal) {
 	return tool.execute("agents-call", request, signal, undefined, {} as ExtensionContext);
 }
 
@@ -323,16 +323,15 @@ describe("subagent queries", () => {
 		});
 		await waitForStatus(subject, "worker", "failed");
 
-		const agentsTool = subject.createToolDefinitions().find((tool) => tool.name === "wait_for_agents") as
-			| AgentsTool
+		const agentsTool = subject.createToolDefinitions().find((tool) => tool.name === "agent_status") as
+			| AgentStatusTool
 			| undefined;
-		if (!agentsTool) throw new Error("wait_for_agents tool is unavailable");
+		if (!agentsTool) throw new Error("agent_status tool is unavailable");
 
 		const retry = subject.message("worker", "correct the failure", true, true);
-		const explicitQuery = executeAgents(agentsTool, { timeout_ms: 0 });
+		const explicitQuery = executeStatus(agentsTool, {});
 		const [, explicitResult] = await Promise.all([retry, explicitQuery]);
 		expect(explicitResult.details).toEqual({
-			timed_out: false,
 			agents: [{ name: "worker", status: "failed", result: "initial partial", error: "initial failure" }],
 		});
 
@@ -368,90 +367,81 @@ describe("subagent queries", () => {
 		}
 	});
 
-	it("defines a strict wait_for_agents tool schema", () => {
-		const tool = createAgentsTool(() => Promise.resolve({ timedOut: false, agents: [] }));
-
+	it("defines a strict immediate agent_status schema", () => {
+		const tool = createAgentStatusTool(async () => ({ timedOut: false, agents: [] }));
+		expect(tool.name).toBe("agent_status");
 		expect(tool.executionMode).toBe("parallel");
-		expect(Check(tool.parameters, { timeout_ms: 0 })).toBe(true);
-		expect(Check(tool.parameters, { timeout_ms: 100, targets: ["first", "second"], until: "all" })).toBe(true);
+		expect(Check(tool.parameters, {})).toBe(true);
+		expect(Check(tool.parameters, { targets: ["first", "second"] })).toBe(true);
 		for (const request of [
-			{},
-			{ timeout_ms: -1 },
-			{ timeout_ms: 1.5 },
-			{ timeout_ms: 0, targets: [] },
-			{ timeout_ms: 0, targets: ["worker", "worker"] },
-			{ timeout_ms: 0, targets: [""] },
-			{ timeout_ms: 0, targets: ["Invalid"] },
-			{ timeout_ms: 0, until: "later" },
-			{ timeout_ms: 0, extra: true },
-		]) {
+			{ timeout_ms: 0 },
+			{ until: "all" },
+			{ targets: [] },
+			{ targets: ["worker", "worker"] },
+			{ targets: [""] },
+			{ targets: ["Invalid"] },
+			{ extra: true },
+		])
 			expect(Check(tool.parameters, request)).toBe(false);
-		}
 	});
 
-	it("defensively validates wait_for_agents tool requests", async () => {
-		const tool = createAgentsTool(() => Promise.resolve({ timedOut: false, agents: [] }));
-
-		await expect(executeAgents(tool, {} as AgentsRequest)).rejects.toThrow(
-			"timeout_ms must be a non-negative integer",
-		);
-		await expect(executeAgents(tool, { timeout_ms: -1 })).rejects.toThrow(
-			"timeout_ms must be a non-negative integer",
-		);
-		await expect(executeAgents(tool, { timeout_ms: 0, targets: [] })).rejects.toThrow(
+	it("defensively validates agent_status requests", async () => {
+		const tool = createAgentStatusTool(async () => ({ timedOut: false, agents: [] }));
+		await expect(executeStatus(tool, {})).resolves.toMatchObject({ details: { agents: [] } });
+		for (const field of ["timeout_ms", "until", "extra"]) {
+			await expect(executeStatus(tool, { [field]: 0 } as AgentStatusRequest)).rejects.toThrow(
+				`Unknown agent status request field: ${field}`,
+			);
+		}
+		await expect(executeStatus(tool, { targets: [] })).rejects.toThrow("targets must be a non-empty array");
+		await expect(executeStatus(tool, { targets: "worker" } as unknown as AgentStatusRequest)).rejects.toThrow(
 			"targets must be a non-empty array",
 		);
-		await expect(
-			executeAgents(tool, { timeout_ms: 0, targets: "worker" } as unknown as AgentsRequest),
-		).rejects.toThrow("targets must be a non-empty array");
-		await expect(executeAgents(tool, { timeout_ms: 0, targets: ["worker", "worker"] })).rejects.toThrow(
+		await expect(executeStatus(tool, { targets: ["worker", "worker"] })).rejects.toThrow(
 			"Duplicate subagent target: worker",
 		);
-		await expect(executeAgents(tool, { timeout_ms: 0, targets: ["Invalid"] })).rejects.toThrow(
-			"Invalid subagent name: Invalid",
-		);
-		await expect(executeAgents(tool, { timeout_ms: 0, until: "later" as "all" })).rejects.toThrow(
-			"Invalid agents wait condition: later",
-		);
-		await expect(executeAgents(tool, { timeout_ms: 0, extra: true } as AgentsRequest)).rejects.toThrow(
-			"Unknown agents request field: extra",
-		);
+		await expect(executeStatus(tool, { targets: ["Invalid"] })).rejects.toThrow("Invalid subagent name: Invalid");
 	});
 
-	it("maps snake-case requests and serializes identical result details", async () => {
+	it("forwards targets and cancellation and omits wait metadata", async () => {
 		const abortController = new AbortController();
 		const queryResult: SubagentQueryResult = {
-			timedOut: true,
+			timedOut: false,
 			agents: [{ name: "worker", status: "failed", result: "partial", error: "failed" }],
 		};
-		const query = vi.fn((_options: SubagentQueryOptions) => Promise.resolve(queryResult));
-		const tool = createAgentsTool(query);
-
-		const result = await executeAgents(
-			tool,
-			{ timeout_ms: 250, targets: ["worker"], until: "any" },
-			abortController.signal,
-		);
-
-		expect(query).toHaveBeenCalledWith({
-			timeoutMs: 250,
-			targets: ["worker"],
-			until: "any",
-			signal: abortController.signal,
-		});
+		const query = vi.fn((_options: Pick<SubagentQueryOptions, "targets" | "signal">) => Promise.resolve(queryResult));
+		const tool = createAgentStatusTool(query);
+		const result = await executeStatus(tool, { targets: ["worker"] }, abortController.signal);
+		expect(query).toHaveBeenCalledWith({ targets: ["worker"], signal: abortController.signal });
 		expect(result.details).toEqual({
-			timed_out: true,
 			agents: [{ name: "worker", status: "failed", result: "partial", error: "failed" }],
 		});
 		expect(result.content).toEqual([{ type: "text", text: JSON.stringify(result.details) }]);
 	});
 
-	it("surfaces controller target errors through the wait_for_agents tool", async () => {
+	it("returns running and queued children immediately without consuming their eventual results", async () => {
 		const subject = controller();
-		const tool = createAgentsTool((options) => subject.queryAgents(options));
+		subject.reserve("running", "work");
+		subject.markRunning("running");
+		subject.reserve("queued", "work");
+		const tool = subject.createToolDefinitions().find((tool) => tool.name === "agent_status") as AgentStatusTool;
+		await expect(executeStatus(tool, {})).resolves.toMatchObject({
+			details: {
+				agents: [
+					{ name: "queued", status: "queued" },
+					{ name: "running", status: "running" },
+				],
+			},
+		});
+	});
 
-		await expect(executeAgents(tool, { timeout_ms: 0, targets: ["missing"] })).rejects.toThrow(
-			"Unknown subagent: missing",
-		);
+	it("surfaces target and cancellation errors through agent_status", async () => {
+		const subject = controller();
+		const tool = subject.createToolDefinitions().find((tool) => tool.name === "agent_status") as AgentStatusTool;
+		await expect(executeStatus(tool, { targets: ["missing"] })).rejects.toThrow("Unknown subagent: missing");
+		const abortController = new AbortController();
+		const reason = new Error("Cancelled status inspection");
+		abortController.abort(reason);
+		await expect(executeStatus(tool, {}, abortController.signal)).rejects.toBe(reason);
 	});
 });

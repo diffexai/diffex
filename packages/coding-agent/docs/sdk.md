@@ -544,17 +544,17 @@ Every root session enables three child-agent coordination tools by default:
 
 - `spawn_agent` starts a child agent asynchronously, while keeping the enclosing parent prompt active until coordinated work finishes
 - `agent_action` steers, queues follow-up work, wakes, renews, or interrupts a child agent
-- `wait_for_agents` checks child statuses or waits for status changes, returning recorded output and errors
+- `agent_status` immediately inspects child statuses, returning recorded output and errors
 
-Use `wait_for_agents` when further progress depends on child results.
-Set `until` to `"any"` or `"all"` and select the relevant `targets` when waiting for completion; without `until`, a status change may return before a child finishes.
-A timeout leaves child work running and does not indicate failure.
-Long waits return at the supervision interval so the parent can act on activity updates.
-Tool allowlists and direct tool calls must use `wait_for_agents` in place of the former `agents` name.
+Call `agent_status` with `{}` to inspect all children, or with `{ targets: ["worker"] }` to inspect selected children.
+It returns immediately with `{ agents: [...] }` and accepts no timeout or wait condition.
+When only needed child work remains, end the current response; automatic coordination keeps the parent task open and resumes it with child reports or results.
+Continue independent work when possible instead of repeatedly polling status.
+Tool allowlists and direct tool calls must use `agent_status` in place of `wait_for_agents`.
 
 Root sessions run at most four children concurrently by default.
 Set `subagents: { maxConcurrent: number }` to configure that limit, or `subagents: false` to disable child agents and omit all three coordination tools.
-The names `spawn_agent`, `agent_action`, `wait_for_agents`, and `escalate_to_parent` are reserved and cannot be supplied through `customTools`.
+The names `spawn_agent`, `agent_action`, `agent_status`, and `escalate_to_parent` are reserved and cannot be supplied through `customTools`.
 
 Messages default to `delivery: "steer"` and enter the child's current work at its next steering boundary.
 Use `delivery: "follow_up"` explicitly for new work that should start after the current work finishes.
@@ -590,10 +590,10 @@ Idle reports do not start a provider call: durable sessions save them on the sel
 Accepted idle reports, delivered active reports, and child tool arguments remain normal session history and follow the existing parent-owned deletion behavior.
 
 When the parent finishes an assistant run, the session freezes every unconsumed child attempt spawned through parent model tool calls.
-Before waiting, it asks the parent to resolve active children by cancelling obsolete work or waiting for needed results.
+Before waiting, it asks the parent to cancel obsolete work or end its current response so the runtime can wait for needed results.
 It then waits until every child in that batch is idle, failed, or interrupted, then adds one non-displayed context message with name-sorted results, partial output, errors, and retry availability.
 The parent model continues automatically from that message, so callers do not need to send another user prompt.
-Terminal results returned explicitly by `wait_for_agents` are marked consumed and are not delivered again.
+Terminal results returned explicitly by `agent_status` are marked consumed and are not delivered again.
 
 An initial child failure offers the parent one coordinated retry for that child during the current explicit parent prompt cycle.
 The parent can analyze the delivered error and partial output, then call `agent_action` with `action: "message"` and `wake: true`.
@@ -636,7 +636,7 @@ const { session } = await createAgentSession({
 
 // Allow only read access and child status queries
 const { session } = await createAgentSession({
-  tools: ["read", "wait_for_agents"],
+  tools: ["read", "agent_status"],
 });
 
 // Disable child agents entirely

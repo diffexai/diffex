@@ -155,7 +155,7 @@ While the parent is active, accepted reports are delivered as hidden context at 
 Reports accepted for the same boundary are combined in acceptance order; a report accepted after delivery begins waits for a later boundary, and earlier queued user steering remains ahead of reports.
 During coordinated waiting, the first pending report resumes the parent but does not consume the frozen child batch.
 The parent can then use normal `agent_action` message, wake, or interrupt behavior, and the batch's terminal results are still delivered exactly once.
-If a child in that frozen batch is already terminal, message or wake actions cannot replace its completed attempt until the result is delivered or explicitly consumed with `wait_for_agents`.
+If a child in that frozen batch is already terminal, message or wake actions cannot replace its completed attempt until the result is delivered or explicitly consumed with `agent_status`.
 
 While the parent is idle, accepting a report does not start a provider call.
 Saved sessions append it to the currently selected branch for the next explicit parent run; in-memory sessions keep it only for the current process.
@@ -163,7 +163,7 @@ Hidden delivery affects display, not storage or secrecy; accepted idle reports, 
 
 After the whole batch is terminal, Diffex gives the parent one hidden, name-sorted context message containing the child results, partial output, errors, and retry availability.
 The parent continues automatically and produces its final response without another user prompt.
-If the parent already retrieved a terminal result with `wait_for_agents`, Diffex does not deliver that result again.
+If the parent already retrieved a terminal result with `agent_status`, Diffex does not deliver that result again.
 
 An initial failure gives the parent one opportunity to send a corrective `agent_action` message with `wake: true`.
 Only one coordinated retry is allowed per child during the current user prompt.

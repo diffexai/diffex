@@ -24,7 +24,7 @@ import type {
 	SessionShutdownEvent,
 	SessionStartEvent,
 } from "../../src/index.ts";
-import { deferred } from "./subagent-harness.ts";
+import { deferred, getSettledAgentStatus } from "./subagent-harness.ts";
 
 type RecordedSessionEvent =
 	| SessionBeforeSwitchEvent
@@ -105,6 +105,7 @@ describe("AgentSessionRuntime characterization", () => {
 					sessionStartEvent,
 					model: runtimeOptions.model,
 					thinkingLevel: runtimeOptions.thinkingLevel,
+					subagents: { maxConcurrent: 1 },
 				})),
 				services,
 				diagnostics: services.diagnostics,
@@ -255,19 +256,10 @@ describe("AgentSessionRuntime characterization", () => {
 			]);
 			const outgoing = runtime.session;
 			const spawn = outgoing.getToolDefinition("spawn_agent")!;
-			const agents = outgoing.getToolDefinition("wait_for_agents")!;
 			await spawn.execute("spawn-worker", { name: "worker", task: "wait" }, undefined, undefined, extensionContext);
 			await childProviderStarted.promise;
 			await spawn.execute("spawn-queued", { name: "queued", task: "wait" }, undefined, undefined, extensionContext);
-			const oldWaitResult = agents
-				.execute(
-					"wait-old",
-					{ timeout_ms: 10_000, targets: ["worker", "queued"], until: "all" },
-					undefined,
-					undefined,
-					extensionContext,
-				)
-				.catch((error: unknown) => error);
+			const oldWaitResult = getSettledAgentStatus(outgoing, ["worker", "queued"]).catch((error: unknown) => error);
 
 			const originalDispose = outgoing.dispose.bind(outgoing);
 			const disposeReached = deferred<void>();
@@ -295,12 +287,11 @@ describe("AgentSessionRuntime characterization", () => {
 			expect(runtime.session).not.toBe(outgoing);
 			await expect(oldWaitResult).resolves.toMatchObject({ message: "Subagent controller is shut down" });
 
-			const nextAgents = runtime.session.getToolDefinition("wait_for_agents")!;
+			const nextAgents = runtime.session.getToolDefinition("agent_status")!;
 			await expect(
-				nextAgents.execute("list-replacement", { timeout_ms: 0 }, undefined, undefined, extensionContext),
+				nextAgents.execute("list-replacement", {}, undefined, undefined, extensionContext),
 			).resolves.toMatchObject({
 				details: {
-					timed_out: false,
 					agents:
 						flow === "import"
 							? [
@@ -320,16 +311,8 @@ describe("AgentSessionRuntime characterization", () => {
 				undefined,
 				extensionContext,
 			);
-			await expect(
-				nextAgents.execute(
-					"wait-worker",
-					{ timeout_ms: 1_000, targets: [replacementName], until: "all" },
-					undefined,
-					undefined,
-					extensionContext,
-				),
-			).resolves.toMatchObject({
-				details: { timed_out: false, agents: [{ name: replacementName, status: "idle" }] },
+			await expect(getSettledAgentStatus(runtime.session, [replacementName])).resolves.toMatchObject({
+				details: { agents: [{ name: replacementName, status: "idle" }] },
 			});
 		},
 	);
@@ -354,19 +337,10 @@ describe("AgentSessionRuntime characterization", () => {
 		]);
 		const outgoing = runtime.session;
 		const spawn = outgoing.getToolDefinition("spawn_agent")!;
-		const agents = outgoing.getToolDefinition("wait_for_agents")!;
 		await spawn.execute("spawn-active", { name: "active", task: "wait" }, undefined, undefined, extensionContext);
 		await childProviderStarted.promise;
 		await spawn.execute("spawn-queued", { name: "queued", task: "wait" }, undefined, undefined, extensionContext);
-		const agentsResult = agents
-			.execute(
-				"wait-agents",
-				{ timeout_ms: 10_000, targets: ["active", "queued"], until: "all" },
-				undefined,
-				undefined,
-				extensionContext,
-			)
-			.catch((error: unknown) => error);
+		const agentsResult = getSettledAgentStatus(outgoing, ["active", "queued"]).catch((error: unknown) => error);
 		const originalDispose = AgentSession.prototype.dispose;
 		const disposedChildren: AgentSession[] = [];
 		vi.spyOn(AgentSession.prototype, "dispose").mockImplementation(function (this: AgentSession) {

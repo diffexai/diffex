@@ -73,7 +73,7 @@ import {
 setDefaultStreamFn(streamSimple);
 
 const DEFAULT_SUBAGENT_CONCURRENCY = 4;
-const RESERVED_SUBAGENT_TOOL_NAMES = new Set(["spawn_agent", "agent_action", "wait_for_agents", "escalate_to_parent"]);
+const RESERVED_SUBAGENT_TOOL_NAMES = new Set(["spawn_agent", "agent_action", "agent_status", "escalate_to_parent"]);
 
 export interface SubagentOptions extends SubagentSupervisionOptions {
 	/** Maximum number of child agents that may run concurrently. Default: 4 */

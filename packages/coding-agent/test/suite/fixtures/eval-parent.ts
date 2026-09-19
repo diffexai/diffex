@@ -32,17 +32,19 @@ const { session: root } = await createAgentSession({
 	...services,
 	sessionManager: SessionManager.inMemory(harness.tempDir),
 	model: harness.getModel(),
-	tools: ["spawn_agent", "agent_action", "wait_for_agents"],
+	tools: ["spawn_agent", "agent_action", "agent_status"],
 	subagents: { maxConcurrent: 1 },
 });
 const runtime = new AgentSessionRuntime(root, services, async () => {
 	throw new Error("Unexpected session replacement");
 });
 const childStarted = deferred<void>();
+const parentWaiting = deferred<void>();
 let parentCalls = 0;
 let childCalls = 0;
 let childSettled = false;
 root.subscribe((event) => {
+	if (event.type === "subagent_wait_start") parentWaiting.resolve();
 	if (event.type === "auto_retry_end" && !event.success) {
 		void root.sendCustomMessage({ customType: "subagent_results", content: "queued report", display: false });
 	}
@@ -71,6 +73,7 @@ harness.setResponses(
 					else options?.signal?.addEventListener("abort", () => resolve(), { once: true });
 				});
 			}
+			if (scenario === "success") await parentWaiting.promise;
 			await setTimeout(20);
 			childSettled = true;
 			return fauxAssistantMessage("child result", { stopReason: scenario === "exhausted" ? "aborted" : "stop" });

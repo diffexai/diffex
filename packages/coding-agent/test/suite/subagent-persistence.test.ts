@@ -33,7 +33,7 @@ import {
 	SUBAGENT_ROSTER_CUSTOM_TYPE,
 } from "../../src/core/subagents/persistence.ts";
 import { createHarness, type Harness } from "./harness.ts";
-import { deferred, getLastUserText } from "./subagent-harness.ts";
+import { deferred, getLastUserText, getSettledAgentStatus } from "./subagent-harness.ts";
 
 const CHILD_ID_A = "018f4f7c-43b7-7abc-8def-0123456789ab";
 const CHILD_ID_B = "018f4f7c-43b7-7abc-8def-0123456789ac";
@@ -430,7 +430,7 @@ describe("durable subagent lifecycle", () => {
 		).rejects.toThrow("parent roster unavailable");
 		await new Promise((resolvePromise) => setTimeout(resolvePromise, 10));
 		expect(providerCalls).toBe(0);
-		await expect(getTool(session, "wait_for_agents").execute("list", { timeout_ms: 0 })).resolves.toMatchObject({
+		await expect(getTool(session, "agent_status").execute("list", {})).resolves.toMatchObject({
 			details: { agents: [] },
 		});
 		expect(readSelectedBranchSubagentRoster(sessionManager)).toMatchObject({ found: false, children: [] });
@@ -454,7 +454,7 @@ describe("durable subagent lifecycle", () => {
 		).rejects.toThrow("child header unavailable");
 		await new Promise((resolvePromise) => setTimeout(resolvePromise, 10));
 		expect(providerCalls).toBe(0);
-		await expect(getTool(session, "wait_for_agents").execute("list", { timeout_ms: 0 })).resolves.toMatchObject({
+		await expect(getTool(session, "agent_status").execute("list", {})).resolves.toMatchObject({
 			details: { agents: [] },
 		});
 	});
@@ -476,7 +476,7 @@ describe("durable subagent lifecycle", () => {
 		});
 
 		await getTool(session, "spawn_agent").execute("spawn", { name: "worker", task: "finish" });
-		const result = await getTool(session, "wait_for_agents").execute("wait", { timeout_ms: 1_000, until: "all" });
+		const result = await getSettledAgentStatus(session);
 		expect(result.details).toMatchObject({
 			agents: [
 				{
@@ -697,7 +697,7 @@ describe("durable subagent lifecycle", () => {
 			const root = await createRoot();
 			root.harness.setResponses([fauxAssistantMessage("child complete")]);
 			await getTool(root.session, "spawn_agent").execute("spawn", { name: "worker", task: "finish" });
-			await getTool(root.session, "wait_for_agents").execute("wait", { timeout_ms: 1_000, until: "all" });
+			await getSettledAgentStatus(root.session);
 			const store = root.session.harnessStateStore;
 			const currentVersion = root.session.activeHarnessVersion;
 
@@ -726,7 +726,7 @@ describe("durable subagent lifecycle", () => {
 		const root = await createRoot();
 		root.harness.setResponses([fauxAssistantMessage("child complete")]);
 		await getTool(root.session, "spawn_agent").execute("spawn", { name: "worker", task: "finish" });
-		await getTool(root.session, "wait_for_agents").execute("wait", { timeout_ms: 1_000, until: "all" });
+		await getSettledAgentStatus(root.session);
 		const store = root.session.harnessStateStore;
 		const currentVersion = root.session.activeHarnessVersion;
 		if (!store || !currentVersion) throw new Error("Missing initialized harness state");
@@ -753,9 +753,7 @@ describe("durable subagent lifecycle", () => {
 		expect((await store.loadCurrent()).manifest.version).toBe(currentVersion);
 		expect(root.session.getSubagents()).toEqual([{ name: "worker", status: "idle", task: "finish" }]);
 		expect(readSelectedBranchSubagentRoster(root.sessionManager).children).toHaveLength(1);
-		await expect(
-			getTool(root.session, "wait_for_agents").execute("after-failed-reset", { timeout_ms: 0 }),
-		).resolves.toMatchObject({
+		await expect(getTool(root.session, "agent_status").execute("after-failed-reset", {})).resolves.toMatchObject({
 			details: { agents: [{ name: "worker", status: "idle" }] },
 		});
 	});
@@ -764,7 +762,7 @@ describe("durable subagent lifecycle", () => {
 		const root = await createRoot();
 		root.harness.setResponses([fauxAssistantMessage("child complete")]);
 		await getTool(root.session, "spawn_agent").execute("spawn", { name: "worker", task: "finish" });
-		await getTool(root.session, "wait_for_agents").execute("wait", { timeout_ms: 1_000, until: "all" });
+		await getSettledAgentStatus(root.session);
 		const store = root.session.harnessStateStore;
 		const currentVersion = root.session.activeHarnessVersion;
 		if (!store || !currentVersion) throw new Error("Missing initialized harness state");
@@ -843,9 +841,7 @@ describe("durable subagent lifecycle", () => {
 				.getEntries()
 				.filter((entry) => entry.type === "message" || entry.type === "custom_message"),
 		).toEqual([]);
-		await expect(
-			getTool(reopened.session, "wait_for_agents").execute("restored", { timeout_ms: 0 }),
-		).resolves.toMatchObject({
+		await expect(getTool(reopened.session, "agent_status").execute("restored", {})).resolves.toMatchObject({
 			details: {
 				agents: [
 					{ name: "alpha", status: "idle", result: "done" },
@@ -868,11 +864,7 @@ describe("durable subagent lifecycle", () => {
 			message: "continue valid",
 			wake: true,
 		});
-		await getTool(reopened.session, "wait_for_agents").execute("wait-valid", {
-			timeout_ms: 1_000,
-			targets: ["alpha"],
-			until: "all",
-		});
+		await getSettledAgentStatus(reopened.session, ["alpha"]);
 		expect(openChild).toHaveBeenCalledTimes(1);
 
 		await getTool(reopened.session, "agent_action").execute("wake-isolated", {
@@ -881,11 +873,7 @@ describe("durable subagent lifecycle", () => {
 			message: "recovery only",
 			wake: true,
 		});
-		await getTool(reopened.session, "wait_for_agents").execute("wait-isolated", {
-			timeout_ms: 1_000,
-			targets: ["corrupt"],
-			until: "all",
-		});
+		await getSettledAgentStatus(reopened.session, ["corrupt"]);
 		expect(providerCalls).toBe(2);
 		expect(seenPrompts).toEqual(["continue valid", "recovery only"]);
 		const latest = readSnapshots(sessionFile).at(-1) ?? [];
@@ -903,9 +891,7 @@ describe("durable subagent lifecycle", () => {
 		]);
 		await root.session.dispose();
 		const reopened = await reopenRoot(root);
-		await expect(
-			getTool(reopened.session, "wait_for_agents").execute("duplicates", { timeout_ms: 0 }),
-		).resolves.toMatchObject({
+		await expect(getTool(reopened.session, "agent_status").execute("duplicates", {})).resolves.toMatchObject({
 			details: {
 				agents: [
 					{ name: "alpha", status: "idle" },
@@ -936,7 +922,7 @@ describe("durable subagent lifecycle", () => {
 		persistChild(root, captured);
 		await root.session.dispose();
 		const reopened = await reopenRoot(root, { modelId: "current-model", thinkingLevel: "low" });
-		reopened.session.setActiveToolsByName(["read", "agent_action", "wait_for_agents"]);
+		reopened.session.setActiveToolsByName(["read", "agent_action", "agent_status"]);
 		vi.spyOn(reopened.session.modelRuntime, "hasConfiguredAuth").mockImplementation(() => {
 			throw new Error("authentication must not participate in restoration fallback");
 		});
@@ -948,11 +934,7 @@ describe("durable subagent lifecycle", () => {
 			message: "wake captured",
 			wake: true,
 		});
-		await getTool(reopened.session, "wait_for_agents").execute("captured-wait", {
-			timeout_ms: 1_000,
-			targets: ["worker"],
-			until: "all",
-		});
+		await getSettledAgentStatus(reopened.session, ["worker"]);
 		const sessionFile = reopened.sessionManager.getSessionFile();
 		if (!sessionFile) throw new Error("Missing parent session file");
 		expect(readSnapshots(sessionFile).at(-1)?.[0]?.config).toEqual(captured);
@@ -993,11 +975,7 @@ describe("durable subagent lifecycle", () => {
 			message: "wake captured harness",
 			wake: true,
 		});
-		await getTool(reopened.session, "wait_for_agents").execute("captured-harness-wait", {
-			timeout_ms: 1_000,
-			targets: ["worker"],
-			until: "all",
-		});
+		await getSettledAgentStatus(reopened.session, ["worker"]);
 
 		expect(providerPrompts).toHaveLength(1);
 		expect(providerPrompts[0]).not.toContain("Use only the newer parent memory.");
@@ -1057,7 +1035,7 @@ describe("durable subagent lifecycle", () => {
 			await root.session.dispose();
 			const reopened = await reopenRoot(root);
 			reopened.session.setThinkingLevel("low");
-			reopened.session.setActiveToolsByName(["read", "agent_action", "wait_for_agents"]);
+			reopened.session.setActiveToolsByName(["read", "agent_action", "agent_status"]);
 			const availableTools = reopened.session.getAllTools();
 			const toolSpy = testCase.removeTool
 				? vi
@@ -1073,11 +1051,7 @@ describe("durable subagent lifecycle", () => {
 				message: `wake ${testCase.name}`,
 				wake: true,
 			});
-			await getTool(reopened.session, "wait_for_agents").execute(`fallback-wait-${testCase.name}`, {
-				timeout_ms: 1_000,
-				targets: ["worker"],
-				until: "all",
-			});
+			await getSettledAgentStatus(reopened.session, ["worker"]);
 			toolSpy?.mockRestore();
 
 			const addedDiagnostics = reopened.services.diagnostics.slice(diagnosticCount);
@@ -1092,8 +1066,7 @@ describe("durable subagent lifecycle", () => {
 				harnessRevision: reopened.session.activeHarnessVersion ?? null,
 			});
 			await expect(
-				getTool(reopened.session, "wait_for_agents").execute(`fallback-result-${testCase.name}`, {
-					timeout_ms: 0,
+				getTool(reopened.session, "agent_status").execute(`fallback-result-${testCase.name}`, {
 					targets: ["worker"],
 				}),
 			).resolves.toMatchObject({
@@ -1143,9 +1116,7 @@ describe("durable subagent lifecycle", () => {
 				thinkingLevel: "high",
 			});
 			sessions.push(session);
-			await expect(
-				getTool(session, "wait_for_agents").execute("unavailable", { timeout_ms: 0 }),
-			).resolves.toMatchObject({
+			await expect(getTool(session, "agent_status").execute("unavailable", {})).resolves.toMatchObject({
 				details: {
 					agents: [{ name: "worker", status: "failed", error: expect.stringContaining("history is unavailable") }],
 				},
@@ -1161,7 +1132,7 @@ describe("durable subagent lifecycle", () => {
 		const inMemory = await createRoot({ persist: false });
 		inMemory.harness.setResponses([fauxAssistantMessage("done")]);
 		await getTool(inMemory.session, "spawn_agent").execute("spawn", { name: "worker", task: "ephemeral" });
-		await getTool(inMemory.session, "wait_for_agents").execute("wait", { timeout_ms: 1_000, until: "all" });
+		await getSettledAgentStatus(inMemory.session);
 		expect(inMemory.sessionManager.getSessionFile()).toBeUndefined();
 
 		const disabled = await createRoot({ subagents: false });

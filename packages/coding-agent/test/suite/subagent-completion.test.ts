@@ -24,7 +24,7 @@ it("asks the parent to cancel obsolete children before completing a solved task"
 		resourceLoader: createTestResourceLoader(),
 		sessionManager: SessionManager.inMemory(harness.tempDir),
 		model: harness.getModel(),
-		tools: ["spawn_agent", "agent_action", "wait_for_agents"],
+		tools: ["spawn_agent", "agent_action", "agent_status"],
 	}));
 	const started = deferred<void>();
 	let reviewed = false;

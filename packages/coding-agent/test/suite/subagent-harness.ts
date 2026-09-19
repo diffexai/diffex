@@ -1,5 +1,6 @@
 import type { Context } from "@diffexai/diffex-ai";
 import type { AgentSession } from "../../src/core/agent-session.ts";
+import type { ExtensionContext } from "../../src/core/extensions/types.ts";
 import { SubagentController } from "../../src/core/subagents/controller.ts";
 import {
 	captureSubagentSessionConfig,
@@ -75,4 +76,18 @@ export async function createSubagentTestHarness(
 			await harness.cleanup();
 		},
 	};
+}
+
+// Synchronize fixtures without consuming results through the model-facing tool.
+export async function waitForSettledAgents(session: AgentSession, targets?: string[]) {
+	const controller = (session as unknown as { _subagentController: SubagentController })._subagentController;
+	const result = await controller.queryAgents({ timeoutMs: 1_000, targets, until: "all" });
+	if (result.timedOut) throw new Error("Timed out waiting for fixture children");
+}
+
+export async function getSettledAgentStatus(session: AgentSession, targets?: string[]) {
+	await waitForSettledAgents(session, targets);
+	const status = session.getToolDefinition("agent_status");
+	if (!status) throw new Error("Missing agent_status tool");
+	return status.execute("fixture-status", targets ? { targets } : {}, undefined, undefined, {} as ExtensionContext);
 }

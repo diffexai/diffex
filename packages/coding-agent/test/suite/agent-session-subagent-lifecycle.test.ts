@@ -10,7 +10,7 @@ import type { ExtensionContext, ToolDefinition } from "../../src/index.ts";
 import { createTestResourceLoader } from "../extension-test-utils.ts";
 import { assistantMsg, userMsg } from "../message-fixtures.ts";
 import { createHarness, type Harness } from "./harness.ts";
-import { deferred } from "./subagent-harness.ts";
+import { deferred, getSettledAgentStatus } from "./subagent-harness.ts";
 
 const extensionContext = {} as ExtensionContext;
 
@@ -55,7 +55,7 @@ describe("AgentSession subagent lifecycle", () => {
 			sessionManager: SessionManager.inMemory(harness.tempDir),
 			model: harness.getModel(),
 			customTools,
-			tools: [...customTools.map((tool) => tool.name), "spawn_agent", "agent_action", "wait_for_agents"],
+			tools: [...customTools.map((tool) => tool.name), "spawn_agent", "agent_action", "agent_status"],
 			subagents: { maxConcurrent: 1 },
 		});
 		roots.push(root);
@@ -95,7 +95,6 @@ describe("AgentSession subagent lifecycle", () => {
 			fauxAssistantMessage("queued done"),
 		]);
 		const spawn = root.getToolDefinition("spawn_agent")!;
-		const agents = root.getToolDefinition("wait_for_agents")!;
 
 		await spawn.execute(
 			"spawn-zeta",
@@ -122,7 +121,7 @@ describe("AgentSession subagent lifecycle", () => {
 		expect(summaries.every(Object.isFrozen)).toBe(true);
 
 		runningFinished.resolve();
-		await agents.execute("wait-all", { timeout_ms: 1_000, until: "all" }, undefined, undefined, extensionContext);
+		await getSettledAgentStatus(root);
 	});
 
 	it("awaits root and child cancellation and rejects retained tools after disposal", async () => {
@@ -167,7 +166,7 @@ describe("AgentSession subagent lifecycle", () => {
 
 		const spawn = root.getToolDefinition("spawn_agent")!;
 		const action = root.getToolDefinition("agent_action")!;
-		const agents = root.getToolDefinition("wait_for_agents")!;
+		const agents = root.getToolDefinition("agent_status")!;
 		const originalDispose = AgentSession.prototype.dispose;
 		const disposedSessions: AgentSession[] = [];
 		vi.spyOn(AgentSession.prototype, "dispose").mockImplementation(function (this: AgentSession) {
@@ -180,15 +179,7 @@ describe("AgentSession subagent lifecycle", () => {
 		await spawn.execute("spawn-active", { name: "active", task: "wait" }, undefined, undefined, extensionContext);
 		await childProviderStarted.promise;
 		await spawn.execute("spawn-queued", { name: "queued", task: "wait" }, undefined, undefined, extensionContext);
-		const agentsWaitResult = agents
-			.execute(
-				"wait-agents",
-				{ timeout_ms: 10_000, targets: ["active", "queued"], until: "all" },
-				undefined,
-				undefined,
-				extensionContext,
-			)
-			.catch((error: unknown) => error);
+		const agentsWaitResult = getSettledAgentStatus(root, ["active", "queued"]).catch((error: unknown) => error);
 		const rootPrompt = root.prompt("run the blocking tool");
 		await rootToolStarted.promise;
 
@@ -216,9 +207,9 @@ describe("AgentSession subagent lifecycle", () => {
 				extensionContext,
 			),
 		).rejects.toThrow("Subagent controller is shut down");
-		await expect(
-			agents.execute("agents-late", { timeout_ms: 0 }, undefined, undefined, extensionContext),
-		).rejects.toThrow("Subagent controller is shut down");
+		await expect(agents.execute("agents-late", {}, undefined, undefined, extensionContext)).rejects.toThrow(
+			"Subagent controller is shut down",
+		);
 	});
 
 	it("clears root queues before aborting the active turn", async () => {
@@ -407,19 +398,10 @@ describe("AgentSession subagent lifecycle", () => {
 				}),
 		]);
 		const spawn = root.getToolDefinition("spawn_agent")!;
-		const agents = root.getToolDefinition("wait_for_agents")!;
 		await spawn.execute("spawn-worker", { name: "worker", task: "wait" }, undefined, undefined, extensionContext);
 		await childProviderStarted.promise;
 		await spawn.execute("spawn-queued", { name: "queued", task: "wait" }, undefined, undefined, extensionContext);
-		const agentsWaitResult = agents
-			.execute(
-				"wait-agents",
-				{ timeout_ms: 10_000, targets: ["worker", "queued"], until: "all" },
-				undefined,
-				undefined,
-				extensionContext,
-			)
-			.catch((error: unknown) => error);
+		const agentsWaitResult = getSettledAgentStatus(root, ["worker", "queued"]).catch((error: unknown) => error);
 
 		const originalDispose = AgentSession.prototype.dispose;
 		const childDisposeStarted = deferred<void>();
@@ -463,25 +445,13 @@ describe("AgentSession subagent lifecycle", () => {
 		await root.setModel(fauxModel);
 		reloadedFaux.setResponses([fauxAssistantMessage("worker done"), fauxAssistantMessage("queued done")]);
 		await spawn.execute("reuse-worker", { name: "worker", task: "again" }, undefined, undefined, extensionContext);
-		const workerResult = await agents.execute(
-			"wait-worker",
-			{ timeout_ms: 1_000, targets: ["worker"], until: "all" },
-			undefined,
-			undefined,
-			extensionContext,
-		);
+		const workerResult = await getSettledAgentStatus(root, ["worker"]);
 		expect(workerResult).toMatchObject({
-			details: { timed_out: false, agents: [{ name: "worker", status: "idle", result: "worker done" }] },
+			details: { agents: [{ name: "worker", status: "idle", result: "worker done" }] },
 		});
 		await spawn.execute("reuse-queued", { name: "queued", task: "again" }, undefined, undefined, extensionContext);
-		await expect(
-			agents.execute(
-				"wait-queued",
-				{ timeout_ms: 1_000, targets: ["queued"], until: "all" },
-				undefined,
-				undefined,
-				extensionContext,
-			),
-		).resolves.toMatchObject({ details: { timed_out: false, agents: [{ name: "queued", status: "idle" }] } });
+		await expect(getSettledAgentStatus(root, ["queued"])).resolves.toMatchObject({
+			details: { agents: [{ name: "queued", status: "idle" }] },
+		});
 	});
 });
