@@ -124,7 +124,7 @@ export function createEscalateToParentTool(
 			"Report a material blocker, risk, contradiction, decision, or needed allowance extension to the parent.",
 		promptSnippet: "Report blockers, risks, decisions, or needed extensions to the parent agent",
 		promptGuidelines: [
-			"Provide concise decision checkpoints with current progress, remaining work, the goal, and the decision or extension needed. When more time is needed, request an extension without estimating its duration. Use escalate_to_parent only for material information that could change the parent's plan. Do not send routine progress or tool logs, and still provide a complete final response.",
+			"Provide concise decision checkpoints with current progress, remaining work, the goal, and the decision or extension needed. When more time is needed, request an extension. Use escalate_to_parent only for material information that could change the parent's plan. Do not send routine progress or tool logs, and still provide a complete final response.",
 		],
 		parameters: escalateToParentSchema,
 		executionMode: "parallel",
@@ -222,7 +222,7 @@ export function createAgentActionTool(
 		promptSnippet: "Steer, follow up, wake, renew, or interrupt an existing child agent",
 		promptGuidelines: [
 			"Messages steer current work at the next tool boundary by default. Set delivery: 'follow_up' only for new work that should wait until the child finishes. Set wake: true to resume an idle child; steering an idle child otherwise fails instead of silently queueing stale instructions.",
-			"Child runs have a renewable 15-minute backstop by default, capped by the parent deadline. Approve a needed extension with action: 'renew' and a reason based on the child's current progress, remaining work, and goal. Each approval adds one configured allowance (15 minutes by default) to the existing deadline, capped by the parent deadline. Do not specify a renewal duration. Cancel obsolete work immediately. Let child agents complete delegated work that is still needed. Interrupt only when the work is no longer needed, is proceeding in the wrong direction, or must stop because of a user request or material risk.",
+			"Child runs have a renewable time limit. Approve a needed extension with action: 'renew' and a reason based on the child's current progress, remaining work, and goal. Each approval adds one configured allowance (15 minutes by default) to the existing deadline, capped by the parent deadline. Cancel obsolete work immediately. Let child agents complete delegated work that is still needed. Interrupt only when the work is no longer needed, is proceeding in the wrong direction, or must stop because of a user request or material risk.",
 			"When waiting for needed child results, continue independent work or use wait_for_agents to wait. A wait timeout does not mean the child has failed and is not by itself a reason to interrupt it.",
 		],
 		parameters: agentActionSchema,
