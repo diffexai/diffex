@@ -1,0 +1,21 @@
+# Native full evaluation. This run intentionally overrides task disk limits.
+n_attempts: 5
+n_concurrent_trials: 3
+retry:
+  max_retries: 0
+environment:
+  type: daytona
+  override_storage_mb: 20480
+agents:
+  - name: diffex_terminal_bench.adapter:DiffexAgent
+    model_name: openai/gpt-5.6-luna
+    kwargs:
+      thinking: max
+      tools: read,bash,edit,write,update_plan
+      subagents: enabled
+      project_resources: context-only
+    env:
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+datasets:
+  - name: terminal-bench/terminal-bench-2-1
+    ref: sha256:7d7bdc1cbedad549fc1140404bd4dc45e5fd0ea7c4186773687d177ad3a0699a
