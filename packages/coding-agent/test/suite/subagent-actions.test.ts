@@ -144,14 +144,16 @@ describe("subagent actions", () => {
 			delivery: "follow_up",
 		});
 		await expect(
-			executeAction(tool, { target: "worker", action: "renew", reason: "Build progressing", lease_ms: 1000 }),
+			executeAction(tool, { target: "worker", action: "renew", reason: "Build progressing" }),
 		).resolves.toMatchObject({ details: { action: "renew", deadline: 1234 } });
 		await expect(executeAction(tool, { target: "worker", action: "renew", reason: " " })).rejects.toThrow(
 			"justification",
 		);
-		await expect(
-			executeAction(tool, { target: "worker", action: "renew", reason: "Build", lease_ms: 0 }),
-		).rejects.toThrow("lease_ms");
+		expect(tool.parameters.properties).not.toHaveProperty("lease_ms");
+		expect(Check(tool.parameters, { target: "worker", action: "renew", reason: "Build", lease_ms: 1000 })).toBe(
+			false,
+		);
+		expect(action).toHaveBeenLastCalledWith({ target: "worker", action: "renew", reason: "Build progressing" });
 		const serialized = JSON.stringify(result);
 		expect(serialized).not.toContain(privateMessage);
 		for (const key of ["task", "output", "error", "usage"]) {

@@ -20,7 +20,8 @@ const spawnAgentSchema = Type.Object({
 const escalateToParentSchema = Type.Object(
 	{
 		message: Type.String({
-			description: "Material blocker, risk, contradiction, or decision requiring parent attention",
+			description:
+				"Material blocker, risk, contradiction, decision, or allowance extension requiring parent attention",
 			minLength: 1,
 			maxLength: 1_000,
 		}),
@@ -38,16 +39,9 @@ const agentActionSchema = Type.Object(
 		target: targetSchema,
 		reason: Type.Optional(
 			Type.String({
-				description: "Justification for extending needed work, with evidence of progress",
-				minLength: 1,
-			}),
-		),
-		lease_ms: Type.Optional(
-			Type.Integer({
 				description:
-					"Renewable allowance from now; defaults to configured 15 minutes and is capped by the parent deadline",
-				minimum: 1,
-				maximum: 2_147_483_647,
+					"Justification for extending needed work based on current progress, remaining work, and the goal",
+				minLength: 1,
 			}),
 		),
 		action: Type.Unsafe<AgentActionRequest["action"]>({
@@ -98,7 +92,7 @@ export type AgentActionRequest =
 			readonly delivery?: "steer" | "follow_up";
 	  }
 	| { readonly target: string; readonly action: "interrupt" }
-	| { readonly target: string; readonly action: "renew"; readonly reason: string; readonly lease_ms?: number };
+	| { readonly target: string; readonly action: "renew"; readonly reason: string };
 
 export interface SpawnAgentDetails {
 	readonly name: string;
@@ -127,10 +121,10 @@ export function createEscalateToParentTool(
 		name: "escalate_to_parent",
 		label: "Escalate to Parent",
 		description:
-			"Report a material blocker, risk, contradiction, or decision that may require the parent to redirect or interrupt work.",
-		promptSnippet: "Report blockers, risks, or uncertainties to the parent agent",
+			"Report a material blocker, risk, contradiction, decision, or needed allowance extension to the parent.",
+		promptSnippet: "Report blockers, risks, decisions, or needed extensions to the parent agent",
 		promptGuidelines: [
-			"Provide concise decision checkpoints with evidence of progress, remaining work, expected duration, and the decision or extension needed. Use escalate_to_parent only for material information that could change the parent's plan. Do not send routine progress or tool logs, and still provide a complete final response.",
+			"Provide concise decision checkpoints with current progress, remaining work, the goal, and the decision or extension needed. When more time is needed, request an extension without estimating its duration. Use escalate_to_parent only for material information that could change the parent's plan. Do not send routine progress or tool logs, and still provide a complete final response.",
 		],
 		parameters: escalateToParentSchema,
 		executionMode: "parallel",
@@ -224,11 +218,11 @@ export function createAgentActionTool(
 		name: "agent_action",
 		label: "Agent Action",
 		description:
-			"Send a message to drive an existing child agent, optionally waking it to resume work, or interrupt its current work.",
+			"Steer an existing child agent, queue follow-up work, wake it, approve an allowance extension, or interrupt its current work.",
 		promptSnippet: "Steer, follow up, wake, renew, or interrupt an existing child agent",
 		promptGuidelines: [
 			"Messages steer current work at the next tool boundary by default. Set delivery: 'follow_up' only for new work that should wait until the child finishes. Set wake: true to resume an idle child; steering an idle child otherwise fails instead of silently queueing stale instructions.",
-			"Child runs have a renewable 15-minute backstop by default, capped by the parent deadline. Use action: 'renew' with a reason and optional lease_ms for justified long builds. Cancel obsolete work immediately. Let child agents complete delegated work that is still needed. Interrupt only when the work is no longer needed, is proceeding in the wrong direction, or must stop because of a user request or material risk.",
+			"Child runs have a renewable 15-minute backstop by default, capped by the parent deadline. Approve a needed extension with action: 'renew' and a reason based on the child's current progress, remaining work, and goal. Each approval adds one configured allowance (15 minutes by default) to the existing deadline, capped by the parent deadline. Do not specify a renewal duration. Cancel obsolete work immediately. Let child agents complete delegated work that is still needed. Interrupt only when the work is no longer needed, is proceeding in the wrong direction, or must stop because of a user request or material risk.",
 			"When waiting for needed child results, continue independent work or use wait_for_agents to wait. A wait timeout does not mean the child has failed and is not by itself a reason to interrupt it.",
 		],
 		parameters: agentActionSchema,
@@ -240,21 +234,15 @@ export function createAgentActionTool(
 			let normalized: AgentActionRequest;
 			if (request.action === "renew") {
 				if (!request.reason?.trim()) throw new Error("Lease renewal requires a justification");
-				if (
-					request.lease_ms !== undefined &&
-					(!Number.isInteger(request.lease_ms) || request.lease_ms <= 0 || request.lease_ms > 2_147_483_647)
-				)
-					throw new RangeError("Invalid lease_ms");
 				if ("message" in request || "wake" in request || "delivery" in request)
 					throw new Error("Renew actions do not accept message fields");
 				normalized = {
 					target: request.target,
 					action: "renew",
 					reason: request.reason,
-					lease_ms: request.lease_ms,
 				};
-			} else if ("reason" in request || "lease_ms" in request) {
-				throw new Error("Only renew actions accept lease fields");
+			} else if ("reason" in request) {
+				throw new Error("Only renew actions accept a reason");
 			} else if (request.action === "interrupt") {
 				if ("message" in request || "wake" in request || "delivery" in request) {
 					throw new Error("Interrupt actions do not accept message fields");

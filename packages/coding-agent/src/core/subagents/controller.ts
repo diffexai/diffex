@@ -258,7 +258,7 @@ export class SubagentController {
 			),
 			createAgentActionTool((request) => {
 				const parent = this.#getBoundParent();
-				if (request.action === "renew") return this.renew(request.target, request.reason, request.lease_ms);
+				if (request.action === "renew") return this.renew(request.target, request.reason);
 				return request.action === "message"
 					? this.message(request.target, request.message, request.wake, parent.isStreaming, request.delivery)
 					: this.interrupt(request.target);
@@ -437,11 +437,9 @@ export class SubagentController {
 		return this.#traceAction(name, "interrupt", () => this.#interrupt(name));
 	}
 
-	async renew(name: string, reason: string, leaseMs = this.#leaseMs): Promise<SubagentActionResult> {
+	async renew(name: string, reason: string): Promise<SubagentActionResult> {
 		const record = this.#getRecordForAction(name);
 		if (!reason.trim()) throw new Error("Lease renewal requires a justification");
-		if (!Number.isInteger(leaseMs) || leaseMs <= 0 || leaseMs > MAX_TIMER_MS)
-			throw new RangeError("Invalid lease_ms");
 		const supervision = record.supervision;
 		if (
 			!supervision ||
@@ -451,12 +449,12 @@ export class SubagentController {
 		) {
 			throw new Error(`Cannot renew inactive or expired subagent: ${name}`);
 		}
-		supervision.deadline = Math.min(
-			Math.max(supervision.deadline, Date.now() + leaseMs),
-			this.#parentDeadline ?? Infinity,
-		);
-		supervision.checkpointRequested = false;
-		this.#armLease(record);
+		const deadline = Math.min(supervision.deadline + this.#leaseMs, this.#parentDeadline ?? Infinity);
+		if (deadline > supervision.deadline) {
+			supervision.deadline = deadline;
+			supervision.checkpointRequested = false;
+			this.#armLease(record);
+		}
 		return { target: name, action: "renew", status: record.status, deadline: supervision.deadline };
 	}
 
@@ -467,12 +465,16 @@ export class SubagentController {
 		supervision.leaseTimer = setTimeout(
 			() => {
 				if (record.supervision !== supervision || isTerminalStatus(record.status)) return;
+				if (supervision.deadline > Date.now()) {
+					this.#armLease(record);
+					return;
+				}
 				record.runtimeWarning = "Subagent lease or parent deadline expired; cancellation requested";
 				void this.interrupt(record.name).catch((error: unknown) => {
 					record.runtimeWarning = `Subagent cancellation failed: ${normalizeError(error)}`;
 				});
 			},
-			Math.max(0, supervision.deadline - Date.now()),
+			Math.min(MAX_TIMER_MS, Math.max(0, supervision.deadline - Date.now())),
 		);
 		supervision.leaseTimer.unref();
 	}
@@ -505,7 +507,7 @@ export class SubagentController {
 			) {
 				supervision.checkpointRequested = true;
 				await record.session?.steer(
-					"Your renewable work allowance is nearly exhausted. If work remains necessary, use escalate_to_parent now with a concise checkpoint: evidence of progress, remaining work, expected duration, and the decision or extension needed. Stop if the task is solved.",
+					"Your renewable work allowance is nearly exhausted. If work remains necessary, use escalate_to_parent now with a concise checkpoint: current progress, remaining work, the goal, and the decision or extension needed. If more time is needed, request an extension without estimating its duration. The parent can approve by calling agent_action with action: 'renew' and a reason, adding another configured allowance (15 minutes by default), capped by its deadline. Stop if the task is solved.",
 				);
 			}
 		} catch (error) {

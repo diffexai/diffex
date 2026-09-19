@@ -519,8 +519,13 @@ describe("root subagent tool registration", () => {
 		expect(getMessageText(toolResults[1])).toContain('"result":"child complete"');
 		expect(childContexts).toHaveLength(1);
 		expect(childContexts[0]?.systemPrompt).toContain(
-			"- escalate_to_parent: Report blockers, risks, or uncertainties to the parent agent",
+			"- escalate_to_parent: Report blockers, risks, decisions, or needed extensions to the parent agent",
 		);
+		expect(childContexts[0]?.systemPrompt).toContain(
+			"current progress, remaining work, the goal, and the decision or extension needed",
+		);
+		expect(childContexts[0]?.systemPrompt).toContain("without estimating its duration");
+		expect(childContexts[0]?.systemPrompt).not.toContain("expected duration");
 		for (const name of COORDINATION_TOOLS) {
 			expect(childContexts[0]?.tools?.map((tool) => tool.name)).not.toContain(name);
 		}

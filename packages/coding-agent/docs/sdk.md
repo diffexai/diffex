@@ -561,14 +561,20 @@ Use `delivery: "follow_up"` explicitly for new work that should start after the 
 Set `wake: true` to resume an idle child; steering an idle child without waking it fails instead of silently queuing instructions.
 
 Child runs have a renewable 15-minute allowance, including time queued for capacity.
-Configure `subagents.leaseMs`, `subagents.supervisionIntervalMs` (default 60,000), and `subagents.parentDeadline` (an absolute Unix timestamp in milliseconds).
+Configure `subagents.leaseMs`, `subagents.supervisionIntervalMs` (default 120,000), and `subagents.parentDeadline` (an absolute Unix timestamp in milliseconds).
 CLI users can set `DIFFEX_SUBAGENT_LEASE_MS`, `DIFFEX_SUBAGENT_SUPERVISION_MS`, and `DIFFEX_TASK_DEADLINE_MS`; explicit SDK options take precedence.
 Supply the parent's deadline when known; renewal never extends beyond it, and parent cancellation remains authoritative.
-Renew needed work with `agent_action` using `action: "renew"`, a `reason` describing progress and remaining work, and an optional `lease_ms` allowance from now.
+Approve a needed extension with `agent_action` using `action: "renew"` and a `reason` based on current progress, remaining work, and the goal.
+Each approval adds one configured allowance (15 minutes by default) to the existing child deadline, capped by the parent deadline.
+The parent does not specify a renewal duration.
 Cancel obsolete work immediately instead of waiting for expiration.
 
-Runtime supervision reports elapsed and inactive time, model responses, tokens, cost, active tools, owned shell groups, and remaining allowance to the parent.
-Near expiration the child receives a request for a concise decision checkpoint through `escalate_to_parent`, including progress, remaining work, expected duration, and any extension needed.
+Every two minutes by default, runtime supervision reports only running/queued status, elapsed time, and time since the last observed activity to the parent.
+Near expiration (around minute 12 with defaults), the child receives a steering request to call `escalate_to_parent` with current progress, remaining work, the goal, and the decision or extension needed.
+If more time is needed, the child requests an extension without estimating its duration.
+The checkpoint request is sent once per allowance and rearmed only when renewal extends the deadline.
+The child receives it at a normal steering boundary after the current assistant turn finishes its tool calls.
+The checkpoint relies on the child following the instruction; the runtime enforces expiration and cancellation.
 Reports resume a waiting parent; they do not abort an in-flight model request.
 Interrupting a child cancels model requests and owned shell process groups, waits for termination verification, and reports cleanup failures.
 Background shell jobs are also cleaned up when a child finishes normally.

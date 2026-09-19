@@ -1,8 +1,11 @@
-import { type AssistantMessage, fauxAssistantMessage } from "@diffexai/diffex-ai";
+import { type AssistantMessage, fauxAssistantMessage, fauxToolCall } from "@diffexai/diffex-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { AgentSession } from "../../src/core/agent-session.ts";
+import type { ExtensionContext } from "../../src/core/extensions/types.ts";
 import { SubagentController } from "../../src/core/subagents/controller.ts";
+import { captureSubagentSessionConfig, createSubagentSession } from "../../src/core/subagents/services.ts";
 import { createHarness, type Harness } from "./harness.ts";
-import { deferred } from "./subagent-harness.ts";
+import { deferred, getLastUserText } from "./subagent-harness.ts";
 
 describe("subagent supervision", () => {
 	let harness: Harness | undefined;
@@ -76,6 +79,134 @@ describe("subagent supervision", () => {
 		]);
 	});
 
+	it("requests one checkpoint per allowance and adds fifteen minutes on parent approval", async () => {
+		harness = await createHarness({ settings: { retry: { enabled: false } } });
+		const config = captureSubagentSessionConfig(harness.session, harness.tempDir);
+		vi.useFakeTimers();
+		const now = Date.now();
+		controller = new SubagentController({ maxConcurrent: 1 });
+		const reports: string[] = [];
+		controller.bindParent(
+			harness.session,
+			() => [],
+			async (_name, text) => {
+				reports.push(text);
+			},
+		);
+		const started = deferred<void>();
+		const firstResponse = deferred<AssistantMessage>();
+		const resumed = deferred<void>();
+		const checkpoint =
+			"Current progress: compiled the core. Remaining work: run validation. Goal: deliver a verified build. An extension is needed.";
+		harness.setResponses([
+			(_context, options) => {
+				options?.signal?.addEventListener(
+					"abort",
+					() => firstResponse.resolve(fauxAssistantMessage("cancelled", { stopReason: "aborted" })),
+					{ once: true },
+				);
+				started.resolve();
+				return firstResponse.promise;
+			},
+			(context) => {
+				const instruction = getLastUserText(context);
+				for (const field of [
+					"escalate_to_parent",
+					"current progress",
+					"remaining work",
+					"the goal",
+					"decision or extension needed",
+					"without estimating its duration",
+				]) {
+					expect(instruction).toContain(field);
+				}
+				expect(instruction).not.toContain("expected duration");
+				return fauxAssistantMessage(fauxToolCall("escalate_to_parent", { message: checkpoint }), {
+					stopReason: "toolUse",
+				});
+			},
+			(_context, options) =>
+				new Promise<AssistantMessage>((resolve) => {
+					options?.signal?.addEventListener(
+						"abort",
+						() => resolve(fauxAssistantMessage("cancelled", { stopReason: "aborted" })),
+						{ once: true },
+					);
+					resumed.resolve();
+				}),
+		]);
+		let child: AgentSession | undefined;
+		controller.spawn("worker", "Deliver a verified build", async (signal, escalateToParent) => {
+			child = await createSubagentSession(config, { signal, escalateToParent });
+			return child;
+		});
+		await started.promise;
+		await vi.advanceTimersByTimeAsync(12 * 60_000 - 1);
+		expect(child!.getSteeringMessages()).toHaveLength(0);
+		await vi.advanceTimersByTimeAsync(1);
+		expect(child!.getSteeringMessages()).toHaveLength(1);
+		await vi.advanceTimersByTimeAsync(2 * 60_000);
+		expect(child!.getSteeringMessages()).toHaveLength(1);
+		firstResponse.resolve(fauxAssistantMessage("Core compiled; validation remains."));
+		await resumed.promise;
+		expect(reports).toContain(checkpoint);
+		expect(child!.getSteeringMessages()).toHaveLength(0);
+		const action = controller.createToolDefinitions().find((tool) => tool.name === "agent_action")!;
+		await expect(
+			action.execute(
+				"approve",
+				{
+					target: "worker",
+					action: "renew",
+					reason: "Core compiled; validation is required for the build goal.",
+				},
+				undefined,
+				undefined,
+				{} as ExtensionContext,
+			),
+		).resolves.toMatchObject({ details: { deadline: now + 30 * 60_000 } });
+		await vi.advanceTimersByTimeAsync(2 * 60_000);
+		expect(reports.at(-1)).toBe('Runtime supervision: {"status":"running","elapsed_ms":960000,"inactive_ms":120000}');
+		expect(controller.snapshot().agents[0]?.status).toBe("running");
+		await vi.advanceTimersByTimeAsync(10 * 60_000 - 1);
+		expect(child!.getSteeringMessages()).toHaveLength(0);
+		await vi.advanceTimersByTimeAsync(1);
+		expect(child!.getSteeringMessages()).toHaveLength(1);
+		await vi.advanceTimersByTimeAsync(2 * 60_000);
+		expect(child!.getSteeringMessages()).toHaveLength(1);
+		await vi.advanceTimersByTimeAsync(2 * 60_000);
+		expect(controller.snapshot().agents[0]?.status).toBe("interrupted");
+	});
+
+	it("preserves extended deadlines beyond one native timer interval", async () => {
+		harness = await createHarness();
+		vi.useFakeTimers();
+		const now = Date.now();
+		const allowance = 2_147_483_647;
+		controller = new SubagentController({ maxConcurrent: 1, leaseMs: allowance, supervisionIntervalMs: allowance });
+		const started = deferred<void>();
+		harness.setResponses([
+			(_context, options) =>
+				new Promise<AssistantMessage>((resolve) => {
+					options?.signal?.addEventListener(
+						"abort",
+						() => resolve(fauxAssistantMessage("cancelled", { stopReason: "aborted" })),
+						{ once: true },
+					);
+					started.resolve();
+				}),
+		]);
+		controller.spawn("worker", "Build", async () => harness!.session);
+		await started.promise;
+		await expect(controller.renew("worker", "Required work remains")).resolves.toMatchObject({
+			deadline: now + 2 * allowance,
+		});
+		await vi.advanceTimersByTimeAsync(allowance);
+		expect(controller.snapshot().agents[0]?.status).toBe("running");
+		await vi.advanceTimersByTimeAsync(allowance);
+		expect(controller.snapshot().agents[0]?.status).toBe("interrupted");
+	});
+
 	it("reports activity and renews a justified build only up to the parent deadline", async () => {
 		harness = await createHarness();
 		vi.useFakeTimers();
@@ -113,14 +244,21 @@ describe("subagent supervision", () => {
 		expect(reports.join("\n")).not.toContain("tokens");
 		expect(harness.session.getSteeringMessages().join("\n")).toContain("concise checkpoint");
 		const waiting = controller.queryAgents({ timeoutMs: 10_000, targets: ["worker"], until: "all" });
-		await expect(controller.renew("worker", "", 1000)).rejects.toThrow();
-		await expect(
-			controller.renew("worker", "Compiler is still building required targets", 1000),
-		).resolves.toMatchObject({ deadline: now + 1500 });
+		await expect(controller.renew("worker", "")).rejects.toThrow();
+		await expect(controller.renew("worker", "Compiler is still building required targets")).resolves.toMatchObject({
+			deadline: now + 1500,
+		});
 		await vi.advanceTimersByTimeAsync(101);
 		await expect(waiting).resolves.toMatchObject({ timedOut: true });
 		expect(controller.snapshot().agents[0]?.status).toBe("running");
-		await vi.advanceTimersByTimeAsync(499);
+		await vi.advanceTimersByTimeAsync(299);
+		expect(harness.session.getSteeringMessages()).toHaveLength(2);
+		await expect(controller.renew("worker", "Still needed, but capped")).resolves.toMatchObject({
+			deadline: now + 1500,
+		});
+		await vi.advanceTimersByTimeAsync(100);
+		expect(harness.session.getSteeringMessages()).toHaveLength(2);
+		await vi.advanceTimersByTimeAsync(100);
 		expect(controller.snapshot().agents[0]?.status).toBe("interrupted");
 		const reportCount = reports.length;
 		await vi.advanceTimersByTimeAsync(1000);
