@@ -802,11 +802,26 @@ export class AgentSession {
 		this.agent.prepareNextTurnWithContext = async (turn, signal) => {
 			const previousSnapshot = await previousPrepareNextTurnWithContext?.(turn, signal);
 			const previousContext = previousSnapshot?.context ?? turn.context;
+			let messages = previousContext.messages;
+			// Tool output is part of the next request even though the model's usage
+			// only describes the request before that output. Check every complete batch.
+			if (turn.toolResults.length > 0 && !signal?.aborted && this.model) {
+				const settings = this.settingsManager.getCompactionSettings();
+				if (shouldCompact(estimateContextTokens(messages).tokens, this.model.contextWindow, settings)) {
+					const beforeCompaction = this.agent.state.messages;
+					await this._runAutoCompaction("threshold", true, signal);
+					if (this.agent.state.messages !== beforeCompaction) {
+						messages = this.agent.state.messages;
+					}
+				}
+			}
 
+			signal?.throwIfAborted();
 			return {
 				...previousSnapshot,
 				context: {
 					...previousContext,
+					messages,
 					systemPrompt:
 						this._activeRunCollaborationState?.effectiveSystemPrompt ??
 						this._deriveEffectivePrompt(
@@ -3653,6 +3668,9 @@ export class AgentSession {
 			}
 
 			this._autoCompactionAbortController = new AbortController();
+			const compactionSignal = signal
+				? AbortSignal.any([signal, this._autoCompactionAbortController.signal])
+				: this._autoCompactionAbortController.signal;
 			this._emit({ type: "compaction_start", reason });
 			started = true;
 
@@ -3667,7 +3685,7 @@ export class AgentSession {
 					customInstructions: undefined,
 					reason,
 					willRetry,
-					signal: this._autoCompactionAbortController.signal,
+					signal: compactionSignal,
 				})) as SessionBeforeCompactResult | undefined;
 
 				if (extensionResult?.cancel) {
@@ -3708,7 +3726,7 @@ export class AgentSession {
 					apiKey,
 					headers,
 					undefined,
-					this._autoCompactionAbortController.signal,
+					compactionSignal,
 					this.thinkingLevel,
 					this.agent.streamFunction,
 					env,
@@ -3723,7 +3741,7 @@ export class AgentSession {
 				details = compactResult.details;
 			}
 
-			if (this._autoCompactionAbortController.signal.aborted) {
+			if (compactionSignal.aborted) {
 				this._emit({
 					type: "compaction_end",
 					reason,
