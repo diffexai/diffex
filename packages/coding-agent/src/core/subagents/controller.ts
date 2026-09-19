@@ -26,6 +26,7 @@ import type {
 	SubagentSpawnOrigin,
 	SubagentStatus,
 	SubagentSummary,
+	SubagentSupervisionOptions,
 	SubagentTerminalStatus,
 	SubagentWaitOptions,
 	SubagentWaitResult,
@@ -84,7 +85,23 @@ function getAssistantText(message: AssistantMessage | undefined): string | undef
 	return text.trim().length > 0 ? text : undefined;
 }
 
+interface Supervision {
+	deadline: number;
+	startedAt: number;
+	lastActivityAt: number;
+	responses: number;
+	tokens: number;
+	cost: number;
+	toolCalls: number;
+	activeTools: Map<string, string>;
+	leaseTimer?: ReturnType<typeof setTimeout>;
+	reportTimer?: ReturnType<typeof setInterval>;
+	checkpointRequested: boolean;
+	reporting: boolean;
+}
+
 interface SubagentRecord {
+	supervision?: Supervision;
 	id: string;
 	name: string;
 	task: string;
@@ -169,6 +186,9 @@ const MAX_TIMER_MS = 2_147_483_647;
 
 export class SubagentController {
 	readonly #maxConcurrent: number;
+	readonly #leaseMs: number;
+	readonly #supervisionIntervalMs: number;
+	readonly #parentDeadline: number | undefined;
 	readonly #captureSession: CaptureSubagentSession | undefined;
 	readonly #persistRoster: ((agents: readonly ChildSnapshotV1[], admission: boolean) => void) | undefined;
 	readonly #restoreRoster: ((controller: SubagentController, parent: AgentSession) => void) | undefined;
@@ -191,17 +211,35 @@ export class SubagentController {
 	#resetCleanupPromise: Promise<unknown[]> | undefined;
 	#shutdownPromise: Promise<void> | undefined;
 
-	constructor(options: {
-		maxConcurrent: number;
-		captureSession?: CaptureSubagentSession;
-		telemetryContext?: TelemetryContext;
-		persistRoster?: (agents: readonly ChildSnapshotV1[], admission: boolean) => void;
-		restoreRoster?: (controller: SubagentController, parent: AgentSession) => void;
-	}) {
+	constructor(
+		options: SubagentSupervisionOptions & {
+			maxConcurrent: number;
+			captureSession?: CaptureSubagentSession;
+			telemetryContext?: TelemetryContext;
+			persistRoster?: (agents: readonly ChildSnapshotV1[], admission: boolean) => void;
+			restoreRoster?: (controller: SubagentController, parent: AgentSession) => void;
+		},
+	) {
 		if (!Number.isInteger(options.maxConcurrent) || options.maxConcurrent <= 0) {
 			throw new RangeError("maxConcurrent must be a positive integer");
 		}
 		this.#maxConcurrent = options.maxConcurrent;
+		this.#leaseMs = options.leaseMs ?? 15 * 60_000;
+		this.#supervisionIntervalMs = options.supervisionIntervalMs ?? 60_000;
+		for (const [name, value] of [
+			["leaseMs", this.#leaseMs],
+			["supervisionIntervalMs", this.#supervisionIntervalMs],
+		] as const) {
+			if (!Number.isInteger(value) || value <= 0 || value > MAX_TIMER_MS)
+				throw new RangeError(`${name} must be a positive timer-safe integer`);
+		}
+		if (
+			options.parentDeadline !== undefined &&
+			(!Number.isSafeInteger(options.parentDeadline) || options.parentDeadline <= 0)
+		) {
+			throw new RangeError("parentDeadline must be a positive Unix timestamp in milliseconds");
+		}
+		this.#parentDeadline = options.parentDeadline;
 		this.#captureSession = options.captureSession;
 		this.#telemetryContext = options.telemetryContext ?? NOOP_TELEMETRY_CONTEXT;
 		this.#persistRoster = options.persistRoster;
@@ -225,6 +263,7 @@ export class SubagentController {
 			),
 			createAgentActionTool((request) => {
 				const parent = this.#getBoundParent();
+				if (request.action === "renew") return this.renew(request.target, request.reason, request.lease_ms);
 				return request.action === "message"
 					? this.message(request.target, request.message, request.wake, parent.isStreaming, request.delivery)
 					: this.interrupt(request.target);
@@ -399,7 +438,93 @@ export class SubagentController {
 	}
 
 	interrupt(name: string): Promise<SubagentActionResult> {
-		return this.#serializeAction(name, () => this.#traceAction(name, "interrupt", () => this.#interrupt(name)));
+		// Cancellation must not wait behind a message waiting for construction or a permit.
+		return this.#traceAction(name, "interrupt", () => this.#interrupt(name));
+	}
+
+	async renew(name: string, reason: string, leaseMs = this.#leaseMs): Promise<SubagentActionResult> {
+		const record = this.#getRecordForAction(name);
+		if (!reason.trim()) throw new Error("Lease renewal requires a justification");
+		if (!Number.isInteger(leaseMs) || leaseMs <= 0 || leaseMs > MAX_TIMER_MS)
+			throw new RangeError("Invalid lease_ms");
+		const supervision = record.supervision;
+		if (
+			!supervision ||
+			isTerminalStatus(record.status) ||
+			record.interruptionRequested ||
+			supervision.deadline <= Date.now()
+		) {
+			throw new Error(`Cannot renew inactive or expired subagent: ${name}`);
+		}
+		supervision.deadline = Math.min(
+			Math.max(supervision.deadline, Date.now() + leaseMs),
+			this.#parentDeadline ?? Infinity,
+		);
+		supervision.checkpointRequested = false;
+		this.#armLease(record);
+		return { target: name, action: "renew", status: record.status, deadline: supervision.deadline };
+	}
+
+	#armLease(record: SubagentRecord): void {
+		const supervision = record.supervision;
+		if (!supervision) return;
+		clearTimeout(supervision.leaseTimer);
+		supervision.leaseTimer = setTimeout(
+			() => {
+				if (record.supervision !== supervision || isTerminalStatus(record.status)) return;
+				record.runtimeWarning = "Subagent lease or parent deadline expired; cancellation requested";
+				void this.interrupt(record.name).catch((error: unknown) => {
+					record.runtimeWarning = `Subagent cancellation failed: ${normalizeError(error)}`;
+				});
+			},
+			Math.max(0, supervision.deadline - Date.now()),
+		);
+		supervision.leaseTimer.unref();
+	}
+
+	#stopSupervision(record: SubagentRecord): void {
+		clearTimeout(record.supervision?.leaseTimer);
+		clearInterval(record.supervision?.reportTimer);
+	}
+
+	async #reportActivity(record: SubagentRecord): Promise<void> {
+		const supervision = record.supervision;
+		if (!supervision || supervision.reporting || isTerminalStatus(record.status) || this.#closed || this.#resetting)
+			return;
+		supervision.reporting = true;
+		try {
+			const now = Date.now();
+			const remaining = Math.max(0, supervision.deadline - now);
+			await this.#deliverEscalation?.(
+				record.name,
+				`Runtime supervision: ${JSON.stringify({
+					status: record.status,
+					elapsed_ms: now - supervision.startedAt,
+					inactive_ms: now - supervision.lastActivityAt,
+					model_responses: supervision.responses,
+					tokens: supervision.tokens,
+					cost_usd: supervision.cost,
+					tool_calls: supervision.toolCalls,
+					active_tools: [...supervision.activeTools.values()].slice(0, 8),
+					shell_groups: record.session?.ownedShellProcessCount ?? 0,
+					remaining_ms: remaining,
+				})}. Cancel obsolete work immediately. Renew only when remaining work is needed and progress justifies it.`,
+			);
+			if (
+				!supervision.checkpointRequested &&
+				remaining <= Math.max(this.#supervisionIntervalMs * 2, this.#leaseMs / 5) &&
+				record.status === "running"
+			) {
+				supervision.checkpointRequested = true;
+				await record.session?.steer(
+					"Your renewable work allowance is nearly exhausted. If work remains necessary, use escalate_to_parent now with a concise checkpoint: evidence of progress, remaining work, expected duration, and the decision or extension needed. Stop if the task is solved.",
+				);
+			}
+		} catch (error) {
+			record.runtimeWarning = `Subagent supervision delivery failed: ${normalizeError(error)}`;
+		} finally {
+			supervision.reporting = false;
+		}
 	}
 
 	attachSession(name: string, session: AgentSession): void {
@@ -596,7 +721,11 @@ export class SubagentController {
 			return result;
 		}
 
-		const deadline = performance.now() + options.timeoutMs;
+		// Return control periodically so supervision can reach a parent inside a long wait tool.
+		const timeoutMs = this.#deliverEscalation
+			? Math.min(options.timeoutMs, this.#supervisionIntervalMs)
+			: options.timeoutMs;
+		const deadline = performance.now() + timeoutMs;
 		while (true) {
 			const remainingMs = Math.min(deadline - performance.now(), MAX_TIMER_MS);
 			if (remainingMs <= 0) {
@@ -889,6 +1018,7 @@ export class SubagentController {
 			record.finalText = undefined;
 			record.error = undefined;
 		} else {
+			this.#stopSupervision(record);
 			record.completedAt = timestamp;
 			record.finalText = fields.finalText;
 			record.error = status === "failed" ? fields.error : undefined;
@@ -1247,6 +1377,7 @@ export class SubagentController {
 		delivery: "steer" | "follow_up",
 	): Promise<SubagentActionResult> {
 		const record = this.#getRecordForAction(name);
+		const admittedRun = record.runController;
 		while (record.status === "queued" && record.session) {
 			const snapshot = this.snapshot();
 			if (record.status !== "queued") break;
@@ -1259,6 +1390,8 @@ export class SubagentController {
 			await record.run;
 			this.#assertOpen();
 		}
+		admittedRun?.signal.throwIfAborted();
+		if (admittedRun && record.interruptionRequested) throw new Error(`Subagent interrupted: ${name}`);
 		if (wake && isTerminalStatus(record.status) && record.coordinatedRun?.delivery === "frozen") {
 			throw new Error(`Cannot wake subagent while its coordinated result is pending delivery: ${name}`);
 		}
@@ -1269,6 +1402,8 @@ export class SubagentController {
 		if (!record.session && record.prepareWake) {
 			if (!wake) throw new Error(`Cannot message restored subagent without wake: ${name}`);
 			const prepared = await record.prepareWake();
+			admittedRun?.signal.throwIfAborted();
+			if (admittedRun && record.interruptionRequested) throw new Error(`Subagent interrupted: ${name}`);
 			record.createSession = prepared.createSession;
 			record.sessionManager = prepared.sessionManager;
 			record.persistenceConfig = prepared.config;
@@ -1289,13 +1424,15 @@ export class SubagentController {
 				record.lastRetryCycleId = this.#coordinationCycle;
 				record.coordinatedRun = this.#createCoordinatedRun("retry");
 			} else {
-				record.coordinatedRun = undefined;
+				record.coordinatedRun =
+					coordinated && record.coordinatedRun ? this.#createCoordinatedRun("initial") : undefined;
 			}
 			this.#scheduleRun(record, message);
 			return { target: name, action: "message", status: "queued", delivery: "prompt" };
 		}
 		if (record.status === "idle" && wake) {
-			record.coordinatedRun = undefined;
+			record.coordinatedRun =
+				coordinated && record.coordinatedRun ? this.#createCoordinatedRun("initial") : undefined;
 			this.#scheduleRun(record, message);
 			return { target: name, action: "message", status: "queued", delivery: "prompt" };
 		}
@@ -1349,6 +1486,28 @@ export class SubagentController {
 		const runController = new AbortController();
 		record.runController = runController;
 		record.runCancellation = undefined;
+		const now = Date.now();
+		record.supervision = {
+			deadline: Math.min(now + this.#leaseMs, this.#parentDeadline ?? Infinity),
+			startedAt: now,
+			lastActivityAt: now,
+			responses: 0,
+			tokens: 0,
+			cost: 0,
+			toolCalls: 0,
+			activeTools: new Map(),
+			checkpointRequested: false,
+			reporting: false,
+		};
+		if (record.supervision.deadline <= now) {
+			record.interruptionRequested = true;
+			runController.abort(new Error("Parent deadline has already expired"));
+		}
+		this.#armLease(record);
+		record.supervision.reportTimer = setInterval(() => {
+			void this.#reportActivity(record);
+		}, this.#supervisionIntervalMs);
+		record.supervision.reportTimer.unref();
 		const run = this.#runPrompt(record, prompt, runController);
 		record.run = run;
 		void run.catch(() => {});
@@ -1387,6 +1546,7 @@ export class SubagentController {
 		let session = record.session;
 		let createdSession: AgentSession | undefined;
 		const assistantMessages: AssistantMessage[] = [];
+		let shellTerminationFailed = false;
 		let unsubscribe: (() => void) | undefined;
 		try {
 			permit = await this.acquirePermit(runController.signal);
@@ -1418,10 +1578,33 @@ export class SubagentController {
 			const activeSession = session;
 			let running = false;
 			unsubscribe = activeSession.subscribe((event) => {
+				const supervision = record.supervision;
+				if (supervision) {
+					if (
+						[
+							"message_update",
+							"message_end",
+							"tool_execution_start",
+							"tool_execution_update",
+							"tool_execution_end",
+						].includes(event.type)
+					)
+						supervision.lastActivityAt = Date.now();
+					if (event.type === "tool_execution_start") {
+						supervision.toolCalls++;
+						supervision.activeTools.set(event.toolCallId, event.toolName);
+					}
+					if (event.type === "tool_execution_end") supervision.activeTools.delete(event.toolCallId);
+					if (event.type === "message_end" && event.message.role === "assistant") {
+						supervision.responses++;
+						supervision.tokens += event.message.usage.totalTokens;
+						supervision.cost += event.message.usage.cost.total;
+					}
+				}
 				if (event.type === "agent_start" && !running) {
 					running = true;
-					if (runController.signal.aborted) {
-						void activeSession.abort().catch(() => {});
+					if (runController.signal.aborted || record.interruptionRequested) {
+						if (!record.runCancellation) void activeSession.abort().catch(() => {});
 					} else {
 						this.markRunning(record.name);
 					}
@@ -1430,8 +1613,16 @@ export class SubagentController {
 					assistantMessages.push(event.message);
 				}
 			});
-			await activeSession.prompt(prompt, { signal: runController.signal });
-			await activeSession.terminateOwnedShellProcesses();
+			const [promptResult] = await Promise.allSettled([
+				activeSession.prompt(prompt, { signal: runController.signal }),
+			]);
+			try {
+				await activeSession.terminateOwnedShellProcesses();
+			} catch (error) {
+				shellTerminationFailed = true;
+				throw error;
+			}
+			if (promptResult.status === "rejected") throw promptResult.reason;
 			if (this.#closed) return;
 
 			const terminalMessage = assistantMessages.at(-1);
@@ -1450,7 +1641,7 @@ export class SubagentController {
 		} catch (error) {
 			if (!this.#closed) {
 				const finalText = getAssistantText(assistantMessages.at(-1));
-				if (record.interruptionRequested) {
+				if (record.interruptionRequested && !shellTerminationFailed) {
 					this.markInterrupted(record.name, finalText);
 				} else {
 					this.markFailed(record.name, normalizeError(error), finalText);
@@ -1491,6 +1682,7 @@ export class SubagentController {
 	#detachRecords(reason: Error): SubagentRecord[] {
 		const records = [...this.#records.values()];
 		for (const record of records) {
+			this.#stopSupervision(record);
 			void this.#requestRunCancellation(record, reason);
 		}
 		this.#records.clear();
@@ -1500,8 +1692,16 @@ export class SubagentController {
 	#requestRunCancellation(record: SubagentRecord, reason: Error): Promise<void> {
 		if (record.runCancellation) return record.runCancellation;
 
-		record.runController?.abort(reason);
-		const cancellation = record.session?.abort() ?? Promise.resolve();
+		record.interruptionRequested = true;
+		let cancellation: Promise<void>;
+		try {
+			// Active prompts own their cancellation and verification. Abort the run signal
+			// only during construction/preflight, avoiding a second abort via its listener.
+			if (!record.session?.isStreaming) record.runController?.abort(reason);
+			cancellation = record.session?.abort() ?? Promise.resolve();
+		} catch (error) {
+			cancellation = Promise.reject(error);
+		}
 
 		record.runCancellation = cancellation;
 		void cancellation.catch(() => {

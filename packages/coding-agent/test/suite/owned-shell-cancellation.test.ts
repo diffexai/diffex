@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall } from "@diffexai/diffex-ai";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { SubagentController } from "../../src/core/subagents/controller.ts";
 import { createHarness, type Harness } from "./harness.ts";
 import { deferred } from "./subagent-harness.ts";
@@ -43,6 +43,37 @@ describe.skipIf(process.platform === "win32")("owned shell cancellation", () => 
 		await controller.interrupt("worker");
 		expect(() => process.kill(pid!, 0)).toThrow();
 		expect(controller.snapshot().agents[0]?.status).toBe("interrupted");
+	});
+
+	it("cleans up background jobs before declaring normal child completion", async () => {
+		harness = await createHarness();
+		controller = new SubagentController({ maxConcurrent: 1 });
+		harness.setResponses([
+			fauxAssistantMessage(fauxToolCall("bash", { command: "sleep 60 >/dev/null 2>&1 & echo $! > child.pid" }), {
+				stopReason: "toolUse",
+			}),
+			() => {
+				pid = Number(readFileSync(join(harness!.tempDir, "child.pid"), "utf8").trim());
+				return fauxAssistantMessage("Done");
+			},
+		]);
+		controller.spawn("worker", "Build", async () => harness!.session);
+		await vi.waitFor(() => expect(controller!.snapshot().agents[0]?.status).toBe("idle"));
+		expect(() => process.kill(pid!, 0)).toThrow();
+		expect(harness.session.ownedShellProcessCount).toBe(0);
+	});
+
+	it("reports termination verification failures instead of claiming completion", async () => {
+		harness = await createHarness();
+		controller = new SubagentController({ maxConcurrent: 1 });
+		harness.setResponses([fauxAssistantMessage("Done")]);
+		const cleanup = vi
+			.spyOn(harness.session, "terminateOwnedShellProcesses")
+			.mockRejectedValueOnce(new Error("Shell process group did not terminate"));
+		controller.spawn("worker", "Build", async () => harness!.session);
+		await vi.waitFor(() => expect(controller!.snapshot().agents[0]?.status).toBe("failed"));
+		expect((await controller.queryAgents({ timeoutMs: 0 })).agents[0]?.error).toContain("did not terminate");
+		cleanup.mockRestore();
 	});
 
 	it("abort cancels session-owned bash and waits for termination", async () => {

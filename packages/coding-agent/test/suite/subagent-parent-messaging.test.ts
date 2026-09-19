@@ -489,6 +489,10 @@ describe("subagent parent messaging foundation", () => {
 						});
 					}
 
+					const lastMessage = context.messages.at(-1);
+					if (JSON.stringify(lastMessage)?.includes("subagent_completion_check")) {
+						return fauxAssistantMessage("The delegated work is still needed; wait for completion.");
+					}
 					rootProviderCalls += 1;
 					const serialized = JSON.stringify(context.messages);
 					if (serialized.includes("subagent_batch_results")) return fauxAssistantMessage("terminal synthesis");
@@ -563,6 +567,10 @@ describe("subagent parent messaging foundation", () => {
 						return fauxAssistantMessage("child result");
 					}
 
+					const lastMessage = context.messages.at(-1);
+					if (JSON.stringify(lastMessage)?.includes("subagent_completion_check")) {
+						return fauxAssistantMessage("The delegated work is still needed; wait for completion.");
+					}
 					rootProviderCalls += 1;
 					const serialized = JSON.stringify(context.messages);
 					if (rootProviderCalls === 1) {
@@ -689,6 +697,10 @@ describe("subagent parent messaging foundation", () => {
 						return fauxAssistantMessage("first result");
 					}
 
+					const lastMessage = context.messages.at(-1);
+					if (JSON.stringify(lastMessage)?.includes("subagent_completion_check")) {
+						return fauxAssistantMessage("The delegated work is still needed; wait for completion.");
+					}
 					rootProviderCalls += 1;
 					if (rootProviderCalls === 1) {
 						return fauxAssistantMessage(
@@ -774,6 +786,10 @@ describe("subagent parent messaging foundation", () => {
 						});
 					}
 
+					const lastMessage = context.messages.at(-1);
+					if (JSON.stringify(lastMessage)?.includes("subagent_completion_check")) {
+						return fauxAssistantMessage("The delegated work is still needed; wait for completion.");
+					}
 					rootProviderCalls += 1;
 					const serialized = JSON.stringify(context.messages);
 					if (rootProviderCalls === 1) {
@@ -851,6 +867,10 @@ describe("subagent parent messaging foundation", () => {
 							if (options?.signal?.aborted) finish();
 							else options?.signal?.addEventListener("abort", finish, { once: true });
 						});
+					}
+					const lastMessage = context.messages.at(-1);
+					if (JSON.stringify(lastMessage)?.includes("subagent_completion_check")) {
+						return fauxAssistantMessage("The delegated work is still needed; wait for completion.");
 					}
 					rootProviderCalls += 1;
 					rootContexts.push(JSON.stringify(context.messages));
@@ -946,6 +966,10 @@ describe("subagent parent messaging foundation", () => {
 							if (options?.signal?.aborted) finish();
 							else options?.signal?.addEventListener("abort", finish, { once: true });
 						});
+					}
+					const lastMessage = context.messages.at(-1);
+					if (JSON.stringify(lastMessage)?.includes("subagent_completion_check")) {
+						return fauxAssistantMessage("The delegated work is still needed; wait for completion.");
 					}
 					rootProviderCalls += 1;
 					if (hasToolResult(context, "spawn_agent")) return fauxAssistantMessage("wait for child");

@@ -112,6 +112,10 @@ describe("automatic subagent coordination", () => {
 					return fauxAssistantMessage("CHILD-RESULT-SENTINEL");
 				}
 
+				const lastMessage = context.messages.at(-1);
+				if (JSON.stringify(lastMessage)?.includes("subagent_completion_check")) {
+					return fauxAssistantMessage("The delegated work is still needed; wait for completion.");
+				}
 				parentContexts.push(context);
 				const hiddenResult = context.messages.find(
 					(message) => message.role === "user" && getMessageText(message).includes("CHILD-RESULT-SENTINEL"),
@@ -186,6 +190,10 @@ describe("automatic subagent coordination", () => {
 					});
 					await releaseChildCleanup.promise;
 					return fauxAssistantMessage("child partial", { stopReason: "aborted" });
+				}
+				const lastMessage = context.messages.at(-1);
+				if (JSON.stringify(lastMessage)?.includes("subagent_completion_check")) {
+					return fauxAssistantMessage("The delegated work is still needed; wait for completion.");
 				}
 				parentCalls += 1;
 				if (!hasToolResult(context, "spawn_agent")) {
@@ -262,6 +270,10 @@ describe("automatic subagent coordination", () => {
 						if (options?.signal?.aborted) finish();
 						else options?.signal?.addEventListener("abort", finish, { once: true });
 					});
+				}
+				const lastMessage = context.messages.at(-1);
+				if (JSON.stringify(lastMessage)?.includes("subagent_completion_check")) {
+					return fauxAssistantMessage("The delegated work is still needed; wait for completion.");
 				}
 				parentCalls += 1;
 				const spawned = getToolResultCount(context, "spawn_agent");
@@ -822,6 +834,10 @@ describe("automatic subagent coordination", () => {
 						else options?.signal?.addEventListener("abort", resolveAbort, { once: true });
 					});
 				}
+				const lastMessage = context.messages.at(-1);
+				if (JSON.stringify(lastMessage)?.includes("subagent_completion_check")) {
+					return fauxAssistantMessage("The delegated work is still needed; wait for completion.");
+				}
 				parentCalls += 1;
 				if (!hasToolResult(context, "spawn_agent")) {
 					return fauxAssistantMessage(fauxToolCall("spawn_agent", { name: "worker", task: "wait forever" }), {
@@ -865,6 +881,10 @@ describe("automatic subagent coordination", () => {
 							{ once: true },
 						);
 					});
+				}
+				const lastMessage = context.messages.at(-1);
+				if (JSON.stringify(lastMessage)?.includes("subagent_completion_check")) {
+					return fauxAssistantMessage("The delegated work is still needed; wait for completion.");
 				}
 				parentCalls += 1;
 				if (!hasToolResult(context, "spawn_agent")) {

@@ -50,7 +50,7 @@ import {
 	resolveRestoredSubagentConfig,
 } from "./subagents/services.ts";
 import { RootLocalEphemeralSubagentSessionManagerFactory } from "./subagents/session-manager-factory.ts";
-import type { SubagentEscalationCallback } from "./subagents/types.ts";
+import type { SubagentEscalationCallback, SubagentSupervisionOptions } from "./subagents/types.ts";
 import { time } from "./timings.ts";
 import {
 	createBashTool,
@@ -75,7 +75,7 @@ setDefaultStreamFn(streamSimple);
 const DEFAULT_SUBAGENT_CONCURRENCY = 4;
 const RESERVED_SUBAGENT_TOOL_NAMES = new Set(["spawn_agent", "agent_action", "wait_for_agents", "escalate_to_parent"]);
 
-export interface SubagentOptions {
+export interface SubagentOptions extends SubagentSupervisionOptions {
 	/** Maximum number of child agents that may run concurrently. Default: 4 */
 	maxConcurrent?: number;
 }
@@ -191,7 +191,7 @@ function getDefaultAgentDir(): string {
 	return getAgentDir();
 }
 
-function normalizeSubagentOptions(value: unknown): false | Required<SubagentOptions> {
+function normalizeSubagentOptions(value: unknown): false | (SubagentOptions & { maxConcurrent: number }) {
 	if (value === false) return false;
 	if (value !== undefined && (typeof value !== "object" || value === null || Array.isArray(value))) {
 		throw new TypeError("subagents must be false or an options object");
@@ -199,7 +199,7 @@ function normalizeSubagentOptions(value: unknown): false | Required<SubagentOpti
 	const options = value as SubagentOptions | undefined;
 	if (options) {
 		for (const key of Object.keys(options)) {
-			if (key !== "maxConcurrent") {
+			if (!["maxConcurrent", "leaseMs", "supervisionIntervalMs", "parentDeadline"].includes(key)) {
 				throw new Error(`Unknown subagents option: ${key}`);
 			}
 		}
@@ -208,7 +208,22 @@ function normalizeSubagentOptions(value: unknown): false | Required<SubagentOpti
 	if (!Number.isInteger(maxConcurrent) || maxConcurrent <= 0) {
 		throw new RangeError("subagents.maxConcurrent must be a positive integer");
 	}
-	return { maxConcurrent };
+	return {
+		maxConcurrent,
+		leaseMs:
+			options?.leaseMs ??
+			(process.env.DIFFEX_SUBAGENT_LEASE_MS === undefined
+				? undefined
+				: Number(process.env.DIFFEX_SUBAGENT_LEASE_MS)),
+		supervisionIntervalMs:
+			options?.supervisionIntervalMs ??
+			(process.env.DIFFEX_SUBAGENT_SUPERVISION_MS === undefined
+				? undefined
+				: Number(process.env.DIFFEX_SUBAGENT_SUPERVISION_MS)),
+		parentDeadline:
+			options?.parentDeadline ??
+			(process.env.DIFFEX_TASK_DEADLINE_MS === undefined ? undefined : Number(process.env.DIFFEX_TASK_DEADLINE_MS)),
+	};
 }
 
 function assertNoReservedSubagentTools(customTools: readonly ToolDefinition[] | undefined): void {
@@ -220,14 +235,14 @@ function assertNoReservedSubagentTools(customTools: readonly ToolDefinition[] | 
 }
 
 function createRootSubagentController(
-	maxConcurrent: number,
+	options: SubagentOptions & { maxConcurrent: number },
 	agentDir: string,
 	telemetryContext: TelemetryContext,
 	parentSessionManager: SessionManager,
 ): SubagentController {
 	const sessionManagerFactory = new RootLocalEphemeralSubagentSessionManagerFactory();
 	return new SubagentController({
-		maxConcurrent,
+		...options,
 		telemetryContext,
 		restoreRoster: (controller, parent) => restoreRootSubagents(controller, parent, agentDir, parentSessionManager),
 		captureSession: (parent, childName, origin) => {
@@ -439,7 +454,7 @@ export async function createInternalAgentSession(
 	const subagentController =
 		subagentOptions === false
 			? undefined
-			: createRootSubagentController(subagentOptions.maxConcurrent, agentDir, telemetryContext, sessionManager);
+			: createRootSubagentController(subagentOptions, agentDir, telemetryContext, sessionManager);
 	const customTools = [
 		...(options.customTools ?? []),
 		...(subagentController?.createToolDefinitions() ?? []),

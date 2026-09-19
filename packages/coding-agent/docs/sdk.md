@@ -67,6 +67,8 @@ const { session } = await createAgentSession({
 ### AgentSession
 
 The session manages agent lifecycle, message history, model state, compaction, and event streaming.
+With automatic compaction enabled, it checks effective context usage after every completed tool-result batch, including new tool output, before requesting the next model response.
+When the threshold is reached, the session compacts and continues automatically while preserving tool-call/result pairs.
 
 ```typescript
 interface AgentSession {
@@ -541,17 +543,35 @@ const { session } = await createAgentSession({ resourceLoader: loader });
 Every root session enables three child-agent coordination tools by default:
 
 - `spawn_agent` starts a child agent asynchronously, while keeping the enclosing parent prompt active until coordinated work finishes
-- `agent_action` sends, wakes, or interrupts a child agent
+- `agent_action` steers, queues follow-up work, wakes, renews, or interrupts a child agent
 - `wait_for_agents` checks child statuses or waits for status changes, returning recorded output and errors
 
 Use `wait_for_agents` when further progress depends on child results.
 Set `until` to `"any"` or `"all"` and select the relevant `targets` when waiting for completion; without `until`, a status change may return before a child finishes.
 A timeout leaves child work running and does not indicate failure.
+Long waits return at the supervision interval so the parent can act on activity updates.
 Tool allowlists and direct tool calls must use `wait_for_agents` in place of the former `agents` name.
 
 Root sessions run at most four children concurrently by default.
 Set `subagents: { maxConcurrent: number }` to configure that limit, or `subagents: false` to disable child agents and omit all three coordination tools.
 The names `spawn_agent`, `agent_action`, `wait_for_agents`, and `escalate_to_parent` are reserved and cannot be supplied through `customTools`.
+
+Messages default to `delivery: "steer"` and enter the child's current work at its next steering boundary.
+Use `delivery: "follow_up"` explicitly for new work that should start after the current work finishes.
+Set `wake: true` to resume an idle child; steering an idle child without waking it fails instead of silently queuing instructions.
+
+Child runs have a renewable 15-minute allowance, including time queued for capacity.
+Configure `subagents.leaseMs`, `subagents.supervisionIntervalMs` (default 60,000), and `subagents.parentDeadline` (an absolute Unix timestamp in milliseconds).
+CLI users can set `DIFFEX_SUBAGENT_LEASE_MS`, `DIFFEX_SUBAGENT_SUPERVISION_MS`, and `DIFFEX_TASK_DEADLINE_MS`; explicit SDK options take precedence.
+Supply the parent's deadline when known; renewal never extends beyond it, and parent cancellation remains authoritative.
+Renew needed work with `agent_action` using `action: "renew"`, a `reason` describing progress and remaining work, and an optional `lease_ms` allowance from now.
+Cancel obsolete work immediately instead of waiting for expiration.
+
+Runtime supervision reports elapsed and inactive time, model responses, tokens, cost, active tools, owned shell groups, and remaining allowance to the parent.
+Near expiration the child receives a request for a concise decision checkpoint through `escalate_to_parent`, including progress, remaining work, expected duration, and any extension needed.
+Reports resume a waiting parent; they do not abort an in-flight model request.
+Interrupting a child cancels model requests and owned shell process groups, waits for termination verification, and reports cleanup failures.
+Background shell jobs are also cleaned up when a child finishes normally.
 
 Child sessions intentionally do not load parent extensions. To prevent an extension policy bypass, `spawn_agent` fails closed when the root has a registered handler for any execution-mutating hook: `resources_discover`, `input`, `context`, `before_agent_start`, `before_provider_request`, `before_provider_headers`, `session_before_compact`, `tool_call`, `tool_result`, or `message_end`. The error lists every incompatible hook in that order. Remove those handlers before spawning, or set `subagents: false`; observation-only hooks and non-spawn child actions remain available.
 
@@ -564,7 +584,8 @@ Idle reports do not start a provider call: durable sessions save them on the sel
 Accepted idle reports, delivered active reports, and child tool arguments remain normal session history and follow the existing parent-owned deletion behavior.
 
 When the parent finishes an assistant run, the session freezes every unconsumed child attempt spawned through parent model tool calls.
-It waits until every child in that batch is idle, failed, or interrupted, then adds one non-displayed context message with name-sorted results, partial output, errors, and retry availability.
+Before waiting, it asks the parent to resolve active children by cancelling obsolete work or waiting for needed results.
+It then waits until every child in that batch is idle, failed, or interrupted, then adds one non-displayed context message with name-sorted results, partial output, errors, and retry availability.
 The parent model continues automatically from that message, so callers do not need to send another user prompt.
 Terminal results returned explicitly by `wait_for_agents` are marked consumed and are not delivered again.
 

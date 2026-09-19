@@ -5,6 +5,15 @@ import type { ToolName } from "../tools/index.ts";
 
 export const SUBAGENT_NAME_PATTERN = /^[a-z][a-z0-9_-]{0,63}$/;
 
+export interface SubagentSupervisionOptions {
+	/** Renewable allowance per child run, including queueing. Default: 15 minutes. */
+	leaseMs?: number;
+	/** Runtime activity reports to the parent. Default: 60 seconds. */
+	supervisionIntervalMs?: number;
+	/** Absolute parent deadline, in milliseconds since the Unix epoch. */
+	parentDeadline?: number;
+}
+
 export type SubagentStatus = "queued" | "running" | "idle" | "failed" | "interrupted";
 
 export interface SubagentSummary {
@@ -59,6 +68,7 @@ export type CaptureSubagentSession = (
 export type SubagentMessageDelivery = "steer" | "follow_up" | "prompt";
 
 export type SubagentActionResult =
+	| { readonly target: string; readonly action: "renew"; readonly status: SubagentStatus; readonly deadline: number }
 	| {
 			readonly target: string;
 			readonly action: "message";

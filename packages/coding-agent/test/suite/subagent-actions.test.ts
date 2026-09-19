@@ -98,6 +98,9 @@ describe("subagent actions", () => {
 	it("defines strict actions, normalizes wake, and returns private stable details", async () => {
 		const privateMessage = "private child instructions";
 		const action = vi.fn(async (request: AgentActionRequest): Promise<SubagentActionResult> => {
+			if (request.action === "renew") {
+				return { target: request.target, action: "renew", status: "running", deadline: 1234 };
+			}
 			if (request.action === "interrupt") {
 				return { target: request.target, action: "interrupt", status: "interrupted" };
 			}
@@ -111,7 +114,7 @@ describe("subagent actions", () => {
 			additionalProperties: false,
 			properties: {
 				target: { type: "string" },
-				action: { type: "string", enum: ["message", "interrupt"] },
+				action: { type: "string", enum: ["message", "interrupt", "renew"] },
 				message: { type: "string" },
 				wake: { type: "boolean" },
 			},
@@ -140,6 +143,15 @@ describe("subagent actions", () => {
 			status: "idle",
 			delivery: "follow_up",
 		});
+		await expect(
+			executeAction(tool, { target: "worker", action: "renew", reason: "Build progressing", lease_ms: 1000 }),
+		).resolves.toMatchObject({ details: { action: "renew", deadline: 1234 } });
+		await expect(executeAction(tool, { target: "worker", action: "renew", reason: " " })).rejects.toThrow(
+			"justification",
+		);
+		await expect(
+			executeAction(tool, { target: "worker", action: "renew", reason: "Build", lease_ms: 0 }),
+		).rejects.toThrow("lease_ms");
 		const serialized = JSON.stringify(result);
 		expect(serialized).not.toContain(privateMessage);
 		for (const key of ["task", "output", "error", "usage"]) {
@@ -493,7 +505,7 @@ describe("subagent actions", () => {
 
 		const message = controller.message("worker", "queued follow-up", false, false, "follow_up");
 		const interrupt = controller.interrupt("worker");
-		await expect(message).resolves.toMatchObject({ delivery: "follow_up" });
+		await expect(message).rejects.toThrow("Subagent interrupted");
 		await expect(interrupt).resolves.toMatchObject({ status: "interrupted" });
 		expect(record.session?.pendingMessageCount).toBe(0);
 		await expect(controller.interrupt("worker")).resolves.toMatchObject({ status: "interrupted" });

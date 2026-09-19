@@ -424,6 +424,7 @@ interface SubagentCoordination {
 	currentWaitAbortController?: AbortController;
 	exitReason?: "escalation" | "cancellation";
 	waitStarted: boolean;
+	completionChecked?: boolean;
 }
 
 interface PromptReservation {
@@ -2202,6 +2203,28 @@ export class AgentSession {
 			if (!coordination) break;
 			if (coordination.exitReason === "cancellation" || this._agentRunAborted) {
 				this._exitSubagentCoordination("cancellation");
+			} else if (!coordination.completionChecked) {
+				coordination.completionChecked = true;
+				const active = this.getSubagents().filter(
+					(child) =>
+						coordination.names.includes(child.name) && (child.status === "running" || child.status === "queued"),
+				);
+				if (active.length > 0) {
+					await this.sendCustomMessage(
+						{
+							customType: "subagent_completion_check",
+							content: JSON.stringify({
+								type: "subagent_completion_check",
+								agents: active,
+								instruction:
+									"Resolve active children before declaring completion. If the parent task is solved or their work is obsolete, cancel them now with agent_action interrupt. For work still needed, use wait_for_agents and inspect the results. Renew only justified long-running work; do not prolong a solved task.",
+							}),
+							display: false,
+						},
+						{ deliverAs: "steer" },
+					);
+					return "continue";
+				}
 			}
 			const delivery = await this._waitForSubagentCoordination(coordination);
 			if (delivery.reason === "cancellation") return "settled";
