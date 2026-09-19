@@ -42,6 +42,13 @@ const agentActionSchema = Type.Object(
 		}),
 		message: Type.Optional(Type.String({ description: "Message for the child agent", minLength: 1 })),
 		wake: Type.Optional(Type.Boolean({ default: false })),
+		delivery: Type.Optional(
+			Type.Union([Type.Literal("steer"), Type.Literal("follow_up")], {
+				description:
+					"steer corrects current work at the next tool boundary (default); follow_up waits until the current work finishes",
+				default: "steer",
+			}),
+		),
 	},
 	{ additionalProperties: false },
 );
@@ -69,7 +76,13 @@ const agentsSchema = Type.Object(
 );
 
 export type AgentActionRequest =
-	| { readonly target: string; readonly action: "message"; readonly message: string; readonly wake?: boolean }
+	| {
+			readonly target: string;
+			readonly action: "message";
+			readonly message: string;
+			readonly wake?: boolean;
+			readonly delivery?: "steer" | "follow_up";
+	  }
 	| { readonly target: string; readonly action: "interrupt" };
 
 export interface SpawnAgentDetails {
@@ -199,7 +212,7 @@ export function createAgentActionTool(
 			"Send a message to drive an existing child agent, optionally waking it to resume work, or interrupt its current work.",
 		promptSnippet: "Message, wake, or interrupt an existing child agent",
 		promptGuidelines: [
-			"Use to provide clarifications or corrections to a child agent. Set wake: true when the message should resume an idle child.",
+			"Messages steer current work at the next tool boundary by default. Set delivery: 'follow_up' only for new work that should wait until the child finishes. Set wake: true to resume an idle child; steering an idle child otherwise fails instead of silently queueing stale instructions.",
 			"Let child agents complete delegated work that is still needed. Interrupt only when the work is no longer needed, is proceeding in the wrong direction, or must stop because of a user request or material risk.",
 			"When waiting for needed child results, continue independent work or use wait_for_agents to wait. A wait timeout does not mean the child has failed and is not by itself a reason to interrupt it.",
 		],
@@ -211,11 +224,15 @@ export function createAgentActionTool(
 			}
 			let normalized: AgentActionRequest;
 			if (request.action === "interrupt") {
-				if ("message" in request || "wake" in request) {
+				if ("message" in request || "wake" in request || "delivery" in request) {
 					throw new Error("Interrupt actions do not accept message fields");
 				}
 				normalized = { target: request.target, action: request.action };
 			} else {
+				if (request.action !== "message") throw new Error(`Invalid subagent action: ${String(request.action)}`);
+				if (request.delivery !== undefined && request.delivery !== "steer" && request.delivery !== "follow_up") {
+					throw new Error("Invalid subagent message delivery");
+				}
 				const message = request.message;
 				if (message === undefined || message.trim().length === 0) {
 					throw new Error("Subagent message must be non-empty");
@@ -225,6 +242,7 @@ export function createAgentActionTool(
 					action: request.action,
 					message,
 					wake: request.wake ?? false,
+					delivery: request.delivery ?? "steer",
 				};
 			}
 

@@ -226,7 +226,7 @@ export class SubagentController {
 			createAgentActionTool((request) => {
 				const parent = this.#getBoundParent();
 				return request.action === "message"
-					? this.message(request.target, request.message, request.wake, parent.isStreaming)
+					? this.message(request.target, request.message, request.wake, parent.isStreaming, request.delivery)
 					: this.interrupt(request.target);
 			}),
 			createAgentsTool(async (options) => {
@@ -383,12 +383,18 @@ export class SubagentController {
 		this.#scheduleRun(record, task);
 	}
 
-	message(name: string, message: string, wake = false, coordinated = false): Promise<SubagentActionResult> {
+	message(
+		name: string,
+		message: string,
+		wake = false,
+		coordinated = false,
+		delivery: "steer" | "follow_up" = "steer",
+	): Promise<SubagentActionResult> {
 		if (message.trim().length === 0) {
 			return Promise.reject(new Error("Subagent message must be non-empty"));
 		}
 		return this.#serializeAction(name, () =>
-			this.#traceAction(name, "message", () => this.#message(name, message, wake, coordinated)),
+			this.#traceAction(name, "message", () => this.#message(name, message, wake, coordinated, delivery)),
 		);
 	}
 
@@ -1233,7 +1239,13 @@ export class SubagentController {
 		);
 	}
 
-	async #message(name: string, message: string, wake: boolean, coordinated: boolean): Promise<SubagentActionResult> {
+	async #message(
+		name: string,
+		message: string,
+		wake: boolean,
+		coordinated: boolean,
+		delivery: "steer" | "follow_up",
+	): Promise<SubagentActionResult> {
 		const record = this.#getRecordForAction(name);
 		while (record.status === "queued" && record.session) {
 			const snapshot = this.snapshot();
@@ -1293,11 +1305,12 @@ export class SubagentController {
 			throw new Error(`Subagent session is unavailable: ${name}`);
 		}
 		if (record.status === "idle") {
+			if (delivery === "steer") throw new Error(`Cannot steer idle subagent without wake: ${name}`);
 			await session.followUp(message);
 			return { target: name, action: "message", status: "idle", delivery: "follow_up" };
 		}
 
-		if (wake) {
+		if (delivery === "steer") {
 			await session.steer(message);
 			return { target: name, action: "message", status: "running", delivery: "steer" };
 		}
