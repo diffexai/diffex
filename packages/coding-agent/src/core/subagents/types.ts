@@ -8,7 +8,7 @@ export const SUBAGENT_NAME_PATTERN = /^[a-z][a-z0-9_-]{0,63}$/;
 export interface SubagentSupervisionOptions {
 	/** Renewable allowance per child run, including queueing. Default: 15 minutes. */
 	leaseMs?: number;
-	/** Runtime activity reports to the parent. Default: 60 seconds. */
+	/** Runtime activity reports to the parent. Default: 2 minutes. */
 	supervisionIntervalMs?: number;
 	/** Absolute parent deadline, in milliseconds since the Unix epoch. */
 	parentDeadline?: number;

@@ -89,11 +89,6 @@ interface Supervision {
 	deadline: number;
 	startedAt: number;
 	lastActivityAt: number;
-	responses: number;
-	tokens: number;
-	cost: number;
-	toolCalls: number;
-	activeTools: Map<string, string>;
 	leaseTimer?: ReturnType<typeof setTimeout>;
 	reportTimer?: ReturnType<typeof setInterval>;
 	checkpointRequested: boolean;
@@ -225,7 +220,7 @@ export class SubagentController {
 		}
 		this.#maxConcurrent = options.maxConcurrent;
 		this.#leaseMs = options.leaseMs ?? 15 * 60_000;
-		this.#supervisionIntervalMs = options.supervisionIntervalMs ?? 60_000;
+		this.#supervisionIntervalMs = options.supervisionIntervalMs ?? 120_000;
 		for (const [name, value] of [
 			["leaseMs", this.#leaseMs],
 			["supervisionIntervalMs", this.#supervisionIntervalMs],
@@ -501,14 +496,7 @@ export class SubagentController {
 					status: record.status,
 					elapsed_ms: now - supervision.startedAt,
 					inactive_ms: now - supervision.lastActivityAt,
-					model_responses: supervision.responses,
-					tokens: supervision.tokens,
-					cost_usd: supervision.cost,
-					tool_calls: supervision.toolCalls,
-					active_tools: [...supervision.activeTools.values()].slice(0, 8),
-					shell_groups: record.session?.ownedShellProcessCount ?? 0,
-					remaining_ms: remaining,
-				})}. Cancel obsolete work immediately. Renew only when remaining work is needed and progress justifies it.`,
+				})}`,
 			);
 			if (
 				!supervision.checkpointRequested &&
@@ -1491,11 +1479,6 @@ export class SubagentController {
 			deadline: Math.min(now + this.#leaseMs, this.#parentDeadline ?? Infinity),
 			startedAt: now,
 			lastActivityAt: now,
-			responses: 0,
-			tokens: 0,
-			cost: 0,
-			toolCalls: 0,
-			activeTools: new Map(),
 			checkpointRequested: false,
 			reporting: false,
 		};
@@ -1590,16 +1573,6 @@ export class SubagentController {
 						].includes(event.type)
 					)
 						supervision.lastActivityAt = Date.now();
-					if (event.type === "tool_execution_start") {
-						supervision.toolCalls++;
-						supervision.activeTools.set(event.toolCallId, event.toolName);
-					}
-					if (event.type === "tool_execution_end") supervision.activeTools.delete(event.toolCallId);
-					if (event.type === "message_end" && event.message.role === "assistant") {
-						supervision.responses++;
-						supervision.tokens += event.message.usage.totalTokens;
-						supervision.cost += event.message.usage.cost.total;
-					}
 				}
 				if (event.type === "agent_start" && !running) {
 					running = true;
