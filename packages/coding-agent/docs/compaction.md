@@ -36,6 +36,12 @@ By default, `reserveTokens` is 16384 tokens (configurable in `~/.diffex/agent/se
 
 You can also trigger manually with `/compact [instructions]`, where optional instructions focus the summary.
 
+### Current Context Accounting
+
+Pre-prompt and post-answer checks and the context display share one estimate of the normal model-visible context. It includes system instructions, tool definitions, images, summaries, custom messages, and included bash output. Request-only extension transforms are not rerun to calculate it.
+
+Provider usage is used only when an in-memory request baseline still matches the selected branch, model configuration, system prompt, tools, and preceding messages. Later messages are estimated locally; system instructions and tools already covered by usage are not added again. After compaction, retained older responses cannot supply usage, regardless of their timestamps. Loaded sessions and changed contexts without a matching baseline use local estimates until an applicable response arrives. Session token and cost totals still include all billed history.
+
 ### How It Works
 
 1. **Find cut point**: Walk backwards from newest message, accumulating token estimates until `keepRecentTokens` (default 20k, configurable in `~/.diffex/agent/settings.json` or `<project-dir>/.diffex/settings.json`) is reached

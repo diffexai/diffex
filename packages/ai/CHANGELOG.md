@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Exported the existing `calculateContextTokens`, `estimateMessageTokens`, and `estimateTextTokens` primitives for shared context accounting.
+
 ## [0.2.7] - 2026-09-18
 
 ## [0.2.6] - 2026-09-18

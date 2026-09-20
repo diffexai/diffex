@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Unified pre-prompt, post-answer, and displayed context estimates, using local estimates when provider usage no longer applies after compaction or context changes.
+
 ## [0.2.7] - 2026-09-18
 
 ### Fixed

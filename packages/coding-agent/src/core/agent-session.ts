@@ -17,6 +17,7 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { basename, dirname } from "node:path";
 import {
 	type Agent,
+	type AgentContext,
 	type AgentEvent,
 	type AgentMessage,
 	type AgentState,
@@ -77,11 +78,8 @@ import {
 } from "./collaboration-mode.ts";
 import {
 	type CompactionResult,
-	calculateContextTokens,
 	collectEntriesForBranchSummary,
 	compact,
-	estimateContextTokens,
-	estimateTokens,
 	generateBranchSummary,
 	prepareCompaction,
 	shouldCompact,
@@ -123,6 +121,7 @@ import { ModelRegistry } from "./model-registry.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.ts";
 import type { ResourceExtensionPaths, ResourceLoader } from "./resource-loader.ts";
+import { SessionContextEstimator } from "./session-context-estimator.ts";
 import type {
 	BranchSummaryEntry,
 	CompactionAppendTransaction,
@@ -441,14 +440,6 @@ interface CollaborationModeState {
 	readonly tools: AgentTool[];
 }
 
-function estimateMessagesTokens(messages: AgentMessage[]): number {
-	let tokens = 0;
-	for (const message of messages) {
-		tokens += estimateTokens(message);
-	}
-	return tokens;
-}
-
 // ============================================================================
 // Constants
 // ============================================================================
@@ -614,6 +605,7 @@ export class AgentSession {
 		this._installAgentToolHooks();
 		this._installAgentContextRestoration();
 		this._installAgentNextTurnRefresh();
+		this._installAgentRequestAccounting();
 
 		this._buildRuntime({
 			activeToolNames: this._initialActiveToolNames,
@@ -793,6 +785,25 @@ export class AgentSession {
 		};
 	}
 
+	private readonly _contextEstimator = new SessionContextEstimator();
+
+	private _installAgentRequestAccounting(): void {
+		const previousPrepareRequest = this.agent.prepareRequest;
+		this.agent.prepareRequest = async (context, signal) => {
+			const modelBefore = JSON.stringify(this.model);
+			const replacement = await previousPrepareRequest?.(context, signal);
+			// A hook can change public state after the loop selected its request model.
+			// In that case the response cannot prove the new configuration's usage.
+			const model = modelBefore === JSON.stringify(this.model) ? this.model : undefined;
+			this._contextEstimator.capture(replacement ?? context, model);
+			return replacement;
+		};
+	}
+
+	private _estimateCurrentContext(context: AgentContext = this.agent.state): number {
+		return this._contextEstimator.estimate(context, this.model, this.sessionManager.getBranch());
+	}
+
 	private _installAgentNextTurnRefresh(): void {
 		const previousPrepareNextTurnWithContext =
 			this.agent.prepareNextTurnWithContext ??
@@ -968,6 +979,10 @@ export class AgentSession {
 					}
 				}
 			}
+		}
+
+		if (event.type === "message_end" && event.message.role === "assistant") {
+			this._contextEstimator.complete(event.message);
 		}
 
 		// Emit to extensions first
@@ -2451,12 +2466,10 @@ export class AgentSession {
 			// Check if we need to compact before sending (catches aborted responses).
 			// The user's new prompt is sent below, so do not call agent.continue() here.
 			const lastAssistant = this._findLastAssistantMessage();
-			if (lastAssistant) {
-				await this._checkCompaction(lastAssistant, false, signal, (transaction) => {
-					pendingCompaction = transaction;
-				});
-				signal?.throwIfAborted();
-			}
+			await this._checkCompaction(lastAssistant, false, signal, (transaction) => {
+				pendingCompaction = transaction;
+			});
+			signal?.throwIfAborted();
 
 			// Build messages array (custom message if any, then user message)
 			messages = [];
@@ -3451,7 +3464,7 @@ export class AgentSession {
 		);
 		const sessionContext = this.sessionManager.buildSessionContext();
 		this.agent.state.messages = sessionContext.messages;
-		const estimatedTokensAfter = estimateMessagesTokens(sessionContext.messages);
+		const estimatedTokensAfter = this._estimateCurrentContext();
 
 		if (this._extensionRunner) {
 			try {
@@ -3505,7 +3518,7 @@ export class AgentSession {
 	 * @param skipAbortedCheck If false, include aborted messages (for pre-prompt check). Default: true
 	 */
 	private async _checkCompaction(
-		assistantMessage: AssistantMessage,
+		assistantMessage: AssistantMessage | undefined,
 		skipAbortedCheck = true,
 		signal?: AbortSignal,
 		deferCommit?: (transaction: CompactionAppendTransaction) => void,
@@ -3514,7 +3527,7 @@ export class AgentSession {
 		if (!settings.enabled) return false;
 
 		// Skip if message was aborted (user cancelled) - unless skipAbortedCheck is false
-		if (skipAbortedCheck && assistantMessage.stopReason === "aborted") return false;
+		if (skipAbortedCheck && assistantMessage?.stopReason === "aborted") return false;
 
 		const contextWindow = this.model?.contextWindow ?? 0;
 
@@ -3523,17 +3536,16 @@ export class AgentSession {
 		// to a larger-context model (e.g. codex) - the overflow error from the old model
 		// shouldn't trigger compaction for the new model.
 		const sameModel =
-			this.model && assistantMessage.provider === this.model.provider && assistantMessage.model === this.model.id;
+			this.model &&
+			assistantMessage &&
+			assistantMessage.provider === this.model.provider &&
+			assistantMessage.model === this.model.id;
 
-		// Skip compaction checks if this assistant message is older than the latest
-		// compaction boundary. This prevents a stale pre-compaction usage/error
-		// from retriggering compaction on the first prompt after compaction.
-		const compactionEntry = getLatestCompactionEntry(this.sessionManager.getBranch());
-		const assistantIsFromBeforeCompaction =
-			compactionEntry !== null && assistantMessage.timestamp <= new Date(compactionEntry.timestamp).getTime();
-		if (assistantIsFromBeforeCompaction) {
-			return false;
-		}
+		const branch = this.sessionManager.getBranch();
+		const compactionEntry = getLatestCompactionEntry(branch);
+		const responseIndex = branch.findIndex((entry) => entry.type === "message" && entry.message === assistantMessage);
+		const responseAfterCompaction = !compactionEntry || responseIndex > branch.indexOf(compactionEntry);
+		const contextTokens = this._estimateCurrentContext();
 
 		// Case 1: Recoverable failure. Explicit/silent context overflow still uses context metadata.
 		// A length stop is recoverable when output ended below the model's original desired limit,
@@ -3541,7 +3553,13 @@ export class AgentSession {
 		// A successful response over the configured window should compact but must not retry: the
 		// assistant answer already completed and agent.continue() cannot continue from an assistant.
 		const recoverableLength = sameModel && isRecoverableLength(assistantMessage, this.model?.maxTokens ?? 0);
-		if (sameModel && (isContextOverflow(assistantMessage, contextWindow) || recoverableLength)) {
+		if (
+			sameModel &&
+			responseAfterCompaction &&
+			(assistantMessage.stopReason === "stop"
+				? contextWindow > 0 && contextTokens > contextWindow
+				: isContextOverflow(assistantMessage, contextWindow) || recoverableLength)
+		) {
 			const willRetry = assistantMessage.stopReason !== "stop";
 
 			if (!willRetry) {
@@ -3571,35 +3589,11 @@ export class AgentSession {
 			return await this._runAutoCompaction("overflow", willRetry, signal, deferCommit);
 		}
 
-		// Case 2: Threshold - context is getting large
-		// For error messages or all-zero usage messages, estimate from the last valid response.
-		// This ensures sessions that hit persistent API errors (e.g. 529) or malformed zero-usage
-		// responses can still compact and do not reset context accounting.
-		let contextTokens: number;
-		const directContextTokens = assistantMessage.usage ? calculateContextTokens(assistantMessage.usage) : 0;
-		if (assistantMessage.stopReason === "error" || directContextTokens === 0) {
-			const messages = this.agent.state.messages;
-			const estimate = estimateContextTokens(messages);
-			if (estimate.lastUsageIndex === null) return false; // No usage data at all
-			// Verify the usage source is post-compaction. Kept pre-compaction messages
-			// have stale usage reflecting the old (larger) context and would falsely
-			// trigger compaction right after one just finished.
-			const usageMsg = messages[estimate.lastUsageIndex];
-			if (
-				compactionEntry &&
-				usageMsg.role === "assistant" &&
-				(usageMsg as AssistantMessage).timestamp <= new Date(compactionEntry.timestamp).getTime()
-			) {
-				return false;
-			}
-			contextTokens = estimate.tokens;
-		} else {
-			contextTokens = directContextTokens;
-		}
-		if (shouldCompact(contextTokens, contextWindow, settings)) {
+		// Case 2: Threshold uses the same normal-context estimate as the footer and preflight.
+		if (contextWindow > 0 && shouldCompact(contextTokens, contextWindow, settings)) {
 			const queuedContinuation = await this._runAutoCompaction("threshold", false, signal, deferCommit);
 			// Threshold compaction does not recover a provider failure.
-			return assistantMessage.stopReason !== "error" && queuedContinuation;
+			return assistantMessage?.stopReason !== "error" && queuedContinuation;
 		}
 		return false;
 	}
@@ -4826,40 +4820,11 @@ export class AgentSession {
 		const contextWindow = model.contextWindow ?? 0;
 		if (contextWindow <= 0) return undefined;
 
-		// After compaction, the last assistant usage reflects pre-compaction context size.
-		// We can only trust usage from an assistant that responded after the latest compaction.
-		// If no such assistant exists, context token count is unknown until the next LLM response.
-		const branchEntries = this.sessionManager.getBranch();
-		const latestCompaction = getLatestCompactionEntry(branchEntries);
-
-		if (latestCompaction) {
-			// Check if there's a valid assistant usage after the compaction boundary
-			const compactionIndex = branchEntries.lastIndexOf(latestCompaction);
-			let hasPostCompactionUsage = false;
-			for (let i = branchEntries.length - 1; i > compactionIndex; i--) {
-				const entry = branchEntries[i];
-				if (entry.type === "message" && entry.message.role === "assistant") {
-					const assistant = entry.message;
-					if (assistant.stopReason !== "aborted" && assistant.stopReason !== "error") {
-						const contextTokens = calculateContextTokens(assistant.usage);
-						if (contextTokens > 0) {
-							hasPostCompactionUsage = true;
-							break;
-						}
-					}
-				}
-			}
-
-			if (!hasPostCompactionUsage) {
-				return { tokens: null, contextWindow, percent: null };
-			}
-		}
-
-		const estimate = estimateContextTokens(this.messages);
-		const percent = (estimate.tokens / contextWindow) * 100;
+		const tokens = this._estimateCurrentContext();
+		const percent = (tokens / contextWindow) * 100;
 
 		return {
-			tokens: estimate.tokens,
+			tokens,
 			contextWindow,
 			percent,
 		};

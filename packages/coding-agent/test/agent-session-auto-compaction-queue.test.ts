@@ -289,13 +289,19 @@ describe("AgentSession auto-compaction queue resume", () => {
 			timestamp: Date.now() + 1000,
 		};
 
-		// Put both messages into agent state so estimateContextTokens can find the successful one
-		session.agent.state.messages = [
-			{ role: "user", content: [{ type: "text", text: "hello" }], timestamp: Date.now() - 1000 },
-			successfulAssistant,
+		// Establish the successful response's actual request baseline before checking the error.
+		settingsManager.applyOverrides({ compaction: { enabled: false } });
+		session.agent.streamFunction = () => {
+			const stream = createAssistantMessageEventStream();
+			queueMicrotask(() => stream.push({ type: "done", reason: "stop", message: successfulAssistant }));
+			return stream;
+		};
+		await session.prompt("hello");
+		settingsManager.applyOverrides({ compaction: { enabled: true } });
+		session.agent.state.messages.push(
 			{ role: "user", content: [{ type: "text", text: "another prompt" }], timestamp: Date.now() + 500 },
 			errorAssistant,
-		];
+		);
 
 		const runAutoCompactionSpy = vi
 			.spyOn(

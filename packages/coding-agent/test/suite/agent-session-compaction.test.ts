@@ -5,7 +5,6 @@ import {
 	type Model,
 } from "@diffexai/diffex-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { estimateTokens } from "../../src/core/compaction/index.ts";
 import { createHarness, getUserTexts, type Harness } from "./harness.ts";
 
 type SessionWithCompactionInternals = {
@@ -129,7 +128,7 @@ describe("AgentSession compaction characterization", () => {
 
 		const result = await harness.session.compact();
 		const compactionEntries = harness.sessionManager.getEntries().filter((entry) => entry.type === "compaction");
-		const estimatedTokensAfter = harness.session.messages.reduce((sum, message) => sum + estimateTokens(message), 0);
+		const estimatedTokensAfter = harness.session.getContextUsage()?.tokens;
 
 		expect(result.summary).toBe("summary from extension");
 		expect(result.usage).toEqual(summaryUsage);
@@ -304,12 +303,14 @@ describe("AgentSession compaction characterization", () => {
 		await harness.session.prompt("x".repeat(5000));
 
 		expect(harness.faux.state.callCount).toBe(2);
-		expect(harness.eventsOfType("compaction_end").at(-1)).toMatchObject({
+		expect(harness.eventsOfType("compaction_end")[0]).toMatchObject({
 			reason: "overflow",
 			aborted: false,
 			willRetry: true,
 		});
 		expect(harness.session.getLastAssistantText()).toBe("completed response");
+		// The completed answer also exceeds this tiny window, but never adds a retry.
+		expect(harness.eventsOfType("compaction_end").at(-1)).toMatchObject({ willRetry: false });
 	});
 
 	it("does not compact when a length stop reaches the desired output limit", async () => {
@@ -445,7 +446,7 @@ describe("AgentSession compaction characterization", () => {
 
 	it("keeps a provider error terminal when threshold compaction queues a report", async () => {
 		const harness = await createHarness({
-			models: [{ id: "faux-1", contextWindow: 1000 }],
+			models: [{ id: "faux-1", contextWindow: 10000 }],
 			settings: { retry: { enabled: false }, compaction: { keepRecentTokens: 1, reserveTokens: 0 } },
 			extensionFactories: [
 				(pi) => {
@@ -474,7 +475,7 @@ describe("AgentSession compaction characterization", () => {
 		});
 		harness.setResponses([
 			() => {
-				harness.settingsManager.applyOverrides({ compaction: { reserveTokens: 999 } });
+				harness.settingsManager.applyOverrides({ compaction: { reserveTokens: 9999 } });
 				return fauxAssistantMessage("", { stopReason: "error", errorMessage: "invalid_api_key" });
 			},
 			fauxAssistantMessage("unexpected continuation"),
@@ -636,26 +637,14 @@ describe("AgentSession compaction characterization", () => {
 	});
 
 	it("triggers threshold compaction for error messages using the last successful usage", async () => {
-		const harness = await createHarness();
+		const harness = await createHarness({ settings: { compaction: { enabled: false } } });
 		harnesses.push(harness);
+		harness.setResponses([fauxAssistantMessage("answer")]);
+		await harness.session.prompt("x".repeat(800_000));
+		harness.settingsManager.applyOverrides({ compaction: { enabled: true } });
+		const errorAssistant = createAssistant(harness, { stopReason: "error", errorMessage: "529 overloaded" });
+		harness.session.agent.state.messages.push(errorAssistant);
 		const sessionInternals = harness.session as unknown as SessionWithCompactionInternals;
-		const successfulAssistant = createAssistant(harness, {
-			stopReason: "stop",
-			totalTokens: 190_000,
-			timestamp: Date.now(),
-		});
-		const errorAssistant = createAssistant(harness, {
-			stopReason: "error",
-			errorMessage: "529 overloaded",
-			timestamp: Date.now() + 1000,
-		});
-		harness.session.agent.state.messages = [
-			{ role: "user", content: [{ type: "text", text: "hello" }], timestamp: Date.now() - 1000 },
-			successfulAssistant,
-			{ role: "user", content: [{ type: "text", text: "retry" }], timestamp: Date.now() + 500 },
-			errorAssistant,
-		];
-
 		const runAutoCompactionSpy = vi.spyOn(sessionInternals, "_runAutoCompaction").mockResolvedValue(false);
 
 		await sessionInternals._checkCompaction(errorAssistant);

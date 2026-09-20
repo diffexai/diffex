@@ -1,4 +1,5 @@
 import { Agent } from "@diffexai/diffex-agent-core";
+import { estimateMessageTokens, estimateTextTokens } from "@diffexai/diffex-ai";
 import {
 	type AssistantMessage,
 	getModel,
@@ -9,6 +10,7 @@ import {
 import { describe, expect, it } from "vitest";
 import { AgentSession } from "../src/core/agent-session.ts";
 import { AuthStorage } from "../src/core/auth-storage.ts";
+import { convertToLlm } from "../src/core/messages.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
 import { SettingsManager } from "../src/core/settings-manager.ts";
 import { getUsageCostBreakdown } from "../src/core/usage-totals.ts";
@@ -97,6 +99,17 @@ function syncAgentMessages(session: AgentSession, sessionManager: SessionManager
 	session.agent.state.messages = sessionManager.buildSessionContext().messages;
 }
 
+function localTokens(session: AgentSession): number {
+	const { messages, systemPrompt, tools } = session.agent.state;
+	return (
+		convertToLlm(messages).reduce((sum, message) => sum + estimateMessageTokens(message), 0) +
+		estimateTextTokens(systemPrompt) +
+		estimateTextTokens(
+			JSON.stringify(tools.map(({ name, description, parameters }) => ({ name, description, parameters }))),
+		)
+	);
+}
+
 describe("AgentSession.getSessionStats", () => {
 	it("exposes the current context usage alongside token totals", async () => {
 		const { session, sessionManager } = await createSession();
@@ -108,15 +121,16 @@ describe("AgentSession.getSessionStats", () => {
 
 			const stats = session.getSessionStats();
 			expect(stats.contextUsage).toEqual(session.getContextUsage());
-			expect(stats.contextUsage?.tokens).toBe(200);
+			expect(stats.contextUsage?.tokens).toBe(localTokens(session));
+			expect(stats.tokens.input).toBe(200);
 			expect(stats.contextUsage?.contextWindow).toBe(model.contextWindow);
-			expect(stats.contextUsage?.percent).toBe((200 / model.contextWindow) * 100);
+			expect(stats.contextUsage?.percent).toBe((localTokens(session) / model.contextWindow) * 100);
 		} finally {
 			await session.dispose();
 		}
 	});
 
-	it("reports unknown current context usage immediately after compaction", async () => {
+	it("estimates current context locally immediately after compaction", async () => {
 		const { session, sessionManager } = await createSession();
 
 		try {
@@ -132,14 +146,14 @@ describe("AgentSession.getSessionStats", () => {
 			// Totals cover ALL entries, including history compacted away (180k + 195k).
 			expect(stats.tokens.input).toBe(375_000);
 			expect(stats.contextUsage).toBeDefined();
-			expect(stats.contextUsage?.tokens).toBeNull();
-			expect(stats.contextUsage?.percent).toBeNull();
+			expect(stats.contextUsage?.tokens).toBe(localTokens(session));
+			expect(stats.contextUsage?.percent).toBe((localTokens(session) / model.contextWindow) * 100);
 		} finally {
 			await session.dispose();
 		}
 	});
 
-	it("uses post-compaction usage for current context instead of stale kept usage", async () => {
+	it("estimates unverified post-compaction context while retaining billing totals", async () => {
 		const { session, sessionManager } = await createSession();
 
 		try {
@@ -156,8 +170,8 @@ describe("AgentSession.getSessionStats", () => {
 			// Totals cover ALL entries, including history compacted away (180k + 195k + 25k).
 			expect(stats.tokens.input).toBe(400_000);
 			expect(stats.contextUsage).toBeDefined();
-			expect(stats.contextUsage?.tokens).toBe(25_000);
-			expect(stats.contextUsage?.percent).toBe((25_000 / model.contextWindow) * 100);
+			expect(stats.contextUsage?.tokens).toBe(localTokens(session));
+			expect(stats.contextUsage?.percent).toBe((localTokens(session) / model.contextWindow) * 100);
 		} finally {
 			await session.dispose();
 		}
@@ -275,7 +289,7 @@ describe("AgentSession.getSessionStats", () => {
 			const stats = session.getSessionStats();
 			expect(stats.contextUsage).toBeDefined();
 			expect(stats.contextUsage?.tokens).not.toBeNull();
-			expect(stats.contextUsage?.tokens ?? 0).toBeGreaterThan(25_000);
+			expect(stats.contextUsage?.tokens).toBe(localTokens(session));
 		} finally {
 			await session.dispose();
 		}
