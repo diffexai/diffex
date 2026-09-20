@@ -7,6 +7,9 @@ ATIF export and usage accounting run after evidence recovery, including interrup
 The [staged benchmark release gate](RELEASE_GATE.md) pins dataset inputs and verifies retained evidence before larger Daytona runs.
 Use the [offline job exporter](RELEASE_GATE.md#export-retained-trials-for-harbor-hub) to package existing stage results for Harbor Hub without rerunning evaluations.
 This integration is not yet ready for leaderboard runs.
+The adapter now requires a release with `--background-process-lifetime` and `--background-process-ownership-dir` support.
+The checked-in Diffex 0.3.0 pin predates these flags; installation deliberately fails its capability check until a corrected release and integrity are published and pinned.
+Source-only lifecycle tests do not qualify the installed release or a live benchmark trial.
 
 ## Host setup
 
@@ -121,13 +124,42 @@ Generated evidence is retained under `results/diffex-execution-*/`.
 Each execution smoke validates ATIF with Harbor's validator and reconciles nonzero input, output, cached-token, and cost totals against every root and child response.
 The outcome smoke exercises success, authentication failure, exhausted retry, recovered retry, interrupted JSON output, and a Harbor-style execution timeout as both root and a non-root user.
 It uses the pinned npm release with a loopback provider and checks nonzero terminal-error exits and rejection of truncated output even when the process exits zero.
-Success and timeout cases create a detached tool descendant that ignores TERM, then verify that cleanup stops it before the next trial.
+Success, provider-failure, forced-CLI-death, and timeout cases create a TERM-resistant background service and verify that its PID and start time are unchanged across adapter cleanup.
+The verifier phase queries that same service and checks that the launcher, CLI, and provider requests have stopped.
+The Linux cleanup regression independently creates a detached service with durable handoff evidence, and covers PID reuse, delayed launch, malformed records, and TERM-resistant active work.
 Evidence is retained under `results/diffex-outcomes-*/`, including partial stdout, stderr, native sessions, process status, cleanup, and outcomes.
 The outcome smoke also validates recoverable ATIF steps and checks that interrupted runs report incomplete accounting.
 The packaging check packs every public npm workspace into temporary tarballs with lifecycle scripts disabled, inspects their contents for benchmark paths, and records file counts and SHA-256 hashes in `results/production-contents.json`.
 It requires existing production build output, including `packages/coding-agent/dist/cli.js`, and fails if that CLI entrypoint is missing.
 It does not build, publish, or regenerate release artifacts.
 Run `npm run check` from the repository root after changing code.
+
+### Source lifecycle validation
+
+Until the corrected release is published, build the development-only image from the repository root:
+
+```bash
+docker build --platform linux/arm64 -f evals/terminal-bench/tests/fixtures/Dockerfile.source -t diffex-adapter-tests:arm64 .
+cd evals/terminal-bench
+uv run --locked python scripts/smoke_outcomes.py --platform linux/arm64 --source-image diffex-adapter-tests:arm64
+uv run --locked python scripts/smoke_outcomes.py --platform linux/arm64 --source-image diffex-adapter-tests:arm64 --grpc-fixture
+docker run --rm --init --user 65534:65534 -v "$PWD:/eval:ro" diffex-adapter-tests:arm64 node --test /eval/tests/cleanup.test.cjs
+```
+
+Repeat with `linux/amd64` and an `amd64` image tag for emulated coverage on an arm64 host.
+Run the cleanup regression without `--user` for root coverage.
+The development image installs dependencies without lifecycle scripts and runs the source CLI through `tsx`.
+The gRPC fixture uses a known-correct implementation and all seven unmodified verifier tests extracted from the SHA-256-verified dataset archive.
+It checks the original process identity before and after verifier RPCs and confirms container deletion afterward.
+Every development smoke report is marked `qualification: source-only`.
+After publication, update `pins.toml`, rerun both pinned-release Linux smokes, and start a fresh live benchmark trial before declaring integration qualification complete.
+
+On 2026-09-20, source-only validation passed 16 controlled outcome cases on each architecture, including root and UID 65534 execution.
+Both architectures also passed all seven pinned gRPC verifier tests with unchanged service identity and confirmed container deletion.
+The Linux cleanup suite passed seven deterministic cases, including forced death before CLI identity publication, and all 142 Python tests and `npm run check` passed.
+The retained outcome reports are `results/diffex-outcomes-8dab466d6f5c/smoke.json` (arm64) and `results/diffex-outcomes-284ee6f0c224/smoke.json` (amd64).
+The gRPC reports are `results/diffex-outcomes-8d83db9627fb/smoke.json` (arm64) and `results/diffex-outcomes-da1f6f5534a3/smoke.json` (amd64).
+These local source checks leave pinned-release smokes and a fresh live benchmark trial pending.
 
 ### Recorded validation
 
@@ -270,7 +302,9 @@ Each run directory retains:
 - `effective.json`: resolved model, thinking, tools, working directory, session path, prompt hashes, and release-context verification.
 - `system-prompt.txt`: the effective system prompt, including release and task context.
 - `stdout.jsonl`, `stderr.log`, and `process.json`: native JSON events, diagnostics, and process status.
-- `launcher.json` and `cleanup.json`: launcher process identity and verified cleanup status.
+- `launcher.json` and `cli.json`: launcher and root CLI PID/start-time identities.
+- `ownership/*.json`: durable shell ownership records published by the CLI.
+- `stop-requested` and `cleanup.json`: the launch barrier, verified control shutdown, and explicitly retained environment-owned processes.
 - `launcher.stdout.log` and `launcher.stderr.log`: launcher diagnostics, including failures before CLI startup.
 - `outcome.json`: execution classification, stream completeness, final assistant stop reason, retry counts, interruption state, and recovery errors.
 - `accounting.json`: observed usage, nullable totals, per-model observations, and reasons accounting is incomplete.
@@ -283,7 +317,8 @@ Provider usage fields in `AgentContext` contain reconciled sums of recorded usag
 
 ### Execution outcomes and interruption recovery
 
-A completed execution requires zero CLI and launcher exit codes, no terminating signal or spawn error, matching effective configuration, and verified cleanup.
+A completed execution requires zero CLI and launcher exit codes, no terminating signal or spawn error, matching effective configuration, and verified cessation of agent execution.
+Environment-owned services may remain alive for shared-environment verification.
 The parser reads JSONL incrementally and requires matching assistant messages, a final `stop` response, closed message/run boundaries, resolved retries, and the native `agent_settled` event.
 Malformed or truncated lines, missing completion events, pending tool use, token-limit termination, and unresolved retries cannot count as completed runs.
 Earlier provider errors are recoverable when retry events and the subsequent terminal assistant state establish success.
@@ -297,7 +332,8 @@ Tool errors alone do not fail execution: the assistant can inspect and recover f
 | Nonzero process, signal, or spawn error | `process_failure` | Raise `DiffexExecutionError` |
 | Missing, truncated, or unfinished native stream | `incomplete` | Raise `DiffexExecutionError` |
 | Effective configuration mismatch | `configuration_failure` | Raise `DiffexExecutionError` |
-| Unverified cleanup or failed evidence collection | `cleanup_failure` / `infrastructure_failure` | Raise `DiffexExecutionError` |
+| Unverified agent shutdown or missing shutdown evidence | `cleanup_failure` / `infrastructure_failure` | Raise `DiffexControlStopError`; block verification |
+| Failed evidence collection with verified shutdown | `infrastructure_failure` | Raise `DiffexExecutionError` |
 | Harbor task deadline cancels `run()` | `cancelled` | Preserve cancellation; Harbor raises `AgentTimeoutError` |
 | Environment transport timeout or failure | `timeout` / `transport_failure` | Preserve the original exception |
 
@@ -308,13 +344,23 @@ The pinned `0.3.0` release returns nonzero for terminal assistant errors and abo
 The adapter also parses native events to classify provider failures and reject incomplete output independently of process exit status.
 
 The launcher writes stdout and stderr directly to files and retains native sessions during execution.
-On success, failure, or cancellation, an independent Harbor exec requests launcher shutdown, stops the CLI process group, and scans Linux `/proc` for same-user descendants carrying the trial's unique environment marker.
-Process start times protect against signaling a reused PID.
-Cleanup escalates from TERM to KILL after five seconds, waits up to two more seconds, and records whether any live tracked processes remain.
+On success, failure, or cancellation, an independent Harbor exec writes the stop barrier and signals identified launcher and CLI processes individually.
+A private pipe prevents CLI startup until the launcher has recorded its PID and start time; launcher death before publication closes the pipe without starting agent execution.
+No launcher process-group signal can include a retained service.
+After control processes exit, cleanup reads durable ownership records and scans Linux `/proc` for trial-marked processes and identified shell groups.
+Linux boot ID, PID, start time, process group, and shell execution tokens distinguish transferred groups from reused process IDs.
+Environment-owned groups survive; active or otherwise untransferred work receives TERM, escalating to KILL within a seven-second recovery budget.
+Control escalation begins after three seconds, reserving time for active descendants; active-work escalation begins after five seconds.
 Already exited zombies cannot execute and are left for sandbox init to reap.
-A stop-request file prevents delayed launch after transport cancellation.
-Task commands must preserve the inherited trial environment marker for detached descendants to remain discoverable.
-Harbor must still delete the sandbox after the trial for complete environment isolation.
+The report records `agent_execution_stopped`, `ownership_validated`, `remaining_agent_pids`, control identities, retained service identities, and the consumed ownership records.
+Outcome parsing and gate validation reconcile these records with retained files.
+`cleanup_confirmed` in the outcome means pre-verifier agent shutdown, not an empty sandbox.
+Missing, malformed, contradictory, or unverified shutdown evidence raises `DiffexControlStopError`, which is outside Harbor's verifier-eligible timeout and nonzero-exit exceptions.
+This exception overrides a pending cancellation while retaining its interrupted outcome in the evidence.
+Verified shutdown preserves Harbor's existing verification behavior for deadlines and nonzero agent exits without changing their failed classifications.
+Task commands must preserve the inherited trial marker or remain in an identified shell group for unfinished descendants to remain discoverable.
+Harbor stops the shared environment after verification, including verifier failure or timeout recovery; separate-environment verification keeps Harbor's artifact-based lifecycle.
+The benchmark runner independently confirms sandbox deletion after every trial, including abandonment and transport failures.
 
 Recovery is shielded against repeated cancellation and runs before `run()` returns or re-raises the interruption.
 It allows up to 15 seconds for the cleanup transport and 15 seconds for mounted-log preparation or 30 seconds for remote log download.

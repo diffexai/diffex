@@ -13,3 +13,4 @@ agents:
       tools: read,bash,edit,write,update_plan
       subagents: enabled
       project_resources: context-only
+      background_process_lifetime: environment

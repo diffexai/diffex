@@ -2,7 +2,8 @@
 
 This gate qualifies a specific Diffex adapter, dataset, model, and harness configuration for a larger benchmark run.
 It does not publish a product release or submit a leaderboard entry.
-The implementation supports all qualification stages; live Diffex qualification remains pending a model-provider credential.
+The implementation supports all qualification stages; live Diffex qualification requires provider credentials and a published release with environment-owned process support.
+The checked-in Diffex 0.3.0 pin lacks that support and deliberately fails installation capability validation until a corrected release and integrity are pinned.
 
 ## Configuration and prerequisites
 
@@ -102,7 +103,8 @@ The Harbor authentication and upload commands below also apply to the exported s
 
 The adapter runs from the local uv project, and a newly started command reads the current Python source and `benchmark.toml`.
 An already running command keeps its loaded code and policy; let it finish or interrupt it once with Ctrl-C and wait for cleanup before restarting.
-No Diffex npm release or product rebuild is needed for these runner and policy changes; new sandboxes install the existing pinned release with the updated tool allowlist.
+The environment-owned process policy requires a corrected Diffex npm release and a reviewed pin update before new sandboxes can qualify.
+Development source images exercise the lifecycle without qualifying the installed release.
 
 After updating the checkout, run the following in your Mac's zsh terminal with `DAYTONA_API_KEY` and `OPENAI_API_KEY` exported.
 `git status --short` must produce no output.
@@ -245,6 +247,12 @@ Diffex installation evidence includes the three CLI checks and verified npm/Node
 The oracle does not install Diffex or call a model, so its Diffex installation, model usage, and ATIF checks are not applicable.
 
 The gate re-parses native process/stream evidence instead of trusting the outcome summary alone.
+The execution policy includes `background_process_lifetime: environment` in the requested/effective configuration and benchmark identity.
+Pre-verifier evidence must establish that all agent execution stopped, with every retained task service backed by a durable environment ownership record.
+The gate reconciles control identities, ownership files, cleanup reports, outcome summaries, and trajectory metadata.
+Retained services do not count as cleanup failures, and verifier reward cannot convert a deadline or provider failure into completed execution.
+An unverified control stop raises `DiffexControlStopError` and prevents Harbor from entering verification.
+Final cleanup remains Harbor's environment stop followed by independent sandbox-deletion confirmation.
 It regenerates ATIF into a temporary directory, validates it with Harbor, and compares it with retained trajectories and image attachments.
 Native totals, per-model totals, `accounting.json`, and `AgentContext` must reconcile.
 Unknown telemetry remains unknown and cannot satisfy complete accounting.
