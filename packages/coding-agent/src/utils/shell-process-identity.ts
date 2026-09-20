@@ -6,7 +6,7 @@ export const SHELL_EXECUTION_ID_ENV = "DIFFEX_SHELL_EXECUTION_ID";
 export interface ShellProcessIdentity {
 	readonly pid: number;
 	readonly processGroupId: number;
-	/** Linux boot ID and start ticks, or macOS ps lstart in the C locale. */
+	/** Linux boot ID and start ticks, or macOS ps lstart in UTC and the C locale. */
 	readonly startTime: string;
 }
 
@@ -35,7 +35,7 @@ export function readShellProcessGroup(processGroupId: number): ShellProcessIdent
 	const result = spawnSync("ps", ["-axo", "pid=,pgid=,stat=,lstart="], {
 		encoding: "utf8",
 		timeout: 1_000,
-		env: { ...process.env, LC_ALL: "C" },
+		env: { ...process.env, LC_ALL: "C", TZ: "UTC" },
 	});
 	if (result.status !== 0) throw new Error("Cannot inspect shell process groups", { cause: result.error });
 	return result.stdout.split("\n").flatMap((line) => {

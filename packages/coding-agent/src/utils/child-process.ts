@@ -45,6 +45,8 @@ export function spawnProcessSync(
  * the grace timer is re-armed on every chunk, so an actively writing descendant keeps
  * us reading, while a quiet inherited handle (e.g. a Windows daemonized descendant
  * that never lets `close` fire) still releases us after the grace elapses.
+ * Callers handing background jobs to an environment can explicitly bound draining
+ * with maxPostExitMs so ongoing service output cannot block session disposal.
  */
 export function waitForChildProcess(child: ChildProcess, options?: { maxPostExitMs?: number }): Promise<number | null> {
 	return new Promise((resolve, reject) => {

@@ -101,12 +101,12 @@ export class OwnedShellProcesses {
 		const temporary = `${path}.${randomUUID()}.tmp`;
 		const fd = openSync(temporary, "wx", 0o600);
 		try {
-			writeFileSync(fd, `${JSON.stringify(record)}\n`);
-			fsyncSync(fd);
-		} finally {
-			closeSync(fd);
-		}
-		try {
+			try {
+				writeFileSync(fd, `${JSON.stringify(record)}\n`);
+				fsyncSync(fd);
+			} finally {
+				closeSync(fd);
+			}
 			renameSync(temporary, path);
 		} finally {
 			try {

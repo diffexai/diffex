@@ -119,6 +119,7 @@ export function createLocalBashOperations(options?: {
 				child.stdin?.end(command);
 			}
 			let timedOut = false;
+			const environmentLifetime = options?.owner?.policy.lifetime === "environment";
 			let completed = false;
 			let completionError: unknown;
 			let timeoutHandle: NodeJS.Timeout | undefined;
@@ -130,7 +131,7 @@ export function createLocalBashOperations(options?: {
 			};
 			const onExit = (code: number | null) => {
 				completed = true;
-				if (timeoutHandle) clearTimeout(timeoutHandle);
+				if (environmentLifetime && timeoutHandle) clearTimeout(timeoutHandle);
 				try {
 					if (child.pid) options?.owner?.complete(child.pid, code === 0 && !timedOut && !signal?.aborted);
 				} catch (error) {
@@ -152,7 +153,7 @@ export function createLocalBashOperations(options?: {
 				// Set timeout if provided.
 				if (timeoutMs !== undefined) {
 					timeoutHandle = setTimeout(() => {
-						if (completed) return;
+						if (environmentLifetime && completed) return;
 						timedOut = true;
 						onAbort();
 					}, timeoutMs);
@@ -168,7 +169,7 @@ export function createLocalBashOperations(options?: {
 				// Handle shell spawn errors and wait for the process to terminate without hanging
 				// on inherited stdio handles held by detached descendants.
 				const exitCode = await waitForChildProcess(child, {
-					maxPostExitMs: options?.owner?.policy.lifetime === "environment" ? 100 : undefined,
+					maxPostExitMs: environmentLifetime ? 100 : undefined,
 				});
 				if (completionError) throw completionError;
 				if (signal?.aborted) {
