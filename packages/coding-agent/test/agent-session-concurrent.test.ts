@@ -23,6 +23,7 @@ import { SessionManager } from "../src/core/session-manager.ts";
 import { SettingsManager } from "../src/core/settings-manager.ts";
 import type { BuildSystemPromptOptions } from "../src/core/system-prompt.ts";
 import { createTestExtensionsResult, createTestResourceLoader } from "./extension-test-utils.ts";
+import { deferred } from "./suite/subagent-harness.ts";
 
 // Mock stream that mimics AssistantMessageEventStream
 class MockAssistantStream extends EventStream<AssistantMessageEvent, AssistantMessage> {
@@ -187,115 +188,129 @@ describe("AgentSession concurrent prompt guard", () => {
 		await firstPrompt.catch(() => {});
 	});
 
-	it("should queue extension-origin steering messages while streaming", async () => {
-		const model = getModel("anthropic", "claude-sonnet-4-5")!;
-		let abortSignal: AbortSignal | undefined;
-		let sawSteeringMessage = false;
-		let lastInputSource: string | undefined;
-		const queueEvents: Array<{ steering: readonly string[]; followUp: readonly string[] }> = [];
+	it.each(["complete", "abort"] as const)(
+		"should queue extension-origin steering messages until %s",
+		async (action) => {
+			const model = getModel("anthropic", "claude-sonnet-4-5")!;
+			const started = deferred<MockAssistantStream>();
+			const queued = deferred<void>();
+			let sawSteeringMessage = false;
+			let lastInputSource: string | undefined;
+			const queueEvents: Array<{ steering: readonly string[]; followUp: readonly string[] }> = [];
 
-		const agent = new Agent({
-			getApiKey: () => "test-key",
-			initialState: {
-				model,
-				systemPrompt: "Test",
-				tools: [],
-			},
-			streamFn: (_model, context, options) => {
-				abortSignal = options?.signal;
-				const stream = new MockAssistantStream();
-				queueMicrotask(() => {
-					const userTexts = context.messages
-						.filter((message) => message.role === "user")
-						.map((message) => {
-							if (typeof message.content === "string") {
-								return message.content;
-							}
-							return message.content
-								.filter((part): part is TextContent | ImageContent => typeof part === "object" && part !== null)
-								.filter((part): part is TextContent => part.type === "text")
-								.map((part) => part.text)
-								.join("\n");
-						});
+			const agent = new Agent({
+				getApiKey: () => "test-key",
+				initialState: {
+					model,
+					systemPrompt: "Test",
+					tools: [],
+				},
+				streamFn: (_model, context, options) => {
+					const stream = new MockAssistantStream();
+					queueMicrotask(() => {
+						const userTexts = context.messages
+							.filter((message) => message.role === "user")
+							.map((message) => {
+								if (typeof message.content === "string") {
+									return message.content;
+								}
+								return message.content
+									.filter(
+										(part): part is TextContent | ImageContent => typeof part === "object" && part !== null,
+									)
+									.filter((part): part is TextContent => part.type === "text")
+									.map((part) => part.text)
+									.join("\n");
+							});
 
-					if (userTexts.includes("Steer from extension")) {
-						sawSteeringMessage = true;
-						stream.push({ type: "start", partial: createAssistantMessage("") });
-						stream.push({ type: "done", reason: "stop", message: createAssistantMessage("Steered") });
-						return;
-					}
-
-					stream.push({ type: "start", partial: createAssistantMessage("") });
-					const checkAbort = () => {
-						if (abortSignal?.aborted) {
-							stream.push({ type: "error", reason: "aborted", error: createAssistantMessage("Aborted") });
-						} else {
-							setTimeout(checkAbort, 5);
+						if (userTexts.includes("Steer from extension")) {
+							sawSteeringMessage = true;
+							stream.push({ type: "start", partial: createAssistantMessage("") });
+							stream.push({ type: "done", reason: "stop", message: createAssistantMessage("Steered") });
+							return;
 						}
+
+						stream.push({ type: "start", partial: createAssistantMessage("") });
+						options?.signal?.addEventListener(
+							"abort",
+							() => {
+								stream.push({
+									type: "error",
+									reason: "aborted",
+									error: { ...createAssistantMessage("Aborted"), stopReason: "aborted" },
+								});
+							},
+							{ once: true },
+						);
+						started.resolve(stream);
+					});
+					return stream;
+				},
+			});
+
+			const sessionManager = SessionManager.inMemory();
+			const settingsManager = SettingsManager.create(tempDir, tempDir);
+			const authStorage = AuthStorage.create(join(tempDir, "auth.json"));
+			const modelRegistry = await createModelRegistry(authStorage, tempDir);
+			await authStorage.modify("anthropic", async () => ({ type: "api_key", key: "test-key" }));
+
+			const extensionsResult = await createTestExtensionsResult([
+				(pi) => {
+					(globalThis as typeof globalThis & { testExtensionApi?: unknown }).testExtensionApi = pi;
+				},
+				(pi) => {
+					pi.on("input", async (event) => {
+						lastInputSource = event.source;
+					});
+				},
+			]);
+
+			session = new AgentSession({
+				agent,
+				sessionManager,
+				settingsManager,
+				cwd: tempDir,
+				modelRuntime: getModelRuntime(modelRegistry),
+				resourceLoader: createTestResourceLoader({ extensionsResult }),
+			});
+			session.subscribe((event) => {
+				if (event.type === "queue_update") {
+					queueEvents.push({ steering: event.steering, followUp: event.followUp });
+					if (event.steering.includes("Steer from extension")) queued.resolve();
+				}
+			});
+
+			const firstPrompt = session.prompt("First message");
+			const firstStream = await started.promise;
+			expect(session.isStreaming).toBe(true);
+
+			const pi = (
+				globalThis as typeof globalThis & {
+					testExtensionApi?: {
+						sendUserMessage: (content: string, options?: { deliverAs?: "steer" | "followUp" }) => void;
 					};
-					checkAbort();
-				});
-				return stream;
-			},
-		});
+				}
+			).testExtensionApi;
+			expect(pi).toBeDefined();
 
-		const sessionManager = SessionManager.inMemory();
-		const settingsManager = SettingsManager.create(tempDir, tempDir);
-		const authStorage = AuthStorage.create(join(tempDir, "auth.json"));
-		const modelRegistry = await createModelRegistry(authStorage, tempDir);
-		await authStorage.modify("anthropic", async () => ({ type: "api_key", key: "test-key" }));
+			pi!.sendUserMessage("Steer from extension", { deliverAs: "steer" });
+			await queued.promise;
 
-		const extensionsResult = await createTestExtensionsResult([
-			(pi) => {
-				(globalThis as typeof globalThis & { testExtensionApi?: unknown }).testExtensionApi = pi;
-			},
-			(pi) => {
-				pi.on("input", async (event) => {
-					lastInputSource = event.source;
-				});
-			},
-		]);
+			expect(session.pendingMessageCount).toBe(1);
+			expect(session.getSteeringMessages()).toContain("Steer from extension");
+			expect(lastInputSource).toBe("extension");
+			expect(queueEvents.some((event) => event.steering.includes("Steer from extension"))).toBe(true);
 
-		session = new AgentSession({
-			agent,
-			sessionManager,
-			settingsManager,
-			cwd: tempDir,
-			modelRuntime: getModelRuntime(modelRegistry),
-			resourceLoader: createTestResourceLoader({ extensionsResult }),
-		});
-		session.subscribe((event) => {
-			if (event.type === "queue_update") {
-				queueEvents.push({ steering: event.steering, followUp: event.followUp });
+			if (action === "abort") {
+				await session.abort();
+			} else {
+				firstStream.push({ type: "done", reason: "stop", message: createAssistantMessage("Done") });
 			}
-		});
+			await firstPrompt;
 
-		const firstPrompt = session.prompt("First message");
-		await new Promise((resolve) => setTimeout(resolve, 10));
-		expect(session.isStreaming).toBe(true);
-
-		const pi = (
-			globalThis as typeof globalThis & {
-				testExtensionApi?: {
-					sendUserMessage: (content: string, options?: { deliverAs?: "steer" | "followUp" }) => void;
-				};
-			}
-		).testExtensionApi;
-		expect(pi).toBeDefined();
-
-		pi!.sendUserMessage("Steer from extension", { deliverAs: "steer" });
-		await new Promise((resolve) => setTimeout(resolve, 25));
-
-		expect(session.pendingMessageCount).toBe(1);
-		expect(session.getSteeringMessages()).toContain("Steer from extension");
-		expect(lastInputSource).toBe("extension");
-		expect(queueEvents.some((event) => event.steering.includes("Steer from extension"))).toBe(true);
-
-		await session.abort();
-		await firstPrompt.catch(() => {});
-
-		expect(sawSteeringMessage).toBe(true);
-	});
+			expect(sawSteeringMessage).toBe(action === "complete");
+		},
+	);
 
 	it("should allow prompt() after previous completes", async () => {
 		// Create session with a stream that completes immediately

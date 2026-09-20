@@ -340,6 +340,7 @@ describe("AgentSessionRuntime characterization", () => {
 		await spawn.execute("spawn-active", { name: "active", task: "wait" }, undefined, undefined, extensionContext);
 		await childProviderStarted.promise;
 		await spawn.execute("spawn-queued", { name: "queued", task: "wait" }, undefined, undefined, extensionContext);
+		expect(outgoing.getSubagents().find((child) => child.name === "queued")?.status).toBe("queued");
 		const agentsResult = getSettledAgentStatus(outgoing, ["active", "queued"]).catch((error: unknown) => error);
 		const originalDispose = AgentSession.prototype.dispose;
 		const disposedChildren: AgentSession[] = [];

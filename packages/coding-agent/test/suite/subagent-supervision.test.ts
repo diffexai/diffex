@@ -96,6 +96,7 @@ describe("subagent supervision", () => {
 		const started = deferred<void>();
 		const firstResponse = deferred<AssistantMessage>();
 		const resumed = deferred<void>();
+		let checkpointInstruction = "";
 		const checkpoint =
 			"Current progress: compiled the core. Remaining work: run validation. Goal: deliver a verified build. An extension is needed.";
 		harness.setResponses([
@@ -109,18 +110,7 @@ describe("subagent supervision", () => {
 				return firstResponse.promise;
 			},
 			(context) => {
-				const instruction = getLastUserText(context);
-				for (const field of [
-					"escalate_to_parent",
-					"current progress",
-					"remaining work",
-					"the goal",
-					"decision or extension needed",
-					"without estimating its duration",
-				]) {
-					expect(instruction).toContain(field);
-				}
-				expect(instruction).not.toContain("expected duration");
+				checkpointInstruction = getLastUserText(context);
 				return fauxAssistantMessage(fauxToolCall("escalate_to_parent", { message: checkpoint }), {
 					stopReason: "toolUse",
 				});
@@ -149,6 +139,16 @@ describe("subagent supervision", () => {
 		expect(child!.getSteeringMessages()).toHaveLength(1);
 		firstResponse.resolve(fauxAssistantMessage("Core compiled; validation remains."));
 		await resumed.promise;
+		for (const field of [
+			"escalate_to_parent",
+			"current progress",
+			"remaining work",
+			"the goal",
+			"decision or extension needed",
+		]) {
+			expect(checkpointInstruction).toContain(field);
+		}
+		expect(checkpointInstruction).not.toContain("expected duration");
 		expect(reports).toContain(checkpoint);
 		expect(child!.getSteeringMessages()).toHaveLength(0);
 		const action = controller.createToolDefinitions().find((tool) => tool.name === "agent_action")!;

@@ -35,7 +35,7 @@ describe("issue #7253: manual compaction during an active response", () => {
 
 		const harness = await createHarness({
 			models: [{ id: "faux-1", contextWindow: 1000, maxTokens: 100 }],
-			settings: { compaction: { enabled: true, reserveTokens: 999, keepRecentTokens: 2 } },
+			settings: { compaction: { enabled: false, reserveTokens: 999, keepRecentTokens: 2 } },
 			tools: [createNoopTool()],
 			extensionFactories: [
 				(pi) => {
@@ -62,6 +62,8 @@ describe("issue #7253: manual compaction during an active response", () => {
 
 		const promptPromise = harness.session.prompt("Run the tool, then continue responding.");
 		await secondResponseStarted;
+		// Enable after the tool boundary so this isolates manual compaction during a response.
+		harness.settingsManager.setCompactionEnabled(true);
 
 		const compactPromise = harness.session.compact();
 		const compactExpectation = expect(compactPromise).resolves.toMatchObject({ summary: "manual summary" });
