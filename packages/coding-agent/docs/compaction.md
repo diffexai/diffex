@@ -36,6 +36,14 @@ By default, `reserveTokens` is 16384 tokens (configurable in `~/.diffex/agent/se
 
 You can also trigger manually with `/compact [instructions]`, where optional instructions focus the summary.
 
+### Automatic Attempt Lifecycle
+
+Pre-prompt and successful-final-answer checks each allow one eligible proactive operation, including the configured transient summarization retries. Afterward, Diffex estimates context again. A failure, independent cancellation, unavailable compaction, or result still above the reserve threshold warns and suppresses further proactive attempts for that logical run. Queued input and automatic continuations share that suppression. The next separately admitted idle prompt resets it before preflight; an idle custom-message run also resets it.
+
+A valid summary remains committed even when it does not reduce context below the threshold. A successful reduction to or below the threshold permits another attempt after renewed growth. These are best-effort limits: local estimates and continuing after a warning do not guarantee a provider token limit.
+
+Cancelling the prompt or session stops pending work and cancels compaction, including authentication and extension hooks. Cancelling compaction alone continues the pending work. Cancellable preflight retains its existing rollback behavior. Successful final answers, including answers exceeding the configured context window, are never retried merely because proactive compaction ran. Manual compaction and bounded failed/truncated-response recovery remain independently available.
+
 ### Current Context Accounting
 
 Pre-prompt and post-answer checks and the context display share one estimate of the normal model-visible context. It includes system instructions, tool definitions, images, summaries, custom messages, and included bash output. Request-only extension transforms are not rerun to calculate it.

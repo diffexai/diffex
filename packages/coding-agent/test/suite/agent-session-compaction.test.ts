@@ -303,14 +303,17 @@ describe("AgentSession compaction characterization", () => {
 		await harness.session.prompt("x".repeat(5000));
 
 		expect(harness.faux.state.callCount).toBe(2);
-		expect(harness.eventsOfType("compaction_end")[0]).toMatchObject({
+		expect(harness.eventsOfType("compaction_end").find((event) => event.reason === "overflow")).toMatchObject({
 			reason: "overflow",
 			aborted: false,
 			willRetry: true,
 		});
 		expect(harness.session.getLastAssistantText()).toBe("completed response");
-		// The completed answer also exceeds this tiny window, but never adds a retry.
-		expect(harness.eventsOfType("compaction_end").at(-1)).toMatchObject({ willRetry: false });
+		// The unavailable preflight operation suppresses proactive checks; failed-response recovery stays independent.
+		expect(harness.eventsOfType("compaction_end").map((event) => [event.reason, event.willRetry])).toEqual([
+			["threshold", false],
+			["overflow", true],
+		]);
 	});
 
 	it("does not compact when a length stop reaches the desired output limit", async () => {
@@ -570,7 +573,7 @@ describe("AgentSession compaction characterization", () => {
 	it("compacts successful overflow responses without retrying", async () => {
 		const harness = await createHarness({
 			settings: { compaction: { enabled: true, keepRecentTokens: 1, reserveTokens: 0 } },
-			models: [{ id: "faux-1", contextWindow: 1, maxTokens: 100 }],
+			models: [{ id: "faux-1", contextWindow: 10000, maxTokens: 100 }],
 			extensionFactories: [
 				(pi) => {
 					pi.on("session_before_compact", async (event) => ({
@@ -585,7 +588,13 @@ describe("AgentSession compaction characterization", () => {
 			],
 		});
 		harnesses.push(harness);
-		harness.setResponses([fauxAssistantMessage("completed answer")]);
+		harness.setResponses([
+			() => {
+				// Keep preflight eligible; only the successful response exceeds the selected public window.
+				harness.session.agent.state.model = { ...harness.getModel(), contextWindow: 1 };
+				return fauxAssistantMessage("completed answer");
+			},
+		]);
 
 		await expect(harness.session.prompt("hello")).resolves.toBeUndefined();
 

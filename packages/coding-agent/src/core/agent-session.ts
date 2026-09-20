@@ -424,6 +424,10 @@ interface SubagentCoordination {
 	waitStarted: boolean;
 }
 
+type AutoCompactionOutcome =
+	| { status: "compacted"; result: CompactionResult; continueRun: boolean }
+	| { status: "failed" | "cancelled" | "unavailable"; errorMessage: string };
+
 interface PromptReservation {
 	readonly signaled: boolean;
 	readonly collaborationMode: CollaborationMode;
@@ -497,6 +501,8 @@ export class AgentSession {
 	private _compactionAbortController: AbortController | undefined = undefined;
 	private _autoCompactionAbortController: AbortController | undefined = undefined;
 	private _overflowRecoveryAttempted = false;
+	private _proactiveCompactionSuppressed = false;
+	private _promptAbortController: AbortController | undefined;
 
 	// Branch summarization state
 	private _branchSummaryAbortController: AbortController | undefined = undefined;
@@ -2175,7 +2181,7 @@ export class AgentSession {
 			this._retryAttempt = 0;
 		}
 
-		if (await this._checkCompaction(msg)) {
+		if (!this._agentRunAborted && (await this._checkCompaction(msg))) {
 			return "continue";
 		}
 
@@ -2264,6 +2270,13 @@ export class AgentSession {
 			return rejectPreflight(new Error("Cannot submit a prompt while another prompt is being admitted."));
 		}
 		if (reservesAdmission) this._promptAdmissionInProgress = true;
+		const promptController = reservesAdmission ? new AbortController() : undefined;
+		if (promptController) this._promptAbortController = promptController;
+		const promptSignal = promptController
+			? signal
+				? AbortSignal.any([signal, promptController.signal])
+				: promptController.signal
+			: signal;
 
 		const reservation: PromptReservation = {
 			signaled: signal !== undefined,
@@ -2290,6 +2303,7 @@ export class AgentSession {
 			if (onAbort && signal) signal.removeEventListener("abort", onAbort);
 			this._promptReservations.delete(reservation);
 			if (reservesAdmission) this._promptAdmissionInProgress = false;
+			if (this._promptAbortController === promptController) this._promptAbortController = undefined;
 		};
 		try {
 			if (reservesAdmission) {
@@ -2298,7 +2312,7 @@ export class AgentSession {
 			return this._traceOperation("prompt", (operationSpan) =>
 				this._prompt(
 					text,
-					options,
+					{ ...options, signal: promptSignal },
 					releaseUnsignaledPreflight,
 					operationSpan,
 					reservation.collaborationMode,
@@ -2468,6 +2482,7 @@ export class AgentSession {
 
 			// Check if we need to compact before sending (catches aborted responses).
 			// The user's new prompt is sent below, so do not call agent.continue() here.
+			this._proactiveCompactionSuppressed = false;
 			const lastAssistant = this._findLastAssistantMessage();
 			await this._checkCompaction(lastAssistant, false, signal, (transaction) => {
 				pendingCompaction = transaction;
@@ -2856,6 +2871,7 @@ export class AgentSession {
 				this.agent.steer(appMessage);
 			}
 		} else if (options?.triggerTurn) {
+			this._proactiveCompactionSuppressed = false;
 			await this._runAgentPrompt(appMessage);
 		} else {
 			this.agent.state.messages.push(appMessage);
@@ -3050,6 +3066,8 @@ export class AgentSession {
 
 	private async _abort(): Promise<void> {
 		this.abortRetry();
+		this._promptAbortController?.abort(new Error("Prompt cancelled"));
+		this._autoCompactionAbortController?.abort();
 		if (this._isAgentRunActive) this._agentRunAborted = true;
 		this._exitSubagentCoordination("cancellation");
 		this.agent.abort();
@@ -3566,6 +3584,7 @@ export class AgentSession {
 			const willRetry = assistantMessage.stopReason !== "stop";
 
 			if (!willRetry) {
+				if (this._proactiveCompactionSuppressed) return false;
 				return await this._runAutoCompaction("overflow", false, signal, deferCommit);
 			}
 
@@ -3593,7 +3612,11 @@ export class AgentSession {
 		}
 
 		// Case 2: Threshold uses the same normal-context estimate as the footer and preflight.
-		if (contextWindow > 0 && shouldCompact(contextTokens, contextWindow, settings)) {
+		if (
+			!this._proactiveCompactionSuppressed &&
+			contextWindow > 0 &&
+			shouldCompact(contextTokens, contextWindow, settings)
+		) {
 			const queuedContinuation = await this._runAutoCompaction("threshold", false, signal, deferCommit);
 			// Threshold compaction does not recover a provider failure.
 			return assistantMessage?.stopReason !== "error" && queuedContinuation;
@@ -3611,11 +3634,34 @@ export class AgentSession {
 		deferCommit?: (transaction: CompactionAppendTransaction) => void,
 	): Promise<boolean> {
 		if (this._disposePromise) return Promise.resolve(false);
-		return this._runOwnedOperation(() =>
-			this._traceOperation("compaction", (telemetryContext) =>
+		return this._runOwnedOperation(async () => {
+			const outcome = await this._traceOperation("compaction", (telemetryContext) =>
 				this._runAutoCompactionOperation(reason, willRetry, telemetryContext, signal, deferCommit),
-			),
-		);
+			);
+			const result = outcome.status === "compacted" ? outcome.result : undefined;
+			let errorMessage = outcome.status === "compacted" ? undefined : outcome.errorMessage;
+			if (!willRetry) {
+				const contextWindow = this.model?.contextWindow ?? 0;
+				const tokens = this._estimateCurrentContext();
+				if (result) result.estimatedTokensAfter = tokens;
+				const stillAboveThreshold =
+					contextWindow > 0 && shouldCompact(tokens, contextWindow, this.settingsManager.getCompactionSettings());
+				this._proactiveCompactionSuppressed = outcome.status !== "compacted" || stillAboveThreshold;
+				if (outcome.status === "compacted" && stillAboveThreshold) {
+					errorMessage =
+						"Auto-compaction completed, but context remains above the reserve threshold. Continuing without further automatic compaction this run.";
+				}
+			}
+			this._emit({
+				type: "compaction_end",
+				reason,
+				result,
+				aborted: outcome.status === "cancelled",
+				willRetry: outcome.status === "compacted" && willRetry,
+				...(errorMessage ? { errorMessage } : {}),
+			});
+			return outcome.status === "compacted" && (outcome.continueRun || this.agent.hasQueuedMessages());
+		});
 	}
 
 	private async _runAutoCompactionOperation(
@@ -3624,13 +3670,18 @@ export class AgentSession {
 		telemetryContext: TelemetryContext = this._telemetryContext,
 		signal?: AbortSignal,
 		deferCommit?: (transaction: CompactionAppendTransaction) => void,
-	): Promise<boolean> {
+	): Promise<AutoCompactionOutcome> {
 		const settings = this.settingsManager.getCompactionSettings();
-		let started = false;
+		const controller = new AbortController();
+		this._autoCompactionAbortController = controller;
+		const onAbort = (): void => controller.abort(signal?.reason);
+		if (signal?.aborted) onAbort();
+		else signal?.addEventListener("abort", onAbort, { once: true });
 
 		try {
+			controller.signal.throwIfAborted();
 			if (!this.model) {
-				return false;
+				return { status: "unavailable", errorMessage: "Auto-compaction unavailable: no model selected." };
 			}
 
 			const {
@@ -3638,20 +3689,21 @@ export class AgentSession {
 				apiKey,
 				headers,
 				env,
-			} = await this._getSummarizationRequestAuth(this.model, signal);
-			signal?.throwIfAborted();
-			if (this._disposePromise) return false;
+			} = await this._getSummarizationRequestAuth(this.model, controller.signal);
+			controller.signal.throwIfAborted();
+			if (this._disposePromise) throw new Error("Compaction cancelled");
 
 			const pathEntries = this.sessionManager.getBranch();
 
 			const preparation = prepareCompaction(pathEntries, settings);
 			if (!preparation) {
-				return false;
+				return {
+					status: "unavailable",
+					errorMessage: "Auto-compaction unavailable: nothing compactable in the current context.",
+				};
 			}
 
-			this._autoCompactionAbortController = new AbortController();
 			this._emit({ type: "compaction_start", reason });
-			started = true;
 
 			let extensionCompaction: CompactionResult | undefined;
 			let fromExtension = false;
@@ -3664,18 +3716,11 @@ export class AgentSession {
 					customInstructions: undefined,
 					reason,
 					willRetry,
-					signal: this._autoCompactionAbortController.signal,
+					signal: controller.signal,
 				})) as SessionBeforeCompactResult | undefined;
 
 				if (extensionResult?.cancel) {
-					this._emit({
-						type: "compaction_end",
-						reason,
-						result: undefined,
-						aborted: true,
-						willRetry: false,
-					});
-					return false;
+					return { status: "cancelled", errorMessage: "Auto-compaction cancelled." };
 				}
 
 				if (extensionResult?.compaction) {
@@ -3705,7 +3750,7 @@ export class AgentSession {
 					apiKey,
 					headers,
 					undefined,
-					this._autoCompactionAbortController.signal,
+					controller.signal,
 					this.thinkingLevel,
 					this.agent.streamFunction,
 					env,
@@ -3720,16 +3765,7 @@ export class AgentSession {
 				details = compactResult.details;
 			}
 
-			if (this._autoCompactionAbortController.signal.aborted) {
-				this._emit({
-					type: "compaction_end",
-					reason,
-					result: undefined,
-					aborted: true,
-					willRetry: false,
-				});
-				return false;
-			}
+			controller.signal.throwIfAborted();
 
 			const result = await this._recordSuccessfulCompaction({
 				reason,
@@ -3740,10 +3776,9 @@ export class AgentSession {
 				fromExtension,
 				usage,
 				willRetry,
-				signal,
+				signal: controller.signal,
 				deferCommit,
 			});
-			this._emit({ type: "compaction_end", reason, result, aborted: false, willRetry });
 
 			if (willRetry) {
 				const messages = this.agent.state.messages;
@@ -3755,34 +3790,26 @@ export class AgentSession {
 				if (lastMsg?.role === "assistant" && (lastMsg.stopReason === "error" || lastMsg.stopReason === "length")) {
 					this.agent.state.messages = messages.slice(0, -1);
 				}
-				return true;
+				return { status: "compacted", result, continueRun: true };
 			}
 
 			// Auto-compaction can complete while follow-up/steering/custom messages are waiting.
 			// Continue once so queued messages are delivered.
-			return this.agent.hasQueuedMessages();
+			return { status: "compacted", result, continueRun: this.agent.hasQueuedMessages() };
 		} catch (error) {
 			const errorMessage = error instanceof Error ? error.message : "compaction failed";
-			const aborted = signal?.aborted || this._autoCompactionAbortController?.signal.aborted || false;
-			if (started) {
-				this._emit({
-					type: "compaction_end",
-					reason,
-					result: undefined,
-					aborted,
-					willRetry: false,
-					...(aborted
-						? {}
-						: {
-								errorMessage:
-									reason === "overflow"
-										? `Context overflow recovery failed: ${errorMessage}`
-										: `Auto-compaction failed: ${errorMessage}`,
-							}),
-				});
+			if (controller.signal.aborted) {
+				return { status: "cancelled", errorMessage: "Auto-compaction cancelled." };
 			}
-			return false;
+			return {
+				status: "failed",
+				errorMessage:
+					reason === "overflow" && willRetry
+						? `Context overflow recovery failed: ${errorMessage}`
+						: `Auto-compaction failed: ${errorMessage}`,
+			};
 		} finally {
+			signal?.removeEventListener("abort", onAbort);
 			this._autoCompactionAbortController = undefined;
 		}
 	}

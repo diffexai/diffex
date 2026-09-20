@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- Bound unsuccessful proactive compaction to one operation per logical run, warn before continuing, and preserve independent cancellation, manual compaction, and failed-response recovery.
 - Unified pre-prompt, post-answer, and displayed context estimates, using local estimates when provider usage no longer applies after compaction or context changes.
 - Show compaction warnings alongside valid summaries or specific cancellation reasons, and write plain text warnings to stderr without changing successful answer output.
 
