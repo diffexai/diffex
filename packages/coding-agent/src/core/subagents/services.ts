@@ -2,6 +2,7 @@ import type { TelemetryContext, ThinkingLevel } from "@diffexai/diffex-agent-cor
 import type { Model } from "@diffexai/diffex-ai";
 import { clampThinkingLevel } from "@diffexai/diffex-ai/compat";
 import type { HarnessStateStore, HarnessVersionBundle } from "@diffexai/diffex-harness-state";
+import type { BackgroundProcessPolicy } from "../../utils/owned-shell-processes.ts";
 import type { AgentSession } from "../agent-session.ts";
 import {
 	type AgentSessionServices,
@@ -32,6 +33,7 @@ export interface CreateSubagentServicesOptions {
 }
 
 export interface SubagentSessionConfig {
+	readonly backgroundProcessPolicy?: BackgroundProcessPolicy;
 	readonly cwd: string;
 	readonly agentDir: string;
 	readonly modelRuntime: ModelRuntime;
@@ -105,6 +107,7 @@ export function captureSubagentSessionConfig(parent: AgentSession, agentDir: str
 	);
 
 	return Object.freeze({
+		backgroundProcessPolicy: parent.backgroundProcessPolicy,
 		cwd: parent.sessionManager.getCwd(),
 		agentDir,
 		modelRuntime: parent.modelRuntime,
@@ -218,6 +221,7 @@ export async function createSubagentSession(
 	const { session } = await createInternalAgentSessionFromServices(
 		{
 			services,
+			backgroundProcessPolicy: config.backgroundProcessPolicy,
 			sessionManager,
 			model: config.model,
 			thinkingLevel: config.thinkingLevel,

@@ -433,5 +433,6 @@ export { copyToClipboard } from "./utils/clipboard.ts";
 export { parseFrontmatter, stripFrontmatter } from "./utils/frontmatter.ts";
 export { convertToPng } from "./utils/image-convert.ts";
 export { formatDimensionNote, type ResizedImage, resizeImage } from "./utils/image-resize.ts";
+export type { BackgroundProcessPolicy, ShellOwnershipRecord } from "./utils/owned-shell-processes.ts";
 // Shell utilities
 export { getShellConfig } from "./utils/shell.ts";

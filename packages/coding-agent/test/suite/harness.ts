@@ -26,6 +26,7 @@ import { SessionManager } from "../../src/core/session-manager.ts";
 import type { Settings } from "../../src/core/settings-manager.ts";
 import { SettingsManager } from "../../src/core/settings-manager.ts";
 import type { InlineExtension, ResourceLoader } from "../../src/index.ts";
+import type { BackgroundProcessPolicy } from "../../src/utils/owned-shell-processes.ts";
 import {
 	type CreateTestExtensionsResultInput,
 	createTestExtensionsResult,
@@ -64,6 +65,7 @@ export function getAssistantTexts(harness: Harness): string[] {
 }
 
 export interface HarnessOptions {
+	backgroundProcessPolicy?: BackgroundProcessPolicy;
 	models?: FauxModelDefinition[];
 	settings?: Partial<Settings>;
 	systemPrompt?: string;
@@ -191,6 +193,7 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 
 	const workspace = await resolveHarnessWorkspace(tempDir);
 	const session = new AgentSession({
+		backgroundProcessPolicy: options.backgroundProcessPolicy,
 		agent,
 		sessionManager,
 		settingsManager,

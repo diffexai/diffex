@@ -57,7 +57,7 @@ import type {
 	HarnessWorkspaceIdentity,
 } from "@diffexai/diffex-harness-state";
 import { getThemeByName, theme } from "../modes/interactive/theme/theme.ts";
-import { OwnedShellProcesses } from "../utils/owned-shell-processes.ts";
+import { type BackgroundProcessPolicy, OwnedShellProcesses } from "../utils/owned-shell-processes.ts";
 import { canonicalizePath, resolvePath } from "../utils/paths.ts";
 import { sleep } from "../utils/sleep.ts";
 import { normalizeToolResultImages } from "../utils/tool-result-images.ts";
@@ -303,6 +303,8 @@ function withoutDeletedHeaders(headers: ProviderHeaders | undefined): Record<str
 }
 
 export interface AgentSessionConfig {
+	/** Lifetime of background groups launched by successful local shell commands. */
+	backgroundProcessPolicy?: BackgroundProcessPolicy;
 	agent: Agent;
 	sessionManager: SessionManager;
 	settingsManager: SettingsManager;
@@ -520,7 +522,7 @@ export class AgentSession {
 	private readonly _bashAbortControllers = new Set<AbortController>();
 	private _pendingBashMessages: BashExecutionMessage[] = [];
 	private readonly _ownedOperations = new Set<Promise<unknown>>();
-	private readonly _shellProcesses = new OwnedShellProcesses();
+	private readonly _shellProcesses: OwnedShellProcesses;
 	private readonly _bashOperations = new Set<Promise<BashResult>>();
 
 	// Extension system
@@ -583,6 +585,7 @@ export class AgentSession {
 	private _disposePromise: Promise<void> | undefined;
 
 	constructor(config: AgentSessionConfig) {
+		this._shellProcesses = new OwnedShellProcesses(config.backgroundProcessPolicy);
 		this.agent = config.agent;
 		this.sessionManager = config.sessionManager;
 		this.settingsManager = config.settingsManager;
@@ -3087,6 +3090,10 @@ export class AgentSession {
 	/** Stop and verify all shell processes owned by this session, including background jobs. */
 	async terminateOwnedShellProcesses(): Promise<void> {
 		await this._shellProcesses.terminateAll();
+	}
+
+	get backgroundProcessPolicy(): BackgroundProcessPolicy {
+		return this._shellProcesses.policy;
 	}
 
 	get ownedShellProcessCount(): number {

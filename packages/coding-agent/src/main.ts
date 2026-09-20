@@ -547,6 +547,10 @@ export async function main(args: string[], options?: MainOptions) {
 	const trustPromptMode: AppMode = parsed.help || parsed.listModels !== undefined ? "print" : appMode;
 	const projectTrustByCwd = new Map<string, boolean>();
 
+	const backgroundProcessPolicy: CreateAgentSessionOptions["backgroundProcessPolicy"] =
+		parsed.backgroundProcessLifetime === "environment"
+			? { lifetime: "environment", ownershipDirectory: resolvePath(parsed.backgroundProcessOwnershipDir!, cwd) }
+			: { lifetime: "session" };
 	const resolvedExtensionPaths = resolveCliPaths(cwd, parsed.extensions);
 	const resolvedSkillPaths = resolveCliPaths(cwd, parsed.skills);
 	const resolvedPromptTemplatePaths = resolveCliPaths(cwd, parsed.promptTemplates);
@@ -664,6 +668,7 @@ export async function main(args: string[], options?: MainOptions) {
 		}
 
 		const created = await createAgentSessionFromServices({
+			backgroundProcessPolicy,
 			services,
 			sessionManager,
 			sessionStartEvent,

@@ -11,6 +11,8 @@ import type { TuiMode } from "../core/settings-manager.ts";
 export type Mode = "text" | "json" | "rpc";
 
 export interface Args {
+	backgroundProcessLifetime?: "session" | "environment";
+	backgroundProcessOwnershipDir?: string;
 	provider?: string;
 	model?: string;
 	apiKey?: string;
@@ -82,6 +84,25 @@ export function parseArgs(args: string[]): Args {
 			if (mode === "text" || mode === "json" || mode === "rpc") {
 				result.mode = mode;
 			}
+		} else if (arg === "--background-process-lifetime" || arg.startsWith("--background-process-lifetime=")) {
+			const value = arg.includes("=") ? arg.slice(arg.indexOf("=") + 1) : args[i + 1];
+			if (!arg.includes("=") && value !== undefined && !value.startsWith("-")) i++;
+			if (value === "session" || value === "environment") result.backgroundProcessLifetime = value;
+			else
+				result.diagnostics.push({
+					type: "error",
+					message: "--background-process-lifetime requires session or environment",
+				});
+		} else if (
+			arg === "--background-process-ownership-dir" ||
+			arg.startsWith("--background-process-ownership-dir=")
+		) {
+			const value = arg.includes("=") ? arg.slice(arg.indexOf("=") + 1) : args[i + 1];
+			if (value && !value.startsWith("-")) {
+				result.backgroundProcessOwnershipDir = value;
+				if (!arg.includes("=")) i++;
+			} else
+				result.diagnostics.push({ type: "error", message: "--background-process-ownership-dir requires a path" });
 		} else if (arg === "--continue" || arg === "-c") {
 			result.continue = true;
 		} else if (arg === "--resume" || arg === "-r") {
@@ -222,6 +243,18 @@ export function parseArgs(args: string[]): Args {
 		}
 	}
 
+	if (result.backgroundProcessLifetime === "environment" && !result.backgroundProcessOwnershipDir) {
+		result.diagnostics.push({
+			type: "error",
+			message: "Environment lifetime requires --background-process-ownership-dir",
+		});
+	}
+	if (result.backgroundProcessOwnershipDir && result.backgroundProcessLifetime !== "environment") {
+		result.diagnostics.push({
+			type: "error",
+			message: "--background-process-ownership-dir requires environment lifetime",
+		});
+	}
 	return result;
 }
 
@@ -259,6 +292,10 @@ ${chalk.bold("Options:")}
   --append-system-prompt <text>  Append text or file contents to the system prompt (can be used multiple times)
   --mode <mode>                  Output mode: text (default), json, or rpc
   --print, -p                    Non-interactive mode: process prompt and exit
+  --background-process-lifetime <session|environment>
+                                 Background shell ownership (default: session)
+  --background-process-ownership-dir <path>
+                                 Supervisor handoff records (required for environment lifetime)
   --continue, -c                 Continue previous session
   --resume, -r                   Select a session to resume
   --session <path|id>            Use specific session file or partial UUID

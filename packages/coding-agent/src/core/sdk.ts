@@ -12,6 +12,7 @@ import { clampThinkingLevel, type Message, type Model, streamSimple } from "@dif
 import type { HarnessStateStore, HarnessVersionBundle } from "@diffexai/diffex-harness-state";
 import { EvolutionMemoryWriter, FileEvolutionPersistence } from "#evolution";
 import { getAgentDir, VERSION } from "../config.ts";
+import type { BackgroundProcessPolicy } from "../utils/owned-shell-processes.ts";
 import { resolvePath } from "../utils/paths.ts";
 import { AgentSession } from "./agent-session.ts";
 import type { AgentSessionLifecycleObserver } from "./agent-session-lifecycle.ts";
@@ -81,6 +82,8 @@ export interface SubagentOptions extends SubagentSupervisionOptions {
 }
 
 export interface CreateAgentSessionOptions {
+	/** Local shell background lifetime. Defaults to session-owned cleanup. */
+	backgroundProcessPolicy?: BackgroundProcessPolicy;
 	/** Working directory for project-local discovery. Default: process.cwd() */
 	cwd?: string;
 	/** Global config directory. Default: ~/.diffex/agent */
@@ -665,6 +668,7 @@ export async function createInternalAgentSession(
 	}
 
 	const session = new AgentSession({
+		backgroundProcessPolicy: options.backgroundProcessPolicy,
 		agent,
 		sessionManager,
 		settingsManager,

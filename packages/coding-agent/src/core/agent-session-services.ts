@@ -59,6 +59,7 @@ export interface CreateAgentSessionServicesOptions {
  * have been resolved against those services.
  */
 export interface CreateAgentSessionFromServicesOptions {
+	backgroundProcessPolicy?: CreateAgentSessionOptions["backgroundProcessPolicy"];
 	services: AgentSessionServices;
 	sessionManager: SessionManager;
 	sessionStartEvent?: SessionStartEvent;
@@ -240,6 +241,7 @@ export async function createInternalAgentSessionFromServices(
 	registerSubagentRuntimeDiagnosticSink(options.sessionManager, options.services.diagnostics);
 	return createInternalAgentSession(
 		{
+			backgroundProcessPolicy: options.backgroundProcessPolicy,
 			cwd: options.services.cwd,
 			agentDir: options.services.agentDir,
 			modelRuntime: options.services.modelRuntime,
