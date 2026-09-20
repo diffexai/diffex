@@ -110,6 +110,8 @@ export async function runPrintMode(runtimeHost: AgentSessionRuntime, options: Pr
 		unsubscribe = session.subscribe((event) => {
 			if (mode === "json") {
 				writeRawStdout(`${JSON.stringify(toJsonEvent(event))}\n`);
+			} else if (event.type === "compaction_end" && event.errorMessage) {
+				console.error(event.errorMessage);
 			}
 		});
 		unsubscribeBackpressure =

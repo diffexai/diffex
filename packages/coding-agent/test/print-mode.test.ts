@@ -1,5 +1,7 @@
+import { Console } from "node:console";
 import type { AssistantMessage, ImageContent } from "@diffexai/diffex-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { AgentSessionEvent, AgentSessionEventListener } from "../src/core/agent-session.ts";
 import type { SessionShutdownEvent } from "../src/index.ts";
 import { runPrintMode } from "../src/modes/print-mode.ts";
 
@@ -55,13 +57,14 @@ function createAssistantMessage(options?: {
 	};
 }
 
-function createRuntimeHost(assistantMessage: AssistantMessage): FakeRuntimeHost {
+function createRuntimeHost(assistantMessage: AssistantMessage, events: AgentSessionEvent[] = []): FakeRuntimeHost {
 	const extensionRunner: FakeExtensionRunner = {
 		hasHandlers: (eventType: string) => eventType === "session_shutdown",
 		emit: vi.fn(async () => {}),
 	};
 
 	const state = { messages: [assistantMessage] };
+	let listener: AgentSessionEventListener | undefined;
 
 	const session: FakeSession = {
 		sessionManager: { getHeader: () => undefined },
@@ -69,8 +72,15 @@ function createRuntimeHost(assistantMessage: AssistantMessage): FakeRuntimeHost 
 		state,
 		extensionRunner,
 		bindExtensions: vi.fn(async () => {}),
-		subscribe: vi.fn(() => () => {}),
-		prompt: vi.fn(async () => {}),
+		subscribe: vi.fn((callback: AgentSessionEventListener) => {
+			listener = callback;
+			return () => {
+				listener = undefined;
+			};
+		}),
+		prompt: vi.fn(async () => {
+			for (const event of events) listener?.(event);
+		}),
 		reload: vi.fn(async () => {}),
 	};
 
@@ -91,6 +101,80 @@ afterEach(() => {
 });
 
 describe("runPrintMode", () => {
+	it.each(["text", "json"] as const)(
+		"delivers compaction warnings in %s mode without failing the answer",
+		async (mode) => {
+			const events: AgentSessionEvent[] = [
+				{
+					type: "compaction_end",
+					reason: "threshold",
+					result: undefined,
+					aborted: false,
+					willRetry: false,
+					errorMessage: "Preparation failed before summarization; continuing",
+				},
+				{
+					type: "compaction_end",
+					reason: "threshold",
+					result: undefined,
+					aborted: true,
+					willRetry: false,
+					errorMessage: "Compaction cancelled; continuing",
+				},
+				{
+					type: "compaction_end",
+					reason: "threshold",
+					result: { summary: "retained", firstKeptEntryId: "kept", tokensBefore: 1000 },
+					aborted: false,
+					willRetry: false,
+					errorMessage: "Context remains above the reserve threshold; continuing",
+				},
+			];
+			const stdout: string[] = [];
+			const stderr: string[] = [];
+			vi.spyOn(process.stdout, "write").mockImplementation(
+				(chunk, encodingOrCallback: BufferEncoding | ((error?: Error | null) => void) | undefined, callback) => {
+					stdout.push(String(chunk));
+					if (typeof encodingOrCallback === "function") encodingOrCallback();
+					else callback?.();
+					return true;
+				},
+			);
+			vi.spyOn(process.stderr, "write").mockImplementation(
+				(chunk, encodingOrCallback: BufferEncoding | ((error?: Error | null) => void) | undefined, callback) => {
+					stderr.push(String(chunk));
+					if (typeof encodingOrCallback === "function") encodingOrCallback();
+					else callback?.();
+					return true;
+				},
+			);
+			const outputConsole = new Console({ stdout: process.stdout, stderr: process.stderr });
+			vi.spyOn(console, "error").mockImplementation(outputConsole.error.bind(outputConsole));
+			const runtimeHost = createRuntimeHost(createAssistantMessage({ text: "answer only" }), events);
+			const exitCode = await runPrintMode(runtimeHost as unknown as Parameters<typeof runPrintMode>[0], {
+				mode,
+				initialMessage: "continue",
+			});
+			expect(exitCode).toBe(0);
+			expect(runtimeHost.dispose).toHaveBeenCalledExactlyOnceWith("completed");
+			if (mode === "text") {
+				expect(stdout.join("")).toBe("answer only\n");
+				expect(stderr.join("")).toBe(
+					events.map((event) => ("errorMessage" in event ? `${event.errorMessage}\n` : "")).join(""),
+				);
+			} else {
+				expect(
+					stdout
+						.join("")
+						.trim()
+						.split("\n")
+						.map((line) => JSON.parse(line)),
+				).toEqual(JSON.parse(JSON.stringify(events)));
+				expect(stderr.join("")).toBe("");
+			}
+		},
+	);
+
 	it("emits session_shutdown in text mode", async () => {
 		const runtimeHost = createRuntimeHost(createAssistantMessage({ text: "done" }));
 		const { session } = runtimeHost;

@@ -42,6 +42,10 @@ Pre-prompt and post-answer checks and the context display share one estimate of 
 
 Provider usage is used only when an in-memory request baseline still matches the selected branch, model configuration, system prompt, tools, and preceding messages. Later messages are estimated locally; system instructions and tools already covered by usage are not added again. After compaction, retained older responses cannot supply usage, regardless of their timestamps. Loaded sessions and changed contexts without a matching baseline use local estimates until an applicable response arrives. Session token and cost totals still include all billed history.
 
+### Warning Output
+
+Compaction warnings appear in the interactive transcript, including when a valid summary accompanies the warning. Plain text mode writes compaction warning messages to stderr and keeps the final answer on stdout; a warning alone does not make a successful answer fail. JSON and RPC modes forward the existing `compaction_end` event with its `errorMessage`, `result`, cancellation, and retry fields.
+
 ### How It Works
 
 1. **Find cut point**: Walk backwards from newest message, accumulating token estimates until `keepRecentTokens` (default 20k, configurable in `~/.diffex/agent/settings.json` or `<project-dir>/.diffex/settings.json`) is reached

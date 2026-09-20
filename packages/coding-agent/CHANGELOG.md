@@ -5,6 +5,7 @@
 ### Fixed
 
 - Unified pre-prompt, post-answer, and displayed context estimates, using local estimates when provider usage no longer applies after compaction or context changes.
+- Show compaction warnings alongside valid summaries or specific cancellation reasons, and write plain text warnings to stderr without changing successful answer output.
 
 ## [0.2.7] - 2026-09-18
 

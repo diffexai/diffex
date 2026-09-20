@@ -3801,13 +3801,7 @@ export class InteractiveMode {
 				}
 				this.clearStatusIndicator("compaction");
 				this.restoreWorkingStatusAfterPhase();
-				if (event.aborted) {
-					if (event.reason === "manual") {
-						this.showError("Compaction cancelled");
-					} else {
-						this.showStatus("Auto-compaction cancelled");
-					}
-				} else if (event.result) {
+				if (!event.aborted && event.result) {
 					this.chatContainer.clear();
 					this.rebuildChatFromMessages();
 					this.addMessageToChat(
@@ -3818,12 +3812,19 @@ export class InteractiveMode {
 						),
 					);
 					this.footer.invalidate();
-				} else if (event.errorMessage) {
+				}
+				if (event.errorMessage) {
 					if (event.reason === "manual") {
 						this.showError(event.errorMessage);
 					} else {
 						this.chatContainer.addChild(new Spacer(1));
 						this.chatContainer.addChild(new Text(theme.fg("error", event.errorMessage), 1, 0));
+					}
+				} else if (event.aborted) {
+					if (event.reason === "manual") {
+						this.showError("Compaction cancelled");
+					} else {
+						this.showStatus("Auto-compaction cancelled");
 					}
 				}
 				void this.flushCompactionQueue({ willRetry: event.willRetry });

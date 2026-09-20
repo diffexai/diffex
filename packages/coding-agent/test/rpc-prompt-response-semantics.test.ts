@@ -10,7 +10,7 @@ import {
 	type Model,
 } from "@diffexai/diffex-ai/compat";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AgentSession } from "../src/core/agent-session.ts";
+import { AgentSession, type AgentSessionEvent, type AgentSessionEventListener } from "../src/core/agent-session.ts";
 import type { AgentSessionRuntime } from "../src/core/agent-session-runtime.ts";
 import { AuthStorage } from "../src/core/auth-storage.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
@@ -185,6 +185,66 @@ async function startRpcMode(options: { withAuth: boolean; responseDelayMs: numbe
 }
 
 describe("RPC prompt response semantics", () => {
+	it("forwards compaction warnings unchanged through the RPC session subscription", async () => {
+		const { runtimeHost, cleanup } = await createRuntimeHost({ withAuth: false, responseDelayMs: 0 });
+		let listener: AgentSessionEventListener | undefined;
+		const subscribe = runtimeHost.session.subscribe.bind(runtimeHost.session);
+		const subscription = vi.spyOn(runtimeHost.session, "subscribe").mockImplementation((callback) => {
+			listener = callback;
+			return subscribe(callback);
+		});
+		const signalListeners = new Map(
+			(["SIGTERM", "SIGHUP"] as const).map((signal) => [signal, process.listeners(signal)]),
+		);
+		const inputEndListeners = process.stdin.rawListeners("end");
+		const events: AgentSessionEvent[] = [
+			{
+				type: "compaction_end",
+				reason: "threshold",
+				result: undefined,
+				aborted: false,
+				willRetry: false,
+				errorMessage: "Preparation failed before summarization; continuing",
+			},
+			{
+				type: "compaction_end",
+				reason: "threshold",
+				result: undefined,
+				aborted: true,
+				willRetry: false,
+				errorMessage: "Compaction cancelled; continuing",
+			},
+			{
+				type: "compaction_end",
+				reason: "threshold",
+				result: { summary: "retained", firstKeptEntryId: "kept", tokensBefore: 1000 },
+				aborted: false,
+				willRetry: false,
+				errorMessage: "Context remains above the reserve threshold; continuing",
+			},
+		];
+		try {
+			rpcIo.outputLines = [];
+			rpcIo.lineHandler = undefined;
+			void runRpcMode(runtimeHost);
+			await vi.waitFor(() => expect(rpcIo.lineHandler).toBeDefined());
+			expect(listener).toBeDefined();
+			for (const event of events) listener!(event);
+			expect(parseOutputLines(rpcIo.outputLines)).toEqual(JSON.parse(JSON.stringify(events)));
+		} finally {
+			subscription.mockRestore();
+			for (const [signal, existing] of signalListeners) {
+				for (const handler of process.listeners(signal)) {
+					if (!existing.includes(handler)) process.off(signal, handler);
+				}
+			}
+			for (const handler of process.stdin.rawListeners("end")) {
+				if (!inputEndListeners.includes(handler)) process.stdin.off("end", handler as () => void);
+			}
+			await cleanup();
+		}
+	});
+
 	afterEach(async () => {
 		rpcIo.outputLines = [];
 		rpcIo.lineHandler = undefined;
