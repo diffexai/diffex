@@ -26,7 +26,7 @@ Each invocation extracts a fresh copy of the verified archive; it does not reuse
 The preparation command writes `results/release-gate/dataset.json` without creating sandboxes or calling a model.
 
 Harbor 0.23.0 and Daytona SDK 0.210.0 are locked in the benchmark's private Python environment.
-Node 22.23.2, Diffex 0.2.6, npm integrity, registry, and Node archive checksums come from [pins.toml](src/diffex_terminal_bench/pins.toml).
+Node 22.23.2, Diffex 0.3.0, npm integrity, registry, and Node archive checksums come from [pins.toml](src/diffex_terminal_bench/pins.toml).
 The default is `openai/gpt-5.6-luna`, `max` thinking, tools `read,bash,edit,write,update_plan`, enabled subagents, disabled evolution, and `context-only` project resources.
 Enabled subagents add `spawn_agent`, `agent_action`, and `wait_for_agents` to the model's tools; Diffex chooses whether to use them.
 Children execute inside the parent trial's sandbox and their sessions and usage remain in the trial evidence.
