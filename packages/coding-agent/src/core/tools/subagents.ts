@@ -109,7 +109,7 @@ export function createEscalateToParentTool(
 		description: "Report blockers, risks, contradictions, decisions, or extension needs to the parent.",
 		promptSnippet: "Escalate issues or request an extension",
 		promptGuidelines: [
-			"Include current progress, remaining work, the goal, and the decision or extension needed. Only escalate information that could change the parent's plan; omit routine progress and tool logs. Still provide a complete final response.",
+			"Include current progress, remaining work, the goal, and the decision or extension needed. Escalate only plan-changing information; omit tool logs. Still provide a complete final response.",
 		],
 		parameters: escalateToParentSchema,
 		executionMode: "parallel",
