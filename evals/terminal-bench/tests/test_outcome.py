@@ -19,9 +19,12 @@ def attempt(reason="stop", error="", retry=False):
 
 def write_cleanup(directory):
     (directory / "stop-requested").touch()
+    controls = [{"role": "launcher", "pid": 10, "start": "100"}, {"role": "cli", "pid": 11, "start": "101"}]
+    for control in controls:
+        (directory / f"{control['role']}.json").write_text(json.dumps({key: value for key, value in control.items() if key != "role"}))
     report = {"schema_version": 1, "phase": "pre-verifier", "stop_requested": True,
               "agent_execution_stopped": True, "ownership_validated": True,
-              "remaining_agent_pids": [], "control_processes": [], "retained_processes": [],
+              "remaining_agent_pids": [], "control_processes": controls, "retained_processes": [],
               "ownership_records": []}
     (directory / "cleanup.json").write_text(json.dumps(report))
     return report
@@ -39,6 +42,18 @@ def write_evidence(directory, events=None):
     write_cleanup(directory)
     (directory / "stdout.jsonl").write_text("".join(json.dumps(event) + "\n" for event in
                                                    [{"type": "session"}, *(events if events is not None else attempt()), {"type": "agent_settled"}]))
+
+
+def retain_service(directory):
+    report = write_cleanup(directory)
+    member = {"pid": 123, "processGroupId": 122, "startTime": "boot:456"}
+    record = {"version": 1, "executionId": "service", "owner": "environment", "state": "background",
+              "processGroupId": 122, "supervisorPid": 120, "members": [member]}
+    (directory / "ownership").mkdir(exist_ok=True)
+    (directory / "ownership/service.json").write_text(json.dumps(record))
+    report.update(ownership_records=[record], retained_processes=[{**member, "executionId": "service", "owner": "environment"}])
+    (directory / "cleanup.json").write_text(json.dumps(report))
+    return report
 
 
 class OutcomeTests(unittest.TestCase):
@@ -119,6 +134,36 @@ class OutcomeTests(unittest.TestCase):
             self.assertEqual(outcome["status"], interruption)
             self.assertFalse(outcome["stream_complete"])
             self.assertTrue((self.directory / "stdout.jsonl").is_file())
+
+    def test_retained_service_does_not_change_execution_outcome(self):
+        for interruption, code, status in ((None, 0, "completed"), (None, 1, "process_failure"),
+                                            ("cancelled", None, "cancelled"), ("timeout", None, "timeout")):
+            write_evidence(self.directory)
+            report = retain_service(self.directory)
+            outcome = parse_outcome(self.directory, interruption=interruption, launcher_exit_code=code)
+            self.assertEqual(outcome["status"], status)
+            self.assertTrue(outcome["agent_execution_stopped"])
+            self.assertEqual(outcome["retained_processes"], report["retained_processes"])
+
+    def test_missing_or_contradictory_evidence_blocks_verification(self):
+        for key, value in (("agent_execution_stopped", False), ("ownership_validated", False),
+                           ("remaining_agent_pids", [124]), ("ownership_records", []),
+                           ("control_processes", []),
+                           ("control_processes", [{"role": "cli", "pid": 123, "start": "456"}])):
+            write_evidence(self.directory)
+            report = retain_service(self.directory)
+            report[key] = value
+            (self.directory / "cleanup.json").write_text(json.dumps(report))
+            for interruption in (None, "cancelled"):
+                with self.subTest(key=key, interruption=interruption):
+                    outcome = parse_outcome(self.directory, interruption, launcher_exit_code=0)
+                    self.assertFalse(outcome["agent_execution_stopped"])
+                    with self.assertRaises(DiffexControlStopError):
+                        require_completed(outcome)
+        write_evidence(self.directory)
+        retain_service(self.directory)
+        (self.directory / "ownership/service.json").unlink()
+        self.assertEqual(parse_outcome(self.directory, launcher_exit_code=0)["status"], "cleanup_failure")
 
 
 if __name__ == "__main__":

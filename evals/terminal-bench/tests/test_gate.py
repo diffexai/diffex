@@ -20,7 +20,7 @@ from diffex_terminal_bench.execution import SUBAGENT_TOOLS
 from diffex_terminal_bench.gate import inventory, require_previous, sha256, stage_tasks, validate_trial, write_json
 from diffex_terminal_bench.outcome import parse_outcome
 from diffex_terminal_bench.trajectory import export_trajectory
-from test_outcome import write_cleanup
+from test_outcome import retain_service, write_cleanup
 from test_trajectory import USAGE, assistant, entry, interrupted_child_records
 
 
@@ -62,6 +62,7 @@ class GateTests(unittest.TestCase):
             (self.run / name).touch()
         setup = self.directory / "agent/setup"
         write_json(setup / "installation.json", {"verified": True, "harbor_version": PINS["harbor_version"],
+                   "background_process_lifetime": "environment",
                    "node_version": f"v{PINS['node_version']}", "diffex_version": PINS["diffex_version"],
                    "npm_integrity": PINS["diffex_integrity"], "npm_registry": PINS["npm_registry"], "elapsed_sec": 10})
         for name in ("version", "help", "list-models"):
@@ -286,6 +287,18 @@ class GateTests(unittest.TestCase):
         report = validate_trial(self.directory, "task", self.identity)
         self.assertEqual(report["rewards"], {"reward": 0})
         self.assertEqual(report["usage"]["prompt_tokens"], 19)
+
+    def test_service_handoff_qualifies_and_corrupt_ownership_cannot(self):
+        retain_service(self.run)
+        write_json(self.run / "outcome.json", parse_outcome(self.run, launcher_exit_code=0))
+        self.reexport()
+        self.assertEqual(validate_trial(self.directory, "task", self.identity)["rewards"], {"reward": 0})
+        self.mutate(self.run / "outcome.json", "retained_processes", [])
+        with self.assertRaisesRegex(ValueError, "ownership evidence"):
+            validate_trial(self.directory, "task", self.identity)
+        self.mutate(self.run / "ownership/service.json", "owner", "session")
+        with self.assertRaisesRegex(ValueError, "Native execution evidence"):
+            validate_trial(self.directory, "task", self.identity)
 
     def test_missing_logs_and_forged_success_cannot_qualify(self):
         cases = [("agent/run-fixture/stderr.log", None, None),

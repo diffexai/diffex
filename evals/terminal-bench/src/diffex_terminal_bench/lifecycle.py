@@ -6,7 +6,7 @@ from pathlib import Path
 
 def read_cleanup(directory: Path) -> dict:
     report = json.loads((directory / "cleanup.json").read_text())
-    if (not isinstance(report, dict) or report.get("schema_version") != 1
+    if (not isinstance(report, dict) or type(report.get("schema_version")) is not int or report["schema_version"] != 1
             or report.get("phase") != "pre-verifier" or report.get("stop_requested") is not True
             or report.get("agent_execution_stopped") is not True
             or report.get("ownership_validated") is not True
@@ -22,18 +22,31 @@ def read_cleanup(directory: Path) -> dict:
         path = directory / f"{role}.json"
         if path.exists():
             control = json.loads(path.read_text())
-            if (not isinstance(control, dict) or type(control.get("pid")) is not int or control["pid"] <= 1
+            if (not isinstance(control, dict) or set(control) != {"pid", "start"}
+                    or type(control.get("pid")) is not int or control["pid"] <= 1
                     or not isinstance(control.get("start"), str) or not control["start"]):
                 raise ValueError("Invalid control identity")
             expected.append({"role": role, **control})
     if controls != expected:
         raise ValueError("Control identities differ from shutdown evidence")
-    saved = [json.loads(path.read_text()) for path in sorted((directory / "ownership").glob("*.json"))]
+    process_path = directory / "process.json"
+    if process_path.exists():
+        process = json.loads(process_path.read_text())
+        roles = {control["role"] for control in controls}
+        if "launcher" not in roles or (type(process.get("exit_code")) is int
+                                       and not process.get("spawn_error") and "cli" not in roles):
+            raise ValueError("Missing launched control identity")
+    saved = []
+    for path in sorted((directory / "ownership").glob("*.json")):
+        record = json.loads(path.read_text())
+        if path.name != f"{record['executionId']}.json":
+            raise ValueError("Ownership filename differs from execution identity")
+        saved.append(record)
     if sorted(records, key=lambda record: record["executionId"]) != sorted(saved, key=lambda record: record["executionId"]):
         raise ValueError("Ownership records differ from shutdown evidence")
     by_id = {}
     for record in records:
-        if (record.get("version") != 1 or not isinstance(record.get("executionId"), str)
+        if (type(record.get("version")) is not int or record["version"] != 1 or not isinstance(record.get("executionId"), str)
                 or not record["executionId"] or record["executionId"] in by_id
                 or type(record.get("processGroupId")) is not int or record["processGroupId"] <= 1
                 or type(record.get("supervisorPid")) is not int or record["supervisorPid"] <= 1

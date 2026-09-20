@@ -23,10 +23,15 @@ assert.equal(installed.resolved, tarball, "Installed registry mismatch");
 if (process.argv[2] === "installed") process.exit(0);
 assert.equal(process.argv[2], "complete");
 assert.equal(readFileSync(join(logs, "version.stdout.txt"), "utf8").trim(), env.DIFFEX_VERSION);
+const help = readFileSync(join(logs, "help.stdout.txt"), "utf8");
+for (const flag of ["--background-process-lifetime", "--background-process-ownership-dir"]) {
+    assert.ok(help.includes(flag), `Pinned Diffex release lacks ${flag}; publish and pin the corrected release`);
+}
 assert.ok(Number(env.SETUP_ELAPSED_SEC) < Number(env.SETUP_TIMEOUT_SEC), "Setup exceeded deadline");
 writeFileSync(join(logs, "installation.json"), `${JSON.stringify({
     schema_version: 1,
     verified: true,
+    background_process_lifetime: "environment",
     started_at: env.SETUP_STARTED_AT,
     elapsed_sec: Number(env.SETUP_ELAPSED_SEC),
     setup_timeout_sec: Number(env.SETUP_TIMEOUT_SEC),

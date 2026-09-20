@@ -47,7 +47,8 @@ function ownership(runDir) {
 	if (!existsSync(directory)) return [];
 	return readdirSync(directory).filter((name) => name.endsWith(".json")).map((name) => {
 		const record = JSON.parse(readFileSync(join(directory, name), "utf8"));
-		if (record.version !== 1 || name !== `${record.executionId}.json` ||
+		if (record.version !== 1 || typeof record.executionId !== "string" || !record.executionId ||
+			name !== `${record.executionId}.json` ||
 			!Number.isSafeInteger(record.processGroupId) || record.processGroupId <= 1 ||
 			!Number.isSafeInteger(record.supervisorPid) || record.supervisorPid <= 1 ||
 			!((record.owner === "environment" && record.state === "background") ||
@@ -80,7 +81,7 @@ async function cleanup(runDir) {
 			const path = join(runDir, `${name}.json`);
 			if (!existsSync(path)) continue;
 			const control = JSON.parse(readFileSync(path, "utf8"));
-			if (!Number.isSafeInteger(control.pid) || control.pid <= 1 ||
+			if (Object.keys(control).sort().join(",") !== "pid,start" || !Number.isSafeInteger(control.pid) || control.pid <= 1 ||
 				typeof control.start !== "string" || !control.start) throw new Error("Invalid control identity");
 			controls.set(name, control);
 		}
@@ -132,7 +133,7 @@ async function cleanup(runDir) {
 	} while (Date.now() < deadline);
 	const report = {
 		schema_version: 1, phase: "pre-verifier", stop_requested: true,
-		agent_execution_stopped: stopped && remaining.length === 0,
+		agent_execution_stopped: stopped && remaining.length === 0 && quietScans >= 2,
 		ownership_validated: stopped, remaining_agent_pids: [...new Set(remaining)],
 		control_processes: [...controls].map(([role, control]) => ({ role, ...control })),
 		retained_processes: retained, ownership_records: records,

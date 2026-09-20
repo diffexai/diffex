@@ -53,6 +53,34 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
 
 
 class RegistryIntegrityTests(unittest.TestCase):
+    def test_release_without_ownership_flags_cannot_complete_installation(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            package = directory / "node_modules/@diffexai/diffex"
+            package.mkdir(parents=True)
+            tarball = f"{PINS['npm_registry']}@diffexai/diffex/-/diffex-{PINS['diffex_version']}.tgz"
+            installed = {"version": PINS["diffex_version"], "integrity": PINS["diffex_integrity"], "resolved": tarball}
+            (package / "package.json").write_text(json.dumps({"version": PINS["diffex_version"]}))
+            (directory / "package-lock.json").write_text(json.dumps({"packages": {"node_modules/@diffexai/diffex": installed}}))
+            (directory / "npm-metadata.json").write_text(json.dumps({"version": PINS["diffex_version"],
+                "dist": {"integrity": PINS["diffex_integrity"], "tarball": tarball}}))
+            (directory / "version.stdout.txt").write_text(PINS["diffex_version"])
+            source = files("diffex_terminal_bench").joinpath("verify-install.cjs").read_text()
+            script = directory / "verify-install.cjs"
+            script.write_text(source.replace('"/opt/diffex-terminal-bench/cli"', json.dumps(temp)))
+            env = {"PATH": os.environ["PATH"], "SETUP_LOGS": temp, "NPM_REGISTRY": PINS["npm_registry"],
+                   "DIFFEX_VERSION": PINS["diffex_version"], "DIFFEX_INTEGRITY": PINS["diffex_integrity"],
+                   "SETUP_ELAPSED_SEC": "1", "SETUP_TIMEOUT_SEC": "600"}
+            for help_text, valid in (("--help", False), ("--background-process-lifetime", False),
+                                     ("--background-process-lifetime --background-process-ownership-dir", True)):
+                (directory / "help.stdout.txt").write_text(help_text)
+                result = subprocess.run(["node", str(script), "complete"], env=env, capture_output=True, text=True, timeout=10)
+                with self.subTest(help_text=help_text):
+                    self.assertEqual(result.returncode == 0, valid, result.stderr)
+                    self.assertEqual((directory / "installation.json").exists(), valid)
+                    if not valid:
+                        self.assertIn("publish and pin the corrected release", result.stderr)
+
     def test_registry_metadata_must_match_all_pins(self):
         tarball = f"{PINS['npm_registry']}@diffexai/diffex/-/diffex-{PINS['diffex_version']}.tgz"
         cases = (

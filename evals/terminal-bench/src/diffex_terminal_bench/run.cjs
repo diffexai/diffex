@@ -51,8 +51,13 @@ const stderr = openSync(join(runDir, "stderr.log"), "wx", 0o600);
 writeFileSync(join(runDir, "process.json"), JSON.stringify({
 	exit_code: null, signal: null, spawn_error: null, interrupted: false,
 }), { mode: 0o600 });
-const child = spawn("/usr/local/bin/diffex", args, {
-	cwd: process.cwd(), env, stdio: ["ignore", stdout, stderr], detached: true,
+// The child cannot execute the CLI before its identity is durable. If the
+// launcher dies during publication, EOF on the private pipe closes the gate.
+// exec preserves this PID and start time through the installed CLI wrapper.
+const child = spawn("/bin/sh", ["-c",
+	'read -r ready <&3 && [ "$ready" = start ] || exit 1; exec 3<&-; exec /usr/local/bin/diffex "$@"',
+	"diffex", ...args], {
+	cwd: process.cwd(), env, stdio: ["ignore", stdout, stderr, "pipe"], detached: true,
 });
 const childStart = child.pid ? identity(child.pid) : null;
 if (child.pid) writeFileSync(join(runDir, "cli.json"), JSON.stringify({ pid: child.pid, start: childStart }), { mode: 0o600 });
@@ -78,6 +83,7 @@ function stop() {
 }
 for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"]) process.on(signal, stop);
 child.on("error", (error) => { spawnError = error.code ?? error.name; });
+child.stdio[3].on("error", (error) => { spawnError = error.code ?? error.name; });
 child.on("close", (code, signal) => {
 	clearTimeout(killTimer);
 	writeFileSync(join(runDir, "process.json"), JSON.stringify({
@@ -86,4 +92,9 @@ child.on("close", (code, signal) => {
 	process.exitCode = interrupted ? 1 : (code ?? 1);
 });
 // Close the race with a stop request written during synchronous initialization.
-if (existsSync(join(runDir, "stop-requested"))) stop();
+if (existsSync(join(runDir, "stop-requested"))) {
+	child.stdio[3].end();
+	stop();
+} else {
+	child.stdio[3].end("start\n");
+}
