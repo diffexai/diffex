@@ -2217,7 +2217,7 @@ export class AgentSession {
 								type: "subagent_completion_check",
 								agents: active,
 								instruction:
-									"Resolve active children before declaring completion. If the parent task is solved or their work is obsolete, cancel them now with agent_action interrupt. For work still needed, continue independent work or end your current response; the runtime will wait automatically and resume you with child reports or results. Use agent_status only when an immediate inspection is needed. Renew only justified long-running work; do not prolong a solved task.",
+									"Review active children before finishing: cancel obsolete work with agent_action interrupt. If needed work remains, end your response to wait automatically. Renew only justified work.",
 							}),
 							display: false,
 						},

@@ -14,14 +14,13 @@ const spawnAgentSchema = Type.Object({
 		description: "Unique lowercase name for the child agent",
 		pattern: SUBAGENT_NAME_PATTERN.source,
 	}),
-	task: Type.String({ description: "The focused task for the child agent", minLength: 1 }),
+	task: Type.String({ description: "Task for the child agent", minLength: 1 }),
 });
 
 const escalateToParentSchema = Type.Object(
 	{
 		message: Type.String({
-			description:
-				"Material blocker, risk, contradiction, decision, or allowance extension requiring parent attention",
+			description: "Checkpoint for the parent",
 			minLength: 1,
 			maxLength: 1_000,
 		}),
@@ -39,8 +38,7 @@ const agentActionSchema = Type.Object(
 		target: targetSchema,
 		reason: Type.Optional(
 			Type.String({
-				description:
-					"Justification for extending needed work based on current progress, remaining work, and the goal",
+				description: "Required for renew: justify against current progress, remaining work, and the goal",
 				minLength: 1,
 			}),
 		),
@@ -108,11 +106,10 @@ export function createEscalateToParentTool(
 	return {
 		name: "escalate_to_parent",
 		label: "Escalate to Parent",
-		description:
-			"Report a material blocker, risk, contradiction, decision, or needed allowance extension to the parent.",
-		promptSnippet: "Report blockers, risks, decisions, or needed extensions to the parent agent",
+		description: "Report blockers, risks, contradictions, decisions, or extension needs to the parent.",
+		promptSnippet: "Escalate issues or request an extension",
 		promptGuidelines: [
-			"Provide concise decision checkpoints with current progress, remaining work, the goal, and the decision or extension needed. When more time is needed, request an extension. Use escalate_to_parent only for material information that could change the parent's plan. Do not send routine progress or tool logs, and still provide a complete final response.",
+			"Include current progress, remaining work, the goal, and the decision or extension needed. Only escalate information that could change the parent's plan; omit routine progress and tool logs. Still provide a complete final response.",
 		],
 		parameters: escalateToParentSchema,
 		executionMode: "parallel",
@@ -167,12 +164,11 @@ export function createSpawnAgentTool(
 	return {
 		name: "spawn_agent",
 		label: "Spawn Agent",
-		description:
-			"Start an independent child agent to work on a focused task asynchronously. Returns the child’s name and queued status without waiting for completion.",
-		promptSnippet: "Delegate a focused task to an independent child agent",
+		description: "Start a child on an independent task; return its name and queued status immediately.",
+		promptSnippet: "Delegate an independent task",
 		promptGuidelines: [
-			"Use for focused subtasks that can run independently alongside other work. Request file references and supporting evidence for research or audits, and assign non-overlapping file ownership for edit and write operations.",
-			"Continue independent work while child agents run. When only needed child work remains, end your current response; the runtime keeps the task open, waits automatically, and resumes you with child reports or results. Cancel obsolete work with agent_action interrupt before declaring completion.",
+			"Request file references and evidence for research or audits. Assign non-overlapping file ownership for edits.",
+			"Continue independent work while children run. When only needed child work remains, end your response; the runtime keeps the task open and resumes you with child reports or results.",
 		],
 		parameters: spawnAgentSchema,
 		executionMode: "parallel",
@@ -199,13 +195,12 @@ export function createAgentActionTool(
 	return {
 		name: "agent_action",
 		label: "Agent Action",
-		description:
-			"Steer an existing child agent, queue follow-up work, wake it, approve an allowance extension, or interrupt its current work.",
-		promptSnippet: "Steer, follow up, wake, renew, or interrupt an existing child agent",
+		description: "Message, wake, renew, or interrupt an existing child agent.",
+		promptSnippet: "Manage an existing child agent",
 		promptGuidelines: [
-			"Messages steer current work at the next tool boundary by default. Set delivery: 'follow_up' only for new work that should wait until the child finishes. Set wake: true to resume an idle child; steering an idle child otherwise fails instead of silently queueing stale instructions.",
-			"Child runs have a renewable time limit. Approve a needed extension with action: 'renew' and a reason based on the child's current progress, remaining work, and goal. Each approval adds one configured allowance (15 minutes by default) to the existing deadline, capped by the parent deadline. Cancel obsolete work immediately. Let child agents complete delegated work that is still needed. Interrupt only when the work is no longer needed, is proceeding in the wrong direction, or must stop because of a user request or material risk.",
-			"Use agent_status for an immediate inspection when needed. When only needed child work remains, end your current response and let the runtime wait automatically. Waiting does not renew a child allowance; approve needed extensions with agent_action renew.",
+			"Set wake: true to resume an idle child; steering an idle child without it fails.",
+			"Use action: 'renew' with a reason to approve an extension. Each approval adds one configured allowance (15 minutes by default) to the existing deadline, capped by the parent deadline. Waiting does not renew it.",
+			"Interrupt obsolete or misdirected work, or when a user request or material risk requires stopping. Otherwise let needed work finish.",
 		],
 		parameters: agentActionSchema,
 		executionMode: "parallel",
@@ -263,12 +258,11 @@ export function createAgentStatusTool(
 	return {
 		name: "agent_status",
 		label: "Agent Status",
-		description:
-			"Immediately inspect child agent statuses and any recorded output or errors. Does not wait for completion.",
+		description: "Immediately return child statuses and recorded output or errors.",
 		promptSnippet: "Inspect child agent status and results",
 		promptGuidelines: [
-			"Use agent_status for an immediate snapshot of selected children, or omit targets to inspect all children. Terminal results returned here are consumed and will not be delivered again automatically.",
-			"Do not repeatedly poll for completion. Continue independent work, or end your current response when only needed child work remains; the runtime waits automatically and resumes you with child reports or results.",
+			"Terminal results returned here are consumed and will not be delivered again automatically.",
+			"Do not repeatedly poll for completion.",
 		],
 		parameters: agentStatusSchema,
 		executionMode: "parallel",

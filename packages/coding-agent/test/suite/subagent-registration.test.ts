@@ -517,9 +517,7 @@ describe("root subagent tool registration", () => {
 		expect(toolResults.map((message) => message.toolName)).toEqual(["spawn_agent", "agent_status"]);
 		expect(getMessageText(toolResults[1])).toContain('"result":"child complete"');
 		expect(childContexts).toHaveLength(1);
-		expect(childContexts[0]?.systemPrompt).toContain(
-			"- escalate_to_parent: Report blockers, risks, decisions, or needed extensions to the parent agent",
-		);
+		expect(childContexts[0]?.systemPrompt).toContain("- escalate_to_parent: Escalate issues or request an extension");
 		expect(childContexts[0]?.systemPrompt).toContain(
 			"current progress, remaining work, the goal, and the decision or extension needed",
 		);
