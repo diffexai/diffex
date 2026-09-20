@@ -254,7 +254,7 @@ The pinned npm `0.3.0` release includes `dist/AGENTS.md`, which matches the adap
 The adapter retains that packaged context without adding a global duplicate.
 The effective system prompt must contain the release instructions, and their SHA-256 is recorded.
 
-The checked-in `benchmark.toml` and `execution.yaml` enable subagents, adding `spawn_agent`, `agent_action`, and `wait_for_agents` to the explicit tool allowlist.
+The checked-in `benchmark.toml` and `execution.yaml` enable subagents, adding `spawn_agent`, `agent_action`, and `agent_status` to the explicit tool allowlist.
 Diffex decides whether to call those tools; enabling them does not require a child on every task.
 Children share their trial's sandbox, and the pinned CLI owns child scheduling and its default concurrency limit.
 The staged runner's `-n/--concurrency` controls simultaneous trials and sandboxes separately.

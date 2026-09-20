@@ -17,7 +17,7 @@ PROVIDER_ENV = {
     "mistral": ("MISTRAL_API_KEY",),
 }
 BUILTIN_TOOLS = ("read", "bash", "edit", "write", "update_plan", "grep", "find", "ls")
-SUBAGENT_TOOLS = ("spawn_agent", "agent_action", "wait_for_agents")
+SUBAGENT_TOOLS = ("spawn_agent", "agent_action", "agent_status")
 
 
 class ExecutionOptions(InstalledAgentOptions):

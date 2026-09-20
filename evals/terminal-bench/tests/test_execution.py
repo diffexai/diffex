@@ -112,7 +112,8 @@ class ExecutionTests(unittest.IsolatedAsyncioTestCase):
         agent = DiffexAgent(logs_dir=self.logs_dir, model_name="openai/gpt-5", subagents="enabled",
                             extra_env={"OPENAI_API_KEY": "test-only"})
         await agent.run("Task", environment, AgentContext())
-        self.assertTrue({"spawn_agent", "agent_action", "wait_for_agents"}.issubset(configs[0]["tools"]))
+        self.assertEqual(configs[0]["tools"], ["read", "bash", "edit", "write", "update_plan",
+                                            "spawn_agent", "agent_action", "agent_status"])
         self.assertTrue(any("chown -R 1000" in call.kwargs["command"] for call in environment.exec.call_args_list))
 
     async def test_checked_in_eval_policies_expose_subagent_tools(self):
@@ -134,7 +135,7 @@ class ExecutionTests(unittest.IsolatedAsyncioTestCase):
                 await agent.run("Task", environment, AgentContext())
                 self.assertEqual(requested[0]["subagents"], "enabled")
                 self.assertEqual(requested[0]["tools"], ["read", "bash", "edit", "write", "update_plan",
-                                                       "spawn_agent", "agent_action", "wait_for_agents"])
+                                                       "spawn_agent", "agent_action", "agent_status"])
 
     async def test_missing_credentials_and_ambiguous_models_fail_before_exec(self):
         with patch.dict(os.environ, {}, clear=True):
