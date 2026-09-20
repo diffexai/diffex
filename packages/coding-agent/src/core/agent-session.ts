@@ -15,6 +15,7 @@
 
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { basename, dirname } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import {
 	type Agent,
 	type AgentContext,
@@ -135,6 +136,7 @@ import {
 	CURRENT_SESSION_VERSION,
 	getLatestCompactionEntry,
 	type SessionHeader,
+	sessionEntryToContextMessages,
 } from "./session-manager.ts";
 import type { SettingsManager } from "./settings-manager.ts";
 import {
@@ -422,6 +424,12 @@ interface SubagentCoordination {
 	currentWaitAbortController?: AbortController;
 	exitReason?: "escalation" | "cancellation";
 	waitStarted: boolean;
+}
+
+interface ProactiveCompactionContext {
+	branchIds: string[];
+	messagesByEntryId: Map<string, AgentMessage>;
+	firstPendingEntryId: string | undefined;
 }
 
 type AutoCompactionOutcome =
@@ -793,21 +801,77 @@ export class AgentSession {
 
 	private readonly _contextEstimator = new SessionContextEstimator();
 	private _selectedRequestModel: string | undefined;
+	private _pendingRequestContextWindow: number | undefined;
 
 	private _installAgentRequestAccounting(): void {
 		const previousPrepareRequest = this.agent.prepareRequest;
 		this.agent.prepareRequest = async (context, signal) => {
 			const replacement = await previousPrepareRequest?.(context, signal);
+			signal?.throwIfAborted();
+			const effective = replacement ?? context;
+			this.agent.state.systemPrompt = effective.systemPrompt;
+			this.agent.state.tools = effective.tools ?? [];
+			this.agent.state.messages = effective.messages;
+			const selectedModel = this._selectedRequestModel
+				? (JSON.parse(this._selectedRequestModel) as Model<string>)
+				: this.model;
+			this._pendingRequestContextWindow = selectedModel?.contextWindow;
+			try {
+				await this._checkProactiveCompaction("threshold", signal);
+			} finally {
+				this._pendingRequestContextWindow = undefined;
+			}
+			signal?.throwIfAborted();
+			const prepared = {
+				...effective,
+				systemPrompt: this.agent.state.systemPrompt,
+				tools: this.agent.state.tools,
+				messages: this.agent.state.messages,
+			};
 			// Admission events and hooks can change public state after the loop selected
 			// its model. Such a response cannot prove the new configuration's usage.
 			const model = this._selectedRequestModel === JSON.stringify(this.model) ? this.model : undefined;
-			this._contextEstimator.capture(replacement ?? context, model);
-			return replacement;
+			this._contextEstimator.capture(prepared, model);
+			return prepared;
 		};
 	}
 
 	private _estimateCurrentContext(context: AgentContext = this.agent.state): number {
 		return this._contextEstimator.estimate(context, this.model, this.sessionManager.getBranch());
+	}
+
+	/** Match complete session semantics before rebuilding durable context. */
+	private _getProactiveCompactionContext(): ProactiveCompactionContext | undefined {
+		const messagesByEntryId = new Map<string, AgentMessage>();
+		let messageIndex = 0;
+		let firstPendingEntryId: string | undefined;
+		for (const entry of this.sessionManager.buildContextEntries()) {
+			const projected = sessionEntryToContextMessages(entry)[0];
+			if (!projected) continue;
+			const message = this.agent.state.messages[messageIndex++];
+			if (!message) return undefined;
+			if (entry.type === "message") {
+				if (!isDeepStrictEqual(message, projected)) return undefined;
+			} else {
+				// These timestamps are reconstructed from entry admission rather than the original message.
+				const { timestamp: _messageTimestamp, ...messageContent } = message;
+				const { timestamp: _entryTimestamp, ...entryContent } = projected;
+				if (!isDeepStrictEqual(messageContent, entryContent)) return undefined;
+			}
+			messagesByEntryId.set(entry.id, message);
+			// A completed response has observed earlier input; its pending tool batch remains indivisible.
+			if (message.role === "assistant") {
+				firstPendingEntryId = message.content.some((content) => content.type === "toolCall") ? entry.id : undefined;
+			} else if (message.role !== "compactionSummary" && message.role !== "branchSummary") {
+				firstPendingEntryId ??= entry.id;
+			}
+		}
+		if (messageIndex !== this.agent.state.messages.length) return undefined;
+		return {
+			branchIds: this.sessionManager.getBranch().map((entry) => entry.id),
+			messagesByEntryId,
+			firstPendingEntryId,
+		};
 	}
 
 	private _installAgentNextTurnRefresh(): void {
@@ -3473,6 +3537,7 @@ export class AgentSession {
 		willRetry: boolean;
 		signal?: AbortSignal;
 		deferCommit?: (transaction: CompactionAppendTransaction) => void;
+		preserveMessages?: Map<string, AgentMessage>;
 	}): Promise<CompactionResult> {
 		const transaction = appendCompactionTransaction(
 			this.sessionManager,
@@ -3483,8 +3548,10 @@ export class AgentSession {
 			options.fromExtension,
 			options.usage,
 		);
-		const sessionContext = this.sessionManager.buildSessionContext();
-		this.agent.state.messages = sessionContext.messages;
+		this.agent.state.messages = this.sessionManager.buildContextEntries().flatMap((entry) => {
+			const preserved = options.preserveMessages?.get(entry.id);
+			return preserved ? [preserved] : sessionEntryToContextMessages(entry);
+		});
 		const estimatedTokensAfter = this._estimateCurrentContext();
 
 		if (this._extensionRunner) {
@@ -3583,10 +3650,7 @@ export class AgentSession {
 		) {
 			const willRetry = assistantMessage.stopReason !== "stop";
 
-			if (!willRetry) {
-				if (this._proactiveCompactionSuppressed) return false;
-				return await this._runAutoCompaction("overflow", false, signal, deferCommit);
-			}
+			if (!willRetry) return await this._checkProactiveCompaction("overflow", signal, deferCommit);
 
 			if (this._overflowRecoveryAttempted) {
 				this._emit({
@@ -3611,17 +3675,24 @@ export class AgentSession {
 			return await this._runAutoCompaction("overflow", willRetry, signal, deferCommit);
 		}
 
-		// Case 2: Threshold uses the same normal-context estimate as the footer and preflight.
+		const queuedContinuation = await this._checkProactiveCompaction("threshold", signal, deferCommit);
+		// Proactive compaction does not recover a provider failure.
+		return assistantMessage?.stopReason !== "error" && queuedContinuation;
+	}
+
+	private async _checkProactiveCompaction(
+		reason: "threshold" | "overflow",
+		signal?: AbortSignal,
+		deferCommit?: (transaction: CompactionAppendTransaction) => void,
+	): Promise<boolean> {
+		const contextWindow = this._pendingRequestContextWindow ?? this.model?.contextWindow ?? 0;
 		if (
-			!this._proactiveCompactionSuppressed &&
-			contextWindow > 0 &&
-			shouldCompact(contextTokens, contextWindow, settings)
-		) {
-			const queuedContinuation = await this._runAutoCompaction("threshold", false, signal, deferCommit);
-			// Threshold compaction does not recover a provider failure.
-			return assistantMessage?.stopReason !== "error" && queuedContinuation;
-		}
-		return false;
+			this._proactiveCompactionSuppressed ||
+			contextWindow <= 0 ||
+			!shouldCompact(this._estimateCurrentContext(), contextWindow, this.settingsManager.getCompactionSettings())
+		)
+			return false;
+		return this._runAutoCompaction(reason, false, signal, deferCommit);
 	}
 
 	/**
@@ -3641,7 +3712,7 @@ export class AgentSession {
 			const result = outcome.status === "compacted" ? outcome.result : undefined;
 			let errorMessage = outcome.status === "compacted" ? undefined : outcome.errorMessage;
 			if (!willRetry) {
-				const contextWindow = this.model?.contextWindow ?? 0;
+				const contextWindow = this._pendingRequestContextWindow ?? this.model?.contextWindow ?? 0;
 				const tokens = this._estimateCurrentContext();
 				if (result) result.estimatedTokensAfter = tokens;
 				const stillAboveThreshold =
@@ -3694,8 +3765,14 @@ export class AgentSession {
 			if (this._disposePromise) throw new Error("Compaction cancelled");
 
 			const pathEntries = this.sessionManager.getBranch();
-
-			const preparation = prepareCompaction(pathEntries, settings);
+			const proactiveContext = willRetry ? undefined : this._getProactiveCompactionContext();
+			if (!willRetry && !proactiveContext) {
+				return {
+					status: "unavailable",
+					errorMessage: "Auto-compaction unavailable: active messages do not match the selected session history.",
+				};
+			}
+			const preparation = prepareCompaction(pathEntries, settings, proactiveContext?.firstPendingEntryId);
 			if (!preparation) {
 				return {
 					status: "unavailable",
@@ -3729,6 +3806,7 @@ export class AgentSession {
 				}
 			}
 
+			controller.signal.throwIfAborted();
 			let summary: string;
 			let firstKeptEntryId: string;
 			let tokensBefore: number;
@@ -3767,6 +3845,34 @@ export class AgentSession {
 
 			controller.signal.throwIfAborted();
 
+			let preserveMessages: Map<string, AgentMessage> | undefined;
+			if (proactiveContext) {
+				const current = this._getProactiveCompactionContext();
+				const branch = this.sessionManager.getBranch();
+				if (
+					!current ||
+					proactiveContext.branchIds.some((id, index) => current.branchIds[index] !== id) ||
+					branch.slice(proactiveContext.branchIds.length).some((entry) => entry.type === "compaction")
+				) {
+					throw new Error("Selected session context changed during compaction.");
+				}
+				const keptIndex = pathEntries.findIndex((entry) => entry.id === firstKeptEntryId);
+				const protectedIndex =
+					current.firstPendingEntryId === undefined
+						? branch.length
+						: branch.findIndex((entry) => entry.id === current.firstPendingEntryId);
+				const firstKeptMessage = branch.slice(keptIndex).flatMap(sessionEntryToContextMessages)[0];
+				if (
+					keptIndex < 0 ||
+					pathEntries[keptIndex]?.type === "compaction" ||
+					keptIndex > protectedIndex ||
+					firstKeptMessage?.role === "toolResult" ||
+					!this.sessionManager.buildContextEntries().some((entry) => entry.id === firstKeptEntryId)
+				) {
+					throw new Error("Compaction cut would discard pending input or separate a tool result from its call.");
+				}
+				preserveMessages = current.messagesByEntryId;
+			}
 			const result = await this._recordSuccessfulCompaction({
 				reason,
 				summary,
@@ -3778,6 +3884,7 @@ export class AgentSession {
 				willRetry,
 				signal: controller.signal,
 				deferCommit,
+				preserveMessages,
 			});
 
 			if (willRetry) {

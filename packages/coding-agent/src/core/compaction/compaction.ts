@@ -769,6 +769,7 @@ export interface CompactionPreparation {
 export function prepareCompaction(
 	pathEntries: SessionEntry[],
 	settings: CompactionSettings,
+	firstPendingEntryId?: string,
 ): CompactionPreparation | undefined {
 	if (pathEntries.length > 0 && pathEntries[pathEntries.length - 1].type === "compaction") {
 		return undefined;
@@ -794,7 +795,26 @@ export function prepareCompaction(
 
 	const tokensBefore = estimateContextTokens(buildSessionContext(pathEntries).messages).tokens;
 
-	const cutPoint = findCutPoint(pathEntries, boundaryStart, boundaryEnd, settings.keepRecentTokens);
+	let cutPoint = findCutPoint(pathEntries, boundaryStart, boundaryEnd, settings.keepRecentTokens);
+	const pendingIndex =
+		firstPendingEntryId === undefined ? -1 : pathEntries.findIndex((entry) => entry.id === firstPendingEntryId);
+	// A large trailing batch may have no valid cut after its results; retain its call frontier.
+	const pendingTokens =
+		pendingIndex < 0
+			? 0
+			: pathEntries
+					.slice(pendingIndex)
+					.flatMap(sessionEntryToContextMessages)
+					.reduce((sum, message) => sum + estimateTokens(message), 0);
+	if (
+		pendingIndex >= boundaryStart &&
+		(pendingIndex < cutPoint.firstKeptEntryIndex || pendingTokens >= settings.keepRecentTokens)
+	) {
+		const turnStartIndex = isTurnStartEntry(pathEntries[pendingIndex])
+			? -1
+			: findTurnStartIndex(pathEntries, pendingIndex, boundaryStart);
+		cutPoint = { firstKeptEntryIndex: pendingIndex, turnStartIndex, isSplitTurn: turnStartIndex !== -1 };
+	}
 
 	// Get UUID of first kept entry
 	const firstKeptEntry = pathEntries[cutPoint.firstKeptEntryIndex];

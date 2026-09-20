@@ -38,15 +38,19 @@ You can also trigger manually with `/compact [instructions]`, where optional ins
 
 ### Automatic Attempt Lifecycle
 
-Pre-prompt and successful-final-answer checks each allow one eligible proactive operation, including the configured transient summarization retries. Afterward, Diffex estimates context again. A failure, independent cancellation, unavailable compaction, or result still above the reserve threshold warns and suppresses further proactive attempts for that logical run. Queued input and automatic continuations share that suppression. The next separately admitted idle prompt resets it before preflight; an idle custom-message run also resets it.
+Pre-prompt, every normal model request after input and tool-result admission, and successful-final-answer checks each allow one eligible proactive operation, including the configured transient summarization retries. Afterward, Diffex estimates context again. A failure, independent cancellation, unavailable compaction, or result still above the reserve threshold warns and suppresses further proactive attempts for that logical run. Queued input and automatic continuations share that suppression. The next separately admitted idle prompt resets it before preflight; an idle custom-message run also resets it.
 
 A valid summary remains committed even when it does not reduce context below the threshold. A successful reduction to or below the threshold permits another attempt after renewed growth. These are best-effort limits: local estimates and continuing after a warning do not guarantee a provider token limit.
 
 Cancelling the prompt or session stops pending work and cancels compaction, including authentication and extension hooks. Cancelling compaction alone continues the pending work. Cancellable preflight retains its existing rollback behavior. Successful final answers, including answers exceeding the configured context window, are never retried merely because proactive compaction ran. Manual compaction and bounded failed/truncated-response recovery remain independently available.
 
+Pending user and custom messages (including images), and the complete latest tool-call/result batch, survive proactive compaction exactly once. This also protects custom messages appended while idle before their first request. Standalone compaction and branch-summary requests bypass normal request scheduling.
+
+An existing request-preparation hook runs once before the budget check. Its effective system prompt and tools remain in use; compaction callbacks can update them. If its messages cannot be matched to selected session history, compaction warns and continues with that effective context unchanged, suppressing further proactive attempts for the run. Unsafe extension cut points are rejected before saving.
+
 ### Current Context Accounting
 
-Pre-prompt and post-answer checks and the context display share one estimate of the normal model-visible context. It includes system instructions, tool definitions, images, summaries, custom messages, and included bash output. Request-only extension transforms are not rerun to calculate it.
+Pre-prompt, request-time, and post-answer checks and the context display share one estimate of the normal model-visible context. It includes system instructions, tool definitions, images, summaries, custom messages, and included bash output. Request-only extension transforms are not rerun to calculate it.
 
 Provider usage is used only when an in-memory request baseline still matches the selected branch, model configuration, system prompt, tools, and preceding messages. Later messages are estimated locally; system instructions and tools already covered by usage are not added again. After compaction, retained older responses cannot supply usage, regardless of their timestamps. Loaded sessions and changed contexts without a matching baseline use local estimates until an applicable response arrives. Session token and cost totals still include all billed history.
 
@@ -60,7 +64,7 @@ Compaction warnings appear in the interactive transcript, including when a valid
 2. **Extract messages**: Collect messages from the previous kept boundary (or session start) up to the cut point
 3. **Generate summary**: Call LLM to summarize with structured format, passing the previous summary as iterative context when present
 4. **Append entry**: Save `CompactionEntry` with summary and `firstKeptEntryId`
-5. **Reload**: Session reloads, using summary + messages from `firstKeptEntryId` onwards
+5. **Rebuild active context**: The current run continues with the saved summary + messages from `firstKeptEntryId` onwards
 
 ```
 Before compaction:
