@@ -400,7 +400,10 @@ def export_trajectory(directory: Path, destination: Path, context: AgentContext,
     accounting = {"complete": not gaps and not missing, "gaps": sorted(set(gaps)),
                   "missing_fields": sorted(missing), "observed_usage": observed,
                   "observed_model_usage": dict(by_model), "totals": totals}
-    root_document["extra"].update(accounting=accounting, execution_status=outcome.get("status"))
+    root_document["extra"].update(accounting=accounting, execution_status=outcome.get("status"),
+                                  background_process_lifetime=requested.get("background_process_lifetime"),
+                                  agent_execution_stopped=outcome.get("agent_execution_stopped"),
+                                  retained_processes=outcome.get("retained_processes", []))
     root_document["final_metrics"] = {
         **{f"total_{field}": value for field, value in totals.items()}, "total_steps": len(root.steps),
         "extra": {"scope": "root_and_all_descendants", "observed_usage": observed, "accounting_complete": accounting["complete"]},

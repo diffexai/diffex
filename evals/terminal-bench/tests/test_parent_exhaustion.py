@@ -11,6 +11,7 @@ from diffex_terminal_bench.benchmark import PACKAGE, REPOSITORY, StageFailedErro
 from diffex_terminal_bench.dataset import load_config
 from diffex_terminal_bench.gate import read_json, sample_tasks, write_json
 from diffex_terminal_bench.outcome import parse_outcome, require_completed
+from test_outcome import write_cleanup
 
 
 class ParentExhaustionTests(unittest.IsolatedAsyncioTestCase):
@@ -51,9 +52,9 @@ class ParentExhaustionTests(unittest.IsolatedAsyncioTestCase):
                     (directory / "stdout.jsonl").write_bytes(stdout)
                     (directory / "stderr.log").write_bytes(stderr)
                     write_json(directory / "process.json", {"exit_code": process.returncode})
-                    write_json(directory / "cleanup.json", {"confirmed": True})
+                    write_cleanup(directory)
                     requested = {"provider": "faux", "model": "fixture", "thinking": "off",
-                                 "instruction_sha256": "fixture", "tools": []}
+                                 "instruction_sha256": "fixture", "tools": [], "background_process_lifetime": "environment"}
                     write_json(directory / "requested.json", requested)
                     write_json(directory / "effective.json", {**requested, "release_agents_loaded": True,
                                                                "instruction_delivered": True})

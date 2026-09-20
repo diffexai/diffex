@@ -16,7 +16,7 @@ from harbor.models.agent.context import AgentContext
 
 from diffex_terminal_bench.config import PINS
 from diffex_terminal_bench.execution import ExecutionOptions, PROVIDER_ENV, SUBAGENT_TOOLS
-from diffex_terminal_bench.outcome import parse_outcome, require_completed
+from diffex_terminal_bench.outcome import DiffexControlStopError, parse_outcome, require_completed
 from diffex_terminal_bench.trajectory import export_trajectory
 
 
@@ -105,6 +105,7 @@ class DiffexAgent(BaseInstalledAgent):
             "pins": PINS, "provider": provider, "model": model,
             "thinking": options.thinking, "tools": tools,
             "subagents": options.subagents, "project_resources": options.project_resources,
+            "background_process_lifetime": options.background_process_lifetime,
             "evolution": {"enabled": False}, "state_policy": "fresh-per-run",
             "credential_env_names": sorted(credentials),
             "instruction_sha256": hashlib.sha256(instruction.encode("utf-8")).hexdigest(),
@@ -179,6 +180,10 @@ class DiffexAgent(BaseInstalledAgent):
                 if outcome["status"] == "completed":
                     outcome.update(status="infrastructure_failure", reason="trajectory_export_failed")
             (self.logs_dir / run_dir.name / "outcome.json").write_text(json.dumps(outcome, indent=2) + "\n")
+            # Raise inside finally so even a pending Harbor deadline cannot
+            # convert unsafe cleanup into a verifier-eligible agent timeout.
+            if outcome.get("agent_execution_stopped") is not True:
+                raise DiffexControlStopError("Agent execution stop is unverified; verification is blocked")
         if execution["interruption"] == "cancelled":
             raise asyncio.CancelledError
         require_completed(outcome)
@@ -206,6 +211,8 @@ class DiffexAgent(BaseInstalledAgent):
         outcome = parse_outcome(directory, execution["interruption"], execution["launcher_exit_code"])
         if failures:
             outcome["recovery_errors"] = failures
+            if any(failure["phase"] == "cleanup" for failure in failures):
+                outcome.update(agent_execution_stopped=False, cleanup_confirmed=False)
             if not execution["interruption"]:
                 outcome.update(status="infrastructure_failure", reason="recovery_failed")
         context.metadata = {**(context.metadata or {}), "diffex_outcome": outcome, "diffex_run_dir": str(run_dir)}

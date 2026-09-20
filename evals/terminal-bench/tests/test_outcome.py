@@ -7,7 +7,7 @@ import unittest
 
 from harbor.agents.installed.base import AgentAuthenticationError
 
-from diffex_terminal_bench.outcome import DiffexExecutionError, parse_outcome, require_completed
+from diffex_terminal_bench.outcome import DiffexControlStopError, DiffexExecutionError, parse_outcome, require_completed
 
 
 def attempt(reason="stop", error="", retry=False):
@@ -17,16 +17,26 @@ def attempt(reason="stop", error="", retry=False):
             {"type": "agent_end", "messages": [message], "willRetry": retry}]
 
 
+def write_cleanup(directory):
+    (directory / "stop-requested").touch()
+    report = {"schema_version": 1, "phase": "pre-verifier", "stop_requested": True,
+              "agent_execution_stopped": True, "ownership_validated": True,
+              "remaining_agent_pids": [], "control_processes": [], "retained_processes": [],
+              "ownership_records": []}
+    (directory / "cleanup.json").write_text(json.dumps(report))
+    return report
+
+
 def write_evidence(directory, events=None):
     directory.mkdir(parents=True, exist_ok=True)
-    config = {"provider": "openai", "model": "gpt-5", "thinking": "high", "tools": ["bash"], "instruction_sha256": "fixture"}
+    config = {"provider": "openai", "model": "gpt-5", "thinking": "high", "tools": ["bash"], "instruction_sha256": "fixture", "background_process_lifetime": "environment"}
     for name, content in {
         "requested.json": config,
         "effective.json": {**config, "release_agents_loaded": True, "instruction_delivered": True},
         "process.json": {"exit_code": 0, "signal": None, "spawn_error": None},
-        "cleanup.json": {"confirmed": True},
     }.items():
         (directory / name).write_text(json.dumps(content))
+    write_cleanup(directory)
     (directory / "stdout.jsonl").write_text("".join(json.dumps(event) + "\n" for event in
                                                    [{"type": "session"}, *(events if events is not None else attempt()), {"type": "agent_settled"}]))
 

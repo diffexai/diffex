@@ -72,7 +72,7 @@ def run_identity(config: BenchmarkConfig, digests: dict) -> dict:
     return {"adapter_commit": commit, "dataset": config.dataset.model_dump(), "task_digests": digests,
             "pins": PINS, "harbor_version": version("harbor"), "daytona_version": version("daytona"),
             "python_version": platform.python_version(), "uv_lock_sha256": sha256(PACKAGE / "uv.lock"),
-            "model": config.model, "policy": config.policy.model_dump(include={"thinking", "tools", "subagents", "project_resources"}),
+            "model": config.model, "policy": config.policy.model_dump(include={"thinking", "tools", "subagents", "project_resources", "background_process_lifetime"}),
             "pilot_tasks": config.pilot_tasks, "backend": "daytona",
             "daytona_target": os.environ.get("DAYTONA_TARGET", "organization-default"),
             "daytona_api_url": os.environ.get("DAYTONA_API_URL", "https://app.daytona.io/api"),
@@ -85,7 +85,7 @@ def trial_config(config: BenchmarkConfig, task_path: Path, directory: Path, labe
     agent = AgentConfig(name="oracle") if oracle else AgentConfig(
         import_path=DiffexAgent.import_path(), model_name=config.model,
         override_setup_timeout_sec=630,
-        kwargs=config.policy.model_dump(include={"thinking", "tools", "subagents", "project_resources"}),
+        kwargs=config.policy.model_dump(include={"thinking", "tools", "subagents", "project_resources", "background_process_lifetime"}),
         # Variable references are serialized, never credential values. Harbor
         # also uses these names to scrub accidental credential output from logs.
         env={name: f"${{{name}}}" for name in PROVIDER_ENV[config.model.split("/", 1)[0]] if os.environ.get(name)},

@@ -40,6 +40,8 @@ const args = [
 	"--thinking", process.env.DIFFEX_TB_THINKING, "--tools", config.tools.join(","),
 	"--session", join(runDir, "sessions", "root.jsonl"),
 	"--session-dir", join(runDir, "sessions"),
+	"--background-process-lifetime", config.background_process_lifetime,
+	"--background-process-ownership-dir", join(runDir, "ownership"),
 	"--no-approve", "--no-extensions", "--no-skills", "--no-prompt-templates", "--no-themes",
 	"--extension", join(runDir, "observe.mjs"), "--print", `@${join(runDir, "instruction.txt")}`,
 ];
@@ -52,6 +54,8 @@ writeFileSync(join(runDir, "process.json"), JSON.stringify({
 const child = spawn("/usr/local/bin/diffex", args, {
 	cwd: process.cwd(), env, stdio: ["ignore", stdout, stderr], detached: true,
 });
+const childStart = child.pid ? identity(child.pid) : null;
+if (child.pid) writeFileSync(join(runDir, "cli.json"), JSON.stringify({ pid: child.pid, start: childStart }), { mode: 0o600 });
 closeSync(stdout);
 closeSync(stderr);
 let spawnError = null;
@@ -61,9 +65,15 @@ function stop() {
 	if (interrupted) return;
 	interrupted = true;
 	if (!child.pid) return;
-	try { process.kill(-child.pid, "SIGTERM"); } catch (error) { if (error.code !== "ESRCH") throw error; }
+	// Signal only the identified CLI. Group signals could reach retained task
+	// services; independent recovery handles active descendants after CLI exit.
+	if (identity(child.pid) === childStart) {
+		try { process.kill(child.pid, "SIGTERM"); } catch (error) { if (error.code !== "ESRCH") throw error; }
+	}
 	killTimer = setTimeout(() => {
-		try { process.kill(-child.pid, "SIGKILL"); } catch (error) { if (error.code !== "ESRCH") throw error; }
+		if (identity(child.pid) === childStart) {
+			try { process.kill(child.pid, "SIGKILL"); } catch (error) { if (error.code !== "ESRCH") throw error; }
+		}
 	}, 5000);
 }
 for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"]) process.on(signal, stop);

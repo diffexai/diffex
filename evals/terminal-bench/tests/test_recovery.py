@@ -12,7 +12,7 @@ from harbor.environments.base import BaseEnvironment, ExecResult
 from harbor.models.agent.context import AgentContext
 
 from diffex_terminal_bench.adapter import DiffexAgent
-from diffex_terminal_bench.outcome import DiffexExecutionError
+from diffex_terminal_bench.outcome import DiffexControlStopError, DiffexExecutionError
 from test_outcome import write_evidence
 from test_trajectory import assistant, entry
 
@@ -135,14 +135,14 @@ class RecoveryTests(unittest.IsolatedAsyncioTestCase):
             return ExecResult(return_code=1 if "cleanup.cjs" in kwargs["command"] else 0, stdout="", stderr="")
 
         self.environment.exec.side_effect = execute
-        with self.assertRaises(DiffexExecutionError):
+        with self.assertRaises(DiffexControlStopError):
             await self.agent.run("Task", self.environment, self.context)
         self.environment.download_dir.assert_awaited_once()
         self.assertEqual(self.context.metadata["diffex_outcome"]["status"], "infrastructure_failure")
 
     async def test_log_collection_failure_is_recorded_locally(self):
         self.environment.download_dir.side_effect = ConnectionError("fixture")
-        with self.assertRaises(DiffexExecutionError):
+        with self.assertRaises(DiffexControlStopError):
             await self.agent.run("Task", self.environment, self.context)
         record = json.loads(next(self.logs.glob("run-*/outcome.json")).read_text())
         self.assertEqual(record["recovery_errors"][0]["phase"], "log_collection")

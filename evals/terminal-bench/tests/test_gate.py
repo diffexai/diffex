@@ -20,6 +20,7 @@ from diffex_terminal_bench.execution import SUBAGENT_TOOLS
 from diffex_terminal_bench.gate import inventory, require_previous, sha256, stage_tasks, validate_trial, write_json
 from diffex_terminal_bench.outcome import parse_outcome
 from diffex_terminal_bench.trajectory import export_trajectory
+from test_outcome import write_cleanup
 from test_trajectory import USAGE, assistant, entry, interrupted_child_records
 
 
@@ -32,10 +33,10 @@ class GateTests(unittest.TestCase):
         self.run = self.directory / "agent/run-fixture"
         self.run.mkdir(parents=True)
         self.identity = {"model": "openai/gpt-5", "policy": {"thinking": "high", "tools": "bash",
-                         "subagents": "disabled", "project_resources": "context-only"},
+                         "subagents": "disabled", "project_resources": "context-only", "background_process_lifetime": "environment"},
                          "release_agents_sha256": "release-hash", "task_digests": {"task": "sha256:task"}}
         requested = {"provider": "openai", "model": "gpt-5", "thinking": "high", "tools": ["bash"],
-                     "subagents": "disabled", "project_resources": "context-only", "pins": PINS,
+                     "subagents": "disabled", "project_resources": "context-only", "background_process_lifetime": "environment", "pins": PINS,
                      "evolution": {"enabled": False}, "state_policy": "fresh-per-run"}
         (self.run / "instruction.txt").write_text("task")
         (self.run / "system-prompt.txt").write_text("system")
@@ -44,7 +45,7 @@ class GateTests(unittest.TestCase):
         write_json(self.run / "effective.json", {**requested, "release_agents_loaded": True, "instruction_delivered": True,
                    "release_agents_sha256": "release-hash", "system_prompt_sha256": sha256(self.run / "system-prompt.txt")})
         write_json(self.run / "process.json", {"exit_code": 0})
-        write_json(self.run / "cleanup.json", {"confirmed": True})
+        write_cleanup(self.run)
         message = assistant("response")
         events = [{"type": "session"}, {"type": "agent_start"}, {"type": "message_start", "message": message},
                   {"type": "message_end", "message": message}, {"type": "agent_end", "messages": [message]},

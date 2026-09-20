@@ -6,9 +6,15 @@ import re
 
 from harbor.agents.installed.base import AgentAuthenticationError, NonZeroAgentExitCodeError
 
+from diffex_terminal_bench.lifecycle import read_cleanup
+
 
 class DiffexExecutionError(NonZeroAgentExitCodeError):
     """An agent infrastructure failure, not a completed task with reward zero."""
+
+
+class DiffexControlStopError(RuntimeError):
+    """Block Harbor verification when agent execution may still be running."""
 
 
 def parse_outcome(directory: Path, interruption: str | None = None,
@@ -21,12 +27,14 @@ def parse_outcome(directory: Path, interruption: str | None = None,
         if not isinstance(process, dict):
             raise ValueError("invalid_process")
         result["process"] = process
-        cleanup = json.loads((directory / "cleanup.json").read_text())
-        if not isinstance(cleanup, dict):
-            raise ValueError("invalid_cleanup")
-        result["cleanup_confirmed"] = cleanup.get("confirmed") is True
     except (OSError, ValueError):
         process = {}
+    try:
+        cleanup = read_cleanup(directory)
+        result.update(cleanup_confirmed=True, agent_execution_stopped=True,
+                      retained_processes=cleanup["retained_processes"])
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        result.update(cleanup_confirmed=False, agent_execution_stopped=False)
     # Parse incrementally so long runs do not require the whole stream in memory.
     active = False
     ended = False
@@ -132,7 +140,8 @@ def parse_outcome(directory: Path, interruption: str | None = None,
             effective = json.loads((directory / "effective.json").read_text())
             if not isinstance(requested, dict) or not isinstance(effective, dict):
                 raise ValueError("invalid_configuration")
-            matches = all(effective.get(key) == requested[key] for key in ("provider", "model", "thinking", "instruction_sha256"))
+            matches = all(effective.get(key) == requested[key] for key in ("provider", "model", "thinking", "instruction_sha256", "background_process_lifetime"))
+            matches = matches and requested.get("background_process_lifetime") == "environment"
             matches = matches and effective.get("release_agents_loaded") is True and effective.get("instruction_delivered") is True
             matches = matches and sorted(effective["tools"]) == sorted(requested["tools"])
         except (OSError, ValueError, KeyError, TypeError):
@@ -143,6 +152,8 @@ def parse_outcome(directory: Path, interruption: str | None = None,
 
 
 def require_completed(outcome: dict) -> None:
+    if outcome.get("agent_execution_stopped") is not True:
+        raise DiffexControlStopError("Agent execution stop is unverified; verification is blocked")
     if outcome["status"] == "completed":
         return
     message = f"Diffex execution {outcome['status']}: {outcome['reason']}; see retained run artifacts"

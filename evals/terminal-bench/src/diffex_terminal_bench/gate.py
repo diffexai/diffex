@@ -203,6 +203,7 @@ def validate_trial(directory: Path, task: str, identity: dict, *, oracle: bool =
     tools = policy["tools"].split(",") + (list(SUBAGENT_TOOLS) if policy["subagents"] == "enabled" else [])
     for key, value in {"provider": provider, "model": model, "thinking": policy["thinking"],
                        "subagents": policy["subagents"], "project_resources": policy["project_resources"],
+                       "background_process_lifetime": policy["background_process_lifetime"],
                        "pins": PINS, "tools": tools, "evolution": {"enabled": False}, "state_policy": "fresh-per-run"}.items():
         if requested.get(key) != value:
             raise ValueError(f"Requested configuration differs from gate identity: {key}")

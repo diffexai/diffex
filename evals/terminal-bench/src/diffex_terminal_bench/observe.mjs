@@ -23,6 +23,8 @@ export default function observe(api) {
 			provider: ctx.model?.provider, model: ctx.model?.id,
 			thinking: api.getThinkingLevel(), tools: api.getActiveTools(), cwd: ctx.cwd,
 			root_session: rootSession,
+			background_process_lifetime: process.argv.includes("--background-process-lifetime")
+				? process.argv[process.argv.indexOf("--background-process-lifetime") + 1] : null,
 			instruction_transport: "native-file",
 			instruction_delivered: prompt === `<file name="${instructionPath}">\n${instruction}\n</file>\n`,
 			instruction_sha256: createHash("sha256").update(instruction).digest("hex"),

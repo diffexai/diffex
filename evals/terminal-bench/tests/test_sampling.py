@@ -37,7 +37,7 @@ class SamplingTests(unittest.TestCase):
             self.assertEqual(len(gate["identity"]["sample"]["tasks"]), self.sample_count)
             self.assertEqual(config.agent.model_name, self.config.model)
             self.assertEqual(config.agent.kwargs, self.config.policy.model_dump(
-                include={"thinking", "tools", "subagents", "project_resources"}))
+                include={"thinking", "tools", "subagents", "project_resources", "background_process_lifetime"}))
             self.assertEqual(config.timeout_multiplier, 1)
             self.assertTrue(config.environment.delete)
             self.started.append(config.task.path.name)

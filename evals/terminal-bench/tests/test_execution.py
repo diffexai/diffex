@@ -26,7 +26,7 @@ class ExecutionTests(unittest.IsolatedAsyncioTestCase):
         # and a Linux smoke using the real launcher and provider.
         async def finish_run(agent, environment, run_dir, context, execution):
             (agent.logs_dir / run_dir.name).mkdir(parents=True, exist_ok=True)
-            return {"status": "completed"}
+            return {"status": "completed", "agent_execution_stopped": True}
 
         finish = patch.object(DiffexAgent, "_finish_run", autospec=True, side_effect=finish_run)
         finish.start()
@@ -86,6 +86,7 @@ class ExecutionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(configs[0]["credential_env_names"], ["OPENAI_API_KEY"])
         self.assertNotIn("spawn_agent", configs[0]["tools"])
         self.assertEqual(configs[0]["evolution"], {"enabled": False})
+        self.assertEqual(configs[0]["background_process_lifetime"], "environment")
         calls = [call.kwargs for call in environment.exec.call_args_list if call.kwargs.get("env")]
         self.assertEqual(len(calls), 2)
         for call in calls:
@@ -147,7 +148,7 @@ class ExecutionTests(unittest.IsolatedAsyncioTestCase):
                 environment.exec.assert_not_called()
 
     def test_preflight_rejects_implicit_or_unsafe_policy(self):
-        for kwargs in ({"thinking": "automatic"}, {"tools": "bash,bash"}, {"tools": "spawn_agent"},
+        for kwargs in ({"background_process_lifetime": "session"}, {"thinking": "automatic"}, {"tools": "bash,bash"}, {"tools": "spawn_agent"},
                        {"project_resources": "all"}, {"subagents": True}, {"unknown": "option"},
                        {"config": {"evolution": {"enabled": True}}}, {"prompt_template_path": "template.txt"}):
             with self.subTest(kwargs=kwargs), self.assertRaises(ValueError):
