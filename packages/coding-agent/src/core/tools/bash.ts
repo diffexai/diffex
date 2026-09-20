@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import { access as fsAccess } from "node:fs/promises";
 import type { AgentTool } from "@diffexai/diffex-agent-core";
@@ -16,6 +17,7 @@ import {
 	trackDetachedChildPid,
 	untrackDetachedChildPid,
 } from "../../utils/shell.ts";
+import { SHELL_EXECUTION_ID_ENV } from "../../utils/shell-process-identity.ts";
 import type { ExtensionContext, ToolDefinition, ToolRenderResultOptions } from "../extensions/types.ts";
 import { OutputAccumulator } from "./output-accumulator.ts";
 import { getTextOutput, invalidArgText, str } from "./render-utils.ts";
@@ -104,10 +106,11 @@ export function createLocalBashOperations(options?: {
 
 			signal?.throwIfAborted();
 			const commandFromStdin = shellConfig.commandTransport === "stdin";
+			const executionId = randomUUID();
 			const child = spawn(shellConfig.shell, commandFromStdin ? shellConfig.args : [...shellConfig.args, command], {
 				cwd,
 				detached: process.platform !== "win32",
-				env: env ?? getShellEnv(),
+				env: { ...(env ?? getShellEnv()), [SHELL_EXECUTION_ID_ENV]: executionId },
 				stdio: [commandFromStdin ? "pipe" : "ignore", "pipe", "pipe"],
 				windowsHide: true,
 			});
@@ -115,22 +118,43 @@ export function createLocalBashOperations(options?: {
 				child.stdin?.on("error", () => {});
 				child.stdin?.end(command);
 			}
-			if (child.pid) {
-				if (options?.owner) options.owner.track(child.pid);
-				else trackDetachedChildPid(child.pid);
-			}
 			let timedOut = false;
+			let completed = false;
+			let completionError: unknown;
 			let timeoutHandle: NodeJS.Timeout | undefined;
 			const onAbort = () => {
-				if (child.pid) killProcessTree(child.pid);
+				if (child.pid) {
+					if (options?.owner) options.owner.terminate(child.pid);
+					else killProcessTree(child.pid);
+				}
 			};
+			const onExit = (code: number | null) => {
+				completed = true;
+				if (timeoutHandle) clearTimeout(timeoutHandle);
+				try {
+					if (child.pid) options?.owner?.complete(child.pid, code === 0 && !timedOut && !signal?.aborted);
+				} catch (error) {
+					completionError = error;
+					try {
+						onAbort();
+					} catch (cleanupError) {
+						completionError = new AggregateError([error, cleanupError], "Shell ownership handoff failed");
+					}
+				}
+			};
+			child.once("exit", onExit);
 
 			try {
+				if (child.pid) {
+					if (options?.owner) options.owner.track(child.pid, executionId);
+					else trackDetachedChildPid(child.pid);
+				}
 				// Set timeout if provided.
 				if (timeoutMs !== undefined) {
 					timeoutHandle = setTimeout(() => {
+						if (completed) return;
 						timedOut = true;
-						if (child.pid) killProcessTree(child.pid);
+						onAbort();
 					}, timeoutMs);
 				}
 				// Stream stdout and stderr.
@@ -143,7 +167,10 @@ export function createLocalBashOperations(options?: {
 				}
 				// Handle shell spawn errors and wait for the process to terminate without hanging
 				// on inherited stdio handles held by detached descendants.
-				const exitCode = await waitForChildProcess(child);
+				const exitCode = await waitForChildProcess(child, {
+					maxPostExitMs: options?.owner?.policy.lifetime === "environment" ? 100 : undefined,
+				});
+				if (completionError) throw completionError;
 				if (signal?.aborted) {
 					throw new Error("aborted");
 				}
@@ -152,6 +179,7 @@ export function createLocalBashOperations(options?: {
 				}
 				return { exitCode };
 			} finally {
+				child.removeListener("exit", onExit);
 				if (child.pid) {
 					if (options?.owner) options.owner.releaseIfExited(child.pid);
 					else untrackDetachedChildPid(child.pid);

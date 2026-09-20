@@ -46,16 +46,18 @@ export function spawnProcessSync(
  * us reading, while a quiet inherited handle (e.g. a Windows daemonized descendant
  * that never lets `close` fire) still releases us after the grace elapses.
  */
-export function waitForChildProcess(child: ChildProcess): Promise<number | null> {
+export function waitForChildProcess(child: ChildProcess, options?: { maxPostExitMs?: number }): Promise<number | null> {
 	return new Promise((resolve, reject) => {
 		let settled = false;
 		let exited = false;
 		let exitCode: number | null = null;
 		let postExitTimer: NodeJS.Timeout | undefined;
+		let postExitDeadline: NodeJS.Timeout | undefined;
 		let stdoutEnded = child.stdout === null;
 		let stderrEnded = child.stderr === null;
 
 		const cleanup = () => {
+			if (postExitDeadline) clearTimeout(postExitDeadline);
 			if (postExitTimer) {
 				clearTimeout(postExitTimer);
 				postExitTimer = undefined;
@@ -118,6 +120,9 @@ export function waitForChildProcess(child: ChildProcess): Promise<number | null>
 			exitCode = code;
 			maybeFinalizeAfterExit();
 			if (!settled) {
+				if (options?.maxPostExitMs !== undefined) {
+					postExitDeadline = setTimeout(() => finalize(exitCode), options.maxPostExitMs);
+				}
 				armIdleTimer();
 			}
 		};
