@@ -233,6 +233,40 @@ describe("AgentSession current context accounting", () => {
 		expect(session.getContextUsage()?.contextWindow).toBe(harness.getModel().contextWindow / 2);
 	});
 
+	it.each(["agent_start", "message_end", "turn_start", "next_turn"] as const)(
+		"rejects a model baseline changed during %s admission",
+		async (eventType) => {
+			const harness = await createHarness({ settings: { compaction: { enabled: false } } });
+			harnesses.push(harness);
+			const originalWindow = harness.getModel().contextWindow;
+			let changed = false;
+			let turns = 0;
+			harness.session.subscribe((event) => {
+				if (event.type === "turn_start") turns++;
+				if (!changed && (event.type === eventType || (eventType === "next_turn" && turns === 2))) {
+					changed = true;
+					harness.session.agent.state.model = { ...harness.getModel(), contextWindow: originalWindow / 2 };
+				}
+			});
+			harness.setResponses([
+				async (_context, _options, _state, model) => {
+					expect(model.contextWindow).toBe(originalWindow);
+					if (eventType === "next_turn") await harness.session.followUp("follow up");
+					return fauxAssistantMessage("answer");
+				},
+				(_context, _options, _state, model) => {
+					expect(model.contextWindow).toBe(originalWindow);
+					return fauxAssistantMessage("next answer");
+				},
+			]);
+			await harness.session.prompt("hello");
+			expect(changed).toBe(true);
+			expect(harness.faux.state.callCount).toBe(eventType === "next_turn" ? 2 : 1);
+			expect(harness.session.messages.at(-1)).toMatchObject({ stopReason: "stop" });
+			expect(harness.session.getContextUsage()?.tokens).toBe(localTokens(harness));
+		},
+	);
+
 	it("composes request preparation and never reruns request-only transforms while estimating", async () => {
 		const prepareRequest = vi.fn((context: AgentContext) => ({
 			...context,

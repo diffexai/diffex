@@ -786,15 +786,15 @@ export class AgentSession {
 	}
 
 	private readonly _contextEstimator = new SessionContextEstimator();
+	private _selectedRequestModel: string | undefined;
 
 	private _installAgentRequestAccounting(): void {
 		const previousPrepareRequest = this.agent.prepareRequest;
 		this.agent.prepareRequest = async (context, signal) => {
-			const modelBefore = JSON.stringify(this.model);
 			const replacement = await previousPrepareRequest?.(context, signal);
-			// A hook can change public state after the loop selected its request model.
-			// In that case the response cannot prove the new configuration's usage.
-			const model = modelBefore === JSON.stringify(this.model) ? this.model : undefined;
+			// Admission events and hooks can change public state after the loop selected
+			// its model. Such a response cannot prove the new configuration's usage.
+			const model = this._selectedRequestModel === JSON.stringify(this.model) ? this.model : undefined;
 			this._contextEstimator.capture(replacement ?? context, model);
 			return replacement;
 		};
@@ -813,6 +813,7 @@ export class AgentSession {
 		this.agent.prepareNextTurnWithContext = async (turn, signal) => {
 			const previousSnapshot = await previousPrepareNextTurnWithContext?.(turn, signal);
 			const previousContext = previousSnapshot?.context ?? turn.context;
+			this._selectedRequestModel = JSON.stringify(this.agent.state.model);
 
 			return {
 				...previousSnapshot,
@@ -1968,6 +1969,7 @@ export class AgentSession {
 			this._invalidatePlanHandoff();
 			let firstRun = true;
 			while (true) {
+				this._selectedRequestModel = JSON.stringify(this.model);
 				if (firstRun) await this.agent.prompt(messages);
 				else await this.agent.continue();
 				firstRun = false;
@@ -1992,6 +1994,7 @@ export class AgentSession {
 				this._isAgentRunActive = true;
 			}
 		} finally {
+			this._selectedRequestModel = undefined;
 			const planHandoff =
 				this._activeRunCollaborationMode === "plan" && this._latestFinalizedPlan !== undefined
 					? { plan: this._latestFinalizedPlan }
