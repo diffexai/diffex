@@ -7,6 +7,7 @@ import unittest
 
 from harbor.agents.installed.base import AgentAuthenticationError
 
+from diffex_terminal_bench.execution import USER_MESSAGE_SUFFIX
 from diffex_terminal_bench.outcome import DiffexControlStopError, DiffexExecutionError, parse_outcome, require_completed
 
 
@@ -32,7 +33,8 @@ def write_cleanup(directory):
 
 def write_evidence(directory, events=None):
     directory.mkdir(parents=True, exist_ok=True)
-    config = {"provider": "openai", "model": "gpt-5", "thinking": "high", "tools": ["bash"], "instruction_sha256": "fixture", "background_process_lifetime": "environment"}
+    config = {"provider": "openai", "model": "gpt-5", "thinking": "high", "tools": ["bash"], "instruction_sha256": "fixture", "background_process_lifetime": "environment",
+              "user_message_suffix": USER_MESSAGE_SUFFIX}
     for name, content in {
         "requested.json": config,
         "effective.json": {**config, "release_agents_loaded": True, "instruction_delivered": True},
@@ -134,6 +136,21 @@ class OutcomeTests(unittest.TestCase):
             self.assertEqual(outcome["status"], interruption)
             self.assertFalse(outcome["stream_complete"])
             self.assertTrue((self.directory / "stdout.jsonl").is_file())
+
+    def test_user_message_suffix_must_be_delivered_and_match_the_eval_policy(self):
+        for field, value in (("user_message_suffix", ""), ("instruction_delivered", False)):
+            write_evidence(self.directory)
+            path = self.directory / "effective.json"
+            effective = json.loads(path.read_text())
+            effective[field] = value
+            path.write_text(json.dumps(effective))
+            self.assertEqual(parse_outcome(self.directory, launcher_exit_code=0)["status"], "configuration_failure")
+        for name in ("requested.json", "effective.json"):
+            path = self.directory / name
+            data = json.loads(path.read_text())
+            data.update(user_message_suffix="arbitrary task hint", instruction_delivered=True)
+            path.write_text(json.dumps(data))
+        self.assertEqual(parse_outcome(self.directory, launcher_exit_code=0)["status"], "configuration_failure")
 
     def test_retained_service_does_not_change_execution_outcome(self):
         for interruption, code, status in ((None, 0, "completed"), (None, 1, "process_failure"),

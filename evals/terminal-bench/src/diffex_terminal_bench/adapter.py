@@ -16,7 +16,7 @@ from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
 
 from diffex_terminal_bench.config import PINS
-from diffex_terminal_bench.execution import ExecutionOptions, PROVIDER_ENV, SUBAGENT_TOOLS
+from diffex_terminal_bench.execution import ExecutionOptions, PROVIDER_ENV, SUBAGENT_TOOLS, USER_MESSAGE_SUFFIX
 from diffex_terminal_bench.lifecycle import read_cleanup
 from diffex_terminal_bench.outcome import DiffexControlStopError, parse_outcome, require_completed
 from diffex_terminal_bench.transport import retry_transport
@@ -112,6 +112,7 @@ class DiffexAgent(BaseInstalledAgent):
             "evolution": {"enabled": False}, "state_policy": "fresh-per-run",
             "credential_env_names": sorted(credentials),
             "instruction_sha256": hashlib.sha256(instruction.encode("utf-8")).hexdigest(),
+            "user_message_suffix": USER_MESSAGE_SUFFIX,
         }
         await self.exec_as_root(environment, command=f"umask 077 && mkdir -p {shlex.quote(str(self.environment_logs_dir))} && mkdir {shlex.quote(str(run_dir))}")
         with tempfile.TemporaryDirectory(prefix="diffex-trial-") as temp:

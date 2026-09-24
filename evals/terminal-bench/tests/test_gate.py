@@ -17,7 +17,7 @@ from harbor.models.trial.config import AgentConfig, EnvironmentConfig, TaskConfi
 from diffex_terminal_bench.benchmark import PACKAGE, main, run_stage
 from diffex_terminal_bench.config import PINS
 from diffex_terminal_bench.dataset import BenchmarkConfig, load_config
-from diffex_terminal_bench.execution import SUBAGENT_TOOLS
+from diffex_terminal_bench.execution import SUBAGENT_TOOLS, USER_MESSAGE_SUFFIX
 from diffex_terminal_bench.gate import inventory, require_previous, sha256, stage_tasks, validate_trial, write_json
 from diffex_terminal_bench.outcome import parse_outcome
 from diffex_terminal_bench.trajectory import export_trajectory
@@ -38,7 +38,7 @@ class GateTests(unittest.TestCase):
                          "release_agents_sha256": "release-hash", "task_digests": {"task": "sha256:task"}}
         requested = {"provider": "openai", "model": "gpt-5", "thinking": "high", "tools": ["bash"],
                      "subagents": "disabled", "project_resources": "context-only", "background_process_lifetime": "environment", "pins": PINS,
-                     "evolution": {"enabled": False}, "state_policy": "fresh-per-run"}
+                     "evolution": {"enabled": False}, "state_policy": "fresh-per-run", "user_message_suffix": USER_MESSAGE_SUFFIX}
         (self.run / "instruction.txt").write_text("task")
         (self.run / "system-prompt.txt").write_text("system")
         requested["instruction_sha256"] = sha256(self.run / "instruction.txt")

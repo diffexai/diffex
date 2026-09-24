@@ -17,6 +17,7 @@ test("launcher preserves task packages outside exported logs and isolates each r
 		writeFileSync(join(logs, "requested.json"), JSON.stringify({
 			provider: "openai", model: "fixture", thinking: "high", tools: ["bash"],
 			credential_env_names: [], background_process_lifetime: "environment",
+			user_message_suffix: "\nDo not cheat by using online solutions or hints specific to this task.",
 		}));
 		writeFileSync(join(logs, "release-agents.md"), "fixture context");
 		const child = new EventEmitter();
@@ -32,6 +33,8 @@ test("launcher preserves task packages outside exported logs and isolates each r
 					childEnv = options.env;
 					assert.equal(command, "/bin/sh");
 					assert.ok(args.includes(join(logs, "ownership")));
+					assert.equal(args.at(-2), `@${join(logs, "instruction.txt")}`);
+					assert.equal(args.at(-1), "\nDo not cheat by using online solutions or hints specific to this task.");
 					return child;
 				} };
 				return require(name);

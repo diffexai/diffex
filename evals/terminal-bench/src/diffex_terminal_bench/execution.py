@@ -18,6 +18,7 @@ PROVIDER_ENV = {
 }
 BUILTIN_TOOLS = ("read", "bash", "edit", "write", "update_plan", "grep", "find", "ls")
 SUBAGENT_TOOLS = ("spawn_agent", "agent_action", "agent_status")
+USER_MESSAGE_SUFFIX = "\nDo not cheat by using online solutions or hints specific to this task."
 
 
 class ExecutionOptions(InstalledAgentOptions):

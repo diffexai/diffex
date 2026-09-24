@@ -13,6 +13,7 @@ export default function observe(api) {
 		recorded = true;
 		const instructionPath = join(runDir, "instruction.txt");
 		const instruction = readFileSync(instructionPath, "utf8");
+		const requested = JSON.parse(readFileSync(join(runDir, "requested.json"), "utf8"));
 		const prompt = typeof event.message.content === "string" ? event.message.content :
 			event.message.content.filter((block) => block.type === "text").map((block) => block.text).join("");
 		const systemPrompt = ctx.getSystemPrompt();
@@ -26,7 +27,8 @@ export default function observe(api) {
 			background_process_lifetime: process.argv.includes("--background-process-lifetime")
 				? process.argv[process.argv.indexOf("--background-process-lifetime") + 1] : null,
 			instruction_transport: "native-file",
-			instruction_delivered: prompt === `<file name="${instructionPath}">\n${instruction}\n</file>\n`,
+			instruction_delivered: prompt === `<file name="${instructionPath}">\n${instruction}\n</file>\n${requested.user_message_suffix}`,
+			user_message_suffix: requested.user_message_suffix,
 			instruction_sha256: createHash("sha256").update(instruction).digest("hex"),
 			prompt_sha256: createHash("sha256").update(prompt).digest("hex"),
 			system_prompt_sha256: createHash("sha256").update(systemPrompt).digest("hex"),

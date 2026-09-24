@@ -7,6 +7,7 @@ import re
 from harbor.agents.installed.base import AgentAuthenticationError, NonZeroAgentExitCodeError
 
 from diffex_terminal_bench.lifecycle import read_cleanup
+from diffex_terminal_bench.execution import USER_MESSAGE_SUFFIX
 
 
 class DiffexExecutionError(NonZeroAgentExitCodeError):
@@ -140,7 +141,8 @@ def parse_outcome(directory: Path, interruption: str | None = None,
             effective = json.loads((directory / "effective.json").read_text())
             if not isinstance(requested, dict) or not isinstance(effective, dict):
                 raise ValueError("invalid_configuration")
-            matches = all(effective.get(key) == requested[key] for key in ("provider", "model", "thinking", "instruction_sha256", "background_process_lifetime"))
+            matches = all(effective.get(key) == requested[key] for key in ("provider", "model", "thinking", "instruction_sha256", "background_process_lifetime", "user_message_suffix"))
+            matches = matches and requested["user_message_suffix"] == USER_MESSAGE_SUFFIX
             matches = matches and requested.get("background_process_lifetime") == "environment"
             matches = matches and effective.get("release_agents_loaded") is True and effective.get("instruction_delivered") is True
             matches = matches and sorted(effective["tools"]) == sorted(requested["tools"])

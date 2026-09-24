@@ -19,6 +19,7 @@ from harbor.utils.trajectory_validator import TrajectoryValidator
 
 from diffex_terminal_bench.adapter import DiffexAgent
 from diffex_terminal_bench.config import PINS
+from diffex_terminal_bench.execution import USER_MESSAGE_SUFFIX
 
 
 async def smoke(platform: str) -> None:
@@ -91,6 +92,7 @@ async def smoke(platform: str) -> None:
                 assert effective["cwd"] == "/task/work"
                 assert effective["model"] == "gpt-5" and effective["thinking"] == "high"
                 prompt = (run_dir / "system-prompt.txt").read_text()
+                assert USER_MESSAGE_SUFFIX.strip() not in prompt
                 assert "PRESERVE_TASK_CONTEXT" in prompt and "DO_NOT_LOAD_PROJECT_SYSTEM" not in prompt
                 assert effective["release_agents_sha256"] == PINS["release_agents_sha256"]
                 initial = json.loads((run_dir / "fixture-start.json").read_text())
@@ -130,9 +132,12 @@ async def smoke(platform: str) -> None:
             assert all(entry["body"]["reasoning_effort"] == "high" for entry in requests)
             for run_dir in run_dirs:
                 remote_instruction = f"/logs/agent/{run_dir.name}/instruction.txt"
-                expected_prompt = f'<file name="{remote_instruction}">\n{instruction}\n</file>\n'
-                assert any(message.get("content") in (expected_prompt, [{"type": "text", "text": expected_prompt}])
+                expected_prompt = f'<file name="{remote_instruction}">\n{instruction}\n</file>\n{USER_MESSAGE_SUFFIX}'
+                assert any(message.get("role") == "user" and message.get("content") in (expected_prompt, [{"type": "text", "text": expected_prompt}])
                            for entry in requests for message in entry["body"]["messages"])
+                assert not any(USER_MESSAGE_SUFFIX.strip() in str(message.get("content", ""))
+                               for entry in requests for message in entry["body"]["messages"]
+                               if message.get("role") in ("system", "developer"))
             for run_dir in run_dirs:
                 assert "STALE_HARNESS_SELECTION" not in (run_dir / "system-prompt.txt").read_text()
             for path in trial.agent_dir.rglob("*"):

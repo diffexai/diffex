@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from diffex_terminal_bench.benchmark import PACKAGE, REPOSITORY, StageFailedError, run_stage
 from diffex_terminal_bench.dataset import load_config
+from diffex_terminal_bench.execution import USER_MESSAGE_SUFFIX
 from diffex_terminal_bench.gate import read_json, sample_tasks, write_json
 from diffex_terminal_bench.outcome import parse_outcome, require_completed
 from test_outcome import write_cleanup
@@ -54,7 +55,8 @@ class ParentExhaustionTests(unittest.IsolatedAsyncioTestCase):
                     write_json(directory / "process.json", {"exit_code": process.returncode})
                     write_cleanup(directory)
                     requested = {"provider": "faux", "model": "fixture", "thinking": "off",
-                                 "instruction_sha256": "fixture", "tools": [], "background_process_lifetime": "environment"}
+                                 "instruction_sha256": "fixture", "tools": [], "background_process_lifetime": "environment",
+                                 "user_message_suffix": USER_MESSAGE_SUFFIX}
                     write_json(directory / "requested.json", requested)
                     write_json(directory / "effective.json", {**requested, "release_agents_loaded": True,
                                                                "instruction_delivered": True})

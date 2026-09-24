@@ -18,6 +18,7 @@ from diffex_terminal_bench.adapter import DiffexAgent
 from diffex_terminal_bench.benchmark import PACKAGE, run_identity, trial_config
 from diffex_terminal_bench.config import PINS
 from diffex_terminal_bench.dataset import load_config
+from diffex_terminal_bench.execution import USER_MESSAGE_SUFFIX
 
 
 class ExecutionTests(unittest.IsolatedAsyncioTestCase):
@@ -87,6 +88,8 @@ class ExecutionTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("spawn_agent", configs[0]["tools"])
         self.assertEqual(configs[0]["evolution"], {"enabled": False})
         self.assertEqual(configs[0]["background_process_lifetime"], "environment")
+        self.assertEqual(configs[0]["user_message_suffix"], USER_MESSAGE_SUFFIX)
+        self.assertEqual(USER_MESSAGE_SUFFIX, "\nDo not cheat by using online solutions or hints specific to this task.")
         calls = [call.kwargs for call in environment.exec.call_args_list if call.kwargs.get("env")]
         self.assertEqual(len(calls), 2)
         for call in calls:

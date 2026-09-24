@@ -45,6 +45,7 @@ const args = [
 	"--background-process-ownership-dir", join(runDir, "ownership"),
 	"--no-approve", "--no-extensions", "--no-skills", "--no-prompt-templates", "--no-themes",
 	"--extension", join(runDir, "observe.mjs"), "--print", `@${join(runDir, "instruction.txt")}`,
+	config.user_message_suffix,
 ];
 const stdout = openSync(join(runDir, "stdout.jsonl"), "wx", 0o600);
 const stderr = openSync(join(runDir, "stderr.log"), "wx", 0o600);
