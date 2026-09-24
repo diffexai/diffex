@@ -21,6 +21,14 @@ case "$(uname -m)" in
 esac
 export NODE_ARCH="$arch" NODE_SHA256="$checksum"
 
+# Harbor's sandbox log transfers also require these base-image utilities.
+for utility in tar gzip; do
+    if ! command -v "$utility" >/dev/null; then
+        echo "Setup requires $utility in the task image" >&2
+        exit 1
+    fi
+done
+
 # Refuse to reuse an earlier install or overwrite a task-provided command.
 mkdir "$prefix"
 if [ -e /usr/local/bin/diffex ] || [ -L /usr/local/bin/diffex ]; then
@@ -30,7 +38,7 @@ fi
 mkdir -p "$HOME" "$prefix/node" "$prefix/cli" "$prefix/work"
 cd "$prefix/work"
 packages=()
-for package in ca-certificates wget xz-utils; do
+for package in ca-certificates wget; do
     if [ "$(dpkg-query -W -f='${Status}' "$package" 2>/dev/null || true)" != "install ok installed" ]; then
         packages+=("$package")
     fi
@@ -55,11 +63,11 @@ if [ "${#packages[@]}" -gt 0 ]; then
         sleep "$((attempt * 2))"
     done
 fi
-archive="node-v$NODE_VERSION-linux-$arch.tar.xz"
+archive="node-v$NODE_VERSION-linux-$arch.tar.gz"
 wget --https-only --tries=3 --timeout=20 --output-document="$archive" \
     "https://nodejs.org/dist/v$NODE_VERSION/$archive"
 printf '%s  %s\n' "$checksum" "$archive" | sha256sum --check --strict
-tar -xJf "$archive" -C "$prefix/node" --strip-components=1
+tar -xzf "$archive" -C "$prefix/node" --strip-components=1
 rm "$archive"
 export PATH="$prefix/node/bin:$PATH"
 test "$(node --version)" = "v$NODE_VERSION"

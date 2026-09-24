@@ -4,6 +4,7 @@ from importlib.resources import as_file, files
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -111,7 +112,8 @@ class RegistryIntegrityTests(unittest.TestCase):
 
 
 class PackageInstallTests(unittest.TestCase):
-    def run_install(self, *, installed=False, update_failures=0, install_failures=0):
+    def run_install(self, *, installed=False, missing_package="wget", update_failures=0,
+                    install_failures=0, corrupt_archive=False):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             commands = root / "bin"
@@ -123,6 +125,7 @@ class PackageInstallTests(unittest.TestCase):
 import json
 import os
 from pathlib import Path
+import subprocess
 import sys
 
 root = Path(os.environ["INSTALL_TEST_ROOT"])
@@ -133,7 +136,7 @@ with (root / "calls.jsonl").open("a") as output:
 if name == "uname":
     print("Linux" if args == ["-s"] else "x86_64")
 elif name == "dpkg-query":
-    if os.environ["INSTALLED"] == "1" or args[-1] != "xz-utils":
+    if os.environ["INSTALLED"] == "1" or args[-1] != os.environ["MISSING_PACKAGE"]:
         print("install ok installed", end="")
     else:
         sys.exit(1)
@@ -146,11 +149,20 @@ elif name == "apt-get":
         print("404 Not Found" if operation == "install" else "Failed to fetch index", file=sys.stderr)
         sys.exit(100)
 elif name == "wget":
-    # Stop after dependency setup; never download or install real packages.
-    sys.exit(42)
+    # Never download or install real packages.
+    if os.environ["CORRUPT_ARCHIVE"] == "1":
+        filename = next(arg.split("=", 1)[1] for arg in args if arg.startswith("--output-document="))
+        Path(filename).write_bytes(b"corrupt Node archive")
+    else:
+        sys.exit(42)
+elif name == "tar":
+    sys.exit(43)
+elif name == "sha256sum":
+    # macOS sha256sum lacks GNU's --strict; retain real checksum verification.
+    sys.exit(subprocess.run([os.environ["SHA256SUM"], "-c", "-"], input=sys.stdin.read(), text=True).returncode)
 ''')
             stub.chmod(0o755)
-            for name in ("uname", "dpkg-query", "apt-get", "wget", "sleep"):
+            for name in ("uname", "dpkg-query", "apt-get", "wget", "sleep", "tar", "sha256sum"):
                 (commands / name).symlink_to(stub)
             with as_file(files("diffex_terminal_bench").joinpath("install.sh")) as source:
                 # Redirect installation paths and capture logs without /dev/fd process substitution.
@@ -166,6 +178,8 @@ elif name == "wget":
                 "NODE_SHA256_X64": PINS["node_sha256"]["x64"], "INSTALL_TEST_ROOT": temp,
                 "INSTALLED": str(int(installed)), "UPDATE_FAILURES": str(update_failures),
                 "INSTALL_FAILURES": str(install_failures),
+                "MISSING_PACKAGE": missing_package, "CORRUPT_ARCHIVE": str(int(corrupt_archive)),
+                "SHA256SUM": shutil.which("sha256sum"),
             })
             self.assertTrue((root / "calls.jsonl").exists(), result.stderr)
             calls = [json.loads(line) for line in (root / "calls.jsonl").read_text().splitlines()]
@@ -176,6 +190,20 @@ elif name == "wget":
         self.assertEqual(result.returncode, 42, result.stderr)
         self.assertFalse(any(call[0] == "apt-get" for call in calls))
 
+    def test_missing_xz_does_not_need_apt_and_downloads_gzip(self):
+        result, calls = self.run_install(missing_package="xz-utils", install_failures=99)
+        self.assertEqual(result.returncode, 42, result.stderr)
+        self.assertFalse(any(call[0] == "apt-get" for call in calls))
+        download = next(call for call in calls if call[0] == "wget")
+        self.assertEqual(download[-1],
+                         f"https://nodejs.org/dist/v{PINS['node_version']}/node-v{PINS['node_version']}-linux-x64.tar.gz")
+
+    def test_corrupt_node_archive_is_rejected_before_extraction(self):
+        result, calls = self.run_install(installed=True, corrupt_archive=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("FAILED", result.stdout + result.stderr)
+        self.assertFalse(any(call[0] == "tar" for call in calls))
+
     def test_missing_archive_refreshes_indexes_and_retries(self):
         result, calls = self.run_install(install_failures=1)
         self.assertEqual(result.returncode, 42, result.stderr)
@@ -184,9 +212,9 @@ elif name == "wget":
                          ["update", "install", "update", "install"])
         for call in apt:
             if "install" in call:
-                self.assertIn("xz-utils", call)
+                self.assertIn("wget", call)
                 self.assertNotIn("ca-certificates", call)
-                self.assertNotIn("wget", call)
+                self.assertNotIn("xz-utils", call)
 
     def test_index_failure_does_not_install_from_stale_indexes(self):
         result, calls = self.run_install(update_failures=1)
