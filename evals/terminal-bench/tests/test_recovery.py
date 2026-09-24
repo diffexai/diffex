@@ -277,6 +277,11 @@ class RecoveryTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_pending_cleanup_publication_is_retried(self):
         attempts = 0
+        elapsed = 0
+
+        async def delay(seconds):
+            nonlocal elapsed
+            elapsed += seconds
 
         async def execute(**kwargs):
             nonlocal attempts
@@ -284,14 +289,14 @@ class RecoveryTests(unittest.IsolatedAsyncioTestCase):
                 raise ConnectionError("response lost while cleanup continues")
             if "evidence.cjs" in kwargs["command"]:
                 attempts += 1
-                if attempts == 1:
+                if elapsed < 7:
                     return ExecResult(return_code=0, stdout="null", stderr="")
             return self.exec_result(kwargs)
 
         self.environment.exec.side_effect = execute
-        with patch("diffex_terminal_bench.transport.asyncio.sleep"):
+        with patch("diffex_terminal_bench.transport.asyncio.sleep", side_effect=delay):
             await self.agent.run("Task", self.environment, self.context)
-        self.assertEqual(attempts, 2)
+        self.assertEqual(attempts, 3)
         self.assertTrue(self.context.metadata["diffex_outcome"]["agent_execution_stopped"])
 
     async def test_local_artifact_write_failure_preserves_shutdown(self):
@@ -329,12 +334,13 @@ class RecoveryTests(unittest.IsolatedAsyncioTestCase):
         for error, count in ((DaytonaAuthenticationError("denied", status_code=401), 1),
                              (DaytonaError("limited", status_code=429, headers={"Retry-After-authenticated": "5"}), 3)):
             operation = create_autospec(self.agent._finish_run, side_effect=error)
-            with patch("diffex_terminal_bench.transport.asyncio.sleep") as sleep:
+            with patch("diffex_terminal_bench.transport.asyncio.sleep") as sleep, \
+                    patch("diffex_terminal_bench.transport.random.uniform", return_value=0):
                 with self.assertRaises(type(error)):
                     await retry_transport(lambda: operation(None, None, None, None))
             self.assertEqual(operation.await_count, count)
             if count == 3:
-                self.assertEqual([call.args[0] for call in sleep.call_args_list], [5, 5])
+                self.assertEqual([call.args[0] for call in sleep.call_args_list], [5, 8])
 
 
 if __name__ == "__main__":

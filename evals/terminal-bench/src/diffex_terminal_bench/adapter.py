@@ -275,7 +275,7 @@ class DiffexAgent(BaseInstalledAgent):
                            or (outcome["status"] == "configuration_failure"
                                and not all((directory / name).is_file() for name in ("requested.json", "effective.json"))))
                 if cleanup is not None and not execution["interruption"] and unknown:
-                    outcome.update(status="artifact_collection_failure", reason="log_collection_failed")
+                    outcome.update(status="artifact_collection_failure", reason=f"{artifact_errors[0]['phase']}_failed")
         if failures:
             outcome["recovery_errors"] = failures
         context.metadata = {**(context.metadata or {}), "diffex_outcome": outcome, "diffex_run_dir": str(run_dir)}

@@ -21,7 +21,9 @@ async def retry_transport[T](operation: Callable[[], Awaitable[T]]) -> T:
                     transient |= exc.status_code in (408, 429, 500, 502, 503, 504)
                 if not transient or attempt == 2:
                     raise
-                delay = 2 ** attempt + random.uniform(0, 0.25)
+                # Cleanup may still be finishing its seven-second TERM/KILL
+                # cycle after a lost RPC response. Cover that publication lag.
+                delay = 4 * 2 ** attempt + random.uniform(0, 0.25)
                 if isinstance(exc, DaytonaError):
                     for key, value in exc.headers.items():
                         if key.lower().startswith("retry-after"):
