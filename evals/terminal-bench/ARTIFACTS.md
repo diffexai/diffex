@@ -7,6 +7,15 @@ The backend waits up to 120 seconds for volume readiness and records its name, I
 The file retains a `mounts` list with session and environment names, so separate verifiers and restarted environments do not replace the agent's recovery location.
 Harbor's Docker-in-Docker backend binds the corresponding `/logs` subdirectories from the sandbox host into the task container.
 
+Sandbox creation allows an initial attempt plus three startup-timeout retries, with deadlines of 60, 60, 60, and 300 seconds.
+There is no retry backoff; each timed-out attempt first receives up to 20 seconds for sandbox lookup and deletion before the next create starts.
+The adapter uses one unique sandbox name across these attempts to recover accepted creates after lost responses and prevent duplicate allocation from late requests.
+`sandbox-startup.json` records attempt deadlines, outcomes, sandbox names, and cleanup results.
+Failed cleanup stops retries and retains any known sandbox reference for Harbor's final cleanup.
+Cancellation and non-timeout provider errors do not trigger creation retries.
+The fourth creation timeout raises `EnvironmentStartTimeoutError`; Harbor's overall environment deadline still applies, including volume preparation and cleanup overhead.
+These retries occur before agent execution and do not rerun evaluation attempts or change `--max-retries 0`.
+
 Agent home, installed task packages, caches, and mutable harness state live in a private `/tmp/diffex-tb-state-*` directory on sandbox disk.
 They remain available to task services through verification and disappear with sandbox deletion.
 The exported `state.json` records these paths without linking the state tree into the logs.

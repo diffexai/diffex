@@ -10,7 +10,6 @@ from unittest.mock import AsyncMock, patch
 
 from daytona import CreateSandboxFromImageParams, CreateSandboxFromSnapshotParams, Image
 from daytona.common.errors import DaytonaConflictError, DaytonaError
-from harbor.environments.daytona import DaytonaEnvironment
 from harbor.models.job.config import JobConfig
 from harbor.models.task.config import EnvironmentConfig
 from harbor.models.trial.paths import TrialPaths
@@ -31,7 +30,7 @@ class VolumeTests(unittest.IsolatedAsyncioTestCase):
         )
         self.volume = SimpleNamespace(id="volume-id", state="ready")
         self.client = SimpleNamespace(volume=SimpleNamespace(get=AsyncMock(return_value=self.volume)))
-        parent = patch.object(DaytonaEnvironment, "_create_sandbox", new_callable=AsyncMock)
+        parent = patch.object(RecordedDaytonaEnvironment, "_create_with_retries", new_callable=AsyncMock)
         self.create = parent.start()
         self.addCleanup(parent.stop)
 
@@ -97,7 +96,7 @@ class VolumeTests(unittest.IsolatedAsyncioTestCase):
         params = CreateSandboxFromImageParams(image=Image.base("docker:28.3.3-dind"))
         await self.environment._create_sandbox(params)
         self.client.volume.get.assert_awaited_once_with("dedicated-project-logs", create=True)
-        self.create.assert_awaited_once_with(params=params, daytona=self.client)
+        self.create.assert_awaited_once_with(params, self.client)
 
     def test_native_full_job_selects_volume_backend(self):
         config = JobConfig.model_validate(yaml.safe_load((Path(__file__).resolve().parents[1] / "full.yaml").read_text()))
