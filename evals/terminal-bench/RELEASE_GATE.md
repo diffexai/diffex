@@ -29,8 +29,8 @@ The preparation command writes `results/release-gate/dataset.json` without creat
 Harbor 0.23.0 and Daytona SDK 0.210.0 are locked in the benchmark's private Python environment.
 Node 22.23.2, Diffex 0.3.1, npm integrity, registry, and Node archive checksums come from [pins.toml](src/diffex_terminal_bench/pins.toml).
 The default is `openai/gpt-5.6-luna`, `max` thinking, tools `read,bash,edit,write,update_plan`, disabled subagents, disabled evolution, and `context-only` project resources.
-Enabled subagents add `spawn_agent`, `agent_action`, and `agent_status` to the model's tools; Diffex chooses whether to use them.
-Children execute inside the parent trial's sandbox and their sessions and usage remain in the trial evidence.
+Enabled subagents are rejected because the pinned CLI does not propagate eval prompt and context-file flags to children.
+Every new eval uses the checked-in system prompt without automatic project context and appends the anti-cheating instruction to the user message.
 Change and commit the configuration before starting a new qualification sequence.
 Every subsequent stage must match the exact recorded identity, including the adapter commit and dependency lock.
 The earlier TB 2.0 / Diffex 0.2.2 oracle evidence cannot qualify this configuration.
@@ -237,10 +237,10 @@ Use `-n 1` throughout that sequence while capacity remains constrained; task dea
 Each stage writes `gate.json` before starting remote work and updates it after every completed trial, including failures.
 The report separates verified `trials` from `failures`, records `completed_trials` and `expected_trials`, and keeps `failure` as the first observed failure.
 Failure entries identify the task, trial index, evidence directory, error type, and phase; a cleanup error following an execution error is retained in `additional_errors`.
-It records dataset/archive and per-task digests, adapter commit, Harbor/Daytona/Python versions, dependency lock hash, installation pins, model, thinking, tools, subagent policy, and hashes of adapter/harness files and the release instructions.
+It records dataset/archive and per-task digests, adapter commit, Harbor/Daytona/Python versions, dependency lock hash, installation pins, model, thinking, tools, subagent policy, and hashes of adapter/harness files and the eval system prompt.
 Each Diffex trial additionally retains the effective system prompt and its SHA-256.
-Full system prompt hashes can differ between isolated trials because context includes trial-specific paths.
-The release instructions and harness source identity must remain consistent.
+The effective system prompt must exactly match the checked-in eval prompt across isolated trials.
+The user-message suffix, disabled automatic context files, and harness source identity are also verified.
 
 Trial directories contain Harbor `config.json`, `lock.json`, `result.json`, verifier reward and combined stdout/stderr, agent logs, native sessions, and sandbox lifecycle evidence.
 Diffex installation evidence includes the three CLI checks and verified npm/Node pins.

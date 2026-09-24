@@ -1,5 +1,7 @@
 """Explicit execution policy for the pinned Diffex release."""
 
+import hashlib
+from importlib.resources import files
 from typing import Literal
 
 from harbor.agents.options import InstalledAgentOptions
@@ -19,12 +21,15 @@ PROVIDER_ENV = {
 BUILTIN_TOOLS = ("read", "bash", "edit", "write", "update_plan", "grep", "find", "ls")
 SUBAGENT_TOOLS = ("spawn_agent", "agent_action", "agent_status")
 USER_MESSAGE_SUFFIX = "\nDo not cheat by using online solutions or hints specific to this task."
+SYSTEM_PROMPT = files(__package__).joinpath("eval-system-prompt.txt").read_text(encoding="utf-8")
+SYSTEM_PROMPT_SHA256 = hashlib.sha256(SYSTEM_PROMPT.encode("utf-8")).hexdigest()
 
 
 class ExecutionOptions(InstalledAgentOptions):
     thinking: Literal["off", "minimal", "low", "medium", "high", "xhigh", "max"] = "high"
     tools: str = "read,bash,edit,write,update_plan"
-    subagents: Literal["disabled", "enabled"] = "disabled"
+    # The pinned CLI does not propagate prompt/context flags to child agents.
+    subagents: Literal["disabled"] = "disabled"
     project_resources: Literal["context-only"] = "context-only"
     background_process_lifetime: Literal["environment"] = "environment"
     # Arbitrary native config and prompt templates could defeat trial isolation

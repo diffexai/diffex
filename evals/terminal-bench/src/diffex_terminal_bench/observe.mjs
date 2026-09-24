@@ -17,8 +17,6 @@ export default function observe(api) {
 		const prompt = typeof event.message.content === "string" ? event.message.content :
 			event.message.content.filter((block) => block.type === "text").map((block) => block.text).join("");
 		const systemPrompt = ctx.getSystemPrompt();
-		const releaseAgentsPath = process.env.DIFFEX_TB_RELEASE_AGENTS;
-		const releaseAgents = readFileSync(releaseAgentsPath, "utf8");
 		writeFileSync(join(runDir, "system-prompt.txt"), systemPrompt, { mode: 0o600 });
 		writeFileSync(join(runDir, "effective.json"), JSON.stringify({
 			provider: ctx.model?.provider, model: ctx.model?.id,
@@ -32,9 +30,7 @@ export default function observe(api) {
 			instruction_sha256: createHash("sha256").update(instruction).digest("hex"),
 			prompt_sha256: createHash("sha256").update(prompt).digest("hex"),
 			system_prompt_sha256: createHash("sha256").update(systemPrompt).digest("hex"),
-			release_agents_path: releaseAgentsPath,
-			release_agents_sha256: createHash("sha256").update(releaseAgents).digest("hex"),
-			release_agents_loaded: systemPrompt.includes(releaseAgents),
+			context_files_disabled: process.argv.includes("--no-context-files"),
 		}, null, 2), { mode: 0o600 });
 	});
 }

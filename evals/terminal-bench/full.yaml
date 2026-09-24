@@ -14,7 +14,8 @@ agents:
     kwargs:
       thinking: max
       tools: read,bash,edit,write,update_plan
-      subagents: enabled
+      # Child agents in the pinned CLI do not inherit eval prompt flags.
+      subagents: disabled
       project_resources: context-only
       background_process_lifetime: environment
     env:

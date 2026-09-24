@@ -246,8 +246,8 @@ def validate_trial(directory: Path, task: str, identity: dict, *, oracle: bool =
         raise ValueError("Retained instruction changed")
     if sha256(run / "system-prompt.txt") != effective["system_prompt_sha256"]:
         raise ValueError("System prompt hash mismatch")
-    if effective["release_agents_sha256"] != identity["release_agents_sha256"]:
-        raise ValueError("Release harness identity mismatch")
+    if effective["system_prompt_sha256"] != identity["system_prompt_sha256"]:
+        raise ValueError("Eval system prompt identity mismatch")
     for name in ("stderr.log", "launcher.stdout.log", "launcher.stderr.log", "sessions/root.jsonl"):
         (run / name).read_bytes()
     validator = TrajectoryValidator()

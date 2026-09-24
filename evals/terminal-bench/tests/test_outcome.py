@@ -7,7 +7,7 @@ import unittest
 
 from harbor.agents.installed.base import AgentAuthenticationError
 
-from diffex_terminal_bench.execution import USER_MESSAGE_SUFFIX
+from diffex_terminal_bench.execution import SYSTEM_PROMPT_SHA256, USER_MESSAGE_SUFFIX
 from diffex_terminal_bench.outcome import DiffexControlStopError, DiffexExecutionError, parse_outcome, require_completed
 
 
@@ -34,10 +34,10 @@ def write_cleanup(directory):
 def write_evidence(directory, events=None):
     directory.mkdir(parents=True, exist_ok=True)
     config = {"provider": "openai", "model": "gpt-5", "thinking": "high", "tools": ["bash"], "instruction_sha256": "fixture", "background_process_lifetime": "environment",
-              "user_message_suffix": USER_MESSAGE_SUFFIX}
+              "user_message_suffix": USER_MESSAGE_SUFFIX, "system_prompt_sha256": SYSTEM_PROMPT_SHA256}
     for name, content in {
         "requested.json": config,
-        "effective.json": {**config, "release_agents_loaded": True, "instruction_delivered": True},
+        "effective.json": {**config, "context_files_disabled": True, "instruction_delivered": True},
         "process.json": {"exit_code": 0, "signal": None, "spawn_error": None},
     }.items():
         (directory / name).write_text(json.dumps(content))
@@ -149,6 +149,23 @@ class OutcomeTests(unittest.TestCase):
             path = self.directory / name
             data = json.loads(path.read_text())
             data.update(user_message_suffix="arbitrary task hint", instruction_delivered=True)
+            path.write_text(json.dumps(data))
+        self.assertEqual(parse_outcome(self.directory, launcher_exit_code=0)["status"], "configuration_failure")
+
+    def test_system_prompt_must_match_and_context_files_must_be_disabled(self):
+        for field, value in (("system_prompt_sha256", "changed"), ("context_files_disabled", False)):
+            with self.subTest(field=field):
+                write_evidence(self.directory)
+                path = self.directory / "effective.json"
+                effective = json.loads(path.read_text())
+                effective[field] = value
+                path.write_text(json.dumps(effective))
+                self.assertEqual(parse_outcome(self.directory, launcher_exit_code=0)["status"], "configuration_failure")
+        write_evidence(self.directory)
+        for name in ("requested.json", "effective.json"):
+            path = self.directory / name
+            data = json.loads(path.read_text())
+            data["system_prompt_sha256"] = "matching-but-unapproved-prompt"
             path.write_text(json.dumps(data))
         self.assertEqual(parse_outcome(self.directory, launcher_exit_code=0)["status"], "configuration_failure")
 

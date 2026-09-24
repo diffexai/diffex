@@ -156,7 +156,6 @@ if (process.argv[2] === "service") {
 		writeFileSync(join(f.runDir, "requested.json"), JSON.stringify({ provider: "openai", model: "fixture",
 			thinking: "off", tools: ["bash"], credential_env_names: [], background_process_lifetime: "environment",
 			user_message_suffix: "\nDo not cheat by using online solutions or hints specific to this task." }));
-		writeFileSync(join(f.runDir, "release-agents.md"), "Fixture context");
 		const launcher = spawn(process.execPath, ["--require", join(__dirname, "fixtures/kill-before-cli-publication.cjs"),
 			join(__dirname, "../src/diffex_terminal_bench/run.cjs"), f.runDir], {
 			env: { ...process.env, DIFFEX_TB_PROVIDER: "openai", DIFFEX_TB_MODEL: "fixture", DIFFEX_TB_THINKING: "off" },

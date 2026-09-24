@@ -17,7 +17,7 @@ from harbor.models.trial.config import AgentConfig, EnvironmentConfig, TaskConfi
 from diffex_terminal_bench.benchmark import PACKAGE, main, run_stage
 from diffex_terminal_bench.config import PINS
 from diffex_terminal_bench.dataset import BenchmarkConfig, load_config
-from diffex_terminal_bench.execution import SUBAGENT_TOOLS, USER_MESSAGE_SUFFIX
+from diffex_terminal_bench.execution import ExecutionOptions, SUBAGENT_TOOLS, SYSTEM_PROMPT, SYSTEM_PROMPT_SHA256, USER_MESSAGE_SUFFIX
 from diffex_terminal_bench.gate import inventory, require_previous, sha256, stage_tasks, validate_trial, write_json
 from diffex_terminal_bench.outcome import parse_outcome
 from diffex_terminal_bench.trajectory import export_trajectory
@@ -35,16 +35,16 @@ class GateTests(unittest.TestCase):
         self.run.mkdir(parents=True)
         self.identity = {"model": "openai/gpt-5", "policy": {"thinking": "high", "tools": "bash",
                          "subagents": "disabled", "project_resources": "context-only", "background_process_lifetime": "environment"},
-                         "release_agents_sha256": "release-hash", "task_digests": {"task": "sha256:task"}}
+                         "system_prompt_sha256": SYSTEM_PROMPT_SHA256, "task_digests": {"task": "sha256:task"}}
         requested = {"provider": "openai", "model": "gpt-5", "thinking": "high", "tools": ["bash"],
                      "subagents": "disabled", "project_resources": "context-only", "background_process_lifetime": "environment", "pins": PINS,
-                     "evolution": {"enabled": False}, "state_policy": "fresh-per-run", "user_message_suffix": USER_MESSAGE_SUFFIX}
+                     "evolution": {"enabled": False}, "state_policy": "fresh-per-run", "user_message_suffix": USER_MESSAGE_SUFFIX,
+                     "system_prompt_sha256": SYSTEM_PROMPT_SHA256}
         (self.run / "instruction.txt").write_text("task")
-        (self.run / "system-prompt.txt").write_text("system")
+        (self.run / "system-prompt.txt").write_text(SYSTEM_PROMPT)
         requested["instruction_sha256"] = sha256(self.run / "instruction.txt")
         write_json(self.run / "requested.json", requested)
-        write_json(self.run / "effective.json", {**requested, "release_agents_loaded": True, "instruction_delivered": True,
-                   "release_agents_sha256": "release-hash", "system_prompt_sha256": sha256(self.run / "system-prompt.txt")})
+        write_json(self.run / "effective.json", {**requested, "context_files_disabled": True, "instruction_delivered": True})
         write_json(self.run / "process.json", {"exit_code": 0})
         write_cleanup(self.run)
         message = assistant("response")
@@ -197,9 +197,12 @@ class GateTests(unittest.TestCase):
         (cache / "snapshots/revision/model.safetensors").symlink_to("../../blobs/weights")
         pilot = ["task", *[f"task-{index}" for index in range(2, 11)]]
         identity = {**self.identity, "task_digests": {name: "sha256:task" for name in pilot}}
+        # Exercise retained child accounting without launching agents. New
+        # evaluations reject this older enabled-subagent execution policy.
         config = BenchmarkConfig.model_validate({**load_config(PACKAGE / "benchmark.toml").model_dump(),
-                                                "model": "openai/gpt-5", "policy": self.identity["policy"],
+                                                "model": "openai/gpt-5",
                                                 "pilot_tasks": pilot, "concurrency": 1})
+        config.policy = ExecutionOptions.model_construct(**self.identity["policy"])
         calls = []
 
         async def create(config):
@@ -338,7 +341,7 @@ class GateTests(unittest.TestCase):
                 path.write_bytes(original)
 
     def test_model_and_harness_changes_invalidate_evidence(self):
-        for key, value in (("model", "openai/gpt-4"), ("release_agents_sha256", "changed")):
+        for key, value in (("model", "openai/gpt-4"), ("system_prompt_sha256", "changed")):
             with self.subTest(key=key), self.assertRaises(ValueError):
                 validate_trial(self.directory, "task", {**self.identity, key: value})
 

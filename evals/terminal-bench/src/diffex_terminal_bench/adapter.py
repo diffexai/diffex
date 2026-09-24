@@ -16,7 +16,7 @@ from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
 
 from diffex_terminal_bench.config import PINS
-from diffex_terminal_bench.execution import ExecutionOptions, PROVIDER_ENV, SUBAGENT_TOOLS, USER_MESSAGE_SUFFIX
+from diffex_terminal_bench.execution import ExecutionOptions, PROVIDER_ENV, SYSTEM_PROMPT_SHA256, USER_MESSAGE_SUFFIX
 from diffex_terminal_bench.lifecycle import read_cleanup
 from diffex_terminal_bench.outcome import DiffexControlStopError, parse_outcome, require_completed
 from diffex_terminal_bench.transport import retry_transport
@@ -101,8 +101,6 @@ class DiffexAgent(BaseInstalledAgent):
         if not isinstance(options, ExecutionOptions):
             raise TypeError("Expected validated execution options")
         tools = options.tools.split(",")
-        if options.subagents == "enabled":
-            tools.extend(SUBAGENT_TOOLS)
         run_dir = self.environment_logs_dir / f"run-{uuid.uuid4().hex}"
         requested = {
             "pins": PINS, "provider": provider, "model": model,
@@ -113,6 +111,7 @@ class DiffexAgent(BaseInstalledAgent):
             "credential_env_names": sorted(credentials),
             "instruction_sha256": hashlib.sha256(instruction.encode("utf-8")).hexdigest(),
             "user_message_suffix": USER_MESSAGE_SUFFIX,
+            "system_prompt_sha256": SYSTEM_PROMPT_SHA256,
         }
         await self.exec_as_root(environment, command=f"umask 077 && mkdir -p {shlex.quote(str(self.environment_logs_dir))} && mkdir {shlex.quote(str(run_dir))}")
         with tempfile.TemporaryDirectory(prefix="diffex-trial-") as temp:
@@ -120,7 +119,7 @@ class DiffexAgent(BaseInstalledAgent):
                 source = Path(temp, name)
                 source.write_text(content, encoding="utf-8")
                 await environment.upload_file(source, str(run_dir / name))
-            for name in ("run.cjs", "cleanup.cjs", "evidence.cjs", "observe.mjs", "release-agents.md"):
+            for name in ("run.cjs", "cleanup.cjs", "evidence.cjs", "observe.mjs", "eval-system-prompt.txt"):
                 with as_file(files(__package__).joinpath(name)) as source:
                     await environment.upload_file(source, str(run_dir / name))
         # Uploads may be root-owned even when the task selects a non-root user.

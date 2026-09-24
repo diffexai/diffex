@@ -19,7 +19,6 @@ test("launcher preserves task packages outside exported logs and isolates each r
 			credential_env_names: [], background_process_lifetime: "environment",
 			user_message_suffix: "\nDo not cheat by using online solutions or hints specific to this task.",
 		}));
-		writeFileSync(join(logs, "release-agents.md"), "fixture context");
 		const child = new EventEmitter();
 		child.pid = 12345;
 		const gate = new EventEmitter();
@@ -33,6 +32,8 @@ test("launcher preserves task packages outside exported logs and isolates each r
 					childEnv = options.env;
 					assert.equal(command, "/bin/sh");
 					assert.ok(args.includes(join(logs, "ownership")));
+					assert.ok(args.includes("--no-context-files"));
+					assert.equal(args[args.indexOf("--system-prompt") + 1], join(logs, "eval-system-prompt.txt"));
 					assert.equal(args.at(-2), `@${join(logs, "instruction.txt")}`);
 					assert.equal(args.at(-1), "\nDo not cheat by using online solutions or hints specific to this task.");
 					return child;
