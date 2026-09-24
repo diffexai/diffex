@@ -4,7 +4,9 @@ n_concurrent_trials: 3
 retry:
   max_retries: 0
 environment:
-  type: daytona
+  import_path: diffex_terminal_bench.daytona_backend:RecordedDaytonaEnvironment
+  kwargs:
+    artifact_volume: diffex-terminal-bench-logs
   override_storage_mb: 20480
 agents:
   - name: diffex_terminal_bench.adapter:DiffexAgent

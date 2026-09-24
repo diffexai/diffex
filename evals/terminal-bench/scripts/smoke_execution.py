@@ -5,6 +5,7 @@ import asyncio
 import hashlib
 import json
 from pathlib import Path
+import shlex
 import subprocess
 import tempfile
 import tomllib
@@ -97,6 +98,9 @@ async def smoke(platform: str) -> None:
                 assert initial == {"state_entries": ["home", "settings.json"], "session_entries": [],
                                    "settings": {"evolution": {"enabled": False}}, "unrelated_credential_present": False}
                 assert (run_dir / "sessions/root.jsonl").stat().st_size > 0
+                state = json.loads((run_dir / "state.json").read_text())
+                assert state["state_dir"].startswith("/tmp/diffex-tb-state-")
+                assert not (run_dir / "state").exists()
                 events = [json.loads(line) for line in (run_dir / "stdout.jsonl").read_text().splitlines()]
                 assert not any(event.get("isError") for event in events)
                 if subagents == "enabled":
@@ -117,10 +121,9 @@ async def smoke(platform: str) -> None:
                 report["trajectories"].append({"run": run_dir.name, "validated": True, "context": context.model_dump()})
                 # Contaminate the previous trial after it completes, proving
                 # the next run never inherits auth, sessions, or harness state.
-                (run_dir / "state/auth.json").write_text('{"stale":true}')
-                (run_dir / "state/SYSTEM.md").write_text("STALE_HARNESS_SELECTION")
-                for selection in (run_dir / "state/harness-state/selections").glob("*.json"):
-                    selection.write_text('{"stale_harness_selection":true}')
+                await current.exec_as_agent(environment, command=shlex.join([
+                    "/opt/diffex-terminal-bench/node/bin/node", "/tmp/faux-provider.cjs", "contaminate", state["state_dir"],
+                ]))
             await agent.exec_as_root(environment, command="test ! -e /task/work/INJECTED && test \"$(cat cwd.txt)\" = /task/work && test \"$(cat shell.txt)\" = shell-ok && test \"$(cat result.txt)\" = file-ok && test \"$(cat child.txt)\" = child-ok")
             requests = [json.loads(line) for line in (trial.agent_dir / "fixture-requests.jsonl").read_text().splitlines()]
             assert requests and all(entry["credential_received"] for entry in requests)

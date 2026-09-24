@@ -1,6 +1,6 @@
 // Launch the installed CLI with only the explicitly selected environment.
 const { spawn } = require("node:child_process");
-const { mkdirSync, readFileSync, writeFileSync, openSync, closeSync, existsSync, copyFileSync } = require("node:fs");
+const { mkdirSync, mkdtempSync, readFileSync, writeFileSync, openSync, closeSync, existsSync, copyFileSync } = require("node:fs");
 const { join } = require("node:path");
 const { identity } = require("./cleanup.cjs");
 
@@ -10,9 +10,10 @@ if (existsSync(join(runDir, "stop-requested"))) process.exit(1);
 const config = JSON.parse(readFileSync(join(runDir, "requested.json"), "utf8"));
 if (process.env.DIFFEX_TB_PROVIDER !== config.provider || process.env.DIFFEX_TB_MODEL !== config.model ||
 	process.env.DIFFEX_TB_THINKING !== config.thinking) throw new Error("Harbor environment differs from requested.json");
-const state = join(runDir, "state");
-// No recursive creation: reusing any prior state is an error.
-mkdirSync(state, { mode: 0o700 });
+// Keep packages, caches, credentials, and mutable harness state on sandbox
+// disk. Preserve them through verification for retained task services.
+const state = mkdtempSync("/tmp/diffex-tb-state-");
+writeFileSync(join(runDir, "state.json"), JSON.stringify({ state_dir: state, home: join(state, "home") }), { mode: 0o600 });
 mkdirSync(join(state, "home"), { mode: 0o700 });
 mkdirSync(join(runDir, "sessions"), { mode: 0o700 });
 writeFileSync(join(state, "settings.json"), JSON.stringify({ evolution: { enabled: false } }), { mode: 0o600 });

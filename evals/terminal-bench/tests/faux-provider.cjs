@@ -1,7 +1,20 @@
 // Controlled Linux smoke fixture. Never used by the benchmark adapter.
 const { createServer } = require("node:http");
-const { appendFileSync, readFileSync, readdirSync, writeFileSync } = require("node:fs");
+const { appendFileSync, existsSync, readFileSync, readdirSync, writeFileSync } = require("node:fs");
 const { join } = require("node:path");
+
+if (process.argv[2] === "contaminate") {
+	const state = process.argv[3];
+	writeFileSync(join(state, "auth.json"), '{"stale":true}');
+	writeFileSync(join(state, "SYSTEM.md"), "STALE_HARNESS_SELECTION");
+	const selections = join(state, "harness-state/selections");
+	if (existsSync(selections)) {
+		for (const name of readdirSync(selections).filter((name) => name.endsWith(".json"))) {
+			writeFileSync(join(selections, name), '{"stale_harness_selection":true}');
+		}
+	}
+	process.exit(0);
+}
 
 if (process.argv[2] === "prepare") {
 	const state = process.env.DIFFEX_CODING_AGENT_DIR;
