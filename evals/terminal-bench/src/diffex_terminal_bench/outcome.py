@@ -18,7 +18,7 @@ class DiffexControlStopError(RuntimeError):
 
 
 def parse_outcome(directory: Path, interruption: str | None = None,
-                  launcher_exit_code: int | None = None) -> dict:
+                  launcher_exit_code: int | None = None, *, shutdown_directory: Path | None = None) -> dict:
     result = {"status": "incomplete", "reason": "missing_evidence", "stream_complete": False,
               "assistant_stop_reason": None, "retry_attempts": 0, "recovered_retries": 0,
               "launcher_exit_code": launcher_exit_code, "interruption": interruption}
@@ -30,7 +30,7 @@ def parse_outcome(directory: Path, interruption: str | None = None,
     except (OSError, ValueError):
         process = {}
     try:
-        cleanup = read_cleanup(directory)
+        cleanup = read_cleanup(shutdown_directory if shutdown_directory is not None else directory)
         result.update(cleanup_confirmed=True, agent_execution_stopped=True,
                       retained_processes=cleanup["retained_processes"])
     except (OSError, ValueError, KeyError, TypeError, AttributeError):

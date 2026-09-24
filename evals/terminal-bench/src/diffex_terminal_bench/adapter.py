@@ -7,6 +7,7 @@ import shlex
 import hashlib
 import json
 from pathlib import Path, PurePosixPath
+import shutil
 import tempfile
 import uuid
 
@@ -16,7 +17,9 @@ from harbor.models.agent.context import AgentContext
 
 from diffex_terminal_bench.config import PINS
 from diffex_terminal_bench.execution import ExecutionOptions, PROVIDER_ENV, SUBAGENT_TOOLS
+from diffex_terminal_bench.lifecycle import read_cleanup
 from diffex_terminal_bench.outcome import DiffexControlStopError, parse_outcome, require_completed
+from diffex_terminal_bench.transport import retry_transport
 from diffex_terminal_bench.trajectory import export_trajectory
 
 
@@ -116,7 +119,7 @@ class DiffexAgent(BaseInstalledAgent):
                 source = Path(temp, name)
                 source.write_text(content, encoding="utf-8")
                 await environment.upload_file(source, str(run_dir / name))
-            for name in ("run.cjs", "cleanup.cjs", "observe.mjs", "release-agents.md"):
+            for name in ("run.cjs", "cleanup.cjs", "evidence.cjs", "observe.mjs", "release-agents.md"):
                 with as_file(files(__package__).joinpath(name)) as source:
                     await environment.upload_file(source, str(run_dir / name))
         # Uploads may be root-owned even when the task selects a non-root user.
@@ -173,13 +176,18 @@ class DiffexAgent(BaseInstalledAgent):
             except Exception as exc:
                 # Export failure must not replace the original cancellation or
                 # provider exception, or let a completed run omit its ATIF file.
-                outcome.setdefault("recovery_errors", []).append({"phase": "trajectory_export", "error": type(exc).__name__})
+                outcome.setdefault("artifact_errors", []).append({"phase": "trajectory_export", "error": type(exc).__name__})
                 context.n_input_tokens = context.n_output_tokens = context.n_cache_tokens = context.cost_usd = None
                 context.model_usage = {}
                 context.metadata = {**(context.metadata or {}), "diffex_trajectory": {"validated": False}}
                 if outcome["status"] == "completed":
-                    outcome.update(status="infrastructure_failure", reason="trajectory_export_failed")
-            (self.logs_dir / run_dir.name / "outcome.json").write_text(json.dumps(outcome, indent=2) + "\n")
+                    outcome.update(status="artifact_collection_failure", reason="trajectory_export_failed")
+            try:
+                (directory / "outcome.json").write_text(json.dumps(outcome, indent=2) + "\n")
+            except OSError as exc:
+                outcome.setdefault("artifact_errors", []).append({"phase": "outcome_persistence", "error": type(exc).__name__})
+                if outcome["status"] == "completed":
+                    outcome.update(status="artifact_collection_failure", reason="outcome_persistence_failed")
             # Raise inside finally so even a pending Harbor deadline cannot
             # convert unsafe cleanup into a verifier-eligible agent timeout.
             if outcome.get("agent_execution_stopped") is not True:
@@ -201,20 +209,75 @@ class DiffexAgent(BaseInstalledAgent):
             ), timeout=15)
         except Exception as exc:
             failures.append({"phase": "cleanup", "error": type(exc).__name__})
-        try:
-            if environment.capabilities.mounted:
-                await asyncio.wait_for(environment.prepare_logs_for_host(), timeout=15)
-            else:
-                await asyncio.wait_for(environment.download_dir(str(run_dir), directory), timeout=30)
-        except Exception as exc:
-            failures.append({"phase": "log_collection", "error": type(exc).__name__})
-        outcome = parse_outcome(directory, execution["interruption"], execution["launcher_exit_code"])
+        # Keep the independently validated evidence outside the bulk download's
+        # destination so partial extraction cannot overwrite its stop decision.
+        with tempfile.TemporaryDirectory(prefix="diffex-shutdown-") as temp:
+            evidence_dir = Path(temp)
+            cleanup = None
+
+            async def fetch_evidence():
+                response = await self.exec_as_agent(
+                    environment,
+                    command=shlex.join(["/opt/diffex-terminal-bench/node/bin/node", str(run_dir / "evidence.cjs"), str(run_dir)]),
+                    timeout_sec=15,
+                )
+                evidence = json.loads(response.stdout)
+                if evidence is None:
+                    raise TimeoutError("Shutdown evidence is not yet published")
+                return evidence
+
+            try:
+                evidence = await retry_transport(fetch_evidence)
+                if not isinstance(evidence, dict):
+                    raise ValueError("Invalid shutdown evidence bundle")
+                for name, content in evidence.items():
+                    path = PurePosixPath(name)
+                    if (name not in ("cleanup.json", "stop-requested", "launcher.json", "cli.json", "process.json")
+                            and not (len(path.parts) == 2 and path.parts[0] == "ownership"
+                                     and path.name.endswith(".json") and name == path.as_posix())):
+                        raise ValueError("Unexpected shutdown evidence path")
+                    if not isinstance(content, str):
+                        raise ValueError("Invalid shutdown evidence content")
+                    target = evidence_dir / name
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_text(content)
+                cleanup = read_cleanup(evidence_dir)
+            except Exception as exc:
+                failures.append({"phase": "shutdown_evidence", "error": type(exc).__name__})
+
+            artifact_errors = []
+            try:
+                if environment.capabilities.mounted:
+                    await asyncio.wait_for(environment.prepare_logs_for_host(), timeout=15)
+                else:
+                    await asyncio.wait_for(environment.download_dir(str(run_dir), directory), timeout=30)
+            except Exception as exc:
+                artifact_errors.append({"phase": "log_collection", "error": type(exc).__name__})
+            # Retain this bundle even when invalid, for diagnosis. Never infer
+            # shutdown from files that arrive later with the bulk artifacts.
+            try:
+                shutil.copytree(evidence_dir, directory, dirs_exist_ok=True)
+            except OSError as exc:
+                artifact_errors.append({"phase": "evidence_persistence", "error": type(exc).__name__})
+            outcome = parse_outcome(directory, execution["interruption"], execution["launcher_exit_code"],
+                                    shutdown_directory=evidence_dir)
+            outcome.update(agent_execution_stopped=cleanup is not None, cleanup_confirmed=cleanup is not None)
+            if cleanup is not None:
+                outcome["retained_processes"] = cleanup["retained_processes"]
+            elif not execution["interruption"]:
+                outcome.update(status="cleanup_failure", reason="process_cleanup_unverified")
+            if artifact_errors:
+                outcome["artifact_errors"] = artifact_errors
+                # Partial downloads may still conclusively establish an agent
+                # failure. Keep that primary cause alongside artifact errors.
+                unknown = (outcome["status"] in ("completed", "incomplete")
+                           or (outcome["status"] == "process_failure" and not outcome.get("process"))
+                           or (outcome["status"] == "configuration_failure"
+                               and not all((directory / name).is_file() for name in ("requested.json", "effective.json"))))
+                if cleanup is not None and not execution["interruption"] and unknown:
+                    outcome.update(status="artifact_collection_failure", reason="log_collection_failed")
         if failures:
             outcome["recovery_errors"] = failures
-            if any(failure["phase"] == "cleanup" for failure in failures):
-                outcome.update(agent_execution_stopped=False, cleanup_confirmed=False)
-            if not execution["interruption"]:
-                outcome.update(status="infrastructure_failure", reason="recovery_failed")
         context.metadata = {**(context.metadata or {}), "diffex_outcome": outcome, "diffex_run_dir": str(run_dir)}
         # The caller writes the summary to host logs after shielded recovery.
         # Do not upload a second copy that could overwrite a later cancellation
