@@ -25,6 +25,7 @@ from diffex_terminal_bench.dataset import BenchmarkConfig, load_config, prepare_
 from diffex_terminal_bench.daytona_backend import confirm_cleanup
 from diffex_terminal_bench.diagnostics import TrialExecutionFailure, describe_failure, diagnose_trial
 from diffex_terminal_bench.execution import PROVIDER_ENV
+from diffex_terminal_bench.retention import cleanup_trial_volume
 from diffex_terminal_bench.gate import STAGES, fingerprint, inventory, read_json, require_previous, sample_tasks, sha256, stage_tasks, validate_trial, verify_stage, write_json
 from diffex_terminal_bench.summary import refresh_index, write_index
 
@@ -174,6 +175,7 @@ async def run_stage(config: BenchmarkConfig, tasks: dict[str, Path], identity: d
                         if cancelled:
                             raise asyncio.CancelledError
                 evidence = validate_trial(trial_dir, task, identity, oracle=stage == "oracle")
+                await cleanup_trial_volume(client, trial_dir)
                 report["trials"].append({"task": task, "directory": trial_dir.name,
                                          "evidence": evidence, "files": inventory(trial_dir)})
                 report["trials"].sort(key=lambda row: row["directory"])

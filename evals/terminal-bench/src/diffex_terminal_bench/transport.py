@@ -7,13 +7,13 @@ import random
 from daytona.common.errors import DaytonaConnectionError, DaytonaError, DaytonaTimeoutError
 
 
-async def retry_transport[T](operation: Callable[[], Awaitable[T]]) -> T:
+async def retry_transport[T](operation: Callable[[], Awaitable[T]], *, request_timeout: float = 20, total_timeout: float = 90) -> T:
     # The outer bound includes backoff and all requests; each request is also
     # bounded so a lost connection cannot consume the entire retry budget.
-    async with asyncio.timeout(90):
+    async with asyncio.timeout(total_timeout):
         for attempt in range(3):
             try:
-                async with asyncio.timeout(20):
+                async with asyncio.timeout(request_timeout):
                     return await operation()
             except Exception as exc:
                 transient = isinstance(exc, (TimeoutError, ConnectionError, DaytonaConnectionError, DaytonaTimeoutError))

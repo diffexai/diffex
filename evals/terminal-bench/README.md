@@ -46,6 +46,7 @@ TB_STORAGE_MB=20480
 mkdir -p "$TB_OUTPUT"
 git rev-parse HEAD > "$TB_OUTPUT/adapter-commit.txt"
 TB_RUN=(uv run --locked harbor run --config full.yaml
+  --plugin diffex_terminal_bench.retention:VolumeCleanupPlugin
   --override-storage-mb "$TB_STORAGE_MB"
   --jobs-dir "$TB_OUTPUT" --job-name full)
 "${TB_RUN[@]}" --print-config > "$TB_OUTPUT/planned-config.json"

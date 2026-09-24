@@ -35,7 +35,22 @@ Keep job concurrency within the organization's remaining capacity, accounting fo
 See the [Daytona limits documentation](https://www.daytona.io/docs/en/limits/).
 This change does not increase job concurrency or sandbox resources.
 
-The shared volume is intentionally retained when a trial deletes its sandbox, including when local download fails.
+The staged runner automatically prunes a completed Diffex trial's volume prefixes after qualification, before releasing its concurrency slot.
+The native Harbor command in the README enables the same behavior with `--plugin diffex_terminal_bench.retention:VolumeCleanupPlugin`.
+Harbor 0.23.0 ignores plugins in YAML, so include this CLI option in other native run commands too.
+Cleanup requires a completed trial and verifier result, matching local reward and verifier logs, valid native shutdown and execution evidence, a valid trajectory, and no artifact errors or native session gaps.
+A zero reward is eligible; failed, interrupted, oracle-only, and incomplete trials retain their remote logs.
+All recorded trial sandboxes must be absent before deletion, including separate verifiers and retained task services.
+One short-lived Python sandbox mounts only that trial's exact prefixes, compares every remote file's SHA-256 against the local artifact copy, and empties the prefixes only if all files match.
+Unknown files, symlinks, or mismatched files preserve remote data for recovery.
+Local logs, transcripts, and results remain available.
+`volume-cleanup.json` records the decision, prefix locations, deleted file count, and cleanup sandbox deletion status.
+Cleanup failures do not change verifier results and retain recovery locations; transport operations use bounded retries.
+Remote comparison and pruning allow three attempts within 210 seconds, with a 60-second execution limit per attempt.
+The cleanup sandbox is deleted in a shielded finalizer, with a two-minute idle stop, immediate deletion after stopping, and a ten-minute maximum lifetime as fallbacks.
+This uses one extra sandbox creation per eligible trial, within the existing worker slot; include that overhead in the Tier 4 creation-rate and compute budget.
+The shared volume itself remains available to subsequent trials and concurrent jobs.
+
 To recover artifacts, select the relevant session in `artifact-volume.json`, mount its volume ID and exact subpath on a temporary sandbox, and download `/logs`.
 Delete that recovery sandbox afterward.
 Remove only a trial's recorded subpath when its artifacts are no longer needed; do not delete the shared volume while any job uses it.
