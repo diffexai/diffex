@@ -19,6 +19,7 @@ export class ToolGroupComponent implements Component {
 	private pathOrigin: DiffexPathOrigin;
 	private reusesLeadingGap: boolean;
 	private settled = false;
+	private cachedRender?: { width: number; lines: string[] };
 
 	constructor(
 		outputPad = 1,
@@ -36,6 +37,7 @@ export class ToolGroupComponent implements Component {
 			return existing;
 		}
 		this.tools.set(toolCallId, component);
+		this.cachedRender = undefined;
 		return component;
 	}
 
@@ -44,7 +46,9 @@ export class ToolGroupComponent implements Component {
 	}
 
 	removeTool(toolCallId: string): boolean {
-		return this.tools.delete(toolCallId);
+		const removed = this.tools.delete(toolCallId);
+		if (removed) this.cachedRender = undefined;
+		return removed;
 	}
 
 	replaceTools(tools: ReadonlyArray<readonly [string, ToolExecutionComponent]>): void {
@@ -53,6 +57,7 @@ export class ToolGroupComponent implements Component {
 			this.tools.delete(toolCallId);
 			this.tools.set(toolCallId, component);
 		}
+		this.cachedRender = undefined;
 	}
 
 	hasTools(): boolean {
@@ -66,41 +71,49 @@ export class ToolGroupComponent implements Component {
 	setPathOrigin(pathOrigin: DiffexPathOrigin, options: { reuseLeadingGap?: boolean } = {}): void {
 		this.pathOrigin = pathOrigin;
 		this.reusesLeadingGap = pathOrigin === "standalone" && options.reuseLeadingGap === true;
+		this.cachedRender = undefined;
 	}
 
 	markSettled(): void {
 		this.settled = true;
+		this.cachedRender = undefined;
 	}
 
 	setOutputPad(padding: number): void {
 		this.outputPad = padding;
+		this.cachedRender = undefined;
 	}
 
 	setExpanded(expanded: boolean): void {
 		for (const tool of this.tools.values()) {
 			tool.setExpanded(expanded);
 		}
+		this.cachedRender = undefined;
 	}
 
 	setShowImages(show: boolean): void {
 		for (const tool of this.tools.values()) {
 			tool.setShowImages(show);
 		}
+		this.cachedRender = undefined;
 	}
 
 	setImageWidthCells(width: number): void {
 		for (const tool of this.tools.values()) {
 			tool.setImageWidthCells(width);
 		}
+		this.cachedRender = undefined;
 	}
 
 	invalidate(): void {
 		for (const tool of this.tools.values()) {
 			tool.invalidate();
 		}
+		this.cachedRender = undefined;
 	}
 
 	render(width: number): string[] {
+		if (this.settled && this.cachedRender?.width === width) return this.cachedRender.lines;
 		const safeWidth = Math.max(1, width);
 		const outputPad = Math.min(Math.max(0, this.outputPad), Math.max(0, safeWidth - 1));
 		const outerRailWidth = safeWidth - outputPad > 1 ? 1 : 0;
@@ -120,12 +133,14 @@ export class ToolGroupComponent implements Component {
 		}
 
 		if (renderedTools.length === 0) {
-			if (this.pathOrigin !== "continued") {
-				return [];
-			}
-			return this.settled
-				? new DiffexPathTerminus(outputPad).render(safeWidth)
-				: new DiffexPathRail(outputPad).render(safeWidth);
+			const lines =
+				this.pathOrigin !== "continued"
+					? []
+					: this.settled
+						? new DiffexPathTerminus(outputPad).render(safeWidth)
+						: new DiffexPathRail(outputPad).render(safeWidth);
+			if (this.settled) this.cachedRender = { width, lines };
+			return lines;
 		}
 
 		const label = this.settled ? "Explored" : "Exploring";
@@ -158,6 +173,7 @@ export class ToolGroupComponent implements Component {
 			}
 		}
 
+		if (this.settled) this.cachedRender = { width, lines: result };
 		return result;
 	}
 }

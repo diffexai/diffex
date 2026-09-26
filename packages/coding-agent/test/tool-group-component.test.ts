@@ -55,6 +55,29 @@ describe("ToolGroupComponent", () => {
 		expect(settled).not.toContain("Exploring");
 	});
 
+	test("reuses settled output until width or display settings change", () => {
+		const group = new ToolGroupComponent(1);
+		const tool = createTool("cached", "Cached");
+		const render = vi.spyOn(tool, "render");
+		group.addTool("cached", tool);
+		group.markSettled();
+
+		const first = group.render(80);
+		expect(group.render(80)).toBe(first);
+		expect(render).toHaveBeenCalledTimes(1);
+
+		group.render(90);
+		expect(render).toHaveBeenCalledTimes(2);
+
+		group.setExpanded(true);
+		group.render(90);
+		expect(render).toHaveBeenCalledTimes(3);
+
+		group.invalidate();
+		group.render(90);
+		expect(render).toHaveBeenCalledTimes(4);
+	});
+
 	test("renders a standalone tool group as one open Diffex path", () => {
 		const glyphs = getGlyphs();
 		const group = new ToolGroupComponent(1);
