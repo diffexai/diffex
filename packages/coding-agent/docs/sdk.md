@@ -614,7 +614,9 @@ Specify which tools to enable:
 - `excludeTools` disables specific built-in, extension, custom, or coordination tool names after any `tools` allowlist is applied
 
 The `edit` tool returns `details.diff` for Diffex's TUI display and `details.patch` as a standard unified patch for SDK consumers.
-The `update_plan` tool returns `details.plan` with the full ordered checklist snapshot.
+The `update_plan` tool accepts a full `plan`, a single-step `update` by stable ID, or `clear: true`.
+Each plan step has an `id`, `step`, and `status`, with optional `success_criteria` strings.
+It returns a short acknowledgement; plan writes and step updates also return the resulting snapshot in `details.plan`.
 
 ```typescript
 import { createAgentSession } from "@diffexai/diffex";
