@@ -80,6 +80,13 @@ npm run check
 `npm run check` runs formatting, linting, dependency policy checks, and TypeScript validation.
 `./test.sh` runs the non-E2E test suites without activating tests that require provider credentials.
 
+## Plan History
+
+`update_plan` saves each changed plan in the session history and returns the complete resolved plan in its tool result, including step IDs, statuses, and success criteria.
+Clearing the plan returns `Plan cleared.`
+Successful compaction summaries include the latest plan snapshot, or an empty plan when it was cleared or absent, so resumed and forked sessions retain the task context.
+Ordinary requests reuse the existing conversation prefix without appending a plan message to every model request.
+
 ## Documentation
 
 - [Coding-agent documentation](packages/coding-agent/docs/index.md)

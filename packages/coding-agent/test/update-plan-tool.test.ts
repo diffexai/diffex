@@ -54,7 +54,9 @@ describe("update_plan tool", () => {
 
 		const result = await executeUpdatePlan(input);
 
-		expect(getTextOutput(result)).toBe("Plan updated: 1 completed, 1 in progress, 1 pending.");
+		expect(getTextOutput(result)).toBe(
+			`Plan updated: 1 completed, 1 in progress, 1 pending.\n${JSON.stringify({ plan: input.plan }, null, 2)}`,
+		);
 		expect(result.details).toEqual(input);
 		expect(result.details).not.toBe(input);
 		expect("plan" in result.details).toBe(true);
@@ -79,7 +81,9 @@ describe("update_plan tool", () => {
 			],
 		});
 
-		expect(getTextOutput(result)).toBe("Plan updated: 2 completed, 0 in progress, 0 pending.");
+		expect(getTextOutput(result)).toBe(
+			`Plan updated: 2 completed, 0 in progress, 0 pending.\n${JSON.stringify({ plan: result.details && "plan" in result.details ? result.details.plan : [] }, null, 2)}`,
+		);
 	});
 
 	test("updates one step by ID while preserving its identity and the other steps", async () => {
@@ -101,7 +105,9 @@ describe("update_plan tool", () => {
 			},
 		});
 
-		expect(getTextOutput(result)).toBe("Plan updated: 0 completed, 1 in progress, 1 pending.");
+		expect(getTextOutput(result)).toBe(
+			`Plan updated: 0 completed, 1 in progress, 1 pending.\n${JSON.stringify(result.details && "plan" in result.details ? { plan: result.details.plan } : {}, null, 2)}`,
+		);
 		expect(result.details).toEqual({
 			plan: [
 				{
@@ -173,7 +179,9 @@ describe("update_plan tool", () => {
 		});
 		expect(second.details).toEqual({ plan: [{ id: "different", step: "Different", status: "completed" }] });
 		expect("explanation" in second.details).toBe(false);
-		expect(getTextOutput(second)).toBe("Plan updated: 1 completed, 0 in progress, 0 pending.");
+		expect(getTextOutput(second)).toBe(
+			`Plan updated: 1 completed, 0 in progress, 0 pending.\n${JSON.stringify(second.details && "plan" in second.details ? { plan: second.details.plan } : {}, null, 2)}`,
+		);
 	});
 
 	test("clears idempotently with or without an exact explanation", async () => {

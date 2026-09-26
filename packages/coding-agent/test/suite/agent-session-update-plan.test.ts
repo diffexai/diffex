@@ -78,7 +78,9 @@ describe("AgentSession update_plan tool", () => {
 		expect(toolResult?.role).toBe("toolResult");
 		if (toolResult?.role !== "toolResult") return;
 		expect(toolResult.toolName).toBe("update_plan");
-		expect(getMessageText(toolResult)).toBe("Plan updated: 1 completed, 1 in progress, 1 pending.");
+		expect(getMessageText(toolResult)).toBe(
+			`Plan updated: 1 completed, 1 in progress, 1 pending.\n${JSON.stringify({ plan }, null, 2)}`,
+		);
 		expect(toolResult.details).toEqual({ plan, explanation: "  exact explanation  " });
 		expect(getMessageText(harness.session.messages[3])).toBe("continuing after plan");
 
@@ -100,85 +102,6 @@ describe("AgentSession update_plan tool", () => {
 				{ id: "run-checks", step: "Run checks" },
 			],
 			explanation: "  exact explanation  ",
-		});
-	});
-
-	it("puts the latest persisted plan at the end of each request after edits and reordering", async () => {
-		const harness = await createHarness();
-		harnesses.push(harness);
-		const firstPlan = [
-			{ id: "settings", step: "Fix settings", status: "in_progress", success_criteria: ["Survives restart"] },
-			{ id: "checks", step: "Run checks", status: "pending" },
-		];
-		const reorderedPlan = [
-			{ id: "checks", step: "Run verification", status: "in_progress", success_criteria: ["Checks pass"] },
-			{
-				id: "settings",
-				step: "Fix settings persistence",
-				status: "completed",
-				success_criteria: ["Settings remain readable"],
-			},
-		];
-		const tailContexts: string[] = [];
-		const capture = (context: { messages: unknown[] }) => {
-			tailContexts.push(getMessageText(context.messages.at(-1)));
-		};
-		harness.setResponses([
-			(context) => {
-				capture(context);
-				return fauxAssistantMessage(fauxToolCall("update_plan", { plan: firstPlan }), { stopReason: "toolUse" });
-			},
-			(context) => {
-				capture(context);
-				return fauxAssistantMessage(
-					fauxToolCall("update_plan", {
-						update: {
-							id: "settings",
-							step: "Fix settings persistence",
-							success_criteria: ["Settings remain readable"],
-						},
-					}),
-					{ stopReason: "toolUse" },
-				);
-			},
-			(context) => {
-				capture(context);
-				return fauxAssistantMessage(fauxToolCall("update_plan", { plan: reorderedPlan }), {
-					stopReason: "toolUse",
-				});
-			},
-			(context) => {
-				capture(context);
-				return fauxAssistantMessage("done");
-			},
-		]);
-
-		await harness.session.prompt("fix settings");
-
-		const prefix = "Current task context (latest plan):\n";
-		expect(tailContexts).toEqual([
-			`${prefix}${JSON.stringify({ plan: [] }, null, 2)}`,
-			`${prefix}${JSON.stringify({ plan: firstPlan }, null, 2)}`,
-			`${prefix}${JSON.stringify(
-				{
-					plan: [
-						{
-							id: "settings",
-							step: "Fix settings persistence",
-							status: "in_progress",
-							success_criteria: ["Settings remain readable"],
-						},
-						firstPlan[1],
-					],
-				},
-				null,
-				2,
-			)}`,
-			`${prefix}${JSON.stringify({ plan: reorderedPlan }, null, 2)}`,
-		]);
-		expect(resolveCurrentPlanState(harness.sessionManager)).toEqual({
-			status: "active",
-			operation: { plan: reorderedPlan },
 		});
 	});
 

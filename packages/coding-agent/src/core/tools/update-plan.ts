@@ -353,7 +353,10 @@ export function createUpdatePlanToolDefinition(
 				content: [
 					{
 						type: "text",
-						text: "clear" in details ? "Plan cleared." : formatPlanSummary(details.plan),
+						text:
+							"clear" in details
+								? "Plan cleared."
+								: `${formatPlanSummary(details.plan)}\n${JSON.stringify({ plan: details.plan }, null, 2)}`,
 					},
 				],
 				details,

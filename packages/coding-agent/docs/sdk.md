@@ -616,7 +616,10 @@ Specify which tools to enable:
 The `edit` tool returns `details.diff` for Diffex's TUI display and `details.patch` as a standard unified patch for SDK consumers.
 The `update_plan` tool accepts a full `plan`, a single-step `update` by stable ID, or `clear: true`.
 Each plan step has an `id`, `step`, and `status`, with optional `success_criteria` strings.
-It returns a short acknowledgement; plan writes and step updates also return the resulting snapshot in `details.plan`.
+Plan writes and step updates return the complete resolved plan in the model-visible tool result, including IDs, statuses, and success criteria, and in `details.plan`.
+The session persists each successful plan change in conversation history, while `clear: true` returns `Plan cleared.`
+Successful compaction summaries include the latest plan snapshot, or an empty plan if the plan was cleared or absent, so resume and fork retain it after older tool results are compacted away.
+Ordinary requests do not append a separate plan message, allowing subsequent requests to reuse the same prompt prefix.
 
 ```typescript
 import { createAgentSession } from "@diffexai/diffex";

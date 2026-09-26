@@ -159,7 +159,6 @@ import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts"
 import { createAllToolDefinitions } from "./tools/index.ts";
 import { createRequestUserInputToolDefinition, REQUEST_USER_INPUT_TOOL_NAME } from "./tools/request-user-input.ts";
 import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapper.ts";
-import type { UpdatePlanItem } from "./tools/update-plan.ts";
 import { addUsageToTotals, createUsageTotals } from "./usage-totals.ts";
 
 // ============================================================================
@@ -460,7 +459,6 @@ function estimateMessagesTokens(messages: AgentMessage[]): number {
 
 /** Standard thinking levels */
 const THINKING_LEVELS: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high"];
-const CURRENT_TASK_CONTEXT_CUSTOM_TYPE = "diffex.current-task-context";
 const MAX_PENDING_SUBAGENT_ESCALATION_CHARACTERS = 8_000;
 const INCOMPATIBLE_SUBAGENT_PARENT_HOOKS = [
 	"resources_discover",
@@ -615,7 +613,6 @@ export class AgentSession {
 		// (session persistence, extensions, auto-compaction, retry logic)
 		this._unsubscribeAgent = this.agent.subscribe(this._handleAgentEvent);
 		this._installAgentToolHooks();
-		this._installCurrentTaskContext();
 		this._installAgentNextTurnRefresh();
 
 		this._buildRuntime({
@@ -836,29 +833,6 @@ export class AgentSession {
 				model: this.agent.state.model,
 				thinkingLevel: this.agent.state.thinkingLevel,
 			};
-		};
-	}
-
-	private _installCurrentTaskContext(): void {
-		const previousTransformContext = this.agent.transformContext;
-		this.agent.transformContext = async (messages, signal) => {
-			const transformedMessages = previousTransformContext
-				? await previousTransformContext(messages, signal)
-				: messages;
-			const state = resolveCurrentPlanState(this.sessionManager);
-			let plan: UpdatePlanItem[] = [];
-			if (state.status === "active") plan = state.operation.plan;
-			else if (state.status === "inactive" && "plan" in state.operation) plan = state.operation.plan;
-			const currentTaskContext: CustomMessage = {
-				role: "custom",
-				customType: CURRENT_TASK_CONTEXT_CUSTOM_TYPE,
-				content: [
-					{ type: "text", text: `Current task context (latest plan):\n${JSON.stringify({ plan }, null, 2)}` },
-				],
-				display: false,
-				timestamp: Date.now(),
-			};
-			return [...transformedMessages, currentTaskContext];
 		};
 	}
 
@@ -3462,9 +3436,17 @@ export class AgentSession {
 		signal?: AbortSignal;
 		deferCommit?: (transaction: CompactionAppendTransaction) => void;
 	}): Promise<CompactionResult> {
+		const planState = resolveCurrentPlanState(this.sessionManager);
+		const plan =
+			planState.status === "active"
+				? planState.operation.plan
+				: planState.status === "inactive" && "plan" in planState.operation
+					? planState.operation.plan
+					: [];
+		const summary = `${options.summary}\n\nCurrent task context (latest plan):\n${JSON.stringify({ plan }, null, 2)}`;
 		const transaction = appendCompactionTransaction(
 			this.sessionManager,
-			options.summary,
+			summary,
 			options.firstKeptEntryId,
 			options.tokensBefore,
 			options.details,
@@ -3503,7 +3485,7 @@ export class AgentSession {
 		else transaction.commit();
 
 		const compactionResult: CompactionResult = {
-			summary: options.summary,
+			summary,
 			firstKeptEntryId: options.firstKeptEntryId,
 			tokensBefore: options.tokensBefore,
 			estimatedTokensAfter,

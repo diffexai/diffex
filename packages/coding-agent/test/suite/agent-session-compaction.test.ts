@@ -131,7 +131,9 @@ describe("AgentSession compaction characterization", () => {
 		const compactionEntries = harness.sessionManager.getEntries().filter((entry) => entry.type === "compaction");
 		const estimatedTokensAfter = harness.session.messages.reduce((sum, message) => sum + estimateTokens(message), 0);
 
-		expect(result.summary).toBe("summary from extension");
+		expect(result.summary).toBe(
+			`summary from extension\n\nCurrent task context (latest plan):\n${JSON.stringify({ plan: [] }, null, 2)}`,
+		);
 		expect(result.usage).toEqual(summaryUsage);
 		expect(result.estimatedTokensAfter).toBe(estimatedTokensAfter);
 		expect(compactionEntries).toHaveLength(1);

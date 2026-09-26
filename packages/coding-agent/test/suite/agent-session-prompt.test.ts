@@ -886,7 +886,10 @@ describe("AgentSession prompt characterization", () => {
 			const reason = new Error("cancel saved compaction");
 			const prompt = harness.session.prompt("new prompt", { signal: controller.signal });
 			await compactHookStarted.promise;
-			expect(sessionManager.getLeafEntry()).toMatchObject({ type: "compaction", summary: "temporarily recorded" });
+			expect(sessionManager.getLeafEntry()).toMatchObject({
+				type: "compaction",
+				summary: `temporarily recorded\n\nCurrent task context (latest plan):\n${JSON.stringify({ plan: [] }, null, 2)}`,
+			});
 			controller.abort(reason);
 			releaseCompactHook.resolve();
 
@@ -988,7 +991,9 @@ describe("AgentSession prompt characterization", () => {
 		expect(harness.eventsOfType("compaction_end")).toEqual([
 			expect.objectContaining({
 				aborted: false,
-				result: expect.objectContaining({ summary: "completed before acceptance" }),
+				result: expect.objectContaining({
+					summary: `completed before acceptance\n\nCurrent task context (latest plan):\n${JSON.stringify({ plan: [] }, null, 2)}`,
+				}),
 			}),
 		]);
 		expect(harness.faux.state.callCount).toBe(0);
@@ -1042,7 +1047,9 @@ describe("AgentSession prompt characterization", () => {
 			}),
 		).rejects.toBe(callbackError);
 		expect(harness.sessionManager.getEntries().filter((entry) => entry.type === "compaction")).toEqual([
-			expect.objectContaining({ summary: "committed before notification failure" }),
+			expect.objectContaining({
+				summary: `committed before notification failure\n\nCurrent task context (latest plan):\n${JSON.stringify({ plan: [{ id: "continue", step: "continue", status: "in_progress" }] }, null, 2)}`,
+			}),
 		]);
 
 		let restoredPlan = false;
