@@ -159,6 +159,12 @@ export class FooterComponent implements Component {
 			theme.fg("footerContext", `context ${contextPercent}%`) +
 			theme.fg("borderMuted", " / ") +
 			theme.fg("footerWindow", windowDisplay);
+		const { input, cacheRead, cacheWrite } = this.session.getSessionStats().tokens;
+		const promptTokens = input + cacheRead + cacheWrite;
+		const cacheHitPercent =
+			promptTokens > 0 && (cacheRead > 0 || cacheWrite > 0)
+				? `${((cacheRead / promptTokens) * 100).toFixed(1)}%`
+				: undefined;
 
 		const planMode = getCollaborationMode(this.session) === "plan";
 		const planFull = theme.fg("warning", "Plan mode");
@@ -215,6 +221,9 @@ export class FooterComponent implements Component {
 		const tryAddField = (field: FooterField): boolean => trySetFields([...fields, field]);
 		const tryUpgradeField = (key: string, text: string): boolean =>
 			trySetFields(fields.map((field) => (field.key === key ? { ...field, text } : field)));
+		if (cacheHitPercent !== undefined) {
+			tryAddField({ key: "cache", order: 3, text: theme.fg("dim", `cache ${cacheHitPercent}`) });
+		}
 
 		// Extension statuses are public UI state, so admit them before optional
 		// detail upgrades and shortcut hints. Truncate only their own field.
@@ -229,7 +238,7 @@ export class FooterComponent implements Component {
 			if (statusText.length > 0 && availableWidth > 0) {
 				tryAddField({
 					key: "extensions",
-					order: 4,
+					order: 5,
 					text: truncateToWidth(theme.fg("dim", statusText), availableWidth, glyphs.ellipsis),
 				});
 			}
@@ -238,15 +247,18 @@ export class FooterComponent implements Component {
 		tryAddField({ key: "thinking", order: 1, text: theme.fg("thinkingText", thinkingLevel) });
 		tryAddField({
 			key: "harness",
-			order: 3,
+			order: 4,
 			text: theme.fg("dim", `h:${harnessVersion}`) + evolutionSpinner,
 		});
 		tryUpgradeField("context", contextMedium);
 		tryUpgradeField("thinking", theme.fg("thinkingText", `thinking ${thinkingLevel}`));
+		if (cacheHitPercent !== undefined) {
+			tryUpgradeField("cache", theme.fg("dim", `input cache hit ${cacheHitPercent}`));
+		}
 		tryUpgradeField("harness", theme.fg("dim", `harness ${harnessVersion}`) + evolutionSpinner);
 		tryUpgradeField("context", contextFull);
 
-		tryAddField({ key: "hotkeys", order: 7, text: theme.fg("dim", "/hotkeys") });
+		tryAddField({ key: "hotkeys", order: 8, text: theme.fg("dim", "/hotkeys") });
 
 		const getBindingHint = (action: "app.thinking.cycle" | "app.model.cycleForward", label: string) => {
 			try {
@@ -258,11 +270,11 @@ export class FooterComponent implements Component {
 		};
 		const thinkingHint = getBindingHint("app.thinking.cycle", "thinking");
 		if (thinkingHint) {
-			tryAddField({ key: "thinkingHint", order: 5, text: thinkingHint });
+			tryAddField({ key: "thinkingHint", order: 6, text: thinkingHint });
 		}
 		const modelHint = getBindingHint("app.model.cycleForward", "model");
 		if (modelHint) {
-			tryAddField({ key: "modelHint", order: 6, text: modelHint });
+			tryAddField({ key: "modelHint", order: 7, text: modelHint });
 		}
 
 		return [renderFields(fields)];

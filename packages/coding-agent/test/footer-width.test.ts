@@ -104,6 +104,13 @@ function createSession(options: {
 			getCwd: () => "/tmp/project",
 		},
 		getContextUsage: () => ({ contextWindow: 200_000, percent: 12.3 }),
+		getSessionStats: () => ({
+			tokens: {
+				input: usage?.input ?? 0,
+				cacheRead: usage?.cacheRead ?? 0,
+				cacheWrite: usage?.cacheWrite ?? 0,
+			},
+		}),
 		modelRuntime: {
 			isUsingSubscription: () => options.usingSubscription ?? false,
 		},
@@ -236,6 +243,47 @@ describe("FooterComponent width handling", () => {
 		expect(lines[0]).toContain("context 12.3% / 200k");
 		expect(lines[0]).toContain("harness default");
 		expect(lines[0]).toContain("/hotkeys");
+	});
+
+	it("shows the session input cache hit rate alongside context usage", () => {
+		const session = createSession({
+			sessionName: "",
+			modelId: "gpt-5.5",
+			thinkingLevel: "medium",
+			usage: {
+				input: 1_000,
+				output: 200,
+				cacheRead: 8_000,
+				cacheWrite: 1_000,
+				cost: { total: 0.1 },
+			},
+		});
+		const footer = new FooterComponent(session, createFooterData(1));
+
+		const wideLine = stripAnsi(footer.render(160)[0] ?? "");
+		expect(wideLine).toContain("input cache hit 80.0%");
+		expect(wideLine).toContain("context 12.3% / 200k");
+		expect(wideLine).toContain("thinking medium");
+
+		const standardLine = stripAnsi(footer.render(60)[0] ?? "");
+		expect(standardLine).toContain("cache 80.0%");
+		expect(visibleWidth(standardLine)).toBeLessThanOrEqual(60);
+	});
+
+	it("shows a zero cache hit rate when the provider reports only cache writes", () => {
+		const session = createSession({
+			sessionName: "",
+			usage: {
+				input: 9_000,
+				output: 200,
+				cacheRead: 0,
+				cacheWrite: 1_000,
+				cost: { total: 0.1 },
+			},
+		});
+		const footer = new FooterComponent(session, createFooterData(1));
+
+		expect(stripAnsi(footer.render(160)[0] ?? "")).toContain("input cache hit 0.0%");
 	});
 
 	it("uses dedicated colors for footer model, context usage, and context window", () => {
