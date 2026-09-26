@@ -6,6 +6,7 @@ import type { ToolDefinition } from "../src/core/extensions/types.ts";
 import {
 	createUpdatePlanTool,
 	createUpdatePlanToolDefinition,
+	resolveUpdatePlanOperation,
 	type UpdatePlanToolDetails,
 	type UpdatePlanToolInput,
 } from "../src/core/tools/update-plan.ts";
@@ -40,9 +41,14 @@ describe("update_plan tool", () => {
 		const input = {
 			explanation: "  Repository evidence changed.\n",
 			plan: [
-				{ step: "Read the code", status: "completed" },
-				{ step: "  Implement the tool  ", status: "in_progress" },
-				{ step: "Run checks", status: "pending" },
+				{ id: "read-the-code", step: "Read the code", status: "completed" },
+				{
+					id: "implement-the-tool",
+					step: "  Implement the tool  ",
+					status: "in_progress",
+					success_criteria: ["Survives restart"],
+				},
+				{ id: "run-checks", step: "Run checks", status: "pending" },
 			],
 		} satisfies UpdatePlanToolInput;
 
@@ -57,43 +63,115 @@ describe("update_plan tool", () => {
 		expect(result.details.plan[0]).not.toBe(input.plan[0]);
 
 		input.plan[0]!.step = "mutated";
+		input.plan[1]!.success_criteria![0] = "mutated";
 		input.explanation = "mutated";
 		expect(result.details.plan[0]?.step).toBe("Read the code");
 		expect(result.details.plan[1]?.step).toBe("  Implement the tool  ");
+		expect(result.details.plan[1]?.success_criteria).toEqual(["Survives restart"]);
 		expect(result.details.explanation).toBe("  Repository evidence changed.\n");
 	});
 
 	test("accepts all-completed plans without an in-progress item", async () => {
 		const result = await executeUpdatePlan({
 			plan: [
-				{ step: "Read the code", status: "completed" },
-				{ step: "Run checks", status: "completed" },
+				{ id: "read-the-code", step: "Read the code", status: "completed" },
+				{ id: "run-checks", step: "Run checks", status: "completed" },
 			],
 		});
 
 		expect(getTextOutput(result)).toBe("Plan updated: 2 completed, 0 in progress, 0 pending.");
 	});
 
+	test("updates one step by ID while preserving its identity and the other steps", async () => {
+		const plan = [
+			{
+				id: "settings",
+				step: "Fix settings",
+				status: "in_progress" as const,
+				success_criteria: ["Survives restart"],
+			},
+			{ id: "checks", step: "Run checks", status: "pending" as const },
+		];
+		const tool = createUpdatePlanTool(() => plan);
+		const result = await tool.execute("tool-1", {
+			update: {
+				id: "settings",
+				step: "Fix settings persistence",
+				success_criteria: ["Changed settings survive restart", "Existing settings remain readable"],
+			},
+		});
+
+		expect(getTextOutput(result)).toBe("Plan updated: 0 completed, 1 in progress, 1 pending.");
+		expect(result.details).toEqual({
+			plan: [
+				{
+					id: "settings",
+					step: "Fix settings persistence",
+					status: "in_progress",
+					success_criteria: ["Changed settings survive restart", "Existing settings remain readable"],
+				},
+				plan[1],
+			],
+		});
+		expect(plan[0]?.step).toBe("Fix settings");
+		expect(plan[0]?.success_criteria).toEqual(["Survives restart"]);
+
+		const clearedCriteria = resolveUpdatePlanOperation({ update: { id: "settings", success_criteria: [] } }, plan);
+		expect(clearedCriteria).toEqual({
+			plan: [{ id: "settings", step: "Fix settings", status: "in_progress" }, plan[1]],
+		});
+	});
+
+	test("validates step identity, criteria, and single-step updates", async () => {
+		await expect(
+			executeUpdatePlan({ plan: [{ step: "Missing ID", status: "in_progress" }] } as unknown as UpdatePlanToolInput),
+		).rejects.toThrow("id must be a non-empty string");
+		await expect(
+			executeUpdatePlan({
+				plan: [
+					{ id: "same", step: "First", status: "in_progress" },
+					{ id: "same", step: "Second", status: "pending" },
+				],
+			}),
+		).rejects.toThrow("Duplicate plan item id: same.");
+		await expect(
+			executeUpdatePlan({ plan: [{ id: "one", step: "One", status: "in_progress", success_criteria: [" "] }] }),
+		).rejects.toThrow("success_criteria must be an array of non-empty strings");
+		expect(() => resolveUpdatePlanOperation({ update: { id: "unknown", status: "completed" } })).toThrow(
+			"without a current plan",
+		);
+		expect(() =>
+			resolveUpdatePlanOperation({ update: { id: "unknown", status: "completed" } }, [
+				{ id: "one", step: "One", status: "in_progress" },
+			]),
+		).toThrow("Unknown plan step id: unknown.");
+		expect(() =>
+			resolveUpdatePlanOperation({ update: { id: "one", status: "pending" } }, [
+				{ id: "one", step: "One", status: "in_progress" },
+			]),
+		).toThrow("exactly one in_progress");
+	});
+
 	test("treats each call as a replacement snapshot", async () => {
 		const first = await executeUpdatePlan({
 			explanation: "Initial approach",
 			plan: [
-				{ step: "One", status: "in_progress" },
-				{ step: "Two", status: "pending" },
+				{ id: "one", step: "One", status: "in_progress" },
+				{ id: "two", step: "Two", status: "pending" },
 			],
 		});
 		const second = await executeUpdatePlan({
-			plan: [{ step: "Different", status: "completed" }],
+			plan: [{ id: "different", step: "Different", status: "completed" }],
 		});
 
 		expect(first.details).toEqual({
 			explanation: "Initial approach",
 			plan: [
-				{ step: "One", status: "in_progress" },
-				{ step: "Two", status: "pending" },
+				{ id: "one", step: "One", status: "in_progress" },
+				{ id: "two", step: "Two", status: "pending" },
 			],
 		});
-		expect(second.details).toEqual({ plan: [{ step: "Different", status: "completed" }] });
+		expect(second.details).toEqual({ plan: [{ id: "different", step: "Different", status: "completed" }] });
 		expect("explanation" in second.details).toBe(false);
 		expect(getTextOutput(second)).toBe("Plan updated: 1 completed, 0 in progress, 0 pending.");
 	});
@@ -110,14 +188,14 @@ describe("update_plan tool", () => {
 
 	test("rejects ambiguous operations and unknown fields", async () => {
 		await expect(executeUpdatePlan({} as UpdatePlanToolInput)).rejects.toThrow(
-			"Provide exactly one update_plan operation: plan or clear.",
+			"Provide exactly one update_plan operation: plan, update, or clear.",
 		);
 		await expect(
 			executeUpdatePlan({
-				plan: [{ step: "One", status: "completed" }],
+				plan: [{ id: "one", step: "One", status: "completed" }],
 				clear: true,
 			} as unknown as UpdatePlanToolInput),
-		).rejects.toThrow("Provide exactly one update_plan operation: plan or clear.");
+		).rejects.toThrow("Provide exactly one update_plan operation: plan, update, or clear.");
 		await expect(executeUpdatePlan({ clear: false } as unknown as UpdatePlanToolInput)).rejects.toThrow(
 			"Clear must be true.",
 		);
@@ -134,33 +212,33 @@ describe("update_plan tool", () => {
 		await expect(executeUpdatePlan({ plan: ["step"] } as unknown as UpdatePlanToolInput)).rejects.toThrow(
 			"Plan item 1 must be an object.",
 		);
-		await expect(executeUpdatePlan({ plan: [{ step: "   ", status: "in_progress" }] })).rejects.toThrow(
+		await expect(executeUpdatePlan({ plan: [{ id: "blank", step: "   ", status: "in_progress" }] })).rejects.toThrow(
 			"Plan item 1 step must be a non-empty string.",
 		);
 		await expect(
 			executeUpdatePlan({
-				plan: [{ step: "One", status: "in_progress", owner: "agent" }],
+				plan: [{ id: "one", step: "One", status: "in_progress", owner: "agent" }],
 			} as unknown as UpdatePlanToolInput),
 		).rejects.toThrow("Plan item 1 contains unexpected field: owner.");
 		await expect(
 			executeUpdatePlan({
 				plan: [
-					{ step: "One", status: "pending" },
-					{ step: "Two", status: "pending" },
+					{ id: "one", step: "One", status: "pending" },
+					{ id: "two", step: "Two", status: "pending" },
 				],
 			}),
 		).rejects.toThrow("Unfinished plans must contain exactly one in_progress item.");
 		await expect(
 			executeUpdatePlan({
 				plan: [
-					{ step: "One", status: "in_progress" },
-					{ step: "Two", status: "in_progress" },
+					{ id: "one", step: "One", status: "in_progress" },
+					{ id: "two", step: "Two", status: "in_progress" },
 				],
 			}),
 		).rejects.toThrow("Unfinished plans must contain exactly one in_progress item.");
 		await expect(
 			executeUpdatePlan({
-				plan: [{ step: "One", status: "blocked" }],
+				plan: [{ id: "one", step: "One", status: "blocked" }],
 			} as unknown as UpdatePlanToolInput),
 		).rejects.toThrow("Plan item 1 status must be pending, in_progress, or completed.");
 	});
@@ -173,12 +251,15 @@ describe("update_plan tool", () => {
 			properties?: {
 				clear?: { const?: boolean };
 				explanation?: { type?: string };
+				update?: { additionalProperties?: boolean; properties?: { id?: { type?: string } } };
 				plan?: {
 					minItems?: number;
 					items?: {
 						additionalProperties?: boolean;
 						properties?: {
+							id?: { type?: string };
 							status?: { enum?: string[] };
+							success_criteria?: { type?: string };
 						};
 					};
 				};
@@ -194,6 +275,10 @@ describe("update_plan tool", () => {
 		}
 		expect(parameters.properties?.plan?.minItems).toBe(1);
 		expect(parameters.properties?.plan?.items?.additionalProperties).toBe(false);
+		expect(parameters.properties?.plan?.items?.properties?.id?.type).toBe("string");
+		expect(parameters.properties?.plan?.items?.properties?.success_criteria?.type).toBe("array");
+		expect(parameters.properties?.update?.additionalProperties).toBe(false);
+		expect(parameters.properties?.update?.properties?.id?.type).toBe("string");
 		expect(parameters.properties?.plan?.items?.properties?.status?.enum).toEqual([
 			"pending",
 			"in_progress",
@@ -308,9 +393,14 @@ describe("update_plan tool", () => {
 		const input = {
 			explanation: "Repository evidence changed.",
 			plan: [
-				{ step: "Read the code", status: "completed" },
-				{ step: "Implement the tool", status: "in_progress" },
-				{ step: "Run checks", status: "pending" },
+				{ id: "read-the-code", step: "Read the code", status: "completed" },
+				{
+					id: "implement-the-tool",
+					step: "Implement the tool",
+					status: "in_progress",
+					success_criteria: ["Works after restart"],
+				},
+				{ id: "run-checks", step: "Run checks", status: "pending" },
 			],
 		} satisfies UpdatePlanToolInput;
 		const definition = createUpdatePlanToolDefinition() as ToolDefinition;
@@ -336,9 +426,10 @@ describe("update_plan tool", () => {
 		const rendered = stripAnsi(component.render(120).join("\n"));
 		expect(rendered).toContain("update_plan");
 		expect(rendered).toContain("Explanation: Repository evidence changed.");
-		expect(rendered).toContain("[x] Read the code");
-		expect(rendered).toContain("[>] Implement the tool");
-		expect(rendered).toContain("[ ] Run checks");
+		expect(rendered).toContain("[x] read-the-code Read the code");
+		expect(rendered).toContain("[>] implement-the-tool Implement the tool");
+		expect(rendered).toContain("- Works after restart");
+		expect(rendered).toContain("[ ] run-checks Run checks");
 		expect(rendered).not.toContain("Plan updated: 1 completed, 1 in progress, 1 pending.");
 	});
 
@@ -374,7 +465,7 @@ describe("update_plan tool", () => {
 		const component = new ToolExecutionComponent(
 			"update_plan",
 			"tool-1",
-			{ plan: [{ step: "Read", status: "pending" }] },
+			{ plan: [{ id: "read", step: "Read", status: "pending" }] },
 			{},
 			definition,
 			createFakeTui(),

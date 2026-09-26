@@ -32,7 +32,9 @@ describe("AgentSession update_plan tool", () => {
 		harnesses.push(harness);
 
 		expect(harness.session.getActiveToolNames()).toContain("update_plan");
-		expect(harness.session.systemPrompt).toContain("- update_plan: track progress with an ordered task checklist");
+		expect(harness.session.systemPrompt).toContain(
+			"- update_plan: persist an ordered plan with step IDs and optional success criteria",
+		);
 		for (const guideline of updatePlanToolSystemPromptContribution.guidelines) {
 			expect(harness.session.systemPrompt).toContain(`- ${guideline}`);
 		}
@@ -51,10 +53,10 @@ describe("AgentSession update_plan tool", () => {
 		const harness = await createHarness();
 		harnesses.push(harness);
 		const plan = [
-			{ step: "Read the code", status: "completed" },
-			{ step: "  Implement update_plan  ", status: "in_progress" },
-			{ step: "Run checks", status: "pending" },
-		] as Array<{ step: string; status: "pending" | "in_progress" | "completed" }>;
+			{ id: "read-the-code", step: "Read the code", status: "completed" },
+			{ id: "implement-update-plan", step: "  Implement update_plan  ", status: "in_progress" },
+			{ id: "run-checks", step: "Run checks", status: "pending" },
+		] as Array<{ id: string; step: string; status: "pending" | "in_progress" | "completed" }>;
 
 		harness.setResponses([
 			fauxAssistantMessage(fauxToolCall("update_plan", { plan, explanation: "  exact explanation  " }), {
@@ -92,8 +94,91 @@ describe("AgentSession update_plan tool", () => {
 			}
 		}
 		expect(entries[0].data).toMatchObject({
-			plan: [{ step: "Read the code" }, { step: "  Implement update_plan  " }, { step: "Run checks" }],
+			plan: [
+				{ id: "read-the-code", step: "Read the code" },
+				{ id: "implement-update-plan", step: "  Implement update_plan  " },
+				{ id: "run-checks", step: "Run checks" },
+			],
 			explanation: "  exact explanation  ",
+		});
+	});
+
+	it("puts the latest persisted plan at the end of each request after edits and reordering", async () => {
+		const harness = await createHarness();
+		harnesses.push(harness);
+		const firstPlan = [
+			{ id: "settings", step: "Fix settings", status: "in_progress", success_criteria: ["Survives restart"] },
+			{ id: "checks", step: "Run checks", status: "pending" },
+		];
+		const reorderedPlan = [
+			{ id: "checks", step: "Run verification", status: "in_progress", success_criteria: ["Checks pass"] },
+			{
+				id: "settings",
+				step: "Fix settings persistence",
+				status: "completed",
+				success_criteria: ["Settings remain readable"],
+			},
+		];
+		const tailContexts: string[] = [];
+		const capture = (context: { messages: unknown[] }) => {
+			tailContexts.push(getMessageText(context.messages.at(-1)));
+		};
+		harness.setResponses([
+			(context) => {
+				capture(context);
+				return fauxAssistantMessage(fauxToolCall("update_plan", { plan: firstPlan }), { stopReason: "toolUse" });
+			},
+			(context) => {
+				capture(context);
+				return fauxAssistantMessage(
+					fauxToolCall("update_plan", {
+						update: {
+							id: "settings",
+							step: "Fix settings persistence",
+							success_criteria: ["Settings remain readable"],
+						},
+					}),
+					{ stopReason: "toolUse" },
+				);
+			},
+			(context) => {
+				capture(context);
+				return fauxAssistantMessage(fauxToolCall("update_plan", { plan: reorderedPlan }), {
+					stopReason: "toolUse",
+				});
+			},
+			(context) => {
+				capture(context);
+				return fauxAssistantMessage("done");
+			},
+		]);
+
+		await harness.session.prompt("fix settings");
+
+		const prefix = "Current task context (latest plan):\n";
+		expect(tailContexts).toEqual([
+			`${prefix}${JSON.stringify({ plan: [] }, null, 2)}`,
+			`${prefix}${JSON.stringify({ plan: firstPlan }, null, 2)}`,
+			`${prefix}${JSON.stringify(
+				{
+					plan: [
+						{
+							id: "settings",
+							step: "Fix settings persistence",
+							status: "in_progress",
+							success_criteria: ["Settings remain readable"],
+						},
+						firstPlan[1],
+					],
+				},
+				null,
+				2,
+			)}`,
+			`${prefix}${JSON.stringify({ plan: reorderedPlan }, null, 2)}`,
+		]);
+		expect(resolveCurrentPlanState(harness.sessionManager)).toEqual({
+			status: "active",
+			operation: { plan: reorderedPlan },
 		});
 	});
 
@@ -107,14 +192,14 @@ describe("AgentSession update_plan tool", () => {
 					fauxToolCall(
 						"update_plan",
 						{
-							plan: [{ step: "Implement the change", status: "in_progress" }],
+							plan: [{ id: "implement-the-change", step: "Implement the change", status: "in_progress" }],
 							explanation: "initial explanation",
 						},
 						{ id: "plan-update" },
 					),
 					fauxToolCall(
 						"update_plan",
-						{ plan: [{ step: "Replacement", status: "in_progress" }] },
+						{ plan: [{ id: "replacement", step: "Replacement", status: "in_progress" }] },
 						{ id: "plan-replacement" },
 					),
 					fauxToolCall("update_plan", { clear: true }, { id: "plan-clear" }),
@@ -152,18 +237,18 @@ describe("AgentSession update_plan tool", () => {
 		]);
 		expect(toolResults.map((message) => message.details)).toEqual([
 			{
-				plan: [{ step: "Implement the change", status: "in_progress" }],
+				plan: [{ id: "implement-the-change", step: "Implement the change", status: "in_progress" }],
 				explanation: "initial explanation",
 			},
-			{ plan: [{ step: "Replacement", status: "in_progress" }] },
+			{ plan: [{ id: "replacement", step: "Replacement", status: "in_progress" }] },
 			{ clear: true },
 		]);
 		expect(getCurrentPlanEntries(harness).map((entry) => entry.data)).toEqual([
 			{
-				plan: [{ step: "Implement the change", status: "in_progress" }],
+				plan: [{ id: "implement-the-change", step: "Implement the change", status: "in_progress" }],
 				explanation: "initial explanation",
 			},
-			{ plan: [{ step: "Replacement", status: "in_progress" }] },
+			{ plan: [{ id: "replacement", step: "Replacement", status: "in_progress" }] },
 			{ clear: true },
 		]);
 		expect(resolveCurrentPlanState(harness.sessionManager)).toEqual({
@@ -178,7 +263,7 @@ describe("AgentSession update_plan tool", () => {
 		harness.setResponses([
 			fauxAssistantMessage(
 				fauxToolCall("update_plan", {
-					plan: [{ step: "Keep this", status: "in_progress" }],
+					plan: [{ id: "keep-this", step: "Keep this", status: "in_progress" }],
 					explanation: "prior",
 				}),
 				{ stopReason: "toolUse" },
@@ -188,9 +273,12 @@ describe("AgentSession update_plan tool", () => {
 		await harness.session.prompt("set a plan");
 
 		harness.setResponses([
-			fauxAssistantMessage(fauxToolCall("update_plan", { plan: [{ step: "Invalid", status: "pending" }] }), {
-				stopReason: "toolUse",
-			}),
+			fauxAssistantMessage(
+				fauxToolCall("update_plan", { plan: [{ id: "invalid", step: "Invalid", status: "pending" }] }),
+				{
+					stopReason: "toolUse",
+				},
+			),
 			fauxAssistantMessage("continue after error"),
 		]);
 		await harness.session.prompt("attempt an invalid replacement");
@@ -199,7 +287,7 @@ describe("AgentSession update_plan tool", () => {
 		expect(resolveCurrentPlanState(harness.sessionManager)).toEqual({
 			status: "active",
 			operation: {
-				plan: [{ step: "Keep this", status: "in_progress" }],
+				plan: [{ id: "keep-this", step: "Keep this", status: "in_progress" }],
 				explanation: "prior",
 			},
 		});
@@ -220,7 +308,7 @@ describe("AgentSession update_plan tool", () => {
 		harness.setResponses([
 			fauxAssistantMessage(
 				fauxToolCall("update_plan", {
-					plan: [{ step: "Cannot persist", status: "in_progress" }],
+					plan: [{ id: "cannot-persist", step: "Cannot persist", status: "in_progress" }],
 				}),
 				{ stopReason: "toolUse" },
 			),
@@ -247,7 +335,7 @@ describe("AgentSession update_plan tool", () => {
 		harness.setResponses([
 			fauxAssistantMessage(
 				fauxToolCall("update_plan", {
-					plan: [{ step: "Shadowed", status: "in_progress" }],
+					plan: [{ id: "shadowed", step: "Shadowed", status: "in_progress" }],
 				}),
 				{ stopReason: "toolUse" },
 			),

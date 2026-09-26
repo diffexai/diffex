@@ -16,16 +16,19 @@ type SessionWithCompactionInternals = {
 	_runAutoCompaction: (reason: "overflow" | "threshold", willRetry: boolean) => Promise<boolean>;
 };
 
-const RESTORED_CONTEXT_HEADER = "Restored unfinished update_plan checklist from the current session.";
-const RESTORED_CONTEXT_REMINDER =
-	"Reminder: restored context is not proof of completion. Verify current state before claiming work is done.";
+const CURRENT_TASK_CONTEXT_HEADER = "Current task context (latest plan):";
 
 function activeOperation(): PlanUpdateDetails {
 	return {
 		plan: [
-			{ step: "Read existing state", status: "completed" },
-			{ step: "  Implement exact restore  ", status: "in_progress" },
-			{ step: "Verify once", status: "pending" },
+			{ id: "read-existing-state", step: "Read existing state", status: "completed" },
+			{
+				id: "implement-exact-restore",
+				step: "  Implement exact restore  ",
+				status: "in_progress",
+				success_criteria: ["Plan survives resume", "Criteria survive compaction"],
+			},
+			{ id: "verify-once", step: "Verify once", status: "pending" },
 		],
 		explanation: "  keep this exact explanation  ",
 	};
@@ -33,23 +36,12 @@ function activeOperation(): PlanUpdateDetails {
 
 function operationWithoutExplanation(): PlanUpdateDetails {
 	return {
-		plan: [{ step: "Continue unfinished work", status: "in_progress" }],
+		plan: [{ id: "continue-unfinished-work", step: "Continue unfinished work", status: "in_progress" }],
 	};
 }
 
 function expectedRestoredText(operation: PlanUpdateDetails): string {
-	const lines = [
-		"Restored unfinished update_plan checklist from the current session. Use this hidden context to continue the work.",
-	];
-	if (operation.explanation !== undefined) {
-		lines.push("", "Explanation:", operation.explanation);
-	}
-	lines.push("", "Checklist:");
-	for (const [index, item] of operation.plan.entries()) {
-		lines.push(`${index + 1}. [${item.status}] ${item.step}`);
-	}
-	lines.push("", RESTORED_CONTEXT_REMINDER);
-	return lines.join("\n");
+	return `${CURRENT_TASK_CONTEXT_HEADER}\n${JSON.stringify({ plan: operation.plan }, null, 2)}`;
 }
 
 function createPlanSessionManager(operation: PlanUpdateDetails = activeOperation()): SessionManager {
@@ -75,11 +67,11 @@ function messageText(message: Message): string {
 }
 
 function findRestoredText(messages: Message[]): string | undefined {
-	return messages.map(messageText).find((text) => text.includes(RESTORED_CONTEXT_HEADER));
+	return messages.map(messageText).find((text) => text.includes(CURRENT_TASK_CONTEXT_HEADER));
 }
 
 function findRestoredContextText(texts: string[]): string | undefined {
-	return texts.find((text) => text.includes(RESTORED_CONTEXT_HEADER));
+	return texts.find((text) => text.includes(CURRENT_TASK_CONTEXT_HEADER));
 }
 
 async function submitAndCaptureContextTexts(harness: Harness, prompt = "continue"): Promise<string[]> {
@@ -132,7 +124,7 @@ describe("AgentSession current-plan restoration", () => {
 		}
 	});
 
-	it("injects exact active plan context once after opening or resuming an existing session", async () => {
+	it("appends exact current-task context on every request after opening or resuming", async () => {
 		const operation = activeOperation();
 		const extensionContextMessage: AgentMessage = {
 			role: "custom",
@@ -154,11 +146,12 @@ describe("AgentSession current-plan restoration", () => {
 		const firstContextTexts = await submitAndCaptureContextTexts(opened, "first submission");
 		expect(findRestoredContextText(firstContextTexts)).toBe(expectedRestoredText(operation));
 		expect(firstContextTexts.indexOf("extension transformed context")).toBeLessThan(
-			firstContextTexts.findIndex((text) => text.includes(RESTORED_CONTEXT_HEADER)),
+			firstContextTexts.findIndex((text) => text.includes(CURRENT_TASK_CONTEXT_HEADER)),
 		);
+		expect(firstContextTexts.at(-1)).toBe(expectedRestoredText(operation));
 
 		const secondContextTexts = await submitAndCaptureContextTexts(opened, "second submission");
-		expect(findRestoredContextText(secondContextTexts)).toBeUndefined();
+		expect(secondContextTexts.at(-1)).toBe(expectedRestoredText(operation));
 
 		expect(opened.session.messages.some((message) => message.role === "custom")).toBe(false);
 		expect(opened.sessionManager.getEntries().filter((entry) => entry.type === "custom_message")).toHaveLength(0);
@@ -179,7 +172,7 @@ describe("AgentSession current-plan restoration", () => {
 		expect(findRestoredContextText(resumedContextTexts)).toBe(expectedRestoredText(operation));
 	});
 
-	it("does not arm restoration for new sessions or forks", async () => {
+	it("includes current-task context for new sessions and forks", async () => {
 		for (const reason of ["new", "fork"] as const) {
 			const startEvent: SessionStartEvent = {
 				type: "session_start",
@@ -193,11 +186,11 @@ describe("AgentSession current-plan restoration", () => {
 			harnesses.push(harness);
 
 			const contextTexts = await submitAndCaptureContextTexts(harness, `${reason} submission`);
-			expect(findRestoredContextText(contextTexts)).toBeUndefined();
+			expect(contextTexts.at(-1)).toBe(expectedRestoredText(activeOperation()));
 		}
 	});
 
-	it("arms through successful manual and auto compaction completion but not cancelled compaction", async () => {
+	it("keeps current-task context after manual, auto, and cancelled compaction", async () => {
 		const manualOperation = operationWithoutExplanation();
 		const manual = await createHarness({
 			extensionFactories: [
@@ -222,7 +215,7 @@ describe("AgentSession current-plan restoration", () => {
 		const manualContextTexts = await submitAndCaptureContextTexts(manual, "after manual compaction");
 		const restoredManual = findRestoredContextText(manualContextTexts);
 		expect(restoredManual).toBe(expectedRestoredText(manualOperation));
-		expect(restoredManual).not.toContain("Explanation:");
+		expect(restoredManual).not.toContain("explanation");
 
 		const autoOperation = operationWithoutExplanation();
 		const auto = await createHarness({
@@ -262,10 +255,10 @@ describe("AgentSession current-plan restoration", () => {
 		await expect(cancelled.session.compact()).rejects.toThrow("Compaction cancelled");
 
 		const cancelledContextTexts = await submitAndCaptureContextTexts(cancelled, "after cancelled compaction");
-		expect(findRestoredContextText(cancelledContextTexts)).toBeUndefined();
+		expect(findRestoredContextText(cancelledContextTexts)).toBe(expectedRestoredText(operationWithoutExplanation()));
 	});
 
-	it("preserves pending restoration through preflight paths and consumes it on model failure", async () => {
+	it("includes current-task context after preflight paths and model failure", async () => {
 		let handleInput = true;
 		const handled = await createHarness({
 			sessionManager: createPlanSessionManager(),
@@ -337,16 +330,18 @@ describe("AgentSession current-plan restoration", () => {
 		}
 
 		const afterFailureTexts = await submitAndCaptureContextTexts(modelFailure, "after model failure");
-		expect(findRestoredContextText(afterFailureTexts)).toBeUndefined();
+		expect(findRestoredContextText(afterFailureTexts)).toBe(expectedRestoredText(activeOperation()));
 	});
 
-	it("consumes without stale injection when newest state becomes inactive, absent, or corrupt", async () => {
+	it("uses the newest state when a plan is cleared, absent, or corrupt", async () => {
 		const inactive = await createHarness({ sessionManager: createPlanSessionManager() });
 		harnesses.push(inactive);
 		appendCurrentPlanRecord(inactive.sessionManager, { clear: true });
 
 		const inactiveTexts = await submitAndCaptureContextTexts(inactive, "after clear");
-		expect(findRestoredContextText(inactiveTexts)).toBeUndefined();
+		expect(findRestoredContextText(inactiveTexts)).toBe(
+			`${CURRENT_TASK_CONTEXT_HEADER}\n${JSON.stringify({ plan: [] }, null, 2)}`,
+		);
 		expect(resolveCurrentPlanState(inactive.sessionManager).status).toBe("inactive");
 
 		const absent = await createHarness({ sessionManager: createPlanSessionManager() });
@@ -354,16 +349,20 @@ describe("AgentSession current-plan restoration", () => {
 		absent.sessionManager.resetLeaf();
 
 		const absentTexts = await submitAndCaptureContextTexts(absent, "after branch reset");
-		expect(findRestoredContextText(absentTexts)).toBeUndefined();
+		expect(findRestoredContextText(absentTexts)).toBe(
+			`${CURRENT_TASK_CONTEXT_HEADER}\n${JSON.stringify({ plan: [] }, null, 2)}`,
+		);
 
 		const corrupt = await createHarness({ sessionManager: createPlanSessionManager() });
 		harnesses.push(corrupt);
 		corrupt.sessionManager.appendCustomEntry(CURRENT_PLAN_CUSTOM_ENTRY_TYPE, {
-			plan: [{ step: "Do not revive older valid state", status: "pending" }],
+			plan: [{ id: "do-not-revive-older-valid-state", step: "Do not revive older valid state", status: "pending" }],
 		});
 
 		const corruptTexts = await submitAndCaptureContextTexts(corrupt, "after corrupt newest");
-		expect(findRestoredContextText(corruptTexts)).toBeUndefined();
+		expect(findRestoredContextText(corruptTexts)).toBe(
+			`${CURRENT_TASK_CONTEXT_HEADER}\n${JSON.stringify({ plan: [] }, null, 2)}`,
+		);
 		expect(resolveCurrentPlanState(corrupt.sessionManager).status).toBe("corrupt");
 	});
 

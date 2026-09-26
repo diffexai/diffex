@@ -1022,7 +1022,7 @@ describe("AgentSession prompt characterization", () => {
 		const model = harness.getModel();
 		harness.sessionManager.appendMessage({ role: "user", content: "previous", timestamp: now - 1000 });
 		harness.sessionManager.appendCustomEntry("diffex.current-plan", {
-			plan: [{ step: "continue", status: "in_progress" }],
+			plan: [{ id: "continue", step: "continue", status: "in_progress" }],
 		});
 		harness.sessionManager.appendMessage({
 			...fauxAssistantMessage("previous response", { stopReason: "length", timestamp: now - 500 }),
@@ -1050,7 +1050,7 @@ describe("AgentSession prompt characterization", () => {
 		harness.setResponses([
 			(context) => {
 				restoredPlan = context.messages.some((message) =>
-					getMessageText(message).includes("Restored unfinished update_plan checklist"),
+					getMessageText(message).includes("Current task context (latest plan):"),
 				);
 				return fauxAssistantMessage("done");
 			},

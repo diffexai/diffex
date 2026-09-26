@@ -1,7 +1,7 @@
 import type { SessionManager } from "./session-manager.ts";
 import {
 	createUpdatePlanToolDefinition,
-	parseUpdatePlanOperation,
+	resolveUpdatePlanOperation,
 	type UpdatePlanToolDetails,
 } from "./tools/update-plan.ts";
 
@@ -17,7 +17,7 @@ export function appendCurrentPlanRecord(
 	sessionManager: Pick<SessionManager, "appendCustomEntry">,
 	operation: UpdatePlanToolDetails,
 ): string {
-	return sessionManager.appendCustomEntry(CURRENT_PLAN_CUSTOM_ENTRY_TYPE, parseUpdatePlanOperation(operation));
+	return sessionManager.appendCustomEntry(CURRENT_PLAN_CUSTOM_ENTRY_TYPE, resolveUpdatePlanOperation(operation));
 }
 
 export function resolveCurrentPlanState(sessionManager: Pick<SessionManager, "getBranch">): CurrentPlanState {
@@ -30,7 +30,7 @@ export function resolveCurrentPlanState(sessionManager: Pick<SessionManager, "ge
 
 		let operation: UpdatePlanToolDetails;
 		try {
-			operation = parseUpdatePlanOperation(entry.data);
+			operation = resolveUpdatePlanOperation(entry.data);
 		} catch {
 			return { status: "corrupt" };
 		}
@@ -44,9 +44,14 @@ export function resolveCurrentPlanState(sessionManager: Pick<SessionManager, "ge
 }
 
 export function createSessionUpdatePlanToolDefinition(
-	sessionManager: Pick<SessionManager, "appendCustomEntry">,
+	sessionManager: Pick<SessionManager, "appendCustomEntry" | "getBranch">,
 ): ReturnType<typeof createUpdatePlanToolDefinition> {
-	const definition = createUpdatePlanToolDefinition();
+	const definition = createUpdatePlanToolDefinition(undefined, () => {
+		const state = resolveCurrentPlanState(sessionManager);
+		if (state.status === "active") return state.operation.plan;
+		if (state.status === "inactive" && "plan" in state.operation) return state.operation.plan;
+		return undefined;
+	});
 	const execute = definition.execute;
 	return {
 		...definition,

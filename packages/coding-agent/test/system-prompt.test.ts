@@ -69,7 +69,7 @@ describe("buildSystemPrompt", () => {
 					bash: "Execute bash commands",
 					edit: "Make surgical edits",
 					write: "Create or overwrite files",
-					update_plan: "track progress with an ordered task checklist",
+					update_plan: "persist an ordered plan with step IDs and optional success criteria",
 				},
 				contextFiles: [],
 				skills: [],

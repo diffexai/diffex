@@ -25,8 +25,8 @@ describe("current plan state", () => {
 		const sessionManager = SessionManager.inMemory();
 		const operation = {
 			plan: [
-				{ step: "  Preserve exact whitespace  ", status: "in_progress" as const },
-				{ step: "Finish", status: "pending" as const },
+				{ id: "preserve-exact-whitespace", step: "  Preserve exact whitespace  ", status: "in_progress" as const },
+				{ id: "finish", step: "Finish", status: "pending" as const },
 			],
 			explanation: "  exact explanation  ",
 		};
@@ -41,8 +41,8 @@ describe("current plan state", () => {
 			customType: CURRENT_PLAN_CUSTOM_ENTRY_TYPE,
 			data: {
 				plan: [
-					{ step: "  Preserve exact whitespace  ", status: "in_progress" },
-					{ step: "Finish", status: "pending" },
+					{ id: "preserve-exact-whitespace", step: "  Preserve exact whitespace  ", status: "in_progress" },
+					{ id: "finish", step: "Finish", status: "pending" },
 				],
 				explanation: "  exact explanation  ",
 			},
@@ -53,8 +53,8 @@ describe("current plan state", () => {
 			status: "active",
 			operation: {
 				plan: [
-					{ step: "  Preserve exact whitespace  ", status: "in_progress" },
-					{ step: "Finish", status: "pending" },
+					{ id: "preserve-exact-whitespace", step: "  Preserve exact whitespace  ", status: "in_progress" },
+					{ id: "finish", step: "Finish", status: "pending" },
 				],
 				explanation: "  exact explanation  ",
 			},
@@ -71,11 +71,11 @@ describe("current plan state", () => {
 	it("uses only the newest record on the selected branch", () => {
 		const sessionManager = SessionManager.inMemory();
 		const rootId = appendCurrentPlanRecord(sessionManager, {
-			plan: [{ step: "Root plan", status: "in_progress" }],
+			plan: [{ id: "root-plan", step: "Root plan", status: "in_progress" }],
 			explanation: "root",
 		});
 		const firstBranchId = appendCurrentPlanRecord(sessionManager, {
-			plan: [{ step: "First branch", status: "in_progress" }],
+			plan: [{ id: "first-branch", step: "First branch", status: "in_progress" }],
 		});
 
 		sessionManager.branch(rootId);
@@ -88,7 +88,7 @@ describe("current plan state", () => {
 		sessionManager.branch(firstBranchId);
 		expect(resolveCurrentPlanState(sessionManager)).toEqual({
 			status: "active",
-			operation: { plan: [{ step: "First branch", status: "in_progress" }] },
+			operation: { plan: [{ id: "first-branch", step: "First branch", status: "in_progress" }] },
 		});
 	});
 
@@ -101,8 +101,8 @@ describe("current plan state", () => {
 		sessionManager.appendMessage(assistantMsg("working"));
 		appendCurrentPlanRecord(sessionManager, {
 			plan: [
-				{ step: "Done", status: "completed" },
-				{ step: "Current", status: "in_progress" },
+				{ id: "done", step: "Done", status: "completed" },
+				{ id: "current", step: "Current", status: "in_progress", success_criteria: ["Survives reopen"] },
 			],
 			explanation: "  reopened exactly  ",
 		});
@@ -111,6 +111,16 @@ describe("current plan state", () => {
 		expect(sessionFile).toBeDefined();
 		const reopened = SessionManager.open(sessionFile!, tempDir);
 		expect(resolveCurrentPlanState(reopened)).toEqual(resolveCurrentPlanState(sessionManager));
+		const reopenedState = resolveCurrentPlanState(reopened);
+		expect(reopenedState.status).toBe("active");
+		if (reopenedState.status === "active") {
+			expect(reopenedState.operation.plan[1]).toEqual({
+				id: "current",
+				step: "Current",
+				status: "in_progress",
+				success_criteria: ["Survives reopen"],
+			});
+		}
 	});
 
 	it("classifies completed, cleared, absent, and corrupt newest states", () => {
@@ -118,13 +128,13 @@ describe("current plan state", () => {
 		expect(resolveCurrentPlanState(sessionManager)).toEqual({ status: "absent" });
 
 		appendCurrentPlanRecord(sessionManager, {
-			plan: [{ step: "Finished", status: "completed" }],
+			plan: [{ id: "finished", step: "Finished", status: "completed" }],
 			explanation: "complete",
 		});
 		expect(resolveCurrentPlanState(sessionManager)).toEqual({
 			status: "inactive",
 			operation: {
-				plan: [{ step: "Finished", status: "completed" }],
+				plan: [{ id: "finished", step: "Finished", status: "completed" }],
 				explanation: "complete",
 			},
 		});
@@ -136,10 +146,10 @@ describe("current plan state", () => {
 		});
 
 		appendCurrentPlanRecord(sessionManager, {
-			plan: [{ step: "Older active plan", status: "in_progress" }],
+			plan: [{ id: "older-active-plan", step: "Older active plan", status: "in_progress" }],
 		});
 		sessionManager.appendCustomEntry(CURRENT_PLAN_CUSTOM_ENTRY_TYPE, {
-			plan: [{ step: "Malformed newest", status: "pending" }],
+			plan: [{ id: "malformed-newest", step: "Malformed newest", status: "pending" }],
 		});
 		expect(resolveCurrentPlanState(sessionManager)).toEqual({ status: "corrupt" });
 	});
@@ -148,7 +158,7 @@ describe("current plan state", () => {
 		const sessionManager = SessionManager.inMemory();
 		const tool = createUpdatePlanTool();
 		await tool.execute("standalone", {
-			plan: [{ step: "Standalone", status: "in_progress" }],
+			plan: [{ id: "standalone", step: "Standalone", status: "in_progress" }],
 		});
 		expect(sessionManager.getBranch()).toEqual([]);
 	});

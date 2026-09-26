@@ -159,6 +159,7 @@ import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts"
 import { createAllToolDefinitions } from "./tools/index.ts";
 import { createRequestUserInputToolDefinition, REQUEST_USER_INPUT_TOOL_NAME } from "./tools/request-user-input.ts";
 import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapper.ts";
+import type { UpdatePlanItem } from "./tools/update-plan.ts";
 import { addUsageToTotals, createUsageTotals } from "./usage-totals.ts";
 
 // ============================================================================
@@ -459,9 +460,7 @@ function estimateMessagesTokens(messages: AgentMessage[]): number {
 
 /** Standard thinking levels */
 const THINKING_LEVELS: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high"];
-const CURRENT_PLAN_RESTORATION_CUSTOM_TYPE = "diffex.current-plan-restoration";
-const CURRENT_PLAN_RESTORATION_REMINDER =
-	"Reminder: restored context is not proof of completion. Verify current state before claiming work is done.";
+const CURRENT_TASK_CONTEXT_CUSTOM_TYPE = "diffex.current-task-context";
 const MAX_PENDING_SUBAGENT_ESCALATION_CHARACTERS = 8_000;
 const INCOMPATIBLE_SUBAGENT_PARENT_HOOKS = [
 	"resources_discover",
@@ -501,7 +500,6 @@ export class AgentSession {
 	private _followUpMessages: string[] = [];
 	/** Messages queued to be included with the next user prompt as context ("asides"). */
 	private _pendingNextTurnMessages: CustomMessage[] = [];
-	private _pendingCurrentPlanRestoration = false;
 	private readonly _skillReferenceSnapshots = new Map<string, SkillReferenceSnapshot>();
 	private readonly _skillEnablementOverrides = new Map<string, boolean>();
 	private _activeSkillTrace: ActiveSkillTrace | undefined;
@@ -613,13 +611,11 @@ export class AgentSession {
 		this._telemetryContext = config.telemetryContext ?? NOOP_TELEMETRY_CONTEXT;
 		this._lifecycleObserver = config.lifecycleObserver;
 
-		this._armInitialCurrentPlanRestoration();
-
 		// Always subscribe to agent events for internal handling
 		// (session persistence, extensions, auto-compaction, retry logic)
 		this._unsubscribeAgent = this.agent.subscribe(this._handleAgentEvent);
 		this._installAgentToolHooks();
-		this._installAgentContextRestoration();
+		this._installCurrentTaskContext();
 		this._installAgentNextTurnRefresh();
 
 		this._buildRuntime({
@@ -843,60 +839,27 @@ export class AgentSession {
 		};
 	}
 
-	private _installAgentContextRestoration(): void {
+	private _installCurrentTaskContext(): void {
 		const previousTransformContext = this.agent.transformContext;
 		this.agent.transformContext = async (messages, signal) => {
 			const transformedMessages = previousTransformContext
 				? await previousTransformContext(messages, signal)
 				: messages;
-			return this._consumePendingCurrentPlanRestoration(transformedMessages);
+			const state = resolveCurrentPlanState(this.sessionManager);
+			let plan: UpdatePlanItem[] = [];
+			if (state.status === "active") plan = state.operation.plan;
+			else if (state.status === "inactive" && "plan" in state.operation) plan = state.operation.plan;
+			const currentTaskContext: CustomMessage = {
+				role: "custom",
+				customType: CURRENT_TASK_CONTEXT_CUSTOM_TYPE,
+				content: [
+					{ type: "text", text: `Current task context (latest plan):\n${JSON.stringify({ plan }, null, 2)}` },
+				],
+				display: false,
+				timestamp: Date.now(),
+			};
+			return [...transformedMessages, currentTaskContext];
 		};
-	}
-
-	private _armInitialCurrentPlanRestoration(): void {
-		if (this._sessionStartEvent.reason !== "startup" && this._sessionStartEvent.reason !== "resume") {
-			return;
-		}
-		this._armCurrentPlanRestorationIfActive();
-	}
-
-	private _armCurrentPlanRestorationIfActive(): void {
-		if (resolveCurrentPlanState(this.sessionManager).status === "active") {
-			this._pendingCurrentPlanRestoration = true;
-		}
-	}
-
-	private _consumePendingCurrentPlanRestoration(messages: AgentMessage[]): AgentMessage[] {
-		if (!this._pendingCurrentPlanRestoration) {
-			return messages;
-		}
-
-		const state = resolveCurrentPlanState(this.sessionManager);
-		this._pendingCurrentPlanRestoration = false;
-		if (state.status !== "active") {
-			return messages;
-		}
-
-		const lines = [
-			"Restored unfinished update_plan checklist from the current session. Use this hidden context to continue the work.",
-		];
-		if (state.operation.explanation !== undefined) {
-			lines.push("", "Explanation:", state.operation.explanation);
-		}
-		lines.push("", "Checklist:");
-		for (const [index, item] of state.operation.plan.entries()) {
-			lines.push(`${index + 1}. [${item.status}] ${item.step}`);
-		}
-		lines.push("", CURRENT_PLAN_RESTORATION_REMINDER);
-
-		const restoredContext: CustomMessage = {
-			role: "custom",
-			customType: CURRENT_PLAN_RESTORATION_CUSTOM_TYPE,
-			content: [{ type: "text", text: lines.join("\n") }],
-			display: false,
-			timestamp: Date.now(),
-		};
-		return [...messages, restoredContext];
 	}
 
 	// =========================================================================
@@ -2378,7 +2341,6 @@ export class AgentSession {
 			if (!pendingCompaction) return;
 			pendingCompaction.commit();
 			pendingCompaction = undefined;
-			this._armCurrentPlanRestorationIfActive();
 		};
 		const rollbackPendingCompaction = (): void => {
 			if (!pendingCompaction) return;
@@ -3548,7 +3510,6 @@ export class AgentSession {
 			usage: options.usage,
 			details: options.details,
 		};
-		if (!options.deferCommit) this._armCurrentPlanRestorationIfActive();
 		return compactionResult;
 	}
 
