@@ -682,13 +682,39 @@ async function executeToolCalls(
 	emit: AgentEventSink,
 ): Promise<ExecutedToolCallBatch> {
 	const toolCalls = assistantMessage.content.filter((c) => c.type === "toolCall");
-	const hasSequentialToolCall = toolCalls.some(
-		(tc) => currentContext.tools?.find((t) => t.name === tc.name)?.executionMode === "sequential",
-	);
-	if (config.toolExecution === "sequential" || hasSequentialToolCall) {
+	if (config.toolExecution === "sequential") {
 		return executeToolCallsSequential(currentContext, assistantMessage, toolCalls, config, signal, emit);
 	}
-	return executeToolCallsParallel(currentContext, assistantMessage, toolCalls, config, signal, emit);
+
+	const messages: ToolResultMessage[] = [];
+	let terminate = true;
+	for (let index = 0; index < toolCalls.length; ) {
+		if (signal?.aborted) break;
+		const sequential =
+			currentContext.tools?.find((tool) => tool.name === toolCalls[index].name)?.executionMode === "sequential";
+		let end = index + 1;
+		if (!sequential) {
+			while (
+				end < toolCalls.length &&
+				currentContext.tools?.find((tool) => tool.name === toolCalls[end].name)?.executionMode !== "sequential"
+			) {
+				end++;
+			}
+		}
+		const executePhase = sequential ? executeToolCallsSequential : executeToolCallsParallel;
+		const phase = await executePhase(
+			currentContext,
+			assistantMessage,
+			toolCalls.slice(index, end),
+			config,
+			signal,
+			emit,
+		);
+		messages.push(...phase.messages);
+		terminate = terminate && phase.terminate;
+		index = end;
+	}
+	return { messages, terminate: messages.length > 0 && terminate };
 }
 
 type ExecutedToolCallBatch = {
