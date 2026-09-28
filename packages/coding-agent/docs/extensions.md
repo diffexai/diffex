@@ -625,11 +625,15 @@ diffex.on("message_end", async (event, ctx) => {
 
 Fired for tool execution lifecycle updates.
 
-In parallel tool mode:
-- `tool_execution_start` is emitted in assistant source order during the preflight phase
+In parallel tool mode, consecutive parallel-capable calls form groups separated by individual sequential tool barriers:
+
+- `tool_execution_start` is emitted in assistant source order during each phase's preflight
 - `tool_execution_update` events may interleave across tools
 - `tool_execution_end` is emitted in tool completion order after each tool is finalized
 - final `toolResult` message events are still emitted later in assistant source order
+
+Every phase awaits execution, `tool_result` handlers, completion handlers, and ordered result-message handlers before the next phase starts preflight.
+Steering delivery and the next model request wait for the entire assistant batch.
 
 ```typescript
 diffex.on("tool_execution_start", async (event, ctx) => {
@@ -754,7 +758,11 @@ Fired after `tool_execution_start`, before the tool executes. **Can block.** Use
 
 Before `tool_call` runs, Diffex waits for previously emitted Agent events to finish draining through `AgentSession`. This means `ctx.sessionManager` is up to date through the current assistant tool-calling message.
 
-In the default parallel tool execution mode, sibling tool calls from the same assistant message are preflighted sequentially, then executed concurrently. `tool_call` is not guaranteed to see sibling tool results from that same assistant message in `ctx.sessionManager`.
+In the default parallel tool execution mode, calls in each consecutive parallel group are preflighted sequentially, then executed concurrently.
+A tool declaring `executionMode: "sequential"` is an exclusive barrier at its position in the assistant message.
+For example, `read A, read B, update_plan, read C, read D` runs as `[read A + read B]`, then `update_plan`, then `[read C + read D]`.
+`update_plan` and `request_user_input` are sequential tools.
+`tool_call` sees settled results from earlier phases in `ctx.sessionManager`, but is not guaranteed to see sibling results within its current parallel group.
 
 `event.input` is mutable. Mutate it in place to patch tool arguments before execution.
 
@@ -816,7 +824,8 @@ diffex.on("tool_call", (event) => {
 
 Fired after tool execution finishes and before `tool_execution_end` plus the final tool result message events are emitted. **Can modify result.**
 
-In parallel tool mode, `tool_result` and `tool_execution_end` may interleave in tool completion order, while final `toolResult` message events are still emitted later in assistant source order.
+Within a parallel group, `tool_result` and `tool_execution_end` may interleave in tool finalization order, while final `toolResult` message events follow assistant source order.
+All result handlers and awaited events settle before the next phase's `tool_call` handlers run.
 
 `tool_result` handlers chain like middleware:
 - Handlers run in extension load order
@@ -969,7 +978,8 @@ Use this before reading project-local extension configuration that should only b
 
 Read-only access to session state. See [Session Format](session-format.md) for the full SessionManager API and entry types.
 
-For `tool_call`, this state is synchronized through the current assistant message before handlers run. In parallel tool execution mode it is still not guaranteed to include sibling tool results from the same assistant message.
+For `tool_call`, this state is synchronized through the current assistant message and all completed execution phases before handlers run.
+In parallel mode, it is not guaranteed to include sibling results within the current group.
 
 ```typescript
 ctx.sessionManager.getEntries()             // All entries
@@ -1875,7 +1885,16 @@ export default function (diffex: ExtensionAPI) {
 
 ## Custom Tools
 
-Register tools the LLM can call via `diffex.registerTool()`. Tools appear in the system prompt and can have custom rendering.
+Register tools the LLM can call via `diffex.registerTool()`.
+Tools appear in the system prompt and can have custom rendering.
+
+Set `executionMode: "sequential"` for a tool that must run alone as an ordered barrier.
+Set `executionMode: "parallel"` or omit it to allow concurrency within a consecutive parallel group.
+Global `toolExecution: "sequential"` runs all calls one by one regardless of tool metadata.
+The model remains responsible for selecting independent calls; the scheduler does not infer file dependencies or shell side effects.
+Existing file-mutation queues still coordinate calls within each parallel group.
+Errors and blocked barriers allow later phases to run, and termination is evaluated across the entire batch.
+Cancellation stops scheduling later phases while active calls retain their cancellation handling.
 
 Use `promptSnippet` for a short one-line entry in the `Available tools` section in the default system prompt. If omitted, custom tools are left out of that section.
 

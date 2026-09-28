@@ -36,9 +36,11 @@ export type StreamFn = (
  * Configuration for how tool calls from a single assistant message are executed.
  *
  * - "sequential": each tool call is prepared, executed, and finalized before the next one starts.
- * - "parallel": tool calls are prepared sequentially, then allowed tools execute concurrently.
- *   `tool_execution_end` is emitted in tool completion order after each tool is finalized,
- *   while tool-result message artifacts are emitted later in assistant source order.
+ * - "parallel": consecutive parallel-capable calls form groups separated by individual
+ *   tools declaring `executionMode: "sequential"`. Each group is prepared sequentially,
+ *   then allowed tools execute concurrently. Completion events follow finalization order;
+ *   tool-result message events follow assistant source order within each phase.
+ *   Hooks and awaited events settle before the next phase is prepared.
  */
 export type ToolExecutionMode = "sequential" | "parallel";
 
@@ -280,9 +282,9 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 	/**
 	 * Tool execution mode.
 	 * - "sequential": execute tool calls one by one
-	 * - "parallel": preflight tool calls sequentially, then execute allowed tools concurrently;
-	 *   emit `tool_execution_end` in tool completion order after each tool is finalized,
-	 *   then emit tool-result message artifacts later in assistant source order
+	 * - "parallel": execute consecutive parallel-capable calls concurrently, separated by
+	 *   sequential tool barriers. Preflight each phase sequentially and await execution,
+	 *   result hooks, completion events, and source-ordered result events before the next phase.
 	 *
 	 * Default: "parallel"
 	 */
@@ -294,6 +296,8 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 	 * Return `{ block: true }` to prevent execution. The loop emits an error tool result instead.
 	 * A blocked result can also set `terminate: true` to participate in the batch early-termination rule.
 	 * The hook receives the agent abort signal and is responsible for honoring it.
+	 * In parallel mode, preflight runs sequentially within the current phase, after all
+	 * prior phases have settled. Sibling results within that phase are not yet available.
 	 */
 	beforeToolCall?: (context: BeforeToolCallContext, signal?: AbortSignal) => Promise<BeforeToolCallResult | undefined>;
 
@@ -309,6 +313,8 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 	 *
 	 * Any omitted fields keep their original values. No deep merge is performed.
 	 * The hook receives the agent abort signal and is responsible for honoring it.
+	 * Parallel siblings can finalize concurrently. All hooks and awaited result events
+	 * in the current phase settle before preflight begins for the next phase.
 	 */
 	afterToolCall?: (context: AfterToolCallContext, signal?: AbortSignal) => Promise<AfterToolCallResult | undefined>;
 }
@@ -420,11 +426,12 @@ export interface AgentTool<TParameters extends TSchema = TSchema, TDetails = any
 		onUpdate?: AgentToolUpdateCallback<TDetails>,
 	) => Promise<AgentToolResult<TDetails>>;
 	/**
-	 * Per-tool execution mode override.
-	 * - "sequential": this tool must execute one at a time with other tool calls.
-	 * - "parallel": this tool can execute concurrently with other tool calls.
+	 * Per-tool scheduling metadata under global parallel execution.
+	 * - "sequential": this call is an exclusive barrier in assistant source order.
+	 * - "parallel": this call can execute concurrently within its consecutive group.
 	 *
-	 * If omitted, the default execution mode applies.
+	 * Omitted metadata is parallel-capable. Global sequential execution always runs
+	 * calls one by one, including tools explicitly declaring "parallel".
 	 */
 	executionMode?: ToolExecutionMode;
 }

@@ -112,18 +112,35 @@ prompt("Read config.json")
 
 Tool execution mode is configurable:
 
-- `parallel` (default): preflight tool calls sequentially, execute allowed tools concurrently, emit `tool_execution_end` as soon as each tool is finalized, then emit toolResult messages and `turn_end.toolResults` in assistant source order
+- `parallel` (default): execute consecutive groups of parallel-capable calls concurrently, separated by individual sequential tool barriers
 - `sequential`: execute tool calls one by one, matching the historical behavior
 
-In parallel mode, tool completion events follow tool completion order, but persisted toolResult messages still follow assistant source order.
+The global mode is set through `toolExecution` in the agent config.
+In parallel mode, a tool declaring `executionMode: "sequential"` executes alone at its position in the assistant message.
+Calls never move across that barrier.
+Tools declaring `"parallel"` or omitting `executionMode` can overlap within their consecutive group.
+Global sequential mode runs every call one by one, including tools explicitly declaring `"parallel"`.
 
-The mode can be set globally via `toolExecution` in the agent config, or per-tool via `executionMode` on `AgentTool`. If any tool call in a batch targets a tool with `executionMode: "sequential"`, the entire batch executes sequentially regardless of the global setting.
+For example, `read A, read B, update_plan, read C, read D` executes as `[read A + read B]`, then `update_plan`, then `[read C + read D]` when `update_plan` declares sequential execution.
 
-The `beforeToolCall` hook runs after `tool_execution_start` and validated argument parsing. It can block execution and attach `terminate: true` to the blocked result. The `afterToolCall` hook runs after tool execution finishes and before `tool_execution_end` and final tool result message events are emitted.
+Each parallel group preflights its calls sequentially before executing permitted calls concurrently.
+The `beforeToolCall` hook runs after `tool_execution_start` and argument validation, and can block execution or attach `terminate: true` to a blocked result.
+The `afterToolCall` hook runs after execution and before `tool_execution_end` and result-message events.
+Completion events follow finalization order within a group; result-message events, persisted results, and `turn_end.toolResults` follow assistant source order.
+Execution, result hooks, completion events, and ordered result-message events all settle before the next phase begins preflight.
+Async subscribers are awaited when using `Agent` or an awaited event sink with `runAgentLoop`; raw event streams remain observational.
 
-Tools, blocked `beforeToolCall` results, and `afterToolCall` overrides can return `terminate: true` to hint that the automatic follow-up LLM call should be skipped. The loop only stops early when every finalized tool result in that batch sets `terminate: true`. Mixed batches continue normally.
+Tools, blocked `beforeToolCall` results, and `afterToolCall` overrides can return `terminate: true` to skip the automatic follow-up LLM call when every finalized result in the entire assistant batch requests termination.
+A terminating phase alone does not skip later phases.
+Tool errors and blocked calls also allow subsequent phases to run.
+Cancellation stops scheduling later phases while preserving active-phase cancellation handling.
+Steering messages and the next model request remain at the batch boundary.
 
-The `Agent` class accepts `shouldStopAfterTurn` in `AgentOptions`. Low-level loop callers can set the same hook in `AgentLoopConfig`:
+The model selects independent calls; the scheduler does not infer file dependencies or shell side effects.
+Existing file-mutation queues still coordinate calls within each parallel group.
+
+The `Agent` class accepts `shouldStopAfterTurn` in `AgentOptions`.
+Low-level loop callers can set the same hook in `AgentLoopConfig`:
 
 ```typescript
 const stream = agentLoop(
@@ -423,10 +440,10 @@ const readFileTool: AgentTool = {
   parameters: Type.Object({
     path: Type.String({ description: "File path" }),
   }),
-  // Override execution mode for this tool (optional).
-  // "sequential" forces the entire batch to run one at a time.
-  // "parallel" allows concurrent execution with other tool calls.
-  // If omitted, the global toolExecution config applies.
+  // Scheduling metadata for global parallel mode (optional).
+  // "sequential" makes this call an exclusive barrier in source order.
+  // "parallel" or omitted metadata allows overlap within its group.
+  // Global sequential mode always runs calls one by one.
   executionMode: "sequential",
   execute: async (toolCallId, params, signal, onUpdate) => {
     const content = await fs.readFile(params.path, "utf-8");
@@ -497,7 +514,7 @@ const context: AgentContext = {
 const config: AgentLoopConfig = {
   model: getModel("openai", "gpt-4o"),
   convertToLlm: (msgs) => msgs.filter(m => ["user", "assistant", "toolResult"].includes(m.role)),
-  toolExecution: "parallel",  // overridden by per-tool executionMode if set
+  toolExecution: "parallel",  // sequential tools form ordered barriers
   beforeToolCall: async ({ toolCall, args, context }) => undefined,
   afterToolCall: async ({ toolCall, result, isError, context }) => undefined,
 };
