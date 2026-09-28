@@ -82,7 +82,7 @@ export const updatePlanToolSystemPromptContribution = {
 	snippet: "persist an ordered plan with step IDs and optional success criteria",
 	guidelines: [
 		"Use update_plan for complex, ambiguous, dependent, long-running, or multi-part work, when the user requests a plan, or when checkpoints would improve collaboration; skip it for simple or immediately executable work.",
-		"Write short, ordered, outcome-focused steps. Give each step a stable ID and add success_criteria for subtasks needing validation.",
+		"Write short, ordered, outcome-focused steps. Give each step a stable ID and add optional success_criteria for subtasks needing validation.",
 		"Include final verification when correctness requires it.",
 		"Update by ID at meaningful milestones; retain IDs when rewording, reordering, or changing status.",
 		"Explain material replanning, omit explanations for routine progress, and use clear: true only when abandoning the checklist.",
