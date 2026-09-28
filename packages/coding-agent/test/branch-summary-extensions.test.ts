@@ -45,7 +45,11 @@ describe("Branch summary extensions", () => {
 
 		expect(summaryEntry?.type).toBe("branch_summary");
 		expect(summaryEntry?.fromHook).toBe(true);
-		expect(summaryEntry?.summary).toBe("Summary provided by extension");
+		expect(summaryEntry?.summary).toBe(
+			"Summary provided by extension\n\n" +
+				"The plan below is authoritative for the selected conversation branch. Plan references in the exploration summary above are historical.\n" +
+				'Current task context (latest plan):\n{\n  "plan": []\n}',
+		);
 		expect(summaryEntry?.usage).toEqual(usage);
 
 		const stats = harness.session.getSessionStats();
