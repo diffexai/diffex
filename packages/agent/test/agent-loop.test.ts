@@ -1,3 +1,4 @@
+import { setImmediate } from "node:timers/promises";
 import {
 	type AssistantMessage,
 	type AssistantMessageEvent,
@@ -8,9 +9,16 @@ import {
 } from "@diffexai/diffex-ai";
 import { Type } from "typebox";
 import { describe, expect, it } from "vitest";
-import { agentLoop, agentLoopContinue } from "../src/agent-loop.ts";
+import { type AgentEventSink, agentLoop, agentLoopContinue, runAgentLoop } from "../src/agent-loop.ts";
 import { setDefaultStreamFn } from "../src/index.ts";
-import type { AgentContext, AgentEvent, AgentLoopConfig, AgentMessage, AgentTool } from "../src/types.ts";
+import type {
+	AgentContext,
+	AgentEvent,
+	AgentLoopConfig,
+	AgentMessage,
+	AgentTool,
+	AgentToolCall,
+} from "../src/types.ts";
 
 // Mock stream for testing - mimics MockAssistantStream
 class MockAssistantStream extends EventStream<AssistantMessageEvent, AssistantMessage> {
@@ -1062,7 +1070,7 @@ describe("agentLoop with AgentMessage", () => {
 		expect(toolResultIds).toEqual(["tool-1", "tool-2"]);
 	});
 
-	it("should force sequential execution when one of multiple tools has executionMode=sequential", async () => {
+	it("should wait for a sequential tool before starting a following parallel tool", async () => {
 		const toolSchema = Type.Object({ value: Type.String() });
 		const executionOrder: string[] = [];
 		let releaseSlow: (() => void) | undefined;
@@ -1113,7 +1121,7 @@ describe("agentLoop with AgentMessage", () => {
 		const config: AgentLoopConfig = {
 			model: createModel(),
 			convertToLlm: identityConverter,
-			// parallel by default, but slowTool forces sequential
+			// Parallel by default, with slowTool acting as a barrier.
 		};
 
 		let callIndex = 0;
@@ -1675,6 +1683,397 @@ describe("agentLoop with AgentMessage", () => {
 
 		expect(llmCalls).toBe(1);
 	});
+});
+
+function gate() {
+	let resolve!: () => void;
+	const promise = new Promise<void>((release) => {
+		resolve = release;
+	});
+	return { promise, resolve };
+}
+
+function startToolBatch(
+	calls: AgentToolCall[],
+	tools: AgentTool[],
+	config: Partial<AgentLoopConfig> = {},
+	onEvent?: AgentEventSink,
+	signal?: AbortSignal,
+) {
+	const events: AgentEvent[] = [];
+	const requests: Message[][] = [];
+	const result = runAgentLoop(
+		[createUserMessage("start")],
+		{ systemPrompt: "", messages: [], tools },
+		{ model: createModel(), convertToLlm: identityConverter, ...config },
+		async (event) => {
+			events.push(event);
+			await onEvent?.(event);
+		},
+		signal,
+		(_model, context) => {
+			requests.push(structuredClone(context.messages));
+			const response = new MockAssistantStream();
+			const message =
+				requests.length === 1
+					? createAssistantMessage(calls, "toolUse")
+					: createAssistantMessage([{ type: "text", text: "done" }]);
+			queueMicrotask(() =>
+				response.push({ type: "done", reason: message.stopReason === "toolUse" ? "toolUse" : "stop", message }),
+			);
+			return response;
+		},
+	);
+	return { events, requests, result };
+}
+
+function schedulingCall(id: string, name = "parallel"): AgentToolCall {
+	return { type: "toolCall", id, name, arguments: { value: id } };
+}
+
+const schedulingSchema = Type.Object({ value: Type.String() });
+
+function schedulingTool(
+	name: string,
+	execute: AgentTool<typeof schedulingSchema, unknown>["execute"],
+	executionMode?: AgentTool["executionMode"],
+): AgentTool<typeof schedulingSchema, unknown> {
+	return { name, label: name, description: name, parameters: schedulingSchema, executionMode, execute };
+}
+
+describe("tool execution phases", () => {
+	it.each([
+		{
+			name: "mixed groups",
+			modes: ["parallel", "parallel", "sequential", "parallel", "parallel"],
+			phases: [[0, 1], [2], [3, 4]],
+		},
+		{ name: "leading barrier", modes: ["sequential", "parallel", "parallel"], phases: [[0], [1, 2]] },
+		{ name: "trailing barrier", modes: ["parallel", "parallel", "sequential"], phases: [[0, 1], [2]] },
+		{
+			name: "consecutive barriers",
+			modes: ["parallel", "sequential", "sequential", "parallel"],
+			phases: [[0], [1], [2], [3]],
+		},
+		{ name: "only barriers", modes: ["sequential", "sequential"], phases: [[0], [1]] },
+		{ name: "all parallel", modes: ["parallel", "parallel"], phases: [[0, 1]] },
+		{
+			name: "omitted metadata",
+			modes: [undefined, undefined, "sequential", undefined, undefined],
+			phases: [[0, 1], [2], [3, 4]],
+		},
+		{
+			name: "global sequential",
+			modes: ["parallel", "parallel", "sequential", "parallel"],
+			phases: [[0], [1], [2], [3]],
+			global: "sequential",
+		},
+	] as const)("schedules $name in exclusive ordered phases", async ({ modes, phases, ...scenario }) => {
+		const gates = modes.map(() => gate());
+		const started = modes.map(() => gate());
+		const executed: number[] = [];
+		const preflight: number[] = [];
+		const tools = modes.map((mode, index) =>
+			schedulingTool(
+				`tool-${index}`,
+				async () => {
+					executed.push(index);
+					started[index].resolve();
+					await gates[index].promise;
+					return { content: [], details: {} };
+				},
+				mode,
+			),
+		);
+		const calls = tools.map((tool, index) => schedulingCall(String(index), tool.name));
+		const batch = startToolBatch(calls, tools, {
+			toolExecution: "global" in scenario ? scenario.global : undefined,
+			beforeToolCall: async ({ toolCall }) => {
+				preflight.push(Number(toolCall.id));
+				return undefined;
+			},
+		});
+		try {
+			const expected: number[] = [];
+			for (const phase of phases) {
+				await started[phase[0]].promise;
+				await setImmediate();
+				expected.push(...phase);
+				expect([...executed]).toEqual(expected);
+				expect([...preflight]).toEqual(expected);
+				for (const index of phase) gates[index].resolve();
+			}
+		} finally {
+			for (const release of gates) release.resolve();
+			await batch.result;
+		}
+		expect(batch.requests).toHaveLength(2);
+		expect(
+			batch.requests[1].filter((message) => message.role === "toolResult").map((message) => message.toolCallId),
+		).toEqual(calls.map((call) => call.id));
+	});
+
+	it("awaits sequential preflight, result hooks, completion listeners, and ordered message listeners before crossing barriers", async () => {
+		const ids = ["a", "b", "barrier", "c", "d"];
+		const execution = new Map(ids.map((id) => [id, gate()]));
+		const started = new Map(ids.map((id) => [id, gate()]));
+		const stages = new Map(
+			[
+				"preflight-b",
+				"hook-a",
+				"end-a",
+				"message-start-a",
+				"message-end-b",
+				"hook-barrier",
+				"end-barrier",
+				"message-end-barrier",
+			].map((stage) => [stage, { entered: gate(), release: gate() }]),
+		);
+		const waitAt = async (stage: string) => {
+			const control = stages.get(stage);
+			if (!control) return;
+			control.entered.resolve();
+			await control.release.promise;
+		};
+		const preflight: string[] = [];
+		const executed: string[] = [];
+		let steeringPolls = 0;
+		const execute: AgentTool<typeof schedulingSchema, unknown>["execute"] = async (id) => {
+			executed.push(id);
+			started.get(id)?.resolve();
+			await execution.get(id)?.promise;
+			return { content: [{ type: "text", text: id }], details: {} };
+		};
+		const batch = startToolBatch(
+			ids.map((id) => schedulingCall(id, id === "barrier" ? "barrier" : "parallel")),
+			[schedulingTool("parallel", execute), schedulingTool("barrier", execute, "sequential")],
+			{
+				beforeToolCall: async ({ toolCall }) => {
+					preflight.push(toolCall.id);
+					await waitAt(`preflight-${toolCall.id}`);
+					return undefined;
+				},
+				afterToolCall: async ({ toolCall }) => {
+					await waitAt(`hook-${toolCall.id}`);
+					return { content: [{ type: "text", text: `final:${toolCall.id}` }] };
+				},
+				getSteeringMessages: async () => {
+					steeringPolls++;
+					return steeringPolls === 2 ? [createUserMessage("steer")] : [];
+				},
+			},
+			async (event) => {
+				if (event.type === "tool_execution_end") await waitAt(`end-${event.toolCallId}`);
+				if (
+					(event.type === "message_start" || event.type === "message_end") &&
+					event.message.role === "toolResult"
+				) {
+					await waitAt(`${event.type.replaceAll("_", "-")}-${event.message.toolCallId}`);
+				}
+			},
+		);
+		try {
+			await stages.get("preflight-b")?.entered.promise;
+			expect([...executed]).toEqual([]);
+			stages.get("preflight-b")?.release.resolve();
+			await started.get("b")?.promise;
+			expect([...executed]).toEqual(["a", "b"]);
+			execution.get("b")?.resolve();
+			await setImmediate();
+			expect(
+				batch.events.filter((event) => event.type === "tool_execution_end").map((event) => event.toolCallId),
+			).toEqual(["b"]);
+			execution.get("a")?.resolve();
+			for (const stage of ["hook-a", "end-a", "message-start-a", "message-end-b"]) {
+				await stages.get(stage)?.entered.promise;
+				expect([...preflight]).toEqual(["a", "b"]);
+				expect(batch.requests).toHaveLength(1);
+				expect(steeringPolls).toBe(1);
+				stages.get(stage)?.release.resolve();
+			}
+			await started.get("barrier")?.promise;
+			expect([...preflight]).toEqual(["a", "b", "barrier"]);
+			execution.get("barrier")?.resolve();
+			for (const stage of ["hook-barrier", "end-barrier", "message-end-barrier"]) {
+				await stages.get(stage)?.entered.promise;
+				expect([...preflight]).toEqual(["a", "b", "barrier"]);
+				expect(batch.requests).toHaveLength(1);
+				stages.get(stage)?.release.resolve();
+			}
+			await started.get("d")?.promise;
+			expect([...executed]).toEqual(ids);
+			execution.get("d")?.resolve();
+			await setImmediate();
+			execution.get("c")?.resolve();
+		} finally {
+			for (const release of execution.values()) release.resolve();
+			for (const stage of stages.values()) stage.release.resolve();
+			await batch.result;
+		}
+		expect(
+			batch.events.filter((event) => event.type === "tool_execution_end").map((event) => event.toolCallId),
+		).toEqual(["b", "a", "barrier", "d", "c"]);
+		for (const type of ["message_start", "message_end"] as const) {
+			expect(
+				batch.events.flatMap((event) =>
+					event.type === type && event.message.role === "toolResult" ? [event.message.toolCallId] : [],
+				),
+			).toEqual(ids);
+		}
+		const messages = await batch.result;
+		expect(messages.filter((message) => message.role === "toolResult").map((message) => message.content)).toEqual(
+			ids.map((id) => [{ type: "text", text: `final:${id}` }]),
+		);
+		expect(batch.requests[1].map((message) => message.role)).toEqual([
+			"user",
+			"assistant",
+			...ids.map(() => "toolResult"),
+			"user",
+		]);
+		expect(batch.requests[1].at(-1)?.content).toBe("steer");
+	});
+
+	it.each(["execute", "blocked", "invalid", "unknown", "result hook"])(
+		"continues later phases after a %s error",
+		async (failure) => {
+			const executed: string[] = [];
+			const finalized: string[] = [];
+			const execute: AgentTool<typeof schedulingSchema, unknown>["execute"] = async (id) => {
+				if (id === "barrier" && failure === "execute") throw new Error("execution failed");
+				executed.push(id);
+				return { content: [], details: {} };
+			};
+			const barrier = schedulingCall("barrier", failure === "unknown" ? "missing" : "barrier");
+			if (failure === "invalid") barrier.arguments = {};
+			const batch = startToolBatch(
+				[schedulingCall("a"), barrier, schedulingCall("b")],
+				[schedulingTool("parallel", execute), schedulingTool("barrier", execute, "sequential")],
+				{
+					beforeToolCall: async ({ toolCall }) =>
+						toolCall.id === "barrier" && failure === "blocked"
+							? { block: true, reason: "blocked", terminate: true }
+							: undefined,
+					afterToolCall: async ({ toolCall }) => {
+						finalized.push(toolCall.id);
+						if (toolCall.id === "barrier" && failure === "result hook") throw new Error("result hook failed");
+						return undefined;
+					},
+				},
+			);
+			const messages = await batch.result;
+			expect(executed).toContain("b");
+			expect(
+				messages
+					.filter((message) => message.role === "toolResult")
+					.map((message) => [message.toolCallId, message.isError]),
+			).toEqual([
+				["a", false],
+				["barrier", true],
+				["b", false],
+			]);
+			expect(finalized).toContain("b");
+			expect(batch.requests).toHaveLength(2);
+		},
+	);
+
+	it.each([
+		{ hints: [true, true, true], requests: 1 },
+		{ hints: [true, false, true], requests: 2 },
+		{ hints: [false, true, true], requests: 2 },
+		{ hints: [true, true, false], requests: 2 },
+	])("aggregates termination across every phase: $hints", async ({ hints, requests }) => {
+		const executed: string[] = [];
+		const batch = startToolBatch(
+			[schedulingCall("0"), schedulingCall("1", "barrier"), schedulingCall("2")],
+			[
+				schedulingTool("parallel", async (id) => {
+					executed.push(id);
+					return { content: [], details: {}, terminate: hints[Number(id)] };
+				}),
+				schedulingTool(
+					"barrier",
+					async () => {
+						throw new Error("blocked barrier must not execute");
+					},
+					"sequential",
+				),
+			],
+			{
+				beforeToolCall: async ({ toolCall }) =>
+					toolCall.id === "1" ? { block: true, terminate: hints[1] } : undefined,
+			},
+		);
+		await batch.result;
+		expect(executed).toEqual(["0", "2"]);
+		expect(batch.requests).toHaveLength(requests);
+	});
+
+	it.each(["parallel", "barrier", "preflight", "result hook", "message listener"])(
+		"stops scheduling later phases when cancelled during %s",
+		async (when) => {
+			const controller = new AbortController();
+			const entered = gate();
+			const release = gate();
+			const preflight: string[] = [];
+			const executed: string[] = [];
+			const pause = async () => {
+				entered.resolve();
+				await release.promise;
+			};
+			const execute: AgentTool<typeof schedulingSchema, unknown>["execute"] = async (id, _args, signal) => {
+				executed.push(id);
+				if ((when === "parallel" && id === "a") || (when === "barrier" && id === "barrier")) {
+					await pause();
+					if (signal?.aborted) throw new Error("active call aborted");
+				}
+				return { content: [], details: {} };
+			};
+			const batch = startToolBatch(
+				[schedulingCall("a"), schedulingCall("b"), schedulingCall("barrier", "barrier"), schedulingCall("later")],
+				[schedulingTool("parallel", execute), schedulingTool("barrier", execute, "sequential")],
+				{
+					beforeToolCall: async ({ toolCall }) => {
+						preflight.push(toolCall.id);
+						if (when === "preflight" && toolCall.id === "a") await pause();
+						return undefined;
+					},
+					afterToolCall: async ({ toolCall }) => {
+						if (when === "result hook" && toolCall.id === "a") await pause();
+						return undefined;
+					},
+					shouldStopAfterTurn: () => controller.signal.aborted,
+				},
+				async (event) => {
+					if (
+						when === "message listener" &&
+						event.type === "message_end" &&
+						event.message.role === "toolResult" &&
+						event.message.toolCallId === "b"
+					)
+						await pause();
+				},
+				controller.signal,
+			);
+			try {
+				await entered.promise;
+				controller.abort();
+			} finally {
+				release.resolve();
+				await batch.result;
+			}
+			expect(preflight).not.toContain("later");
+			expect(executed).not.toContain("later");
+			if (when !== "barrier") expect(preflight).not.toContain("barrier");
+			if (when === "preflight") expect(executed).toEqual([]);
+			const results = (await batch.result).filter((message) => message.role === "toolResult");
+			expect(results.map((message) => message.toolCallId)).toEqual(
+				when === "preflight" ? ["a"] : when === "barrier" ? ["a", "b", "barrier"] : ["a", "b"],
+			);
+			if (when === "parallel" || when === "barrier" || when === "preflight")
+				expect(results.some((message) => message.isError)).toBe(true);
+			expect(batch.requests).toHaveLength(1);
+		},
+	);
 });
 
 describe("agentLoopContinue with AgentMessage", () => {

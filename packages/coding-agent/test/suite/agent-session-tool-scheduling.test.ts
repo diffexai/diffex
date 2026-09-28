@@ -36,8 +36,19 @@ describe("AgentSession tool scheduling", () => {
 							return { content: [{ type: "text", text: id }], details: {} };
 						},
 					});
-					pi.on("tool_call", async (event) => {
+					pi.on("tool_call", async (event, ctx) => {
 						preflightOrder.push(event.toolCallId);
+						const priorResults = ctx.sessionManager
+							.getBranch()
+							.flatMap((entry) =>
+								entry.type === "message" && entry.message.role === "toolResult"
+									? [entry.message.toolCallId]
+									: [],
+							);
+						if (event.toolCallId === "plan") expect(priorResults).toEqual(["read-a", "read-b"]);
+						if (event.toolCallId === "read-c" || event.toolCallId === "read-d") {
+							expect(priorResults).toEqual(["read-a", "read-b", "plan"]);
+						}
 					});
 				},
 			],
@@ -60,15 +71,15 @@ describe("AgentSession tool scheduling", () => {
 		try {
 			await started.get("read-a")?.promise;
 			await setImmediate();
-			expect(executionOrder).toEqual(["read-a", "read-b"]);
-			expect(preflightOrder).toEqual(["read-a", "read-b"]);
+			expect([...executionOrder]).toEqual(["read-a", "read-b"]);
+			expect([...preflightOrder]).toEqual(["read-a", "read-b"]);
 			gates.get("read-b")?.resolve();
 			await completed.get("read-b")?.promise;
 			expect(preflightOrder).not.toContain("plan");
 			gates.get("read-a")?.resolve();
 			await started.get("read-c")?.promise;
 			await setImmediate();
-			expect(executionOrder).toEqual(ids);
+			expect([...executionOrder]).toEqual(ids);
 			expect(resolveCurrentPlanState(harness.sessionManager)).toEqual({ status: "active", operation: { plan } });
 			gates.get("read-d")?.resolve();
 			await completed.get("read-d")?.promise;
