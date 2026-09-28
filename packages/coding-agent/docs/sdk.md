@@ -619,6 +619,8 @@ Each plan step has an `id`, `step`, and `status`, with optional `success_criteri
 Plan writes and step updates return the complete resolved plan in the model-visible tool result, including IDs, statuses, and success criteria, and in `details.plan`.
 The session persists each successful plan change in conversation history, while `clear: true` returns `Plan cleared.`
 Successful compaction summaries include the latest plan snapshot, or an empty plan if the plan was cleared or absent, so resume and fork retain it after older tool results are compacted away.
+When `navigateTree()` summarizes the abandoned branch, the saved branch summary includes the destination branch's authoritative plan snapshot and marks plan references in the exploration summary as historical.
+Selecting a user message uses the plan at its parent, and navigating before any plan or after clearing it records an empty plan.
 Ordinary requests do not append a separate plan message, allowing subsequent requests to reuse the same prompt prefix.
 
 ```typescript

@@ -87,7 +87,7 @@ import {
 	prepareCompaction,
 	shouldCompact,
 } from "./compaction/index.ts";
-import { createSessionUpdatePlanToolDefinition, resolveCurrentPlanState } from "./current-plan-state.ts";
+import { createSessionUpdatePlanToolDefinition, formatCurrentPlanSnapshot } from "./current-plan-state.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
 import { exportSessionToHtml, type ToolHtmlRenderer } from "./export-html/index.ts";
 import { createToolHtmlRenderer } from "./export-html/tool-renderer.ts";
@@ -3436,14 +3436,7 @@ export class AgentSession {
 		signal?: AbortSignal;
 		deferCommit?: (transaction: CompactionAppendTransaction) => void;
 	}): Promise<CompactionResult> {
-		const planState = resolveCurrentPlanState(this.sessionManager);
-		const plan =
-			planState.status === "active"
-				? planState.operation.plan
-				: planState.status === "inactive" && "plan" in planState.operation
-					? planState.operation.plan
-					: [];
-		const summary = `${options.summary}\n\nCurrent task context (latest plan):\n${JSON.stringify({ plan }, null, 2)}`;
+		const summary = `${options.summary}\n\n${formatCurrentPlanSnapshot(this.sessionManager)}`;
 		const transaction = appendCompactionTransaction(
 			this.sessionManager,
 			summary,
@@ -4704,9 +4697,10 @@ export class AgentSession {
 			let summaryEntry: BranchSummaryEntry | undefined;
 			const mutateLeaf = (): void => {
 				if (summaryText) {
+					const summary = `${summaryText}\n\nThe plan below is authoritative for the selected conversation branch. Plan references in the exploration summary above are historical.\n${formatCurrentPlanSnapshot(this.sessionManager, newLeafId)}`;
 					const summaryId = this.sessionManager.branchWithSummary(
 						newLeafId,
-						summaryText,
+						summary,
 						summaryDetails,
 						fromExtension,
 						summaryUsage,

@@ -132,13 +132,16 @@ describe("AgentSession durable plan restoration", () => {
 				const resumed = await createHarness({ sessionManager });
 				harnesses.push(resumed);
 				resumed.session.agent.state.messages = sessionManager.buildSessionContext().messages;
+				const requests: Message[][] = [];
 				resumed.setResponses([
 					(context) => {
-						expect(context.messages.map(getMessageText).join("\n")).toContain(planSnapshot(plan));
+						requests.push(context.messages);
 						return fauxAssistantMessage("continued");
 					},
 				]);
 				await resumed.session.prompt("continue after compaction");
+				expect(requests).toHaveLength(1);
+				expect(requests[0].map(getMessageText).join("\n")).toContain(planSnapshot(plan));
 			}
 		}
 	});

@@ -20,8 +20,11 @@ export function appendCurrentPlanRecord(
 	return sessionManager.appendCustomEntry(CURRENT_PLAN_CUSTOM_ENTRY_TYPE, resolveUpdatePlanOperation(operation));
 }
 
-export function resolveCurrentPlanState(sessionManager: Pick<SessionManager, "getBranch">): CurrentPlanState {
-	const branch = sessionManager.getBranch();
+export function resolveCurrentPlanState(
+	sessionManager: Pick<SessionManager, "getBranch">,
+	fromId?: string | null,
+): CurrentPlanState {
+	const branch = fromId === null ? [] : sessionManager.getBranch(fromId);
 	for (let index = branch.length - 1; index >= 0; index--) {
 		const entry = branch[index];
 		if (entry.type !== "custom" || entry.customType !== CURRENT_PLAN_CUSTOM_ENTRY_TYPE) {
@@ -41,6 +44,20 @@ export function resolveCurrentPlanState(sessionManager: Pick<SessionManager, "ge
 		return { status: "active", operation };
 	}
 	return { status: "absent" };
+}
+
+export function formatCurrentPlanSnapshot(
+	sessionManager: Pick<SessionManager, "getBranch">,
+	fromId?: string | null,
+): string {
+	const state = resolveCurrentPlanState(sessionManager, fromId);
+	const plan =
+		state.status === "active"
+			? state.operation.plan
+			: state.status === "inactive" && "plan" in state.operation
+				? state.operation.plan
+				: [];
+	return `Current task context (latest plan):\n${JSON.stringify({ plan }, null, 2)}`;
 }
 
 export function createSessionUpdatePlanToolDefinition(
