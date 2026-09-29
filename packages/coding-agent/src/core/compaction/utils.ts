@@ -86,7 +86,7 @@ export function formatFileOperations(readFiles: string[], modifiedFiles: string[
 // Message Serialization
 // ============================================================================
 
-/** Project history for summarization without changing persisted or retained messages. */
+/** Exclude plan data from a context projection without changing persisted messages. */
 export function excludePlanItems(messages: AgentMessage[]): AgentMessage[] {
 	return messages.flatMap((message): AgentMessage[] => {
 		if (message.role === "toolResult" && message.toolName === "update_plan") return [];

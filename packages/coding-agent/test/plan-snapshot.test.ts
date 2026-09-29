@@ -14,6 +14,18 @@ describe("stripCurrentPlanSnapshot", () => {
 		expect(stripCurrentPlanSnapshot(snapshot)).toBe("");
 	});
 
+	it("removes the authority paragraph and snapshot attached by branch navigation", () => {
+		const narrative = "Branch narrative\n\n<modified-files>\nsrc/example.ts\n</modified-files>";
+		const attachment =
+			'The plan below is authoritative for the selected conversation branch. Plan references in the exploration summary above are historical.\nCurrent task context (latest plan):\n{"plan":[]}';
+
+		expect(stripCurrentPlanSnapshot(`${narrative}\n\n${attachment}`)).toBe(narrative);
+		expect(stripCurrentPlanSnapshot(attachment)).toBe("");
+		expect(stripCurrentPlanSnapshot(`${narrative}\n\n${attachment}\nMore narrative`)).toBe(
+			`${narrative}\n\n${attachment}\nMore narrative`,
+		);
+	});
+
 	it.each([
 		"Narrative without a plan",
 		`Mention of ${CURRENT_PLAN_SNAPSHOT_PREFIX}{"plan": []}`,

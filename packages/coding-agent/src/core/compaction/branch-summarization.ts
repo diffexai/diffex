@@ -20,6 +20,7 @@ import { completeSummarization, estimateTokens } from "./compaction.ts";
 import {
 	computeFileLists,
 	createFileOps,
+	excludePlanItems,
 	extractFileOpsFromMessage,
 	type FileOperations,
 	formatFileOperations,
@@ -220,7 +221,8 @@ export function prepareBranchEntries(entries: SessionEntry[], tokenBudget: numbe
 	// Second pass: walk from newest to oldest, adding messages until token budget
 	for (let i = entries.length - 1; i >= 0; i--) {
 		const entry = entries[i];
-		const message = getMessageFromEntry(entry);
+		const rawMessage = getMessageFromEntry(entry);
+		const message = rawMessage ? excludePlanItems([rawMessage])[0] : undefined;
 		if (!message) continue;
 
 		// Extract file ops from assistant messages (tool calls)

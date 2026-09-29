@@ -20,6 +20,7 @@ import { createInterface } from "readline";
 import { StringDecoder } from "string_decoder";
 import { getAgentDir as getDefaultAgentDir, getSessionsDir } from "../config.ts";
 import { normalizePath, resolvePath } from "../utils/paths.ts";
+import { excludePlanItems } from "./compaction/utils.ts";
 import {
 	type BashExecutionMessage,
 	type CustomMessage,
@@ -27,6 +28,7 @@ import {
 	createCompactionSummaryMessage,
 	createCustomMessage,
 } from "./messages.ts";
+import { stripCurrentPlanSnapshot } from "./plan-snapshot.ts";
 
 export const CURRENT_SESSION_VERSION = 3;
 
@@ -497,7 +499,27 @@ export function buildSessionContext(
 ): SessionContext {
 	const path = buildSessionPath(entries, leafId, byId);
 	const { thinkingLevel, model } = getSessionContextSettings(path);
-	const messages = buildContextEntries(entries, leafId, byId).flatMap(sessionEntryToContextMessages);
+	const contextEntries = buildContextEntries(entries, leafId, byId);
+	const contextEntryIds = new Set(contextEntries.map((entry) => entry.id));
+	// Context order puts the latest compaction before its retained tail. Use path
+	// order to find the snapshot that supersedes earlier plan calls and summaries.
+	let snapshotIndex = -1;
+	for (let i = path.length - 1; i >= 0; i--) {
+		const entry = path[i];
+		if (
+			contextEntryIds.has(entry.id) &&
+			(entry.type === "compaction" || entry.type === "branch_summary") &&
+			stripCurrentPlanSnapshot(entry.summary) !== entry.summary
+		) {
+			snapshotIndex = i;
+			break;
+		}
+	}
+	const supersededEntryIds = new Set(path.slice(0, Math.max(0, snapshotIndex)).map((entry) => entry.id));
+	const messages = contextEntries.flatMap((entry) => {
+		const projected = sessionEntryToContextMessages(entry);
+		return supersededEntryIds.has(entry.id) ? excludePlanItems(projected) : projected;
+	});
 	return { messages, thinkingLevel, model };
 }
 
