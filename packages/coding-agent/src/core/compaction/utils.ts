@@ -4,6 +4,7 @@
 
 import type { AgentMessage } from "@diffexai/diffex-agent-core";
 import { contentText, type Message } from "@diffexai/diffex-ai";
+import { stripCurrentPlanSnapshot } from "../plan-snapshot.ts";
 
 // ============================================================================
 // File Operation Tracking
@@ -84,6 +85,21 @@ export function formatFileOperations(readFiles: string[], modifiedFiles: string[
 // ============================================================================
 // Message Serialization
 // ============================================================================
+
+/** Project history for summarization without changing persisted or retained messages. */
+export function excludePlanItems(messages: AgentMessage[]): AgentMessage[] {
+	return messages.flatMap((message): AgentMessage[] => {
+		if (message.role === "toolResult" && message.toolName === "update_plan") return [];
+		if (message.role === "assistant") {
+			const content = message.content.filter((block) => block.type !== "toolCall" || block.name !== "update_plan");
+			return content.length > 0 ? [{ ...message, content }] : [];
+		}
+		if (message.role === "compactionSummary" || message.role === "branchSummary") {
+			return [{ ...message, summary: stripCurrentPlanSnapshot(message.summary) }];
+		}
+		return [message];
+	});
+}
 
 /** Maximum characters for a tool result in serialized summaries. */
 const TOOL_RESULT_MAX_CHARS = 2000;

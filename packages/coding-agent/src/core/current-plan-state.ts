@@ -1,3 +1,4 @@
+import { CURRENT_PLAN_SNAPSHOT_PREFIX } from "./plan-snapshot.ts";
 import type { SessionManager } from "./session-manager.ts";
 import {
 	createUpdatePlanToolDefinition,
@@ -57,7 +58,7 @@ export function formatCurrentPlanSnapshot(
 			: state.status === "inactive" && "plan" in state.operation
 				? state.operation.plan
 				: [];
-	return `Current task context (latest plan):\n${JSON.stringify({ plan }, null, 2)}`;
+	return `${CURRENT_PLAN_SNAPSHOT_PREFIX}${JSON.stringify({ plan }, null, 2)}`;
 }
 
 export function createSessionUpdatePlanToolDefinition(

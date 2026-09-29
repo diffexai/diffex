@@ -1,6 +1,30 @@
+import type { AgentMessage } from "@diffexai/diffex-agent-core";
 import { fauxAssistantMessage, fauxToolCall, type Message } from "@diffexai/diffex-ai";
 import { describe, expect, it } from "vitest";
-import { serializeConversation } from "../src/core/compaction/utils.ts";
+import { excludePlanItems, serializeConversation } from "../src/core/compaction/utils.ts";
+
+describe("excludePlanItems", () => {
+	it("strips snapshots from summary messages and preserves user content without mutation", () => {
+		const snapshot = 'Current task context (latest plan):\n{"plan":[]}';
+		const user: AgentMessage = { role: "user", content: snapshot, timestamp: 1 };
+		const messages: AgentMessage[] = [
+			{ role: "compactionSummary", summary: `Compaction evidence\n\n${snapshot}`, tokensBefore: 100, timestamp: 1 },
+			{ role: "branchSummary", summary: `Branch evidence\n\n${snapshot}`, fromId: "branch", timestamp: 1 },
+			user,
+			fauxAssistantMessage(fauxToolCall("update_plan", { clear: true })),
+		];
+
+		const result = excludePlanItems(messages);
+
+		expect(result).toEqual([
+			{ ...messages[0], summary: "Compaction evidence" },
+			{ ...messages[1], summary: "Branch evidence" },
+			user,
+		]);
+		expect(messages[0]).toHaveProperty("summary", `Compaction evidence\n\n${snapshot}`);
+		expect(messages[1]).toHaveProperty("summary", `Branch evidence\n\n${snapshot}`);
+	});
+});
 
 describe("serializeConversation", () => {
 	it("omits plan calls and results while preserving other content in the same message", () => {

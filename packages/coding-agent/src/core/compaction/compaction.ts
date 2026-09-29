@@ -18,6 +18,7 @@ import { contentText, type RetryCallbacks, type RetryPolicy, retryAssistantCall,
 import type { AssistantMessage, Context, Model, SimpleStreamOptions, Usage } from "@diffexai/diffex-ai/compat";
 import { completeSimple } from "@diffexai/diffex-ai/compat";
 import { convertToLlm } from "../messages.ts";
+import { stripCurrentPlanSnapshot } from "../plan-snapshot.ts";
 import {
 	buildSessionContext,
 	type CompactionEntry,
@@ -27,6 +28,7 @@ import {
 import {
 	computeFileLists,
 	createFileOps,
+	excludePlanItems,
 	extractFileOpsFromMessage,
 	type FileOperations,
 	formatFileOperations,
@@ -692,6 +694,7 @@ export async function generateSummaryWithUsage(
 	);
 
 	// Use update prompt if we have a previous summary, otherwise initial prompt
+	previousSummary = previousSummary === undefined ? undefined : stripCurrentPlanSnapshot(previousSummary);
 	let basePrompt = previousSummary ? UPDATE_SUMMARIZATION_PROMPT : SUMMARIZATION_PROMPT;
 	if (customInstructions) {
 		basePrompt = `${basePrompt}\n\nAdditional focus: ${customInstructions}`;
@@ -699,7 +702,7 @@ export async function generateSummaryWithUsage(
 
 	// Serialize conversation to text so model doesn't try to continue it
 	// Convert to LLM messages first (handles custom types like bashExecution, custom, etc.)
-	const llmMessages = convertToLlm(currentMessages);
+	const llmMessages = convertToLlm(excludePlanItems(currentMessages));
 	const conversationText = serializeConversation(llmMessages);
 
 	// Build the prompt with conversation wrapped in tags
@@ -788,7 +791,7 @@ export function prepareCompaction(
 	let boundaryStart = 0;
 	if (prevCompactionIndex >= 0) {
 		const prevCompaction = pathEntries[prevCompactionIndex] as CompactionEntry;
-		previousSummary = prevCompaction.summary;
+		previousSummary = stripCurrentPlanSnapshot(prevCompaction.summary);
 		const firstKeptEntryIndex = pathEntries.findIndex((entry) => entry.id === prevCompaction.firstKeptEntryId);
 		boundaryStart = firstKeptEntryIndex >= 0 ? firstKeptEntryIndex : prevCompactionIndex + 1;
 	}
@@ -839,8 +842,8 @@ export function prepareCompaction(
 
 	return {
 		firstKeptEntryId,
-		messagesToSummarize,
-		turnPrefixMessages,
+		messagesToSummarize: excludePlanItems(messagesToSummarize),
+		turnPrefixMessages: excludePlanItems(turnPrefixMessages),
 		isSplitTurn: cutPoint.isSplitTurn,
 		tokensBefore,
 		previousSummary,
@@ -905,7 +908,7 @@ export async function compact(
 	let summaryUsage: Usage;
 
 	if (isSplitTurn && turnPrefixMessages.length > 0) {
-		let historyText = "No prior history.";
+		let historyText = previousSummary ?? "No prior history.";
 		let historyUsage: Usage | undefined;
 		if (messagesToSummarize.length > 0) {
 			const historyResult = await generateSummaryWithUsage(
@@ -1004,7 +1007,7 @@ async function generateTurnPrefixSummary(
 		Math.floor(0.5 * reserveTokens),
 		model.maxTokens > 0 ? model.maxTokens : Number.POSITIVE_INFINITY,
 	); // Smaller budget for turn prefix
-	const llmMessages = convertToLlm(messages);
+	const llmMessages = convertToLlm(excludePlanItems(messages));
 	const conversationText = serializeConversation(llmMessages);
 	const promptText = `<conversation>\n${conversationText}\n</conversation>\n\n${TURN_PREFIX_SUMMARIZATION_PROMPT}`;
 	const summarizationMessages = [
