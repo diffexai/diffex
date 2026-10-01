@@ -12,7 +12,12 @@ It does not own WorkOS authentication, billing, cloud policy, sandbox allocation
 
 The `diffex-runtime-server` executable starts the service with an authenticated WebSocket listener.
 The cloud bootstrap supplies `DIFFEX_SESSION_ID`, `DIFFEX_WORKSPACE`, and an internal `DIFFEX_RUNTIME_SHARED_SECRET` of at least 32 bytes.
-It also supplies `DIFFEX_MODEL_PROVIDER`, `DIFFEX_MODEL_ID`, and `DIFFEX_MODEL_API_KEY` through the sandbox provider's secret-injection mechanism.
-The environment value is an opaque Daytona placeholder, the real provider key never enters the sandbox, and the placeholder is removed from the runtime process environment after the in-memory model client is configured.
+It also supplies `DIFFEX_MODEL_PROVIDER`, `DIFFEX_MODEL_ID`, `DIFFEX_MODEL_MAX_OUTPUT_TOKENS`, `DIFFEX_MODEL_GATEWAY_URL`, and `DIFFEX_MODEL_GATEWAY_CREDENTIAL`.
+The gateway credential authorizes only this cloud session's model calls and is removed from the process environment after the in-memory transport is configured.
+The process rejects a direct provider API key and uses a single configured Anthropic model.
+Before each model request, the transport persists its operation UUID and request digest in a private directory under `DIFFEX_RUNTIME_STATE_DIR`.
+Provider and agent retries are disabled for gateway failures, including timeouts and dropped streams, because automatically starting another generation could duplicate an already dispatched operation.
+Pending operation metadata survives restart for diagnostics without replaying the original request.
 Completed model usage is written to a durable sandbox outbox before it is reported to `DIFFEX_USAGE_ENDPOINT`.
+These sandbox usage reports are telemetry; the cloud gateway owns authoritative token measurements.
 Public WorkOS tokens and cloud attachment tickets are consumed by the control plane and are never passed to this process.

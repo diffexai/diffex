@@ -27,7 +27,7 @@ def inspect_image(filename):
         if config['architecture'] != 'amd64' or config['os'] != 'linux':
             raise ValueError('Expected Linux amd64 runtime')
         for layer in manifest[0]['Layers']:
-            with tarfile.open(fileobj=image.extractfile(layer), mode='r|') as archive:
+            with tarfile.open(fileobj=image.extractfile(layer), mode='r|*') as archive:
                 for entry in archive:
                     name = entry.name.removeprefix('./')
                     if not name.startswith('opt/diffex/') or not entry.isfile():

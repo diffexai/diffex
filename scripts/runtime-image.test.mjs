@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
+import { gzipSync } from "node:zlib";
 import { distributionDocs } from "./cli-distribution.mjs";
 
 test("image inspection rejects separate NOTICE files and development documents in earlier layers", () => {
@@ -29,15 +30,21 @@ test("image inspection rejects separate NOTICE files and development documents i
 				config: { Labels: { "org.opencontainers.image.revision": "a".repeat(40) } },
 			}),
 		);
-		write("manifest.json", JSON.stringify([{ Config: "config.json", Layers: ["layer.tar", "cleanup.tar"] }]));
 		write("cleanup/opt/diffex/packages/coding-agent/docs/.wh.development.md", "");
 		execFileSync("tar", ["-cf", join(directory, "cleanup.tar"), "-C", join(directory, "cleanup"), "opt"], {
 			env: { ...process.env, COPYFILE_DISABLE: "1" },
 		});
-		const inspect = () => {
+		const inspect = (compressed = false, malformed = false) => {
 			execFileSync("tar", ["-cf", join(directory, "layer.tar"), "-C", join(directory, "layer"), "opt"], {
 				env: { ...process.env, COPYFILE_DISABLE: "1" },
 			});
+			const layerArchive = compressed ? "layer.tar.gz" : "layer.tar";
+			const cleanupArchive = compressed ? "cleanup.tar.gz" : "cleanup.tar";
+			if (compressed) {
+				write(layerArchive, gzipSync(malformed ? Buffer.from("invalid tar layer") : readFileSync(join(directory, "layer.tar"))));
+				write(cleanupArchive, gzipSync(readFileSync(join(directory, "cleanup.tar"))));
+			}
+			write("manifest.json", JSON.stringify([{ Config: "config.json", Layers: [layerArchive, cleanupArchive] }]));
 			execFileSync(
 				"tar",
 				[
@@ -47,8 +54,8 @@ test("image inspection rejects separate NOTICE files and development documents i
 					directory,
 					"manifest.json",
 					"config.json",
-					"layer.tar",
-					"cleanup.tar",
+					layerArchive,
+					cleanupArchive,
 				],
 				{ env: { ...process.env, COPYFILE_DISABLE: "1" } },
 			);
@@ -58,6 +65,11 @@ test("image inspection rejects separate NOTICE files and development documents i
 		};
 		const valid = inspect();
 		assert.equal(valid.status, 0, valid.stderr);
+		const compressed = inspect(true);
+		assert.equal(compressed.status, 0, compressed.stderr);
+		const malformed = inspect(true, true);
+		assert.notEqual(malformed.status, 0);
+		assert.match(malformed.stderr, /ReadError/);
 		write(`${workspace}dist/AGENTS.md`, "Private repository instructions");
 		const substituted = inspect();
 		assert.notEqual(substituted.status, 0);
@@ -77,6 +89,9 @@ test("image inspection rejects separate NOTICE files and development documents i
 		const invalid = inspect();
 		assert.notEqual(invalid.status, 0);
 		assert.match(invalid.stderr, /unapproved distribution documentation/);
+		const compressedInvalid = inspect(true);
+		assert.notEqual(compressedInvalid.status, 0);
+		assert.match(compressedInvalid.stderr, /unapproved distribution documentation/);
 	} finally {
 		rmSync(directory, { recursive: true, force: true });
 	}

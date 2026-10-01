@@ -19,8 +19,20 @@ const path = process.env.DIFFEX_RUNTIME_PATH ?? "/runtime";
 const agentDir = process.env.DIFFEX_AGENT_DIR;
 const modelProvider = requiredEnvironment("DIFFEX_MODEL_PROVIDER");
 const modelId = requiredEnvironment("DIFFEX_MODEL_ID");
-const modelApiKey = requiredEnvironment("DIFFEX_MODEL_API_KEY");
+const runtimeStateDirectory = requiredEnvironment("DIFFEX_RUNTIME_STATE_DIR");
+const gatewayUrl = requiredEnvironment("DIFFEX_MODEL_GATEWAY_URL");
+const gatewayCredential = requiredEnvironment("DIFFEX_MODEL_GATEWAY_CREDENTIAL");
+const maxOutputTokens = Number(requiredEnvironment("DIFFEX_MODEL_MAX_OUTPUT_TOKENS"));
+if (process.env.DIFFEX_MODEL_API_KEY) throw new Error("Hosted runtime cannot receive a direct provider API key");
 const modelRuntime = await ModelRuntime.create({
+	hostedGateway: {
+		baseUrl: gatewayUrl,
+		credential: gatewayCredential,
+		provider: modelProvider,
+		modelId,
+		maxOutputTokens,
+		stateDirectory: runtimeStateDirectory,
+	},
 	...(agentDir
 		? {
 				authPath: join(agentDir, "auth.json"),
@@ -29,10 +41,9 @@ const modelRuntime = await ModelRuntime.create({
 		: {}),
 	refreshOnCreate: false,
 });
-await modelRuntime.setRuntimeApiKey(modelProvider, modelApiKey);
-delete process.env.DIFFEX_MODEL_API_KEY;
+await modelRuntime.refresh({ allowNetwork: false });
+delete process.env.DIFFEX_MODEL_GATEWAY_CREDENTIAL;
 delete process.env.DIFFEX_RUNTIME_SHARED_SECRET;
-const runtimeStateDirectory = requiredEnvironment("DIFFEX_RUNTIME_STATE_DIR");
 const usageReporter = createDurableUsageReporter({
 	endpoint: requiredEnvironment("DIFFEX_USAGE_ENDPOINT"),
 	sharedSecret,

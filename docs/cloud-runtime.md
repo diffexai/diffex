@@ -19,8 +19,11 @@ The cloud relay preserves byte order, applies backpressure and limits, and does 
 The WorkOS access token stays at the control-plane boundary.
 Provider credentials, sandbox identifiers, and internal runtime addresses never enter the Diffex wire protocol.
 
-The production model credential is mounted through Daytona Secrets with a provider-host allowlist.
-Only Daytona's opaque placeholder enters the sandbox environment, and the real provider credential is substituted into outbound HTTPS headers outside the sandbox.
+Hosted inference uses the authenticated cloud model gateway.
+The runtime receives a session-scoped gateway credential and URL, while provider credentials remain in the gateway host.
+Every model call, including compaction, branch summaries, and child agents, uses the same gateway transport.
+The transport saves a private operation UUID and request digest before sending, then disables automatic provider and agent retries after a failure.
+Pending records survive restart for diagnosis and are never automatically regenerated or replayed.
 
 ## Runtime Image
 
@@ -45,6 +48,8 @@ The production runtime service must:
 - Convert runtime events through the existing protocol adapters
 - Reject conflicting session mutations instead of silently queuing them
 - Shut down cleanly when the sandbox receives a termination signal
+- Receive `DIFFEX_MODEL_GATEWAY_URL` and `DIFFEX_MODEL_GATEWAY_CREDENTIAL`, and reject direct provider-key bootstrap
+- Persist private model-operation records under `DIFFEX_RUNTIME_STATE_DIR`
 
 ## Compatibility
 
