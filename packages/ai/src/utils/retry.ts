@@ -227,6 +227,7 @@ export function isRetryableProviderErrorMessage(errorMessage: string): boolean {
  */
 export function isRetryableAssistantError(message: AssistantMessage): boolean {
 	return (
+		message.retryable !== false &&
 		message.stopReason === "error" &&
 		message.errorMessage !== undefined &&
 		isRetryableProviderErrorMessage(message.errorMessage)

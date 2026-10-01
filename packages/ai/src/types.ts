@@ -423,6 +423,8 @@ export interface AssistantMessage {
 	stopReason: StopReason;
 	deferred?: DeferredHandle;
 	errorMessage?: string;
+	/** False when starting a replacement request could duplicate a billable operation. */
+	retryable?: boolean;
 	rawStopReason?: string;
 	timestamp: number; // Unix timestamp in milliseconds
 }

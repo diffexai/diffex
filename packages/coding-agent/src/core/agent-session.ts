@@ -3506,6 +3506,7 @@ export class AgentSession {
 		signal?: AbortSignal,
 		deferCommit?: (transaction: CompactionAppendTransaction) => void,
 	): Promise<boolean> {
+		if (assistantMessage.retryable === false) return false;
 		const settings = this.settingsManager.getCompactionSettings();
 		if (!settings.enabled) return false;
 

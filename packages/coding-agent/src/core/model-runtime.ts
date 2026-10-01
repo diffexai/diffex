@@ -37,9 +37,11 @@ import {
 	type StreamOptions,
 } from "@diffexai/diffex-ai";
 import * as builtinProviderCatalog from "@diffexai/diffex-ai/providers/all";
+import { anthropicProvider } from "@diffexai/diffex-ai/providers/anthropic";
 import { getAgentDir } from "../config.ts";
 import { operationSignal, raceWithAbortSignal } from "../utils/abort.ts";
 import { AuthStorage as DefaultAuthStorage } from "./auth-storage.ts";
+import { HostedModelGateway, type HostedModelGatewayOptions } from "./hosted-model-gateway.ts";
 import { ModelConfig } from "./model-config.ts";
 import { FileModelsStore, InMemoryCodingAgentModelsStore } from "./models-store.ts";
 import {
@@ -64,6 +66,8 @@ interface ModelRuntimeSnapshot {
 }
 
 export interface CreateModelRuntimeOptions {
+	/** Route every hosted model call through the authenticated metering gateway. */
+	hostedGateway?: HostedModelGatewayOptions;
 	/** Credential storage. Defaults to the file at authPath. */
 	credentials?: CredentialStore;
 	authPath?: string;
@@ -137,6 +141,7 @@ export class ModelRuntime implements Models {
 	private readonly compositionErrors = new Map<string, string>();
 	private readonly modelsPath: string | undefined;
 	private readonly modelNetworkEnabled: boolean;
+	private readonly hostedGateway: HostedModelGateway | undefined;
 	private config: ModelConfig;
 	private snapshot: ModelRuntimeSnapshot = {
 		all: [],
@@ -158,11 +163,13 @@ export class ModelRuntime implements Models {
 		modelsStore: ModelsStore,
 		providers: readonly Provider[],
 		modelNetworkEnabled: boolean,
+		hostedGateway?: HostedModelGateway,
 	) {
 		this.credentials = credentials;
 		this.config = config;
 		this.modelsPath = modelsPath;
 		this.modelNetworkEnabled = modelNetworkEnabled;
+		this.hostedGateway = hostedGateway;
 		this.defaultBuiltins = new Map(providers.map((provider) => [provider.id, provider]));
 		for (const [providerId, provider] of this.defaultBuiltins) this.builtins.set(providerId, provider);
 		this.models = createModels({ credentials, modelsStore });
@@ -170,7 +177,9 @@ export class ModelRuntime implements Models {
 	}
 
 	static async create(options: CreateModelRuntimeOptions = {}): Promise<ModelRuntime> {
+		const gateway = options.hostedGateway ? await HostedModelGateway.create(options.hostedGateway) : undefined;
 		const credentials = new RuntimeCredentials(options.credentials ?? DefaultAuthStorage.create(options.authPath));
+		if (gateway) credentials.setRuntimeApiKey(gateway.options.provider, gateway.options.credential);
 		const modelsPath =
 			options.modelsPath === null ? undefined : (options.modelsPath ?? join(getAgentDir(), "models.json"));
 		const config = await ModelConfig.load(modelsPath);
@@ -180,20 +189,46 @@ export class ModelRuntime implements Models {
 				? new FileModelsStore(options.modelsStorePath ?? join(dirname(modelsPath), "models-store.json"))
 				: new InMemoryCodingAgentModelsStore());
 		const builtinModelDataGeneratedAt = builtinProviderCatalog.getBuiltinModelDataGeneratedAt();
-		const providers = builtinProviderCatalog
+		let providers = builtinProviderCatalog
 			.builtinProviders()
 			.map((provider) =>
 				provider.id === "radius"
 					? provider
 					: withRemoteCatalog(provider, options.catalogBaseUrl, builtinModelDataGeneratedAt),
 			);
+		if (gateway) {
+			const provider = anthropicProvider();
+			const model = provider.getModels().find((candidate) => candidate.id === gateway.options.modelId);
+			if (!model) throw new Error("Hosted gateway model is not in the Anthropic catalog");
+			providers = [
+				{
+					...provider,
+					getModels: () => [
+						{
+							...model,
+							maxTokens: Math.min(model.maxTokens, gateway.options.maxOutputTokens),
+							input: ["text"],
+							baseUrl: gateway.options.baseUrl,
+							headers: undefined,
+							compat: {
+								...model.compat,
+								supportsEagerToolInputStreaming: false,
+								supportsStrictTools: false,
+								supportsToolReferences: false,
+							},
+						},
+					],
+				},
+			];
+		}
 		const runtime = new ModelRuntime(
 			credentials,
 			config,
 			modelsPath,
 			modelsStore,
 			providers,
-			process.env.DIFFEX_OFFLINE === undefined,
+			!gateway && process.env.DIFFEX_OFFLINE === undefined,
+			gateway,
 		);
 		runtime.configureRadiusProviders();
 		runtime.rebuildProviders();
@@ -243,6 +278,12 @@ export class ModelRuntime implements Models {
 	}
 
 	private recomposeProvider(providerId: string): void {
+		if (this.hostedGateway) {
+			const provider = this.defaultBuiltins.get(providerId);
+			if (provider) this.models.setProvider(provider);
+			else this.models.deleteProvider(providerId);
+			return;
+		}
 		const base = this.nativeExtensionProviders.get(providerId) ?? this.builtins.get(providerId);
 		const extension = this.extensionProviders.get(providerId);
 		if (!base && !this.config.getProvider(providerId) && !extension) {
@@ -473,6 +514,14 @@ export class ModelRuntime implements Models {
 		providerOrModel: string | Model<Api>,
 		overrides: ModelRuntimeAuthOverrides = {},
 	): Promise<AuthResult | undefined> {
+		if (this.hostedGateway) {
+			if (typeof providerOrModel !== "string") this.hostedGateway.assertModel(providerOrModel);
+			else if (providerOrModel !== this.hostedGateway.options.provider) return undefined;
+			return {
+				auth: { apiKey: this.hostedGateway.options.credential, baseUrl: this.hostedGateway.options.baseUrl },
+				source: "hosted model gateway",
+			};
+		}
 		if (typeof providerOrModel === "string") return this.models.getAuth(providerOrModel, overrides);
 		const resolution = await this.models.getAuth(providerOrModel, overrides);
 		if (!resolution) return undefined;
@@ -534,6 +583,7 @@ export class ModelRuntime implements Models {
 	}
 
 	setRuntimeApiKey(providerId: string, apiKey: string, options: AuthOperationOptions = {}): Promise<void> {
+		if (this.hostedGateway) return Promise.reject(new Error("Hosted gateway does not allow credential overrides"));
 		const signal = operationSignal(options.signal);
 		return this.enqueueCredentialOperation(providerId, signal, async () => {
 			this.credentials.setRuntimeApiKey(providerId, apiKey);
@@ -547,6 +597,7 @@ export class ModelRuntime implements Models {
 	}
 
 	removeRuntimeApiKey(providerId: string, options: AuthOperationOptions = {}): Promise<void> {
+		if (this.hostedGateway) return Promise.reject(new Error("Hosted gateway does not allow credential overrides"));
 		const signal = operationSignal(options.signal);
 		return this.enqueueCredentialOperation(providerId, signal, async () => {
 			this.credentials.removeRuntimeApiKey(providerId);
@@ -612,6 +663,17 @@ export class ModelRuntime implements Models {
 		context: Context,
 		options?: ModelsApiStreamOptions<TApi>,
 	): AssistantMessageEventStream {
+		if (this.hostedGateway) {
+			const provider = this.defaultBuiltins.get("anthropic");
+			if (!provider) throw new Error("Hosted Anthropic provider is missing");
+			return this.hostedGateway.stream(model, options, (requestOptions) =>
+				provider.stream(
+					{ ...model, baseUrl: this.hostedGateway?.options.baseUrl ?? model.baseUrl },
+					context,
+					requestOptions as ApiStreamOptions<TApi>,
+				),
+			);
+		}
 		return lazyStream(
 			model,
 			async () => {
@@ -638,6 +700,17 @@ export class ModelRuntime implements Models {
 	}
 
 	streamSimple(model: Model<Api>, context: Context, options?: ModelsSimpleStreamOptions): AssistantMessageEventStream {
+		if (this.hostedGateway) {
+			const provider = this.defaultBuiltins.get("anthropic");
+			if (!provider) throw new Error("Hosted Anthropic provider is missing");
+			return this.hostedGateway.stream(model, options, (requestOptions) =>
+				provider.streamSimple(
+					{ ...model, baseUrl: this.hostedGateway?.options.baseUrl ?? model.baseUrl },
+					context,
+					requestOptions as SimpleStreamOptions,
+				),
+			);
+		}
 		return lazyStream(
 			model,
 			async () => {
@@ -683,6 +756,7 @@ export class ModelRuntime implements Models {
 	}
 
 	login(providerId: string, type: AuthType, interaction: AuthInteraction): Promise<Credential> {
+		if (this.hostedGateway) return Promise.reject(new Error("Hosted gateway does not allow credential overrides"));
 		const signal = operationSignal(interaction.signal);
 		return this.enqueueCredentialOperation(providerId, signal, async () => {
 			const credential = await this.models.login(providerId, type, { ...interaction, signal });
@@ -692,6 +766,7 @@ export class ModelRuntime implements Models {
 	}
 
 	logout(providerId: string, options: AuthOperationOptions = {}): Promise<void> {
+		if (this.hostedGateway) return Promise.reject(new Error("Hosted gateway does not allow credential overrides"));
 		const signal = operationSignal(options.signal);
 		return this.enqueueCredentialOperation(providerId, signal, async () => {
 			await this.models.logout(providerId, { signal });
@@ -743,6 +818,7 @@ export class ModelRuntime implements Models {
 	}
 
 	registerNativeProvider(provider: Provider): void {
+		if (this.hostedGateway) throw new Error("Hosted gateway does not allow provider overrides");
 		if (!provider.id.trim()) throw new Error("Provider id must not be empty.");
 		this.extensionProviders.delete(provider.id);
 		this.nativeExtensionProviders.set(provider.id, provider);
@@ -752,6 +828,7 @@ export class ModelRuntime implements Models {
 	}
 
 	registerProvider(providerId: string, config: ProviderConfigInput): void {
+		if (this.hostedGateway) throw new Error("Hosted gateway does not allow provider overrides");
 		// Validate the incoming registration on its own, like the legacy registry:
 		// a broken re-registration must throw without touching the stored config.
 		validateExtensionProvider(providerId, this.builtins.get(providerId), this.config.getProvider(providerId), config);
