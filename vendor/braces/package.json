@@ -1,0 +1,18 @@
+{
+  "name": "@diffex-cloud/braces",
+  "version": "3.0.3-diffex.1",
+  "private": true,
+  "description": "Reviewed local depth-guard patch of upstream braces 3.0.3",
+  "type": "commonjs",
+  "main": "index.js",
+  "license": "MIT",
+  "files": [
+    "index.js",
+    "lib",
+    "LICENSE",
+    "README.md"
+  ],
+  "dependencies": {
+    "fill-range": "7.1.1"
+  }
+}

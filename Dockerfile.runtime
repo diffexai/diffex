@@ -11,6 +11,7 @@ COPY legal ./legal
 COPY docs/release/distribution-policy.json ./docs/release/distribution-policy.json
 COPY packages ./packages
 COPY scripts ./scripts
+COPY vendor ./vendor
 
 RUN npm ci --ignore-scripts
 RUN npm run hydrate:model-data && npm run build:offline
