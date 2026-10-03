@@ -2,7 +2,9 @@
 
 This private package preserves the upstream `braces` 3.0.3 API and MIT license while bounding nesting to address [GHSA-vfj7-8cjw-p6xm](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm).
 It is named `@diffex-cloud/braces` at version `3.0.3-diffex.1` because this is our reviewed patch, not an upstream fixed release.
-Each consuming repository scopes its npm override to the affected dependency chain and tests the installed consumer rather than changing its functionality.
+Each consuming repository wires npm overrides to the affected dependencies and tests the installed consumer rather than changing its functionality.
+Diffex uses a root override because npm 10 does not reliably propagate an ancestor-scoped override through workspace dependencies.
+Its current affected dependency chain is the development tool shx; the local patch is not included in shipped production locks.
 
 ## Provenance
 
