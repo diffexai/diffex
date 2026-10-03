@@ -92,6 +92,9 @@ let interrupt;
 let tarballRequests = 0;
 const server = createServer((request, reply) => {
 	const path = decodeURIComponent(request.url);
+	// A stalled npm event loop can reuse a socket after the fixture's idle deadline.
+	// Each owned response closes its connection instead of racing pooled socket reuse.
+	reply.setHeader("connection", "close");
 	if (path === "/@diffexai/diffex") {
 		const pkg = {
 			...metadata,
@@ -102,20 +105,22 @@ const server = createServer((request, reply) => {
 					.digest("base64")}`,
 			},
 		};
+		const body = JSON.stringify({
+			name: metadata.name,
+			"dist-tags": { latest: metadata.version },
+			versions: { [metadata.version]: pkg },
+		});
 		reply.setHeader("content-type", "application/json");
-		reply.end(
-			JSON.stringify({
-				name: metadata.name,
-				"dist-tags": { latest: metadata.version },
-				versions: { [metadata.version]: pkg },
-			}),
-		);
+		reply.setHeader("content-length", Buffer.byteLength(body));
+		reply.end(body);
 	} else if (path === "/diffex.tgz") {
 		tarballRequests++;
 		if (mode === "interrupt") {
 			interrupt?.();
 			return;
 		}
+		reply.setHeader("content-type", "application/octet-stream");
+		reply.setHeader("content-length", bytes.length);
 		reply.end(bytes);
 	} else {
 		reply.writeHead(404).end();
@@ -215,27 +220,72 @@ try {
 		else {
 			const child = spawn(process.execPath, ["--import", guard, executable, "update", "--self", "--force"], {
 				...options,
+				timeout: undefined,
 				detached: true,
-				stdio: "ignore",
+				stdio: ["ignore", "inherit", "inherit"],
 			});
-			let interrupted = false;
-			interrupt = () => {
-				interrupted = true;
-				process.kill(-child.pid, "SIGTERM");
-			};
-			const deadline = setTimeout(() => process.kill(-child.pid, "SIGKILL"), 30000);
-			try {
-				await new Promise((done, reject) => {
-					child.on("close", done);
-					child.on("error", reject);
-				});
-			} finally {
-				clearTimeout(deadline);
+			const closed = new Promise((done, reject) => {
+				child.once("close", (code, signal) => done({ code, signal }));
+				child.once("error", reject);
+			});
+			function signalGroup(signal) {
+				if (!child.pid) return false;
+				try {
+					process.kill(-child.pid, signal);
+					return true;
+				} catch (error) {
+					if (error.code === "ESRCH") return false;
+					throw error;
+				}
 			}
-			assert(interrupted, "Interrupted update must reach the real npm archive download");
+			let interrupted = false;
+			let cancellationFallbackTriggered = false;
+			let outcome;
+			let startupDeadline;
+			let cancellationDeadline;
+			const stopped = new Promise((done, reject) => {
+				closed.then(done, reject);
+				startupDeadline = setTimeout(
+					() => reject(new Error("Timed out before the real npm archive download")),
+					options.timeout,
+				);
+				interrupt = () => {
+					if (interrupted) return;
+					try {
+						assert(signalGroup("SIGTERM"), "Update exited before archive cancellation");
+						interrupted = true;
+						clearTimeout(startupDeadline);
+						// Bound cancellation after the observed download, independently of npm startup.
+						cancellationDeadline = setTimeout(() => {
+							try {
+								cancellationFallbackTriggered = true;
+								signalGroup("SIGKILL");
+							} catch (error) {
+								reject(error);
+							}
+						}, 5000);
+					} catch (error) {
+						reject(error);
+					}
+				};
+			});
+			try {
+				outcome = await stopped;
+				assert(interrupted, "Interrupted update must reach the real npm archive download");
+			} finally {
+				interrupt = undefined;
+				clearTimeout(startupDeadline);
+				clearTimeout(cancellationDeadline);
+				// The detached group belongs only to this fixture, including npm descendants.
+				signalGroup("SIGKILL");
+				await closed.catch(() => {});
+			}
 			evidence.commands.push({
 				command: "diffex update --self --force",
-				signal: "SIGTERM",
+				requestedSignal: "SIGTERM",
+				signal: outcome.signal,
+				exitCode: outcome.code,
+				cancellationFallbackTriggered,
 				boundary: "npm archive download",
 			});
 		}
