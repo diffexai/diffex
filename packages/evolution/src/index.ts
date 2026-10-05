@@ -313,6 +313,8 @@ export type {
 	EvolutionCursorStore,
 	EvolutionEventSink,
 	EvolutionEvidenceCatalog,
+	EvolutionEvidenceScan,
+	EvolutionEvidenceScanFailure,
 	EvolutionFailureRecord,
 	EvolutionFailureReporter,
 	EvolutionIdGenerator,

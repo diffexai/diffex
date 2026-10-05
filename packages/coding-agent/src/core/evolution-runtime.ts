@@ -25,6 +25,7 @@ import {
 	EvolutionControlPlane,
 	EvolutionControlService,
 	type EvolutionEvidenceCatalog,
+	type EvolutionEvidenceScan,
 	EvolutionExecutionError,
 	type EvolutionHarnessVersionInfo,
 	type EvolutionJobDetail,
@@ -492,7 +493,10 @@ export class TraceEvidenceCatalog implements EvolutionEvidenceCatalog {
 	readonly #scope: EvolutionScope;
 	readonly #materializeInvocation: typeof materializeJsonlInvocation;
 	readonly #isTraceActive: (path: string) => Promise<boolean>;
-	readonly #cache = new Map<string, Promise<SuccessfulMaterialization | null>>();
+	readonly #cache = new Map<
+		string,
+		{ readonly ingestionCursor: number; readonly materialization: Promise<SuccessfulMaterialization | null> }
+	>();
 
 	constructor(options: {
 		agentDir: string;
@@ -700,39 +704,66 @@ export class TraceEvidenceCatalog implements EvolutionEvidenceCatalog {
 		return (await this.#paths()).length;
 	}
 
-	async listSuccessful(
-		scope: EvolutionScope,
-		afterCursor: number,
-		throughCursor: number,
-	): Promise<readonly SuccessfulMaterialization[]> {
+	async scan(scope: EvolutionScope, afterCursor: number, throughCursor: number): Promise<EvolutionEvidenceScan> {
 		this.#assertScope(scope);
 		const paths = await this.#paths();
 		const selected = paths.slice(afterCursor, Math.min(throughCursor, paths.length));
-		const materializations = await Promise.all(
-			selected.map((path, index) => {
-				const ingestionCursor = afterCursor + index + 1;
-				const key = `${ingestionCursor}:${path}`;
-				const cached = this.#cache.get(key);
-				if (cached) return cached;
-				const created = this.#materialize(path, ingestionCursor).catch(() => null);
-				this.#cache.set(key, created);
-				return created;
-			}),
-		);
-		return materializations.filter((entry): entry is SuccessfulMaterialization => entry !== null);
+		const materializations: SuccessfulMaterialization[] = [];
+		for (const [index, path] of selected.entries()) {
+			const ingestionCursor = afterCursor + index + 1;
+			const key = `${ingestionCursor}:${path}`;
+			let cached = this.#cache.get(key);
+			if (cached === undefined) {
+				const materialization = this.#materialize(path, ingestionCursor);
+				cached = { ingestionCursor, materialization };
+				this.#cache.set(key, cached);
+				void materialization.catch(() => {
+					if (this.#cache.get(key) === cached) this.#cache.delete(key);
+				});
+			}
+			try {
+				const materialization = await cached.materialization;
+				if (materialization !== null) materializations.push(materialization);
+			} catch {
+				return {
+					materializations,
+					firstFailure: {
+						ingestionCursor,
+						traceName: basename(path),
+						notice: "Trace evidence could not be read and will be retried.",
+					},
+				};
+			}
+		}
+		return { materializations, firstFailure: null };
 	}
 
 	async excludedThroughCursor(scope: EvolutionScope, afterCursor: number, throughCursor: number): Promise<number> {
 		this.#assertScope(scope);
-		await this.listSuccessful(scope, afterCursor, throughCursor);
 		const excludedNames = new Set((await this.#readExclusions()).map((exclusion) => exclusion.traceName));
 		const paths = await this.#paths();
 		let cursor = afterCursor;
-		for (const path of paths.slice(afterCursor, Math.min(throughCursor, paths.length))) {
-			if (!excludedNames.has(basename(path))) break;
+		for (const [index, path] of paths.slice(afterCursor, Math.min(throughCursor, paths.length)).entries()) {
+			const ingestionCursor = afterCursor + index + 1;
+			const cached = this.#cache.get(`${ingestionCursor}:${path}`);
+			if (cached === undefined && !excludedNames.has(basename(path))) break;
+			if (cached !== undefined) {
+				try {
+					await cached.materialization;
+				} catch {
+					break;
+				}
+			}
 			cursor += 1;
 		}
 		return cursor;
+	}
+
+	async discardProcessedThrough(scope: EvolutionScope, cursor: number): Promise<void> {
+		this.#assertScope(scope);
+		for (const [key, cached] of this.#cache) {
+			if (cached.ingestionCursor <= cursor) this.#cache.delete(key);
+		}
 	}
 }
 

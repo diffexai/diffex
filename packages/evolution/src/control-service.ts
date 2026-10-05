@@ -44,6 +44,7 @@ import type {
 	EvolutionCursorStore,
 	EvolutionEventSink,
 	EvolutionEvidenceCatalog,
+	EvolutionEvidenceScanFailure,
 	EvolutionJobStore,
 	EvolutionLedger,
 	EvolutionProgressEvent,
@@ -121,6 +122,7 @@ export interface EvolutionOverview {
 	readonly ingestionHighWaterCursor: number;
 	readonly unprocessedTokens: number;
 	readonly settledInvocationCount: number;
+	readonly firstEvidenceFailure?: EvolutionEvidenceScanFailure | null;
 	readonly automaticTokenThreshold: number;
 	readonly automaticMinimumInvocations: number;
 	readonly lastEvolutionAt: string | null;
@@ -658,12 +660,8 @@ export class EvolutionControlService {
 			this.#dependencies.jobs.list(this.#dependencies.scope),
 			this.#dependencies.harnesses.listVersions(),
 		]);
-		const materializations = await this.#dependencies.evidence.listSuccessful(
-			this.#dependencies.scope,
-			cursor.sequence,
-			highWater,
-		);
-		const tokenCount = countEvolutionTokens(materializations.map((entry) => entry.invocation));
+		const scan = await this.#dependencies.evidence.scan(this.#dependencies.scope, cursor.sequence, highWater);
+		const tokenCount = countEvolutionTokens(scan.materializations.map((entry) => entry.invocation));
 		const lastAutomaticRunAt =
 			jobs
 				.filter((job) => !isCancelledJob(job) && job.trigger === "automatic" && job.terminalAt !== null)
@@ -687,7 +685,7 @@ export class EvolutionControlService {
 			active !== null
 				? ({ eligible: false, reason: "blocking-job" } as const)
 				: evaluateAutomaticEvolutionEligibility({
-						invocationCount: materializations.length,
+						invocationCount: scan.materializations.length,
 						tokens: tokenCount.totalTokens,
 						now: new Date(currentTime).toISOString(),
 						previousAutomaticTerminalAt: lastAutomaticRunAt,
@@ -703,7 +701,8 @@ export class EvolutionControlService {
 			processedEvidenceCursor: cursor.sequence,
 			ingestionHighWaterCursor: highWater,
 			unprocessedTokens: tokenCount.totalTokens,
-			settledInvocationCount: materializations.length,
+			settledInvocationCount: scan.materializations.length,
+			firstEvidenceFailure: scan.firstFailure,
 			automaticTokenThreshold: AUTOMATIC_EVOLUTION_TOKEN_THRESHOLD,
 			automaticMinimumInvocations: AUTOMATIC_EVOLUTION_MINIMUM_INVOCATIONS,
 			lastEvolutionAt,

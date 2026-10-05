@@ -469,11 +469,12 @@ export class EvolutionControlPlane implements EvolutionJobRunner {
 					retryable: false,
 				});
 			}
-			const availableMaterializations = await this.#dependencies.evidence.listSuccessful(
+			const scan = await this.#dependencies.evidence.scan(
 				request.scope,
 				processedCursor.sequence,
 				availableHighWaterCursor,
 			);
+			const availableMaterializations = scan.materializations;
 			const seenMaterializations = new Set<string>();
 			let previousCursor = processedCursor.sequence;
 			for (const materialization of availableMaterializations) {
@@ -497,7 +498,7 @@ export class EvolutionControlPlane implements EvolutionJobRunner {
 					(await this.#dependencies.evidence.excludedThroughCursor?.(
 						request.scope,
 						processedCursor.sequence,
-						availableHighWaterCursor,
+						scan.firstFailure === null ? availableHighWaterCursor : scan.firstFailure.ingestionCursor - 1,
 					)) ?? processedCursor.sequence;
 				if (excludedThroughCursor > processedCursor.sequence) {
 					const commitId = `excluded-${computeEvolutionContentDigest({
@@ -519,13 +520,14 @@ export class EvolutionControlPlane implements EvolutionJobRunner {
 							retryable: false,
 						});
 					}
+					await this.#dependencies.evidence.discardProcessedThrough?.(request.scope, excludedThroughCursor);
 				}
 				return { status: "not-created", reason: "no-new-evidence" };
 			}
 			const scopeJobs = await this.#dependencies.jobs.list(request.scope);
 			const availableEvidenceRange = {
 				afterCursor: processedCursor.sequence,
-				throughCursor: availableHighWaterCursor,
+				throughCursor: availableMaterializations.at(-1)?.ingestionCursor ?? processedCursor.sequence,
 			};
 			const blocking = scopeJobs.find(
 				(job) =>
@@ -559,7 +561,13 @@ export class EvolutionControlPlane implements EvolutionJobRunner {
 			const ingestionHighWaterCursor =
 				request.trigger === "automatic"
 					? (materializations.at(-1)?.ingestionCursor ?? processedCursor.sequence)
-					: availableHighWaterCursor;
+					: ((await this.#dependencies.evidence.excludedThroughCursor?.(
+							request.scope,
+							processedCursor.sequence,
+							scan.firstFailure === null ? availableHighWaterCursor : scan.firstFailure.ingestionCursor - 1,
+						)) ??
+						materializations.at(-1)?.ingestionCursor ??
+						processedCursor.sequence);
 			const evidenceRange = {
 				afterCursor: processedCursor.sequence,
 				throughCursor: ingestionHighWaterCursor,
@@ -788,6 +796,7 @@ export class EvolutionControlPlane implements EvolutionJobRunner {
 				retryable: false,
 			});
 		}
+		await this.#dependencies.evidence.discardProcessedThrough?.(job.metadata.scope, job.evidenceRange.throughCursor);
 		const completion: EvolutionJobCompletion = {
 			kind: directive === "complete-no-op" ? "no-op" : "activated",
 			resultingHarnessVersion: directive === "complete-no-op" ? null : resultingHarnessVersion,

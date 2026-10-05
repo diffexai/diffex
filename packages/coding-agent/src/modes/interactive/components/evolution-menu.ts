@@ -681,6 +681,12 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 		const evolutionEnabled = this.#client.getEnabled();
 		this.#addLine(`Evolution tokens: ${overview.unprocessedTokens.toLocaleString()}`);
 		this.#addLine(`Evolution invocations: ${overview.settledInvocationCount}`);
+		if (overview.firstEvidenceFailure !== null && overview.firstEvidenceFailure !== undefined) {
+			this.#addLine(
+				`Evidence retry pending at cursor ${overview.firstEvidenceFailure.ingestionCursor} (${overview.firstEvidenceFailure.traceName}): ${overview.firstEvidenceFailure.notice}`,
+				"warning",
+			);
+		}
 		this.#addLine(`Last evolution: ${formatEvolutionTimestamp(overview.lastEvolutionAt)}`);
 		this.#addLine(
 			!evolutionEnabled

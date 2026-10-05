@@ -115,6 +115,7 @@ function overview(overrides: Partial<EvolutionOverview> = {}): EvolutionOverview
 		ingestionHighWaterCursor: 8,
 		unprocessedTokens: 1_100_001,
 		settledInvocationCount: 6,
+		firstEvidenceFailure: null,
 		automaticTokenThreshold: AUTOMATIC_EVOLUTION_TOKEN_THRESHOLD,
 		automaticMinimumInvocations: 5,
 		lastEvolutionAt: null,
@@ -435,6 +436,30 @@ describe("EvolutionMenuComponent", () => {
 		expect(output).toContain("Browse");
 		expect(output).not.toContain("Rollback");
 		expect(output).toContain("Cancel [unavailable]");
+	});
+
+	it("shows a generic retry notice for the first unreadable evidence trace", async () => {
+		const fixture = client(
+			overview({
+				firstEvidenceFailure: {
+					ingestionCursor: 7,
+					traceName: "unreadable.jsonl",
+					notice: "Trace evidence could not be read and will be retried.",
+				},
+			}),
+		);
+		const component = new EvolutionMenuComponent(
+			fixture.client,
+			() => {},
+			() => {},
+			() => {},
+		);
+		await vi.waitFor(() => expect(stripAnsi(component.render(180).join("\n"))).toContain("Browse"));
+
+		const output = stripAnsi(component.render(180).join("\n"));
+		expect(output).toContain("Evidence retry pending at cursor 7 (unreadable.jsonl)");
+		expect(output).toContain("Trace evidence could not be read and will be retried.");
+		expect(output).not.toContain("simulated incompatible trace");
 	});
 
 	it("cancels a resumable job by its durable job ID", async () => {

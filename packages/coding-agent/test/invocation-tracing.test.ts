@@ -293,7 +293,7 @@ describe("CLI invocation tracing", () => {
 
 		await expect(lockfile.check(firstPath, { realpath: false })).resolves.toBe(false);
 		expect(await catalog.highWaterCursor(scope)).toBe(1);
-		expect(await catalog.listSuccessful(scope, 0, 1)).toHaveLength(1);
+		expect((await catalog.scan(scope, 0, 1)).materializations).toHaveLength(1);
 		expect(footer(await readTrace(firstPath))?.terminationStatus).toBe("completed");
 		expect((await readTrace(firstPath)).find((record) => record.type === "session_segment")).toMatchObject({
 			taskLineageId: "operation-1",
@@ -325,7 +325,7 @@ describe("CLI invocation tracing", () => {
 		});
 
 		expect(await catalog.highWaterCursor(scope)).toBe(2);
-		expect(await catalog.listSuccessful(scope, 1, 2)).toHaveLength(1);
+		expect((await catalog.scan(scope, 1, 2)).materializations).toHaveLength(1);
 		expect(tracePaths(directories.agentDir)).toHaveLength(2);
 		await trace.close();
 		expect(tracePaths(directories.agentDir)).toHaveLength(2);
@@ -460,7 +460,7 @@ describe("CLI invocation tracing", () => {
 		expect(await Promise.all([firstCatalog.highWaterCursor(scope), secondCatalog.highWaterCursor(scope)])).toEqual([
 			2, 2,
 		]);
-		const materializations = await firstCatalog.listSuccessful(scope, 0, 2);
+		const materializations = (await firstCatalog.scan(scope, 0, 2)).materializations;
 		expect(materializations).toHaveLength(2);
 		expect(new Set(materializations.map((entry) => entry.materializationId)).size).toBe(2);
 		await Promise.all([firstTrace.close(), secondTrace.close()]);
@@ -510,7 +510,7 @@ describe("CLI invocation tracing", () => {
 		expect(tracePaths(directories.agentDir)).toEqual([path]);
 		const scope: EvolutionScope = { repositoryId: "global", scopeId: "global" };
 		const catalog = new TraceEvidenceCatalog({ agentDir: directories.agentDir, scope });
-		const [materialization] = await catalog.listSuccessful(scope, 0, await catalog.highWaterCursor(scope));
+		const [materialization] = (await catalog.scan(scope, 0, await catalog.highWaterCursor(scope))).materializations;
 		const sessionEvidence =
 			materialization?.invocation.evidence.filter((entry) => entry.kind === "session_item") ?? [];
 		expect(sessionEvidence).toHaveLength(2);
@@ -749,7 +749,7 @@ describe("CLI invocation tracing", () => {
 		const catalog = new TraceEvidenceCatalog({ agentDir: directories.agentDir, scope });
 		expect(tracePaths(directories.agentDir)).toEqual([]);
 		expect(await catalog.highWaterCursor(scope)).toBe(0);
-		expect(await catalog.listSuccessful(scope, 0, 0)).toEqual([]);
+		expect((await catalog.scan(scope, 0, 0)).materializations).toEqual([]);
 	});
 
 	it.each([
@@ -778,7 +778,7 @@ describe("CLI invocation tracing", () => {
 			const scope: EvolutionScope = { repositoryId: "global", scopeId: "global" };
 			const catalog = new TraceEvidenceCatalog({ agentDir: directories.agentDir, scope });
 			expect(tracePaths(directories.agentDir)).toHaveLength(expectedRawTraceCount);
-			expect(await catalog.listSuccessful(scope, 0, await catalog.highWaterCursor(scope))).toEqual([]);
+			expect((await catalog.scan(scope, 0, await catalog.highWaterCursor(scope))).materializations).toEqual([]);
 			expect(await catalog.excludedThroughCursor(scope, 0, await catalog.highWaterCursor(scope))).toBe(
 				expectedRawTraceCount,
 			);
@@ -848,7 +848,7 @@ describe("CLI invocation tracing", () => {
 
 		const scope: EvolutionScope = { repositoryId: "global", scopeId: "global" };
 		const catalog = new TraceEvidenceCatalog({ agentDir: directories.agentDir, scope });
-		const materializations = await catalog.listSuccessful(scope, 0, await catalog.highWaterCursor(scope));
+		const materializations = (await catalog.scan(scope, 0, await catalog.highWaterCursor(scope))).materializations;
 		expect(materializations).toHaveLength(1);
 		expect(
 			materializations[0]?.invocation.evidence.some((entry) => JSON.stringify(entry).includes("exit-operation")),
@@ -891,7 +891,7 @@ describe("CLI invocation tracing", () => {
 		expect(footer(records)?.terminationStatus).toBe("failed");
 		const scope: EvolutionScope = { repositoryId: "global", scopeId: "global" };
 		const catalog = new TraceEvidenceCatalog({ agentDir: traceStorageDirectory(tracePath), scope });
-		expect(await catalog.listSuccessful(scope, 0, await catalog.highWaterCursor(scope))).toHaveLength(1);
+		expect((await catalog.scan(scope, 0, await catalog.highWaterCursor(scope))).materializations).toHaveLength(1);
 	});
 
 	it.each([

@@ -125,6 +125,11 @@ async function serviceFixture(
 	evidenceOptions: {
 		readonly highWaterCursor?: number;
 		readonly materializations?: readonly SuccessfulMaterialization[];
+		readonly firstFailure?: {
+			readonly ingestionCursor: number;
+			readonly traceName: string;
+			readonly notice: string;
+		} | null;
 	} = {},
 ): Promise<ServiceFixture> {
 	const root = await mkdtemp(join(tmpdir(), "diffex-evolution-service-"));
@@ -174,10 +179,18 @@ async function serviceFixture(
 		async highWaterCursor() {
 			return evidenceOptions.highWaterCursor ?? 3;
 		},
-		async listSuccessful(_scope: EvolutionScope, afterCursor: number, throughCursor: number) {
-			return materializations.filter(
-				(entry) => entry.ingestionCursor > afterCursor && entry.ingestionCursor <= throughCursor,
-			);
+		async scan(_scope: EvolutionScope, afterCursor: number, throughCursor: number) {
+			return {
+				materializations: materializations.filter(
+					(entry) =>
+						entry.ingestionCursor > afterCursor &&
+						entry.ingestionCursor <= throughCursor &&
+						(evidenceOptions.firstFailure === undefined ||
+							evidenceOptions.firstFailure === null ||
+							entry.ingestionCursor < evidenceOptions.firstFailure.ingestionCursor),
+				),
+				firstFailure: evidenceOptions.firstFailure ?? null,
+			};
 		},
 	};
 	const controlPlane = new EvolutionControlPlane(
@@ -529,6 +542,29 @@ describe("evolution control service", () => {
 		expect(snapshot.evidenceSources.map((source) => source.materializationId)).toEqual(["materialization-2"]);
 		expect(snapshot.tokenMeasurement).toMatchObject(countEvolutionTokens([eligible.invocation]));
 		await fixture.service.cancelJob(started.job.jobId);
+	});
+
+	it("reports only the valid evidence prefix before the first materialization failure", async () => {
+		const eligible = materialization(1);
+		const fixture = await serviceFixture(undefined, {
+			highWaterCursor: 3,
+			materializations: [eligible, materialization(2), materialization(3)],
+			firstFailure: {
+				ingestionCursor: 2,
+				traceName: "unreadable.jsonl",
+				notice: "Trace evidence could not be read and will be retried.",
+			},
+		});
+
+		expect(await fixture.service.overview()).toMatchObject({
+			settledInvocationCount: 1,
+			unprocessedTokens: countEvolutionTokens([eligible.invocation]).totalTokens,
+			firstEvidenceFailure: {
+				ingestionCursor: 2,
+				traceName: "unreadable.jsonl",
+				notice: "Trace evidence could not be read and will be retried.",
+			},
+		});
 	});
 
 	it("projects eligibility and attaches a concurrent manual trigger", async () => {

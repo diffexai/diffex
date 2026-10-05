@@ -661,28 +661,78 @@ describe("coding-agent evolution runtime", () => {
 		const unreadablePath = join(traceDirectory, "m-unreadable.jsonl");
 		writeFileSync(unreadablePath, "unreadable\n");
 		const scope: EvolutionScope = { repositoryId: "repository", scopeId: "repository" };
+		let shouldFail = true;
+		let materializationAttempts = 0;
 		const catalog = new TraceEvidenceCatalog({
 			agentDir: root,
 			scope,
 			async materializeInvocation(path) {
-				if (path === unreadablePath) throw new Error("simulated incompatible trace");
+				materializationAttempts += 1;
+				if (path === unreadablePath && shouldFail) throw new Error("simulated incompatible trace");
 				return materializedInvocation(basename(path, ".jsonl"), sessionPath);
 			},
 		});
 
 		expect(await catalog.highWaterCursor(scope)).toBe(3);
-		expect(await catalog.listSuccessful(scope, 0, 3)).toMatchObject([
+		const failedScan = await catalog.scan(scope, 0, 3);
+		expect(failedScan.materializations).toMatchObject([
 			{ materializationId: "z-first", ingestionCursor: 1 },
 			{ materializationId: "a-second", ingestionCursor: 2 },
 		]);
+		expect(failedScan.firstFailure).toEqual({
+			ingestionCursor: 3,
+			traceName: "m-unreadable.jsonl",
+			notice: "Trace evidence could not be read and will be retried.",
+		});
+		shouldFail = false;
+		expect((await catalog.scan(scope, 2, 3)).materializations).toMatchObject([
+			{ materializationId: "m-unreadable", ingestionCursor: 3 },
+		]);
+		expect(materializationAttempts).toBe(4);
+		await catalog.discardProcessedThrough(scope, 3);
+		expect((await catalog.scan(scope, 0, 2)).materializations).toHaveLength(2);
+		expect(materializationAttempts).toBe(6);
 
 		await new Promise((resolveDelay) => setTimeout(resolveDelay, 5));
 		const latePath = join(traceDirectory, "00-late.jsonl");
 		writeFileSync(latePath, "late\n");
 		expect(await catalog.highWaterCursor(scope)).toBe(4);
-		expect(await catalog.listSuccessful(scope, 3, 4)).toMatchObject([
+		expect((await catalog.scan(scope, 3, 4)).materializations).toMatchObject([
 			{ materializationId: "00-late", ingestionCursor: 4 },
 		]);
+	});
+
+	it("reuses an in-flight successful materialization across concurrent scans", async () => {
+		const root = join(tmpdir(), `diffex-inflight-evidence-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+		const traceDirectory = join(root, "traces");
+		mkdirSync(traceDirectory, { recursive: true });
+		temporaryDirectories.push(root);
+		writeFileSync(join(traceDirectory, "trace.jsonl"), "trace\n");
+		const scope: EvolutionScope = { repositoryId: "repository", scopeId: "repository" };
+		let materializationCalls = 0;
+		let releaseMaterialization: (() => void) | undefined;
+		const materialized = new Promise<void>((resolve) => {
+			releaseMaterialization = resolve;
+		});
+		const catalog = new TraceEvidenceCatalog({
+			agentDir: root,
+			scope,
+			async materializeInvocation() {
+				materializationCalls += 1;
+				await materialized;
+				return materializedInvocation("trace", "/session.jsonl");
+			},
+		});
+
+		const first = catalog.scan(scope, 0, 1);
+		await vi.waitFor(() => expect(materializationCalls).toBe(1));
+		const second = catalog.scan(scope, 0, 1);
+		releaseMaterialization?.();
+		expect(await Promise.all([first, second])).toEqual([
+			{ materializations: [expect.objectContaining({ materializationId: "trace" })], firstFailure: null },
+			{ materializations: [expect.objectContaining({ materializationId: "trace" })], firstFailure: null },
+		]);
+		expect(materializationCalls).toBe(1);
 	});
 
 	it("indexes settled traces without letting an older active invocation block them", async () => {
@@ -714,14 +764,14 @@ describe("coding-agent evolution runtime", () => {
 		});
 
 		expect(await Promise.all([catalog.highWaterCursor(scope), peerCatalog.highWaterCursor(scope)])).toEqual([2, 2]);
-		expect(await catalog.listSuccessful(scope, 0, 3)).toMatchObject([
+		expect((await catalog.scan(scope, 0, 3)).materializations).toMatchObject([
 			{ materializationId: "first", ingestionCursor: 1 },
 			{ materializationId: "later", ingestionCursor: 2 },
 		]);
 
 		active.delete(activePath);
 		expect(await Promise.all([catalog.highWaterCursor(scope), peerCatalog.highWaterCursor(scope)])).toEqual([3, 3]);
-		expect(await peerCatalog.listSuccessful(scope, 2, 3)).toMatchObject([
+		expect((await peerCatalog.scan(scope, 2, 3)).materializations).toMatchObject([
 			{ materializationId: "active", ingestionCursor: 3 },
 		]);
 	});
@@ -743,7 +793,7 @@ describe("coding-agent evolution runtime", () => {
 			}),
 		});
 
-		expect(await catalog.listSuccessful(scope, 0, await catalog.highWaterCursor(scope))).toEqual([]);
+		expect((await catalog.scan(scope, 0, await catalog.highWaterCursor(scope))).materializations).toEqual([]);
 		expect(JSON.parse(readFileSync(join(traceDirectory, ".evolution-exclusions.json"), "utf8"))).toEqual({
 			version: 1,
 			exclusions: [

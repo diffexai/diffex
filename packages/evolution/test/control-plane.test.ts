@@ -222,6 +222,7 @@ interface ControlPlaneFixture<TExecutor extends EvolutionStageExecutor = Evoluti
 	readonly events: EvolutionProgressEvent[];
 	readonly executor: TExecutor;
 	readonly failureRecords: EvolutionFailureRecord[];
+	readonly prunedCursors: readonly number[];
 	readonly persistence: FileEvolutionPersistence;
 }
 
@@ -234,6 +235,11 @@ async function controlPlaneFixture<TExecutor extends EvolutionStageExecutor>(
 	],
 	highWaterCursor?: number,
 	capturedSnapshot: EvolutionSnapshotContext = snapshotContext(),
+	firstFailure: {
+		readonly ingestionCursor: number;
+		readonly traceName: string;
+		readonly notice: string;
+	} | null = null,
 ): Promise<ControlPlaneFixture<TExecutor>> {
 	const root = await mkdtemp(join(tmpdir(), "diffex-evolution-control-"));
 	temporaryDirectories.push(root);
@@ -241,6 +247,7 @@ async function controlPlaneFixture<TExecutor extends EvolutionStageExecutor>(
 	const clock = new AdvancingClock();
 	const events: EvolutionProgressEvent[] = [];
 	const failureRecords: EvolutionFailureRecord[] = [];
+	const prunedCursors: number[] = [];
 	const eventSink: EvolutionEventSink = {
 		emit(event) {
 			events.push(event);
@@ -267,10 +274,22 @@ async function controlPlaneFixture<TExecutor extends EvolutionStageExecutor>(
 				async highWaterCursor() {
 					return highWaterCursor ?? materializations.at(-1)?.ingestionCursor ?? 0;
 				},
-				async listSuccessful(_scope, afterCursor, throughCursor) {
-					return materializations.filter(
-						(item) => item.ingestionCursor > afterCursor && item.ingestionCursor <= throughCursor,
-					);
+				async scan(_scope, afterCursor, throughCursor) {
+					return {
+						materializations: materializations.filter(
+							(item) =>
+								item.ingestionCursor > afterCursor &&
+								item.ingestionCursor <= throughCursor &&
+								(firstFailure === null || item.ingestionCursor < firstFailure.ingestionCursor),
+						),
+						firstFailure,
+					};
+				},
+				async discardProcessedThrough(_scope, cursor) {
+					prunedCursors.push(cursor);
+				},
+				async excludedThroughCursor(_scope, _afterCursor, throughCursor) {
+					return throughCursor;
 				},
 			},
 			snapshots: {
@@ -282,7 +301,7 @@ async function controlPlaneFixture<TExecutor extends EvolutionStageExecutor>(
 		},
 		{ leaseTtlMs: 5_000, heartbeatIntervalMs: 1_000, retryBaseDelayMs: 0, retryMaxDelayMs: 0 },
 	);
-	return { root, clock, controlPlane, events, executor, failureRecords, persistence };
+	return { root, clock, controlPlane, events, executor, failureRecords, prunedCursors, persistence };
 }
 
 async function createManualJob(fixture: ControlPlaneFixture) {
@@ -294,6 +313,7 @@ async function createManualJob(fixture: ControlPlaneFixture) {
 
 describe("durable evolution control plane", () => {
 	it("durably consumes an excluded-only evidence range", async () => {
+		const prunedCursors: number[] = [];
 		const fixture = await controlPlaneFixture(new RecordingExecutor(), []);
 		const controlPlane = new EvolutionControlPlane(
 			{
@@ -311,11 +331,14 @@ describe("durable evolution control plane", () => {
 					async highWaterCursor() {
 						return 3;
 					},
-					async listSuccessful() {
-						return [];
+					async scan() {
+						return { materializations: [], firstFailure: null };
 					},
 					async excludedThroughCursor() {
 						return 3;
+					},
+					async discardProcessedThrough(_scope, cursor) {
+						prunedCursors.push(cursor);
 					},
 				},
 				snapshots: {
@@ -333,6 +356,55 @@ describe("durable evolution control plane", () => {
 			reason: "no-new-evidence",
 		});
 		expect(await fixture.persistence.load(scope)).toMatchObject({ sequence: 3 });
+		expect(prunedCursors).toEqual([3]);
+	});
+
+	it("processes only the successful prefix before a retryable evidence failure", async () => {
+		const fixture = await controlPlaneFixture(
+			new RecordingExecutor({ noOp: true }),
+			[materialization(1), materialization(2), materialization(3)],
+			3,
+			snapshotContext(),
+			{
+				ingestionCursor: 2,
+				traceName: "failed.jsonl",
+				notice: "Trace evidence could not be read and will be retried.",
+			},
+		);
+
+		const created = await createManualJob(fixture);
+		expect(created.evidenceRange).toEqual({ afterCursor: 0, throughCursor: 1 });
+		await fixture.controlPlane.runJob(created.jobId);
+		expect(await fixture.persistence.load(scope)).toMatchObject({ sequence: 1 });
+		expect(fixture.prunedCursors).toEqual([1]);
+		await expect(fixture.controlPlane.createJob({ scope, trigger: "manual" })).resolves.toEqual({
+			status: "not-created",
+			reason: "no-new-evidence",
+		});
+	});
+
+	it("does not count evidence after a failure toward automatic eligibility", async () => {
+		const fixture = await controlPlaneFixture(
+			new RecordingExecutor(),
+			[
+				materialization(1, 200_000, 0),
+				materialization(2, 200_000, 0),
+				materialization(3, 200_000, 0),
+				materialization(4, 200_000, 0),
+			],
+			4,
+			snapshotContext(),
+			{
+				ingestionCursor: 4,
+				traceName: "unreadable.jsonl",
+				notice: "Trace evidence could not be read and will be retried.",
+			},
+		);
+
+		await expect(fixture.controlPlane.createJob({ scope, trigger: "automatic" })).resolves.toMatchObject({
+			status: "created",
+			job: { evidenceRange: { afterCursor: 0, throughCursor: 2 } },
+		});
 	});
 
 	it("commits a mixed range through excluded evidence after eligible work completes", async () => {
@@ -741,8 +813,8 @@ describe("durable evolution control plane", () => {
 					async highWaterCursor() {
 						return 0;
 					},
-					async listSuccessful() {
-						return [];
+					async scan() {
+						return { materializations: [], firstFailure: null };
 					},
 				},
 				snapshots: {

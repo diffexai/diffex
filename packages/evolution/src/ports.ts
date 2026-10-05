@@ -604,14 +604,22 @@ export interface SuccessfulMaterialization {
 	readonly invocation: MaterializedInvocation;
 }
 
+export interface EvolutionEvidenceScanFailure {
+	readonly ingestionCursor: number;
+	readonly traceName: string;
+	readonly notice: string;
+}
+
+export interface EvolutionEvidenceScan {
+	readonly materializations: readonly SuccessfulMaterialization[];
+	readonly firstFailure: EvolutionEvidenceScanFailure | null;
+}
+
 export interface EvolutionEvidenceCatalog {
 	highWaterCursor(scope: EvolutionScope): Promise<number>;
-	listSuccessful(
-		scope: EvolutionScope,
-		afterCursor: number,
-		throughCursor: number,
-	): Promise<readonly SuccessfulMaterialization[]>;
+	scan(scope: EvolutionScope, afterCursor: number, throughCursor: number): Promise<EvolutionEvidenceScan>;
 	excludedThroughCursor?(scope: EvolutionScope, afterCursor: number, throughCursor: number): Promise<number>;
+	discardProcessedThrough?(scope: EvolutionScope, cursor: number): Promise<void>;
 }
 
 export type EvolutionSkillSnapshotSource = Omit<EvolutionSkillContentSnapshot, "workspace">;
