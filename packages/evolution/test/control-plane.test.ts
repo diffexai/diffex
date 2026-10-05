@@ -383,6 +383,28 @@ describe("durable evolution control plane", () => {
 		});
 	});
 
+	it("leaves the cursor unchanged when the first evidence trace is retryable", async () => {
+		const fixture = await controlPlaneFixture(
+			new RecordingExecutor(),
+			[materialization(1), materialization(2)],
+			2,
+			snapshotContext(),
+			{
+				ingestionCursor: 1,
+				traceName: "failed-first.jsonl",
+				notice: "Trace evidence could not be read and will be retried.",
+			},
+		);
+
+		await expect(fixture.controlPlane.createJob({ scope, trigger: "manual" })).resolves.toEqual({
+			status: "not-created",
+			reason: "no-new-evidence",
+		});
+		expect(await fixture.persistence.load(scope)).toMatchObject({ sequence: 0 });
+		expect(await fixture.persistence.list(scope)).toEqual([]);
+		expect(fixture.prunedCursors).toEqual([]);
+	});
+
 	it("does not count evidence after a failure toward automatic eligibility", async () => {
 		const fixture = await controlPlaneFixture(
 			new RecordingExecutor(),
