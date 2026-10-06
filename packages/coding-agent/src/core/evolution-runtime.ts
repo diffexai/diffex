@@ -444,7 +444,7 @@ export class CodingAgentEvolutionModelExecutor implements EvolutionModelExecutor
 				{
 					signal: controller.signal,
 					...(request.stage === "skill-synthesizer" ? { maxTokens: request.maxOutputTokens } : {}),
-					cacheRetention: "none",
+					cacheRetention: "short",
 					sessionId: request.idempotencyKey,
 					timeoutMs: PROVIDER_STREAM_IDLE_TIMEOUT_MS,
 					websocketConnectTimeoutMs: PROVIDER_FIRST_BYTE_TIMEOUT_MS,

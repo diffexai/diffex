@@ -937,6 +937,44 @@ describe("coding-agent evolution runtime", () => {
 		});
 	});
 
+	it("requests short cache retention with the evolution session ID", async () => {
+		const harness = await createHarness();
+		harnesses.push(harness);
+		const idempotencyKey = "evolution-prompt-cache";
+		harness.setResponses([
+			(_context, options) => {
+				expect(options?.cacheRetention).toBe("short");
+				expect(options?.sessionId).toBe(idempotencyKey);
+				return fauxAssistantMessage(fauxToolCall("submit_evolution_response", { complete: true, lessons: [] }), {
+					stopReason: "toolUse",
+				});
+			},
+		]);
+		const executor = new CodingAgentEvolutionModelExecutor(harness.session, harness.session.modelRuntime, {
+			async waitUntilBackgroundAllowed() {},
+		});
+		const model = harness.getModel();
+
+		await expect(
+			executor.execute({
+				stage: "reflector",
+				model: {
+					provider: model.provider,
+					model: model.id,
+					configurationDigest: `sha256:${"1".repeat(64)}`,
+				},
+				promptVersion: "reflector-v1",
+				idempotencyKey,
+				input: {},
+				outputSchema: { type: "object" },
+				tools: [],
+			}),
+		).resolves.toMatchObject({
+			output: { complete: true, lessons: [] },
+			submissionMethod: "response-tool",
+		});
+	});
+
 	it("preserves transient provider stop diagnostics for evolution failures", async () => {
 		const harness = await createHarness();
 		harnesses.push(harness);
