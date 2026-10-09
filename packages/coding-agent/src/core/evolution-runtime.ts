@@ -88,6 +88,7 @@ const TRACE_EVIDENCE_INDEX_NAME = ".evolution-index.json";
 const TRACE_EVIDENCE_INDEX_VERSION = 1;
 const TRACE_EXCLUSION_INDEX_NAME = ".evolution-exclusions.json";
 const TRACE_EXCLUSION_INDEX_VERSION = 1;
+const MAX_TRACE_MATERIALIZATION_RETRIES = 2;
 const RESPONSE_TOOL_NAME = "submit_evolution_response";
 const MAX_MODEL_ROUNDS = 10;
 const PROVIDER_FIRST_BYTE_TIMEOUT_MS = 60_000;
@@ -497,6 +498,7 @@ export class TraceEvidenceCatalog implements EvolutionEvidenceCatalog {
 		string,
 		{ readonly ingestionCursor: number; readonly materialization: Promise<SuccessfulMaterialization | null> }
 	>();
+	readonly #failedMaterializationAttempts = new Map<string, number>();
 
 	constructor(options: {
 		agentDir: string;
@@ -713,8 +715,30 @@ export class TraceEvidenceCatalog implements EvolutionEvidenceCatalog {
 			const ingestionCursor = afterCursor + index + 1;
 			const key = `${ingestionCursor}:${path}`;
 			let cached = this.#cache.get(key);
+			if (
+				cached === undefined &&
+				(this.#failedMaterializationAttempts.get(key) ?? 0) >= MAX_TRACE_MATERIALIZATION_RETRIES + 1
+			) {
+				return {
+					materializations,
+					firstFailure: {
+						ingestionCursor,
+						traceName: basename(path),
+						notice: "Trace evidence could not be read after 2 retries.",
+					},
+				};
+			}
 			if (cached === undefined) {
-				const materialization = this.#materialize(path, ingestionCursor);
+				const materialization = this.#materialize(path, ingestionCursor).then(
+					(result) => {
+						this.#failedMaterializationAttempts.delete(key);
+						return result;
+					},
+					(error: unknown) => {
+						this.#failedMaterializationAttempts.set(key, (this.#failedMaterializationAttempts.get(key) ?? 0) + 1);
+						throw error;
+					},
+				);
 				cached = { ingestionCursor, materialization };
 				this.#cache.set(key, cached);
 				void materialization.catch(() => {
@@ -730,7 +754,10 @@ export class TraceEvidenceCatalog implements EvolutionEvidenceCatalog {
 					firstFailure: {
 						ingestionCursor,
 						traceName: basename(path),
-						notice: "Trace evidence could not be read and will be retried.",
+						notice:
+							(this.#failedMaterializationAttempts.get(key) ?? 0) >= MAX_TRACE_MATERIALIZATION_RETRIES + 1
+								? "Trace evidence could not be read after 2 retries."
+								: "Trace evidence could not be read and will be retried.",
 					},
 				};
 			}

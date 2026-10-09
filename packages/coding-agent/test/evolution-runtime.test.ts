@@ -702,6 +702,55 @@ describe("coding-agent evolution runtime", () => {
 		]);
 	});
 
+	it("stops retrying unreadable evidence after two retries", async () => {
+		const root = join(tmpdir(), `diffex-bounded-evidence-retry-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+		const traceDirectory = join(root, "traces");
+		mkdirSync(traceDirectory, { recursive: true });
+		temporaryDirectories.push(root);
+		const unreadablePath = join(traceDirectory, "unreadable.jsonl");
+		writeFileSync(unreadablePath, "unreadable\n");
+		const scope: EvolutionScope = { repositoryId: "repository", scopeId: "repository" };
+		let materializationAttempts = 0;
+		const catalog = new TraceEvidenceCatalog({
+			agentDir: root,
+			scope,
+			async materializeInvocation() {
+				materializationAttempts += 1;
+				throw new Error("simulated incompatible trace");
+			},
+		});
+
+		const retryableFailure = {
+			materializations: [],
+			firstFailure: {
+				ingestionCursor: 1,
+				traceName: "unreadable.jsonl",
+				notice: "Trace evidence could not be read and will be retried.",
+			},
+		};
+		expect(await catalog.scan(scope, 0, 1)).toEqual(retryableFailure);
+		expect(await catalog.scan(scope, 0, 1)).toEqual(retryableFailure);
+		expect(await catalog.scan(scope, 0, 1)).toEqual({
+			materializations: [],
+			firstFailure: {
+				ingestionCursor: 1,
+				traceName: "unreadable.jsonl",
+				notice: "Trace evidence could not be read after 2 retries.",
+			},
+		});
+		expect(materializationAttempts).toBe(3);
+		expect(await catalog.scan(scope, 0, 1)).toEqual({
+			materializations: [],
+			firstFailure: {
+				ingestionCursor: 1,
+				traceName: "unreadable.jsonl",
+				notice: "Trace evidence could not be read after 2 retries.",
+			},
+		});
+		expect(materializationAttempts).toBe(3);
+		expect(await catalog.excludedThroughCursor(scope, 0, 1)).toBe(0);
+	});
+
 	it("reuses an in-flight successful materialization across concurrent scans", async () => {
 		const root = join(tmpdir(), `diffex-inflight-evidence-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 		const traceDirectory = join(root, "traces");
