@@ -16,7 +16,10 @@ import {
 	harnessVersionDirectoryName,
 } from "@diffexai/diffex-harness-state";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createAgentSessionFromServices, createAgentSessionServices } from "../../src/core/agent-session-services.ts";
 import { resolveHarnessWorkspace } from "../../src/core/harness-state-runtime.ts";
+import { SessionManager } from "../../src/core/session-manager.ts";
+import { markFixedHarnessSubagentSession } from "../../src/core/subagents/session-runtime.ts";
 import { createHarness, getMessageText, type Harness } from "./harness.ts";
 
 describe("AgentSession harness revisions", () => {
@@ -659,6 +662,115 @@ describe("AgentSession harness revisions", () => {
 		expect(harness.session.activeHarnessVersion).toBe(advance.bundle.manifest.version);
 		expect(providerPrompts[0]).not.toContain("<evolution_memory");
 		expect(providerPrompts[1]).toContain("Use the newly selected memory.");
+	});
+
+	it("reconciles the selected harness before regular construction while preserving pinned and fixed bundles", async () => {
+		const { harness, store, rootVersion, agentDir } = await createVersionedHarness();
+		const successor = await store.saveVersion({ memory: "Use the construction selection." }, rootVersion);
+		await store.selectVersion(successor.manifest.version);
+		const createSession = async (options: { pinHarnessVersion?: boolean; fixed?: boolean } = {}) => {
+			const services = await createAgentSessionServices({
+				cwd: harness.tempDir,
+				agentDir,
+				harnessStateStore: store,
+				harnessVersionBundle: await store.loadVersion(rootVersion),
+			});
+			const sessionManager = SessionManager.inMemory();
+			if (options.fixed) markFixedHarnessSubagentSession(sessionManager);
+			const created = await createAgentSessionFromServices({
+				services,
+				sessionManager,
+				subagents: false,
+				pinHarnessVersion: options.pinHarnessVersion,
+			});
+			return created.session;
+		};
+
+		const regular = await createSession();
+		const pinned = await createSession({ pinHarnessVersion: true });
+		const fixed = await createSession({ fixed: true });
+		try {
+			expect(regular.activeHarnessVersion).toBe(successor.manifest.version);
+			expect(pinned.activeHarnessVersion).toBe(rootVersion);
+			expect(fixed.activeHarnessVersion).toBe(rootVersion);
+		} finally {
+			await Promise.all([regular.dispose(), pinned.dispose(), fixed.dispose()]);
+		}
+	});
+
+	it("falls back to the built-in harness when selected state cannot be read during construction", async () => {
+		const { harness, store, rootVersion, agentDir } = await createVersionedHarness();
+		const services = await createAgentSessionServices({
+			cwd: harness.tempDir,
+			agentDir,
+			harnessStateStore: store,
+			harnessVersionBundle: await store.loadVersion(rootVersion),
+		});
+		vi.spyOn(store, "loadCurrent").mockRejectedValueOnce(new Error("selected state is unavailable"));
+		const created = await createAgentSessionFromServices({
+			services,
+			sessionManager: SessionManager.inMemory(),
+			subagents: false,
+		});
+		try {
+			expect(created.session.activeHarnessVersion).toBeUndefined();
+			expect(created.harnessStateWarning).toBe(
+				"Harness state could not be activated: selected state is unavailable. Continuing with the built-in harness.",
+			);
+		} finally {
+			await created.session.dispose();
+		}
+	});
+
+	it("reconciles the selected revision after an idle reload", async () => {
+		const { harness, store, rootVersion } = await createVersionedHarness();
+		const successor = await store.advance({ memory: "Use the reload selection." }, rootVersion);
+		expect(successor.status).toBe("advanced");
+		if (successor.status !== "advanced") throw new Error("Expected harness advance to succeed");
+
+		await harness.session.reload();
+
+		expect(harness.session.activeHarnessVersion).toBe(successor.bundle.manifest.version);
+		expect(harness.session.systemPrompt).toContain("Use the reload selection.");
+	});
+
+	it("retains the active harness when reload cannot reconcile the selected revision", async () => {
+		const { harness, store, rootVersion } = await createVersionedHarness();
+		const successor = await store.saveVersion({ memory: "Do not activate after a failed reload." }, rootVersion);
+		await store.selectVersion(successor.manifest.version);
+		vi.spyOn(store, "loadCurrent").mockRejectedValueOnce(new Error("selection read failed"));
+
+		await expect(harness.session.reload()).rejects.toThrow("selection read failed");
+
+		expect(harness.session.activeHarnessVersion).toBe(rootVersion);
+	});
+
+	it("rejects reload before rebuilding runtime while work is active", async () => {
+		const { harness } = await createVersionedHarness();
+		const sessionInternals = harness.session as unknown as { _buildRuntime: () => void };
+		const rebuild = vi.spyOn(sessionInternals, "_buildRuntime");
+		vi.spyOn(harness.session, "isStreaming", "get").mockReturnValue(true);
+
+		await expect(harness.session.reload()).rejects.toThrow("Cannot reload while the session is busy.");
+
+		expect(rebuild).not.toHaveBeenCalled();
+	});
+
+	it("rejects reload before rebuilding runtime while a continuation is queued", async () => {
+		const { harness } = await createVersionedHarness();
+		const sessionInternals = harness.session as unknown as { _buildRuntime: () => void };
+		const rebuild = vi.spyOn(sessionInternals, "_buildRuntime");
+		harness.session.agent.followUp({
+			role: "custom",
+			customType: "test",
+			content: [{ type: "text", text: "queued continuation" }],
+			display: false,
+			timestamp: Date.now(),
+		});
+
+		await expect(harness.session.reload()).rejects.toThrow("Cannot reload while the session is busy.");
+
+		expect(rebuild).not.toHaveBeenCalled();
 	});
 
 	it("keeps an in-flight request pinned while the next request refreshes", async () => {

@@ -81,6 +81,7 @@ export interface HarnessOptions {
 	sessionStartEvent?: SessionStartEvent;
 	harnessStateStore?: HarnessStateStore;
 	harnessVersionBundle?: HarnessVersionBundle;
+	pinHarnessVersion?: boolean;
 	telemetryContext?: TelemetryContext;
 	lifecycleObserver?: AgentSessionLifecycleObserver;
 }
@@ -208,6 +209,7 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 		sessionStartEvent: options.sessionStartEvent,
 		harnessStateStore: options.harnessStateStore,
 		harnessVersionBundle: options.harnessVersionBundle,
+		pinHarnessVersion: options.pinHarnessVersion,
 		workspaceIdentity: workspace.workspace,
 		telemetryContext: options.telemetryContext,
 		lifecycleObserver: options.lifecycleObserver,

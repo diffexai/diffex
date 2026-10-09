@@ -43,6 +43,23 @@ export interface LoadedHarnessState {
 }
 
 /**
+ * Load the selected harness from an existing store. This preserves the
+ * startup fallback used when a late selection read cannot be completed.
+ */
+export async function loadSelectedHarnessState(store: HarnessStateStore): Promise<LoadedHarnessState> {
+	try {
+		return { store, bundle: await store.loadCurrent(), warning: undefined };
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		return {
+			store,
+			bundle: undefined,
+			warning: `Harness state could not be activated: ${message}. Continuing with the built-in harness.`,
+		};
+	}
+}
+
+/**
  * Initialize the shared harness revision store and load this workspace's selected revision.
  * Invalid selected state is deliberately left untouched so `/version` can repair it.
  */
@@ -53,7 +70,6 @@ export async function loadWorkspaceHarnessState(
 	const store = new HarnessStateStore(agentDir, { workspace });
 	try {
 		await store.initialize();
-		return { store, bundle: await store.loadCurrent(), warning: undefined };
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
 		return {
@@ -62,4 +78,5 @@ export async function loadWorkspaceHarnessState(
 			warning: `Harness state could not be activated: ${message}. Continuing with the built-in harness.`,
 		};
 	}
+	return loadSelectedHarnessState(store);
 }

@@ -1,9 +1,13 @@
+import { mkdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
 	type AssistantMessage,
 	createAssistantMessageEventStream,
 	fauxAssistantMessage,
 	type Model,
 } from "@diffexai/diffex-ai";
+import { HarnessStateStore } from "@diffexai/diffex-harness-state";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { estimateTokens } from "../../src/core/compaction/index.ts";
 import { createHarness, getUserTexts, type Harness } from "./harness.ts";
@@ -184,6 +188,100 @@ describe("AgentSession compaction characterization", () => {
 
 		expect(getUserTexts(harness)).toContain("queued after compaction");
 		expect(harness.session.getLastAssistantText()).toBe("queued response");
+	});
+
+	it("reconciles the selected harness after committed manual compaction without queued work", async () => {
+		const agentDir = join(tmpdir(), `diffex-compaction-harness-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+		mkdirSync(agentDir, { recursive: true });
+		const store = new HarnessStateStore(agentDir);
+		const root = await store.initialize();
+		const harness = await createHarness({
+			harnessStateStore: store,
+			harnessVersionBundle: root,
+			settings: { compaction: { keepRecentTokens: 1 } },
+			extensionFactories: [
+				(pi) => {
+					pi.on("session_before_compact", async (event) => ({
+						compaction: {
+							summary: "manual compacted",
+							firstKeptEntryId: event.preparation.firstKeptEntryId,
+							tokensBefore: event.preparation.tokensBefore,
+							details: {},
+						},
+					}));
+				},
+			],
+		});
+		harnesses.push(harness);
+		try {
+			seedCompactableSession(harness);
+			const successor = await store.advance({ memory: "Use the compacted selection." }, root.manifest.version);
+			expect(successor.status).toBe("advanced");
+			if (successor.status !== "advanced") throw new Error("Expected harness advance to succeed");
+
+			await harness.session.compact();
+
+			expect(harness.session.activeHarnessVersion).toBe(successor.bundle.manifest.version);
+		} finally {
+			rmSync(agentDir, { recursive: true, force: true });
+		}
+	});
+
+	it("keeps a queued continuation pinned and reports a post-commit harness refresh failure", async () => {
+		const agentDir = join(tmpdir(), `diffex-compaction-harness-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+		mkdirSync(agentDir, { recursive: true });
+		const store = new HarnessStateStore(agentDir);
+		const root = await store.initialize();
+		const harness = await createHarness({
+			harnessStateStore: store,
+			harnessVersionBundle: root,
+			settings: { compaction: { keepRecentTokens: 1 } },
+			extensionFactories: [
+				(pi) => {
+					pi.on("session_before_compact", async (event) => ({
+						compaction: {
+							summary: "manual compacted",
+							firstKeptEntryId: event.preparation.firstKeptEntryId,
+							tokensBefore: event.preparation.tokensBefore,
+							details: {},
+						},
+					}));
+				},
+			],
+		});
+		harnesses.push(harness);
+		try {
+			seedCompactableSession(harness);
+			const successor = await store.advance({ memory: "Do not activate while queued." }, root.manifest.version);
+			expect(successor.status).toBe("advanced");
+			if (successor.status !== "advanced") throw new Error("Expected harness advance to succeed");
+			harness.session.agent.followUp({
+				role: "custom",
+				customType: "test",
+				content: [{ type: "text", text: "queued continuation" }],
+				display: false,
+				timestamp: Date.now(),
+			});
+
+			await harness.session.compact();
+
+			expect(harness.session.activeHarnessVersion).toBe(root.manifest.version);
+			harness.session.agent.clearAllQueues();
+			seedCompactableSession(harness);
+			vi.spyOn(store, "loadCurrent").mockRejectedValueOnce(new Error("selection read failed"));
+
+			const result = await harness.session.compact();
+
+			expect(result.summary).toContain("manual compacted");
+			expect(harness.eventsOfType("compaction_end").at(-1)).toMatchObject({
+				reason: "manual",
+				aborted: false,
+				result,
+				errorMessage: "selection read failed",
+			});
+		} finally {
+			rmSync(agentDir, { recursive: true, force: true });
+		}
 	});
 
 	it("throws when compacting without a model", async () => {

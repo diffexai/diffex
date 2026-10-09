@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Regular root sessions now reconcile selected harness memory and evolved skills at construction, idle reload, and eligible manual compaction boundaries.
+
 ## [0.3.2] - 2026-09-29
 
 ### New Features

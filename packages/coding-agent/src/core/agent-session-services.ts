@@ -239,7 +239,7 @@ export async function createInternalAgentSessionFromServices(
 	internalCustomTools: readonly ToolDefinition[] = [],
 ): Promise<CreateAgentSessionResult> {
 	registerSubagentRuntimeDiagnosticSink(options.sessionManager, options.services.diagnostics);
-	return createInternalAgentSession(
+	const result = await createInternalAgentSession(
 		{
 			backgroundProcessPolicy: options.backgroundProcessPolicy,
 			cwd: options.services.cwd,
@@ -265,4 +265,8 @@ export async function createInternalAgentSessionFromServices(
 		},
 		internalCustomTools,
 	);
+	if (result.harnessStateWarning) {
+		options.services.diagnostics.push({ type: "warning", message: result.harnessStateWarning });
+	}
+	return result;
 }

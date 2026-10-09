@@ -1475,7 +1475,7 @@ export class AgentSession {
 		await this._notifyHarnessActivated(activatedBundle.manifest.version);
 	}
 
-	private async _refreshSelectedHarnessAtPromptBoundary(): Promise<void> {
+	private async _reconcileSelectedHarness(): Promise<void> {
 		if (!this._harnessStateStore || this._pinHarnessVersion || hasFixedHarnessSubagentSession(this.sessionManager)) {
 			return;
 		}
@@ -2344,7 +2344,7 @@ export class AgentSession {
 				);
 			}
 
-			if (!this.isStreaming) await this._refreshSelectedHarnessAtPromptBoundary();
+			if (!this.isStreaming) await this._reconcileSelectedHarness();
 			signal?.throwIfAborted();
 
 			// Emit input event for extension interception (before skill/template expansion)
@@ -3381,6 +3381,14 @@ export class AgentSession {
 				usage,
 				willRetry: false,
 			});
+			let refreshError: string | undefined;
+			if (!this.agent.hasQueuedMessages()) {
+				try {
+					await this._reconcileSelectedHarness();
+				} catch (error) {
+					refreshError = error instanceof Error ? error.message : String(error);
+				}
+			}
 			// compaction_end listeners may submit queued prompts, so expose idle state before notifying them.
 			this._compactionAbortController = undefined;
 			this._emit({
@@ -3389,6 +3397,7 @@ export class AgentSession {
 				result: compactionResult,
 				aborted: false,
 				willRetry: false,
+				errorMessage: refreshError,
 			});
 			return compactionResult;
 		} catch (error) {
@@ -4175,6 +4184,18 @@ export class AgentSession {
 	}
 
 	async reload(options?: { beforeSessionStart?: () => void | Promise<void> }): Promise<void> {
+		if (
+			this._promptAdmissionInProgress ||
+			this._harnessSwitchInProgress ||
+			this.isStreaming ||
+			this.agent.hasQueuedMessages() ||
+			this.isRetrying ||
+			this._manualCompactionOperations > 0 ||
+			this.isCompacting ||
+			this.isBashRunning
+		) {
+			throw new Error("Cannot reload while the session is busy.");
+		}
 		await this._subagentController?.reset();
 		const oldRunner = this._extensionRunner;
 		const previousFlagValues = oldRunner.getFlagValues();
@@ -4189,6 +4210,7 @@ export class AgentSession {
 			flagValues: previousFlagValues,
 			includeAllExtensionTools: true,
 		});
+		await this._reconcileSelectedHarness();
 
 		const hasBindings =
 			this._extensionUIContext ||

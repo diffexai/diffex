@@ -20,6 +20,7 @@ import { formatNoModelsAvailableMessage } from "./auth-guidance.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
 import type { ExtensionRunner, LoadExtensionsResult, SessionStartEvent, ToolDefinition } from "./extensions/index.ts";
 import {
+	loadSelectedHarnessState,
 	loadWorkspaceHarnessState,
 	resolveEvolutionWorkspaceStateDirectory,
 	resolveHarnessWorkspace,
@@ -51,6 +52,7 @@ import {
 	resolveRestoredSubagentConfig,
 } from "./subagents/services.ts";
 import { RootLocalEphemeralSubagentSessionManagerFactory } from "./subagents/session-manager-factory.ts";
+import { hasFixedHarnessSubagentSession } from "./subagents/session-runtime.ts";
 import type { SubagentEscalationCallback, SubagentSupervisionOptions } from "./subagents/types.ts";
 import { time } from "./timings.ts";
 import {
@@ -440,9 +442,6 @@ export async function createInternalAgentSession(
 	const cwd = resolvePath(options.cwd ?? options.sessionManager?.getCwd() ?? process.cwd());
 	const workspace = await resolveHarnessWorkspace(cwd);
 	const agentDir = options.agentDir ? resolvePath(options.agentDir) : getDefaultAgentDir();
-	const loadedHarnessState = options.harnessStateStore
-		? { store: options.harnessStateStore, bundle: options.harnessVersionBundle, warning: undefined }
-		: await loadWorkspaceHarnessState(agentDir, workspace.workspace);
 	const subagentOptions = normalizeSubagentOptions(options.subagents);
 	const telemetryContext = options.telemetryContext ?? NOOP_TELEMETRY_CONTEXT;
 	assertNoReservedSubagentTools(options.customTools);
@@ -454,6 +453,7 @@ export async function createInternalAgentSession(
 
 	const settingsManager = options.settingsManager ?? SettingsManager.create(cwd, agentDir);
 	const sessionManager = options.sessionManager ?? SessionManager.create(cwd, getDefaultSessionDir(cwd, agentDir));
+	const usesFixedHarness = options.pinHarnessVersion === true || hasFixedHarnessSubagentSession(sessionManager);
 	const subagentController =
 		subagentOptions === false
 			? undefined
@@ -667,6 +667,11 @@ export async function createInternalAgentSession(
 		sessionManager.appendThinkingLevelChange(thinkingLevel);
 	}
 
+	const loadedHarnessState = options.harnessStateStore
+		? usesFixedHarness
+			? { store: options.harnessStateStore, bundle: options.harnessVersionBundle, warning: undefined }
+			: await loadSelectedHarnessState(options.harnessStateStore)
+		: await loadWorkspaceHarnessState(agentDir, workspace.workspace);
 	const session = new AgentSession({
 		backgroundProcessPolicy: options.backgroundProcessPolicy,
 		agent,

@@ -74,7 +74,7 @@ This is progressive disclosure: only names, descriptions, and locations are alwa
 
 ### Evolved Skills
 
-Evolved skills are immutable, workspace-scoped packages in a harness revision. The package version covers `SKILL.md` and every bundled UTF-8 supporting file, while the content digest identifies `SKILL.md` itself. Diffex exposes a package only when the active revision and workspace identity match. Selecting another revision changes `EVOLVE.md` memory and the evolved-skill set together at the next prompt boundary; in-flight and already admitted queued requests remain pinned.
+Evolved skills are immutable, workspace-scoped packages in a harness revision. The package version covers `SKILL.md` and every bundled UTF-8 supporting file, while the content digest identifies `SKILL.md` itself. Diffex exposes a package only when the active revision and workspace identity match. Selecting another revision changes `EVOLVE.md` memory and the evolved-skill set together at regular root-session construction, an idle prompt boundary, an idle reload, or successful manual compaction without a queued continuation; in-flight and already admitted queued requests remain pinned.
 
 An evolved reference binds its skill ID, content version, digest, workspace, and harness revision. A reference from an inactive revision is rejected. `/reload` refreshes installed skills while preserving the evolved overlay from the active harness. Accepted evolved skills activate automatically after validation and any configured evaluation finish. Use `/evolve` to inspect provenance, validation, available evaluation results, activation, and rollback. See [Harness Evolution](evolution.md).
 
