@@ -56,7 +56,9 @@ Use `./diffex-test.sh` to run the Diffex-branded coding agent directly from this
 
 ## Distribution policy
 
-The source repository remains private.
+The source repository remains private pending an explicit publication review.
+Changing visibility requires an audit of retained Actions logs, artifacts, source snapshots, debug maps, and linked session transcripts.
+Artifact names such as `private-release-*` do not provide access protection.
 The approved release channel is the eleven public npm packages, including `@diffexai/diffex`.
 Standalone archives, Python, secondary package registries, and interactive CLI containers are deferred.
 Public packages include readable JavaScript and declarations, with Apache-2.0 metadata and complete applicable upstream notices.
