@@ -1,7 +1,7 @@
 [
   {
     "path": "README.md",
-    "context": "Diffex is a fork of the [Pi Agent Harness](https://github.com/earendil-works/pi).",
+    "context": "Diffex builds on the [Pi Agent Harness](https://github.com/earendil-works/pi) to extend its capabilities.",
     "identities": [
       "earendil-works"
     ],
