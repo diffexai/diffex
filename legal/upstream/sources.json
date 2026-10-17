@@ -1,4 +1,9 @@
 {
+  "marked-18.0.5.LICENSE": [
+    "markedjs/marked",
+    "4063c638cb621c09091d41b26f323ff074416bb9",
+    "LICENSE"
+  ],
   "highlight-11.9.0.LICENSE": [
     "highlightjs/highlight.js",
     "f47103d4f1ac1592c56904574d1fbf5bf2475605",

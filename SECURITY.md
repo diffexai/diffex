@@ -23,9 +23,9 @@ coding agent trivially and this cannot be protected against.
 
 ## Reporting a Vulnerability
 
-If you believe you found a security vulnerability in Diffex or another package in
-this repository, contact a Diffex repository owner privately through your existing repository access.
-A dedicated public security mailbox and GitHub private reporting channel have not yet been verified.
+Report suspected vulnerabilities privately through the repository Security tab when private vulnerability reporting is available.
+Until that channel is enabled, contact a Diffex repository owner privately through your existing repository access or the contact paths on [diffex.ai](https://diffex.ai/).
+Do not put credentials, personal data, or exploit details in public issues or pull requests.
 Do not send sensitive reports to an upstream project.
 
 Please include:

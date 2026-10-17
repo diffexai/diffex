@@ -59,12 +59,13 @@ Use `./diffex-test.sh` to run the Diffex-branded coding agent directly from this
 The source repository remains private pending an explicit publication review.
 Changing visibility requires an audit of retained Actions logs, artifacts, source snapshots, debug maps, and linked session transcripts.
 Artifact names such as `private-release-*` do not provide access protection.
-The approved release channel is the eleven public npm packages, including `@diffexai/diffex`.
+The approved release channel is the public npm package `@diffexai/diffex`, which bundles the required runtime workspaces.
 Standalone archives, Python, secondary package registries, and interactive CLI containers are deferred.
 Public packages include readable JavaScript and declarations, with Apache-2.0 metadata and complete applicable upstream notices.
 They exclude source maps, TypeScript examples, and native source build files.
 Delivered implementation code remains inspectable; private source hosting and compilation do not guarantee confidentiality.
 See the [distribution review](docs/release/distribution-review.md) for exact scope and release prerequisites.
+See the [source publication review](docs/release/source-publication.md) for the separate repository visibility transition.
 
 ## Local Setup
 
@@ -124,6 +125,7 @@ Participation in the project is governed by the [Code of Conduct](CODE_OF_CONDUC
 
 Do not commit credentials, secrets, local machine artifacts, build output, or private deployment state.
 Report sensitive issues privately through the repository maintainers or the contact paths on [diffex.ai](https://diffex.ai/).
+See [SECURITY.md](SECURITY.md) for reporting guidance and the execution trust boundary.
 
 ## License
 
