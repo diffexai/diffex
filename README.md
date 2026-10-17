@@ -21,22 +21,28 @@
 
 # Diffex
 
-Diffex is a TypeScript agent harness and interactive coding agent.
+Diffex is a self-evolving coding agent.
 It provides a multi-provider LLM API, a general-purpose agent runtime, a terminal UI, remote session protocols, and an extensible coding-agent CLI.
 
-Diffex treats the agent harness as an optimization target instead of a static configuration.
-The project is evolving the harness around observable behavior, diagnostic signals, and evidence-backed improvements.
+Diffex treats the agent harness as an optimization target.
+Diffex evolves through observable behavior, diagnostic signals, and evidence-backed improvements.
 
-This repository is the current Node.js and TypeScript implementation.
 The archived Rust implementation is available at [diffexai/diffex-legacy](https://github.com/diffexai/diffex-legacy).
 
 Read more at [diffex.ai](https://diffex.ai/) and in the [Diffex white paper](https://diffex.ai/white-paper).
 
-## Fork Status
+Diffex builds on the [Pi Agent Harness](https://github.com/earendil-works/pi) to extend its capabilities.
+Use `./diffex-test.sh` to run Diffex directly from this repository.
 
-Diffex is a fork of the [Pi Agent Harness](https://github.com/earendil-works/pi).
-The workspace packages and CLI now use Diffex-owned names.
-Use `./diffex-test.sh` to run the Diffex-branded coding agent directly from this repository.
+## Installation
+
+Diffex is released on npm as [`@diffexai/diffex`](https://www.npmjs.com/package/@diffexai/diffex?activeTab=readme).
+Install it globally and launch the CLI:
+
+```bash
+npm install -g @diffexai/diffex
+diffex
+```
 
 ## Workspace Packages
 
@@ -89,14 +95,6 @@ npm run check
 
 `npm run check` runs formatting, linting, dependency policy checks, and TypeScript validation.
 `./test.sh` runs the non-E2E test suites without activating tests that require provider credentials.
-
-## Plan History
-
-`update_plan` saves each changed plan in the session history and returns the complete resolved plan in its tool result, including step IDs, statuses, and success criteria.
-Clearing the plan returns `Plan cleared.`
-Successful compaction summaries include the latest plan snapshot, or an empty plan when it was cleared or absent, so resumed and forked sessions retain the task context.
-When `/tree` summarizes an abandoned branch, its saved summary identifies that branch's plan references as historical and includes the selected branch's authoritative plan snapshot.
-Ordinary requests reuse the existing conversation prefix without appending a plan message to every model request.
 
 ## Documentation
 
