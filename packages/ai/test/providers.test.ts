@@ -73,7 +73,7 @@ describe("builtin providers", () => {
 				input: 3,
 				output: 15,
 				cacheRead: 0.3,
-				cacheWrite: 0,
+				cacheWrite: 3,
 			});
 		}
 	});
