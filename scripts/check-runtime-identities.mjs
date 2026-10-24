@@ -43,7 +43,6 @@ export function checkIdentities(root) {
           "package-lock.json",
           "tsconfig.json",
           "SECURITY.md",
-          "README.md",
           "LICENSE",
         ].includes(path)) &&
       !path.includes("/test/") &&

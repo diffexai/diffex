@@ -32,6 +32,13 @@ test("checks path and exact content, and rejects added or stale exceptions", () 
     execFileSync("git", ["add", path], { cwd: root });
     assert.equal(checkIdentities(root).occurrences, 1);
     writeFileSync(
+      join(root, "README.md"),
+      "Thank you to [Pi](https://github.com/earendil-works/pi).",
+    );
+    assert.equal(checkIdentities(root).occurrences, 1);
+    writeFileSync(join(root, "README.md"), "# Diffex");
+    assert.equal(checkIdentities(root).occurrences, 1);
+    writeFileSync(
       join(root, path),
       context + '\nfetch("https://pi.dev/api/report-install");',
     );

@@ -1,14 +1,5 @@
 [
   {
-    "path": "README.md",
-    "context": "Diffex builds on the [Pi Agent Harness](https://github.com/earendil-works/pi) to extend its capabilities.",
-    "identities": [
-      "earendil-works"
-    ],
-    "category": "legal notice",
-    "reason": "Preserves upstream source attribution alongside the unchanged MIT notice in LICENSE."
-  },
-  {
     "path": "packages/ai/src/api/openai-codex-responses.ts",
     "context": "\theaders.set(\"originator\", \"pi\");",
     "identities": [
