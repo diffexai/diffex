@@ -1659,7 +1659,11 @@ describe("coding-agent evolution runtime", () => {
 		writeFileSync(join(traceDirectory, `${traceId}.jsonl`), records.map(encodeTraceRecord).join(""));
 		const store = new HarnessStateStore(agentDir);
 		const root = await store.initialize();
-		const harness = await createHarness({ harnessStateStore: store, harnessVersionBundle: root });
+		const harness = await createHarness({
+			harnessStateStore: store,
+			harnessVersionBundle: root,
+			settings: { compaction: { enabled: false, keepRecentTokens: 1 } },
+		});
 		harnesses.push(harness);
 		harness.setResponses([
 			fauxAssistantMessage(
@@ -1790,6 +1794,27 @@ describe("coding-agent evolution runtime", () => {
 				nextPromptWillRefresh: true,
 			});
 
+			let pinnedPrompt = "";
+			harness.appendResponses([
+				(context) => {
+					pinnedPrompt = context.systemPrompt ?? "";
+					return fauxAssistantMessage("still using the original harness");
+				},
+			]);
+			await harness.session.prompt("Continue before compaction.");
+
+			expect(harness.session.activeHarnessVersion).toBe(root.manifest.version);
+			expect(pinnedPrompt).not.toContain("<name>focused-verification</name>");
+			expect(harness.session.createSkillReferences()).toEqual([]);
+
+			harness.appendResponses([fauxAssistantMessage("Summarized the original harness conversation.")]);
+			const compaction = await harness.session.compact();
+			expect(compaction.summary).toContain("Summarized the original harness conversation.");
+			expect(harness.sessionManager.getBranch()).toContainEqual(
+				expect.objectContaining({ type: "compaction", summary: compaction.summary }),
+			);
+			expect(harness.session.activeHarnessVersion).toBe(activatedHarnessVersion);
+
 			let exposedPrompt = "";
 			harness.appendResponses([
 				(context) => {
@@ -1812,6 +1837,8 @@ describe("coding-agent evolution runtime", () => {
 				}),
 			]);
 
+			expect(harness.getPendingResponseCount()).toBe(0);
+
 			await expect(runtime.control.getSkillCandidate(started.job.jobId, candidateId)).resolves.toMatchObject({
 				targetHarnessVersion: activatedHarnessVersion,
 				rollbackTargetHarnessVersion: root.manifest.version,
@@ -1823,6 +1850,11 @@ describe("coding-agent evolution runtime", () => {
 				toHarnessVersion: root.manifest.version,
 			});
 			expect((await store.loadCurrent()).manifest.version).toBe(root.manifest.version);
+			const activeReferences = harness.session.createSkillReferences();
+			await harness.session.reload();
+			expect(harness.session.activeHarnessVersion).toBe(activatedHarnessVersion);
+			expect(harness.session.systemPrompt).toContain("<name>focused-verification</name>");
+			expect(harness.session.createSkillReferences()).toEqual(activeReferences);
 			await expect(runtime.control.getSkillCandidate(started.job.jobId, candidateId)).resolves.toMatchObject({
 				summary: { state: "accepted" },
 				targetHarnessVersion: null,

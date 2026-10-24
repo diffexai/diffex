@@ -244,6 +244,10 @@ describe("Item 3: private skill-report scoring", () => {
 		expect(await env.points()).toEqual([-1, -1, -2.5]);
 		expect(await env.points(updated.manifest.version)).toEqual([0, undefined, -2.5]);
 		expect(await env.store.loadCurrent()).toEqual(updated);
+		expect(env.session.activeHarnessVersion).toBe(env.bundle.manifest.version);
+		// Background selection does not adopt packages; explicitly switch before scoring the new revision.
+		await env.session.switchHarnessVersion(updated.manifest.version);
+		expect(env.session.activeHarnessVersion).toBe(updated.manifest.version);
 		env.harness.setResponses([fauxAssistantMessage("New version output."), report([])]);
 		await env.session.prompt("Check the new version.");
 		expect(await env.points(updated.manifest.version)).toEqual([-1, undefined, -3.5]);

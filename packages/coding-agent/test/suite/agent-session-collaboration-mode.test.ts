@@ -109,7 +109,8 @@ describe("AgentSession collaboration mode foundation", () => {
 			expect(setCollaborationMode(harness.session, "plan").status).toBe("busy");
 		});
 		const prompt = harness.session.prompt("first request", { source: "extension" });
-		expect(order).toEqual(["admission"]);
+		// Admission is synchronous and precedes input, regardless of whether input has already started.
+		expect(order[0]).toBe("admission");
 		await prompt;
 		expect(order).toEqual(["admission", "input"]);
 		expect(isCollaborationModeBusy(harness.session)).toBe(false);
