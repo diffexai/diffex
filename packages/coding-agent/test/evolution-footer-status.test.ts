@@ -218,17 +218,14 @@ describe("EvolutionFooterStatus", () => {
 		status.dispose();
 	});
 
-	it("activates a newly selected evolved harness after completion", async () => {
-		let activeVersion: HarnessVersion = rootVersion;
+	it("notifies once about a newly selected evolved harness without changing the active version", async () => {
 		const fixture = client(overview(rootVersion), [
 			{ version: rootVersion, kind: "default", evolvedAt: null, evolvedIn: null },
 		]);
-		const selected = vi.fn(async (version: string) => {
-			activeVersion = version as HarnessVersion;
-		});
+		const selected = vi.fn();
 		const status = new EvolutionFooterStatus({
 			client: fixture.client,
-			getActiveHarnessVersion: () => activeVersion,
+			getActiveHarnessVersion: () => rootVersion,
 			requestRender: () => {},
 			onSelectedHarnessChange: selected,
 		});
@@ -252,7 +249,42 @@ describe("EvolutionFooterStatus", () => {
 		});
 		await vi.waitFor(() => expect(selected).toHaveBeenCalledWith(evolvedVersion));
 
-		expect(status.getSnapshot().activeVersionInfo?.version).toBe(evolvedVersion);
+		await status.refresh();
+		fixture.emit({
+			jobId: "job-active",
+			emittedAt: "2026-08-20T12:48:00.000Z",
+			type: "completed",
+			stage: "completed",
+		});
+		await status.refresh();
+
+		expect(selected).toHaveBeenCalledExactlyOnceWith(evolvedVersion);
+		expect(status.getSnapshot().activeVersionInfo?.version).toBe(rootVersion);
+		status.dispose();
+	});
+
+	it("does not notify for initial hydration or completion without a selected-version change", async () => {
+		const fixture = client(overview(evolvedVersion), []);
+		const selected = vi.fn();
+		const status = new EvolutionFooterStatus({
+			client: fixture.client,
+			getActiveHarnessVersion: () => rootVersion,
+			requestRender: () => {},
+			onSelectedHarnessChange: selected,
+		});
+		await status.refresh();
+		expect(selected).not.toHaveBeenCalled();
+
+		fixture.emit({
+			jobId: "job-no-change",
+			emittedAt: "2026-08-20T12:48:00.000Z",
+			type: "completed",
+			stage: "completed",
+		});
+		await status.refresh();
+		await status.refresh();
+
+		expect(selected).not.toHaveBeenCalled();
 		status.dispose();
 	});
 

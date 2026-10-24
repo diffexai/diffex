@@ -45,7 +45,6 @@ export class EvolutionFooterStatus {
 	#spinnerFrameIndex = 0;
 	#selectedHarnessVersion: string | null = null;
 	#selectedHarnessVersionLoaded = false;
-	#activateSelectedHarness = false;
 	#versionInfoGeneration = 0;
 	#loadedVersionInfoGeneration = -1;
 	#refreshPromise: Promise<void> | null = null;
@@ -138,14 +137,11 @@ export class EvolutionFooterStatus {
 				if (selectionChanged) {
 					this.#versionInfoGeneration += 1;
 					this.#refreshAgain = true;
-				}
-				if ((selectionChanged || this.#activateSelectedHarness) && selectedVersion !== null) {
-					this.#activateSelectedHarness = false;
 					await this.#onSelectedHarnessChange?.(selectedVersion);
 				}
 			}
 		} catch {
-			// Footer status is best-effort. Prompt-boundary harness refresh remains authoritative.
+			// Footer status is best-effort. Session lifecycle boundaries control harness adoption.
 		} finally {
 			if (!this.#disposed) {
 				this.#requestRender();
@@ -167,7 +163,6 @@ export class EvolutionFooterStatus {
 		}
 		if (event.type === "completed" || event.type === "failed") this.#setRunning(false);
 		if (event.type === "completed") {
-			this.#activateSelectedHarness = true;
 			this.#versionInfoGeneration += 1;
 		}
 		this.#requestRender();

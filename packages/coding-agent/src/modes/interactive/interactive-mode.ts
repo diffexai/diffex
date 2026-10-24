@@ -716,13 +716,11 @@ export class InteractiveMode {
 		this.footer = new FooterComponent(this.session, this.footerDataProvider, {
 			evolution: options.evolution,
 			requestRender: () => this.ui.requestRender(),
-			onSelectedHarnessChange: async (version) => {
+			onSelectedHarnessChange: (version) => {
 				if (version === this.session.activeHarnessVersion) return;
-				try {
-					await this.session.switchHarnessVersion(version);
-				} catch {
-					// A busy session refreshes the selected harness at its next prompt boundary.
-				}
+				this.showStatus(
+					"Evolution selected a new harness revision. Changes apply automatically after context compaction, or use /clear to apply them now.",
+				);
 			},
 		});
 		this.footerContainer = new Container();
