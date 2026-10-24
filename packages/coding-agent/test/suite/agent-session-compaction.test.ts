@@ -1,16 +1,19 @@
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
 	type AssistantMessage,
 	createAssistantMessageEventStream,
 	fauxAssistantMessage,
+	fauxToolCall,
 	type Model,
 } from "@diffexai/diffex-ai";
 import { HarnessStateStore } from "@diffexai/diffex-harness-state";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { PLAN_MODE_SYSTEM_PROMPT, setCollaborationMode } from "../../src/core/collaboration-mode.ts";
 import { estimateTokens } from "../../src/core/compaction/index.ts";
-import { createHarness, getUserTexts, type Harness } from "./harness.ts";
+import { markFixedHarnessSubagentSession } from "../../src/core/subagents/session-runtime.ts";
+import { createHarness, getMessageText, getUserTexts, type Harness, type HarnessOptions } from "./harness.ts";
 
 type SessionWithCompactionInternals = {
 	_checkCompaction: (assistantMessage: AssistantMessage, skipAbortedCheck?: boolean) => Promise<boolean>;
@@ -91,6 +94,38 @@ function seedCompactableSession(harness: Harness): void {
 
 describe("AgentSession compaction characterization", () => {
 	const harnesses: Harness[] = [];
+	const agentDirs: string[] = [];
+
+	async function createVersionedCompactionHarness(options: HarnessOptions = {}) {
+		const agentDir = join(tmpdir(), `diffex-compaction-harness-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+		mkdirSync(agentDir, { recursive: true });
+		agentDirs.push(agentDir);
+		const store = new HarnessStateStore(agentDir);
+		const root = await store.initialize();
+		const harness = await createHarness({
+			...options,
+			harnessStateStore: store,
+			harnessVersionBundle: root,
+			settings: {
+				...options.settings,
+				compaction: { enabled: true, keepRecentTokens: 1, reserveTokens: 0, ...options.settings?.compaction },
+			},
+			extensionFactories: [
+				(pi) => {
+					pi.on("session_before_compact", (event) => ({
+						compaction: {
+							summary: "versioned compaction summary",
+							firstKeptEntryId: event.preparation.firstKeptEntryId,
+							tokensBefore: event.preparation.tokensBefore,
+						},
+					}));
+				},
+				...(options.extensionFactories ?? []),
+			],
+		});
+		harnesses.push(harness);
+		return { harness, store, root };
+	}
 
 	afterEach(async () => {
 		vi.useRealTimers();
@@ -98,6 +133,7 @@ describe("AgentSession compaction characterization", () => {
 		while (harnesses.length > 0) {
 			await harnesses.pop()?.cleanup();
 		}
+		for (const agentDir of agentDirs.splice(0)) rmSync(agentDir, { recursive: true, force: true });
 	});
 
 	it("manually compacts using an extension-provided summary", async () => {
@@ -227,7 +263,7 @@ describe("AgentSession compaction characterization", () => {
 		}
 	});
 
-	it("keeps a queued continuation pinned and reports a post-commit harness refresh failure", async () => {
+	it("refreshes with a queued continuation and reports a later post-commit harness refresh failure", async () => {
 		const agentDir = join(tmpdir(), `diffex-compaction-harness-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 		mkdirSync(agentDir, { recursive: true });
 		const store = new HarnessStateStore(agentDir);
@@ -252,7 +288,10 @@ describe("AgentSession compaction characterization", () => {
 		harnesses.push(harness);
 		try {
 			seedCompactableSession(harness);
-			const successor = await store.advance({ memory: "Do not activate while queued." }, root.manifest.version);
+			const successor = await store.advance(
+				{ memory: "Activate at the compaction boundary." },
+				root.manifest.version,
+			);
 			expect(successor.status).toBe("advanced");
 			if (successor.status !== "advanced") throw new Error("Expected harness advance to succeed");
 			harness.session.agent.followUp({
@@ -265,7 +304,7 @@ describe("AgentSession compaction characterization", () => {
 
 			await harness.session.compact();
 
-			expect(harness.session.activeHarnessVersion).toBe(root.manifest.version);
+			expect(harness.session.activeHarnessVersion).toBe(successor.bundle.manifest.version);
 			harness.session.agent.clearAllQueues();
 			seedCompactableSession(harness);
 			vi.spyOn(store, "loadCurrent").mockRejectedValueOnce(new Error("selection read failed"));
@@ -282,6 +321,196 @@ describe("AgentSession compaction characterization", () => {
 		} finally {
 			rmSync(agentDir, { recursive: true, force: true });
 		}
+	});
+
+	it.each(["default", "plan"] as const)(
+		"refreshes the %s harness before automatic tool and overflow continuations",
+		async (mode) => {
+			for (const reason of ["threshold", "overflow"] as const) {
+				const { harness, store, root } = await createVersionedCompactionHarness({
+					models: [{ id: "faux-1", contextWindow: 1000, maxTokens: 100 }],
+				});
+				if (mode === "plan") setCollaborationMode(harness.session, mode);
+				seedCompactableSession(harness);
+				writeFileSync(join(harness.tempDir, "context.txt"), "context to inspect");
+				let selectedVersion = root.manifest.version;
+				const prompts: string[] = [];
+				harness.setResponses([
+					async (context) => {
+						prompts.push(context.systemPrompt ?? "");
+						const advanced = await store.advance(
+							{ memory: "Use memory after automatic compaction." },
+							root.manifest.version,
+						);
+						if (advanced.status !== "advanced") throw new Error("Expected harness advance to succeed");
+						selectedVersion = advanced.bundle.manifest.version;
+						return reason === "threshold"
+							? fauxAssistantMessage(fauxToolCall("read", { path: join(harness.tempDir, "context.txt") }), {
+									stopReason: "toolUse",
+								})
+							: fauxAssistantMessage("", { stopReason: "error", errorMessage: "prompt is too long" });
+					},
+					(context) => {
+						prompts.push(context.systemPrompt ?? "");
+						harness.settingsManager.setCompactionEnabled(false);
+						return fauxAssistantMessage("continued with the new harness");
+					},
+				]);
+
+				await harness.session.prompt("x".repeat(5000));
+
+				expect(prompts, reason).toHaveLength(2);
+				expect(prompts[0]).not.toContain("Use memory after automatic compaction.");
+				expect(prompts[1]).toContain("Use memory after automatic compaction.");
+				if (mode === "plan") expect(prompts[1]).toContain(PLAN_MODE_SYSTEM_PROMPT);
+				expect(harness.session.activeHarnessVersion).toBe(selectedVersion);
+				expect(harness.eventsOfType("compaction_end")[0]).toMatchObject({ reason, aborted: false });
+			}
+		},
+	);
+
+	it.each([false, true])("refreshes only after pre-prompt compaction commits (cancel: %s)", async (cancel) => {
+		const { harness, store, root } = await createVersionedCompactionHarness({
+			models: [{ id: "faux-1", contextWindow: 1000 }],
+			settings: { compaction: { reserveTokens: 950 } },
+		});
+		seedCompactableSession(harness);
+		const advanced = await store.advance({ memory: "Use committed pre-prompt memory." }, root.manifest.version);
+		if (advanced.status !== "advanced") throw new Error("Expected harness advance to succeed");
+		const controller = new AbortController();
+		harness.setResponses([
+			(context) => {
+				expect(context.systemPrompt).toContain("Use committed pre-prompt memory.");
+				harness.settingsManager.setCompactionEnabled(false);
+				return fauxAssistantMessage("after pre-prompt compaction");
+			},
+		]);
+
+		const prompt = harness.session.prompt("continue", {
+			signal: controller.signal,
+			preflightResult: (accepted) => {
+				if (accepted && cancel) controller.abort(new Error("cancel before commit"));
+			},
+		});
+		if (cancel) await expect(prompt).rejects.toThrow("cancel before commit");
+		else await prompt;
+
+		expect(harness.session.activeHarnessVersion).toBe(
+			cancel ? root.manifest.version : advanced.bundle.manifest.version,
+		);
+		expect(harness.sessionManager.getEntries().filter((entry) => entry.type === "compaction")).toHaveLength(
+			cancel ? 0 : 1,
+		);
+		expect(harness.faux.state.callCount).toBe(cancel ? 0 : 1);
+	});
+
+	it.each(["pre-prompt", "overflow"] as const)(
+		"preserves extension prompt overrides through %s refresh",
+		async (boundary) => {
+			const { harness, store, root } = await createVersionedCompactionHarness({
+				models: [{ id: "faux-1", contextWindow: 1000 }],
+				settings: { compaction: { reserveTokens: boundary === "pre-prompt" ? 950 : 0 } },
+				extensionFactories: [
+					(pi) => {
+						pi.on("before_agent_start", () => ({ systemPrompt: "Extension-owned prompt" }));
+					},
+				],
+			});
+			seedCompactableSession(harness);
+			const advanced = await store.advance({ memory: "New base harness memory." }, root.manifest.version);
+			if (advanced.status !== "advanced") throw new Error("Expected harness advance to succeed");
+			const prompts: string[] = [];
+			harness.setResponses([
+				(context) => {
+					prompts.push(context.systemPrompt ?? "");
+					if (boundary === "overflow")
+						return fauxAssistantMessage("", { stopReason: "error", errorMessage: "prompt is too long" });
+					harness.settingsManager.setCompactionEnabled(false);
+					return fauxAssistantMessage("after pre-prompt compaction");
+				},
+				(context) => {
+					prompts.push(context.systemPrompt ?? "");
+					harness.settingsManager.setCompactionEnabled(false);
+					return fauxAssistantMessage("after overflow compaction");
+				},
+			]);
+
+			await harness.session.prompt("continue with the extension prompt");
+
+			expect(prompts).toEqual(Array(boundary === "overflow" ? 2 : 1).fill("Extension-owned prompt"));
+			expect(harness.session.activeHarnessVersion).toBe(advanced.bundle.manifest.version);
+			expect(harness.session.systemPrompt).toContain("New base harness memory.");
+		},
+	);
+
+	it("restores next-turn context if cancellation arrives during the committed harness refresh", async () => {
+		const { harness, store, root } = await createVersionedCompactionHarness({
+			models: [{ id: "faux-1", contextWindow: 1000 }],
+			settings: { compaction: { reserveTokens: 950 } },
+		});
+		seedCompactableSession(harness);
+		const advanced = await store.advance({ memory: "Committed harness memory." }, root.manifest.version);
+		if (advanced.status !== "advanced") throw new Error("Expected harness advance to succeed");
+		await harness.session.sendCustomMessage(
+			{ customType: "test", content: "pending context survives cancellation", display: false },
+			{ deliverAs: "nextTurn" },
+		);
+		const controller = new AbortController();
+		vi.spyOn(store, "loadCurrent").mockImplementationOnce(async () => {
+			controller.abort(new Error("cancel during harness refresh"));
+			return advanced.bundle;
+		});
+
+		await expect(harness.session.prompt("cancel before agent start", { signal: controller.signal })).rejects.toThrow(
+			"cancel during harness refresh",
+		);
+
+		expect(harness.eventsOfType("agent_start")).toHaveLength(0);
+		expect(harness.sessionManager.getEntries().filter((entry) => entry.type === "compaction")).toHaveLength(1);
+		harness.settingsManager.setCompactionEnabled(false);
+		harness.setResponses([
+			(context) => {
+				expect(
+					context.messages.filter((message) =>
+						getMessageText(message).includes("pending context survives cancellation"),
+					),
+				).toHaveLength(1);
+				return fauxAssistantMessage("restored pending context");
+			},
+		]);
+		await harness.session.prompt("try again");
+		expect(harness.session.getLastAssistantText()).toBe("restored pending context");
+	});
+
+	it.each(["pinned", "fixed"])("keeps a %s harness unchanged after compaction", async (kind) => {
+		const { harness, store, root } = await createVersionedCompactionHarness({ pinHarnessVersion: kind === "pinned" });
+		if (kind === "fixed") markFixedHarnessSubagentSession(harness.sessionManager);
+		seedCompactableSession(harness);
+		await store.advance({ memory: "Do not apply to pinned sessions." }, root.manifest.version);
+
+		await harness.session.compact();
+
+		expect(harness.session.activeHarnessVersion).toBe(root.manifest.version);
+	});
+
+	it("reports an automatic refresh failure without undoing compaction or stopping recovery", async () => {
+		const { harness, store, root } = await createVersionedCompactionHarness();
+		seedCompactableSession(harness);
+		await store.advance({ memory: "Unavailable selected memory." }, root.manifest.version);
+		vi.spyOn(store, "loadCurrent").mockRejectedValueOnce(new Error("selection read failed"));
+		const sessionInternals = harness.session as unknown as SessionWithCompactionInternals;
+
+		await expect(sessionInternals._runAutoCompaction("overflow", true)).resolves.toBe(true);
+
+		expect(harness.session.activeHarnessVersion).toBe(root.manifest.version);
+		expect(harness.eventsOfType("compaction_end").at(-1)).toMatchObject({
+			reason: "overflow",
+			aborted: false,
+			willRetry: true,
+			result: expect.objectContaining({ summary: expect.stringContaining("versioned compaction summary") }),
+			errorMessage: "selection read failed",
+		});
+		expect(harness.sessionManager.getEntries().filter((entry) => entry.type === "compaction")).toHaveLength(1);
 	});
 
 	it("throws when compacting without a model", async () => {

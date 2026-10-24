@@ -719,7 +719,7 @@ describe("AgentSession prompt characterization", () => {
 		expect(harness.faux.state.callCount).toBe(0);
 	});
 
-	it("observes cancellation after the awaited harness refresh boundary", async () => {
+	it("admits a signaled prompt without reading a selected harness pointer that would block", async () => {
 		const agentDir = join(tmpdir(), `diffex-prompt-signal-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 		mkdirSync(agentDir, { recursive: true });
 		tempDirs.push(agentDir);
@@ -727,24 +727,39 @@ describe("AgentSession prompt characterization", () => {
 		const root = await store.initialize();
 		const harness = await createHarness({ harnessStateStore: store, harnessVersionBundle: root });
 		harnesses.push(harness);
-		const loadStarted = deferred();
+		const successor = await store.saveVersion(
+			{ memory: "Do not adopt during prompt admission." },
+			root.manifest.version,
+		);
+		await store.selectVersion(successor.manifest.version);
 		const releaseLoad = deferred();
-		const loadCurrent = store.loadCurrent.bind(store);
-		vi.spyOn(store, "loadCurrent").mockImplementation(async () => {
-			loadStarted.resolve();
+		const loadCurrent = vi.spyOn(store, "loadCurrent").mockImplementation(async () => {
 			await releaseLoad.promise;
-			return loadCurrent();
+			return successor;
 		});
+		let providerPrompt = "";
+		harness.setResponses([
+			(context) => {
+				providerPrompt = context.systemPrompt ?? "";
+				return fauxAssistantMessage("pinned response");
+			},
+		]);
 		const controller = new AbortController();
-		const reason = new Error("cancel harness refresh");
-		const prompt = harness.session.prompt("refresh", { signal: controller.signal });
-		await loadStarted.promise;
-		controller.abort(reason);
-		releaseLoad.resolve();
+		const prompt = harness.session.prompt("remain pinned", { signal: controller.signal });
+		try {
+			await vi.waitFor(() => expect(harness.faux.state.callCount).toBe(1));
+		} finally {
+			// Release a regressed pointer read so a failing assertion cannot strand prompt cleanup.
+			releaseLoad.resolve();
+			await prompt;
+		}
 
-		await expect(prompt).rejects.toBe(reason);
-		expect(harness.session.messages).toEqual([]);
-		expect(harness.faux.state.callCount).toBe(0);
+		expect(loadCurrent).not.toHaveBeenCalled();
+		expect(harness.session.activeHarnessVersion).toBe(root.manifest.version);
+		expect(providerPrompt).not.toContain("Do not adopt during prompt admission.");
+		expect(harness.session.messages.map((message) => message.role)).toEqual(["user", "assistant"]);
+		expect(getMessageText(harness.session.messages[1])).toBe("pinned response");
+		expect(harness.getPendingResponseCount()).toBe(0);
 	});
 
 	it("propagates cancellation through authentication", async () => {

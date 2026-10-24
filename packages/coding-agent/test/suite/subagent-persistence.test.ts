@@ -691,7 +691,7 @@ describe("durable subagent lifecycle", () => {
 		});
 	});
 
-	it.each(["reload", "manual harness switch", "prompt-boundary harness refresh"] as const)(
+	it.each(["reload", "manual harness switch", "compaction-boundary harness refresh"] as const)(
 		"writes an empty reset barrier through %s",
 		async (boundary) => {
 			const root = await createRoot();
@@ -709,10 +709,38 @@ describe("durable subagent lifecycle", () => {
 					const successor = await store.saveVersion({ memory: "manual successor" }, currentVersion);
 					await root.session.switchHarnessVersion(successor.manifest.version);
 				} else {
-					const successor = await store.advance({ memory: "prompt successor" }, currentVersion);
+					const successor = await store.advance({ memory: "compaction successor" }, currentVersion);
 					expect(successor.status).toBe("advanced");
-					root.harness.setResponses([fauxAssistantMessage("parent response")]);
-					await root.session.prompt("activate selected harness");
+					if (successor.status !== "advanced") throw new Error("Expected harness advance to succeed");
+					let providerPrompt = "";
+					root.harness.setResponses([
+						(context) => {
+							providerPrompt = context.systemPrompt ?? "";
+							return fauxAssistantMessage("parent response");
+						},
+					]);
+					await root.session.prompt("keep the active harness and child roster pinned");
+
+					expect(root.session.activeHarnessVersion).toBe(currentVersion);
+					expect(providerPrompt).not.toContain("compaction successor");
+					expect(root.session.getSubagents()).toEqual([{ name: "worker", status: "idle", task: "finish" }]);
+					expect(readSelectedBranchSubagentRoster(root.sessionManager).children).toEqual([
+						expect.objectContaining({
+							kind: "restorable",
+							snapshot: expect.objectContaining({
+								name: "worker",
+								config: expect.objectContaining({ harnessRevision: currentVersion }),
+							}),
+						}),
+					]);
+
+					root.harness.settingsManager.applyOverrides({ compaction: { keepRecentTokens: 1 } });
+					root.harness.setResponses([fauxAssistantMessage("compacted before adopting the selected harness")]);
+					await root.session.compact();
+
+					expect(root.session.activeHarnessVersion).toBe(successor.bundle.manifest.version);
+					expect(root.session.systemPrompt).toContain("compaction successor");
+					expect(root.sessionManager.getEntries().some((entry) => entry.type === "compaction")).toBe(true);
 				}
 			}
 

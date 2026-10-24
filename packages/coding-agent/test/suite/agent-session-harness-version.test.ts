@@ -206,7 +206,7 @@ describe("AgentSession harness revisions", () => {
 		);
 	});
 
-	it("refreshes memory and evolved skills from one selected revision", async () => {
+	it("explicitly adopts memory and evolved skills from one selected revision", async () => {
 		const { harness, store, rootVersion, telemetry } = await createVersionedHarness();
 		const workspace = await resolveHarnessWorkspace(harness.tempDir);
 		const skillContent =
@@ -233,6 +233,7 @@ describe("AgentSession harness revisions", () => {
 			},
 		]);
 
+		await harness.session.switchHarnessVersion(revision.manifest.version);
 		await harness.session.prompt("observe the atomic revision");
 
 		expect(harness.session.activeHarnessVersion).toBe(revision.manifest.version);
@@ -277,7 +278,7 @@ describe("AgentSession harness revisions", () => {
 		expect(harness.session.createSkillReferences()).toEqual([]);
 	});
 
-	it("loads a manually assembled skill revision and restores the prior catalog at the next prompt", async () => {
+	it("pins a manually assembled skill revision until explicitly restoring the prior catalog", async () => {
 		const { harness, store, rootVersion, telemetry, agentDir } = await createVersionedHarness();
 		const root = await store.loadVersion(rootVersion);
 		const workspace = await resolveHarnessWorkspace(harness.tempDir);
@@ -301,10 +302,15 @@ describe("AgentSession harness revisions", () => {
 			},
 			(context) => {
 				providerPrompts.push(context.systemPrompt ?? "");
+				return fauxAssistantMessage("still pinned revision");
+			},
+			(context) => {
+				providerPrompts.push(context.systemPrompt ?? "");
 				return fauxAssistantMessage("restored revision");
 			},
 		]);
 
+		await harness.session.switchHarnessVersion(revision);
 		await harness.session.prompt("trace the selected skill");
 
 		expect(harness.session.activeHarnessVersion).toBe(revision);
@@ -342,12 +348,21 @@ describe("AgentSession harness revisions", () => {
 		expect(rolledBack.status).toBe("selected");
 		expect(harness.session.activeHarnessVersion).toBe(revision);
 
-		await harness.session.prompt("observe the restored catalog");
+		await harness.session.prompt("observe the pinned catalog after background rollback");
+
+		expect(harness.session.activeHarnessVersion).toBe(revision);
+		expect(providerPrompts[1]).toContain("Use the manually assembled harness revision.");
+		expect(providerPrompts[1]).toContain("<name>manual-review</name>");
+		expect(harness.session.createSkillReferences()).toEqual([reference]);
+
+		await harness.session.switchHarnessVersion(rootVersion);
+		await harness.session.prompt("observe the explicitly restored catalog");
 
 		expect(harness.session.activeHarnessVersion).toBe(rootVersion);
-		expect(providerPrompts[1]).not.toContain("Use the manually assembled harness revision.");
-		expect(providerPrompts[1]).not.toContain("<name>manual-review</name>");
+		expect(providerPrompts[2]).not.toContain("Use the manually assembled harness revision.");
+		expect(providerPrompts[2]).not.toContain("<name>manual-review</name>");
 		expect(harness.session.createSkillReferences()).toEqual([]);
+		expect(harness.getPendingResponseCount()).toBe(0);
 	});
 
 	it("selects complete skill-only descendants and restores exact ancestor catalogs in provider prompts", async () => {
@@ -476,7 +491,7 @@ describe("AgentSession harness revisions", () => {
 		expect((await store.loadCurrent()).manifest.version).toBe(one.manifest.version);
 	});
 
-	it("pins in-flight tool continuations across a skill-only selection change", async () => {
+	it("pins tool continuations and later idle requests across a skill-only selection change", async () => {
 		const { harness, store, one, updated } = await createSkillRevisionChain();
 		await harness.session.switchHarnessVersion(one.manifest.version);
 		const [skill] = one.state.skills;
@@ -513,14 +528,15 @@ describe("AgentSession harness revisions", () => {
 			release.resolve();
 			await inFlight;
 		}
-		await harness.session.prompt("observe the fresh selection");
+		await harness.session.prompt("observe the pinned selection on a later idle request");
 
 		expect(providerPrompts).toHaveLength(3);
 		expectRevisionPrompt(providerPrompts[0] ?? "", one);
 		expectRevisionPrompt(providerPrompts[1] ?? "", one);
 		expect(readResult).toContain("# Original alpha-review");
-		expectRevisionPrompt(providerPrompts[2] ?? "", updated);
-		expect(harness.session.activeHarnessVersion).toBe(updated.manifest.version);
+		expectRevisionPrompt(providerPrompts[2] ?? "", one);
+		expect(harness.session.activeHarnessVersion).toBe(one.manifest.version);
+		expect((await store.loadCurrent()).manifest.version).toBe(updated.manifest.version);
 		expect(harness.getPendingResponseCount()).toBe(0);
 	});
 
@@ -576,14 +592,15 @@ describe("AgentSession harness revisions", () => {
 			expect(userMessages[0]).toContain(`version="${reference.version}"`);
 			expect(userMessages[0]).toContain(`harness-revision="${one.manifest.version}"`);
 			expect(userMessages[0]).not.toContain("Updated");
-			expectRevisionPrompt(providerPrompts[2] ?? "", updated);
+			expectRevisionPrompt(providerPrompts[2] ?? "", one);
 			expect(userMessages[1]).toBe("fresh review");
-			expect(harness.session.activeHarnessVersion).toBe(updated.manifest.version);
+			expect(harness.session.activeHarnessVersion).toBe(one.manifest.version);
+			expect((await store.loadCurrent()).manifest.version).toBe(updated.manifest.version);
 			expect(harness.getPendingResponseCount()).toBe(0);
 		},
 	);
 
-	it("rejects an evolved reference after the selected harness changes", async () => {
+	it("rejects an evolved reference after explicitly switching the active harness", async () => {
 		const { harness, store, rootVersion } = await createVersionedHarness();
 		const workspace = await resolveHarnessWorkspace(harness.tempDir);
 		const first = await store.saveVersion(
@@ -617,6 +634,7 @@ describe("AgentSession harness revisions", () => {
 			first.manifest.version,
 		);
 		await store.selectVersion(second.manifest.version);
+		await harness.session.switchHarnessVersion(second.manifest.version);
 
 		await expect(harness.session.prompt(`${reference.reference}\n\nreview this`)).rejects.toThrow(
 			"is not part of the active harness revision",
@@ -638,7 +656,7 @@ describe("AgentSession harness revisions", () => {
 		expect((await store.loadCurrent()).manifest.version).toBe(rootVersion);
 	});
 
-	it("refreshes the selected harness before the next admitted request", async () => {
+	it("keeps idle prompt admission pinned when the selected harness advances", async () => {
 		const { harness, store, rootVersion } = await createVersionedHarness();
 		const providerPrompts: string[] = [];
 		harness.setResponses([
@@ -659,9 +677,12 @@ describe("AgentSession harness revisions", () => {
 
 		await harness.session.prompt("second request");
 
-		expect(harness.session.activeHarnessVersion).toBe(advance.bundle.manifest.version);
+		expect(harness.session.activeHarnessVersion).toBe(rootVersion);
+		expect(providerPrompts).toHaveLength(2);
 		expect(providerPrompts[0]).not.toContain("<evolution_memory");
-		expect(providerPrompts[1]).toContain("Use the newly selected memory.");
+		expect(providerPrompts[1]).not.toContain("<evolution_memory");
+		expect((await store.loadCurrent()).manifest.version).toBe(advance.bundle.manifest.version);
+		expect(harness.getPendingResponseCount()).toBe(0);
 	});
 
 	it("reconciles the selected harness before regular construction while preserving pinned and fixed bundles", async () => {
@@ -698,6 +719,78 @@ describe("AgentSession harness revisions", () => {
 		}
 	});
 
+	it("adopts the selected revision in a fresh /clear-equivalent session from the same cwd services", async () => {
+		const { harness, store, rootVersion, agentDir, one, updated } = await createSkillRevisionChain();
+		const services = await createAgentSessionServices({
+			cwd: harness.tempDir,
+			agentDir,
+			modelRuntime: harness.session.modelRuntime,
+			settingsManager: harness.settingsManager,
+			resourceLoaderOptions: {
+				noExtensions: true,
+				noSkills: true,
+				noPromptTemplates: true,
+				noThemes: true,
+				noContextFiles: true,
+			},
+			harnessStateStore: store,
+			harnessVersionBundle: await store.loadVersion(rootVersion),
+		});
+		await store.selectVersion(one.manifest.version);
+		const providerPrompts: string[] = [];
+		harness.setResponses(
+			Array.from({ length: 3 }, () => (context) => {
+				providerPrompts.push(context.systemPrompt ?? "");
+				return fauxAssistantMessage("observed session revision");
+			}),
+		);
+		const original = await createAgentSessionFromServices({
+			services,
+			sessionManager: SessionManager.inMemory(harness.tempDir),
+			model: harness.getModel(),
+			subagents: false,
+		});
+		// Isolate session lifecycle requests from the SDK's private scoring continuations.
+		original.session.agent.preparePrivateContinuation = undefined;
+		try {
+			await original.session.prompt("before background selection");
+			await store.selectVersion(updated.manifest.version);
+			await original.session.prompt("remain pinned before clear");
+
+			expect(original.session.activeHarnessVersion).toBe(one.manifest.version);
+			expect(original.session.messages.length).toBeGreaterThan(0);
+			expectRevisionPrompt(providerPrompts[0] ?? "", one);
+			expectRevisionPrompt(providerPrompts[1] ?? "", one);
+		} finally {
+			await original.session.dispose();
+		}
+
+		// /clear replaces the session with a new SessionManager in the same cwd.
+		const cleared = await createAgentSessionFromServices({
+			services,
+			sessionManager: SessionManager.inMemory(harness.tempDir),
+			sessionStartEvent: { type: "session_start", reason: "new" },
+			model: harness.getModel(),
+			subagents: false,
+		});
+		cleared.session.agent.preparePrivateContinuation = undefined;
+		try {
+			expect(cleared.session.activeHarnessVersion).toBe(updated.manifest.version);
+			expect(cleared.session.messages).toEqual([]);
+			await cleared.session.prompt("observe the selected revision after clear");
+
+			expectRevisionPrompt(providerPrompts[2] ?? "", updated);
+			expect(cleared.session.createSkillReferences()).toEqual(
+				updated.state.skills.map((skill) =>
+					expect.objectContaining({ name: skill.name, harnessRevision: updated.manifest.version }),
+				),
+			);
+			expect(harness.getPendingResponseCount()).toBe(0);
+		} finally {
+			await cleared.session.dispose();
+		}
+	});
+
 	it("falls back to the built-in harness when selected state cannot be read during construction", async () => {
 		const { harness, store, rootVersion, agentDir } = await createVersionedHarness();
 		const services = await createAgentSessionServices({
@@ -722,27 +815,46 @@ describe("AgentSession harness revisions", () => {
 		}
 	});
 
-	it("reconciles the selected revision after an idle reload", async () => {
-		const { harness, store, rootVersion } = await createVersionedHarness();
-		const successor = await store.advance({ memory: "Use the reload selection." }, rootVersion);
-		expect(successor.status).toBe("advanced");
-		if (successor.status !== "advanced") throw new Error("Expected harness advance to succeed");
+	it("keeps the active memory and complete skill catalog pinned after an idle reload", async () => {
+		const { harness, store, one, updated } = await createSkillRevisionChain();
+		await harness.session.switchHarnessVersion(one.manifest.version);
+		const activeBundle = harness.session.harnessVersionBundle;
+		const references = harness.session.createSkillReferences();
+		await store.selectVersion(updated.manifest.version);
 
 		await harness.session.reload();
 
-		expect(harness.session.activeHarnessVersion).toBe(successor.bundle.manifest.version);
-		expect(harness.session.systemPrompt).toContain("Use the reload selection.");
+		expect(harness.session.harnessVersionBundle).toBe(activeBundle);
+		expectRevisionPrompt(harness.session.systemPrompt, one);
+		expect(harness.session.createSkillReferences()).toEqual(references);
+		expect((await store.loadCurrent()).manifest.version).toBe(updated.manifest.version);
+		expect(harness.getPendingResponseCount()).toBe(0);
 	});
 
-	it("retains the active harness when reload cannot reconcile the selected revision", async () => {
+	it("reloads without reading a selected revision that is unavailable", async () => {
 		const { harness, store, rootVersion } = await createVersionedHarness();
-		const successor = await store.saveVersion({ memory: "Do not activate after a failed reload." }, rootVersion);
+		const successor = await store.saveVersion({ memory: "Do not activate during reload." }, rootVersion);
 		await store.selectVersion(successor.manifest.version);
-		vi.spyOn(store, "loadCurrent").mockRejectedValueOnce(new Error("selection read failed"));
+		const loadCurrent = vi.spyOn(store, "loadCurrent").mockRejectedValue(new Error("selection read failed"));
 
-		await expect(harness.session.reload()).rejects.toThrow("selection read failed");
+		await expect(harness.session.reload()).resolves.toBeUndefined();
 
+		expect(loadCurrent).not.toHaveBeenCalled();
 		expect(harness.session.activeHarnessVersion).toBe(rootVersion);
+		expect(harness.session.systemPrompt).not.toContain("Do not activate during reload.");
+	});
+
+	it("retains the active harness when resource reload fails", async () => {
+		const { harness, store, one, updated } = await createSkillRevisionChain();
+		await harness.session.switchHarnessVersion(one.manifest.version);
+		const activeBundle = harness.session.harnessVersionBundle;
+		await store.selectVersion(updated.manifest.version);
+		vi.spyOn(harness.session.resourceLoader, "reload").mockRejectedValueOnce(new Error("resource reload failed"));
+
+		await expect(harness.session.reload()).rejects.toThrow("resource reload failed");
+
+		expect(harness.session.harnessVersionBundle).toBe(activeBundle);
+		expectRevisionPrompt(harness.session.systemPrompt, one);
 	});
 
 	it("rejects reload before rebuilding runtime while work is active", async () => {
@@ -773,7 +885,7 @@ describe("AgentSession harness revisions", () => {
 		expect(rebuild).not.toHaveBeenCalled();
 	});
 
-	it("keeps an in-flight request pinned while the next request refreshes", async () => {
+	it("keeps in-flight and later requests pinned until an explicit switch", async () => {
 		const { harness, store, rootVersion } = await createVersionedHarness();
 		const providerPrompts: string[] = [];
 		let signalFirstStarted: (() => void) | undefined;
@@ -792,7 +904,11 @@ describe("AgentSession harness revisions", () => {
 			},
 			(context) => {
 				providerPrompts.push(context.systemPrompt ?? "");
-				return fauxAssistantMessage("after activation");
+				return fauxAssistantMessage("still pinned");
+			},
+			(context) => {
+				providerPrompts.push(context.systemPrompt ?? "");
+				return fauxAssistantMessage("after explicit activation");
 			},
 		]);
 
@@ -819,16 +935,25 @@ describe("AgentSession harness revisions", () => {
 		resolveFirst?.(fauxAssistantMessage("before activation"));
 		await inFlight;
 
-		await harness.session.prompt("request admitted after activation");
+		await harness.session.prompt("request admitted after background selection");
 
 		expect(providerPrompts[0]).not.toContain("Use memory selected during the request.");
 		expect(providerPrompts[0]).not.toContain("<name>later-review</name>");
-		expect(providerPrompts[1]).toContain("Use memory selected during the request.");
-		expect(providerPrompts[1]).toContain("<name>later-review</name>");
+		expect(providerPrompts[1]).not.toContain("Use memory selected during the request.");
+		expect(providerPrompts[1]).not.toContain("<name>later-review</name>");
+		expect(harness.session.activeHarnessVersion).toBe(rootVersion);
+
+		await harness.session.switchHarnessVersion(advance.bundle.manifest.version);
+		await harness.session.prompt("request admitted after explicit activation");
+
+		expect(providerPrompts).toHaveLength(3);
+		expect(providerPrompts[2]).toContain("Use memory selected during the request.");
+		expect(providerPrompts[2]).toContain("<name>later-review</name>");
 		expect(harness.session.activeHarnessVersion).toBe(advance.bundle.manifest.version);
+		expect(harness.getPendingResponseCount()).toBe(0);
 	});
 
-	it("reports a live activation to the process lifecycle observer", async () => {
+	it("reports explicit activation, but not background selection, to the process lifecycle observer", async () => {
 		const activatedVersions: HarnessVersion[] = [];
 		const agentDir = join(tmpdir(), `diffex-harness-observer-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 		mkdirSync(agentDir, { recursive: true });
@@ -851,7 +976,12 @@ describe("AgentSession harness revisions", () => {
 		expect(successor.status).toBe("advanced");
 		if (successor.status !== "advanced") throw new Error("Expected harness advance to succeed");
 
-		await harness.session.prompt("observe the selected harness");
+		await harness.session.prompt("observe the pinned harness");
+
+		expect(activatedVersions).toEqual([]);
+		expect(harness.session.activeHarnessVersion).toBe(root.manifest.version);
+
+		await harness.session.switchHarnessVersion(successor.bundle.manifest.version);
 
 		expect(activatedVersions).toEqual([successor.bundle.manifest.version]);
 	});
