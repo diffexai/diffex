@@ -42,7 +42,7 @@ Using AI-assisted tools is acceptable, but contributors remain responsible for c
 2. Reproduce bugs through the user-facing workflow before narrowing the problem to focused tests.
 3. Add or update tests for changed public behavior and bug fixes.
 4. Run the required validation and resolve every error, warning, and informational diagnostic.
-5. Open a pull request that explains the summary, reasoning, changes, user impact, and testing performed.
+5. Open a pull request using the provided [GitHub pull request template](.github/pull_request_template.md). Complete every section with the summary, reasoning, changes, and testing performed, including relevant user impact.
 6. Address review feedback with focused follow-up commits.
 7. Merge only after approval and all required checks pass.
 

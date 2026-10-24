@@ -14,68 +14,60 @@
 
 <p align="center">
   <a href="https://diffex.ai/"><img alt="Website" src="https://img.shields.io/badge/site-diffex.ai-black.svg" /></a>
-  <a href="package.json"><img alt="Node.js 22.19 or newer" src="https://img.shields.io/badge/node-%3E%3D22.19.0-339933.svg?logo=node.js&logoColor=white" /></a>
+  <a href="https://www.npmjs.com/package/@diffexai/diffex?activeTab=readme"><img alt="Latest npm version" src="https://img.shields.io/npm/v/%40diffexai%2Fdiffex?label=diffex" /></a>
+  <a href="https://nodejs.org/"><img alt="Node.js 22.19 or newer" src="https://img.shields.io/badge/node-%3E%3D22.19.0-339933.svg?logo=node.js&logoColor=white" /></a>
   <a href="LICENSE"><img alt="License: Apache 2.0" src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" /></a>
   <a href="https://github.com/diffexai/diffex/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/diffexai/diffex/actions/workflows/ci.yml/badge.svg?branch=main" /></a>
 </p>
 
 # Diffex
 
-Diffex is a self-evolving coding agent.
-It provides a multi-provider LLM API, a general-purpose agent runtime, a terminal UI, remote session protocols, and an extensible coding-agent CLI.
+Diffex is a lightweight, self-evolving coding agent that lives in your CLI. Ask it to explore a codebase, implement features, fix bugs, and run tests—all from your terminal.
 
-Diffex treats the agent harness as an optimization target.
-Diffex evolves through observable behavior, diagnostic signals, and evidence-backed improvements.
+- **Work with your code:** read and edit files, run shell commands, and iterate on changes in an interactive session.
+- **Choose your models:** connect subscription accounts or API keys, or use local models.
+- **Make it yours:** add skills, extensions, and reusable prompts, or integrate Diffex into your own tools.
 
-The archived Rust implementation is available at [diffexai/diffex-legacy](https://github.com/diffexai/diffex-legacy).
+## Quick start
 
-Read more at [diffex.ai](https://diffex.ai/) and in the [Diffex white paper](https://diffex.ai/white-paper).
-
-Diffex builds on the [Pi Agent Harness](https://github.com/earendil-works/pi) to extend its capabilities.
-Use `./diffex-test.sh` to run Diffex directly from this repository.
-
-## Installation
-
-Diffex is released on npm as [`@diffexai/diffex`](https://www.npmjs.com/package/@diffexai/diffex?activeTab=readme).
-Install it globally and launch the CLI:
+Requires Node.js 22.19 or newer and npm.
 
 ```bash
-npm install -g @diffexai/diffex
+npm install -g --ignore-scripts @diffexai/diffex
+cd your-project
 diffex
 ```
 
-## Workspace Packages
+Use `/login` to connect a supported subscription provider, or set a provider API key such as `ANTHROPIC_API_KEY` before launching. Then describe what you want to build or change.
 
-| Package | Responsibility |
-|---------|----------------|
-| [`packages/telemetry`](packages/telemetry) | Vendor-neutral telemetry contracts and typed schemas. |
-| [`packages/ai`](packages/ai) | Unified LLM API with provider and model discovery. |
-| [`packages/agent`](packages/agent) | Agent runtime, tool calling, state management, and attachments. |
-| [`packages/harness-state`](packages/harness-state) | Immutable, content-addressed harness revisions and global selection. |
-| [`packages/protocol`](packages/protocol) | Transport-neutral CBOR protocol for remote sessions. |
-| [`packages/client`](packages/client) | Transport-neutral client for remote sessions. |
-| [`packages/server`](packages/server) | Experimental remote session server. |
-| [`packages/session-backends/sqlite-node`](packages/session-backends/sqlite-node) | SQLite session persistence for Node.js. |
-| [`packages/tui`](packages/tui) | Terminal UI components with differential rendering. |
-| [`packages/coding-agent`](packages/coding-agent) | Interactive coding-agent CLI and extension system. |
-| [`packages/evals`](packages/evals) | Evaluation utilities and scenarios. |
+Diffex runs with your user account's permissions. Use a container or sandbox when working with untrusted code.
 
-## Distribution policy
+## Benchmarks
 
-The source repository remains private pending an explicit publication review.
-Changing visibility requires an audit of retained Actions logs, artifacts, source snapshots, debug maps, and linked session transcripts.
-Artifact names such as `private-release-*` do not provide access protection.
-The approved release channel is the public npm package `@diffexai/diffex`, which bundles the required runtime workspaces.
-Standalone archives, Python, secondary package registries, and interactive CLI containers are deferred.
-Public packages include readable JavaScript and declarations, with Apache-2.0 metadata and complete applicable upstream notices.
-They exclude source maps, TypeScript examples, and native source build files.
-Delivered implementation code remains inspectable; private source hosting and compilation do not guarantee confidentiality.
-See the [distribution review](docs/release/distribution-review.md) for exact scope and release prerequisites.
-See the [source publication review](docs/release/source-publication.md) for the separate repository visibility transition.
+Diffex scores are reported mean rewards; Codex's score is published leaderboard accuracy. Trial counts show scored / total attempts. All Diffex runs used `max` reasoning without subagents.
 
-## Local Setup
+| Benchmark | Agent | Model | Score | Trials |
+|-----------|-------|-------|------:|-------:|
+| [Deep SWE 1.1](https://hub.harborframework.com/jobs/c7689ad5-0558-41cc-9b8d-576d71d2b3b0) | Diffex 0.3.2 | GPT-6 Luna | 67.27% | 110 / 113 |
+| [Terminal-Bench 2.1](https://hub.harborframework.com/jobs/10462e7b-ec7d-49fa-9103-2060d4f62931) | Diffex 0.3.2 | GPT-6 Luna | 80.19% | 424 / 445 |
+| [Terminal-Bench 2.1](https://hub.harborframework.com/jobs/169f8574-9c7f-411c-9fe5-489ea4471016) | Diffex 0.3.1 | GPT-5.6 Luna | 79.85% | 412 / 445 |
+| [Terminal-Bench 2.1](https://github.com/harbor-framework/terminal-bench-2-1/pull/112) | Codex | GPT-5.6 Luna | 75.73% | 445 / 445 |
 
-Diffex requires Node.js 22.19 or newer and npm.
+Deep SWE also reported **95.13% fail-to-pass** and **98.85% pass-to-pass** test scores.
+
+On Terminal-Bench 2.1, Diffex's reported GPT-5.6 Luna score is **4.12 percentage points above Codex**, also using `max` reasoning. This is not a controlled comparison: execution environments may differ.
+
+## Documentation
+
+- [Quickstart](packages/coding-agent/docs/quickstart.md)
+- [Usage and commands](packages/coding-agent/docs/usage.md)
+- [Providers and authentication](packages/coding-agent/docs/providers.md)
+- [Local models](packages/coding-agent/docs/llama-cpp.md)
+- [Skills](packages/coding-agent/docs/skills.md) and [extensions](packages/coding-agent/docs/extensions.md)
+- [SDK](packages/coding-agent/docs/sdk.md) and [RPC integration](packages/coding-agent/docs/rpc.md)
+- [Containerization and sandboxing](packages/coding-agent/docs/containerization.md)
+
+## Development
 
 ```bash
 git clone https://github.com/diffexai/diffex.git
@@ -85,47 +77,21 @@ npm run build:offline
 ./diffex-test.sh
 ```
 
-The source launcher can be run from any directory and preserves the caller's working directory.
-
-## Local Validation
+Validate changes with:
 
 ```bash
 npm run check
 ./test.sh
 ```
 
-`npm run check` runs formatting, linting, dependency policy checks, and TypeScript validation.
-`./test.sh` runs the non-E2E test suites without activating tests that require provider credentials.
+The checks cover formatting, linting, dependency policy, and TypeScript. The test command runs non-E2E suites without activating tests that require provider credentials.
 
-## Documentation
+If you find Diffex useful, please [give it a star on GitHub](https://github.com/diffexai/diffex). Help us improve Diffex by [suggesting features or reporting issues](https://github.com/diffexai/diffex/issues/new/choose), or [contributing directly](CONTRIBUTING.md).
 
-- [Coding-agent documentation](packages/coding-agent/docs/index.md)
-- [Containerization and sandboxing](packages/coding-agent/docs/containerization.md)
-- [Contributing](CONTRIBUTING.md)
-- [Code of Conduct](CODE_OF_CONDUCT.md)
-- [Project rules](AGENTS.md)
+## Acknowledgments
 
-## Permissions and Containerization
-
-Diffex does not impose a built-in security boundary around filesystem, process, network, or credential access.
-By default, it runs with the permissions of the user and process that launched it.
-
-Use a container or sandbox when stronger isolation is required.
-See the [containerization guide](packages/coding-agent/docs/containerization.md) for supported patterns.
-
-## Contributing
-
-Issues and pull requests are welcome.
-Read [CONTRIBUTING.md](CONTRIBUTING.md) for setup, validation, and review expectations.
-Participation in the project is governed by the [Code of Conduct](CODE_OF_CONDUCT.md).
-
-## Security
-
-Do not commit credentials, secrets, local machine artifacts, build output, or private deployment state.
-Report sensitive issues privately through the repository maintainers or the contact paths on [diffex.ai](https://diffex.ai/).
-See [SECURITY.md](SECURITY.md) for reporting guidance and the execution trust boundary.
+Thank you to the developers of [Pi](https://github.com/earendil-works/pi) for building the foundation that Diffex builds on.
 
 ## License
 
-Diffex contributions are distributed under the [Apache License 2.0](LICENSE).
-Portions derived from Pi remain available under the MIT License, with the upstream copyright and permission notice preserved in the license file.
+Apache License 2.0
