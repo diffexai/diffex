@@ -3,9 +3,9 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ResponseFunctionCallOutputItemList } from "openai/resources/responses/responses.js";
 import { Type } from "typebox";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import type { Api, Context, Model, StreamOptions, Tool, ToolResultMessage } from "../src/compat.ts";
-import { complete, getModel } from "../src/compat.ts";
+import { complete, getModel, getModels } from "../src/compat.ts";
 import { hasAzureOpenAICredentials, resolveAzureDeploymentName } from "./azure-utils.ts";
 import { resolveApiKey } from "./oauth.ts";
 
@@ -162,8 +162,15 @@ describe("Responses API tool result images", () => {
 		});
 	});
 
-	describe("GitHub Copilot Responses Provider (gpt-5-mini)", () => {
-		const model = getModel("github-copilot", "gpt-5-mini");
+	describe("GitHub Copilot Responses Provider (vision-capable reasoning model)", () => {
+		let model: Model<Api>;
+		beforeAll(() => {
+			const candidate = getModels("github-copilot").find(
+				(value) => value.api === "openai-responses" && value.reasoning && value.input.includes("image"),
+			);
+			if (!candidate) throw new Error("Copilot catalog has no vision-capable Responses reasoning model");
+			model = candidate;
+		});
 
 		it.skipIf(!githubCopilotToken)(
 			"should send tool result images in function_call_output",

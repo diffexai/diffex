@@ -21,6 +21,7 @@ import type {
 	ProviderStreams,
 } from "../src/types.ts";
 import { AssistantMessageEventStream } from "../src/utils/event-stream.ts";
+import { generateModelsFixture, modelsDevProvider } from "./generate-models-fixture.ts";
 
 function fakeAuthContext(env: Record<string, string>, files: string[] = []): AuthContext {
 	return {
@@ -66,27 +67,44 @@ describe("builtin providers", () => {
 		expect(getBuiltinModel("anthropic", "claude-haiku-4-5").compat?.supportsStrictTools).toBe(true);
 	});
 
-	it("uses official Kimi K3 pricing for Moonshot providers", () => {
-		const models = builtinModels();
+	it.each([
+		{ input: 3, output: 15, cache_read: 0.3, cache_write: 3 },
+		{ input: 2.9879, output: 14.9395, cache_read: 0.2988, cache_write: 2.9879 },
+	])("preserves upstream Kimi K3 pricing for Moonshot providers: %j", (cost) => {
+		const models = generateModelsFixture(
+			Object.fromEntries(
+				["moonshotai", "moonshotai-cn"].map((provider) => [
+					provider,
+					modelsDevProvider({
+						"kimi-k3": { cost },
+					}),
+				]),
+			),
+		);
 		for (const provider of ["moonshotai", "moonshotai-cn"]) {
-			expect(models.getModel(provider, "kimi-k3")?.cost).toEqual({
-				input: 3,
-				output: 15,
-				cacheRead: 0.3,
-				cacheWrite: 3,
+			expect(models.getModel(provider, "kimi-k3", "openai-completions").cost).toEqual({
+				input: cost.input,
+				output: cost.output,
+				cacheRead: cost.cache_read,
+				cacheWrite: cost.cache_write,
 			});
 		}
 	});
 
 	it("uses API-equivalent implied pricing for Kimi Coding subscription models", () => {
-		const models = builtinModels();
+		const models = generateModelsFixture({
+			"kimi-code-plan-cn": modelsDevProvider({
+				k3: { cost: { input: 0, output: 0, cache_read: 0, cache_write: 0 } },
+				"kimi-for-coding-highspeed": {},
+			}),
+		});
 		const expectedCosts = {
 			k3: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 0 },
 			"kimi-for-coding-highspeed": { input: 1.9, output: 8, cacheRead: 0.38, cacheWrite: 0 },
 		};
 
 		for (const [modelId, cost] of Object.entries(expectedCosts)) {
-			expect(models.getModel("kimi-coding", modelId)?.cost).toEqual(cost);
+			expect(models.getModel("kimi-coding", modelId, "anthropic-messages").cost).toEqual(cost);
 		}
 	});
 

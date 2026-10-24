@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { getModel, getSupportedThinkingLevels } from "../src/compat.ts";
+import { generateModelsFixture, modelsDevProvider } from "./generate-models-fixture.ts";
 
 describe("getSupportedThinkingLevels", () => {
 	it("includes max but not xhigh for Anthropic Opus 4.6 on anthropic-messages API", () => {
@@ -115,10 +116,21 @@ describe("getSupportedThinkingLevels", () => {
 		expect(getSupportedThinkingLevels(model!)).toEqual(["low", "high", "max"]);
 	});
 
-	it("includes only low, high, max for Kimi Coding K3", () => {
-		const model = getModel("kimi-coding", "k3");
-		expect(model).toBeDefined();
-		expect(getSupportedThinkingLevels(model!)).toEqual(["low", "high", "max"]);
+	it.each([
+		[
+			["low", "high", "max"],
+			["low", "high", "max"],
+		],
+		[
+			["none", "low", "high", "max"],
+			["off", "low", "high", "max"],
+		],
+	])("uses upstream Kimi Coding K3 effort options %j", (values, expected) => {
+		const catalog = generateModelsFixture({
+			"kimi-code-plan-cn": modelsDevProvider({ k3: { reasoning_options: [{ type: "effort", values }] } }),
+		});
+		const model = catalog.getModel("kimi-coding", "k3", "anthropic-messages");
+		expect(getSupportedThinkingLevels(model)).toEqual(expected);
 	});
 
 	it("includes only high for OpenCode Grok Build", () => {

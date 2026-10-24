@@ -1,9 +1,25 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { OpenAIResponsesOptions } from "../src/api/openai-responses.ts";
 import { getSupportedThinkingLevels } from "../src/models.ts";
-import { XAI_MODELS } from "../src/providers/xai.models.ts";
 import { xaiProvider } from "../src/providers/xai.ts";
 import type { Context, Model } from "../src/types.ts";
+import { generateModelsFixture, modelsDevProvider } from "./generate-models-fixture.ts";
+
+const retiredModelIds = [
+	"grok-3",
+	"grok-3-fast",
+	"grok-4.20-0309-non-reasoning",
+	"grok-4.20-0309-reasoning",
+	"grok-code-fast-1",
+];
+const catalog = generateModelsFixture({
+	xai: modelsDevProvider({
+		...Object.fromEntries(retiredModelIds.map((id) => [id, {}])),
+		"grok-4.3": {},
+		"grok-4.5": { reasoning_options: [{ type: "effort", values: ["low", "medium", "high"] }] },
+	}),
+});
+const grok45 = catalog.getModel("xai", "grok-4.5", "openai-responses");
 
 type CapturedRequest = {
 	url: string;
@@ -61,26 +77,33 @@ describe("xAI Responses provider", () => {
 	});
 
 	it("excludes retired and redundant models from the built-in catalog", () => {
-		for (const modelId of [
-			"grok-3",
-			"grok-3-fast",
-			"grok-4.20-0309-non-reasoning",
-			"grok-4.20-0309-reasoning",
-			"grok-code-fast-1",
-		]) {
-			expect(Object.keys(XAI_MODELS)).not.toContain(modelId);
+		for (const modelId of retiredModelIds) {
+			expect(catalog.getModels("xai").map((model) => model.id)).not.toContain(modelId);
 		}
 	});
 
-	it("uses Responses with low/medium/high efforts only for Grok 4.5", () => {
-		expect(XAI_MODELS["grok-4.5"].api).toBe("openai-responses");
-		expect(getSupportedThinkingLevels(XAI_MODELS["grok-4.5"])).toEqual(["low", "medium", "high"]);
-		expect(XAI_MODELS["grok-4.3"].api).toBe("openai-completions");
+	it("uses Responses for Grok 4.5 with upstream effort options", () => {
+		expect(getSupportedThinkingLevels(grok45)).toEqual(["low", "medium", "high"]);
+		expect(catalog.getModel("xai", "grok-4.3", "openai-completions").api).toBe("openai-completions");
+	});
+
+	it("preserves newly advertised Grok 4.5 effort options", () => {
+		const updated = generateModelsFixture({
+			xai: modelsDevProvider({
+				"grok-4.5": { reasoning_options: [{ type: "effort", values: ["low", "medium", "high", "xhigh"] }] },
+			}),
+		});
+		expect(getSupportedThinkingLevels(updated.getModel("xai", "grok-4.5", "openai-responses"))).toEqual([
+			"low",
+			"medium",
+			"high",
+			"xhigh",
+		]);
 	});
 
 	it("uses /responses with bearer auth and xAI-compatible request fields", async () => {
 		const captured = await captureRequest(
-			XAI_MODELS["grok-4.5"],
+			grok45,
 			{
 				systemPrompt: "You are a careful coding assistant.",
 				messages: [{ role: "user", content: "hello", timestamp: 1 }],

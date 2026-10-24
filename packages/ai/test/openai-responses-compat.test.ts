@@ -72,7 +72,19 @@ describe("openai-responses provider defaults", () => {
 	});
 
 	it("omits reasoning when no reasoning is requested", async () => {
-		const model = getModel("github-copilot", "gpt-5-mini");
+		const model: Model<"openai-responses"> = {
+			id: "gpt-5-mini",
+			name: "Copilot reasoning fixture",
+			api: "openai-responses",
+			provider: "github-copilot",
+			baseUrl: "https://api.individual.githubcopilot.com",
+			reasoning: true,
+			thinkingLevelMap: { off: null, minimal: "low" },
+			input: ["text", "image"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 128000,
+			maxTokens: 8192,
+		};
 		let capturedPayload: unknown;
 
 		vi.spyOn(globalThis, "fetch").mockResolvedValue(

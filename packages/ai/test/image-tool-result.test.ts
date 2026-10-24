@@ -1,9 +1,9 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Type } from "typebox";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import type { Api, Context, Model, Tool, ToolResultMessage } from "../src/compat.ts";
-import { complete, getModel } from "../src/compat.ts";
+import { complete, getModel, getModels } from "../src/compat.ts";
 import type { StreamOptions } from "../src/types.ts";
 
 type StreamOptionsWithExtras = StreamOptions & Record<string, unknown>;
@@ -311,8 +311,15 @@ describe("Tool Results with Images", () => {
 		});
 	});
 
-	describe.skipIf(!process.env.BASETEN_API_KEY)("Baseten Provider (Kimi-K2.6)", () => {
-		const llm = getModel("baseten", "moonshotai/Kimi-K2.6");
+	describe.skipIf(!process.env.BASETEN_API_KEY)("Baseten Provider (vision-capable reasoning model)", () => {
+		let llm: Model<Api>;
+		beforeAll(() => {
+			const model = getModels("baseten").find(
+				(candidate) => candidate.reasoning && candidate.input.includes("image"),
+			);
+			if (!model) throw new Error("Baseten catalog has no vision-capable reasoning model");
+			llm = model;
+		});
 		const options = { reasoningEffort: "high" } satisfies StreamOptionsWithExtras;
 
 		it("should handle tool result with only image", { retry: 3, timeout: 30000 }, async () => {

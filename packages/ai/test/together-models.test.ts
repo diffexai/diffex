@@ -1,7 +1,23 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { getModel } from "../src/compat.ts";
 import { findEnvKeys, getEnvApiKey } from "../src/env-api-keys.ts";
 
+import { generateModelsFixture, modelsDevProvider } from "./generate-models-fixture.ts";
+
+const catalog = generateModelsFixture({
+	together: modelsDevProvider({
+		"moonshotai/Kimi-K3": {
+			modalities: { input: ["text", "image"] },
+			limit: { context: 1048576, output: 131072 },
+			cost: { input: 3, output: 15, cache_read: 0.3 },
+		},
+		"openai/gpt-oss-120b": {
+			reasoning_options: [{ type: "effort", values: ["low", "medium", "high"] }],
+		},
+		"deepseek-ai/DeepSeek-V4-Pro-0813": {},
+		"MiniMaxAI/MiniMax-M2.7": {},
+	}),
+});
+const getModel = (provider: string, id: string) => catalog.getModel(provider, id, "openai-completions");
 const originalTogetherApiKey = process.env.TOGETHER_API_KEY;
 
 afterEach(() => {
@@ -13,7 +29,7 @@ afterEach(() => {
 });
 
 describe("Together models", () => {
-	it("registers the default Kimi K3 model via OpenAI-compatible Chat Completions API", () => {
+	it("generates Kimi K3 metadata for the OpenAI-compatible Chat Completions API", () => {
 		const model = getModel("together", "moonshotai/Kimi-K3");
 
 		expect(model).toBeDefined();

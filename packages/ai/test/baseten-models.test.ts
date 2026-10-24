@@ -1,8 +1,22 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { getModel, streamSimple } from "../src/compat.ts";
+import { streamSimple } from "../src/compat.ts";
 import { findEnvKeys, getEnvApiKey } from "../src/env-api-keys.ts";
 import { getSupportedThinkingLevels } from "../src/models.ts";
 
+import { generateModelsFixture, modelsDevProvider } from "./generate-models-fixture.ts";
+
+const catalog = generateModelsFixture({
+	baseten: modelsDevProvider({
+		"zai-org/GLM-5.2": {
+			limit: { context: 1048576, output: 262144 },
+			cost: { input: 1.4, output: 4.4, cache_read: 0.3 },
+		},
+		"moonshotai/Kimi-K2.6": {
+			reasoning_options: [{ type: "toggle" }],
+		},
+	}),
+});
+const getModel = (provider: string, id: string) => catalog.getModel(provider, id, "openai-completions");
 const originalBasetenApiKey = process.env.BASETEN_API_KEY;
 
 afterEach(() => {
@@ -14,7 +28,7 @@ afterEach(() => {
 });
 
 describe("Baseten models", () => {
-	it("registers GLM 5.2 as the default OpenAI-compatible reasoning model", () => {
+	it("generates GLM 5.2 OpenAI-compatible reasoning metadata from upstream values", () => {
 		const model = getModel("baseten", "zai-org/GLM-5.2");
 
 		expect(model).toMatchObject({

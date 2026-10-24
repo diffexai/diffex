@@ -1,8 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
 import { stream as streamAnthropic } from "../src/api/anthropic-messages.ts";
-import { getModel } from "../src/compat.ts";
 import { getSupportedThinkingLevels } from "../src/models.ts";
 import type { Context } from "../src/types.ts";
+import { generateModelsFixture, modelsDevProvider } from "./generate-models-fixture.ts";
+
+const catalog = generateModelsFixture({
+	"github-copilot": modelsDevProvider({
+		"claude-opus-4.7": {},
+		"claude-opus-5": {},
+		"claude-sonnet-4.6": {},
+	}),
+});
+const getModel = (provider: string, id: string) => catalog.getModel(provider, id, "anthropic-messages");
 
 const mockState = vi.hoisted(() => ({
 	constructorOpts: undefined as Record<string, unknown> | undefined,
