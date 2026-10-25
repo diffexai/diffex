@@ -66,7 +66,7 @@ test("both generators emit deterministic deployable locks in an isolated fixture
 		const input = fixture();
 		input.manifest.version = "1.0.0";
 		for (const [name, version] of [
-			["@google/genai", "1.52.0"],
+			["@google/genai", "2.31.0"],
 			["protobufjs", "7.6.5"],
 		]) {
 			input.manifest.dependencies[name] = version;

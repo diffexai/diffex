@@ -1,46 +1,29 @@
 import { complete, resetApiProviders } from "@diffexai/diffex-ai/compat";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { AuthStorage } from "../src/core/auth-storage.ts";
 import { ModelRegistry } from "../src/core/model-registry.ts";
 import { ModelRuntime } from "../src/core/model-runtime.ts";
 
-const openAIState = vi.hoisted(() => ({ clientOptions: undefined as unknown }));
-
-vi.mock("openai", () => {
-	class FakeOpenAI {
-		constructor(options: unknown) {
-			openAIState.clientOptions = options;
-		}
-
-		chat = {
-			completions: {
-				create: () => {
-					const stream = {
-						async *[Symbol.asyncIterator]() {
-							yield {
-								choices: [{ delta: {}, finish_reason: "stop" }],
-								usage: { prompt_tokens: 1, completion_tokens: 1 },
-							};
-						},
-					};
-					const promise = Promise.resolve(stream) as Promise<typeof stream> & {
-						withResponse(): Promise<{
-							data: typeof stream;
-							response: { status: number; headers: Headers };
-						}>;
-					};
-					promise.withResponse = async () => ({
-						data: stream,
-						response: { status: 200, headers: new Headers() },
-					});
-					return promise;
-				},
-			},
-		};
-	}
-
-	return { default: FakeOpenAI };
-});
+function createOfflineFetch(): { fetch: typeof globalThis.fetch; requests: Request[] } {
+	const requests: Request[] = [];
+	return {
+		requests,
+		fetch: async (input, init) => {
+			requests.push(new Request(input, init));
+			const chunk = {
+				id: "chatcmpl-test",
+				object: "chat.completion.chunk",
+				created: 0,
+				model: "test-model",
+				choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+				usage: { prompt_tokens: 1, completion_tokens: 1 },
+			};
+			return new Response(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`, {
+				headers: { "content-type": "text/event-stream" },
+			});
+		},
+	};
+}
 
 async function createCloudflareRuntime(): Promise<{ modelRuntime: ModelRuntime; modelRegistry: ModelRegistry }> {
 	const authStorage = AuthStorage.inMemory();
@@ -69,22 +52,24 @@ describe("ModelRegistry Cloudflare compat streaming", () => {
 		const { modelRuntime } = await createCloudflareRuntime();
 		const model = modelRuntime.getModel("cloudflare-ai-gateway", getCloudflareCompatModelId(modelRuntime));
 		expect(model).toBeDefined();
+		const offline = createOfflineFetch();
 
 		resetApiProviders();
-		await modelRuntime.completeSimple(model!, { messages: [] });
+		const result = await modelRuntime.completeSimple(model!, { messages: [] }, { fetch: offline.fetch });
 
-		const clientOptions = openAIState.clientOptions as {
-			baseURL?: string;
-			defaultHeaders?: Record<string, unknown>;
-		};
-		expect(clientOptions.baseURL).toBe("https://gateway.ai.cloudflare.com/v1/test-account/test-gateway/compat");
-		expect(clientOptions.defaultHeaders?.["cf-aig-authorization"]).toBe("Bearer test-token");
+		expect(result.stopReason).toBe("stop");
+		expect(offline.requests).toHaveLength(1);
+		expect(offline.requests[0].url).toBe(
+			"https://gateway.ai.cloudflare.com/v1/test-account/test-gateway/compat/chat/completions",
+		);
+		expect(offline.requests[0].headers.get("cf-aig-authorization")).toBe("Bearer test-token");
 	});
 
 	it("materializes the Cloudflare endpoint after extension-style auth resolution", async () => {
 		const { modelRuntime, modelRegistry } = await createCloudflareRuntime();
 		const model = modelRegistry.find("cloudflare-ai-gateway", getCloudflareCompatModelId(modelRuntime));
 		expect(model).toBeDefined();
+		const offline = createOfflineFetch();
 
 		resetApiProviders();
 		const auth = await modelRegistry.getApiKeyAndHeaders(model!);
@@ -96,15 +81,15 @@ describe("ModelRegistry Cloudflare compat streaming", () => {
 			"x-api-key": null,
 		});
 
-		await complete(model!, { messages: [] }, auth);
+		const result = await complete(model!, { messages: [] }, { ...auth, fetch: offline.fetch });
 
-		const clientOptions = openAIState.clientOptions as {
-			baseURL?: string;
-			defaultHeaders?: Record<string, unknown>;
-		};
-		expect(clientOptions.baseURL).toBe("https://gateway.ai.cloudflare.com/v1/test-account/test-gateway/compat");
-		expect(clientOptions.defaultHeaders?.["cf-aig-authorization"]).toBe("Bearer test-token");
-		expect(clientOptions.defaultHeaders?.Authorization).toBeNull();
-		expect(clientOptions.defaultHeaders?.["x-api-key"]).toBeNull();
+		expect(result.stopReason).toBe("stop");
+		expect(offline.requests).toHaveLength(1);
+		expect(offline.requests[0].url).toBe(
+			"https://gateway.ai.cloudflare.com/v1/test-account/test-gateway/compat/chat/completions",
+		);
+		expect(offline.requests[0].headers.get("cf-aig-authorization")).toBe("Bearer test-token");
+		expect(offline.requests[0].headers.has("Authorization")).toBe(false);
+		expect(offline.requests[0].headers.has("x-api-key")).toBe(false);
 	});
 });

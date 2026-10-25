@@ -1,18 +1,25 @@
+import type { GenerateContentParameters } from "@google/genai";
 import { describe, expect, it, vi } from "vitest";
 
 const googleGenAiMock = vi.hoisted(() => ({
 	finishReason: "MALFORMED_FUNCTION_CALL",
+	toolCall: false,
+	requests: [] as GenerateContentParameters[],
 }));
 
 vi.mock("@google/genai", () => {
 	class GoogleGenAI {
 		models = {
-			generateContentStream: async function* () {
+			generateContentStream: async function* (params: GenerateContentParameters) {
+				googleGenAiMock.requests.push(params);
 				yield {
 					responseId: "google-response-id",
 					candidates: [
 						{
 							finishReason: googleGenAiMock.finishReason,
+							...(googleGenAiMock.toolCall && {
+								content: { parts: [{ functionCall: { name: "lookup", args: {} } }] },
+							}),
 						},
 					],
 					usageMetadata: {
@@ -29,6 +36,8 @@ vi.mock("@google/genai", () => {
 		FinishReason: {
 			STOP: "STOP",
 			MAX_TOKENS: "MAX_TOKENS",
+			CONTINUATION: "CONTINUATION",
+			TOO_MANY_TOOL_CALLS: "TOO_MANY_TOOL_CALLS",
 			BLOCKLIST: "BLOCKLIST",
 			PROHIBITED_CONTENT: "PROHIBITED_CONTENT",
 			SPII: "SPII",
@@ -75,6 +84,38 @@ const context: Context = {
 };
 
 describe("Google raw stop reasons", () => {
+	it.each(["google-generative-ai", "google-vertex"] as const)(
+		"disables automatic continuation and maps new finish reasons for %s",
+		async (api) => {
+			for (const toolCall of [false, true]) {
+				for (const [finishReason, expected] of [
+					["CONTINUATION", "length"],
+					["TOO_MANY_TOOL_CALLS", "error"],
+					["STOP", toolCall ? "toolUse" : "stop"],
+				] as const) {
+					googleGenAiMock.finishReason = finishReason;
+					googleGenAiMock.toolCall = toolCall;
+					googleGenAiMock.requests = [];
+					const options = { apiKey: "test-api-key" };
+					const stream =
+						api === "google-generative-ai"
+							? streamGoogleGenerativeAi(getModel("google", "gemini-2.5-flash"), context, options)
+							: streamGoogleVertex(getModel("google-vertex", "gemini-3-flash-preview"), context, options);
+					const message = await stream.result();
+
+					expect(googleGenAiMock.requests).toHaveLength(1);
+					expect(googleGenAiMock.requests[0].config?.automaticContinuation).toBe(false);
+					expect(message.stopReason).toBe(expected);
+					expect(message.rawStopReason).toBe(finishReason);
+					expect(message.errorMessage).toBe(
+						expected === "error" ? `Provider stopped with: ${finishReason}` : undefined,
+					);
+				}
+			}
+			googleGenAiMock.toolCall = false;
+		},
+	);
+
 	it("preserves raw Gemini finish reasons for Google Generative AI errors", async () => {
 		googleGenAiMock.finishReason = "MALFORMED_FUNCTION_CALL";
 

@@ -79,6 +79,35 @@ function createFakeAnthropicClient(response: Response): Anthropic {
 }
 
 describe("Anthropic raw SSE parsing", () => {
+	it("maps model context window exhaustion to length while preserving partial content", async () => {
+		const response = createSseResponse(
+			minimalAnthropicEvents.map((event) =>
+				event.event === "message_delta"
+					? {
+							event: "message_delta",
+							data: JSON.stringify({
+								type: "message_delta",
+								delta: { stop_reason: "model_context_window_exceeded" },
+								usage: { output_tokens: 5 },
+							}),
+						}
+					: event,
+			),
+		);
+		const result = await streamAnthropic(
+			getModel("anthropic", "claude-haiku-4-5"),
+			{ messages: [{ role: "user", content: "Hello", timestamp: Date.now() }] },
+			{ client: createFakeAnthropicClient(response) },
+		).result();
+
+		expect(result.stopReason).toBe("length");
+		expect(result.rawStopReason).toBe("model_context_window_exceeded");
+		expect(result.errorMessage).toBeUndefined();
+		expect(result.content).toEqual([{ type: "text", text: "Hello" }]);
+		expect(result.usage.input).toBe(12);
+		expect(result.usage.output).toBe(5);
+	});
+
 	it("repairs malformed SSE JSON and malformed streamed tool JSON", async () => {
 		const model = getModel("anthropic", "claude-haiku-4-5");
 		const context: Context = {

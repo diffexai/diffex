@@ -10,13 +10,13 @@
  *
  * Usage:
  *   # First install dependencies
- *   cd packages/coding-agent/examples/extensions/custom-provider && npm install
+ *   cd packages/coding-agent/examples/extensions/custom-provider-anthropic && npm install --ignore-scripts
  *
  *   # With OAuth (run /login custom-anthropic first)
- *   diffex -e ./packages/coding-agent/examples/extensions/custom-provider
+ *   diffex -e ./packages/coding-agent/examples/extensions/custom-provider-anthropic
  *
  *   # With API key
- *   CUSTOM_ANTHROPIC_API_KEY=sk-ant-... diffex -e ./packages/coding-agent/examples/extensions/custom-provider
+ *   CUSTOM_ANTHROPIC_API_KEY=sk-ant-... diffex -e ./packages/coding-agent/examples/extensions/custom-provider-anthropic
  *
  * Then use /model to select custom-anthropic/claude-sonnet-4-5
  */
@@ -324,6 +324,7 @@ function mapStopReason(reason: string): StopReason {
 		case "stop_sequence":
 			return "stop";
 		case "max_tokens":
+		case "model_context_window_exceeded":
 			return "length";
 		case "tool_use":
 			return "toolUse";

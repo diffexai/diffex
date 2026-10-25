@@ -1,4 +1,4 @@
-import { HTTPClient, Mistral } from "@mistralai/mistralai";
+import { HTTPClient } from "@mistralai/mistralai/lib/http.js";
 import type {
 	ChatCompletionStreamRequest,
 	ChatCompletionStreamRequestMessage,
@@ -6,6 +6,7 @@ import type {
 	ContentChunk,
 	FunctionTool,
 } from "@mistralai/mistralai/models/components";
+import { Chat } from "@mistralai/mistralai/sdk/chat.js";
 import { calculateCost, clampThinkingLevel } from "../models.ts";
 import type {
 	AssistantMessage,
@@ -63,7 +64,7 @@ export const stream: StreamFunction<"mistral-conversations", MistralOptions> = (
 			}
 
 			// Intentionally per-request: avoids shared SDK mutable state across concurrent consumers.
-			const mistral = new Mistral({
+			const chat = new Chat({
 				apiKey,
 				serverURL: model.baseUrl,
 				...(options?.fetch ? { httpClient: new HTTPClient({ fetcher: options.fetch }) } : {}),
@@ -77,7 +78,7 @@ export const stream: StreamFunction<"mistral-conversations", MistralOptions> = (
 			if (nextPayload !== undefined) {
 				payload = nextPayload as ChatCompletionStreamRequest;
 			}
-			const mistralStream = await mistral.chat.stream(payload, buildRequestOptions(model, options));
+			const mistralStream = await chat.stream(payload, buildRequestOptions(model, options));
 			stream.push({ type: "start", partial: output });
 			await consumeChatStream(model, output, stream, mistralStream);
 

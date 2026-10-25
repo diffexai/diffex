@@ -4,33 +4,29 @@ const mistralMock = vi.hoisted(() => ({
 	finishReason: "stop" as string,
 }));
 
-vi.mock("@mistralai/mistralai", () => {
-	class HTTPClient {}
-
-	class Mistral {
-		chat = {
-			stream: async function* () {
-				yield {
-					data: {
-						id: "mistral-response-id",
-						choices: [
-							{
-								finishReason: mistralMock.finishReason,
-								delta: {},
-							},
-						],
-						usage: {
-							promptTokens: 1,
-							completionTokens: 0,
-							totalTokens: 1,
+vi.mock("@mistralai/mistralai/sdk/chat.js", () => {
+	class Chat {
+		async *stream() {
+			yield {
+				data: {
+					id: "mistral-response-id",
+					choices: [
+						{
+							finishReason: mistralMock.finishReason,
+							delta: {},
 						},
+					],
+					usage: {
+						promptTokens: 1,
+						completionTokens: 0,
+						totalTokens: 1,
 					},
-				};
-			},
-		};
+				},
+			};
+		}
 	}
 
-	return { HTTPClient, Mistral };
+	return { Chat };
 });
 
 import { stream as streamMistral } from "../src/api/mistral-conversations.ts";
