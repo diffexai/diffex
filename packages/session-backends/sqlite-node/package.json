@@ -44,8 +44,8 @@
 		"@diffexai/diffex-agent-core": "^0.3.2"
 	},
 	"devDependencies": {
-		"@vitest/coverage-v8": "4.1.9",
-		"vitest": "4.1.9"
+		"@vitest/coverage-v8": "4.1.12",
+		"vitest": "4.1.12"
 	},
 	"private": true
 }

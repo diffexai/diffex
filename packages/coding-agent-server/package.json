@@ -47,9 +47,10 @@
 	},
 	"devDependencies": {
 		"@diffexai/diffex-client": "^0.3.2",
+		"@types/ws": "8.18.2",
 		"shx": "0.4.0",
-		"vitest": "4.1.9",
-		"ws": "8.21.0"
+		"vitest": "4.1.12",
+		"ws": "8.22.0"
 	},
 	"private": true
 }

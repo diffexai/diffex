@@ -7,7 +7,7 @@ See [AGENTS.md](https://github.com/diffexai/diffex/blob/main/AGENTS.md) for addi
 ```bash
 git clone https://github.com/diffexai/diffex
 cd diffex
-npm install
+npm install --ignore-scripts
 npm run build
 ```
 
@@ -55,10 +55,15 @@ Never use `__dirname` directly for package assets.
 ## Testing
 
 ```bash
-./test.sh                         # Run non-LLM tests (no API keys needed)
-npm test                          # Run all tests
-npm test -- test/specific.test.ts # Run specific test
+./test.sh # Run non-E2E tests with credentials isolated
+
+# From the relevant package directory:
+node ../../node_modules/vitest/dist/cli.js --run test/specific.test.ts
 ```
+
+Do not run the full Vitest suite directly: endpoint or authentication environment variables can activate provider E2E tests.
+
+See [dependency maintenance](../../../docs/dependency-maintenance.md) for dependency update constraints and validation.
 
 ## Project Structure
 
