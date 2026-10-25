@@ -15,7 +15,7 @@ Keep each dependency's pins synchronized across consuming workspaces and example
 
 - Vitest and `@vitest/coverage-v8` use **4.1.12**, the patched 4.x release. The latest `vitest-evals` (**0.17.0**) requires `vitest >=4 <5`, so Vitest 5 is not compatible with the evaluation workspace.
 - `hosted-git-info` remains **9.0.3**. Version 10.1.1 requires Node `^22.22.2 || ^24.15.0 || >=26.0.0`, above the project's Node 22.19.0 minimum.
-- `@typescript/native-preview` has no stable release under that package name; do not replace its existing pin with another prerelease as part of a stable-only update.
+- `@typescript/native-preview` has no stable release under that package name; do not replace its existing pin with another prerelease as part of a stable-only update. Its existing pin remains available to workspace build scripts, while the root check uses stable TypeScript 7's `tsc`.
 
 ## Install tooling
 
@@ -28,6 +28,12 @@ npm exec --yes --ignore-scripts --package=npm@11.21.1 -- npm install --package-l
 If changed dependencies remain duplicated under workspaces, run `npm dedupe --package-lock-only --ignore-scripts` before regenerating distribution locks. The generators resolve dependencies from their originating workspace and relocate them to published `node_modules/` paths, preserving nested version differences and platform-specific optional dependencies. They reject unresolved or conflicting flattened dependencies. The root OpenTelemetry API pin also makes SDK optional peers available to the browser smoke check.
 
 The repository normally enforces a two-day minimum release age. Do not disable it without explicit approval. This update batch received approval to use `npm_config_min_release_age=0` on install commands only; `.npmrc` remains unchanged.
+
+## Development tooling
+
+Development tooling uses Biome **2.6.3**, TypeScript **7.0.2**, esbuild **0.28.2**, and tsx **4.23.15**. Biome's schema and recommended preset configuration are migrated together with newly enforced diagnostics. The TypeScript target is **ES2024**, matching Unicode-set regular expressions already used on supported Node runtimes. The relative-import policy checker uses TypeScript 7's exported native AST API (`typescript/unstable/ast` and `typescript/unstable/sync`); these API paths are unstable, so the exact compiler pin and syntax/diagnostic regression tests must move together. Temporary parser projects and native clients are cleaned up after every check.
+
+`diff` supplies its own declarations, so the obsolete `@types/diff` stub is no longer needed. The rimraf override is synchronized at **6.1.3** in the root and published CLI manifests/locks. Nanoid and protobufjs overrides remain in their consumers' compatible major lines rather than forcing unsupported transitive majors.
 
 ## Runtime libraries
 
