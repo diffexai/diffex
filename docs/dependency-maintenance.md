@@ -41,7 +41,7 @@ Runtime pins use keyring **2.1.2**, Chalk **6.0.1**, diff **9.0.0**, highlight.j
 
 Keyring's missing-password result is now `null`. The storage adapter still reports a missing session as `undefined`. Socket adapters normalize the new declaration's string-or-buffer input, and syntax highlighting uses highlight.js's public entry point. The extension dependency example pins Chalk 6.0.1.
 
-The standalone sandbox example lock now resolves shell-quote **1.12.0**, addressing both reported shell-quote advisories. Sandbox runtime itself remains at 0.0.26 while the latest 0.0.81's unpatched node-forge signature-verification advisory is reviewed; forcing a Zod major or accepting a new vulnerable dependency is not automatic.
+The standalone sandbox example lock now resolves shell-quote **1.12.0**, addressing both reported shell-quote advisories. Sandbox runtime itself is intentionally retained at **0.0.26**: version 0.0.81 introduces node-forge 1.4.0 with the unpatched [GHSA-86w9-cpqp-85rv](https://github.com/advisories/GHSA-86w9-cpqp-85rv) signature-verification advisory. Revisit this exception when a patched upstream dependency is available; do not force an incompatible Zod major override to suppress the remaining audit findings.
 
 ## Networking review
 
