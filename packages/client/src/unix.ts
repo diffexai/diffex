@@ -51,7 +51,9 @@ function connectUnixSocket(
 			);
 		});
 		socket.on("data", (chunk) => {
-			if (!terminal) handlers.onData(new Uint8Array(chunk.buffer, chunk.byteOffset, chunk.byteLength));
+			if (terminal) return;
+			const bytes = typeof chunk === "string" ? Buffer.from(chunk) : chunk;
+			handlers.onData(new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength));
 		});
 		socket.once("end", close);
 		socket.once("close", close);

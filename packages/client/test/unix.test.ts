@@ -52,7 +52,8 @@ describe.runIf(process.platform !== "win32")("Unix-domain sockets", () => {
 			socket.once("close", () => sockets.delete(socket));
 			const decoder = new ClientMessageDecoder();
 			socket.on("data", (chunk) => {
-				for (const message of decoder.push(chunk)) {
+				const bytes = typeof chunk === "string" ? Buffer.from(chunk) : chunk;
+				for (const message of decoder.push(bytes)) {
 					if (message.type === "hello") {
 						const hello = encodeServerMessage({
 							type: "hello",
@@ -115,11 +116,12 @@ describe.runIf(process.platform !== "win32")("Unix-domain sockets", () => {
 			resumeServer = () => socket.resume();
 			resolveServerReady?.();
 			socket.on("data", (chunk) => {
-				for (let index = 0; index < chunk.byteLength; index++) {
+				const bytes = typeof chunk === "string" ? Buffer.from(chunk) : chunk;
+				for (let index = 0; index < bytes.byteLength; index++) {
 					const expected = receivedLength + index < first.byteLength ? 1 : 2;
-					if (chunk[index] !== expected) invalidOrder = true;
+					if (bytes[index] !== expected) invalidOrder = true;
 				}
-				receivedLength += chunk.byteLength;
+				receivedLength += bytes.byteLength;
 				if (receivedLength === expectedLength) {
 					socket.end(new Uint8Array([9]));
 					resolveReceived?.();
@@ -172,7 +174,8 @@ describe.runIf(process.platform !== "win32")("Unix-domain sockets", () => {
 			socket.once("close", () => sockets.delete(socket));
 			const decoder = new ClientMessageDecoder();
 			socket.on("data", (chunk) => {
-				for (const message of decoder.push(chunk)) {
+				const bytes = typeof chunk === "string" ? Buffer.from(chunk) : chunk;
+				for (const message of decoder.push(bytes)) {
 					if (message.type === "hello") {
 						socket.write(
 							encodeServerMessage({

@@ -130,7 +130,8 @@ export async function connectUnixTestClient(path: string): Promise<ProtocolTestC
 		},
 	});
 	socket.on("data", (chunk) => {
-		client.receive(new Uint8Array(chunk.buffer, chunk.byteOffset, chunk.byteLength));
+		const bytes = typeof chunk === "string" ? Buffer.from(chunk) : chunk;
+		client.receive(new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength));
 	});
 	socket.on("error", (error) => client.fail(error));
 	socket.once("close", () => client.markClosed());

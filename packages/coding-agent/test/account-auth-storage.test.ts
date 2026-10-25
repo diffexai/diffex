@@ -16,7 +16,7 @@ const session: DiffexAccountSession = {
 	context: { user: { id: "user-diffex-1" } },
 };
 
-function createFakeKeyring(initial?: string) {
+function createFakeKeyring(initial: string | null = null) {
 	let value = initial;
 	const entry: KeyringEntry = {
 		setPassword: vi.fn(async (password) => {
@@ -24,8 +24,8 @@ function createFakeKeyring(initial?: string) {
 		}),
 		getPassword: vi.fn(async () => value),
 		deleteCredential: vi.fn(async () => {
-			const existed = value !== undefined;
-			value = undefined;
+			const existed = value !== null;
+			value = null;
 			return existed;
 		}),
 	};
@@ -45,6 +45,13 @@ describe("Diffex account keyring storage", () => {
 		await storage.delete(apiOrigin);
 		await expect(storage.read(apiOrigin)).resolves.toBeUndefined();
 		expect(createEntry).toHaveBeenCalledWith("ai.diffex.cli", apiOrigin);
+	});
+
+	it("treats the native keyring's null result as a missing credential", async () => {
+		const fake = createFakeKeyring(null);
+		const storage = new KeyringDiffexAccountAuthStorage(() => fake.entry);
+
+		await expect(storage.read(apiOrigin)).resolves.toBeUndefined();
 	});
 
 	it("rejects malformed keyring data without returning partial credentials", async () => {

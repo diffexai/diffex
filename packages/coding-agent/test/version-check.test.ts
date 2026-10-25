@@ -172,14 +172,18 @@ describe("version checks", () => {
 				.intercept({ path: "/api/latest-version" })
 				.reply(status, "", { headers: { location: "https://unreviewed.invalid/latest" } });
 			dispatcher.get("https://unreviewed.invalid").intercept({ path: "/latest" }).reply(200, foreignRequest);
-			const fetchMock = vi.fn((input: string, init?: RequestInit) =>
-				undiciFetch(input, {
-					headers: Object.fromEntries(new Headers(init?.headers)),
+			const fetchMock = vi.fn((input: string, init?: RequestInit) => {
+				const headers: Record<string, string> = {};
+				new Headers(init?.headers).forEach((value, key) => {
+					headers[key] = value;
+				});
+				return undiciFetch(input, {
+					headers,
 					redirect: init?.redirect,
 					signal: init?.signal,
 					dispatcher,
-				}),
-			);
+				});
+			});
 			vi.stubGlobal("fetch", fetchMock);
 			try {
 				await expect(getLatestDiffexRelease("1.2.3", { retry: true })).rejects.toMatchObject({

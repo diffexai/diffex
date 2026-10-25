@@ -17,7 +17,7 @@ import { DEFAULT_MAX_BYTES, formatSize, type TruncationResult, truncateHead } fr
 export function relativizeFindResultPath(
 	resultPath: string,
 	searchPath: string,
-	pathModule: path.PlatformPath = path,
+	pathModule: Pick<typeof path, "sep" | "isAbsolute" | "relative"> = path,
 ): string {
 	const hadTrailingSeparator =
 		resultPath.endsWith(pathModule.sep) || (pathModule.sep === "\\" && resultPath.endsWith("/"));

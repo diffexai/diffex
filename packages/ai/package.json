@@ -73,8 +73,8 @@
 		"@mistralai/mistralai": "3.2.0",
 		"@opentelemetry/api": "1.10.0",
 		"@smithy/node-http-handler": "4.12.1",
-		"http-proxy-agent": "7.0.2",
-		"https-proxy-agent": "7.0.6",
+		"http-proxy-agent": "9.1.0",
+		"https-proxy-agent": "9.1.0",
 		"openai": "7.43.0",
 		"partial-json": "0.1.7",
 		"typebox": "1.4.3"
@@ -100,7 +100,7 @@
 		"node": ">=22.19.0"
 	},
 	"devDependencies": {
-		"@types/node": "24.12.4",
+		"@types/node": "26.6.5",
 		"canvas": "3.2.3",
 		"vitest": "4.1.12"
 	},

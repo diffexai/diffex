@@ -39,7 +39,7 @@
 		"@diffexai/diffex-telemetry": "^0.3.2"
 	},
 	"devDependencies": {
-		"@types/node": "24.12.4",
+		"@types/node": "26.6.5",
 		"shx": "0.4.0",
 		"vitest": "4.1.12"
 	}

@@ -47,7 +47,7 @@
 		"node": ">=22.19.0"
 	},
 	"devDependencies": {
-		"@types/node": "24.12.4",
+		"@types/node": "26.6.5",
 		"vitest": "4.1.12"
 	},
 	"private": true

@@ -123,7 +123,8 @@ class UnixListener implements DiffexServerListener {
 		}
 		const handler = accept(connection);
 		socket.on("data", (chunk) => {
-			handler.onData(new Uint8Array(chunk.buffer, chunk.byteOffset, chunk.byteLength));
+			const bytes = typeof chunk === "string" ? Buffer.from(chunk) : chunk;
+			handler.onData(new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength));
 		});
 		socket.on("error", (error) => {
 			handler.onError(error);

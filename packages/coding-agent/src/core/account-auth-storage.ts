@@ -18,7 +18,7 @@ export interface DiffexAccountAuthStorage {
 
 export interface KeyringEntry {
 	setPassword(password: string, signal?: AbortSignal): Promise<void>;
-	getPassword(signal?: AbortSignal): Promise<string | undefined>;
+	getPassword(signal?: AbortSignal): Promise<string | null>;
 	deleteCredential(signal?: AbortSignal): Promise<boolean>;
 }
 
@@ -42,7 +42,7 @@ export class KeyringDiffexAccountAuthStorage implements DiffexAccountAuthStorage
 		try {
 			const entry = await this.#entry(apiOrigin);
 			const stored = await entry.getPassword(signal);
-			return stored === undefined ? undefined : parseStoredSession(stored, apiOrigin);
+			return stored === null ? undefined : parseStoredSession(stored, apiOrigin);
 		} catch (error) {
 			if (isMissingCredentialError(error)) return undefined;
 			if (error instanceof DiffexAccountStorageError) throw error;

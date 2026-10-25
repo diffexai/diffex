@@ -11,7 +11,7 @@
 	"devDependencies": {
 		"@diffexai/diffex-ai": "^0.3.2",
 		"@diffexai/diffex": "^0.3.2",
-		"@types/node": "24.12.4",
+		"@types/node": "26.6.5",
 		"shx": "0.4.0",
 		"typescript": "5.9.3",
 		"vitest-evals": "0.17.0",
