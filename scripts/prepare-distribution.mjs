@@ -74,7 +74,7 @@ export function preparePackageDistribution(directory) {
 		}
 		for (const [name, version, license, file] of [
 			["highlight.js", "11.9.0", "BSD-3-Clause", "legal/upstream/highlight-11.9.0.LICENSE"],
-			["marked", "18.0.5", "MIT", "node_modules/marked/LICENSE"],
+			["marked", "18.0.5", "MIT", "legal/upstream/marked-18.0.5.LICENSE"],
 		]) {
 			const text = readFileSync(join(root, file), "utf8");
 			notices += `\n===== ${name}@${version} (${license}) =====\n${text}\n`;

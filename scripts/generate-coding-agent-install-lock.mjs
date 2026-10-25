@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, posix, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { cliDistribution } from "./cli-distribution.mjs";
+import { distributionExternalPackages, resolveExternalDependency } from "./distribution-lock-resolution.mjs";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptDir, "..");
@@ -150,86 +151,11 @@ function getInternalWorkspaces(lockPackages) {
 
 		workspaces.set(entry.name, {
 			lockPath,
-			packageJson:
-				entry.name === "@diffexai/diffex"
-					? cliDistribution(repoRoot).manifest
-					: readJson(join(repoRoot, lockPath, "package.json")),
+			packageJson: readJson(join(repoRoot, lockPath, "package.json")),
 		});
 	}
 
 	return workspaces;
-}
-
-function resolveExternalDependency(lockPackages, packageName, fromLockPath) {
-	const candidateDirs = [];
-	let current = fromLockPath;
-
-	while (current) {
-		candidateDirs.push(current);
-		const parent = posix.dirname(current);
-		if (parent === "." || parent === current) {
-			break;
-		}
-		current = parent;
-	}
-	candidateDirs.push("");
-
-	const tried = new Set();
-	for (const directory of candidateDirs) {
-		const candidate = directory ? `${directory}/node_modules/${packageName}` : `node_modules/${packageName}`;
-		if (tried.has(candidate)) {
-			continue;
-		}
-		tried.add(candidate);
-
-		const entry = lockPackages[candidate];
-		if (entry && !entry.link) {
-			return candidate;
-		}
-	}
-
-	const suffix = `node_modules/${packageName}`;
-	const matches = Object.entries(lockPackages)
-		.filter(([lockPath, entry]) => !entry.link && (lockPath === suffix || lockPath.endsWith(`/${suffix}`)))
-		.map(([lockPath]) => lockPath);
-
-	if (matches.length === 1) {
-		return matches[0];
-	}
-
-	throw new Error(
-		`Cannot resolve ${packageName} from ${fromLockPath || "root"}. ` +
-			(matches.length > 1 ? `Matches: ${matches.join(", ")}` : "No matching lockfile entry found."),
-	);
-}
-
-function addInternalWorkspace(installLockPackages, addedPaths, queue, name, workspace) {
-	const packageJson = workspace.packageJson;
-	const outputPath = `node_modules/${name}`;
-	const entry = copyPackageJsonEntry(packageJson, { includeName: false });
-	entry.resolved = registryTarballUrl(name, packageJson.version);
-
-	installLockPackages[outputPath] = sortedPackageEntry(entry);
-	addedPaths.add(outputPath);
-
-	for (const dependencyName of Object.keys(packageDependencies(packageJson))) {
-		queue.push({ name: dependencyName, from: outputPath });
-	}
-}
-
-function addExternalPackage(lockPackages, installLockPackages, addedPaths, queue, name, from) {
-	const lockPath = resolveExternalDependency(lockPackages, name, from);
-	if (addedPaths.has(lockPath)) {
-		return;
-	}
-
-	const entry = lockPackages[lockPath];
-	installLockPackages[lockPath] = copyLockEntry(entry);
-	addedPaths.add(lockPath);
-
-	for (const dependencyName of Object.keys(packageDependencies(entry))) {
-		queue.push({ name: dependencyName, from: lockPath });
-	}
 }
 
 function createInstallerPackageJson(codingAgentPackage) {
@@ -288,6 +214,9 @@ function validateGeneratedFiles(installerPackageJson, installLock, internalNames
 		const packageName = packageNameFromLockPath(lockPath);
 		if (packageName) {
 			includedPackageNames.add(packageName);
+		}
+		if (lockPath && !lockPath.startsWith("node_modules/")) {
+			errors.push(`${lockPath} is not a published node_modules path`);
 		}
 		if (entry.link) {
 			errors.push(`${lockPath} is a link entry`);
@@ -361,7 +290,9 @@ function validateGeneratedFiles(installerPackageJson, installLock, internalNames
 	}
 
 	if (errors.length > 0) {
-		throw new Error(`Generated installer lock failed validation:\n${errors.map((error) => `  - ${error}`).join("\n")}`);
+		throw new Error(
+			`Generated installer lock failed validation:\n${errors.map((error) => `  - ${error}`).join("\n")}`,
+		);
 	}
 }
 
@@ -378,28 +309,19 @@ function generateInstallLock() {
 	const installLockPackages = {
 		"": createRootLockEntry(installerPackageJson),
 	};
-	const addedPaths = new Set([""]);
-	const internalNames = new Set();
-	const queue = Object.keys(packageDependencies(installerPackageJson)).map((name) => ({ name, from: "" }));
-
-	while (queue.length > 0) {
-		const item = queue.shift();
-		if (!item) {
-			break;
-		}
-
-		const workspace = internalWorkspaces.get(item.name);
-		if (workspace) {
-			const outputPath = `node_modules/${item.name}`;
-			internalNames.add(item.name);
-			if (!addedPaths.has(outputPath)) {
-				addInternalWorkspace(installLockPackages, addedPaths, queue, item.name, workspace);
-			}
-			continue;
-		}
-
-		addExternalPackage(lockPackages, installLockPackages, addedPaths, queue, item.name, item.from);
-	}
+	const internalNames = new Set([codingAgentPackage.name]);
+	const cliEntry = copyPackageJsonEntry(codingAgentPackage, { includeName: false });
+	cliEntry.resolved = registryTarballUrl(codingAgentPackage.name, codingAgentPackage.version);
+	installLockPackages[`node_modules/${codingAgentPackage.name}`] = sortedPackageEntry(cliEntry);
+	Object.assign(
+		installLockPackages,
+		distributionExternalPackages({
+			lockPackages,
+			manifest: codingAgentPackage,
+			workspaces: internalWorkspaces,
+			copyEntry: copyLockEntry,
+		}),
+	);
 
 	const installLock = {
 		name: installerPackageJson.name,

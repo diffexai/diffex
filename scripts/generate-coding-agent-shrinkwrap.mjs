@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, posix, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { cliDistribution } from "./cli-distribution.mjs";
+import { distributionExternalPackages, resolveExternalDependency } from "./distribution-lock-resolution.mjs";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptDir, "..");
@@ -125,11 +126,6 @@ function packageNameFromLockPath(lockPath) {
 	return parts[0];
 }
 
-function registryTarballUrl(packageName, version) {
-	const tarballName = packageName.startsWith("@") ? packageName.split("/")[1] : packageName;
-	return `https://registry.npmjs.org/${packageName}/-/${tarballName}-${version}.tgz`;
-}
-
 function getInternalWorkspaces(lockPackages) {
 	const workspaces = new Map();
 
@@ -143,98 +139,21 @@ function getInternalWorkspaces(lockPackages) {
 
 		workspaces.set(entry.name, {
 			lockPath,
-			packageJson:
-				entry.name === "@diffexai/diffex"
-					? cliDistribution(repoRoot).manifest
-					: readJson(join(repoRoot, lockPath, "package.json")),
+			packageJson: readJson(join(repoRoot, lockPath, "package.json")),
 		});
 	}
 
 	return workspaces;
 }
 
-function resolveExternalDependency(lockPackages, packageName, fromLockPath) {
-	const candidateDirs = [];
-	let current = fromLockPath;
-
-	while (current) {
-		candidateDirs.push(current);
-		const parent = posix.dirname(current);
-		if (parent === "." || parent === current) {
-			break;
-		}
-		current = parent;
-	}
-	candidateDirs.push("");
-
-	const tried = new Set();
-	for (const directory of candidateDirs) {
-		const candidate = directory ? `${directory}/node_modules/${packageName}` : `node_modules/${packageName}`;
-		if (tried.has(candidate)) {
-			continue;
-		}
-		tried.add(candidate);
-
-		const entry = lockPackages[candidate];
-		if (entry && !entry.link) {
-			return candidate;
-		}
-	}
-
-	const suffix = `node_modules/${packageName}`;
-	const matches = Object.entries(lockPackages)
-		.filter(([lockPath, entry]) => !entry.link && (lockPath === suffix || lockPath.endsWith(`/${suffix}`)))
-		.map(([lockPath]) => lockPath);
-
-	if (matches.length === 1) {
-		return matches[0];
-	}
-
-	throw new Error(
-		`Cannot resolve ${packageName} from ${fromLockPath || "root"}. ` +
-			(matches.length > 1 ? `Matches: ${matches.join(", ")}` : "No matching lockfile entry found."),
-	);
-}
-
-function addInternalWorkspace(shrinkwrapPackages, addedPaths, queue, name, workspace) {
-	const packageJson = workspace.packageJson;
-	const outputPath = `node_modules/${name}`;
-	const entry = copyPackageJsonEntry(packageJson, { includeName: false });
-	entry.resolved = registryTarballUrl(name, packageJson.version);
-
-	shrinkwrapPackages[outputPath] = sortedPackageEntry(entry);
-	addedPaths.add(outputPath);
-
-	for (const dependencyName of Object.keys(packageDependencies(packageJson))) {
-		queue.push({ name: dependencyName, from: outputPath });
-	}
-}
-
-function addExternalPackage(lockPackages, shrinkwrapPackages, addedPaths, queue, name, from) {
-	const lockPath = resolveExternalDependency(lockPackages, name, from);
-	if (addedPaths.has(lockPath)) {
-		return;
-	}
-
-	const entry = lockPackages[lockPath];
-	shrinkwrapPackages[lockPath] = copyLockEntry(entry);
-	addedPaths.add(lockPath);
-
-	for (const dependencyName of Object.keys(packageDependencies(entry))) {
-		queue.push({ name: dependencyName, from: lockPath });
-	}
-}
-
-function validateShrinkwrap(shrinkwrap, internalNames) {
+function validateShrinkwrap(shrinkwrap) {
 	const errors = [];
-	const includedPaths = new Set(Object.keys(shrinkwrap.packages));
-	const includedPackageNames = new Set();
 	const seenAllowedInstallScriptPackages = new Set();
 
 	for (const [lockPath, entry] of Object.entries(shrinkwrap.packages)) {
 		const packageName = packageNameFromLockPath(lockPath);
-		if (packageName) {
-			includedPackageNames.add(packageName);
+		if (lockPath && !lockPath.startsWith("node_modules/")) {
+			errors.push(`${lockPath} is not a published node_modules path`);
 		}
 		if (entry.link) {
 			errors.push(`${lockPath} is a link entry`);
@@ -264,19 +183,19 @@ function validateShrinkwrap(shrinkwrap, internalNames) {
 		}
 	}
 
-	for (const name of internalNames) {
-		if (!includedPackageNames.has(name)) {
-			errors.push(`internal dependency ${name} is missing`);
-		}
-	}
-
 	for (const [lockPath, entry] of Object.entries(shrinkwrap.packages)) {
-		for (const dependencyName of Object.keys(packageDependencies(entry))) {
-			const dependencyIncluded = [...includedPaths].some(
-				(candidate) =>
-					candidate === `node_modules/${dependencyName}` || candidate.endsWith(`/node_modules/${dependencyName}`),
-			);
-			if (!dependencyIncluded) {
+		for (const [dependencyName, dependencySpec] of Object.entries(packageDependencies(entry))) {
+			try {
+				const resolved = resolveExternalDependency(shrinkwrap.packages, dependencyName, lockPath);
+				if (
+					/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(dependencySpec) &&
+					shrinkwrap.packages[resolved].version !== dependencySpec
+				) {
+					errors.push(
+						`${lockPath || "root"} dependency ${dependencyName}@${dependencySpec} resolves to ${shrinkwrap.packages[resolved].version}`,
+					);
+				}
+			} catch {
 				errors.push(`${lockPath || "root"} dependency ${dependencyName} is missing`);
 			}
 		}
@@ -306,28 +225,15 @@ function generateShrinkwrap() {
 	const shrinkwrapPackages = {
 		"": copyPackageJsonEntry(codingAgentPackage, { includeName: true }),
 	};
-	const addedPaths = new Set([""]);
-	const internalNames = new Set();
-	const queue = Object.keys(packageDependencies(codingAgentPackage)).map((name) => ({ name, from: "" }));
-
-	while (queue.length > 0) {
-		const item = queue.shift();
-		if (!item) {
-			break;
-		}
-
-		const workspace = internalWorkspaces.get(item.name);
-		if (workspace) {
-			const outputPath = `node_modules/${item.name}`;
-			internalNames.add(item.name);
-			if (!addedPaths.has(outputPath)) {
-				addInternalWorkspace(shrinkwrapPackages, addedPaths, queue, item.name, workspace);
-			}
-			continue;
-		}
-
-		addExternalPackage(lockPackages, shrinkwrapPackages, addedPaths, queue, item.name, item.from);
-	}
+	Object.assign(
+		shrinkwrapPackages,
+		distributionExternalPackages({
+			lockPackages,
+			manifest: codingAgentPackage,
+			workspaces: internalWorkspaces,
+			copyEntry: copyLockEntry,
+		}),
+	);
 
 	const shrinkwrap = {
 		name: codingAgentPackage.name,
@@ -337,7 +243,7 @@ function generateShrinkwrap() {
 		packages: sortedObject(shrinkwrapPackages),
 	};
 
-	validateShrinkwrap(shrinkwrap, internalNames);
+	validateShrinkwrap(shrinkwrap);
 	return shrinkwrap;
 }
 
