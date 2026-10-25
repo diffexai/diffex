@@ -81,9 +81,11 @@ test("both generators emit deterministic deployable locks in an isolated fixture
 		]) {
 			copyFileSync(new URL(file, import.meta.url), join(root, "scripts", file));
 		}
+		writeFileSync(join(root, "manifest.json"), JSON.stringify(input.manifest));
 		writeFileSync(
 			join(root, "scripts/cli-distribution.mjs"),
-			`export function cliDistribution() { return { manifest: ${JSON.stringify(input.manifest)} }; }\n`,
+			'import { readFileSync } from "node:fs";\n' +
+				'export function cliDistribution() { return { manifest: JSON.parse(readFileSync(new URL("../manifest.json", import.meta.url), "utf8")) }; }\n',
 		);
 		for (const [name, workspace] of input.workspaces) {
 			const manifest = { name, version: "1.0.0", ...workspace.packageJson };
