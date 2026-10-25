@@ -4,6 +4,7 @@
  * Run with: npx tsx test/streaming-render-debug.ts
  */
 
+import assert from "node:assert/strict";
 import type { AssistantMessage } from "@diffexai/diffex-ai";
 import { ProcessTerminal, type TUI, TuiMainScreen } from "@diffexai/diffex-tui";
 import { readFileSync } from "fs";
@@ -28,10 +29,7 @@ const fixtureMessage: AssistantMessage = JSON.parse(
 const thinkingContent = fixtureMessage.content.find((c) => c.type === "thinking");
 const textContent = fixtureMessage.content.find((c) => c.type === "text");
 
-if (thinkingContent?.type !== "thinking") {
-	console.error("No thinking content in fixture");
-	process.exit(1);
-}
+assert.ok(thinkingContent, "No thinking content in fixture");
 
 const fullThinkingText = thinkingContent.thinking;
 const fullTextContent = textContent && textContent.type === "text" ? textContent.text : "";
