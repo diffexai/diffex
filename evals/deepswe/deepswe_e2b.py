@@ -169,7 +169,7 @@ class ResourceCheckedE2B(E2BEnvironment):
         self, command: str, *, cwd: str | None, env: dict[str, str] | None,
         timeout_sec: int | None, user: str,
     ):
-        # E2B 2.51 executes /bin/bash -l -c: login profiles can replace the PATH
+        # E2B executes /bin/bash -l -c: login profiles can replace the PATH
         # supplied through envs. Restore the fully merged PATH inside that shell
         # so startup probes, agent tools, and verifier commands use task binaries.
         # Keep credentials in the env parameter, never in shell command text.
@@ -245,7 +245,7 @@ class ResourceCheckedE2B(E2BEnvironment):
             raise RuntimeError(f"E2B capacity differs from the task requirements: {resources}")
 
     async def stop(self, delete: bool) -> None:
-        # Harbor 0.23 downloads verifier logs only after verify() returns.
+        # Recover verifier logs before teardown, including when verify() fails.
         # Retain a separate recovery snapshot on timeout/transport failure too,
         # without turning an incomplete reward file into a completed grade.
         try:

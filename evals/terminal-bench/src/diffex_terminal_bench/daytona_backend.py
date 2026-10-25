@@ -19,7 +19,7 @@ class RecordedDaytonaEnvironment(DaytonaEnvironment):
         self, params: CreateSandboxFromImageParams | CreateSandboxFromSnapshotParams,
         daytona: AsyncDaytona | None = None,
     ) -> None:
-        # Harbor 0.23.0 has no public hook for SDK volume mounts. This creation
+        # Harbor has no public hook for SDK volume mounts. This creation
         # boundary covers both direct sandboxes and the DinD host (whose /logs
         # paths Harbor bind-mounts into the task container).
         if daytona is None:
@@ -142,7 +142,7 @@ class RecordedDaytonaEnvironment(DaytonaEnvironment):
         try:
             await super().start(force_build)
         finally:
-            # Harbor 0.23.0 exposes no public creation-result API. Read its
+            # Harbor exposes no public creation-result API. Read its
             # pinned sandbox reference before stop() deliberately clears it.
             if self._sandbox is not None:
                 path = self.trial_paths.trial_dir / "sandbox-created.json"

@@ -40,8 +40,8 @@ async def main() -> None:
             json.dump({"seed": seed}, stream)
             stream.write("\n")
     config = JobConfig.model_validate(yaml.safe_load((source / "sample.yaml").read_text()))
-    if (PINS["diffex_version"], version("harbor"), version("e2b")) != ("0.3.2", "0.23.0", "2.51.0"):
-        raise RuntimeError("Expected Diffex 0.3.2, Harbor 0.23.0, E2B 2.51.0.")
+    if (PINS["diffex_version"], version("harbor"), version("e2b")) != ("0.3.2", "0.24.0", "2.59.0"):
+        raise RuntimeError("Expected Diffex 0.3.2, Harbor 0.24.0, E2B 2.59.0.")
     if (config.n_attempts, config.n_concurrent_trials, config.retry.max_retries) != (2, 5, 0):
         raise RuntimeError("Expected two attempts, five concurrent trials, and zero retries.")
     if len(config.agents) != 1 or len(config.datasets) != 1 or config.tasks:

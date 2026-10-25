@@ -34,7 +34,7 @@ class ExportJobTests(unittest.TestCase):
         config = load_config(PACKAGE / "benchmark.toml")
         self.model_name = config.model
         now = datetime.now(timezone.utc)
-        self.identity = {"harbor_version": "0.23.0", "concurrency": 3, "harbor_retries": 0,
+        self.identity = {"harbor_version": PINS["harbor_version"], "concurrency": 3, "harbor_retries": 0,
                          "pilot_tasks": config.pilot_tasks,
                          "task_digests": {task: "sha256:" + "a" * 64 for task in config.pilot_tasks}}
         self.report = {"stage": "pilot", "identity": self.identity, "identity_sha256": fingerprint(self.identity),
@@ -227,6 +227,14 @@ class ExportJobTests(unittest.TestCase):
         (self.directories[0] / "agent/trajectory.json").write_text("changed")
         with self.assertRaisesRegex(ValueError, "checked evidence changed"):
             export_job(self.source, self.output, allow_partial=True)
+        self.assertFalse(self.output.exists())
+
+    def test_export_rejects_a_stage_from_a_different_harbor_version(self):
+        self.identity["harbor_version"] = "0.0.0"
+        self.report["identity_sha256"] = fingerprint(self.identity)
+        write_json(self.source / "gate.json", self.report)
+        with self.assertRaisesRegex(ValueError, "Harbor version recorded by the stage"):
+            export_job(self.source, self.output)
         self.assertFalse(self.output.exists())
 
     def test_unfinished_stage_cannot_be_exported(self):

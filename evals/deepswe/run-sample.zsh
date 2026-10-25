@@ -6,7 +6,7 @@ DS_REPO=${DS_SETUP:h:h}
 DS_PREPARED=${DS_PREPARED:-$DS_REPO/.artifacts/deepswe/prepared-5x2-runtime-v3}
 cd "$DS_REPO/evals/terminal-bench"
 export PYTHONPATH="$DS_SETUP${PYTHONPATH:+:$PYTHONPATH}"
-DS_UV=(uv --cache-dir /tmp/diffex-e2b-uv-cache run --locked --with 'harbor[e2b]==0.23.0' --with 'e2b==2.51.0')
+DS_UV=(uv --cache-dir /tmp/diffex-e2b-uv-cache run --locked)
 [[ $# -le 1 ]] || { print -u2 'Too many arguments.'; exit 1; }
 case "${1:-}" in
   --prepare)

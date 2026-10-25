@@ -25,8 +25,8 @@ async def main() -> None:
     args = parser.parse_args()
     source = Path(__file__).resolve().parent
     config = JobConfig.model_validate(yaml.safe_load((source / "smoke.yaml").read_text()))
-    if (PINS["diffex_version"], version("harbor"), version("e2b")) != ("0.3.2", "0.23.0", "2.51.0"):
-        raise RuntimeError("Expected Diffex 0.3.2, Harbor 0.23.0, and E2B 2.51.0.")
+    if (PINS["diffex_version"], version("harbor"), version("e2b")) != ("0.3.2", "0.24.0", "2.59.0"):
+        raise RuntimeError("Expected Diffex 0.3.2, Harbor 0.24.0, and E2B 2.59.0.")
     if (config.n_attempts, config.n_concurrent_trials, config.retry.max_retries) != (1, 1, 0):
         raise RuntimeError("The smoke trial requires one attempt, concurrency one, and zero retries.")
     agent = config.agents[0]

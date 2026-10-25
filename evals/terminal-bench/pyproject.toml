@@ -3,11 +3,11 @@ name = "diffex-terminal-bench"
 version = "0.1.0"
 description = "Private Harbor integration for Diffex Terminal-Bench evaluations"
 requires-python = ">=3.13,<3.14"
-dependencies = ["harbor[daytona,e2b]==0.23.0", "daytona==0.210.0", "pydantic==2.13.5", "pyyaml==6.0.3"]
+dependencies = ["harbor[daytona,e2b]==0.24.0", "daytona==0.226.1", "e2b==2.59.0", "pydantic==2.14.1", "pyyaml==6.0.3"]
 classifiers = ["Private :: Do Not Upload"]
 
 [build-system]
-requires = ["hatchling==1.27.0"]
+requires = ["hatchling==1.32.4"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
@@ -15,6 +15,7 @@ packages = ["src/diffex_terminal_bench"]
 
 [tool.uv]
 default-groups = []
+prerelease = "if-necessary"
 
 [[tool.uv.index]]
 name = "pypi"

@@ -1,4 +1,4 @@
-harbor_version = "0.23.0"
+harbor_version = "0.24.0"
 node_version = "22.23.2"
 diffex_version = "0.3.2"
 npm_registry = "https://registry.npmjs.org/"

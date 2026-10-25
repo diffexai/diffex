@@ -57,7 +57,7 @@ def progress(message: str) -> None:
 
 
 def preflight(config: BenchmarkConfig, *, oracle: bool) -> None:
-    if version("harbor") != PINS["harbor_version"] or version("daytona") != "0.210.0":
+    if version("harbor") != PINS["harbor_version"] or version("daytona") != "0.226.1":
         raise ValueError("Run uv sync --locked to install the pinned Harbor/Daytona versions")
     if not os.environ.get("DAYTONA_API_KEY"):
         raise ValueError("Set DAYTONA_API_KEY through your secret-loading mechanism")

@@ -196,7 +196,7 @@ def validate_trial(directory: Path, task: str, identity: dict, *, oracle: bool =
     saved_rewards = read_json(reward_path) if reward_path.exists() else {"reward": float((verifier / "reward.txt").read_text())}
     if saved_rewards != rewards:
         raise ValueError("Verifier reward does not reconcile with Harbor")
-    # Harbor 0.23.0 redirects both verifier streams to test-stdout.txt.
+    # Harbor redirects both verifier streams to test-stdout.txt.
     if not (verifier / "test-stdout.txt").is_file():
         raise ValueError("Missing combined verifier log: test-stdout.txt")
     if oracle:
