@@ -13,12 +13,12 @@ import {
 	rmSync,
 	writeFileSync,
 } from "node:fs";
-import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { isolatedEnvironment } from "./artifact-acceptance.mjs";
+import { createLifecycleRegistry } from "./npm-lifecycle-registry.mjs";
 import { findNpmRecoveryDirectory } from "./npm-recovery.mjs";
 
 const run = promisify(execFile);
@@ -90,36 +90,14 @@ const evidence = {
 let mode = "valid";
 let interrupt;
 let tarballRequests = 0;
-const server = createServer((request, reply) => {
-	const path = decodeURIComponent(request.url);
-	if (path === "/@diffexai/diffex") {
-		const pkg = {
-			...metadata,
-			dist: {
-				tarball: `http://127.0.0.1:${server.address().port}/diffex.tgz`,
-				integrity: `sha512-${createHash("sha512")
-					.update(mode === "corrupt" ? "wrong bytes" : bytes)
-					.digest("base64")}`,
-			},
-		};
-		reply.setHeader("content-type", "application/json");
-		reply.end(
-			JSON.stringify({
-				name: metadata.name,
-				"dist-tags": { latest: metadata.version },
-				versions: { [metadata.version]: pkg },
-			}),
-		);
-	} else if (path === "/diffex.tgz") {
+const server = createLifecycleRegistry({
+	metadata,
+	bytes,
+	getMode: () => mode,
+	onArchive: (archiveMode) => {
 		tarballRequests++;
-		if (mode === "interrupt") {
-			interrupt?.();
-			return;
-		}
-		reply.end(bytes);
-	} else {
-		reply.writeHead(404).end();
-	}
+		if (archiveMode === "interrupt") interrupt?.();
+	},
 });
 await new Promise((done) => server.listen(0, "127.0.0.1", done));
 
@@ -216,28 +194,44 @@ try {
 			const child = spawn(process.execPath, ["--import", guard, executable, "update", "--self", "--force"], {
 				...options,
 				detached: true,
-				stdio: "ignore",
+				stdio: ["ignore", "pipe", "pipe"],
 			});
+			// Keep draining both pipes, retaining only the last 64 KiB per stream.
+			const captured = { stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) };
+			for (const name of ["stdout", "stderr"]) {
+				child[name].on("data", (chunk) => {
+					captured[name] = Buffer.concat([captured[name], chunk]).subarray(-64 * 1024);
+				});
+			}
 			let interrupted = false;
 			interrupt = () => {
 				interrupted = true;
 				process.kill(-child.pid, "SIGTERM");
 			};
 			const deadline = setTimeout(() => process.kill(-child.pid, "SIGKILL"), 30000);
+			let result;
 			try {
-				await new Promise((done, reject) => {
-					child.on("close", done);
+				result = await new Promise((done, reject) => {
+					child.on("close", (exitCode, signal) => done({ exitCode, signal }));
 					child.on("error", reject);
 				});
 			} finally {
 				clearTimeout(deadline);
+				interrupt = undefined;
 			}
-			assert(interrupted, "Interrupted update must reach the real npm archive download");
-			evidence.commands.push({
+			const diagnostic = {
 				command: "diffex update --self --force",
-				signal: "SIGTERM",
+				...result,
 				boundary: "npm archive download",
-			});
+				interrupted,
+				stdout: captured.stdout.toString("utf8"),
+				stderr: captured.stderr.toString("utf8"),
+			};
+			evidence.commands.push(diagnostic);
+			assert(
+				interrupted,
+				`Interrupted update must reach the real npm archive download; child exited before boundary: ${JSON.stringify(diagnostic)}`,
+			);
 		}
 		const installationUnchanged = snapshot(prefix) === stable;
 		if (fault === "corrupt") assert(installationUnchanged, "Integrity failure mutated the prefix");
