@@ -10,6 +10,7 @@ Unified LLM API with provider collections, automatic auth resolution, token and 
 - [Installation](#installation)
 - [Quick Start](#quick-start)
 - [Providers and Models](#providers-and-models)
+  - [Provider SDK Migration Notes](#provider-sdk-migration-notes)
   - [Provider Factories](#provider-factories)
   - [All Built-in Providers](#all-built-in-providers)
   - [Querying Models](#querying-models)
@@ -232,6 +233,15 @@ Snippets in the rest of this README assume a `models` collection set up like thi
 A **provider** is the runtime unit: it owns its model catalog, its auth (API key resolution, OAuth flows), and its stream behavior. A `Models` collection holds providers and routes every request to the provider that owns the model.
 
 Providers internally share **API implementations** (the wire protocols): Anthropic models use `anthropic-messages`, OpenAI uses `openai-responses`, while xAI, Groq, Cerebras, OpenRouter, and most others share `openai-completions`. Mixed-API providers (GitHub Copilot, OpenCode Zen) dispatch per model.
+
+### Provider SDK Migration Notes
+
+The Anthropic, Google GenAI, Mistral, and OpenAI SDK updates leave existing provider authentication unchanged. Google uses the Google API-key/ADC paths documented under [Auth](#auth), not GitHub credentials.
+
+- **Anthropic**: API version `2026-10-21` no longer accepts `temperature`, `top_p`, or `top_k`. The adapter omits these sampling parameters; the public unified `temperature` option is now ignored for Anthropic.
+- **Google Gemini and Vertex AI**: The adapters explicitly set `automaticContinuation: false`. A `CONTINUATION` finish reason ends the request rather than triggering hidden SDK follow-up requests; applications control any subsequent request.
+
+See [Stop Reasons](#stop-reasons) for limit/continuation mappings and [dependency maintenance](../../docs/dependency-maintenance.md) for update procedures and compatibility notes.
 
 ### Provider Factories
 
@@ -885,10 +895,12 @@ Every `AssistantMessage` includes a `stopReason` field that indicates how the ge
 
 - `"pending"` - Only present in partial messages when we do not know what the stop reason will be
 - `"stop"` - This is the final message the model will produce this turn
-- `"length"` - Output hit the maximum token limit
+- `"length"` - Generation reached a token/context limit or requires explicit continuation
 - `"toolUse"` - Model is calling tools and expects tool results
 - `"error"` - An error occurred during generation
 - `"aborted"` - Request was cancelled via abort signal
+
+Anthropic's `model_context_window_exceeded` and Google Gemini/Vertex AI's `CONTINUATION` both map to `"length"`.
 
 `AssistantMessage` may also include `responseId`, a provider-specific upstream response or message identifier when the underlying API exposes one. Do not assume it is always present across providers.
 

@@ -33,6 +33,14 @@ The repository normally enforces a two-day minimum release age. Do not disable i
 
 [Undici 8.12.3](https://github.com/nodejs/undici/releases/tag/v8.12.3) fixes HTTP/2 connection replacement following stream timeouts and preserves caller async context for queued pool requests. These can affect timeout recovery and request attribution; review networking tests when updating. It retains the Node 22.19.0 minimum.
 
+## Provider SDK migrations
+
+The provider SDKs use Anthropic **1.3.0**, Google GenAI **2.31.0**, Mistral **3.2.0**, and OpenAI **7.43.0**. The standalone custom Anthropic provider example uses the same Anthropic pin and lockfile. Mistral uses scoped Chat and HTTPClient imports so its new Node-only voice exports do not enter browser bundles. Cloudflare compatibility tests inject an in-memory fetch implementation rather than relying on SDK hoisting.
+
+Google automatic continuation is explicitly disabled for Gemini and Vertex requests. A continuation limit is reported as `length` rather than allowing the SDK to send additional requests automatically. Google authentication remains independent of GitHub credentials.
+
+Anthropic adopts the SDK's API version **2026-10-21** and no longer sends the removed sampling parameters. A model-context-window limit is reported as `length`. The Google GenAI install-script allowlist was reviewed and updated: its published `preinstall` is still a no-op, and installs continue to skip scripts.
+
 ## Security review
 
 The initial audit reported seven affected packages, all present in the baseline lockfile. Updating Vitest/coverage to 4.1.12 and refreshing compatible Vite and source-map-js transitives removes five findings. The remaining sandbox-runtime/Zod dependency chain requires further review; do not force a Zod major-version override across consumers without checking their APIs.
