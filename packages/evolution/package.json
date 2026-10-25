@@ -26,7 +26,7 @@
 		"prepublishOnly": "npm run clean && npm run build"
 	},
 	"author": "DiffexAI",
-	"license": "Apache-2.0",
+	"license": "MIT",
 	"repository": {
 		"type": "git",
 		"url": "git+https://github.com/diffexai/diffex.git",

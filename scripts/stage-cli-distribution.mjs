@@ -15,7 +15,7 @@ export function stageCliDistribution(directory, stage) {
 	}
 	writeFileSync(
 		join(stage, "README.md"),
-		"# Diffex\n\nCoding agent for your terminal.\nSee the [Diffex documentation](https://diffex.ai/docs/overview/) for installation and usage.\n\nDiffex is licensed under Apache-2.0; Pi-derived portions retain their MIT terms.\nSee LICENSE and THIRD-PARTY-NOTICES.txt.\n",
+		"# Diffex\n\nCoding agent for your terminal.\nSee the [Diffex documentation](https://diffex.ai/docs/overview/) for installation and usage.\n\nDiffex is licensed under MIT; Pi-derived portions retain their MIT terms.\nSee LICENSE and THIRD-PARTY-NOTICES.txt.\n",
 	);
 	const inventory = JSON.parse(readFileSync(join(directory, "distribution-files.json"), "utf8"));
 	const components = JSON.parse(readFileSync(join(directory, "distribution-components.json"), "utf8")).filter(

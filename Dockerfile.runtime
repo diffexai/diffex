@@ -36,7 +36,7 @@ WORKDIR /workspace
 ARG SOURCE_COMMIT
 LABEL org.opencontainers.image.source="https://github.com/diffexai/diffex"
 LABEL org.opencontainers.image.revision=$SOURCE_COMMIT
-LABEL org.opencontainers.image.licenses="Apache-2.0 AND MIT"
+LABEL org.opencontainers.image.licenses="MIT"
 LABEL org.opencontainers.image.description="Hosted Diffex coding-agent runtime"
 
 CMD ["diffex-runtime-server"]

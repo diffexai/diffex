@@ -114,6 +114,13 @@ test("packed CLI links to online documentation and excludes the docs directory",
 		assert.equal(published.repository, undefined);
 		assert.equal(published.bugs, undefined);
 		assert.equal(published.diffexConfig.production, true);
+		assert.equal(published.license, "MIT");
+		const components = JSON.parse(
+			execFileSync("tar", ["-xOf", archive, "package/distribution-components.json"], { encoding: "utf8" }),
+		);
+		for (const component of components.filter(({ name }) => name.startsWith("@diffexai/"))) {
+			assert.equal(component.license, "MIT", component.name);
+		}
 		assert.match(
 			execFileSync("tar", ["-xOf", archive, "package/README.md"], { encoding: "utf8" }),
 			/https:\/\/diffex\.ai\/docs\/overview\//,
@@ -132,6 +139,7 @@ test("packed CLI links to online documentation and excludes the docs directory",
 			encoding: "utf8",
 		});
 		assert.match(attribution, /^Diffex\nCopyright 2026 Luntraa, Inc\./);
+		assert.match(attribution, /Diffex is licensed under MIT/);
 		assert(!existsSync(join(pkg, "NOTICE")));
 		assert.match(attribution, /highlight\.js@11\.9\.0/);
 		assert.match(attribution, /marked@18\.0\.5/);
@@ -172,7 +180,7 @@ test("actual npm tarball carries notices and excludes debug sources after prepar
 			JSON.stringify({
 				name: "@diffexai/diffex-agent-core",
 				version: "0.2.0",
-				license: "Apache-2.0",
+				license: "MIT",
 				type: "module",
 				files: [
 					"dist",

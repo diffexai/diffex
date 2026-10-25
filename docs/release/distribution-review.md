@@ -32,9 +32,9 @@ Delivered code remains inspectable; repository privacy, minification, obfuscatio
 
 ## License and notice inventory
 
-The CLI and all bundled workspace manifests declare `Apache-2.0`.
-The two vendored Diffex workspaces also declare `Apache-2.0`.
-Each public package receives the complete root `LICENSE`, preserving the full Apache text, Luntraa, Inc. ownership, and the complete upstream MIT license and copyright notice for Pi-derived portions.
+The CLI and all bundled workspace manifests declare `MIT`.
+The two vendored Diffex workspaces also declare `MIT`.
+Each public package receives the complete root `LICENSE`, preserving the MIT terms, Luntraa, Inc. ownership, and the complete upstream MIT license and copyright notice for Pi-derived portions.
 The package declaration does not replace the MIT terms of those portions or other third-party terms.
 The generated `NOTICE` describes that distinction and the Diffex modifications.
 

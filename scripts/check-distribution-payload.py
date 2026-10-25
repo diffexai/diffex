@@ -145,8 +145,8 @@ def inspect_archive(file, license_file, expected_name=None, expected_version=Non
     if entries[root + 'LICENSE'] != Path(license_file).read_bytes():
         fail(str(file), 'license text differs from reviewed root license')
     metadata = json.loads(entries[root + 'package.json'])
-    if metadata.get('license') != 'Apache-2.0':
-        fail(str(file), 'package license must be Apache-2.0')
+    if metadata.get('license') != 'MIT':
+        fail(str(file), 'package license must be MIT')
     if metadata.get('private'):
         fail(str(file), 'private workspace cannot be a public package')
     if expected_name and metadata.get('name') != expected_name:

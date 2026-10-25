@@ -17,7 +17,7 @@ Standalone archives and other installation channels are deferred by the [approve
 The single public CLI package is derived from `scripts/release-packages.mjs`.
 Internal workspaces remain private and required runtime modules are included inside the CLI tarball.
 The generated publication manifest and installation locks contain no registry dependencies on separate Diffex packages.
-Every package declares Apache-2.0 and ships the full root license, including the complete MIT notice for Pi-derived portions.
+Every package declares MIT and ships the full root license, including the complete MIT notice for Pi-derived portions.
 The generated `NOTICE`, `THIRD-PARTY-NOTICES.txt`, and `distribution-components.json` identify applicable portions and bundled components.
 Readable runtime JavaScript, declarations, runtime JSON/SQL data, HTML/CSS templates, and documentation are approved.
 Examples and native source build files are excluded; evolution and harness-trace runtime code is explicitly public when vendored in the CLI.

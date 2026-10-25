@@ -461,6 +461,6 @@ npm run check
 
 ## License
 
-Apache-2.0 for Diffex, copyright 2026 Luntraa, Inc.
+MIT for Diffex, copyright 2026 Luntraa, Inc.
 Pi-derived portions retain their MIT terms and upstream copyright notice.
 See LICENSE, NOTICE, and THIRD-PARTY-NOTICES.txt in the distribution.

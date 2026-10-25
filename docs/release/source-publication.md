@@ -57,7 +57,7 @@ New commits, comments, artifacts, and runs after the inventory require a delta r
 
 ## Source notices
 
-The root `LICENSE` preserves the Apache-2.0 terms for Diffex and the upstream MIT terms and copyright for Pi-derived portions.
+The root `LICENSE` provides the MIT terms for Diffex and preserves the upstream MIT terms and copyright for Pi-derived portions.
 The vendored HTML-exporter libraries retain their bundle headers.
 Their complete upstream texts are tracked at `legal/upstream/marked-18.0.5.LICENSE` and `legal/upstream/highlight-11.9.0.LICENSE`.
 `legal/upstream/sources.json` records the source revisions.

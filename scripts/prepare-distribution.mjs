@@ -43,7 +43,7 @@ function walk(directory) {
 export function preparePackageDistribution(directory) {
 	const absolute = resolve(root, directory);
 	const pkg = JSON.parse(readFileSync(join(absolute, "package.json"), "utf8"));
-	if (pkg.license !== "Apache-2.0") throw new Error(`Unapproved package license: ${pkg.name}`);
+	if (pkg.license !== "MIT") throw new Error(`Unapproved package license: ${pkg.name}`);
 	const commit =
 		process.env.DIFFEX_SOURCE_COMMIT ??
 		execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
@@ -54,20 +54,20 @@ export function preparePackageDistribution(directory) {
 			name: pkg.name,
 			version: pkg.version,
 			sourceCommit: commit,
-			license: "Apache-2.0",
+			license: "MIT",
 			portions: "Diffex contributions; Pi-derived portions retain MIT terms in LICENSE",
 			notice: "LICENSE",
 		},
 	];
 	const notice =
-		"Diffex\nCopyright 2026 Luntraa, Inc.\n\nWhere this distribution contains Pi Agent Harness-derived portions,\nthose portions retain their MIT terms and copyright notice in LICENSE.\nThe Apache-2.0 package declaration does not replace third-party terms.\n";
+		"Diffex\nCopyright 2026 Luntraa, Inc.\n\nDiffex is licensed under MIT.\nWhere this distribution contains Pi Agent Harness-derived portions,\nthose portions retain their MIT terms and copyright notice in LICENSE.\nThe MIT package declaration does not replace third-party terms.\n";
 	let notices = notice;
 	if (pkg.name === "@diffexai/diffex") {
 		for (const workspace of ["evolution", "harness-trace"]) {
 			components.push({
 				name: `@diffexai/diffex-${workspace}`,
 				version: pkg.version,
-				license: "Apache-2.0",
+				license: "MIT",
 				portions: `dist/vendor/${workspace}: runtime JavaScript and declarations`,
 				notice: "LICENSE",
 			});

@@ -20,10 +20,10 @@ function fixture(extra, omit) {
 	const files = {
 		...Object.fromEntries(distributionDocs.map((path) => [path, "Reviewed user guide"])),
 		"README.md": "Diffex installation and usage",
-		"package.json": JSON.stringify({ name: "@diffexai/diffex", version, license: "Apache-2.0" }),
+		"package.json": JSON.stringify({ name: "@diffexai/diffex", version, license: "MIT" }),
 		LICENSE: readFileSync(license),
 		"THIRD-PARTY-NOTICES.txt": "Test fixture with no external bundled dependencies.\n",
-		"distribution-components.json": JSON.stringify([{ name: "Diffex", license: "Apache-2.0 AND MIT" }]),
+		"distribution-components.json": JSON.stringify([{ name: "Diffex", license: "MIT" }]),
 		"dist/index.js": "export const value = 1;\n",
 		"dist/index.d.ts": "export declare const value: number;\n",
 		"dist/AGENTS.md": readFileSync("AGENTS_release.md"),
@@ -179,7 +179,7 @@ test("rejects a case variant of the approved default path", () => {
 
 test("rejects default instructions in a non-CLI package", () => {
 	const { directory, archive } = fixture({
-		"package.json": JSON.stringify({ name: "@diffexai/diffex-agent-core", version, license: "Apache-2.0" }),
+		"package.json": JSON.stringify({ name: "@diffexai/diffex-agent-core", version, license: "MIT" }),
 	});
 	try {
 		const result = spawnSync("python3", [checker, archive, "--license", license], { encoding: "utf8" });
@@ -192,8 +192,8 @@ test("rejects default instructions in a non-CLI package", () => {
 
 test("rejects substituted package identity and license metadata", () => {
 	for (const replacement of [
-		{ name: "foreign", license: "Apache-2.0" },
-		{ name: "@diffexai/diffex", license: "MIT" },
+		{ name: "foreign", license: "MIT" },
+		{ name: "@diffexai/diffex", license: "Apache-2.0" },
 	]) {
 		const result = inspect({ "package.json": JSON.stringify({ version, ...replacement }) });
 		assert.notEqual(result.status, 0);

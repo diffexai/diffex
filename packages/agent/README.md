@@ -536,6 +536,6 @@ These low-level streams are observational. They preserve event order, but they d
 
 ## License
 
-Apache-2.0 for Diffex, copyright 2026 Luntraa, Inc.
+MIT for Diffex, copyright 2026 Luntraa, Inc.
 Pi-derived portions retain their MIT terms and upstream copyright notice.
 See LICENSE, NOTICE, and THIRD-PARTY-NOTICES.txt in the distribution.
