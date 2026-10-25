@@ -13,7 +13,7 @@
 		"@diffexai/diffex": "^0.3.2",
 		"@types/node": "26.6.5",
 		"shx": "0.4.0",
-		"typescript": "5.9.3",
+		"typescript": "7.0.2",
 		"vitest-evals": "0.17.0",
 		"vitest": "4.1.12"
 	}

@@ -62,7 +62,7 @@ export class OwnedShellProcesses {
 	/** Called synchronously on shell exit, before output draining or another event can cancel it. */
 	complete(pid: number, successful: boolean): void {
 		const execution = this.#executions.get(pid);
-		if (!execution || execution.state !== "active") return;
+		if (execution?.state !== "active") return;
 		// This callback belongs to the ChildProcess just reaped by Node. Capture the
 		// surviving group now; later cleanup must validate these process identities.
 		execution.members = process.platform === "win32" ? [] : readShellProcessGroup(pid);

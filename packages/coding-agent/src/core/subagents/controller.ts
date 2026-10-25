@@ -576,7 +576,7 @@ export class SubagentController {
 		const attempts = [...this.#records.values()]
 			.flatMap((record) => {
 				const run = record.coordinatedRun;
-				if (!run || run.delivery !== "pending") return [];
+				if (run?.delivery !== "pending") return [];
 				run.delivery = "frozen";
 				return [{ name: record.name, runId: run.id }];
 			})

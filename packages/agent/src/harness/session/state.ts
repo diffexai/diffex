@@ -268,7 +268,7 @@ export class SessionState {
 			let targetId: string | null = null;
 			if (selectedEntryId !== null) {
 				const entry = this.getEntry(selectedEntryId);
-				if (!entry || entry.type !== "message") {
+				if (entry?.type !== "message") {
 					throw new SessionError("invalid_fork_target", `Fork target is not a message entry: ${selectedEntryId}`);
 				}
 				const position = options.position ?? (options.entryId === undefined ? "at" : "before");

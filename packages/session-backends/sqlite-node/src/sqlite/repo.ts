@@ -806,7 +806,7 @@ export class SqliteSessionRepository
 				const selectedEntryId = options.entryId ?? main.leaf_id;
 				if (selectedEntryId !== null) {
 					const target = readEntryRow(db, source.id, selectedEntryId);
-					if (!target || target.type !== "message") {
+					if (target?.type !== "message") {
 						throw new SessionError(
 							"invalid_fork_target",
 							`Fork target is not a message entry: ${selectedEntryId}`,

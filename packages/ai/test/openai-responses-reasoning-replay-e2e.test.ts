@@ -46,7 +46,7 @@ describe.skipIf(!process.env.OPENAI_API_KEY || !process.env.ANTHROPIC_API_KEY)(
 			const thinkingBlock = assistantResponse.content.find(
 				(block) => block.type === "thinking" && block.thinkingSignature,
 			);
-			if (!thinkingBlock || thinkingBlock.type !== "thinking") {
+			if (thinkingBlock?.type !== "thinking") {
 				throw new Error("Missing thinking signature from OpenAI Responses");
 			}
 

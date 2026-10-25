@@ -248,7 +248,7 @@ function validateToolStart(
 	invocations.add(invocation);
 
 	const assistantEntry = entriesById.get(record.assistantEntryId);
-	if (!assistantEntry || assistantEntry.type !== "message" || assistantEntry.message.role !== "assistant") {
+	if (assistantEntry?.type !== "message" || assistantEntry.message.role !== "assistant") {
 		corrupt("tool_call_mismatch", `Tool start ${record.id} does not reference an assistant entry`);
 	}
 	const toolCalls = assistantEntry.message.content.filter((content) => content.type === "toolCall");
@@ -457,7 +457,7 @@ function deriveToolBatch(
 				entry.message.role === "assistant" &&
 				entry.message.content.some((content) => content.type === "toolCall"),
 		);
-	if (!assistantEntry || assistantEntry.type !== "message" || assistantEntry.message.role !== "assistant") return null;
+	if (assistantEntry?.type !== "message" || assistantEntry.message.role !== "assistant") return null;
 
 	const toolCalls = assistantEntry.message.content.filter(
 		(content): content is AgentToolCall => content.type === "toolCall",

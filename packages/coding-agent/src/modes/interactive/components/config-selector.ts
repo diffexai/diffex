@@ -373,7 +373,7 @@ class ResourceList implements Component, Focusable {
 
 	private selectFirstItem(): void {
 		const firstItemIndex = this.filteredItems.findIndex((e) => e.type === "item");
-		this.selectedIndex = firstItemIndex >= 0 ? firstItemIndex : 0;
+		this.selectedIndex = Math.max(firstItemIndex, 0);
 	}
 
 	updateItem(item: ResourceItem, enabled: boolean): void {

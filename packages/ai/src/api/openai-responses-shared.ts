@@ -650,14 +650,14 @@ export async function processResponsesStream<TApi extends Api>(
 			}
 		} else if (event.type === "response.custom_tool_call_input.delta") {
 			const slot = getSlot(event.output_index, "toolCall");
-			if (!slot || !slot.block.customInput) continue;
+			if (!slot?.block.customInput) continue;
 			pushToolCallDelta(
 				slot,
 				appendCustomToolCallInput(slot.block, getCustomToolCallInput(slot.block) + event.delta, false),
 			);
 		} else if (event.type === "response.custom_tool_call_input.done") {
 			const slot = getSlot(event.output_index, "toolCall");
-			if (!slot || !slot.block.customInput) continue;
+			if (!slot?.block.customInput) continue;
 			pushToolCallDelta(slot, appendCustomToolCallInput(slot.block, event.input, true));
 		} else if (event.type === "response.output_item.done") {
 			const item = event.item;

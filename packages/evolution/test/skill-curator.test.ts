@@ -851,12 +851,19 @@ describe("StructuredSkillCurator", () => {
 			expect(expansionInput).not.toHaveProperty("acceptedOutlines");
 			expect(expansionInput).not.toHaveProperty("frozenEvolutionMemory");
 		}
-		expect((requestInputs.get("alpha")?.[0]?.control as JsonObject).responseCorrection).toBeUndefined();
-		expect((requestInputs.get("beta")?.[1]?.control as JsonObject).responseCorrection).toMatchObject({
+		const alphaInput = requestInputs.get("alpha")?.[0];
+		const betaRetryInput = requestInputs.get("beta")?.[1];
+		const gammaInput = requestInputs.get("gamma")?.[0];
+		const gammaRetryInput = requestInputs.get("gamma")?.[1];
+		if (!alphaInput || !betaRetryInput || !gammaInput || !gammaRetryInput) {
+			throw new Error("Expected initial and retry expansion inputs");
+		}
+		expect((alphaInput.control as JsonObject).responseCorrection).toBeUndefined();
+		expect((betaRetryInput.control as JsonObject).responseCorrection).toMatchObject({
 			reason: expect.stringContaining("trigger must be an object"),
 		});
-		expect((requestInputs.get("gamma")?.[0]?.control as JsonObject).responseCorrection).toBeUndefined();
-		expect((requestInputs.get("gamma")?.[1]?.control as JsonObject).responseCorrection).toMatchObject({
+		expect((gammaInput.control as JsonObject).responseCorrection).toBeUndefined();
+		expect((gammaRetryInput.control as JsonObject).responseCorrection).toMatchObject({
 			reason: expect.stringContaining("trigger must be an object"),
 		});
 		const expansionKeys = [...idempotencyKeys.values()].flat();

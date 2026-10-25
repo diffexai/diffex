@@ -280,7 +280,7 @@ async function generateContext(
 	}
 
 	const toolCall = assistantResponse.content.find((c) => c.type === "toolCall");
-	if (!toolCall || toolCall.type !== "toolCall") {
+	if (toolCall?.type !== "toolCall") {
 		console.log(`  No tool call in response (stopReason: ${assistantResponse.stopReason})`);
 		return {
 			messages: [userMessage, assistantResponse],

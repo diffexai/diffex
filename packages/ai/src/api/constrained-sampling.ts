@@ -83,7 +83,7 @@ function inferGrammarInputProperty(tool: Tool): string {
 
 export function resolveJsonSchemaStrictSampling(tool: Tool, supportsStrictMode: boolean): boolean | undefined {
 	const config = tool.constrainedSampling;
-	if (!config || config.type !== "json_schema") {
+	if (config === false || config?.type !== "json_schema") {
 		return undefined;
 	}
 
@@ -103,7 +103,7 @@ export function resolveGrammarConstrainedSampling(
 	supportsOpenAIGrammarTools: boolean,
 ): GrammarConstrainedSampling | undefined {
 	const config = tool.constrainedSampling;
-	if (!config || config.type !== "grammar") {
+	if (config === false || config?.type !== "grammar") {
 		return undefined;
 	}
 

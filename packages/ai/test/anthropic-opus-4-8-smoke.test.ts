@@ -51,7 +51,7 @@ describe.skipIf(!process.env.ANTHROPIC_API_KEY)("Anthropic Opus 4.8 smoke", () =
 
 		const thinkingBlock = response.content.find((block) => block.type === "thinking");
 		expect(thinkingBlock?.type).toBe("thinking");
-		if (!thinkingBlock || thinkingBlock.type !== "thinking") {
+		if (thinkingBlock?.type !== "thinking") {
 			throw new Error("Expected thinking block from Claude Opus 4.8");
 		}
 		expect(typeof thinkingBlock.thinkingSignature).toBe("string");

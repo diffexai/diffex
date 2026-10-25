@@ -249,6 +249,6 @@ async function closeWebSocketServer(server: WebSocketServer | undefined): Promis
 }
 
 async function closeHttpServer(server: Server | undefined): Promise<void> {
-	if (!server || !server.listening) return;
+	if (!server?.listening) return;
 	await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
 }

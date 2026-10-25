@@ -54,7 +54,7 @@ export function applyTranscriptProgress(state: TranscriptState, progress: Transc
 	const item =
 		state.progressItems.get(progress.messageId) ??
 		state.snapshot.transcript.find(({ id }) => id === progress.messageId);
-	if (!item || item.role !== "assistant") return state;
+	if (item?.role !== "assistant") return state;
 	let toolCallBuffers = state.toolCallBuffers;
 	const content = item.content.map((part, index) => {
 		if (index !== progress.contentIndex) return structuredClone(part);

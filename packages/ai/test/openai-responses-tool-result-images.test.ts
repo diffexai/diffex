@@ -63,7 +63,7 @@ async function verifyToolResultImagesStayInFunctionCallOutput<TApi extends Api>(
 
 	const toolCall = firstResponse.content.find((block) => block.type === "toolCall");
 	expect(toolCall).toBeTruthy();
-	if (!toolCall || toolCall.type !== "toolCall") {
+	if (toolCall?.type !== "toolCall") {
 		throw new Error("Expected tool call");
 	}
 

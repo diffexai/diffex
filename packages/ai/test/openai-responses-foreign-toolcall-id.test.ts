@@ -54,7 +54,7 @@ describe("OpenAI Responses foreign tool call ID normalization", () => {
 
 		expect(functionCall).toBeDefined();
 		expect(functionCall?.type).toBe("function_call");
-		if (!functionCall || functionCall.type !== "function_call") {
+		if (functionCall?.type !== "function_call") {
 			throw new Error("Expected function_call item");
 		}
 

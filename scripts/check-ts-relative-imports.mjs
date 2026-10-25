@@ -1,6 +1,8 @@
-import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import ts from "typescript";
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import * as ts from "typescript/unstable/ast";
+import { API } from "typescript/unstable/sync";
 
 const ignoredDirectories = new Set([".git", "coverage", "dist", "node_modules"]);
 const files = [];
@@ -26,7 +28,7 @@ function isRelativeJavaScriptSpecifier(specifier) {
 
 function getImportTypeSpecifier(node) {
 	if (!ts.isLiteralTypeNode(node.argument)) return undefined;
-	if (!ts.isStringLiteralLike(node.argument.literal)) return undefined;
+	if (!ts.isStringLiteralLikeNode(node.argument.literal)) return undefined;
 	return node.argument.literal;
 }
 
@@ -34,41 +36,69 @@ const failures = [];
 
 collectTypescriptFiles(".");
 
-for (const file of files.sort()) {
-	const sourceText = readFileSync(file, "utf8");
-	const sourceFile = ts.createSourceFile(file, sourceText, ts.ScriptTarget.Latest, true);
+if (files.length > 0) {
+	// TypeScript's native AST API is unstable; the workspace pins its exact version.
+	// A standalone project checks every collected file, independent of repository configs.
+	const directory = mkdtempSync(join(tmpdir(), "diffex-ts-relative-imports-"));
+	let api;
+	try {
+		const config = join(directory, "tsconfig.json");
+		writeFileSync(
+			config,
+			JSON.stringify({
+				compilerOptions: { noResolve: true, noLib: true, types: [] },
+				files: files.map((file) => resolve(file)),
+			}),
+		);
+		api = new API();
+		const snapshot = api.updateSnapshot({ openProjects: [config] });
+		const project = snapshot.getProject(config);
+		if (!project) throw new Error("Could not open the relative import check project");
 
-	function checkSpecifier(node) {
-		if (!isRelativeJavaScriptSpecifier(node.text)) return;
-		const { line, character } = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
-		failures.push(`${file}:${line + 1}:${character + 1}: ${node.text}`);
-	}
+		for (const file of files.sort()) {
+			const sourceFile = project.program.getSourceFile(resolve(file));
+			if (!sourceFile) throw new Error(`Could not parse ${file}`);
 
-	function visit(node) {
-		if (ts.isImportDeclaration(node) && ts.isStringLiteralLike(node.moduleSpecifier)) {
-			checkSpecifier(node.moduleSpecifier);
-		} else if (ts.isExportDeclaration(node) && node.moduleSpecifier && ts.isStringLiteralLike(node.moduleSpecifier)) {
-			checkSpecifier(node.moduleSpecifier);
-		} else if (
-			ts.isCallExpression(node) &&
-			node.expression.kind === ts.SyntaxKind.ImportKeyword &&
-			node.arguments[0] &&
-			ts.isStringLiteralLike(node.arguments[0])
-		) {
-			checkSpecifier(node.arguments[0]);
-		} else if (ts.isImportTypeNode(node)) {
-			const specifier = getImportTypeSpecifier(node);
-			if (specifier) checkSpecifier(specifier);
+			function checkSpecifier(node) {
+				if (!isRelativeJavaScriptSpecifier(node.text)) return;
+				const { line, character } = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
+				failures.push(`${file}:${line + 1}:${character + 1}: ${node.text}`);
+			}
+
+			function visit(node) {
+				if (ts.isImportDeclaration(node) && ts.isStringLiteralLikeNode(node.moduleSpecifier)) {
+					checkSpecifier(node.moduleSpecifier);
+				} else if (ts.isExportDeclaration(node) && node.moduleSpecifier && ts.isStringLiteralLikeNode(node.moduleSpecifier)) {
+					checkSpecifier(node.moduleSpecifier);
+				} else if (
+					ts.isCallExpression(node) &&
+					node.expression.kind === ts.SyntaxKind.ImportKeyword &&
+					node.arguments[0] &&
+					ts.isStringLiteralLikeNode(node.arguments[0])
+				) {
+					checkSpecifier(node.arguments[0]);
+				} else if (ts.isImportTypeNode(node)) {
+					const specifier = getImportTypeSpecifier(node);
+					if (specifier) checkSpecifier(specifier);
+				}
+
+				node.forEachChild(visit);
+			}
+
+			visit(sourceFile);
 		}
-
-		ts.forEachChild(node, visit);
+	} finally {
+		try {
+			// Closing the client also disposes its snapshots and projects.
+			api?.close();
+		} finally {
+			rmSync(directory, { recursive: true, force: true });
+		}
 	}
-
-	visit(sourceFile);
 }
 
 if (failures.length > 0) {
 	console.error("Relative .js imports are not allowed in non-declaration .ts files:");
 	for (const failure of failures) console.error(`  ${failure}`);
-	process.exit(1);
+	process.exitCode = 1;
 }
