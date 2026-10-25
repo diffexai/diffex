@@ -260,7 +260,7 @@ Defer background resource startup until `session_start` or the command/tool/even
   "name": "my-extension",
   "dependencies": {
     "zod": "^3.0.0",
-    "chalk": "^5.0.0"
+    "chalk": "6.0.1"
   },
   "diffex": {
     "extensions": ["./src/index.ts"]

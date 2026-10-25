@@ -29,6 +29,14 @@ If changed dependencies remain duplicated under workspaces, run `npm dedupe --pa
 
 The repository normally enforces a two-day minimum release age. Do not disable it without explicit approval. This update batch received approval to use `npm_config_min_release_age=0` on install commands only; `.npmrc` remains unchanged.
 
+## Runtime libraries
+
+Runtime pins use keyring **2.1.2**, Chalk **6.0.1**, diff **9.0.0**, highlight.js **11.12.0**, and HTTP/HTTPS proxy agents **9.1.0**. Terminal tests use xterm/headless **6.0.0**. Node declarations are synchronized at **26.6.5**; the supported runtime minimum remains Node **22.19.0**, and no new runtime APIs are required.
+
+Keyring's missing-password result is now `null`. The storage adapter still reports a missing session as `undefined`. Socket adapters normalize the new declaration's string-or-buffer input, and syntax highlighting uses highlight.js's public entry point. The extension dependency example pins Chalk 6.0.1.
+
+The standalone sandbox example lock now resolves shell-quote **1.12.0**, addressing both reported shell-quote advisories. Sandbox runtime itself remains at 0.0.26 while the latest 0.0.81's unpatched node-forge signature-verification advisory is reviewed; forcing a Zod major or accepting a new vulnerable dependency is not automatic.
+
 ## Networking review
 
 [Undici 8.12.3](https://github.com/nodejs/undici/releases/tag/v8.12.3) fixes HTTP/2 connection replacement following stream timeouts and preserves caller async context for queued pool requests. These can affect timeout recovery and request attribution; review networking tests when updating. It retains the Node 22.19.0 minimum.

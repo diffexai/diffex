@@ -36,7 +36,7 @@
  *
  * Setup:
  * 1. Copy sandbox/ directory to ~/.diffex/agent/extensions/
- * 2. Run `npm install` in ~/.diffex/agent/extensions/sandbox/
+ * 2. Run `npm install --ignore-scripts` in ~/.diffex/agent/extensions/sandbox/
  *
  * Linux also requires: bubblewrap, socat, ripgrep
  */
