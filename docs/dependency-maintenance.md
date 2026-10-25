@@ -55,6 +55,12 @@ Google automatic continuation is explicitly disabled for Gemini and Vertex reque
 
 Anthropic adopts the SDK's API version **2026-10-21** and no longer sends the removed sampling parameters. A model-context-window limit is reported as `length`. The Google GenAI install-script allowlist was reviewed and updated: its published `preinstall` is still a no-op, and installs continue to skip scripts.
 
+## Python evaluation dependencies
+
+The shared Terminal-Bench/DeepSWE project pins Harbor **0.24.0**, Daytona **0.226.1**, E2B **2.59.0**, Pydantic **2.14.1**, PyYAML **6.0.3**, and build backend Hatchling **1.32.4**. Runtime guards and live setup guides match the checked-in lock; DeepSWE no longer resolves separate `uv run --with` overlays.
+
+The refreshed Python lock patches the reported certifi, aiohttp, OpenTelemetry API, PyJWT, multidict, and urllib3 advisories. Stable direct dependencies still require beta-only OpenTelemetry instrumentation transitives; `prerelease = "if-necessary"` records that resolver policy. Dependency validation uses published wheels without build hooks and mocked tests, not paid sandbox/model benchmark runs. Linux Docker qualification and live service qualification remain separate release checks.
+
 ## Security review
 
 The initial audit reported seven affected packages, all present in the baseline lockfile. Updating Vitest/coverage to 4.1.12 and refreshing compatible Vite and source-map-js transitives removes five findings. The remaining sandbox-runtime/Zod dependency chain requires further review; do not force a Zod major-version override across consumers without checking their APIs.

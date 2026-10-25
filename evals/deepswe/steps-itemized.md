@@ -14,7 +14,8 @@
 The [Harbor dataset](https://hub.harborframework.com/datasets/datacurve/deep-swe-1-1) contains 113 tasks.
 This workflow pins the dataset to `sha256:5affcd534fd90ac85d202d4c63f8b35ddc942140afdd5d60014a21365440a2f5`.
 The smoke task pin is `sha256:602b5b3144f5386bc54107a58e9bb9eef276e9cdae98610b482f95eb4e960310`.
-Harbor 0.23.0 and E2B 2.51.0 are installed through the existing Terminal-Bench uv project.
+Harbor 0.24.0 and E2B 2.59.0 are pinned in the existing Terminal-Bench uv project and lockfile.
+All DeepSWE launchers use that shared environment without `--with` dependency overlays.
 The existing `diffex_terminal_bench.adapter:DiffexAgent` installs the published Diffex release pinned in `evals/terminal-bench/src/diffex_terminal_bench/pins.toml`.
 
 [DeepSWE 1.1](https://github.com/datacurve-ai/deep-swe) grades committed changes in a separate pristine verifier sandbox.
@@ -91,7 +92,7 @@ Previously observed connection, artifact collection, and shutdown-evidence error
     Preparation resolves the pinned dataset, downloads the smoke task definition, checks separate verification, and resolves the agent/verifier network policies.
     Harbor may warn that the original task's explicit `model.patch` artifact overlaps its standard `/logs/artifacts` collection directory.
     The task is preserved unchanged; the post-run checker requires the patch to be retained.
-    It writes `.artifacts/deepswe/prepared/manifest.json`.
+    It writes `.artifacts/deepswe/prepared-runtime-v3/manifest.json`.
     The launcher repeats these checks automatically before starting the trial.
 
 5. Start the smoke trial:
@@ -126,7 +127,6 @@ Previously observed connection, artifact collection, and shutdown-evidence error
     ```zsh
     cd /Users/jialeyu/Projects/diffex-new/evals/terminal-bench
     uv --cache-dir /tmp/diffex-e2b-uv-cache run --locked \
-      --with 'harbor[e2b]==0.23.0' --with 'e2b==2.51.0' \
       python ../deepswe/verify-smoke.py "$DS_JOB"
     ```
 
@@ -141,7 +141,6 @@ Previously observed connection, artifact collection, and shutdown-evidence error
     ```zsh
     cd /Users/jialeyu/Projects/diffex-new/evals/terminal-bench
     uv --cache-dir /tmp/diffex-e2b-uv-cache run --locked \
-      --with 'harbor[e2b]==0.23.0' --with 'e2b==2.51.0' \
       harbor auth login
     ```
 
@@ -149,7 +148,6 @@ Previously observed connection, artifact collection, and shutdown-evidence error
 
     ```zsh
     uv --cache-dir /tmp/diffex-e2b-uv-cache run --locked \
-      --with 'harbor[e2b]==0.23.0' --with 'e2b==2.51.0' \
       harbor upload "$DS_JOB" --org diffex --private
     ```
 

@@ -1,6 +1,6 @@
 # Artifact collection and shutdown verification
 
-`full.yaml` and the staged benchmark runner use `RecordedDaytonaEnvironment` with the pinned Harbor 0.23.0 and Daytona 0.210.0 APIs.
+`full.yaml` and the staged benchmark runner use `RecordedDaytonaEnvironment` with the pinned Harbor 0.24.0 and Daytona 0.226.1 APIs.
 The backend mounts the shared `diffex-terminal-bench-logs` volume at `/logs`, with a fresh `trials/<uuid>` subpath for each sandbox creation.
 Override `environment.kwargs.artifact_volume` to select a different project volume.
 The backend waits up to 120 seconds for volume readiness and records its name, ID, mount path, and subpath in the trial's `artifact-volume.json` before creating the sandbox.
@@ -46,7 +46,7 @@ This change does not increase job concurrency or sandbox resources.
 
 The staged runner automatically prunes a completed Diffex trial's volume prefixes after qualification, before releasing its concurrency slot.
 The native Harbor command in the README enables the same behavior with `--plugin diffex_terminal_bench.retention:VolumeCleanupPlugin`.
-Harbor 0.23.0 ignores plugins in YAML, so include this CLI option in other native run commands too.
+Pass this CLI option explicitly in other native run commands too; do not rely on YAML to activate the cleanup plugin.
 Cleanup requires a completed trial and verifier result, matching local reward and verifier logs, valid native shutdown and execution evidence, a valid trajectory, and no artifact errors or native session gaps.
 A zero reward is eligible; failed, interrupted, oracle-only, and incomplete trials retain their remote logs.
 All recorded trial sandboxes must be absent before deletion, including separate verifiers and retained task services.

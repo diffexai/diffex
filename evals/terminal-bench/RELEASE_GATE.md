@@ -26,7 +26,8 @@ This source archive pin identifies internal qualification inputs; it does not cl
 Each invocation extracts a fresh copy of the verified archive; it does not reuse editable extracted task directories or resolve a mutable dataset alias.
 The preparation command writes `results/release-gate/dataset.json` without creating sandboxes or calling a model.
 
-Harbor 0.23.0 and Daytona SDK 0.210.0 are locked in the benchmark's private Python environment.
+Harbor 0.24.0 and Daytona SDK 0.226.1 are locked in the benchmark's private Python environment.
+DeepSWE shares this lock with E2B 2.59.0; its launchers do not resolve dependency overlays.
 Node 22.23.2, Diffex 0.3.2, npm integrity, registry, and Node archive checksums come from [pins.toml](src/diffex_terminal_bench/pins.toml).
 The default is `openai/gpt-6-luna`, `xhigh` thinking, tools `read,bash,edit,write,update_plan`, disabled subagents, disabled evolution, and `context-only` project resources.
 Enabled subagents are rejected because the pinned CLI does not propagate eval prompt and context-file flags to children.

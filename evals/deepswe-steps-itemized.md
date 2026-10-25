@@ -15,7 +15,7 @@ The final command starts the evaluation.
 | Subagents | Disabled |
 | Self evolution | Disabled by the adapter's fresh `evolution.enabled=false` settings |
 | Environment | E2B, through `deepswe_e2b:ResourceCheckedE2B` |
-| Harness dependencies | Harbor `0.23.0`, E2B `2.51.0` |
+| Harness dependencies | Harbor `0.24.0`, E2B `2.59.0`, shared Terminal-Bench lock |
 | Sample | Five tasks selected without replacement using a saved random seed |
 | Attempts per task | 2 |
 | Concurrent trials | 5 |
@@ -34,16 +34,16 @@ See the official [leaderboard data](https://deepswe.datacurve.ai/artifacts/v1.1/
     uv --cache-dir /tmp/diffex-e2b-uv-cache sync --locked
     ```
 
-2. Install the pinned E2B extras, select five random tasks, and download and validate their definitions:
+2. Using the shared locked environment without dependency overlays, select five random tasks and download and validate their definitions:
 
     ```zsh
     zsh /Users/jialeyu/Projects/diffex-new/evals/deepswe/run-sample.zsh --prepare
     ```
 
-    Preparation saves `seed.json`, `manifest.json`, `job.yaml`, and a task cache in `.artifacts/deepswe/prepared-5x2/` under the repository root.
+    Preparation saves `seed.json`, `manifest.json`, `job.yaml`, and a task cache in `.artifacts/deepswe/prepared-5x2-runtime-v3/` under the repository root.
     It confirms Diffex 0.3.2, the 113-task dataset digest, five selected task identities, two attempts, concurrency five, and separate verification.
     Repeating preparation retains the existing seed and selected tasks.
-    Harbor 0.23.0's `n_tasks` takes the first entries, so this launcher explicitly samples a sorted task list with the recorded seed and writes `task_names` into the prepared configuration.
+    Harbor's `n_tasks` takes the first entries, so this launcher explicitly samples a sorted task list with the recorded seed and writes `task_names` into the prepared configuration.
     Harbor warns that the original explicit `model.patch` artifact overlaps its standard `/logs/artifacts` collection.
     The upstream task definitions are preserved; check that the patch is retained after execution.
 
@@ -51,7 +51,7 @@ See the official [leaderboard data](https://deepswe.datacurve.ai/artifacts/v1.1/
 
     ```zsh
     zsh /Users/jialeyu/Projects/diffex-new/evals/deepswe/run-sample.zsh --print-config
-    python3 -m json.tool /Users/jialeyu/Projects/diffex-new/.artifacts/deepswe/prepared-5x2/manifest.json
+    python3 -m json.tool /Users/jialeyu/Projects/diffex-new/.artifacts/deepswe/prepared-5x2-runtime-v3/manifest.json
     ```
 
     Confirm `n_attempts: 2`, `n_concurrent_trials: 5`, the five task names, the pinned dataset, `thinking: max`, and disabled subagents.
@@ -127,7 +127,6 @@ Harbor collects local logs and deletes sandboxes through its normal lifecycle.
       [[ ${#DS_TRACES} -gt 0 ]]
       for DS_TRACE in "${DS_TRACES[@]}"; do
         uv --cache-dir /tmp/diffex-e2b-uv-cache run --locked \
-          --with 'harbor[e2b]==0.23.0' --with 'e2b==2.51.0' \
           python -m harbor.utils.trajectory_validator "$DS_TRACE"
       done
     )
@@ -146,10 +145,8 @@ Native Harbor jobs can be uploaded without the Terminal-Bench staged export comm
 ```zsh
 cd /Users/jialeyu/Projects/diffex-new/evals/terminal-bench
 uv --cache-dir /tmp/diffex-e2b-uv-cache run --locked \
-  --with 'harbor[e2b]==0.23.0' --with 'e2b==2.51.0' \
   harbor auth login
 uv --cache-dir /tmp/diffex-e2b-uv-cache run --locked \
-  --with 'harbor[e2b]==0.23.0' --with 'e2b==2.51.0' \
   harbor upload "$DS_JOB" --org diffex --private
 ```
 

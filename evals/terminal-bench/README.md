@@ -23,7 +23,8 @@ uv run --locked python -c 'from diffex_terminal_bench.adapter import DiffexAgent
 ```
 
 The import path is `diffex_terminal_bench.adapter:DiffexAgent`.
-Harbor is pinned to `0.23.0` in `pyproject.toml` and `uv.lock`.
+Harbor `0.24.0`, Daytona `0.226.1`, E2B `2.59.0`, Pydantic `2.14.1`, and PyYAML `6.0.3` are pinned in `pyproject.toml` and `uv.lock`.
+DeepSWE uses this same locked environment without runtime dependency overlays.
 The adapter follows that release's `BaseInstalledAgent.install(environment)` interface.
 See [Harbor's installed-agent documentation](https://www.harborframework.com/docs/agents).
 
@@ -395,7 +396,7 @@ Avoid log filters that discard the retained evidence.
 
 ### ATIF export and accounting
 
-The converter emits `ATIF-v1.8` using the models and validator shipped with pinned Harbor 0.23.0.
+The converter emits `ATIF-v1.8` using the models and validator shipped with pinned Harbor 0.24.0.
 See [Harbor's ATIF documentation](https://www.harborframework.com/docs/agents/trajectory-format) for the schema and validation command.
 It writes the final trajectory atomically after cleanup and evidence collection, before returning to Harbor.
 Export failure changes an otherwise completed execution to `artifact_collection_failure`; it preserves an existing provider failure or cancellation.
@@ -480,7 +481,12 @@ Generated environments, Python caches, `results/`, and Harbor `jobs/` are ignore
 
 ## Updating pins
 
-Change the Harbor requirement and matching runtime pin together, then regenerate `uv.lock` with `uv lock` and review the dependency changes.
+Change the Harbor requirement and matching runtime pin together, and keep the Daytona preflight guard and DeepSWE Harbor/E2B guards aligned with the direct requirements.
+Regenerate `uv.lock` with `uv lock --upgrade --prerelease if-necessary` and review the dependency changes.
+Direct requirements must remain exact stable versions; beta-only OpenTelemetry transitives are required by Daytona.
+`[tool.uv].prerelease = "if-necessary"` keeps normal locked syncs consistent with that resolution policy.
+Hatchling is separately pinned to `1.32.4` in `[build-system]` and is not included in the runtime lock.
+Do not add `uv run --with` overlays: Terminal-Bench and DeepSWE share the checked-in lock.
 Update Node checksums from the selected release's [official SHASUMS256.txt](https://nodejs.org/dist/v22.23.2/SHASUMS256.txt).
 For Diffex, query the exact release with `npm view @diffexai/diffex@VERSION version dist engines --json --registry=https://registry.npmjs.org/` and review the new version, engine requirement, and integrity.
 Rerun the clean Linux installation checks after any pin change.
