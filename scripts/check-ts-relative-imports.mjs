@@ -2,7 +2,7 @@ import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import * as ts from "typescript/unstable/ast";
-import { API } from "typescript/unstable/sync";
+import { API } from "typescript/unstable/async";
 
 const ignoredDirectories = new Set([".git", "coverage", "dist", "node_modules"]);
 const files = [];
@@ -51,12 +51,12 @@ if (files.length > 0) {
 			}),
 		);
 		api = new API();
-		const snapshot = api.updateSnapshot({ openProjects: [config] });
+		const snapshot = await api.updateSnapshot({ openProjects: [config] });
 		const project = snapshot.getProject(config);
 		if (!project) throw new Error("Could not open the relative import check project");
 
 		for (const file of files.sort()) {
-			const sourceFile = project.program.getSourceFile(resolve(file));
+			const sourceFile = await project.program.getSourceFile(resolve(file));
 			if (!sourceFile) throw new Error(`Could not parse ${file}`);
 
 			function checkSpecifier(node) {
@@ -90,7 +90,7 @@ if (files.length > 0) {
 	} finally {
 		try {
 			// Closing the client also disposes its snapshots and projects.
-			api?.close();
+			await api?.close();
 		} finally {
 			rmSync(directory, { recursive: true, force: true });
 		}
