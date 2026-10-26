@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added atomic editor tokens with compact display labels that expand on submission, including `EditorTextPart`, `EditorTextToken`, and optional `EditorComponent.setTextWithTokens` ([#132](https://github.com/diffexai/diffex/pull/132)).
+- Added configurable placeholder-cursor styling and shared selected-list prefix exports ([#58](https://github.com/diffexai/diffex/pull/58)).
+
+### Changed
+
+- Updated Markdown parsing and character-width dependencies ([#272](https://github.com/diffexai/diffex/pull/272)).
+- Changed package licensing to MIT ([#280](https://github.com/diffexai/diffex/pull/280)).
+
 ## [0.3.2] - 2026-09-29
 
 ## [0.3.1] - 2026-09-20

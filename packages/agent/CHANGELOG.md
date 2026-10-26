@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added explicit runtime telemetry contexts and nested run, turn, request, and tool spans ([#95](https://github.com/diffexai/diffex/pull/95)).
+
+### Changed
+
+- Updated runtime dependencies, including file-ignore matching, schema handling, YAML parsing, and diff generation ([#272](https://github.com/diffexai/diffex/pull/272), [#274](https://github.com/diffexai/diffex/pull/274)).
+- Changed package licensing to MIT ([#280](https://github.com/diffexai/diffex/pull/280)).
+
 ## [0.3.2] - 2026-09-29
 
 ### Added

@@ -2,9 +2,36 @@
 
 ## [Unreleased]
 
+### New Features
+
+- Added GPT-6 Astra, Luna, Sol, and GPT-6.1 Sol to the model list for ChatGPT login.
+  See [Providers](docs/providers.md).
+- Added cache-preserving harness updates: background memory and evolved-skill changes apply after successful compaction or in a new session, with pending-update notices in the TUI.
+  See [Request boundaries](docs/evolution.md#request-boundaries) ([#260](https://github.com/diffexai/diffex/pull/260) by [@Issacboy123](https://github.com/Issacboy123)).
+- Retained lessons and evolved skills longer before score-based grooming removes them, while keeping existing capacity limits.
+  See [Lesson feedback and grooming](docs/evolution.md#lesson-feedback-and-grooming) and [Private skill feedback](docs/evolution.md#private-skill-feedback).
+
+### Added
+
+- Added GPT-6 Astra, Luna, Sol, and GPT-6.1 Sol to the Codex model list for ChatGPT login.
+
 ### Changed
 
-- Regular root sessions now reconcile selected harness memory and evolved skills at construction, idle reload, and eligible manual compaction boundaries.
+- Deferred background harness memory and evolved-skill updates until successful manual or automatic compaction or a new session, preserving the active conversation's input cache. The TUI announces pending updates; `/clear` starts with the latest revision and `/version` still switches immediately.
+  See [Request boundaries](docs/evolution.md#request-boundaries) ([#260](https://github.com/diffexai/diffex/pull/260) by [@Issacboy123](https://github.com/Issacboy123)).
+- Retained lessons and evolved skills longer by lowering grooming removal thresholds from -5 to -7 for lessons and from -8 to -11 for skills, without changing capacity limits.
+  See [Lesson feedback and grooming](docs/evolution.md#lesson-feedback-and-grooming) and [Private skill feedback](docs/evolution.md#private-skill-feedback).
+- Updated provider SDKs and runtime dependencies, including terminal rendering, syntax highlighting, credential storage, and HTTP libraries ([#272](https://github.com/diffexai/diffex/pull/272), [#273](https://github.com/diffexai/diffex/pull/273), [#274](https://github.com/diffexai/diffex/pull/274)).
+- Anthropic requests now omit unsupported sampling parameters, including `temperature`. Google Gemini and Vertex AI requests no longer perform automatic SDK continuations; continuation and context-window limits are reported as `length`.
+  See [Provider SDK migration notes](../ai/README.md#provider-sdk-migration-notes) ([#273](https://github.com/diffexai/diffex/pull/273)).
+- Changed project and package licensing to MIT ([#280](https://github.com/diffexai/diffex/pull/280)).
+
+### Fixed
+
+- Fixed Google model streaming through OpenCode Go by registering its Google API implementation ([#265](https://github.com/diffexai/diffex/pull/265)).
+- Fixed failed evolution evidence scans being skipped permanently; bounded retries preserve the failed cursor and expose retry status in `/evolve` ([#258](https://github.com/diffexai/diffex/pull/258) by [@Issacboy123](https://github.com/Issacboy123)).
+- Enabled short prompt-cache retention for background evolution model calls ([#259](https://github.com/diffexai/diffex/pull/259) by [@Issacboy123](https://github.com/Issacboy123)).
+- Updated vulnerable CLI dependencies, including Undici and Zod, and patched shell-quote in the sandbox extension example ([#262](https://github.com/diffexai/diffex/pull/262), [#272](https://github.com/diffexai/diffex/pull/272), [#274](https://github.com/diffexai/diffex/pull/274), [#281](https://github.com/diffexai/diffex/pull/281)).
 
 ## [0.3.2] - 2026-09-29
 
