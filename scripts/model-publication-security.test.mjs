@@ -44,3 +44,14 @@ test("publication accepts only main for scheduled and manual runs", () => {
 	}
 	assert.equal(allowed("publish", { event_name: "schedule", ref: "refs/heads/feature" }), false);
 });
+
+test("binds artifact and publishing code to one SHA and serializes uploads without cancellation", () => {
+	assert.equal(workflow.jobs.publish.env.SOURCE_REF, "${{ needs.generate.outputs.source_sha }}");
+	assert.equal(workflow.jobs.publish.concurrency["cancel-in-progress"], false);
+	assert.match(workflow.jobs.publish.environment, /diffex-model-upload-staging/);
+	assert.match(workflow.jobs.publish.environment, /diffex-model-upload-production/);
+	assert.match(workflow.jobs.publish.env.R2_ENDPOINT, /6b24afa849f8254ab5e6e2d1956239cc/);
+	assert.match(workflow.jobs.publish.steps.at(-1).run, /--require-main/);
+	assert.equal(workflow.jobs.generate.steps.find((step) => step.name === "Generate model catalog JSON").env.MODEL_CATALOG_SOURCE_SHA,
+		"${{ steps.source.outputs.sha }}");
+});

@@ -10,6 +10,7 @@ import {
 	CLOUDFLARE_AI_GATEWAY_OPENAI_BASE_URL,
 	CLOUDFLARE_WORKERS_AI_BASE_URL,
 } from "../src/api/cloudflare.ts";
+import { parseModelCatalog } from "../src/model-validation.ts";
 import type {
 	AnthropicMessagesCompat,
 	Api,
@@ -2855,6 +2856,7 @@ async function generateModels() {
 		}
 	}
 
+	for (const providerId of sortedProviderIds) parseModelCatalog(providerId, jsonProviders[providerId]);
 	const generatedAt = new Date().toISOString();
 
 	if (!generatorOptions.jsonOnly) {
@@ -2964,6 +2966,10 @@ async function generateModels() {
 		const providerOutputDir = join(generatorOptions.jsonOutputDir, "providers");
 		rmSync(generatorOptions.jsonOutputDir, { recursive: true, force: true });
 		mkdirSync(providerOutputDir, { recursive: true });
+		writeJson(join(generatorOptions.jsonOutputDir, "generation.json"), {
+			generatedAt,
+			sourceCommit: process.env.MODEL_CATALOG_SOURCE_SHA,
+		});
 		writeJson(join(generatorOptions.jsonOutputDir, "models.json"), jsonProviders);
 		writeJson(join(generatorOptions.jsonOutputDir, "providers.json"), sortedProviderIds);
 		for (const providerId of sortedProviderIds) {

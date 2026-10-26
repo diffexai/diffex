@@ -35,6 +35,7 @@ export type {
 	OAuthSelectPrompt,
 } from "./compat/extension-oauth-types.ts";
 export * from "./images-models.ts";
+export { parseModelCatalog } from "./model-validation.ts";
 export * from "./models.ts";
 export * from "./models-store.ts";
 export * from "./providers/faux.ts";
