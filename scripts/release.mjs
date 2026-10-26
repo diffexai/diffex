@@ -224,7 +224,7 @@ if (
 )
 	throw new Error("origin/main changed during preparation; review the new main before releasing");
 stageReleaseOutputs(intendedOutputs);
-run(`git commit -m "Release v${version}"`);
+run(`git commit -m "fix(coding-agent): release v${version}"`);
 run(`git tag v${version}`);
 console.log();
 
@@ -236,7 +236,7 @@ console.log();
 // Commit
 console.log("Committing changelog updates...");
 stageReleaseOutputs(new Set(getChangelogs()));
-run(`git commit -m "Add [Unreleased] section for next cycle"`);
+run(`git commit -m "docs(coding-agent): start next release cycle"`);
 console.log();
 
 // Push

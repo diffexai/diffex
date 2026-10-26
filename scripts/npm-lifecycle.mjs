@@ -104,7 +104,13 @@ await new Promise((done) => server.listen(0, "127.0.0.1", done));
 async function command(command, args, extra = {}) {
 	try {
 		console.log(`Lifecycle: ${command} ${args.join(" ")}`);
-		const result = await run(command, args, { ...options, ...extra });
+		const packageManagerOperation =
+			(["npm", "bun"].includes(command) && args.includes("install")) || args.includes("--self");
+		const result = await run(command, args, {
+			...options,
+			timeout: packageManagerOperation ? 600_000 : options.timeout,
+			...extra,
+		});
 		evidence.commands.push({ command, args, exitCode: 0 });
 		return result.stdout;
 	} catch (error) {

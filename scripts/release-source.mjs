@@ -102,7 +102,7 @@ export function pushPreparedRelease(tag) {
 	const commit = git("rev-parse", `refs/tags/${tag}^{commit}`);
 	if (
 		git("rev-parse", "HEAD^") !== commit ||
-		git("log", "-1", "--format=%s") !== "Add [Unreleased] section for next cycle"
+		git("log", "-1", "--format=%s") !== "docs(coding-agent): start next release cycle"
 	)
 		throw new Error("Prepared main must contain exactly the next-cycle commit after the release tag");
 	const changed = git("diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD").split("\n");

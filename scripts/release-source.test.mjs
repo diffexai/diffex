@@ -220,7 +220,7 @@ for (const failure of ["rejected transaction", "lost acknowledgement"])
 				"# Changelog\n\n## [Unreleased]\n\n## [0.0.3]\n\n- Fixture\n",
 			);
 			f.git("add", "packages/ai/CHANGELOG.md");
-			f.git("commit", "-m", "Add [Unreleased] section for next cycle");
+			f.git("commit", "-m", "docs(coding-agent): start next release cycle");
 			const final = f.git("rev-parse", "HEAD");
 			const hook = join(f.remote, "hooks/pre-receive");
 			if (failure === "rejected transaction") writeFileSync(hook, "#!/bin/sh\nexit 1\n", { mode: 0o755 });

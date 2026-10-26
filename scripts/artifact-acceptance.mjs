@@ -183,7 +183,7 @@ export function installConsumer(
 		manager === "npm"
 			? ["install", "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund"]
 			: ["install", "--production", "--ignore-scripts", "--network-concurrency=8"],
-		{ cwd: directory, env, stdio: "inherit", timeout: 180_000 },
+		{ cwd: directory, env, stdio: "inherit", timeout: 600_000 },
 	);
 	for (const pkg of selected) {
 		const installed = join(directory, "node_modules", pkg.name);
@@ -329,7 +329,7 @@ export function acceptArtifacts(artifactDirectory, outputDirectory, { managers =
 				outputDirectory,
 				...(managers.includes("bun") ? [] : ["--skip-bun"]),
 			],
-			{ cwd: root, stdio: "inherit", timeout: 600000 },
+			{ cwd: root, stdio: "inherit", timeout: 3_600_000 },
 		);
 		verifyTarballs(tarballDirectory, records, packages);
 		writeFileSync(
