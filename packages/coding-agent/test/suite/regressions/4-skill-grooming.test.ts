@@ -104,7 +104,7 @@ async function setup(count = 2, memory = "") {
 
 describe("Item 4: skill grooming before evolution", () => {
 	it.each(["manual", "automatic"] as const)(
-		"grooms eight omissions before the %s snapshot, curation, and next prompt",
+		"grooms eleven omissions before the %s snapshot, curation, and next prompt",
 		async (trigger) => {
 			const env = await setup();
 			const curate = vi.spyOn(StructuredSkillCurator.prototype, "curate");
@@ -152,7 +152,7 @@ describe("Item 4: skill grooming before evolution", () => {
 					void (async () => {
 						for await (const event of await stream(model, context, options)) {
 							if (event.type === "done")
-								event.message.usage = { ...event.message.usage, input: 50_000, output: 0, totalTokens: 50_000 };
+								event.message.usage = { ...event.message.usage, input: 37_000, output: 0, totalTokens: 37_000 };
 							output.push(event);
 						}
 						output.end();
@@ -162,12 +162,12 @@ describe("Item 4: skill grooming before evolution", () => {
 				await env.coordinator.replace(env.runtime);
 				cleanups.push(() => env.coordinator.stop());
 			}
-			for (let index = 0; index < 8; index += 1) {
+			for (let index = 0; index < 11; index += 1) {
 				env.harness.setResponses([
 					fauxAssistantMessage("Verified the requested result."),
 					report([{ skillName: "skill-1", signal: "helpful" }]),
 				]);
-				if (index === 7) {
+				if (index === 10) {
 					env.harness.appendResponses(
 						Array.from({ length: 30 }, () => (context) => {
 							const parameters = context.tools?.find(
@@ -221,12 +221,12 @@ describe("Item 4: skill grooming before evolution", () => {
 				scores.scores.find(
 					(item) => item.skillId === computeHarnessSkillId(env.workspace, "skills/skill-0/SKILL.md"),
 				)?.points,
-			).toBe(-8);
+			).toBe(-11);
 			expect(
 				scores.scores.find(
 					(item) => item.skillId === computeHarnessSkillId(env.workspace, "skills/skill-1/SKILL.md"),
 				)?.points,
-			).toBe(8);
+			).toBe(11);
 			if (trigger === "manual") {
 				expect((await env.store.loadCurrent()).manifest.version).toBe(env.bundle.manifest.version);
 				await env.runtime.start();
@@ -290,7 +290,7 @@ describe("Item 4: skill grooming before evolution", () => {
 
 	it("freezes one consistent revision after both lesson and skill grooming", async () => {
 		const env = await setup(2, "Lesson 1: Old lesson.\n");
-		for (let index = 0; index < 8; index += 1) {
+		for (let index = 0; index < 11; index += 1) {
 			env.harness.setResponses([
 				fauxAssistantMessage("Verified."),
 				fauxAssistantMessage(fauxToolCall(LESSON_REPORT_TOOL.name, { lessons: [] }), { stopReason: "toolUse" }),
