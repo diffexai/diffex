@@ -54,18 +54,18 @@ async function setup(points: readonly number[]) {
 
 describe("lesson grooming", () => {
 	it.each([
-		{ points: [-5, -6, 0], remaining: [3] },
+		{ points: [-6.5, -7, -8, 0], remaining: [1, 4] },
 		{ points: [...Array<number>(12).fill(0), -1], remaining: Array.from({ length: 12 }, (_, index) => index + 1) },
 		{
-			points: [-5, -6, -2, ...Array<number>(12).fill(0)],
+			points: [-7, -8, -2, ...Array<number>(12).fill(0)],
 			remaining: Array.from({ length: 12 }, (_, index) => index + 4),
 		},
 		{
-			points: [-5, -6, -7, ...Array<number>(11).fill(0)],
+			points: [-7, -8, -9, ...Array<number>(11).fill(0)],
 			remaining: Array.from({ length: 11 }, (_, index) => index + 4),
 		},
 		{ points: Array<number>(13).fill(0), remaining: Array.from({ length: 12 }, (_, index) => index + 2) },
-		{ points: [-5], remaining: [] },
+		{ points: [-7], remaining: [] },
 	])("removes exactly the threshold/cap victims: $points", async ({ points, remaining }) => {
 		const { state, writer, scores, snapshot } = await setup(points);
 		expect(snapshot.activeMemoryItems.every((item) => item.ledger.origin === "manual")).toBe(true);
@@ -88,8 +88,8 @@ describe("lesson grooming", () => {
 		expect((await state.loadCurrent()).manifest.version).toBe(groomed.harnessVersion);
 	});
 
-	it.each([[], [-4.5, 0], Array<number>(12).fill(0)].map((points) => ({ points })))(
-		"does not advance below thresholds: $points",
+	it.each([[], [-6.5, -6, -5, 0], Array<number>(12).fill(0)].map((points) => ({ points })))(
+		"does not advance above the removal threshold and within capacity: $points",
 		async ({ points }) => {
 			const { state, writer, scores, snapshot } = await setup(points);
 			expect(await writer.groom(scores, scope, context)).toEqual(snapshot);
@@ -98,7 +98,7 @@ describe("lesson grooming", () => {
 	);
 
 	it("keeps manual removal unavailable to ordinary evolution batches", async () => {
-		const { writer, snapshot } = await setup([-5]);
+		const { writer, snapshot } = await setup([-7]);
 		const item = snapshot.activeMemoryItems[0]!;
 		const content: Omit<MutationBatch, "metadata"> = {
 			batchId: "ordinary",
@@ -136,7 +136,7 @@ describe("lesson grooming", () => {
 	});
 
 	it("still rejects mismatched removal digests", async () => {
-		const { state, writer, scores, snapshot } = await setup([-5]);
+		const { state, writer, scores, snapshot } = await setup([-7]);
 		const points = await scores.loadLessonScores(scope, snapshot.harnessVersion);
 		vi.spyOn(scores, "loadLessonScores").mockResolvedValue({
 			...points,

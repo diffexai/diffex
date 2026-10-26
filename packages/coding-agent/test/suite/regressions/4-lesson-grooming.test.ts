@@ -108,7 +108,7 @@ const emptyReflection = () =>
 
 describe("Item 4: grooming before evolution snapshots", () => {
 	it.each(["manual", "automatic"] as const)(
-		"grooms five omissions before the %s job and next prompt",
+		"grooms seven omissions before the %s job and next prompt",
 		async (trigger) => {
 			const env = await setup();
 			if (trigger === "automatic") {
@@ -119,7 +119,7 @@ describe("Item 4: grooming before evolution snapshots", () => {
 					void (async () => {
 						for await (const event of await stream(model, context, options)) {
 							if (event.type === "done") {
-								event.message.usage = { ...event.message.usage, input: 80_000, output: 0, totalTokens: 80_000 };
+								event.message.usage = { ...event.message.usage, input: 60_000, output: 0, totalTokens: 60_000 };
 							}
 							output.push(event);
 						}
@@ -130,12 +130,12 @@ describe("Item 4: grooming before evolution snapshots", () => {
 				await env.coordinator.replace(env.runtime);
 				cleanups.push(() => env.coordinator.stop());
 			}
-			for (let index = 0; index < 5; index += 1) {
+			for (let index = 0; index < 7; index += 1) {
 				const main = fauxAssistantMessage("Verified the requested result.");
 				env.harness.setResponses([
 					main,
 					assessment(),
-					...(index === 4 && trigger === "automatic" ? Array.from({ length: 10 }, emptyReflection) : []),
+					...(index === 6 && trigger === "automatic" ? Array.from({ length: 20 }, emptyReflection) : []),
 				]);
 				await env.session.prompt(`Verify result ${index + 1}.`);
 			}
@@ -143,10 +143,10 @@ describe("Item 4: grooming before evolution snapshots", () => {
 				(await env.scores.loadLessonScores(env.scope, env.bundle.manifest.version)).scores.map(
 					(item) => item.points,
 				),
-			).toEqual([-5, 5]);
+			).toEqual([-7, 7]);
 			if (trigger === "manual") {
 				expect((await env.store.loadCurrent()).manifest.version).toBe(env.bundle.manifest.version);
-				env.harness.setResponses(Array.from({ length: 10 }, emptyReflection));
+				env.harness.setResponses(Array.from({ length: 20 }, emptyReflection));
 				await env.runtime.start();
 				const started = await env.runtime.control.startManual();
 				expect(started.status).toBe("created");
@@ -208,9 +208,9 @@ describe("Item 4: grooming before evolution snapshots", () => {
 		},
 	);
 
-	it.each([0, 12])("leaves %i lessons unchanged below grooming thresholds", async (count) => {
+	it.each([0, 12])("leaves %i lessons unchanged just above the removal threshold", async (count) => {
 		const env = await setup(count);
-		for (let index = 0; index < 4; index += 1) {
+		for (let index = 0; index < 6; index += 1) {
 			env.harness.setResponses([fauxAssistantMessage("Verified."), ...(count === 0 ? [] : [assessment()])]);
 			await env.session.prompt(`Verify result ${index + 1}.`);
 		}
@@ -219,7 +219,7 @@ describe("Item 4: grooming before evolution snapshots", () => {
 				(await env.scores.loadLessonScores(env.scope, env.bundle.manifest.version)).scores.map(
 					(item) => item.points,
 				),
-			).toEqual(Array.from({ length: count }, (_, index) => (index === 1 ? 4 : -4)));
+			).toEqual(Array.from({ length: count }, (_, index) => (index === 1 ? 6 : -6)));
 		}
 		const before = await env.writer.captureSnapshot();
 		const groom = vi.spyOn(EvolutionMemoryWriter.prototype, "groom");

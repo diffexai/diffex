@@ -16,7 +16,7 @@ export interface SkillPolicy {
 export const DEFAULT_SKILL_POLICY: SkillPolicy = Object.freeze({
 	initialPoints: 0,
 	weights: Object.freeze({ helpful: 1, harmful: -1.5, neutral: -1 }),
-	removalThreshold: -8,
+	removalThreshold: -11,
 	skillCap: 10,
 	resetOnModify: true,
 });

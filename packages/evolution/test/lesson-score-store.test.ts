@@ -119,7 +119,7 @@ describe("lesson score store", () => {
 		expect(DEFAULT_LESSON_POLICY).toEqual({
 			initialPoints: 0,
 			weights: { helpful: 1, harmful: -1.5, neutral: -1 },
-			removalThreshold: -5,
+			removalThreshold: -7,
 			lessonCap: 12,
 			resetOnModify: true,
 		});

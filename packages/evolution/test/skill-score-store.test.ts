@@ -78,7 +78,7 @@ describe("skill score store", () => {
 		expect(DEFAULT_SKILL_POLICY).toEqual({
 			initialPoints: 0,
 			weights: { helpful: 1, harmful: -1.5, neutral: -1 },
-			removalThreshold: -8,
+			removalThreshold: -11,
 			skillCap: 10,
 			resetOnModify: true,
 		});

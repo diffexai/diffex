@@ -79,11 +79,11 @@ function packageContent({ filePath: _filePath, baseDir: _baseDir, files, ...skil
 
 describe("skill grooming", () => {
 	it.each([
-		{ points: [-8, -9, 0], removed: [0, 1] },
+		{ points: [-10.5, -11, -12, 0], removed: [1, 2] },
 		{ points: [...Array<number>(10).fill(0), -1], removed: [10] },
-		{ points: [-8, -9, -2, ...Array<number>(10).fill(0)], removed: [0, 1, 2] },
-		{ points: [-8, -9, -10, ...Array<number>(9).fill(0)], removed: [0, 1, 2] },
-		{ points: [-8], removed: [0] },
+		{ points: [-11, -12, -2, ...Array<number>(10).fill(0)], removed: [0, 1, 2] },
+		{ points: [-11, -12, -13, ...Array<number>(9).fill(0)], removed: [0, 1, 2] },
+		{ points: [-11], removed: [0] },
 	])("removes exactly the threshold and capacity victims: $points", async ({ points, removed }) => {
 		const env = await setup(points);
 		const registry = vi.spyOn(env.registry, "list");
@@ -138,8 +138,8 @@ describe("skill grooming", () => {
 		expect(groomed.state.skills).toHaveLength(11); // Ten local skills plus the foreign skill.
 	});
 
-	it.each([[], [-7.5, 0], Array<number>(10).fill(0)].map((points) => ({ points })))(
-		"does not advance below thresholds: $points",
+	it.each([[], [-10.5, -10, -8, 0], Array<number>(10).fill(0)].map((points) => ({ points })))(
+		"does not advance above the removal threshold and within capacity: $points",
 		async ({ points }) => {
 			const env = await setup(points);
 			const installed = join(env.root, "installed.md");
@@ -154,7 +154,7 @@ describe("skill grooming", () => {
 	it.each(["contentDigest", "packageVersion", "workspace"] as const)(
 		"rejects mismatched %s without advancing",
 		async (field) => {
-			const env = await setup([-8]);
+			const env = await setup([-11]);
 			const snapshot = await env.scores.loadSkillScores(scope, workspace, env.bundle.manifest.version);
 			vi.spyOn(env.scores, "loadSkillScores").mockResolvedValue({
 				...snapshot,
@@ -169,7 +169,7 @@ describe("skill grooming", () => {
 	);
 
 	it("does not rebase a scored removal onto a concurrently selected revision", async () => {
-		const env = await setup([-8]);
+		const env = await setup([-11]);
 		const next = await env.state.saveVersion({ memory: "Changed selection.\n" }, env.bundle.manifest.version);
 		const select = env.state.selectVersionIfCurrent.bind(env.state);
 		vi.spyOn(env.state, "selectVersionIfCurrent").mockImplementationOnce(async (...args) => {

@@ -16,7 +16,7 @@ export interface LessonPolicy {
 export const DEFAULT_LESSON_POLICY: LessonPolicy = Object.freeze({
 	initialPoints: 0,
 	weights: Object.freeze({ helpful: 1, harmful: -1.5, neutral: -1 }),
-	removalThreshold: -5,
+	removalThreshold: -7,
 	lessonCap: 12,
 	resetOnModify: true,
 });
