@@ -108,23 +108,5 @@
     ],
     "category": "approved integration",
     "reason": "OpenCode session/client attribution retained by the release audit independently of the optional attribution toggle."
-  },
-  {
-    "path": "packages/coding-agent/src/core/remote-catalog-provider.ts",
-    "context": "const DEFAULT_CATALOG_BASE_URL = \"https://pi.dev\";",
-    "identities": [
-      "pi.dev"
-    ],
-    "category": "approved integration",
-    "reason": "Pi-supported model catalogs retained by the release audit."
-  },
-  {
-    "path": "packages/coding-agent/src/core/remote-catalog-provider.ts",
-    "context": "/** Add a persisted pi.dev catalog overlay to a static built-in provider. */",
-    "identities": [
-      "pi.dev"
-    ],
-    "category": "approved integration",
-    "reason": "Pi-supported model catalogs retained by the release audit."
   }
 ]

@@ -1,14 +1,19 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
 	createModels,
 	createProvider,
 	InMemoryModelsStore,
 	type Model,
 	type ModelsPublication,
+	type ModelsStore,
 	type Provider,
 	type RefreshModelsContext,
 } from "@diffexai/diffex-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { VERSION } from "../src/config.ts";
+import { FileModelsStore } from "../src/core/models-store.ts";
 import { withRemoteCatalog } from "../src/core/remote-catalog-provider.ts";
 
 const neverAbortedSignal = new AbortController().signal;
@@ -43,14 +48,14 @@ function testProvider(localGeneratedAt?: number) {
 				},
 			},
 		}),
-		"https://pi.dev",
+		"https://api.diffex.ai",
 		localGeneratedAt,
 	);
 }
 
 async function refreshProvider(
 	provider: Provider,
-	store: InMemoryModelsStore,
+	store: ModelsStore,
 	overrides: Partial<Pick<RefreshModelsContext, "allowNetwork" | "force" | "signal">> = {},
 ): Promise<void> {
 	const publish = async (publication: ModelsPublication): Promise<boolean> => {
@@ -143,7 +148,7 @@ describe("remote catalog provider", () => {
 		expect(stored?.checkedAt).toBeGreaterThanOrEqual(checkedAt ?? 0);
 	});
 
-	it("drops a stale etag when the overlay becomes unavailable", async () => {
+	it("preserves a valid matching cache when the overlay becomes unavailable", async () => {
 		const responses = [
 			new Response(JSON.stringify({ dynamic: model("dynamic") }), {
 				headers: { "content-type": "application/json", etag: '"catalog-1"' },
@@ -157,7 +162,8 @@ describe("remote catalog provider", () => {
 		await refreshProvider(provider, store);
 		await refreshProvider(provider, store, { force: true });
 
-		expect((await store.read(provider.id))?.etag).toBeUndefined();
+		expect((await store.read(provider.id))?.etag).toBe('"catalog-1"');
+		expect(provider.getModels().map((entry) => entry.id)).toEqual(["static", "dynamic"]);
 	});
 
 	it("keeps the etag and overlay after a transient failure", async () => {
@@ -229,7 +235,7 @@ describe("remote catalog provider", () => {
 		expect((await store.read(provider.id))?.models.map((entry) => entry.id)).toEqual(["newer"]);
 	});
 
-	it("treats unimplemented pi.dev catalog routes as an unavailable overlay", async () => {
+	it("treats incompatible catalog routes as an unavailable overlay", async () => {
 		vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("not implemented", { status: 501 }));
 		const provider = testProvider();
 		const store = new InMemoryModelsStore();
@@ -237,5 +243,91 @@ describe("remote catalog provider", () => {
 		await expect(refreshProvider(provider, store)).resolves.toBeUndefined();
 		expect(provider.getModels().map((entry) => entry.id)).toEqual(["static"]);
 		expect(await store.read(provider.id)).toMatchObject({ models: [], checkedAt: expect.any(Number) });
+	});
+
+	it.each([
+		{},
+		{ catalogUrl: "https://old.example/api/models/providers/test-provider", catalogClientVersion: VERSION },
+		{ catalogUrl: "https://api.diffex.ai/api/models/providers/test-provider", catalogClientVersion: "0.0.1" },
+	])("ignores foreign cache models, validators and timers: %j", async (provenance) => {
+		const store = new InMemoryModelsStore();
+		await store.write("test-provider", {
+			models: [model("foreign")],
+			checkedAt: Date.now(),
+			lastModified: Date.now(),
+			etag: '"foreign"',
+			...provenance,
+		});
+		const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ fresh: model("fresh") }));
+		const provider = testProvider();
+		await refreshProvider(provider, store, { allowNetwork: false });
+		expect(provider.getModels().map((entry) => entry.id)).toEqual(["static"]);
+		expect(fetchSpy).not.toHaveBeenCalled();
+		await refreshProvider(provider, store);
+		expect(fetchSpy).toHaveBeenCalledOnce();
+		expect(fetchSpy.mock.calls[0]?.[1]?.headers).not.toHaveProperty("if-none-match");
+		expect(provider.getModels().map((entry) => entry.id)).toEqual(["static", "fresh"]);
+		expect(await store.read(provider.id)).toMatchObject({
+			catalogUrl: "https://api.diffex.ai/api/models/providers/test-provider",
+			catalogClientVersion: VERSION,
+		});
+	});
+
+	it.each(["json", "fields", "provider", "key", "network", "timeout", "cancel", "http"])(
+		"preserves the matching cache after %s failure",
+		async (failure) => {
+			const store = new InMemoryModelsStore();
+			const fetchSpy = vi
+				.spyOn(globalThis, "fetch")
+				.mockResolvedValue(Response.json({ valid: model("valid") }, { headers: { etag: '"valid"' } }));
+			const provider = testProvider();
+			await refreshProvider(provider, store);
+			const before = await store.read(provider.id);
+			const controller = new AbortController();
+			fetchSpy.mockImplementation(async () => {
+				if (failure === "network") throw new TypeError("network unavailable");
+				if (failure === "timeout") throw new DOMException("Timed out", "TimeoutError");
+				if (failure === "cancel") controller.abort();
+				if (failure === "http") return new Response(null, { status: 503 });
+				if (failure === "json") return new Response("{broken");
+				return Response.json({
+					invalid: {
+						...model(failure === "key" ? "wrong" : "invalid"),
+						...(failure === "fields" ? { contextWindow: -1 } : {}),
+						...(failure === "provider" ? { provider: "other" } : {}),
+					},
+				});
+			});
+			const refresh = refreshProvider(provider, store, { force: true, signal: controller.signal });
+			if (failure === "cancel") await refresh;
+			else await expect(refresh).rejects.toThrow();
+			expect(await store.read(provider.id)).toEqual(before);
+			expect(provider.getModels().map((entry) => entry.id)).toEqual(["static", "valid"]);
+		},
+	);
+
+	it("persists provenance across restart and restores matching models offline", async () => {
+		const root = mkdtempSync(join(tmpdir(), "diffex-catalog-restart-"));
+		try {
+			const path = join(root, "models-store.json");
+			const fetchSpy = vi
+				.spyOn(globalThis, "fetch")
+				.mockResolvedValue(Response.json({ dynamic: model("dynamic") }, { headers: { etag: '"valid"' } }));
+			await refreshProvider(testProvider(), new FileModelsStore(path));
+			const restarted = testProvider();
+			const store = new FileModelsStore(path);
+			await refreshProvider(restarted, store, { allowNetwork: false });
+			await refreshProvider(restarted, store);
+			expect(fetchSpy).toHaveBeenCalledOnce();
+			expect(restarted.getModels().map((entry) => entry.id)).toEqual(["static", "dynamic"]);
+			const entry = await store.read(restarted.id);
+			if (!entry) throw new Error("Missing persisted cache");
+			await store.write(restarted.id, { ...entry, checkedAt: Date.now() - 4 * 60 * 60 * 1000 });
+			fetchSpy.mockResolvedValue(new Response(null, { status: 304 }));
+			await refreshProvider(restarted, store);
+			expect(fetchSpy).toHaveBeenCalledTimes(2);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
 	});
 });

@@ -25,11 +25,10 @@ Paths below are descriptive coordinates; the full source context is authoritativ
 | `packages/coding-agent/src/core/provider-attribution.ts:58`           | `Pi`               | approved integration | Provider attribution retained by the release audit; optional headers default off.                    |
 | `packages/coding-agent/src/core/provider-attribution.ts:64`           | `pi-coding-agent`  | approved integration | Provider attribution retained by the release audit; optional headers default off.                    |
 | `packages/coding-agent/src/core/provider-attribution.ts:80`           | `pi`               | approved integration | OpenCode session/client attribution retained independently of the optional attribution toggle.       |
-| `packages/coding-agent/src/core/remote-catalog-provider.ts:6`         | `pi.dev`           | approved integration | Pi-supported model catalogs retained by the release audit.                                           |
-| `packages/coding-agent/src/core/remote-catalog-provider.ts:44`        | `pi.dev`           | approved integration | Pi-supported model catalogs retained by the release audit.                                           |
 
 The owner explicitly approved retention of OpenAI Codex and xAI OAuth during this implementation.
-The release audit approves Radius gateway/OAuth, Pi-supported model catalogs, and provider attribution.
+The release audit approves Radius gateway/OAuth and provider attribution.
+Model catalogs use the Diffex-owned API described in [the catalog contract](docs/model-catalog.md); the former catalog exceptions are removed.
 These entries permit those integrations only; they do not authorize install reporting, update authority, arbitrary traffic to the same host, or new dependencies.
 The source check covers tracked and unignored package source, examples, configuration, workflow files, operational extensions, dependency metadata, and root identity documents.
 Tests and their fixtures describe rejected historical inputs and are not shipped runtime configuration.

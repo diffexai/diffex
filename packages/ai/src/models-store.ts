@@ -2,6 +2,10 @@ import type { Api, Model } from "./types.ts";
 
 export interface ModelsStoreEntry {
 	models: readonly Model<Api>[];
+	/** Exact provider catalog URL that supplied this entry. */
+	catalogUrl?: string;
+	/** Diffex client version used to select its compatibility tier. */
+	catalogClientVersion?: string;
 	/** Unix timestamp from the remote catalog's Last-Modified header. */
 	lastModified?: number;
 	/** Unix timestamp of the last completed remote check. */
