@@ -3,8 +3,8 @@ import { stream as streamAnthropic } from "../src/api/anthropic-messages.ts";
 import { stream as streamOpenAICompletions } from "../src/api/openai-completions.ts";
 import { stream as streamOpenAIResponses } from "../src/api/openai-responses.ts";
 import { getModel, stream } from "../src/compat.ts";
-import { MODELS } from "../src/models.generated.ts";
 import type { Context, Model } from "../src/types.ts";
+import { generateModelsFixture, modelsDevProvider } from "./generate-models-fixture.ts";
 
 class PayloadCaptured extends Error {
 	constructor() {
@@ -429,6 +429,11 @@ describe("Cache Retention (DIFFEX_CACHE_RETENTION)", () => {
 	});
 
 	describe("OpenAI Completions Provider", () => {
+		const opencodeModelIds = ["deepseek-v4-flash", "deepseek-v4-pro", "kimi-k2.5", "kimi-k2.6", "minimax-m2.7"];
+		const opencodeCatalog = generateModelsFixture({
+			opencode: modelsDevProvider(Object.fromEntries(opencodeModelIds.map((id) => [id, {}]))),
+		});
+
 		function createCompletionsModel(compat?: Model<"openai-completions">["compat"]): Model<"openai-completions"> {
 			return {
 				id: "test-model",
@@ -495,14 +500,8 @@ describe("Cache Retention (DIFFEX_CACHE_RETENTION)", () => {
 			expect(capturedPayload.prompt_cache_retention).toBeUndefined();
 		});
 
-		it.each([
-			MODELS.opencode["deepseek-v4-flash"],
-			MODELS.opencode["deepseek-v4-pro"],
-			MODELS.opencode["kimi-k2.5"],
-			MODELS.opencode["kimi-k2.6"],
-			MODELS.opencode["minimax-m2.7"],
-		] as const)("should omit long cache retention for $provider/$id", async (metadata) => {
-			const model = metadata as Model<"openai-completions">;
+		it.each(opencodeModelIds)("should omit long cache retention for opencode/%s", async (id) => {
+			const model = opencodeCatalog.getModel("opencode", id, "openai-completions");
 			let capturedPayload: OpenAICompletionsCachePayload | undefined;
 
 			try {
