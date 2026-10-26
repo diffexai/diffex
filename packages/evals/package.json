@@ -1,6 +1,6 @@
 {
 	"name": "@diffexai/diffex-evals",
-	"version": "0.3.2",
+	"version": "0.3.3",
 	"private": true,
 	"type": "module",
 	"scripts": {
@@ -9,8 +9,8 @@
 		"test": "vitest run --config vitest.test.config.ts"
 	},
 	"devDependencies": {
-		"@diffexai/diffex-ai": "^0.3.2",
-		"@diffexai/diffex": "^0.3.2",
+		"@diffexai/diffex-ai": "^0.3.3",
+		"@diffexai/diffex": "^0.3.3",
 		"@types/node": "26.6.5",
 		"shx": "0.4.0",
 		"typescript": "7.0.2",

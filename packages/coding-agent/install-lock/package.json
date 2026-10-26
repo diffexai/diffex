@@ -1,10 +1,10 @@
 {
 	"name": "@diffexai/diffex-coding-agent-install",
-	"version": "0.3.2",
+	"version": "0.3.3",
 	"private": true,
 	"description": "Lockfile root used by the Diffex installer and updater.",
 	"dependencies": {
-		"@diffexai/diffex": "0.3.2"
+		"@diffexai/diffex": "0.3.3"
 	},
 	"overrides": {
 		"zod": "4.6.6",

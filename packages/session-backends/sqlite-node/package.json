@@ -1,6 +1,6 @@
 {
 	"name": "@diffexai/diffex-session-backend-sqlite-node",
-	"version": "0.3.2",
+	"version": "0.3.3",
 	"description": "Node sqlite session backend for @diffexai/diffex-agent-core sessions",
 	"type": "module",
 	"main": "./dist/index.js",
@@ -40,8 +40,8 @@
 		"node": ">=22.19.0"
 	},
 	"dependencies": {
-		"@diffexai/diffex-ai": "^0.3.2",
-		"@diffexai/diffex-agent-core": "^0.3.2"
+		"@diffexai/diffex-ai": "^0.3.3",
+		"@diffexai/diffex-agent-core": "^0.3.3"
 	},
 	"devDependencies": {
 		"@vitest/coverage-v8": "4.1.12",

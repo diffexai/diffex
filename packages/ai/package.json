@@ -1,6 +1,6 @@
 {
 	"name": "@diffexai/diffex-ai",
-	"version": "0.3.2",
+	"version": "0.3.3",
 	"description": "Unified LLM API with automatic model discovery and provider configuration",
 	"type": "module",
 	"main": "./dist/index.js",
@@ -68,7 +68,7 @@
 	"dependencies": {
 		"@anthropic-ai/sdk": "1.3.0",
 		"@aws-sdk/client-bedrock-runtime": "3.1156.0",
-		"@diffexai/diffex-telemetry": "^0.3.2",
+		"@diffexai/diffex-telemetry": "^0.3.3",
 		"@google/genai": "2.31.0",
 		"@mistralai/mistralai": "3.2.0",
 		"@opentelemetry/api": "1.10.0",
