@@ -332,7 +332,7 @@ export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhi
  *
  * @example
  * ```typescript
- * declare module "@mariozechner/agent" {
+ * declare module "@diffexai/diffex-agent-core" {
  *   interface CustomAgentMessages {
  *     artifact: ArtifactMessage;
  *     notification: NotificationMessage;
