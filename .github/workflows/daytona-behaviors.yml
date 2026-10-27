@@ -61,7 +61,7 @@ jobs:
             scripts/daytona-behaviors/live-guard.mjs \
             scripts/daytona-behaviors/baselines
           sha256sum .artifacts/daytona-bundle/bundle.tar.gz > .artifacts/daytona-bundle/SHA256SUMS
-      - name: Retain exact private candidate bytes
+      - name: Retain exact candidate bytes (not confidential)
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: daytona-release-${{ github.sha }}-${{ github.run_attempt }}
@@ -69,7 +69,7 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 30
-      - name: Retain exact private behavior bundle
+      - name: Retain exact behavior bundle (not confidential)
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: daytona-bundle-${{ github.sha }}-${{ github.run_attempt }}
@@ -145,12 +145,22 @@ jobs:
             --arg mode deterministic --arg execution "$EXECUTION" --arg recovery "$RECOVERY" \
             '{commit: $commit, runId: $runId, mode: $mode, execution: $execution, recovery: $recovery}' \
             > .artifacts/daytona-deterministic/workflow-job.json
-      - name: Retain deterministic evidence even on failure
+      - name: Guard all deterministic evidence before publication
+        id: sanitize
         if: always()
+        env:
+          DAYTONA_API_KEY: ${{ secrets.DAYTONA_API_KEY }}
+        run: |
+          python3 scripts/daytona-behaviors/sanitize_evidence.py \
+            --root .artifacts/daytona-deterministic --output .artifacts/daytona-deterministic-sanitized \
+            --mode deterministic
+      - name: Retain sanitized deterministic evidence even on failure
+        if: ${{ always() && steps.sanitize.outputs.safe_to_upload == 'true' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: daytona-evidence-deterministic-${{ github.sha }}-${{ github.run_attempt }}
-          path: .artifacts/daytona-deterministic/
+          path: .artifacts/daytona-deterministic-sanitized/
+          include-hidden-files: true
           if-no-files-found: error
           retention-days: 30
 
@@ -223,12 +233,23 @@ jobs:
             --arg mode live --arg execution "$EXECUTION" --arg recovery "$RECOVERY" \
             '{commit: $commit, runId: $runId, mode: $mode, execution: $execution, recovery: $recovery}' \
             > .artifacts/daytona-live/workflow-job.json
-      - name: Retain live evidence even on failure
+      - name: Guard all live evidence before publication
+        id: sanitize
         if: always()
+        env:
+          DAYTONA_API_KEY: ${{ secrets.DAYTONA_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          python3 scripts/daytona-behaviors/sanitize_evidence.py \
+            --root .artifacts/daytona-live --output .artifacts/daytona-live-sanitized \
+            --mode live
+      - name: Retain sanitized live evidence even on failure
+        if: ${{ always() && steps.sanitize.outputs.safe_to_upload == 'true' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: daytona-evidence-live-${{ github.sha }}-${{ github.run_attempt }}
-          path: .artifacts/daytona-live/
+          path: .artifacts/daytona-live-sanitized/
+          include-hidden-files: true
           if-no-files-found: error
           retention-days: 30
 
@@ -258,17 +279,23 @@ jobs:
               failed=1
               continue
             fi
+            if ! jq --exit-status --arg mode "$mode" \
+              '.schemaVersion == 1 and .mode == $mode and .safe_to_upload == true and .outcome == "clean" and .credential_matches == 0' \
+              "$evidence/publication-safety.json" > /dev/null; then
+              echo "::error::Missing or failed $mode credential publication guard"
+              failed=1
+            fi
             if ! jq --exit-status --arg commit "$DIFFEX_SOURCE_COMMIT" --arg mode "$mode" \
               --arg runId "$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$mode" \
               '.commit == $commit and .mode == $mode and .runId == $runId and .execution == "success" and .recovery == "success"' \
-              "$evidence/workflow-job.json"; then
+              "$evidence/workflow-job.json" > /dev/null; then
               echo "::error::$mode execution or cleanup did not succeed"
               failed=1
             fi
             if ! jq --exit-status --arg commit "$DIFFEX_SOURCE_COMMIT" --arg mode "$mode" \
               --arg runId "$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$mode" \
               '.commit == $commit and .mode == $mode and .run_id == $runId and .outcome == "passed" and .execution == "passed" and .exit_code == 0 and .installed_outcome == "passed" and .reports_complete == true and .cleanup == "confirmed"' \
-              "$evidence/orchestration.json"; then
+              "$evidence/orchestration.json" > /dev/null; then
               echo "::error::Missing, incomplete or failed $mode orchestration/cleanup result"
               failed=1
             fi
@@ -279,7 +306,7 @@ jobs:
             fi
             if ! jq --exit-status --arg commit "$DIFFEX_SOURCE_COMMIT" --arg mode "$mode" --argjson expected "$expected" \
               '.schemaVersion == 1 and .commit == $commit and .mode == $mode and .outcome == "passed" and (.artifactHashes | type == "object" and length > 0) and ((.scenarios | map(.id) | sort) == ($expected | sort)) and all(.scenarios[]; .commit == $commit and .outcome == "passed")' \
-              "$evidence/evidence/results.json"; then
+              "$evidence/evidence/results.json" > /dev/null; then
               echo "::error::Missing, incomplete or failed $mode installed scenarios"
               failed=1
             fi
@@ -292,7 +319,7 @@ jobs:
           done
           if ! jq --slurp --exit-status '.[0].artifactHashes == .[1].artifactHashes' \
             .artifacts/daytona-summary/deterministic/evidence/results.json \
-            .artifacts/daytona-summary/live/evidence/results.json; then
+            .artifacts/daytona-summary/live/evidence/results.json > /dev/null; then
             echo '::error::Both modes must test the same candidate tarball hashes'
             failed=1
           fi
@@ -307,11 +334,12 @@ jobs:
             echo "Evidence and confirmed cleanup gate: $([[ "$failed" == 0 ]] && echo passed || echo failed)"
           } >> "$GITHUB_STEP_SUMMARY"
           exit "$failed"
-      - name: Retain aggregate evidence even on failure
+      - name: Retain sanitized aggregate evidence even on failure
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: daytona-summary-${{ github.sha }}-${{ github.run_attempt }}
           path: .artifacts/daytona-summary/
+          include-hidden-files: true
           if-no-files-found: error
           retention-days: 30

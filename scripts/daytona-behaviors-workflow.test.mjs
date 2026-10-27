@@ -82,12 +82,51 @@ test("one 35-minute preparation freezes, builds offline, prepares and verifies t
 		assert.doesNotMatch(recover.run, /--mode|--artifacts/);
 		assert.equal(recover.env.OPENAI_API_KEY, undefined);
 		assert.equal(run.env.OPENAI_API_KEY !== undefined, mode === "live");
-		assert.equal(job.steps.at(-1).if, "always()");
+		assert.equal(job.steps.at(-1).if, "${{ always() && steps.sanitize.outputs.safe_to_upload == 'true' }}");
 	}
 	assert.deepEqual(workflow.jobs["daytona-behaviors"].needs, ["prepare", "deterministic", "live"]);
 });
 
-for (const scenario of ["pass", "missing-artifact", "missing-result", "invalid-result", "missing-xml", "failed-job", "cleanup-failed", "wrong-commit", "wrong-run", "orchestration-failed", "cleanup-unconfirmed", "partial-scenarios", "wrong-result-commit", "different-tarballs"]) {
+test("only a completed all-files credential guard permits sanitized evidence publication", () => {
+	assert.equal(workflow.env.DAYTONA_API_KEY, undefined);
+	assert.equal(workflow.env.OPENAI_API_KEY, undefined);
+	for (const mode of ["deterministic", "live"]) {
+		const job = workflow.jobs[mode];
+		const guard = job.steps.find((step) => step.id === "sanitize");
+		const guardIndex = job.steps.indexOf(guard);
+		const recordIndex = job.steps.findIndex((step) => step.name === "Record execution and cleanup outcomes");
+		assert.equal(guardIndex, recordIndex + 1);
+		assert.equal(guard.if, "always()");
+		assert.equal(guard["continue-on-error"], undefined);
+		assert.deepEqual(guard.env, mode === "live"
+			? { DAYTONA_API_KEY: "${{ secrets.DAYTONA_API_KEY }}", OPENAI_API_KEY: "${{ secrets.OPENAI_API_KEY }}" }
+			: { DAYTONA_API_KEY: "${{ secrets.DAYTONA_API_KEY }}" });
+		assert.match(guard.run, /python3 scripts\/daytona-behaviors\/sanitize_evidence\.py/);
+		assert.ok(guard.run.includes(`--root .artifacts/daytona-${mode} --output .artifacts/daytona-${mode}-sanitized`));
+		assert.ok(guard.run.includes(`--mode ${mode}`));
+		assert.doesNotMatch(guard.run, /\$.*(?:DAYTONA_API_KEY|OPENAI_API_KEY)|continue-on-error|\|\| true/);
+		assert.equal(job.env.DAYTONA_API_KEY, undefined);
+		assert.equal(job.env.OPENAI_API_KEY, undefined);
+		const uploads = job.steps.filter((step) => step.uses?.startsWith("actions/upload-artifact@"));
+		assert.equal(uploads.length, 1);
+		const upload = uploads[0];
+		assert.equal(job.steps.indexOf(upload), guardIndex + 1);
+		assert.equal(upload.if, "${{ always() && steps.sanitize.outputs.safe_to_upload == 'true' }}");
+		assert.equal(upload.with.path, `.artifacts/daytona-${mode}-sanitized/`);
+		assert.equal(upload.with["include-hidden-files"], true);
+	}
+	const aggregate = workflow.jobs["daytona-behaviors"];
+	assert.equal(aggregate.env.DETERMINISTIC_RESULT, "${{ needs.deterministic.result }}");
+	assert.equal(aggregate.env.LIVE_RESULT, "${{ needs.live.result }}");
+	assert.equal(aggregate.env.DAYTONA_API_KEY, undefined);
+	assert.equal(aggregate.env.OPENAI_API_KEY, undefined);
+	assert.equal(aggregate.steps.at(-1).with["include-hidden-files"], true);
+	for (const job of Object.values(workflow.jobs)) {
+		for (const step of job.steps) assert.doesNotMatch(step.name, /private/i);
+	}
+});
+
+for (const scenario of ["pass", "missing-artifact", "missing-result", "invalid-result", "missing-xml", "failed-job", "sanitizer-failed", "missing-safety-report", "unsafe-report", "credential-found", "cleanup-failed", "wrong-commit", "wrong-run", "orchestration-failed", "cleanup-unconfirmed", "partial-scenarios", "wrong-result-commit", "different-tarballs"]) {
 	test(`aggregate fails closed: ${scenario}`, () => {
 		const root = mkdtempSync(join(tmpdir(), "daytona workflow "));
 		try {
@@ -96,6 +135,10 @@ for (const scenario of ["pass", "missing-artifact", "missing-result", "invalid-r
 			for (const mode of ["deterministic", "live"]) {
 				const directory = join(fixtures, mode);
 				mkdirSync(join(directory, "evidence"), { recursive: true });
+				writeFileSync(join(directory, "publication-safety.json"), JSON.stringify({
+					schemaVersion: 1, mode, safe_to_upload: true, outcome: "clean", credential_matches: 0,
+				}));
+				writeFileSync(join(directory, ".orchestration-exit"), "0\n");
 				writeFileSync(join(directory, "workflow-job.json"), JSON.stringify({
 					commit, mode, runId: `123-2-${mode}`, execution: "success", recovery: "success",
 				}));
@@ -115,6 +158,16 @@ for (const scenario of ["pass", "missing-artifact", "missing-result", "invalid-r
 			}
 			const live = join(fixtures, "live");
 			if (scenario === "missing-artifact") rmSync(live, { recursive: true });
+			if (scenario === "missing-safety-report") rmSync(join(live, "publication-safety.json"));
+			if (["unsafe-report", "credential-found"].includes(scenario)) {
+				const report = JSON.parse(readFileSync(join(live, "publication-safety.json"), "utf8"));
+				if (scenario === "unsafe-report") report.safe_to_upload = false;
+				if (scenario === "credential-found") {
+					report.outcome = "credential-found";
+					report.credential_matches = 1;
+				}
+				writeFileSync(join(live, "publication-safety.json"), JSON.stringify(report));
+			}
 			if (scenario === "missing-result") rmSync(join(live, "evidence/results.json"));
 			if (scenario === "invalid-result") writeFileSync(join(live, "evidence/results.json"), "[]");
 			if (scenario === "missing-xml") rmSync(join(live, "orchestration.xml"));
@@ -164,14 +217,19 @@ cpSync(source, args[args.indexOf("--dir") + 1], { recursive: true });
 					GITHUB_STEP_SUMMARY: join(root, "summary.md"),
 					PREPARE_RESULT: "success",
 					DETERMINISTIC_RESULT: "success",
-					LIVE_RESULT: scenario === "failed-job" ? "failure" : "success",
+					LIVE_RESULT: ["failed-job", "sanitizer-failed"].includes(scenario) ? "failure" : "success",
 				},
 			});
 			assert.equal(result.status, scenario === "pass" ? 0 : 1, `${result.stdout}\n${result.stderr}`);
 			const summary = JSON.parse(readFileSync(join(root, ".artifacts/daytona-summary/summary.json"), "utf8"));
 			assert.equal(summary.passed, scenario === "pass");
-			// Downloaded evidence remains in the aggregate artifact, including failed cases.
-			if (scenario !== "missing-artifact") assert.ok(readFileSync(join(root, ".artifacts/daytona-summary/live/workflow-job.json")));
+			// No evidence JSON (including provider response fields) is echoed into job logs.
+			assert.doesNotMatch(result.stdout, /artifactHashes|diffex\.tgz|credential_matches|schemaVersion/);
+			// Downloaded evidence, including hidden digest members, survives failed cases.
+			if (scenario !== "missing-artifact") {
+				assert.ok(readFileSync(join(root, ".artifacts/daytona-summary/live/workflow-job.json")));
+				assert.equal(readFileSync(join(root, ".artifacts/daytona-summary/live/.orchestration-exit"), "utf8"), "0\n");
+			}
 		} finally {
 			rmSync(root, { recursive: true, force: true });
 		}

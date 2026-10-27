@@ -64,17 +64,31 @@ The workflow never sets its own qualification variable.
 
 3. **Recovery and evidence, including failure.** Once execution starts, the always-run recovery step invokes `recover --output DIR`.
    Recovery retrieves available evidence and confirms cleanup; it does not launch or retry behavior execution.
-   The workflow records execution and recovery outcomes separately in `workflow-job.json` and uploads evidence even after a failure.
-   A recovered transcript does not turn a failed run into a pass.
+   The workflow records execution and recovery outcomes separately in `workflow-job.json`, then always runs the final all-files credential publication guard before any per-mode evidence upload.
+   The guard scans the entire local output root, including `installed.log`, `launcher.log`, nested `install.txt` files, binary captures and hidden files; it does not rely on the installed suite's earlier filtering.
+   It reads actual credential bytes only from `DAYTONA_API_KEY` (both modes) and `OPENAI_API_KEY` (live only) in its environment, never from credential files or command-line arguments.
+   Auth files/directories, symlinks and special files are excluded without opening them.
+   Exact credential bytes in file contents and path names are redacted before a separate sanitized publication copy is written; the original local recovery output is never uploaded.
+   `publication-safety.json` records only sanitized paths, credential variable names, counts and hashes of sanitized bytes, not credential values or hashes of original secret-bearing bytes.
+   A credential match fails the guard and producing job even if the sanitized evidence can be retained for diagnosis.
+   Only a fully completed scan, final byte/path verification and safety report set `safe_to_upload=true`; unexpected failures or missing scan credentials block upload rather than falling back to raw evidence.
+   These exact-byte checks are defense in depth, not a general detector for arbitrary credentials or encoded secret transformations: the harness must never write secrets to evidence or logs.
+   A recovered or sanitized transcript does not turn a failed run into a pass.
 
 4. **Aggregate, including missing results.** The final job runs even when dependencies fail or skip on an enabled run.
    It requires successful prepare, deterministic and live jobs; exact commit/mode/run-ID markers; successful execution and recovery; passing orchestration JSON with confirmed deletion; the complete expected installed scenario inventory; matching candidate tarball hashes in both modes; and nonempty orchestration and installed-suite XML reports.
-   Missing artifacts, incomplete results, execution failure or cleanup failure fail the aggregate.
+   Missing artifacts, incomplete results, execution failure, credential-guard failure or cleanup failure fail the aggregate.
+   The aggregate requires a clean publication safety report and checks the producing jobs' outcomes, so a failed sanitizer cannot be hidden by otherwise passing scenario reports.
    Evidence-upload failure also leaves the producing job failed.
+   Aggregate validation does not echo evidence JSON or credential values into job logs or the step summary.
+   Per-mode and aggregate uploads include hidden sanitized files, preserving `.orchestration-exit` and other digest-manifest members; excluded auth files stay excluded.
 
 GitHub artifacts retain the release, bundle, per-mode evidence and aggregate evidence for **30 days**.
 Download evidence before expiry if a longer-lived qualification record is required.
-Artifacts remain private repository evidence; they are not npm or public release assets.
+This repository is public: GitHub Actions artifacts can be downloaded by authenticated users with repository read access and are **not confidential storage**.
+The release and bundle artifacts contain no credentials; per-mode and aggregate evidence must contain only the guarded, sanitized publication copies.
+They are workflow artifacts, not npm or release assets; that distinction does not make them private.
+Never rely on GitHub log masking or artifact access controls to protect keys.
 
 ## Configure access and a snapshot
 
@@ -86,11 +100,12 @@ Create the GitHub environment `daytona-behaviors` and configure:
 | Setting | Location | Purpose |
 | --- | --- | --- |
 | `DAYTONA_API_KEY` | Environment secret | Local orchestration calls to Daytona; never passed as the sandbox's model credential. |
-| `OPENAI_API_KEY` | Environment secret | Approved, restricted live-provider key; injected only into the live execution step. |
+| `OPENAI_API_KEY` | Environment secret | Approved, restricted live-provider key; injected only into live execution and the live publication guard. |
 | `DAYTONA_BEHAVIORS_SNAPSHOT` | Environment variable | Prepared toolchain snapshot name passed explicitly as `--snapshot`. |
 | `DAYTONA_BEHAVIORS_QUALIFIED` | Repository variable | Set to `true` only after reviewing a successful qualification. |
 
 The deterministic job and recovery steps do not receive `OPENAI_API_KEY`.
+Each publication guard receives only its mode's credential whitelist, scoped to that step; credential values never appear in its arguments, report or status output.
 The prepare and aggregate jobs receive neither credential.
 Provider credentials must be test-only, revocable and covered by a spending limit; do not use personal login state or production agent configuration.
 Review the current model, request/token/time limits and allowed provider destination in the checked live harness before approval.
@@ -167,6 +182,7 @@ Expected local output:
 - `evidence/results.json` and `evidence/results.xml`: incremental installed-suite results.
 - Available per-scenario transcripts, events, terminal captures/baseline comparisons and other diagnostic files produced by the harness.
 - `workflow-job.json`: CI-only record of exact source, run identity, execution and recovery outcomes.
+- `publication-safety.json`: final guard report in the separate sanitized publication directory, never an authorization to upload the original output.
 
 Do not delete or hand-edit `state.json` while a sandbox may exist.
 For interrupted execution, retained output or cleanup failure:
@@ -181,6 +197,20 @@ It must preserve failure evidence and positively confirm deletion; an attempted 
 If credentials, runner termination or service failure prevent confirmation, treat cleanup as failed and use the saved sandbox/run identity with the Daytona owner to reconcile resources.
 CI's always-run step is best effort under cancellation or runner loss, not a guarantee that GitHub will execute cleanup.
 Recover manually and confirm no run-owned sandboxes remain before closing the incident.
+
+Before sharing any local evidence, run the same publication guard after recovery with the approved credentials available only in the environment:
+
+```sh
+python3 scripts/daytona-behaviors/sanitize_evidence.py \
+  --root .artifacts/daytona-deterministic \
+  --output .artifacts/daytona-deterministic-sanitized \
+  --mode deterministic
+```
+
+Use `--mode live` and a separate fresh publication destination for live evidence.
+A nonzero exit is a security failure, even if a completed sanitized copy and its safety report exist.
+If the scan did not complete, do not publish any evidence; never substitute the raw directory.
+Retain or share only a completed sanitized copy, review it for unrelated sensitive data and treat it as public-readable.
 
 ## Local executable checks and baseline review
 
@@ -234,7 +264,7 @@ The implementation must remain **unqualified** until that user supplies and revi
    Expect a nonzero exit and a recorded baseline assertion failure, retained JSON/XML and captures, and confirmed sandbox deletion.
    Run `recover --output .artifacts/daytona-intentional-failure` if needed; it must not relaunch or turn the failed execution into a pass.
    Record the deliberately altered bundle identity separately; never replace the original retained bundle, regenerate its approved checksum or commit the bad baseline.
-   Retain the local CLI output directory with the qualification record; this rehearsal needs no new workflow inputs.
+   Run the final publication guard on the local CLI output and retain only its completed sanitized copy with the qualification record; this rehearsal needs no new workflow inputs.
 4. Require a **cancellation rehearsal**: dispatch another run from `main`, wait until a sandbox and behavior execution exist, then cancel that workflow run.
    Retain the run URL, sandbox/run identities and whatever incremental artifacts were uploaded.
    Recover available saved output without relaunching; if cancellation prevented artifact upload, use the recorded run labels and the Daytona owner to reconcile resources.
