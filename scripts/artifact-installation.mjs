@@ -1,10 +1,29 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
-import { isAbsolute, join, relative } from "node:path";
+import { lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const readJson = (file) => JSON.parse(readFileSync(file, "utf8"));
+
+export function resolveArtifactDirectory(value) {
+	assert(typeof value === "string" && value.length > 0 && !value.includes("\0"), "Invalid artifact directory");
+	const directory = resolve(value);
+	for (const base of [process.cwd(), tmpdir(), homedir(), "/tmp"]) {
+		const root = resolve(base);
+		if (!directory.startsWith(root + sep)) continue;
+		let current = root;
+		for (const component of relative(root, directory).split(sep)) {
+			current = join(current, component);
+			const entry = lstatSync(current, { throwIfNoEntry: false });
+			assert(!entry?.isSymbolicLink(), "Artifact directory must not traverse symlinks");
+			assert(!entry || entry.isDirectory(), "Artifact directory contains a non-directory component");
+		}
+		return directory;
+	}
+	throw new Error("Artifact directory must be inside the workspace, home, or temporary directory");
+}
 
 export function assertContained(file, directory) {
 	const local = relative(realpathSync(directory), realpathSync(file));
@@ -12,11 +31,13 @@ export function assertContained(file, directory) {
 }
 
 export function verifyTarballs(directory, records, packages) {
+	directory = resolveArtifactDirectory(directory);
 	assert.equal(records.length, packages.length, "Incomplete tarball inventory");
 	assert.equal(new Set(records.map((pkg) => pkg.name)).size, packages.length, "Duplicate tarball identity");
 	for (const pkg of packages) {
 		const record = records.find((entry) => entry.name === pkg.name);
 		assert(record && record.version === pkg.version, `Missing tarball: ${pkg.name}`);
+		assert(typeof record.filename === "string" && basename(record.filename) === record.filename, "Invalid tarball filename");
 		assert.equal(record.filename, `${pkg.name.replace("@", "").replace("/", "-")}-${pkg.version}.tgz`);
 		assert.equal(
 			digest(readFileSync(join(directory, record.filename))),
@@ -27,12 +48,19 @@ export function verifyTarballs(directory, records, packages) {
 }
 
 export function isolatedEnvironment(directory) {
-	const env = {};
-	for (const key of ["PATH", "SystemRoot", "WINDIR", "COMSPEC", "PATHEXT", "LANG"]) {
-		if (process.env[key]) env[key] = process.env[key];
-	}
+	directory = resolveArtifactDirectory(directory);
+	// Read literal allowlisted names: dynamic environment lookups can accidentally
+	// admit credentials when this helper is reused by installation/lifecycle code.
+	const env = Object.fromEntries(Object.entries({
+		PATH: process.env.PATH,
+		SystemRoot: process.env.SystemRoot,
+		WINDIR: process.env.WINDIR,
+		COMSPEC: process.env.COMSPEC,
+		PATHEXT: process.env.PATHEXT,
+		LANG: process.env.LANG,
+	}).filter(([, value]) => typeof value === "string"));
 	for (const dir of ["home", "config", "cache", "prefix", "project", "agent", "temp"])
-		mkdirSync(join(directory, dir), { recursive: true });
+		mkdirSync(resolveArtifactDirectory(join(directory, dir)), { recursive: true });
 	return {
 		...env,
 		HOME: join(directory, "home"),
@@ -64,6 +92,12 @@ export function installConsumer(
 	tarballDirectory,
 	cacheDirectory = join(directory, "cache"),
 ) {
+	directory = resolveArtifactDirectory(directory);
+	cacheDirectory = resolveArtifactDirectory(cacheDirectory);
+	tarballDirectory = resolveArtifactDirectory(tarballDirectory);
+	assert(manager === "npm" || manager === "bun", "Unsupported package manager");
+	const command = manager === "npm" ? "npm" : "bun";
+	assert(selected.every((pkg) => typeof pkg.name === "string" && /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/.test(pkg.name)), "Invalid package name");
 	mkdirSync(directory, { recursive: true });
 	const env = isolatedEnvironment(directory);
 	mkdirSync(cacheDirectory, { recursive: true });
@@ -81,7 +115,7 @@ export function installConsumer(
 		JSON.stringify({ private: true, type: "module", dependencies, overrides: dependencies }),
 	);
 	execFileSync(
-		manager,
+		command,
 		manager === "npm"
 			? ["install", "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund"]
 			: ["install", "--production", "--ignore-scripts", "--network-concurrency=8"],
@@ -106,6 +140,7 @@ export function installConsumer(
 			"Installed inventory differs from the checked tarball",
 		);
 		for (const file of inventory.files) {
+			assert(typeof file.path === "string" && !isAbsolute(file.path) && !file.path.split(/[\\/]/).includes(".."), "Invalid inventory path");
 			assertContained(join(installed, file.path), installed);
 			assert.equal(
 				digest(readFileSync(join(installed, file.path))),

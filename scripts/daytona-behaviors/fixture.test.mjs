@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, linkSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { Socket } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import fixture from "./fixture.mjs";
+import guard from "./live-guard.mjs";
 
 const cli = fileURLToPath(new URL("../../packages/coding-agent/dist/cli.js", import.meta.url));
 const extension = fileURLToPath(new URL("./fixture.mjs", import.meta.url));
@@ -142,3 +143,121 @@ test("transport rejects unexpected hosts, credentials and custom headers without
 		rmSync(directory, { recursive: true, force: true });
 	}
 });
+
+for (const [name, extension] of [["fixture", fixture], ["live guard", guard]]) {
+	test(`${name} rejects traversal, unauthorized paths, symlinks, hardlinks and nonregular recordings`, () => {
+		const directory = mkdtempSync(join(tmpdir(), "behavior-record-boundary-"));
+		const outside = mkdtempSync("/var/tmp/behavior-record-outside-");
+		const originalEnv = { ...process.env };
+		try {
+			const target = join(directory, "untouched.jsonl");
+			writeFileSync(target, "fixture-owned marker\n");
+			const symlink = join(directory, "symlink.jsonl");
+			symlinkSync(target, symlink);
+			const hardlink = join(directory, "hardlink.jsonl");
+			linkSync(target, hardlink);
+			const nonregular = join(directory, "directory.jsonl");
+			mkdirSync(nonregular);
+			const fifo = join(directory, "fifo.jsonl");
+			assert.equal(spawnSync("mkfifo", [fifo]).status, 0);
+			const escaped = join(directory, "escaped");
+			symlinkSync(outside, escaped);
+			writeFileSync(join(outside, "events.jsonl"), "fixture-owned marker\n");
+			const shared = join(directory, "shared");
+			mkdirSync(shared);
+			chmodSync(shared, 0o777);
+			const writable = join(directory, "shared.jsonl");
+			writeFileSync(writable, "fixture-owned marker\n");
+			chmodSync(writable, 0o666);
+			for (const path of [
+				`${directory}/../escape.jsonl`,
+				"/not-a-behavior-record-root/events.jsonl",
+				`${process.cwd()}-not-the-workspace/events.jsonl`,
+				`${directory}/nul\0.jsonl`,
+				symlink, hardlink, nonregular, fifo, writable, join(shared, "events.jsonl"), join(escaped, "events.jsonl"),
+			]) {
+				process.env.DIFFEX_BEHAVIOR_RECORD = path;
+				// Neither TMPDIR nor isolated config vars may grant arbitrary filesystem access.
+				process.env.TMPDIR = "/not-a-behavior-record-root";
+				process.env.DIFFEX_CODING_AGENT_DIR = "/not-a-behavior-record-root/agent";
+				assert.throws(() => extension({ on() { assert.fail("Unsafe recording accepted"); } }), /recording (path|destination|directory|must|changed)|ELOOP|EISDIR/);
+			}
+			delete process.env.DIFFEX_BEHAVIOR_RECORD;
+			assert.throws(() => extension({}), /DIFFEX_BEHAVIOR_RECORD is required/);
+			assert.equal(readFileSync(target, "utf8"), "fixture-owned marker\n");
+			assert.equal(readFileSync(join(outside, "events.jsonl"), "utf8"), "fixture-owned marker\n");
+		} finally {
+			process.env = originalEnv;
+			rmSync(directory, { recursive: true, force: true });
+			rmSync(outside, { recursive: true, force: true });
+		}
+	});
+
+	test(`${name} pins the validated file descriptor across path and environment replacement`, () => {
+		const directory = mkdtempSync(join(tmpdir(), "behavior-record-fd-"));
+		const originalEnv = { ...process.env };
+		const originalFetch = globalThis.fetch;
+		const originalConnect = Socket.prototype.connect;
+		const callbacks = new Map();
+		try {
+			const path = join(directory, "events.jsonl");
+			const pinned = join(directory, "pinned.jsonl");
+			const target = join(directory, "untouched.jsonl");
+			writeFileSync(target, "fixture-owned marker\n");
+			process.env.DIFFEX_BEHAVIOR_RECORD = path;
+			process.env.DIFFEX_BEHAVIOR_TRANSPORT = "0";
+			extension({ on(name, callback) { callbacks.set(name, callback); }, registerProvider() {} });
+			renameSync(path, pinned);
+			symlinkSync(target, path);
+			process.env.DIFFEX_BEHAVIOR_RECORD = target;
+			callbacks.get("agent_settled")();
+			assert.deepEqual(records(pinned), [{ type: "settled" }]);
+			assert.equal(readFileSync(target, "utf8"), "fixture-owned marker\n");
+		} finally {
+			callbacks.get("session_shutdown")?.();
+			globalThis.fetch = originalFetch;
+			Socket.prototype.connect = originalConnect;
+			process.env = originalEnv;
+			rmSync(directory, { recursive: true, force: true });
+		}
+	});
+
+	test(`${name} permits cwd-relative and isolated sandbox recordings with variable filenames`, () => {
+		const directory = mkdtempSync(join(tmpdir(), "behavior-record-local-"));
+		const local = mkdtempSync(join(process.cwd(), ".behavior-record-local-"));
+		const originalEnv = { ...process.env };
+		const originalCwd = process.cwd();
+		const originalFetch = globalThis.fetch;
+		const originalConnect = Socket.prototype.connect;
+		try {
+			for (const name of ["project", "agent", "home", "temp"]) mkdirSync(join(directory, name));
+			process.env.HOME = join(directory, "home");
+			process.env.TMPDIR = join(directory, "temp");
+			process.env.DIFFEX_CODING_AGENT_DIR = join(directory, "agent");
+			process.env.DIFFEX_BEHAVIOR_TRANSPORT = "0";
+			for (const [cwd, path] of [
+				[originalCwd, relative(originalCwd, join(local, "local-events.jsonl"))],
+				[join(directory, "project"), join(directory, "different-name.jsonl")],
+			]) {
+				process.chdir(cwd);
+				process.env.DIFFEX_BEHAVIOR_RECORD = path;
+				const callbacks = new Map();
+				try {
+					extension({ on(name, callback) { callbacks.set(name, callback); }, registerProvider() {} });
+					callbacks.get("agent_settled")();
+					assert.deepEqual(records(path), [{ type: "settled" }]);
+				} finally {
+					callbacks.get("session_shutdown")?.();
+					rmSync(resolve(path), { force: true });
+					globalThis.fetch = originalFetch;
+					Socket.prototype.connect = originalConnect;
+				}
+			}
+		} finally {
+			process.chdir(originalCwd);
+			process.env = originalEnv;
+			rmSync(directory, { recursive: true, force: true });
+			rmSync(local, { recursive: true, force: true });
+		}
+	});
+}
