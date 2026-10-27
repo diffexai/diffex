@@ -33,9 +33,20 @@ class Terminal:
         self.evidence, self.deadline = evidence, deadline
         self.env = env
         (evidence / "tmux.conf").write_text("set -g extended-keys on\nset -gq extended-keys-format csi-u\n")
+        # Some sandbox init processes reap tmux's pane status. Record the actual
+        # application child's status independently, while retaining its real PTY.
+        launcher = evidence / "terminal-launch.py"
+        launcher.write_text(
+            "import json, pathlib, subprocess\n"
+            f"result = subprocess.run({[executable, *args]!r})\n"
+            f"temporary = pathlib.Path({str(evidence / '.terminal-exit.tmp')!r})\n"
+            "temporary.write_text(json.dumps({'exitCode': result.returncode}))\n"
+            f"temporary.replace({str(evidence / 'terminal-exit.json')!r})\n"
+            "raise SystemExit(0 if result.returncode == 0 else 1)\n"
+        )
         self.command("new-session", "-d", "-s", "behavior", "-x", "80", "-y", "24",
                      "-c", str(project),
-                     " ".join(shlex.quote(a) for a in [executable, *args]))
+                     " ".join(shlex.quote(a) for a in [sys.executable, str(launcher)]))
         self.command("set-option", "-g", "remain-on-exit", "on")
 
     def command(self, *args):
@@ -103,13 +114,12 @@ class Terminal:
         end = min(self.deadline, time.monotonic() + 10)
         while time.monotonic() < end:
             self.capture()
-            dead = self.command("display-message", "-p", "#{pane_dead}:#{pane_dead_status}:#{pane_dead_signal}").strip()
-            if dead.startswith("1:"):
-                # Older tmux may observe EOF before waitpid supplies status.
-                # A dead pane alone is not a completed or successful exit.
-                _, status, signal = dead.split(":", 2)
-                if status or signal:
-                    assert status == "0" and not signal, f"Unclean terminal exit: {dead}"
+            status_file = self.evidence / "terminal-exit.json"
+            if status_file.exists():
+                status = json.loads(status_file.read_text())["exitCode"]
+                assert status == 0, f"Unclean terminal exit: {status}"
+                dead = self.command("display-message", "-p", "#{pane_dead}").strip()
+                if dead == "1":
                     return
             time.sleep(.1)
         raise AssertionError("Terminal failed to exit")
