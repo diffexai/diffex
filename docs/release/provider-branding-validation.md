@@ -2,7 +2,8 @@
 
 Diffex controls the local callback presentation and default application attribution.
 Registered OAuth client IDs, provider consent pages, authentication protocols, stored credentials, inference endpoints, and payloads remain unchanged.
-The separate Diffex account feature and Radius implementation are excluded.
+The separate Diffex account feature is excluded.
+Radius was excluded from the original branding change and subsequently removed from the built-in provider and authentication integrations.
 
 ## Implemented defaults
 
@@ -37,7 +38,7 @@ Attribution tests cover enabled and disabled settings, environment overrides, co
 A browser-bundled Codex stream also completed against a mock with `process` absent and the expected `diffex (browser)` User-Agent.
 
 `npm run check` passes, including the runtime identity inventory and browser bundle smoke check.
-The inventory retains four occurrences across three documented exceptions: the Radius client ID, the Radius gateway, and two occurrences in the original DOOM integration credit.
+The inventory retains only two occurrences in one documented exception for the original DOOM integration credit.
 The audit found no inherited Pi application labels in other built-in provider login implementations or shared login UI.
 Provider protocol labels such as GitHub Copilot and Claude CLI headers remain unchanged.
 

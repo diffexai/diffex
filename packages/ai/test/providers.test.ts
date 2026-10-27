@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { lazyApi } from "../src/api/lazy.ts";
 import { envApiKeyAuth } from "../src/auth/helpers.ts";
 import type { AuthContext, AuthEvent } from "../src/auth/types.ts";
+import { findEnvKeys, getEnvApiKey } from "../src/env-api-keys.ts";
 import { createModels, createProvider } from "../src/models.ts";
 import { InMemoryModelsStore } from "../src/models-store.ts";
 import { builtinModels, builtinProviders, getBuiltinModel } from "../src/providers/all.ts";
@@ -47,13 +48,20 @@ describe("builtin providers", () => {
 		const all = models.getModels();
 		expect(all.length).toBeGreaterThan(500);
 
-		// Static providers list models immediately; Radius is purely dynamic.
 		for (const provider of providers) {
 			const list = models.getModels(provider.id);
-			if (provider.id === "radius") expect(list).toEqual([]);
-			else expect(list.length).toBeGreaterThan(0);
+			expect(list.length).toBeGreaterThan(0);
 			expect(list.every((m) => m.provider === provider.id)).toBe(true);
 		}
+	});
+
+	it("does not expose Radius or resolve its former environment key", async () => {
+		const models = builtinModels();
+		expect(models.getProvider("radius")).toBeUndefined();
+		expect(models.getModels("radius")).toEqual([]);
+		await expect(models.getAuth("radius")).resolves.toBeUndefined();
+		expect(findEnvKeys("radius", { RADIUS_API_KEY: "unused-key" })).toBeUndefined();
+		expect(getEnvApiKey("radius", { RADIUS_API_KEY: "unused-key" })).toBeUndefined();
 	});
 
 	it("stores native constrained-sampling capabilities in model metadata", () => {

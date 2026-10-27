@@ -1,171 +1,125 @@
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { InMemoryModelsStore } from "@diffexai/diffex-ai";
+import { type Credential, InMemoryModelsStore, type Model } from "@diffexai/diffex-ai";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthStorage } from "../src/core/auth-storage.ts";
 import { ModelRuntime } from "../src/core/model-runtime.ts";
-import { RADIUS_PROVIDER_ID } from "../src/core/radius.ts";
-import { allowNetwork } from "./test-network-env.ts";
 
-function radiusOAuthCredential(gatewayBaseUrl: string) {
-	return {
-		type: "oauth" as const,
-		access: "access-token",
-		refresh: "refresh-token",
-		expires: Date.now() + 60 * 60 * 1000,
-		gatewayConfig: radiusConfig(gatewayBaseUrl),
-	};
-}
-
-function radiusConfig(baseUrl: string) {
-	return {
-		baseUrl,
-		models: [
-			{
-				id: "auto",
-				name: "Radius Auto",
-				reasoning: false,
-				input: ["text" as const],
-				cost: { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 0.2 },
-				contextWindow: 128000,
-				maxTokens: 16384,
-			},
-		],
-	};
-}
-
+const staleModel: Model<"diffex-messages"> = {
+	id: "auto",
+	name: "Radius Auto",
+	api: "diffex-messages",
+	provider: "radius",
+	baseUrl: "https://radius.example/v1",
+	reasoning: false,
+	input: ["text"],
+	cost: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 },
+	contextWindow: 128000,
+	maxTokens: 16384,
+};
 let tempDir: string;
 
 beforeEach(() => {
-	allowNetwork();
-	tempDir = join(tmpdir(), `pi-test-radius-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-	mkdirSync(tempDir, { recursive: true });
+	tempDir = mkdtempSync(join(tmpdir(), "diffex-radius-removal-"));
+	vi.stubEnv("RADIUS_API_KEY", "unused-radius-key");
+	vi.stubGlobal(
+		"fetch",
+		vi.fn(async () => {
+			throw new Error("Unexpected provider request");
+		}),
+	);
 });
-
 afterEach(() => {
-	vi.restoreAllMocks();
-	if (tempDir && existsSync(tempDir)) rmSync(tempDir, { recursive: true });
+	vi.unstubAllEnvs();
+	vi.unstubAllGlobals();
+	rmSync(tempDir, { recursive: true, force: true });
 });
 
-describe("Radius provider", () => {
-	it("restores the legacy credential catalog without network access", async () => {
-		const runtime = await ModelRuntime.create({
-			credentials: AuthStorage.inMemory({
-				[RADIUS_PROVIDER_ID]: radiusOAuthCredential("https://radius.example.com/v1"),
-			}),
-			modelsStore: new InMemoryModelsStore(),
-			modelsPath: null,
-			allowModelNetwork: false,
-		});
+describe("removed Radius integration", () => {
+	it.each([
+		{ type: "api_key", key: "stored-key" },
+		{ type: "oauth", access: "access", refresh: "refresh", expires: Number.MAX_SAFE_INTEGER },
+		{
+			type: "oauth",
+			access: "expired",
+			refresh: "refresh",
+			expires: 0,
+			gatewayConfig: { baseUrl: staleModel.baseUrl, models: [staleModel] },
+		},
+	] satisfies Credential[])(
+		"does not reactivate Radius from saved credentials or cached models: %j",
+		async (credential) => {
+			const credentials = AuthStorage.inMemory({ radius: credential });
+			const modelsStore = new InMemoryModelsStore();
+			await modelsStore.write("radius", { models: [staleModel] });
+			const runtime = await ModelRuntime.create({
+				credentials,
+				modelsStore,
+				modelsPath: null,
+				allowModelNetwork: false,
+			});
+			expect(runtime.getProviders().some((provider) => provider.id === "radius")).toBe(false);
+			expect(runtime.getProvider("radius")).toBeUndefined();
+			expect(runtime.getModels("radius")).toEqual([]);
+			expect(runtime.hasConfiguredAuth("radius")).toBe(false);
+			expect(runtime.isUsingOAuth("radius")).toBe(false);
+			await expect(runtime.getAuth("radius")).resolves.toBeUndefined();
+			await expect(runtime.checkAuth("radius")).resolves.toBeUndefined();
+			await expect(runtime.getAvailable("radius")).resolves.toEqual([]);
+			await runtime.refresh({ providers: ["radius"], allowNetwork: true });
+			const result = await runtime.completeSimple(staleModel, { messages: [] });
+			expect(result).toMatchObject({ stopReason: "error", errorMessage: "Unknown provider: radius" });
+			expect(fetch).not.toHaveBeenCalled();
+			await expect(credentials.read("radius")).resolves.toEqual(credential);
+		},
+	);
 
-		const model = runtime.getModel(RADIUS_PROVIDER_ID, "auto");
-		expect(model).toMatchObject({ api: "diffex-messages", baseUrl: "https://radius.example.com/v1" });
-		expect(runtime.getProvider(RADIUS_PROVIDER_ID)?.name).toBe("Radius");
-		expect(runtime.hasConfiguredAuth(RADIUS_PROVIDER_ID)).toBe(true);
-	});
+	it.each(["oauth", "api_key"] as const)(
+		"rejects direct Radius %s login before prompting or making requests",
+		async (type) => {
+			const runtime = await ModelRuntime.create({ credentials: AuthStorage.inMemory(), modelsPath: null });
+			const prompt = vi.fn(async () => {
+				throw new Error("Unexpected prompt");
+			});
+			const notify = vi.fn();
+			await expect(
+				runtime.login("radius", type, { signal: new AbortController().signal, prompt, notify }),
+			).rejects.toThrow("Unknown provider: radius");
+			expect(prompt).not.toHaveBeenCalled();
+			expect(notify).not.toHaveBeenCalled();
+			expect(fetch).not.toHaveBeenCalled();
+		},
+	);
 
-	it("fetches and stores the catalog for configured Radius auth", async () => {
-		vi.spyOn(globalThis, "fetch").mockImplementation(
-			async () =>
-				new Response(JSON.stringify(radiusConfig("https://radius.example.com/v1")), {
-					status: 200,
-					headers: { "content-type": "application/json" },
+	it.each(["radius", "radius-dev"])(
+		"rejects the Radius models.json OAuth configuration under %s",
+		async (providerId) => {
+			const modelsPath = join(tempDir, "models.json");
+			writeFileSync(
+				modelsPath,
+				JSON.stringify({
+					providers: {
+						[providerId]: {
+							oauth: "radius",
+							baseUrl: "https://radius.example",
+							apiKey: "stored-key",
+							api: "diffex-messages",
+							models: [{ id: "auto" }],
+						},
+					},
 				}),
-		);
-		const modelsStore = new InMemoryModelsStore();
-		const credentials = AuthStorage.inMemory({
-			[RADIUS_PROVIDER_ID]: {
-				type: "oauth",
-				access: "access-token",
-				refresh: "refresh-token",
-				expires: Date.now() + 60 * 60 * 1000,
-			},
-		});
-		const runtime = await ModelRuntime.create({
-			credentials,
-			modelsStore,
-			modelsPath: null,
-			allowModelNetwork: true,
-		});
-
-		expect(runtime.getModel(RADIUS_PROVIDER_ID, "auto")).toBeDefined();
-		expect((await modelsStore.read(RADIUS_PROVIDER_ID))?.models).toHaveLength(1);
-		const radiusRequest = vi
-			.mocked(fetch)
-			.mock.calls.find(([url]) => String(url) === "https://radius.pi.dev/v1/config");
-		expect(radiusRequest?.[1]?.headers).toMatchObject({ authorization: "Bearer access-token" });
-	});
-
-	it("does not refresh catalogs over the network by default", async () => {
-		const fetchSpy = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("unexpected catalog fetch"));
-		const runtime = await ModelRuntime.create({
-			credentials: AuthStorage.inMemory({
-				[RADIUS_PROVIDER_ID]: radiusOAuthCredential("https://radius.example.com/v1"),
-			}),
-			modelsStore: new InMemoryModelsStore(),
-			modelsPath: null,
-		});
-
-		expect(runtime.getModel(RADIUS_PROVIDER_ID, "auto")).toBeDefined();
-		expect(fetchSpy).not.toHaveBeenCalled();
-	});
-
-	it("does not fetch or expose Radius models without configured auth", async () => {
-		const fetchSpy = vi.spyOn(globalThis, "fetch");
-		const runtime = await ModelRuntime.create({
-			credentials: AuthStorage.inMemory(),
-			modelsStore: new InMemoryModelsStore(),
-			modelsPath: null,
-			allowModelNetwork: true,
-		});
-
-		expect(runtime.getModels(RADIUS_PROVIDER_ID)).toEqual([]);
-		expect(fetchSpy.mock.calls.some(([url]) => String(url).includes("radius.pi.dev/v1/config"))).toBe(false);
-	});
-
-	it("supports custom Radius gateways from models.json", async () => {
-		vi.spyOn(globalThis, "fetch").mockImplementation(
-			async () => new Response(JSON.stringify(radiusConfig("http://localhost:8788/v1")), { status: 200 }),
-		);
-		const modelsPath = join(tempDir, "models.json");
-		writeFileSync(
-			modelsPath,
-			JSON.stringify({
-				providers: { "radius-dev": { name: "Radius (dev)", baseUrl: "http://localhost:8788", oauth: "radius" } },
-			}),
-		);
-		const runtime = await ModelRuntime.create({
-			credentials: AuthStorage.inMemory({
-				"radius-dev": {
-					type: "oauth",
-					access: "access-token",
-					refresh: "refresh-token",
-					expires: Date.now() + 60 * 60 * 1000,
-				},
-			}),
-			modelsStore: new InMemoryModelsStore(),
-			modelsPath,
-			allowModelNetwork: true,
-		});
-
-		expect(runtime.getModel("radius-dev", "auto")).toMatchObject({
-			api: "diffex-messages",
-			baseUrl: "http://localhost:8788/v1",
-		});
-		expect(runtime.getProvider("radius-dev")?.name).toBe("Radius (dev)");
-	});
-
-	it("requires baseUrl for custom Radius gateways", async () => {
-		const modelsPath = join(tempDir, "models.json");
-		writeFileSync(modelsPath, JSON.stringify({ providers: { "radius-dev": { oauth: "radius" } } }));
-		const runtime = await ModelRuntime.create({
-			credentials: AuthStorage.inMemory(),
-			modelsStore: new InMemoryModelsStore(),
-			modelsPath,
-			allowModelNetwork: false,
-		});
-
-		expect(runtime.getError()).toContain('"baseUrl" is required when "oauth" is set');
-	});
+			);
+			const runtime = await ModelRuntime.create({
+				credentials: AuthStorage.inMemory(),
+				modelsPath,
+				modelsStore: new InMemoryModelsStore(),
+			});
+			expect(runtime.getError()).toContain("oauth");
+			expect(runtime.getProvider(providerId)).toBeUndefined();
+			await runtime.refresh({ providers: [providerId], allowNetwork: true });
+			expect(runtime.getProvider(providerId)).toBeUndefined();
+			expect(fetch).not.toHaveBeenCalled();
+		},
+	);
 });

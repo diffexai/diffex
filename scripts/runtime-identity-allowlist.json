@@ -1,23 +1,5 @@
 [
   {
-    "path": "packages/ai/src/auth/oauth/radius.ts",
-    "context": "const OAUTH_CLIENT_ID = \"pi-gateway\";",
-    "identities": [
-      "pi-gateway"
-    ],
-    "category": "approved integration",
-    "reason": "Radius gateway OAuth client retained by the release audit."
-  },
-  {
-    "path": "packages/ai/src/providers/radius-config.ts",
-    "context": "export const DEFAULT_RADIUS_GATEWAY = \"https://radius.pi.dev\";",
-    "identities": [
-      "radius.pi.dev"
-    ],
-    "category": "approved integration",
-    "reason": "Default Radius gateway retained by the release audit."
-  },
-  {
     "path": "packages/coding-agent/examples/extensions/doom-overlay/README.md",
     "context": "- [pi-doom](https://github.com/badlogic/pi-doom) for the original diffex integration",
     "identities": [
