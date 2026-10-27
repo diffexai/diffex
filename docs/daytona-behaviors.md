@@ -7,6 +7,8 @@ A maintainer must provision Daytona access, prepare a snapshot, supply an approv
 Local fixture tests, SDK mocks and workflow validation do not establish that Daytona creation, upload, PTY execution, live inference or deletion works against the real service.
 Do not mark the integration qualified until those operations and their failure paths have retained evidence.
 
+The [2026-10-27 qualification record](daytona-behaviors-qualification.md) documents successful real-service CLI runs and lifecycle rehearsals. GitHub Actions execution, retention and workflow-level cancellation/overlap qualification remain pending; automatic execution is still disabled.
+
 This is a standalone acceptance gate for the packaged Diffex CLI, not the hosted product's runtime image, a release publisher or a replacement for native artifact acceptance.
 It installs the exact reviewed candidate tarballs into isolated consumers outside the repository.
 The deterministic mode controls inference while exercising installed behavior; the live mode uses a bounded real OpenAI request path.
