@@ -7,7 +7,6 @@ import {
 	openSync,
 	readFileSync,
 	rmSync,
-	statSync,
 	symlinkSync,
 	writeFileSync,
 } from "node:fs";
@@ -173,7 +172,13 @@ describe("AuthStorage", () => {
 			const target = join(tempDir, "protected.json");
 			writeFileSync(target, "{}");
 			symlinkSync(target, authJsonPath);
-			const before = statSync(target).ino;
+			const original = openSync(target, "r");
+			let before: number;
+			try {
+				before = fstatSync(original).ino;
+			} finally {
+				closeSync(original);
+			}
 			const storage = AuthStorage.create(authJsonPath);
 			await storage.modify("openai-codex", async () => ({
 				type: "oauth",
@@ -181,7 +186,6 @@ describe("AuthStorage", () => {
 				refresh: "refresh",
 				expires: 123,
 			}));
-			expect(lstatSync(authJsonPath).isSymbolicLink()).toBe(true);
 			const descriptor = openSync(target, "r");
 			try {
 				const metadata = fstatSync(descriptor);
@@ -195,6 +199,7 @@ describe("AuthStorage", () => {
 			} finally {
 				closeSync(descriptor);
 			}
+			expect(lstatSync(authJsonPath).isSymbolicLink()).toBe(true);
 		},
 	);
 
