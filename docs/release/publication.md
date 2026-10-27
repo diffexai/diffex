@@ -35,9 +35,9 @@ Missing credentials fail before npm verification or storage access.
 Use an AWS CLI that supports `put-object --if-match` and `--if-none-match`.
 
 The original `diffex-model-upload` environment had no secrets or protection rules when inspected on 2026-09-10.
-Release publication now has a dedicated environment so configuring release credentials cannot redirect the model publisher.
-The model-catalog workflow retains its existing environment and former account endpoint; model publication and any old-account data migration require their own setup.
-Do not copy release credentials into that environment.
+That historical setup has been superseded by the dedicated model-upload environments and Diffex-owned storage described in [the catalog contract](../model-catalog.md).
+Release publication and model publication use separate environment credentials.
+Do not copy release credentials into model-upload environments.
 
 Bucket-scoped Object Read & Write credentials can mutate other objects within their own bucket, including any future model objects in the production bucket.
 They do not enforce a `releases/v1/` prefix boundary and must never be distributed to clients.
@@ -172,6 +172,7 @@ Canaries cover missing releases, newer/equal/older releases, normal and forced u
 Malformed JSON, wrong schema, prerelease versions, missing or duplicate canonical packages, package-version mismatches, and foreign identities must produce an unavailable response and no install even with force.
 Every successful install attempt must match the complete expected npm argument list, pinned to `@diffexai/diffex@<validated-version>` without uninstall.
 The JSON evidence captures requested and actual URLs, response status and public body, socket destination, intercepted install command, and verified local cleanup.
-Install telemetry is intercepted separately without network traffic; its Pi dependency remains separate migration work.
+Install telemetry is removed, and the current canary rejects every unexpected startup request, including the former install-report route.
+See [install telemetry removal](install-telemetry-removal.md) for the regression boundary; the original acceptance results remain historical evidence.
 The source canary does not establish published-package installation or binary acceptance.
 See [the client canary acceptance record](client-canaries.md) for executed results and remaining limits.

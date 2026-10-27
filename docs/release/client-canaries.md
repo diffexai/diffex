@@ -69,6 +69,7 @@ No package-manager process executed, no uninstall was attempted, and no installe
 The preload intercepted the separate `https://pi.dev/api/report-install` call during non-offline startup and returned a controlled failure without forwarding it.
 There was no Pi version-check traffic or any Pi socket connection.
 At the time of this historical run, install telemetry, model catalogs, and Radius remained separate migration work.
+Install telemetry has since been [removed](install-telemetry-removal.md), and catalogs now use the [Diffex authority](../model-catalog.md).
 Radius is now removed and prohibited in all environments; see [Radius removal](radius-removal.md).
 
 ## Regression and artifact checks

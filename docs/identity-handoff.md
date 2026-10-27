@@ -1,7 +1,7 @@
 # Product identity handoff
 
-The release candidate uses the identities below and the approved backend policy in [the candidate handoff](release/candidate-handoff.md).
-That handoff supersedes the earlier identity migration's security/staff exceptions and absent-API-hostname statements.
+The current Diffex identities and package map are recorded below.
+The [candidate handoff](release/candidate-handoff.md) preserves historical acceptance evidence; its service and attribution approvals are superseded by current policy.
 The canonical source remains private.
 No package, image, release asset, or source archive is published by this change.
 
@@ -21,7 +21,9 @@ No package, image, release asset, or source archive is published by this change.
 
 Diffex and Luntraa, Inc. are unrelated to Earendil.
 The former staff-team authorization, security mailbox reference, announcement, and product affiliation wording have been removed.
-The owner explicitly retained OpenAI Codex and xAI OAuth and provider attribution.
+Provider attribution now identifies Diffex; see [provider validation](release/provider-branding-validation.md).
+ChatGPT now registers Diffex and uses public model and inference APIs; existing inherited registrations require a new sign-in as described in [provider setup](../packages/coding-agent/docs/providers.md#chatgpt).
+The xAI subscription integration remains available with Diffex attribution.
 Radius is removed; the older release audit does not authorize its use.
 See [migration and validation](release/radius-removal.md).
 The catalog authority is now Diffex; see [the catalog contract](model-catalog.md).
@@ -29,23 +31,24 @@ The exact residual inventory is [identity-residual-allowlist.md](../identity-res
 
 | Workspace                               | Final package                                  | Publication                  |
 | --------------------------------------- | ---------------------------------------------- | ---------------------------- |
-| `packages/agent`                        | `@diffexai/diffex-agent-core`                  | Public; publication deferred |
-| `packages/ai`                           | `@diffexai/diffex-ai`                          | Public; publication deferred |
-| `packages/client`                       | `@diffexai/diffex-client`                      | Public; publication deferred |
-| `packages/coding-agent`                 | `@diffexai/diffex`                             | Public; publication deferred |
-| `packages/coding-agent-server`          | `@diffexai/diffex-coding-agent-server`         | Public; publication deferred |
-| `packages/harness-state`                | `@diffexai/diffex-harness-state`               | Public; publication deferred |
-| `packages/protocol`                     | `@diffexai/diffex-protocol`                    | Public; publication deferred |
-| `packages/server`                       | `@diffexai/diffex-server`                      | Public; publication deferred |
-| `packages/session-backends/sqlite-node` | `@diffexai/diffex-session-backend-sqlite-node` | Public; publication deferred |
-| `packages/telemetry`                    | `@diffexai/diffex-telemetry`                   | Public; publication deferred |
-| `packages/tui`                          | `@diffexai/diffex-tui`                         | Public; publication deferred |
+| `packages/agent`                        | `@diffexai/diffex-agent-core`                  | Private internal workspace |
+| `packages/ai`                           | `@diffexai/diffex-ai`                          | Private internal workspace |
+| `packages/client`                       | `@diffexai/diffex-client`                      | Private internal workspace |
+| `packages/coding-agent`                 | `@diffexai/diffex`                             | Public CLI |
+| `packages/coding-agent-server`          | `@diffexai/diffex-coding-agent-server`         | Private internal workspace |
+| `packages/harness-state`                | `@diffexai/diffex-harness-state`               | Private internal workspace |
+| `packages/protocol`                     | `@diffexai/diffex-protocol`                    | Private internal workspace |
+| `packages/server`                       | `@diffexai/diffex-server`                      | Private internal workspace |
+| `packages/session-backends/sqlite-node` | `@diffexai/diffex-session-backend-sqlite-node` | Private internal workspace |
+| `packages/telemetry`                    | `@diffexai/diffex-telemetry`                   | Private internal workspace |
+| `packages/tui`                          | `@diffexai/diffex-tui`                         | Private internal workspace |
 | `packages/evals`                        | `@diffexai/diffex-evals`                       | Private                      |
 | `packages/evolution`                    | `@diffexai/diffex-evolution`                   | Private                      |
 | `packages/harness-trace`                | `@diffexai/diffex-harness-trace`               | Private                      |
 | `packages/coding-agent/install-lock`    | `@diffexai/diffex-coding-agent-install`        | Generated private installer  |
 
 The public package inventory is derived from `scripts/release-packages.mjs`.
+Only `@diffexai/diffex` is public; required internal runtime modules are bundled into its tarball under the [distribution policy](release/distribution-policy.json).
 The generated installer package remains private and is not an additional publication target.
 `@diffexai/diffex-coding-agent` is not a supported package identity.
 

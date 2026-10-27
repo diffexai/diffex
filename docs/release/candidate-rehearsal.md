@@ -93,9 +93,11 @@ Lifecycle tests use loopback discovery/registry fixtures, with third-party depen
 These application-level guards and event logs are not a whole-host packet capture or proof of live provider egress.
 Catalog preparation contacts its approved catalog inputs; the local refresh encountered a transport failure, so the existing validated local snapshot was used for source gates while the native build retained its freshly hydrated snapshot.
 
-The source identity gate accepts exactly seventeen reviewed occurrences across 915 files.
+The historical source identity gate accepted seventeen reviewed occurrences across 915 files.
 Inspection of that historical tarball found sixteen identity matches in nine files, then approved as Radius, catalog, OAuth, and provider-attribution entries.
 Radius approval has since been revoked for every environment.
+Catalogs, ChatGPT registration, and application attribution have also migrated to the current Diffex defaults described in [the residual inventory](../../identity-residual-allowlist.md).
+The JSON evidence preserves its original URLs, headers, and review labels; it does not define current service permissions.
 The final payload gate verifies required notices, runtime-file hashes, the documentation allowlist, and absence of prohibited source and embedded maps.
 Image inspection accepts 1,414 project files across twelve runtime workspaces and thirty approved documentation assets.
 All isolated installation prefixes, caches, homes, mock sessions, fixture servers, and runtime containers are removed by their harnesses.

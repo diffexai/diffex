@@ -6,16 +6,19 @@ The accepted implementation is [`33704b32c5d17b849c013834fd1c56d65de843fd`](http
 The follow-up evidence commit changes only documents; [the artifact manifest](candidate-artifacts.json) pins the tested implementation and bytes.
 The companion cloud change is stacked on PR #147.
 
-Current policy supersedes this historical candidate's Radius approval.
+Current policy supersedes this historical candidate's service, OAuth registration, and application-attribution approvals.
 Radius is removed and must not be used in development, testing, evaluation, or production.
-The pinned JSON manifests and identity reports below describe historical bytes containing Radius and must not be reused as release candidates.
+The pinned JSON manifests and identity reports below preserve historical bytes, including former URLs and headers, and must not be reused as release candidates.
+Their approval labels are historical evidence, not current runtime exceptions.
+Current catalog ownership is defined by [the catalog contract](../model-catalog.md), and current ChatGPT registration and inference by [provider setup](../../packages/coding-agent/docs/providers.md#chatgpt).
 See [Radius removal](radius-removal.md) for current migration and validation.
 
 ## Reconciled decisions
 
 The canonical private source, package map, executable, hosted image identity, and Luntraa, Inc. copyright are recorded in [the identity handoff](../identity-handoff.md).
 The historical release audit approved external catalogs and provider attribution.
-The owner additionally instructed this implementation to retain OpenAI Codex and xAI OAuth.
+The owner additionally instructed that implementation to retain OpenAI Codex and xAI OAuth.
+Current provider defaults identify Diffex, and ChatGPT now uses a Diffex registration and public APIs instead of the inherited client registration.
 Radius gateway/OAuth approval has been revoked; no replacement Radius service is planned.
 No Diffex ownership of those external services or registrations is asserted.
 
@@ -34,18 +37,20 @@ Install reporting remains removed.
 The updater still accepts only canonical stable versions for `@diffexai/diffex`, pins installation to the verified version, and treats the no-release response as no update.
 The [exact residual inventory](../../identity-residual-allowlist.md) replaces the obsolete exceptions and is enforced by `npm run check:identities`.
 
-## Endpoint ownership and allowed egress
+## Current endpoint ownership and allowed egress
+
+This table reflects current source behavior, not the endpoints captured in the historical JSON evidence.
 
 | Operation                             | Endpoint or authority                                                                                                   | Policy                                                                                                                  |
 | ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
 | Release discovery                     | `https://api.diffex.ai/api/latest-version`                                                                              | Diffex Cloud public Worker; anonymous; fixed canonical package identity; no redirects                                   |
 | Diffex account login and product APIs | `https://api.diffex.ai`, existing Render/WorkOS routes                                                                  | Separate account credentials |
-| Built-in catalog refresh              | `https://pi.dev/api/models/providers/<provider>`                                                                        | Explicitly retained external catalogs for configured providers                                                          |
-| OpenAI Codex                          | `https://auth.openai.com`, `https://chatgpt.com/backend-api`; client `app_EMoamEEZ73f0CkXaXp7hrann`                     | Explicit owner retention of OAuth and provider attribution                                                              |
-| xAI subscription                      | `https://auth.x.ai/oauth2/device/code`, `https://auth.x.ai/oauth2/token`; client `b1a00492-073a-47ea-816f-4c329264a828` | Explicit owner retention of OAuth and provider attribution                                                              |
+| Built-in catalog refresh              | `https://api.diffex.ai/api/models/providers/{providerId}` | Diffex-owned catalogs; cache provenance and compatibility follow the catalog contract |
+| ChatGPT (`openai-codex`)               | `https://auth.openai.com`, `https://api.openai.com/v1` | Diffex account registration; public account model catalog and Responses API; inherited registrations require sign-in again |
+| xAI subscription                      | `https://auth.x.ai/oauth2/device/code`, `https://auth.x.ai/oauth2/token`; client `b1a00492-073a-47ea-816f-4c329264a828` | Existing subscription OAuth with Diffex attribution |
 | Other model providers                 | Selected built-in provider endpoints or explicitly configured custom endpoints                                          | Provider-specific credentials and model traffic                                                                         |
-| Optional attribution                  | OpenRouter, NVIDIA NIM, Cloudflare                                                                                      | Existing optional provider headers; default off; separate from removed install reporting                                |
-| OpenCode attribution                  | Selected OpenCode endpoint                                                                                              | Existing client/session headers retained independently of optional attribution                                          |
+| Optional attribution                  | OpenRouter, NVIDIA NIM, Cloudflare | Diffex application headers; default off; separate from removed install reporting |
+| OpenCode attribution                  | Selected OpenCode endpoint | Diffex client identity and session header, independent of optional attribution |
 
 Radius discovery, authentication, and inference are no longer supported or allowed egress.
 Custom gateways remain explicit user configuration.
@@ -61,7 +66,9 @@ The static provider IDs in that historical manifest describe the candidate's cat
 Dynamic `radius` is no longer supported by the source adapters.
 The installed artifact manifest lists all 40 provider IDs and display names; listing a provider does not claim live authentication or inference acceptance.
 
-Configured built-in providers retain the external overlay and its four-hour refresh interval.
+Configured built-in providers use the Diffex-owned overlay and its four-hour refresh interval.
+Only caches matching the exact catalog URL and CLI version can restore models or validators; former-host caches trigger an unconditional refresh when online.
+ChatGPT uses its signed-in account's public model catalog and an account-specific cache instead.
 Newer remote models override same-ID built-ins; cached bodies support ETag `304` responses.
 Older or undated overlays do not override the frozen built-in generation timestamp.
 Unavailable `404`/`501` overlays and transient errors preserve the documented built-in/cache fallback.
@@ -108,7 +115,8 @@ All eleven local tarballs use version `0.2.0` and are fixture candidates, not pu
 Their SHA-256 values, the standalone executable/archive hashes, provider inventory, exact commands, exit codes, and smoke results are retained in [candidate-artifacts.json](candidate-artifacts.json).
 
 The [artifact identity review](candidate-identity-review.json) binds every match to an unpacked file hash, byte offset and context, or decoded source-map line.
-It records 49 raw approved-integration/legal matches and 28 approved matches from decoded source maps.
+It records 49 raw approved-integration/legal matches and 28 approved matches from decoded source maps under the policy at that revision.
+Those historical approvals do not authorize the former catalogs, registrations, attribution headers, or Radius service in current source.
 Five additional lexical hits are identified separately: an XML processing-instruction error, three syntax-highlighting mathematical constants, and Jiti's bundled detection of an external Pi agent from PATH.
 The detector neither names Diffex as Pi nor uses a Pi package, service, credential, or organization; it is third-party interoperability vocabulary rather than an inherited Diffex identity.
 These contexts do not expand the runtime identity allowlist or authorize any new egress.

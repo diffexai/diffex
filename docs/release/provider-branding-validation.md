@@ -1,5 +1,10 @@
 # Provider branding validation
 
+This record describes the provider presentation and attribution checks performed before the ChatGPT authentication migration.
+Its OpenAI Codex registration, endpoint, device-flow, and transport descriptions are historical.
+Current ChatGPT setup uses Diffex registration and the public model and Responses APIs; see [provider setup](../../packages/coding-agent/docs/providers.md#chatgpt).
+The historical mock results below do not establish acceptance of the current ChatGPT flow.
+
 Diffex controls the local callback presentation and default application attribution.
 Registered OAuth client IDs, provider consent pages, authentication protocols, stored credentials, inference endpoints, and payloads remain unchanged.
 The separate Diffex account feature is excluded.
