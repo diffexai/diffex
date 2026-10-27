@@ -226,7 +226,7 @@ describe("removed Radius integration", () => {
 		expect(fetch).not.toHaveBeenCalled();
 	});
 
-	it.each(["api_key", "oauth", "cli", "default"])(
+	it.each(["api_key", "oauth", "cli", "cli-provider", "default", "resume", "auth", "auth-key", "auth-token"])(
 		"explains legacy %s configuration through the source CLI",
 		(kind) => {
 			const repo = fileURLToPath(new URL("../../..", import.meta.url));
@@ -240,6 +240,38 @@ describe("removed Radius integration", () => {
 			const authPath = join(agentDir, "auth.json");
 			const auth = JSON.stringify({ radius: { type: "api_key", key: "unused-key" } });
 			writeFileSync(authPath, auth);
+			const sessionPath = join(tempDir, "old-session.jsonl");
+			if (kind === "resume") {
+				writeFileSync(
+					sessionPath,
+					[
+						{
+							type: "session",
+							version: 3,
+							id: "old-session",
+							timestamp: new Date(0).toISOString(),
+							cwd: tempDir,
+						},
+						{
+							type: "model_change",
+							id: "model",
+							parentId: null,
+							timestamp: new Date(0).toISOString(),
+							provider: "radius",
+							modelId: "auto",
+						},
+						{
+							type: "message",
+							id: "message",
+							parentId: "model",
+							timestamp: new Date(0).toISOString(),
+							message: { role: "user", content: "Previous prompt", timestamp: 0 },
+						},
+					]
+						.map((entry) => JSON.stringify(entry))
+						.join("\n"),
+				);
+			}
 			if (kind === "api_key" || kind === "oauth") {
 				writeFileSync(
 					join(agentDir, "models.json"),
@@ -262,17 +294,28 @@ describe("removed Radius integration", () => {
 					"--import",
 					join(repo, "node_modules/tsx/dist/loader.mjs"),
 					join(repo, "packages/coding-agent/src/cli.ts"),
-					"--offline",
-					"--no-extensions",
-					"--no-skills",
-					"--no-context-files",
-					"--no-prompt-templates",
-					"--no-session",
-					...(kind === "cli"
-						? ["--model", "radius/auto", "-p", "Do not send"]
-						: kind === "default"
-							? ["-p", "Do not send"]
-							: ["--list-models"]),
+					...(kind.startsWith("auth")
+						? [
+								"auth",
+								kind === "auth" ? "check" : kind === "auth-key" ? "print-api-key" : "print-bearer-token",
+								"--provider",
+								"radius",
+							]
+						: [
+								"--offline",
+								"--no-extensions",
+								"--no-skills",
+								"--no-context-files",
+								"--no-prompt-templates",
+								...(kind === "resume" ? ["--session", sessionPath] : ["--no-session"]),
+								...(kind === "cli"
+									? ["--model", "radius/auto", "-p", "Do not send"]
+									: kind === "cli-provider"
+										? ["--provider", "radius", "-p", "Do not send"]
+										: kind === "default" || kind === "resume"
+											? ["-p", "Do not send"]
+											: ["--list-models"]),
+							]),
 				],
 				{
 					cwd: tempDir,
@@ -290,7 +333,7 @@ describe("removed Radius integration", () => {
 				},
 			);
 			expect(result.error).toBeUndefined();
-			expect(result.status).toBe(kind === "cli" || kind === "default" ? 1 : 0);
+			expect(result.status).toBe(kind === "api_key" || kind === "oauth" ? 0 : kind === "auth" ? 2 : 1);
 			expect(result.stderr).toContain("Radius support has been removed");
 			expect(result.stdout).not.toMatch(/^radius\s+auto/m);
 			expect(readFileSync(authPath, "utf8")).toBe(auth);

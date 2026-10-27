@@ -215,7 +215,8 @@ async function runAuthCommand(args: string[]): Promise<boolean> {
 					result = { status: "not_ready", provider: result.provider, reason: "credential_not_available" };
 				}
 			}
-		} catch {
+		} catch (error) {
+			if (error instanceof AuthCommandError) throw error;
 			result = {
 				status: "invalid",
 				provider: requestedAuth.provider ?? requestedAuth.model!,
@@ -274,7 +275,7 @@ function buildSessionOptions(
 	// Model from CLI
 	// - supports --provider <name> --model <pattern>
 	// - supports --model <provider>/<pattern>
-	if (parsed.model) {
+	if (parsed.model || parsed.provider) {
 		const resolved = resolveCliModel({
 			cliProvider: parsed.provider,
 			cliModel: parsed.model,

@@ -26,6 +26,8 @@ SOURCE_SUFFIXES = {'.ts', '.tsx', '.mts', '.cts', '.c', '.h', '.cc', '.cpp', '.r
 MAP_DIRECTIVE = re.compile(rb'(?://[#@]|/\*[#@])\s*sourceMappingURL\s*=')
 MAP_CONTENT = re.compile(rb'["\']sourcesContent["\']\s*:')
 TS_CONTENT = re.compile(rb'(?m)^\s*(?:export\s+)?(?:interface\s+\w+\s*(?:extends[^\n]+)?\{|type\s+\w+\s*=)')
+REMOVED_PROVIDER_PATH = re.compile(r'(?:^|/)(?:providers/radius(?:-config)?|auth/oauth/radius|core/radius)\.(?:js|d\.ts)$', re.I)
+REMOVED_PROVIDER_RUNTIME = re.compile(rb'radius\.(?:pi\.dev|earendil\.com)|\bRADIUS_API_KEY\b|\bpi-gateway\b', re.I)
 
 
 class PayloadError(ValueError):
@@ -42,6 +44,8 @@ def check_path(name, directory=False, default_agents=False):
         fail(name, 'unsafe archive path')
     if any(part in {'.git', '.env', 'src', 'examples', '__MACOSX'} or part.startswith(('._', '.env.')) for part in path.parts):
         fail(name, 'prohibited source or private path')
+    if REMOVED_PROVIDER_PATH.search(name):
+        fail(name, 'removed Radius integration')
     if any(part.lower() == 'agents.md' for part in path.parts) and not default_agents:
         fail(name, 'prohibited repository instructions')
     if not directory and path.name.upper() == 'NOTICE':
@@ -81,6 +85,8 @@ def scan_bytes(data, path, budget, depth=0, default_agents=False):
         fail(path, 'prohibited repository instructions: default AGENTS.md differs from AGENTS_release.md')
     if MAP_DIRECTIVE.search(data) or MAP_CONTENT.search(data):
         fail(path, 'embedded source map')
+    if PurePosixPath(path).suffix in {'.js', '.mjs', '.cjs', '.ts', '.node'} and REMOVED_PROVIDER_RUNTIME.search(data):
+        fail(path, 'removed Radius integration')
     if not declaration and PurePosixPath(path).suffix not in {'.md', '.html'} and TS_CONTENT.search(data):
         fail(path, 'TypeScript implementation content')
     stream = io.BytesIO(data)

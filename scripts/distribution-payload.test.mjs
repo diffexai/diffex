@@ -80,6 +80,28 @@ test("accepts a tarball with readable JavaScript, declarations, and complete not
 	assert.equal(result.status, 0, result.stderr);
 });
 
+test("accepts the Radius removal explanation without restoring the integration", () => {
+	const result = inspect({ "dist/removed.js": 'export const message = "Radius support has been removed.";' });
+	assert.equal(result.status, 0, result.stderr);
+});
+
+for (const [path, content] of [
+	["dist/node_modules/@diffexai/diffex-ai/dist/providers/radius.js", "export const provider = {};"],
+	["dist/node_modules/@diffexai/diffex-ai/dist/providers/radius-config.d.ts", "export declare const gateway: string;"],
+	["dist/node_modules/@diffexai/diffex-ai/dist/auth/oauth/radius.js", "export const login = () => {};"],
+	["dist/core/radius.js", "export const provider = {};"],
+	["dist/renamed.js", 'export const gateway = "https://radius.pi.dev";'],
+	["dist/renamed.mjs", 'export const issuer = "https://radius.earendil.com";'],
+	["dist/renamed.cjs", 'exports.key = process.env.RADIUS_API_KEY;'],
+	["dist/bundle.node", Buffer.from('binary\0client_id=pi-gateway\0')],
+]) {
+	test(`rejects removed Radius integration in ${path}`, () => {
+		const result = inspect({ [path]: content });
+		assert.notEqual(result.status, 0);
+		assert.match(result.stderr, /removed Radius integration/);
+	});
+}
+
 for (const notice of [
 	"LICENSE",
 	"THIRD-PARTY-NOTICES.txt",

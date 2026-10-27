@@ -1,4 +1,5 @@
 import type { Api, CredentialInfo, Model } from "@diffexai/diffex-ai";
+import { getRemovedProviderMessage } from "@diffexai/diffex-ai/providers/removed";
 import { resolveCliModel } from "../core/model-resolver.ts";
 import type { ModelRuntime } from "../core/model-runtime.ts";
 import type { Args } from "./args.ts";
@@ -22,6 +23,8 @@ export async function resolveCredentialForPrint(
 	signal?: AbortSignal,
 ): Promise<string> {
 	const { provider: cliProvider, model: cliModel } = validateAuthCommandArgs(args, kind);
+	const removed = getRemovedProviderMessage(cliProvider ?? cliModel?.split("/")[0] ?? "");
+	if (removed) throw new AuthCommandError(removed);
 	const credentialTypes = new Map<string, CredentialInfo["type"]>(
 		(await modelRuntime.listCredentials({ signal })).map((credential) => [credential.providerId, credential.type]),
 	);
