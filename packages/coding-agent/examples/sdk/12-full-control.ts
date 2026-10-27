@@ -4,6 +4,8 @@
  * Replace everything - no discovery, explicit configuration.
  */
 
+import { homedir } from "node:os";
+import { join } from "node:path";
 import {
 	createAgentSession,
 	createExtensionRuntime,
@@ -14,9 +16,10 @@ import {
 } from "@diffexai/diffex";
 import { getModel } from "@diffexai/diffex-ai/compat";
 
+const agentDir = join(homedir(), ".diffex", "examples", "full-control");
 const modelRuntime = await ModelRuntime.create({
-	authPath: "/tmp/my-agent/auth.json",
-	modelsPath: "/tmp/my-agent/models.json",
+	authPath: join(agentDir, "auth.json"),
+	modelsPath: join(agentDir, "models.json"),
 });
 if (process.env.MY_ANTHROPIC_KEY) {
 	await modelRuntime.setRuntimeApiKey("anthropic", process.env.MY_ANTHROPIC_KEY);
@@ -51,7 +54,7 @@ Available: read, bash. Be concise.`,
 
 const { session } = await createAgentSession({
 	cwd,
-	agentDir: "/tmp/my-agent",
+	agentDir,
 	model,
 	thinkingLevel: "off",
 	modelRuntime,

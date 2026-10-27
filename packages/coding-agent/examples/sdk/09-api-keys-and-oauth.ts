@@ -4,6 +4,8 @@
  * Configure provider auth through ModelRuntime.
  */
 
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { createAgentSession, ModelRuntime, SessionManager } from "@diffexai/diffex";
 
 const modelRuntime = await ModelRuntime.create();
@@ -14,9 +16,10 @@ const { session: defaultAuthSession } = await createAgentSession({
 console.log("Session with default model runtime");
 await defaultAuthSession.dispose();
 
+const customDirectory = join(homedir(), ".diffex", "examples", "custom-auth");
 const customRuntime = await ModelRuntime.create({
-	authPath: "/tmp/my-app/auth.json",
-	modelsPath: "/tmp/my-app/models.json",
+	authPath: join(customDirectory, "auth.json"),
+	modelsPath: join(customDirectory, "models.json"),
 });
 const { session: customAuthSession } = await createAgentSession({
 	sessionManager: SessionManager.inMemory(),
