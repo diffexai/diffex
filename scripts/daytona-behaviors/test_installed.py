@@ -44,7 +44,7 @@ class InstalledTests(unittest.TestCase):
             self.assertIn("checksum", runner.results[0]["error"])
 
     def test_provider_and_configuration_failures_are_distinct(self):
-        for status, category in ((401, "configuration"), (429, "provider"), (503, "provider")):
+        for status, category in ((400, "configuration"), (401, "configuration"), (404, "configuration"), (429, "provider"), (503, "provider")):
             with self.subTest(status=status), tempfile.TemporaryDirectory() as temporary:
                 runner = self.runner(temporary)
                 def fail(evidence):
@@ -52,6 +52,15 @@ class InstalledTests(unittest.TestCase):
                     raise AssertionError("No response")
                 self.assertFalse(runner.scenario("live", fail))
                 self.assertEqual(runner.results[0]["category"], category)
+
+    def test_transport_unavailability_is_provider_failure(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            runner = self.runner(temporary)
+            def fail(evidence):
+                (evidence / "events.jsonl").write_text(json.dumps({"type": "provider-error", "error": "TypeError"}) + "\n")
+                raise AssertionError("No response")
+            self.assertFalse(runner.scenario("live", fail))
+            self.assertEqual(runner.results[0]["category"], "provider")
 
     def test_normalization_preserves_layout_and_behavior_text(self):
         env = {"HOME": "/tmp/home", "DIFFEX_PROJECT": "/tmp/project"}

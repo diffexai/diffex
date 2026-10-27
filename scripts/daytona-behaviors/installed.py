@@ -169,10 +169,11 @@ class Runner:
                     message = message.replace(secret, "[REDACTED]")
             item["error"] = message
             # Availability/configuration is distinct from an assertion about product behavior.
-            statuses = [event["status"] for file in evidence.glob("**/events.jsonl") for event in read_events(file) if event["type"] == "response"]
-            if any(s in (401, 403) for s in statuses):
+            events = [event for file in evidence.glob("**/events.jsonl") for event in read_events(file)]
+            statuses = [event["status"] for event in events if event["type"] == "response"]
+            if any(s in (400, 401, 403, 404) for s in statuses):
                 item["category"] = "configuration"
-            elif any(s == 429 or s >= 500 for s in statuses):
+            elif any(s == 429 or s >= 500 for s in statuses) or any(e["type"] == "provider-error" for e in events):
                 item["category"] = "provider"
         finally:
             item["duration"] = round(time.monotonic() - started, 3)
@@ -241,9 +242,13 @@ class Runner:
             resolved = str(Path(executable).resolve())
             write_json(evidence / "resolution.json", {"requested": executable, "resolved": resolved})
             args = self.args_for(fixture, "behavior/fixture")
-            for command, expected in [(["--help"], "Usage"), (["--version"], ""), (args + ["--list-models"], "fixture")]:
-                output = self.process(executable, command, env, root / "project", evidence)
+            for name, command, expected in [("help", ["--help"], "Usage"), ("version", ["--version"], ""), ("models", args + ["--list-models"], "fixture")]:
+                command_evidence = evidence / name
+                command_evidence.mkdir()
+                output = self.process(executable, command, env, root / "project", command_evidence)
                 assert expected in output and output.strip(), "Installation command output missing"
+                if name == "version":
+                    assert re.fullmatch(r"\d+\.\d+\.\d+(?:[-+]\S+)?", output.strip()), "Malformed version output"
         run_case("installation", installation)
 
         def printed(env, root, fixture, evidence):
@@ -276,6 +281,7 @@ class Runner:
                 assert (project / "bash-result.txt").read_text() == "behavior-edited\n"
                 events = read_events(record)
                 assert {"read", "write", "edit", "bash"} <= {e.get("toolName") for e in events if e["type"] == "tool_result"}
+                assert any(e["type"] == "tool_result" and e.get("toolName") == "read" and "behavior-input-marker" in json.dumps(e.get("content")) for e in events), "Read did not return fixture contents"
                 terminal.send("BEHAVIOR_CANCEL")
                 terminal.wait("behavior-cancel-started")
                 terminal.command("send-keys", "Escape")
@@ -295,6 +301,8 @@ class Runner:
             assert len(sessions) == 1, "Expected one persisted conversation"
             output = self.process(executable, args + ["--session", str(sessions[0]), "-p", "BEHAVIOR_RESUME"], env, project, evidence)
             assert "behavior-resumed-ok" in output
+            resumed = [e for e in read_events(record) if e["type"] == "context" and e.get("mode") == "BEHAVIOR_RESUME"]
+            assert resumed and any(m["role"] == "toolResult" and m.get("toolName") == "read" and "behavior-input-marker" in json.dumps(m.get("content")) for m in resumed[-1]["messages"]), "Resumed conversation lost read contents"
             assert not any(e["type"] == "blocked-network" for e in read_events(record)), "Unexpected external network"
         run_case("terminal-tools-cancel-resume", tools)
 
@@ -321,6 +329,7 @@ class Runner:
                 terminal = Terminal(executable, args, env, project, evidence, self.deadline)
                 try:
                     terminal.wait("Ask Diffex")
+                    event_mark = len(read_events(root / "events.jsonl"))
                     terminal.send("Use read to read input.txt, then use write to copy its exact contents into output.txt. Do not use bash. Then reply with exactly: completed " + marker)
                     terminal.wait("completed " + marker, seconds=120)
                     terminal.settled(root / "events.jsonl", 1, seconds=20)
@@ -328,7 +337,8 @@ class Runner:
                     events = read_events(root / "events.jsonl")
                     assert {"read", "write"} <= {e.get("toolName") for e in events if e["type"] == "tool_result" and not e.get("isError")}
                     assert sum(e["type"] == "request" for e in events) <= 6
-                    assert any(e["type"] == "streamed-text" and e.get("delta") for e in events), "No streamed text observed"
+                    reply = "".join(e["delta"] for e in events[event_mark:] if e["type"] == "streamed-text")
+                    assert "completed " + marker in reply, "Interactive streamed confirmation missing"
                     terminal.exit()
                 finally:
                     terminal.close()
@@ -338,7 +348,12 @@ class Runner:
     def run(self):
         installations = []
         if self.args.executable:
-            installations.append(("local", str(self.args.executable.absolute())))
+            executable = self.args.executable.absolute()
+            self.hashes["installedExecutableSha256"] = hashlib.sha256(executable.resolve().read_bytes()).hexdigest()
+            inventory = executable.parent.parent / "@diffexai/diffex/distribution-files.json"
+            if inventory.exists():
+                self.hashes["installedInventorySha256"] = hashlib.sha256(inventory.read_bytes()).hexdigest()
+            installations.append(("local", str(executable)))
         else:
             def manifest_check(evidence):
                 manifest = json.loads((self.args.artifacts / "manifest.json").read_text())

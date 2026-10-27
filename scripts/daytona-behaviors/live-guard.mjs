@@ -20,11 +20,16 @@ export default function (diffex) {
 		if (url.pathname.endsWith("/responses")) body.max_output_tokens = 512;
 		else body.max_completion_tokens = 512;
 		record({ type: "request", request: requests, path: url.pathname, maxOutputTokens: 512 });
-		const response = await originalFetch(new Request(request, {
-			body: JSON.stringify(body), signal: AbortSignal.any([request.signal, AbortSignal.timeout(180_000 - (Date.now() - started))]),
-		}));
-		record({ type: "response", status: response.status });
-		return response;
+		try {
+			const response = await originalFetch(new Request(request, {
+				body: JSON.stringify(body), signal: AbortSignal.any([request.signal, AbortSignal.timeout(180_000 - (Date.now() - started))]),
+			}));
+			record({ type: "response", status: response.status });
+			return response;
+		} catch (error) {
+			record({ type: "provider-error", error: error instanceof Error ? error.name : "UnknownError" });
+			throw error;
+		}
 	};
 	diffex.on("tool_result", (event) => record({ type: "tool_result", toolName: event.toolName, content: event.content, isError: event.isError }));
 	diffex.on("message_update", (event) => {
