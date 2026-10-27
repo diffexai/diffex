@@ -1,0 +1,3 @@
+# Standalone orchestration only; no Harbor dependency.
+# ttl_minutes and strict_context APIs inspected in this exact SDK version.
+daytona==0.226.1

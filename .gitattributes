@@ -9,6 +9,9 @@
 # Shell scripts should keep LF
 *.sh text eol=lf
 
+# Terminal snapshots intentionally retain empty rows to preserve screen height.
+scripts/daytona-behaviors/baselines/*.txt whitespace=-blank-at-eof
+
 # Common binary assets
 *.png binary
 *.jpg binary
