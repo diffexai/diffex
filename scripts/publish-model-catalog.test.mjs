@@ -105,7 +105,7 @@ test("rejects malformed fields, inconsistent shards, invalid timestamps and smal
 	writeFileSync(join(root, "generation.json"), "{}");
 	assert.throws(() => validateBundle(root), /timestamp/);
 	catalogFixture(root);
-	for (const provider of Object.keys(models)) {
+	for (const provider of ["anthropic", "openai", "openrouter"]) {
 		models[provider] = { "model-1": models[provider]["model-1"] };
 		writeFileSync(join(root, "providers", `${provider}.json`), JSON.stringify(models[provider]));
 	}

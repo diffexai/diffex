@@ -1,4 +1,3 @@
-import { appendFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
 export function publicationAllowed(event, manual, date = new Date()) {
@@ -14,6 +13,5 @@ export function publicationAllowed(event, manual, date = new Date()) {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
 	const allowed = publicationAllowed(process.env.EVENT_NAME, process.env.MANUAL_PUBLISH === "true");
-	appendFileSync(process.env.GITHUB_OUTPUT, `allowed=${allowed}\n`);
-	console.log(`Catalog publication window: ${allowed}`);
+	console.log(`allowed=${allowed}`);
 }

@@ -125,7 +125,7 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           MANUAL_PUBLISH: ${{ inputs.publish || false }}
-        run: node scripts/model-publication-window.mjs
+        run: node scripts/model-publication-window.mjs >> "$GITHUB_OUTPUT"
 
       - name: Publish model catalog to R2
         if: steps.publication-window.outputs.allowed == 'true'

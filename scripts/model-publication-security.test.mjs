@@ -1,10 +1,30 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import vm from "node:vm";
 import { parse } from "yaml";
 
 const workflow = parse(readFileSync(new URL("../.github/workflows/publish-model-catalog.yml", import.meta.url), "utf8"));
+
+test("publication-window CLI emits only its decision and does not write environment-selected paths", (t) => {
+	const root = mkdtempSync(join(tmpdir(), "diffex-window-security-"));
+	t.after(() => rmSync(root, { recursive: true, force: true }));
+	const target = join(root, "unrelated-file");
+	writeFileSync(target, "unchanged\n");
+	for (const manual of ["true", "false", "true\nallowed=true"]) {
+		const result = spawnSync(process.execPath, ["scripts/model-publication-window.mjs"], {
+			cwd: new URL("../", import.meta.url),
+			encoding: "utf8",
+			env: { ...process.env, EVENT_NAME: "workflow_dispatch", MANUAL_PUBLISH: manual, GITHUB_OUTPUT: target },
+		});
+		assert.equal(result.status, 0, result.stderr);
+		assert.equal(readFileSync(target, "utf8"), "unchanged\n");
+		assert.equal(result.stdout, `allowed=${manual === "true"}\n`);
+	}
+});
 
 function allowed(job, overrides = {}, inputs = {}) {
 	const github = {
