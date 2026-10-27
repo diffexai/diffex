@@ -1,6 +1,7 @@
 import type { ProviderEnv } from "../types.ts";
 import { operationSignal, raceWithAbortSignal } from "../utils/abort.ts";
 import { formatThrownValue } from "../utils/diagnostics.ts";
+import { OAuthSessionExpiredError } from "./errors.ts";
 import type {
 	ApiKeyAuth,
 	ApiKeyCredential,
@@ -135,15 +136,18 @@ async function resolveStoredOAuth(
 	const minimumValidityMs = Math.max(DEFAULT_OAUTH_MINIMUM_VALIDITY_MS, minOAuthValidityMs ?? 0);
 	const expiresSoon = (credential: OAuthCredential) => Date.now() + minimumValidityMs >= credential.expires;
 	let credential = stored;
+	if (credential.reauthorizationRequired) throw new ModelsError("oauth", `Sign in again to ${providerId} with /login`);
 
 	if (expiresSoon(credential)) {
 		// Optimistic check said expired; the authoritative check runs under the lock.
 		let post: Credential | undefined;
+		let expiredSession: OAuthSessionExpiredError | undefined;
 		try {
 			post = await credentials.modify(
 				providerId,
 				async (current) => {
 					if (current?.type !== "oauth") return undefined; // logged out meanwhile
+					if (current.reauthorizationRequired) return undefined;
 					if (!expiresSoon(current)) return undefined; // another process/request refreshed
 					try {
 						const refreshSignal = AbortSignal.any([
@@ -152,6 +156,17 @@ async function resolveStoredOAuth(
 						]);
 						return await oauth.refresh(current, refreshSignal);
 					} catch (error) {
+						if (error instanceof OAuthSessionExpiredError) {
+							expiredSession = error;
+							return {
+								...current,
+								access: "",
+								refresh: "",
+								idToken: undefined,
+								expires: 0,
+								reauthorizationRequired: true,
+							};
+						}
 						throw new ModelsError("oauth", `OAuth refresh failed for ${providerId}`, { cause: error });
 					}
 				},
@@ -162,6 +177,9 @@ async function resolveStoredOAuth(
 			throw new ModelsError("auth", `Credential store modify failed for ${providerId}`, { cause: error });
 		}
 		if (post?.type !== "oauth") return undefined; // logged out meanwhile
+		if (expiredSession || post.reauthorizationRequired) {
+			throw new ModelsError("oauth", `Sign in again to ${providerId} with /login`, { cause: expiredSession });
+		}
 		credential = post;
 		// The normal five-minute window triggers a refresh but does not impose a
 		// provider contract. Explicit callers (such as bearer-token export) do

@@ -38,16 +38,16 @@ beforeEach(() => {
 			if (url.endsWith("/oauth/revoke")) return new Response(null, { status: 200 });
 			if (url !== `${issuer}/api/accounts/oauth/token`) throw new Error(`Unexpected request: ${url}`);
 			const idToken = await new SignJWT({
+				iss: issuer,
+				aud: clientId,
+				sub: "account-subject",
+				iat: Math.floor(Date.now() / 1000),
+				exp: Math.floor(Date.now() / 1000) + 3600,
 				nonce: authorization.searchParams.get("nonce"),
 				email: "person@example.com",
 				...claims,
 			})
 				.setProtectedHeader({ alg: "RS256", kid: "test-key" })
-				.setIssuer(issuer)
-				.setAudience(clientId)
-				.setSubject("account-subject")
-				.setIssuedAt()
-				.setExpirationTime("1h")
 				.sign(key.privateKey);
 			return Response.json({
 				access_token: "opaque-access",
@@ -133,10 +133,14 @@ describe.sequential("ChatGPT registration and session lifecycle", () => {
 
 	it.each([
 		["wrong nonce", { nonce: "wrong" }, {}],
-		["wrong audience", {}, { id_token: "unsigned.token.value" }],
+		["wrong audience", { aud: "oaiapp_other" }, {}],
+		["wrong issuer", { iss: "https://other.example" }, {}],
+		["expired ID token", { exp: 1 }, {}],
+		["missing subject", { sub: "" }, {}],
+		["invalid signature", {}, { id_token: "unsigned.token.value" }],
 		["missing ID token", {}, { id_token: null }],
-		["missing permission", {}, { scope: "openid profile email" }],
 		["invalid expiry", {}, { expires_in: -1 }],
+		["overflowing expiry", {}, { expires_in: 1e308 }],
 		["missing refresh", {}, { refresh_token: "" }],
 	] as const)("rejects %s without saving an account identity", async (_name, nextClaims, overrides) => {
 		claims = nextClaims;
@@ -145,6 +149,72 @@ describe.sequential("ChatGPT registration and session lifecycle", () => {
 		await nativeFetch(callback());
 		await expect(attempt.login).rejects.toThrow();
 		expect(new ChatGPTRegistrationStore().list()[0].subject).toBeUndefined();
+	});
+
+	it("retains a validated sign-in without plan permission and supports explicit consent later", async () => {
+		tokenOverrides = { scope: "openid profile email offline_access" };
+		const credential = await signIn();
+		expect(credential.subject).toBe("account-subject");
+		await expect(openaiCodexOAuth.toAuth(credential)).rejects.toThrow("plan usage is not authorized");
+		const attempt = await startLogin();
+		expect(authorization.searchParams.get("client_id")).toBe(clientId);
+		expect(authorization.searchParams.get("prompt")).toBe("consent");
+		tokenOverrides = {};
+		await nativeFetch(callback());
+		await expect(openaiCodexOAuth.toAuth(await attempt.login)).resolves.toMatchObject({ apiKey: "opaque-access" });
+	});
+
+	it("rejects a different verified subject during reauthorization", async () => {
+		await signIn();
+		claims = { sub: "other-account" };
+		const attempt = await startLogin();
+		await nativeFetch(callback());
+		await expect(attempt.login).rejects.toThrow("identity changed");
+		expect(new ChatGPTRegistrationStore().list()[0].subject).toBe("account-subject");
+	});
+
+	it.each(["invalid_grant", "refresh_token_reused"])(
+		"clears unusable tokens after %s while retaining the registration",
+		async (code) => {
+			const credential = await signIn();
+			const credentials = new InMemoryCredentialStore();
+			await credentials.modify("openai-codex", async () => ({ ...credential, expires: 0 }));
+			const models = createModels({ credentials });
+			models.setProvider(
+				createProvider({ id: "openai-codex", auth: { oauth: openaiCodexOAuth }, models: [], api: {} }),
+			);
+			const fetch = vi.fn(async () => Response.json({ error: code }, { status: 400 }));
+			vi.stubGlobal("fetch", fetch);
+			await expect(models.getAuth("openai-codex")).rejects.toThrow("Run /login");
+			expect(await credentials.read("openai-codex")).toMatchObject({
+				access: "",
+				refresh: "",
+				reauthorizationRequired: true,
+				clientId,
+			});
+			const cleared = await credentials.read("openai-codex");
+			expect(cleared?.type === "oauth" ? cleared.idToken : undefined).toBeUndefined();
+			await expect(models.getAuth("openai-codex")).rejects.toThrow("/login");
+			expect(fetch).toHaveBeenCalledOnce();
+			expect(new ChatGPTRegistrationStore().list()[0]).toMatchObject({ clientId, subject: credential.subject });
+			expect(new ChatGPTRegistrationStore().list()[0].idToken).toBeUndefined();
+		},
+	);
+
+	it("preserves usable credentials after a temporary refresh failure", async () => {
+		const credential = { ...(await signIn()), expires: 0 };
+		const credentials = new InMemoryCredentialStore();
+		await credentials.modify("openai-codex", async () => credential);
+		const models = createModels({ credentials });
+		models.setProvider(
+			createProvider({ id: "openai-codex", auth: { oauth: openaiCodexOAuth }, models: [], api: {} }),
+		);
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => new Response(null, { status: 503 })),
+		);
+		await expect(models.getAuth("openai-codex")).rejects.toThrow("Try again later");
+		expect(await credentials.read("openai-codex")).toEqual(credential);
 	});
 
 	it("rejects missing issued IDs and authorization denial before exchange", async () => {
@@ -209,7 +279,7 @@ describe.sequential("ChatGPT registration and session lifecycle", () => {
 		await models.logout("openai-codex");
 		expect(await credentials.read("openai-codex")).toBeUndefined();
 		expect(new ChatGPTRegistrationStore().list()).toEqual([
-			{ clientId, subject: credential.subject, email: credential.email },
+			{ clientId, subject: credential.subject, email: credential.email, scopes: credential.scopes },
 		]);
 		const request = requests.find((entry) => entry.url.endsWith("/oauth/revoke"));
 		expect(Object.fromEntries(new URLSearchParams(String(request?.init?.body)))).toEqual({

@@ -36,7 +36,7 @@ const neverAbortedSignal = new AbortController().signal;
 const context: Context = { messages: [{ role: "user", content: "hi", timestamp: Date.now() }] };
 
 describe("builtin providers", () => {
-	it("builtinModels registers every builtin provider with models", async () => {
+	it("builtinModels registers static and account-specific builtin catalogs", async () => {
 		const models = builtinModels();
 		const providers = models.getProviders();
 		expect(providers.length).toBe(builtinProviders().length);
@@ -50,9 +50,11 @@ describe("builtin providers", () => {
 
 		for (const provider of providers) {
 			const list = models.getModels(provider.id);
-			expect(list.length).toBeGreaterThan(0);
+			expect(list.length > 0 || provider.refreshModels !== undefined).toBe(true);
 			expect(list.every((m) => m.provider === provider.id)).toBe(true);
 		}
+		expect(models.getModels("openai-codex")).toEqual([]);
+		expect(models.getProvider("openai-codex")?.refreshModels).toBeTypeOf("function");
 	});
 
 	it("does not expose Radius or resolve its former environment key", async () => {

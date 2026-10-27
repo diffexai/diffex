@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { createServer } from "node:http";
 import { setTimeout as sleep } from "node:timers/promises";
 import { createRemoteJWKSet, customFetch, jwtVerify } from "jose";
+import { OAuthSessionExpiredError } from "../errors.ts";
 import type { OAuthAuth, OAuthCredential, ProviderAuthInteraction } from "../types.ts";
 import { type ChatGPTRegistration, ChatGPTRegistrationStore } from "./chatgpt-registration.ts";
 import { oauthErrorHtml, oauthSuccessHtml } from "./oauth-page.ts";
@@ -12,6 +13,14 @@ const TOKEN_URL = `${ISSUER}/api/accounts/oauth/token`;
 const RESOURCE = "https://api.openai.com/v1";
 const SCOPE = "openid profile email offline_access resource.invoke chatgpt.tokens.use.direct";
 const PLAN_SCOPE = "chatgpt.tokens.use.direct";
+const TERMINAL_REFRESH_ERRORS = new Set([
+	"invalid_grant",
+	"invalid_refresh_token",
+	"token_expired",
+	"refresh_token_expired",
+	"refresh_token_invalidated",
+	"refresh_token_reused",
+]);
 
 async function tokenCredentials(
 	response: Response,
@@ -20,24 +29,40 @@ async function tokenCredentials(
 	signal: AbortSignal,
 	options: { nonce?: string; previous?: OAuthCredential; registration?: ChatGPTRegistration },
 ): Promise<OAuthCredential> {
-	if (!response.ok) throw new Error(`ChatGPT token request failed (${response.status}). Sign in again with /login.`);
+	if (!response.ok) {
+		const body: unknown = await response.json().catch(() => undefined);
+		const error = body && typeof body === "object" && "error" in body ? body.error : undefined;
+		const code =
+			typeof error === "string"
+				? error
+				: error && typeof error === "object" && "code" in error
+					? error.code
+					: undefined;
+		if (options.previous && typeof code === "string" && TERMINAL_REFRESH_ERRORS.has(code)) {
+			throw new OAuthSessionExpiredError(`ChatGPT session expired (${code}). Run /login.`);
+		}
+		throw new Error(
+			`ChatGPT token request failed (${response.status}). ${response.status >= 500 ? "Try again later." : "Sign in again with /login."}`,
+		);
+	}
 	const json = (await response.json()) as Record<string, unknown>;
 	if (
 		typeof json.access_token !== "string" ||
 		!json.access_token ||
-		((typeof json.refresh_token !== "string" || !json.refresh_token) && !options.previous?.refresh) ||
+		typeof json.refresh_token !== "string" ||
+		!json.refresh_token ||
 		typeof json.expires_in !== "number" ||
 		!Number.isFinite(json.expires_in) ||
 		json.expires_in <= 0 ||
+		!Number.isSafeInteger(Date.now() + json.expires_in * 1000) ||
 		typeof json.token_type !== "string" ||
 		json.token_type.toLowerCase() !== "bearer"
 	) {
 		throw new Error("Invalid ChatGPT token response");
 	}
 	const scopes = typeof json.scope === "string" ? json.scope.split(/\s+/).filter(Boolean) : options.previous?.scopes;
-	if (!Array.isArray(scopes) || !scopes.includes(PLAN_SCOPE) || !scopes.includes("resource.invoke")) {
-		throw new Error("ChatGPT plan usage was not authorized. Run /login to authorize it.");
-	}
+	if (!Array.isArray(scopes) || !scopes.every((scope) => typeof scope === "string"))
+		throw new Error("Missing ChatGPT granted scopes");
 	let subject = options.previous?.subject;
 	let email = options.previous?.email;
 	let idToken = options.previous?.idToken;
@@ -53,7 +78,11 @@ async function tokenCredentials(
 			clockTolerance: 5,
 		});
 		if (options.nonce && payload.nonce !== options.nonce) throw new Error("ChatGPT ID token nonce mismatch");
-		if (!payload.sub || (payload.azp !== undefined && payload.azp !== clientId))
+		if (
+			!payload.sub ||
+			(payload.azp !== undefined && payload.azp !== clientId) ||
+			(Array.isArray(payload.aud) && payload.aud.length > 1 && payload.azp !== clientId)
+		)
 			throw new Error("Invalid ChatGPT ID token identity");
 		const expectedSubject = options.registration?.subject ?? options.previous?.subject;
 		if (expectedSubject && payload.sub !== expectedSubject) throw new Error("ChatGPT account identity changed");
@@ -66,10 +95,7 @@ async function tokenCredentials(
 	return {
 		type: "oauth",
 		access: json.access_token,
-		refresh:
-			typeof json.refresh_token === "string" && json.refresh_token
-				? json.refresh_token
-				: (options.previous?.refresh ?? ""),
+		refresh: json.refresh_token,
 		expires: Date.now() + json.expires_in * 1000,
 		clientId,
 		extAgentHostId: hostId,
@@ -106,7 +132,7 @@ async function login(interaction: ProviderAuthInteraction): Promise<OAuthCredent
 			options: [
 				...registrations.map((entry) => ({
 					id: entry.clientId,
-					label: `${entry.email ?? entry.subject ?? "Complete registration"} (${entry.clientId})`,
+					label: `${entry.scopes && !entry.scopes.includes(PLAN_SCOPE) ? "Enable ChatGPT plan usage: " : ""}${entry.email ?? entry.subject ?? "Complete registration"} (${entry.clientId})`,
 				})),
 				{ id: "new", label: "Add a ChatGPT account or workspace" },
 			],
@@ -151,6 +177,7 @@ async function login(interaction: ProviderAuthInteraction): Promise<OAuthCredent
 			});
 		});
 		const address = server.address();
+		signal.throwIfAborted();
 		if (!address || typeof address === "string") throw new Error("ChatGPT callback listener unavailable");
 		const redirectUri = `http://127.0.0.1:${address.port}/auth/callback`;
 		const authorize = new URL(`${ISSUER}/api/accounts/authorize`);
@@ -169,6 +196,8 @@ async function login(interaction: ProviderAuthInteraction): Promise<OAuthCredent
 		if (!registration) authorize.searchParams.set("agent_name_hint", "Diffex");
 		if (registration?.idToken) authorize.searchParams.set("id_token_hint", registration.idToken);
 		if (registration?.email) authorize.searchParams.set("login_hint", registration.email);
+		if (registration?.scopes && !registration.scopes.includes(PLAN_SCOPE))
+			authorize.searchParams.set("prompt", "consent");
 		interaction.notify({
 			type: "auth_url",
 			url: authorize.toString(),
@@ -209,7 +238,8 @@ async function login(interaction: ProviderAuthInteraction): Promise<OAuthCredent
 			throw new Error("Incomplete or mismatched ChatGPT registration callback");
 		}
 		// A code may expire before exchange. Keep the issued ID for a fresh authorization attempt.
-		if (!registration) store.save({ clientId });
+		const issuedRegistration = registration ?? store.list().find((entry) => entry.clientId === clientId);
+		if (!issuedRegistration) store.save({ clientId });
 		const response = await fetch(TOKEN_URL, {
 			method: "POST",
 			headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -223,13 +253,24 @@ async function login(interaction: ProviderAuthInteraction): Promise<OAuthCredent
 				resource: RESOURCE,
 			}),
 		});
-		const credential = await tokenCredentials(response, clientId, hostId, signal, { nonce, registration });
+		const credential = await tokenCredentials(response, clientId, hostId, signal, {
+			nonce,
+			registration: issuedRegistration,
+		});
 		store.save({
 			clientId,
 			subject: credential.subject as string,
 			email: credential.email as string | undefined,
 			idToken: credential.idToken as string,
+			scopes: credential.scopes as string[],
 		});
+		if (!(credential.scopes as string[]).includes(PLAN_SCOPE)) {
+			interaction.notify({
+				type: "info",
+				message:
+					"Signed in to ChatGPT. Plan usage is disabled. Run /login and select Enable ChatGPT plan usage, or configure an OpenAI API key.",
+			});
+		}
 		return credential;
 	} finally {
 		if (onAbort) signal.removeEventListener("abort", onAbort);
@@ -258,7 +299,18 @@ export const openaiCodexOAuth: OAuthAuth = {
 				resource: RESOURCE,
 			}),
 		});
-		return tokenCredentials(response, clientId, hostId, signal, { previous: credential });
+		try {
+			return await tokenCredentials(response, clientId, hostId, signal, { previous: credential });
+		} catch (error) {
+			if (error instanceof OAuthSessionExpiredError) {
+				new ChatGPTRegistrationStore().save({
+					clientId,
+					subject: credential.subject as string,
+					email: credential.email as string | undefined,
+				});
+			}
+			throw error;
+		}
 	},
 	async logout(credential, signal) {
 		const { clientId } = requireRegistration(credential);
@@ -266,13 +318,20 @@ export const openaiCodexOAuth: OAuthAuth = {
 		const registration = store.list().find((entry) => entry.clientId === clientId);
 		if (registration) store.save({ ...registration, idToken: undefined });
 		try {
-			const discovery = await fetch(`${ISSUER}/.well-known/openid-configuration`, { signal });
-			if (!discovery.ok) throw new Error("Discovery failed");
-			const metadata = (await discovery.json()) as { issuer?: string; revocation_endpoint?: string };
-			const endpoint = new URL(metadata.revocation_endpoint ?? "");
-			if (metadata.issuer !== ISSUER || endpoint.origin !== ISSUER) throw new Error("Invalid revocation endpoint");
+			let endpoint: URL | undefined;
 			for (let attempt = 0; attempt < 3; attempt++) {
 				try {
+					if (!endpoint) {
+						const discovery = await fetch(`${ISSUER}/.well-known/openid-configuration`, { signal });
+						if (!discovery.ok) {
+							if (discovery.status < 500) break;
+							throw new Error("Discovery temporarily unavailable");
+						}
+						const metadata = (await discovery.json()) as { issuer?: string; revocation_endpoint?: string };
+						const discovered = new URL(metadata.revocation_endpoint ?? "");
+						if (metadata.issuer !== ISSUER || discovered.origin !== ISSUER) break;
+						endpoint = discovered;
+					}
 					const response = await fetch(endpoint, {
 						method: "POST",
 						headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -297,7 +356,13 @@ export const openaiCodexOAuth: OAuthAuth = {
 	},
 	async toAuth(credential) {
 		requireRegistration(credential);
-		if (!Array.isArray(credential.scopes) || !credential.scopes.includes(PLAN_SCOPE)) {
+		if (!credential.access || credential.reauthorizationRequired)
+			throw new Error("ChatGPT session expired. Run /login.");
+		if (
+			!Array.isArray(credential.scopes) ||
+			!credential.scopes.includes(PLAN_SCOPE) ||
+			!credential.scopes.includes("resource.invoke")
+		) {
 			throw new Error("ChatGPT plan usage is not authorized. Run /login.");
 		}
 		return { apiKey: credential.access, baseUrl: RESOURCE };

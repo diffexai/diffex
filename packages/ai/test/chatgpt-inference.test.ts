@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Type } from "typebox";
 import { afterEach, expect, it, vi } from "vitest";
 import { InMemoryCredentialStore } from "../src/auth/credential-store.ts";
@@ -7,7 +10,12 @@ import { InMemoryModelsStore } from "../src/models-store.ts";
 import { openaiCodexProvider } from "../src/providers/openai-codex.ts";
 import type { Context } from "../src/types.ts";
 
-afterEach(() => vi.unstubAllGlobals());
+const directories: string[] = [];
+afterEach(() => {
+	vi.unstubAllGlobals();
+	vi.unstubAllEnvs();
+	for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
+});
 
 const credential: OAuthCredential = {
 	type: "oauth",
@@ -288,12 +296,21 @@ it.each(["incomplete", "interrupted"])("distinguishes %s output from completed i
 	expect((await models.completeSimple(model, context)).stopReason).toBe(status === "incomplete" ? "length" : "error");
 });
 
-it("cancels an active HTTP stream", async () => {
+it.each(["cancellation", "logout"])("stops an active HTTP stream on %s", async (action) => {
+	const directory = mkdtempSync(join(tmpdir(), "diffex-chatgpt-inference-"));
+	directories.push(directory);
+	vi.stubEnv("DIFFEX_CODING_AGENT_DIR", directory);
 	let requestSignal: AbortSignal | null | undefined;
 	vi.stubGlobal(
 		"fetch",
 		vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
 			if (String(input).endsWith("/models")) return Response.json(catalog);
+			if (String(input).endsWith("/.well-known/openid-configuration"))
+				return Response.json({
+					issuer: "https://auth.openai.com",
+					revocation_endpoint: "https://auth.openai.com/oauth/revoke",
+				});
+			if (String(input).endsWith("/oauth/revoke")) return new Response(null, { status: 200 });
 			requestSignal = init?.signal;
 			return new Response(
 				new ReadableStream<Uint8Array>({
@@ -316,7 +333,11 @@ it("cancels an active HTTP stream", async () => {
 	const { models, model } = await runtime();
 	const controller = new AbortController();
 	const stream = models.streamSimple(model, context, { signal: controller.signal });
-	for await (const event of stream) if (event.type === "text_delta") controller.abort();
+	for await (const event of stream) {
+		if (event.type !== "text_delta") continue;
+		if (action === "logout") await models.logout("openai-codex");
+		else controller.abort();
+	}
 	expect((await stream.result()).stopReason).toBe("aborted");
 	expect(requestSignal?.aborted).toBe(true);
 });

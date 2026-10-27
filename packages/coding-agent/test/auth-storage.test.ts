@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type CredentialStore, createModels, type Provider } from "@diffexai/diffex-ai";
@@ -154,6 +154,31 @@ describe("AuthStorage", () => {
 			openai: { type: "api_key", key: "external" },
 		});
 	});
+
+	test.skipIf(process.platform === "win32")(
+		"atomically replaces credentials with owner-only permissions while preserving symlinks",
+		async () => {
+			const target = join(tempDir, "protected.json");
+			writeFileSync(target, "{}");
+			symlinkSync(target, authJsonPath);
+			const before = statSync(target).ino;
+			const storage = AuthStorage.create(authJsonPath);
+			await storage.modify("openai-codex", async () => ({
+				type: "oauth",
+				access: "access",
+				refresh: "refresh",
+				expires: 123,
+			}));
+			expect(lstatSync(authJsonPath).isSymbolicLink()).toBe(true);
+			expect(statSync(target).ino).not.toBe(before);
+			expect(statSync(target).mode & 0o777).toBe(0o600);
+			expect(JSON.parse(readFileSync(target, "utf8"))["openai-codex"]).toMatchObject({
+				access: "access",
+				refresh: "refresh",
+				expires: 123,
+			});
+		},
+	);
 
 	test("modify with undefined leaves the current credential unchanged", async () => {
 		writeAuthJson({ anthropic: { type: "api_key", key: "stored" } });

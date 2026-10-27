@@ -1,4 +1,4 @@
-import type { AuthInfoLink, OAuthDeviceCodeInfo } from "@diffexai/diffex-ai";
+import { type AuthInfoLink, getOAuthDisplayUrl, type OAuthDeviceCodeInfo } from "@diffexai/diffex-ai";
 import { Container, type Focusable, getKeybindings, Input, Spacer, Text, type TUI } from "@diffexai/diffex-tui";
 import { openBrowser } from "../../../utils/open-browser.ts";
 import { theme } from "../theme/theme.ts";
@@ -74,7 +74,7 @@ export class LoginDialogComponent extends Container implements Focusable {
 	}
 
 	private cancel(): void {
-		this.abortController.abort();
+		this.abortController.abort(new Error("Login cancelled"));
 		if (this.inputRejecter) {
 			this.inputRejecter(new Error("Login cancelled"));
 			this.inputResolver = undefined;
@@ -87,13 +87,14 @@ export class LoginDialogComponent extends Container implements Focusable {
 	 * Called by onAuth callback - show URL and optional instructions
 	 */
 	showAuth(url: string, instructions?: string): void {
+		const displayUrl = getOAuthDisplayUrl(url);
 		this.contentContainer.clear();
 		this.contentContainer.addChild(new Spacer(1));
-		const linkedUrl = `\x1b]8;;${url}\x07${url}\x1b]8;;\x07`;
+		const linkedUrl = `\x1b]8;;${displayUrl}\x07${displayUrl}\x1b]8;;\x07`;
 		this.contentContainer.addChild(new Text(theme.fg("accent", linkedUrl), 1, 0));
 
 		const clickHint = process.platform === "darwin" ? "Cmd+click to open" : "Ctrl+click to open";
-		const hyperlink = `\x1b]8;;${url}\x07${clickHint}\x1b]8;;\x07`;
+		const hyperlink = `\x1b]8;;${displayUrl}\x07${clickHint}\x1b]8;;\x07`;
 		this.contentContainer.addChild(new Text(theme.fg("dim", hyperlink), 1, 0));
 
 		if (instructions) {

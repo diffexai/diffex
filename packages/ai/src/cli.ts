@@ -2,6 +2,7 @@
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createInterface } from "node:readline";
+import { getOAuthDisplayUrl } from "./auth/helpers.ts";
 import type { AuthPrompt, OAuthCredential, Provider } from "./index.ts";
 import { builtinProviders } from "./providers/all.ts";
 
@@ -53,7 +54,7 @@ async function login(providerId: string): Promise<void> {
 			notify: (event) => {
 				switch (event.type) {
 					case "auth_url":
-						console.log(`\nOpen this URL in your browser:\n${event.url}`);
+						console.log(`\nOpen this URL in your browser:\n${getOAuthDisplayUrl(event.url)}`);
 						if (event.instructions) console.log(event.instructions);
 						break;
 					case "device_code":

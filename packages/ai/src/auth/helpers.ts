@@ -1,5 +1,12 @@
 import type { ApiKeyAuth, OAuthAuth } from "./types.ts";
 
+/** Keep retained identity tokens out of terminal output and diagnostic URLs. */
+export function getOAuthDisplayUrl(value: string): string {
+	const url = new URL(value);
+	url.searchParams.delete("id_token_hint");
+	return url.toString();
+}
+
 /**
  * Standard api-key auth: a stored credential key wins, otherwise the first
  * set env var resolves. Includes a `login` that prompts for the key.

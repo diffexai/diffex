@@ -33,6 +33,7 @@ The provider ID remains `openai-codex` for configuration and CLI selection.
 Diffex stores the stable host identity and issued account registrations in `~/.diffex/agent/chatgpt/`, alongside the active credentials in `auth.json`.
 `DIFFEX_CODING_AGENT_DIR` relocates both directories.
 Later sign-ins let you select a saved registration or add another ChatGPT account or workspace.
+If you decline plan usage, Diffex retains your validated sign-in and offers **Enable ChatGPT plan usage** on the next login.
 Remote machines can complete sign-in by pasting the full loopback redirect URL into Diffex.
 
 Models come from the signed-in account's public model catalog, with an account-specific cache for offline startup.
@@ -43,6 +44,8 @@ Review app limits and credits in [ChatGPT Settings - Usage](https://chatgpt.com/
 
 `/logout` stops the account's active requests, attempts remote session revocation, and clears the active tokens while retaining the host and registration for later sign-in.
 If remote revocation cannot be confirmed, Diffex reports that local sign-out completed and directs you to disconnect the app in ChatGPT Settings.
+An unusable refresh token clears the local token set and requires a new sign-in with the saved registration.
+Temporary network failures preserve credentials for retry.
 
 See OpenAI's [registration guide](https://developers.openai.com/siwc/token-sharing-open-source/sign-in) and [models and inference guide](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference).
 

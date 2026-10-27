@@ -13,6 +13,11 @@ const CATALOG_URL = `${BASE_URL}/models`;
 
 function credentialId(credential: Credential | undefined): string | undefined {
 	return credential?.type === "oauth" &&
+		credential.access &&
+		!credential.reauthorizationRequired &&
+		Array.isArray(credential.scopes) &&
+		credential.scopes.includes("chatgpt.tokens.use.direct") &&
+		credential.scopes.includes("resource.invoke") &&
 		typeof credential.clientId === "string" &&
 		typeof credential.subject === "string"
 		? JSON.stringify([credential.clientId, credential.subject])

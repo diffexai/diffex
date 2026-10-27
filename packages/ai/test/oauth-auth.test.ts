@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { InMemoryCredentialStore } from "../src/auth/credential-store.ts";
+import { getOAuthDisplayUrl } from "../src/auth/helpers.ts";
 import { anthropicOAuth } from "../src/auth/oauth/anthropic.ts";
 import { githubCopilotOAuth } from "../src/auth/oauth/github-copilot.ts";
 import { kimiCodingOAuth } from "../src/auth/oauth/kimi-coding.ts";
@@ -18,6 +19,14 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 describe.sequential("OAuthAuth adapters", () => {
+	it("redacts retained ID tokens from displayed authorization URLs", () => {
+		const display = getOAuthDisplayUrl(
+			"https://auth.openai.com/api/accounts/authorize?client_id=oaiapp_diffex&id_token_hint=private-token&state=state",
+		);
+		expect(display).not.toContain("private-token");
+		expect(display).not.toContain("id_token_hint");
+		expect(new URL(display).searchParams.get("client_id")).toBe("oaiapp_diffex");
+	});
 	it("keeps the extension OAuth barrel free of built-in flow implementations", () => {
 		expect(extensionOAuthCompatibility).not.toHaveProperty("loginAnthropic");
 		expect(extensionOAuthCompatibility).not.toHaveProperty("anthropicOAuth");

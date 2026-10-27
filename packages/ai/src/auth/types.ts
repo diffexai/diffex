@@ -31,6 +31,8 @@ export interface OAuthCredentials {
 /** Stored canonical OAuth credential. */
 export interface OAuthCredential extends OAuthCredentials {
 	type: "oauth";
+	/** Terminal session failure: tokens cleared, registration retained for a new sign-in. */
+	reauthorizationRequired?: boolean;
 }
 
 /** One type-tagged credential per provider — the shape of today's auth.json. */

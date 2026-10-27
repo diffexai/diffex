@@ -8,6 +8,7 @@ export interface ChatGPTRegistration {
 	subject?: string;
 	email?: string;
 	idToken?: string;
+	scopes?: string[];
 }
 
 /** Registration metadata survives logout; renewable tokens live in the credential store. */
@@ -49,7 +50,9 @@ export class ChatGPTRegistrationStore {
 					!/^oaiapp_[\w-]+$/.test(value.clientId) ||
 					(value.subject !== undefined && (typeof value.subject !== "string" || !value.subject)) ||
 					(value.email !== undefined && typeof value.email !== "string") ||
-					(value.idToken !== undefined && typeof value.idToken !== "string")
+					(value.idToken !== undefined && typeof value.idToken !== "string") ||
+					(value.scopes !== undefined &&
+						(!Array.isArray(value.scopes) || !value.scopes.every((scope) => typeof scope === "string")))
 				) {
 					throw new Error("Invalid saved ChatGPT registration");
 				}
