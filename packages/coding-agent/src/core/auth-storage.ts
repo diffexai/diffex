@@ -35,7 +35,10 @@ type AuthFileReadState = {
 	reload?: AuthFileReload;
 };
 
-let sharedAuthFileReadState: { authPath: string; readState: AuthFileReadState } | undefined;
+const sharedAuthFileReadStates = new Map<string, WeakRef<AuthFileReadState>>();
+const authFileReadStateCleanup = new FinalizationRegistry<string>((authPath) => {
+	if (!sharedAuthFileReadStates.get(authPath)?.deref()) sharedAuthFileReadStates.delete(authPath);
+});
 
 export interface AuthStorageBackend {
 	withLock<T>(fn: (current: string | undefined) => LockResult<T>): T;
@@ -344,10 +347,11 @@ export class AuthStorage implements CredentialStore {
 	private constructor(storage: AuthStorageBackend, authPath?: string) {
 		this.storage = storage;
 		this.authPath = authPath;
-		this.readState =
-			authPath && sharedAuthFileReadState?.authPath === authPath ? sharedAuthFileReadState.readState : { data: {} };
-		if (authPath && !sharedAuthFileReadState) {
-			sharedAuthFileReadState = { authPath, readState: this.readState };
+		const sharedReadState = authPath ? sharedAuthFileReadStates.get(authPath)?.deref() : undefined;
+		this.readState = sharedReadState ?? { data: {} };
+		if (authPath && !sharedReadState) {
+			sharedAuthFileReadStates.set(authPath, new WeakRef(this.readState));
+			authFileReadStateCleanup.register(this.readState, authPath);
 		}
 		if (authPath) {
 			const revision = getFileRevision(authPath);
