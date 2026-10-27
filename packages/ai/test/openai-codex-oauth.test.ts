@@ -9,6 +9,7 @@ defineOAuthCallbackTests(openaiCodexOAuth, {
 	clientId: "app_EMoamEEZ73f0CkXaXp7hrann",
 	scope: "openid profile email offline_access",
 	redirectUri: "http://localhost:1455/auth/callback",
+	originator: "diffex",
 });
 
 const neverAbortedSignal = new AbortController().signal;

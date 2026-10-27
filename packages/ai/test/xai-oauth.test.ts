@@ -100,7 +100,11 @@ describe("xAI OAuth device flow", () => {
 				const form = requestForm(init);
 				expect(form.get("client_id")).toBe("b1a00492-073a-47ea-816f-4c329264a828");
 				expect(form.get("scope")).toBe("openid profile email offline_access grok-cli:access api:access");
-				expect(form.get("referrer")).toBe("pi");
+				expect(Object.fromEntries(form)).toEqual({
+					client_id: "b1a00492-073a-47ea-816f-4c329264a828",
+					scope: "openid profile email offline_access grok-cli:access api:access",
+					referrer: "diffex",
+				});
 				return jsonResponse(deviceCodeResponse());
 			}
 

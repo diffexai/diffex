@@ -145,8 +145,8 @@ async function startCallbackServer(expectedState: string): Promise<CallbackServe
 				res.end(oauthSuccessHtml());
 				settleWait?.({ code, state });
 			} catch {
-				res.writeHead(500, { "Content-Type": "text/plain; charset=utf-8" });
-				res.end("Internal error");
+				res.writeHead(500, { "Content-Type": "text/html; charset=utf-8" });
+				res.end(oauthErrorHtml("Internal error while processing OAuth callback."));
 			}
 		});
 

@@ -13,6 +13,7 @@ export function defineOAuthCallbackTests(
 		clientId?: string;
 		scope?: string;
 		redirectUri?: string;
+		originator?: string;
 	},
 ): void {
 	describe.sequential(`${options.name} browser callback`, () => {
@@ -77,6 +78,20 @@ export function defineOAuthCallbackTests(
 				if (options.scope) expect(authorize.searchParams.get("scope")).toBe(options.scope);
 				if (options.redirectUri) expect(authorize.searchParams.get("redirect_uri")).toBe(options.redirectUri);
 				expect(authorize.searchParams.get("code_challenge_method")).toBe("S256");
+				if (options.originator) {
+					expect(Object.fromEntries(authorize.searchParams)).toEqual({
+						response_type: "code",
+						client_id: options.clientId,
+						redirect_uri: options.redirectUri,
+						scope: options.scope,
+						code_challenge: expect.stringMatching(/^[\w-]{43}$/),
+						code_challenge_method: "S256",
+						state: expect.stringMatching(/^[a-f0-9]{32}$/),
+						id_token_add_organizations: "true",
+						codex_cli_simplified_flow: "true",
+						originator: options.originator,
+					});
+				}
 				const state = authorize.searchParams.get("state");
 				if (state) callback.searchParams.set("state", state);
 

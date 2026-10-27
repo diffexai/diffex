@@ -94,6 +94,78 @@ function buildSSEPayload({
 }
 
 describe("openai-codex streaming", () => {
+	it.each(["sse", "websocket"] as const)(
+		"preserves attribution overrides and null removal over %s",
+		async (transport) => {
+			const token = mockToken();
+			const model: Model<"openai-codex-responses"> = {
+				id: "gpt-5.1-codex",
+				name: "GPT-5.1 Codex",
+				api: "openai-codex-responses",
+				provider: "openai-codex",
+				baseUrl: "https://chatgpt.com/backend-api",
+				reasoning: true,
+				input: ["text"],
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+				contextWindow: 400000,
+				maxTokens: 128000,
+				headers: { Originator: "model-client", "User-Agent": "model-agent", "x-custom": "kept" },
+			};
+			const captured: Headers[] = [];
+			const completion = {
+				type: "response.completed",
+				response: { status: "completed", usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 } },
+			};
+			vi.stubGlobal(
+				"fetch",
+				vi.fn(async (url: string, init?: RequestInit) => {
+					expect(url).toBe("https://chatgpt.com/backend-api/codex/responses");
+					captured.push(new Headers(init?.headers));
+					return new Response(`data: ${JSON.stringify(completion)}\n\n`, {
+						headers: { "content-type": "text/event-stream" },
+					});
+				}),
+			);
+			class MockWebSocket extends EventTarget {
+				constructor(url: string, protocols?: { headers?: Record<string, string> }) {
+					super();
+					expect(url).toBe("wss://chatgpt.com/backend-api/codex/responses");
+					captured.push(new Headers(protocols?.headers));
+					queueMicrotask(() => this.dispatchEvent(new Event("open")));
+				}
+				send(): void {
+					queueMicrotask(() =>
+						this.dispatchEvent(Object.assign(new Event("message"), { data: JSON.stringify(completion) })),
+					);
+				}
+				close(): void {}
+			}
+			vi.stubGlobal("WebSocket", MockWebSocket);
+			for (const headers of [
+				undefined,
+				{ originator: "request-client", "user-agent": "request-agent" },
+				{ originator: null, "user-agent": null },
+			]) {
+				const result = await streamOpenAICodexResponses(
+					model,
+					{ messages: [] },
+					{ apiKey: token, transport, headers },
+				).result();
+				expect(result.stopReason).toBe("stop");
+			}
+			expect(captured.map((headers) => [headers.get("originator"), headers.get("user-agent")])).toEqual([
+				["model-client", "model-agent"],
+				["request-client", "request-agent"],
+				[null, null],
+			]);
+			for (const headers of captured) {
+				expect(headers.get("authorization")).toBe(`Bearer ${token}`);
+				expect(headers.get("chatgpt-account-id")).toBe("acc_test");
+				expect(headers.get("x-custom")).toBe("kept");
+			}
+		},
+	);
+
 	it("streams SSE responses into AssistantMessageEventStream", async () => {
 		const tempDir = mkdtempSync(join(tmpdir(), "diffex-codex-stream-"));
 		process.env.DIFFEX_CODING_AGENT_DIR = tempDir;
@@ -156,7 +228,8 @@ describe("openai-codex streaming", () => {
 				expect(headers?.get("Authorization")).toBe(`Bearer ${token}`);
 				expect(headers?.get("chatgpt-account-id")).toBe("acc_test");
 				expect(headers?.get("OpenAI-Beta")).toBe("responses=experimental");
-				expect(headers?.get("originator")).toBe("pi");
+				expect(headers?.get("originator")).toBe("diffex");
+				expect(headers?.get("user-agent")).toMatch(/^diffex \(.+; .+\)$/);
 				expect(headers?.get("accept")).toBe("text/event-stream");
 				expect(headers?.has("x-api-key")).toBe(false);
 				return new Response(stream, {
@@ -1325,6 +1398,8 @@ describe("openai-codex streaming", () => {
 
 		expect(sentBodies).toHaveLength(1);
 		expect(capturedWebSocketHeaders?.["session-id"]).toBe("session-auto");
+		expect(capturedWebSocketHeaders?.originator).toBe("diffex");
+		expect(capturedWebSocketHeaders?.["user-agent"]).toMatch(/^diffex \(.+; .+\)$/);
 		expect(capturedWebSocketHeaders?.session_id).toBeUndefined();
 		expect(capturedWebSocketHeaders?.["x-client-request-id"]).toBe("session-auto");
 		expect(global.fetch).not.toHaveBeenCalled();
