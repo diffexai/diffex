@@ -11,6 +11,7 @@ Diffex supports subscription-based providers via OAuth and API key providers via
 - [llama.cpp](#llamacpp)
 - [Custom Providers](#custom-providers)
 - [Resolution Order](#resolution-order)
+- [Removed Providers](#removed-providers)
 
 ## Subscriptions
 
@@ -329,3 +330,20 @@ When resolving credentials for a provider:
 2. `auth.json` entry (API key or OAuth token)
 3. Environment variable
 4. Custom provider keys from `models.json`
+
+## Removed Providers
+
+Radius is removed and must not be used in development, testing, evaluation, or production.
+It is absent from subscription and API-key login menus, provider discovery, and model catalogs.
+Custom registrations under the `radius` provider ID are rejected.
+
+Existing Radius selections explain that support was removed and require a replacement provider.
+Remove `providers.radius` and any provider with `"oauth": "radius"` from `~/.diffex/agent/models.json`.
+These entries invalidate the custom configuration file until removed; built-in providers remain available.
+Replace Radius defaults in global or project `settings.json`, including `defaultProvider`, `defaultModel`, and any Radius entries in `enabledModels`.
+Resume an old Radius session with an explicit `--model provider/model` to choose its replacement.
+
+Saved Radius credentials and cached models remain on disk but cannot restore access or trigger token refresh, catalog discovery, or inference.
+Use `/logout` to delete a saved Radius credential locally without contacting the former service, or remove its entry from `auth.json` manually.
+Remove the unused Radius entry from `models-store.json` and unset the former `RADIUS_API_KEY` environment variable.
+Configure another supported provider through `/login`, then select its model with `/model`.

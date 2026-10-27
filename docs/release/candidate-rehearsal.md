@@ -1,5 +1,8 @@
 # Candidate release rehearsal
 
+This is historical evidence for the pinned revision below.
+Its Radius-containing artifacts are superseded and must not be reused; see [Radius removal](radius-removal.md).
+
 The rehearsal validates the approved npm-only distribution without publishing a release.
 The current public inventory is `@diffexai/diffex`, with internal runtime modules bundled inside its tarball.
 The older eleven-package and standalone acceptance requirements are superseded by the owner-approved [distribution policy](distribution-policy.json).
@@ -91,7 +94,8 @@ These application-level guards and event logs are not a whole-host packet captur
 Catalog preparation contacts its approved catalog inputs; the local refresh encountered a transport failure, so the existing validated local snapshot was used for source gates while the native build retained its freshly hydrated snapshot.
 
 The source identity gate accepts exactly seventeen reviewed occurrences across 915 files.
-Inspection of every final tarball member finds sixteen identity matches in nine files, all mapping to approved Radius, catalog, OAuth, and provider-attribution entries.
+Inspection of that historical tarball found sixteen identity matches in nine files, then approved as Radius, catalog, OAuth, and provider-attribution entries.
+Radius approval has since been revoked for every environment.
 The final payload gate verifies required notices, runtime-file hashes, the documentation allowlist, and absence of prohibited source and embedded maps.
 Image inspection accepts 1,414 project files across twelve runtime workspaces and thirty approved documentation assets.
 All isolated installation prefixes, caches, homes, mock sessions, fixture servers, and runtime containers are removed by their harnesses.

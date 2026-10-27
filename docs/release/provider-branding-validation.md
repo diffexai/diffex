@@ -4,6 +4,7 @@ Diffex controls the local callback presentation and default application attribut
 Registered OAuth client IDs, provider consent pages, authentication protocols, stored credentials, inference endpoints, and payloads remain unchanged.
 The separate Diffex account feature is excluded.
 Radius was excluded from the original branding change and subsequently removed from the built-in provider and authentication integrations.
+The [Radius removal record](radius-removal.md) supersedes its historical approval and documents configuration rejection and offline validation.
 
 ## Implemented defaults
 

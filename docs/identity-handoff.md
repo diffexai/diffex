@@ -15,13 +15,15 @@ No package, image, release asset, or source archive is published by this change.
 | Legal copyright owner       | Luntraa, Inc.                                                                                                  |
 | Release API                 | `https://api.diffex.ai/api/latest-version`, owned by `diffex-cloud`                                            |
 | Model catalog API | `https://api.diffex.ai/api/models/providers/{providerId}`, owned by `diffex-cloud` |
-| Radius services | Approved external integrations recorded in the candidate handoff                                               |
+| Radius services | Removed; prohibited in development, testing, evaluation, and production |
 | Security contact            | Existing private access to a Diffex repository owner; no dedicated mailbox or public reporting channel claimed |
 | Issue authorization         | Write/admin permission on the current Diffex repository                                                        |
 
 Diffex and Luntraa, Inc. are unrelated to Earendil.
 The former staff-team authorization, security mailbox reference, announcement, and product affiliation wording have been removed.
-The owner explicitly retained OpenAI Codex and xAI OAuth in addition to the release audit's Radius and provider-attribution integrations.
+The owner explicitly retained OpenAI Codex and xAI OAuth and provider attribution.
+Radius is removed; the older release audit does not authorize its use.
+See [migration and validation](release/radius-removal.md).
 The catalog authority is now Diffex; see [the catalog contract](model-catalog.md).
 The exact residual inventory is [identity-residual-allowlist.md](../identity-residual-allowlist.md).
 

@@ -6,12 +6,17 @@ The accepted implementation is [`33704b32c5d17b849c013834fd1c56d65de843fd`](http
 The follow-up evidence commit changes only documents; [the artifact manifest](candidate-artifacts.json) pins the tested implementation and bytes.
 The companion cloud change is stacked on PR #147.
 
+Current policy supersedes this historical candidate's Radius approval.
+Radius is removed and must not be used in development, testing, evaluation, or production.
+The pinned JSON manifests and identity reports below describe historical bytes containing Radius and must not be reused as release candidates.
+See [Radius removal](radius-removal.md) for current migration and validation.
+
 ## Reconciled decisions
 
 The canonical private source, package map, executable, hosted image identity, and Luntraa, Inc. copyright are recorded in [the identity handoff](../identity-handoff.md).
-The release audit approves Pi-supported catalogs, Radius gateway/OAuth, and provider attribution.
+The historical release audit approved external catalogs and provider attribution.
 The owner additionally instructed this implementation to retain OpenAI Codex and xAI OAuth.
-The earlier backend plan's proposed replacement catalogs, Diffex Radius service, and replacement provider registrations are therefore not prerequisites for this candidate.
+Radius gateway/OAuth approval has been revoked; no replacement Radius service is planned.
 No Diffex ownership of those external services or registrations is asserted.
 
 The obsolete security/staff exceptions are removed.
@@ -34,18 +39,15 @@ The [exact residual inventory](../../identity-residual-allowlist.md) replaces th
 | Operation                             | Endpoint or authority                                                                                                   | Policy                                                                                                                  |
 | ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
 | Release discovery                     | `https://api.diffex.ai/api/latest-version`                                                                              | Diffex Cloud public Worker; anonymous; fixed canonical package identity; no redirects                                   |
-| Diffex account login and product APIs | `https://api.diffex.ai`, existing Render/WorkOS routes                                                                  | Separate account credentials; never implicitly reused as Radius credentials                                             |
+| Diffex account login and product APIs | `https://api.diffex.ai`, existing Render/WorkOS routes                                                                  | Separate account credentials |
 | Built-in catalog refresh              | `https://pi.dev/api/models/providers/<provider>`                                                                        | Explicitly retained external catalogs for configured providers                                                          |
-| Radius config and inference           | `https://radius.pi.dev/v1/config`, gateway-selected message base URL                                                    | Explicitly retained Radius trust boundary; provider credentials only                                                    |
-| Radius OAuth                          | Gateway `/v1/oauth` discovery and discovered authorization/device/token URLs; client `pi-gateway`                       | Retained registration; the earlier audit observed issuer `https://radius.earendil.com`; live discovery was not repeated |
 | OpenAI Codex                          | `https://auth.openai.com`, `https://chatgpt.com/backend-api`; client `app_EMoamEEZ73f0CkXaXp7hrann`                     | Explicit owner retention of OAuth and provider attribution                                                              |
 | xAI subscription                      | `https://auth.x.ai/oauth2/device/code`, `https://auth.x.ai/oauth2/token`; client `b1a00492-073a-47ea-816f-4c329264a828` | Explicit owner retention of OAuth and provider attribution                                                              |
 | Other model providers                 | Selected built-in provider endpoints or explicitly configured custom endpoints                                          | Provider-specific credentials and model traffic                                                                         |
 | Optional attribution                  | OpenRouter, NVIDIA NIM, Cloudflare                                                                                      | Existing optional provider headers; default off; separate from removed install reporting                                |
 | OpenCode attribution                  | Selected OpenCode endpoint                                                                                              | Existing client/session headers retained independently of optional attribution                                          |
 
-Radius discovery and model configurations remain trusted inputs that can supply endpoint URLs.
-Retaining them accepts that existing trust boundary; this change does not implement the older plan's endpoint allowlisting or cache-origin migration proposal.
+Radius discovery, authentication, and inference are no longer supported or allowed egress.
 Custom gateways remain explicit user configuration.
 No runtime egress permission extends to install-report routes, upstream update discovery, security reporting to upstream contacts, or external organization authorization.
 GitHub access remains available for explicitly requested extension/package operations and source-host operations.
@@ -55,7 +57,8 @@ GitHub access remains available for explicitly requested extension/package opera
 The frozen built-in catalog was generated at `2026-08-25T03:02:44.635Z` with structure hash `888155e376e18c5eb02a88c79c374edaa9a517730bfe17f82f76ca51c96cca12`.
 The local build validates and uses that checked-in snapshot without refreshing model metadata.
 `packages/ai/src/providers/data/.manifest.json` records every provider shard digest.
-The static provider IDs in that manifest, plus dynamic `radius`, remain supported by the source adapters.
+The static provider IDs in that historical manifest describe the candidate's catalog.
+Dynamic `radius` is no longer supported by the source adapters.
 The installed artifact manifest lists all 40 provider IDs and display names; listing a provider does not claim live authentication or inference acceptance.
 
 Configured built-in providers retain the external overlay and its four-hour refresh interval.
@@ -76,7 +79,8 @@ No deployment or production metadata mutation was needed.
 ## Validation and explicit exclusions
 
 The full `./test.sh` suite passed without provider credentials.
-This includes the retained Radius, OpenAI Codex, xAI, remote catalog, provider-attribution, install-report removal, and updater regressions.
+That historical run included Radius, OpenAI Codex, xAI, remote catalog, provider-attribution, install-report removal, and updater regressions.
+Current Radius tests assert rejection without service access.
 The new issue-workflow tests first reproduced rejection of Diffex maintainers because an inherited token was absent, then passed after repository-scoped authorization replaced it.
 The CLI quality gate and exact identity scan passed.
 The cloud/CLI contract checker passed with no public contract changes.
