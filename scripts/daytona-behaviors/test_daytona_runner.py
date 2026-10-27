@@ -16,7 +16,8 @@ import unittest
 from unittest.mock import patch
 import xml.etree.ElementTree as ET
 
-from daytona import DaytonaNotFoundError, ExecuteResponse
+from daytona import DaytonaError, DaytonaNotFoundError, ExecuteResponse
+from daytona_api_client import SnapshotState
 
 from daytona_runner import (
     EXTRACT_SCRIPT, INSTALLED, MANIFEST_SCRIPT, REMOTE_EVIDENCE, RESOURCES,
@@ -31,6 +32,7 @@ class FakeFS:
         self.uploads: list[tuple[str, bytes]] = []
         self.downloads: list[str] = []
         self.corrupt = False
+        self.corrupt_paths: set[str] = set()
 
     def upload_file(self, source: str | bytes, destination: str, timeout: int = 0):
         value = Path(source).read_bytes() if isinstance(source, str) else source
@@ -39,14 +41,17 @@ class FakeFS:
 
     def download_file_stream(self, source: str, timeout: int = 0):
         self.downloads.append(source)
-        content = self.files[source] + (b"changed" if self.corrupt else b"")
+        if not self.files[source]:
+            raise DaytonaError("No file data received")
+        content = self.files[source] + (b"changed" if self.corrupt or source in self.corrupt_paths else b"")
         yield content[:3]
         yield content[3:]
 
 
 class FakeProcess:
-    def __init__(self, fs: FakeFS):
+    def __init__(self, fs: FakeFS, output: Path):
         self.fs = fs
+        self.output = output
         self.calls: list[tuple[str, dict[str, str] | None]] = []
         self.product_outcome = "passed"
         self.exit_code = 0
@@ -69,10 +74,20 @@ class FakeProcess:
                 os.kill(os.getpid(), signal.SIGTERM)
             if self.raise_on_launch:
                 raise self.raise_on_launch
+            state = json.loads((self.output / "state.json").read_text())
+            hashes = {"candidate.tgz": "a" * 64}
+            scenario = {"id": "terminal", "commit": state["commit"], "artifactHashes": hashes,
+                        "outcome": self.product_outcome, "category": "product", "evidence": ["terminal"]}
+            suite = ET.Element("testsuite", name="installed", tests="1",
+                               failures="0" if self.product_outcome == "passed" else "1")
+            case = ET.SubElement(suite, "testcase", name="terminal", classname="product")
+            if self.product_outcome != "passed":
+                ET.SubElement(case, "failure", message="intentional failure")
             self.fs.files.update({
-                REMOTE_EVIDENCE + "/results.json": json.dumps({"outcome": self.product_outcome,
-                    "scenarios": [{"outcome": self.product_outcome, "category": "product"}]}).encode(),
-                REMOTE_EVIDENCE + "/results.xml": b'<testsuite name="installed"/>',
+                REMOTE_EVIDENCE + "/results.json": json.dumps({"schemaVersion": 1,
+                    "commit": state["commit"], "mode": state["mode"], "artifactHashes": hashes,
+                    "outcome": self.product_outcome, "scenarios": [scenario]}).encode(),
+                REMOTE_EVIDENCE + "/results.xml": ET.tostring(suite),
                 REMOTE_EVIDENCE + "/.orchestration-exit.json": json.dumps({"exit_code": self.exit_code}).encode(),
                 REMOTE_EVIDENCE + "/terminal/evidence.txt": b"terminal evidence\n",
             })
@@ -81,7 +96,7 @@ class FakeProcess:
 
 class FakeSnapshot:
     def __init__(self):
-        self.value = SimpleNamespace(name="toolchain", id="snapshot-id", state="active", cpu=2, mem=4, disk=8)
+        self.value = SimpleNamespace(name="toolchain", id="snapshot-id", state=SnapshotState.ACTIVE, cpu=2, mem=4, disk=8)
         self.params = None
         self.create_error: Exception | None = None
 
@@ -100,7 +115,7 @@ class FakeClient:
         self.output = output
         self.snapshot = FakeSnapshot()
         self.fs = FakeFS()
-        self.process = FakeProcess(self.fs)
+        self.process = FakeProcess(self.fs, output)
         self.sandbox = SimpleNamespace(id="sandbox-id", name="", labels={},
                                        cpu=2, memory=4, disk=8, fs=self.fs, process=self.process)
         self.exists = False
@@ -284,6 +299,12 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(self.client.deletes, 0)
         self.assertEqual(self.state.cleanup, "unconfirmed")
 
+    def test_inactive_sdk_snapshot_state_never_creates(self):
+        self.client.snapshot.value.state = SnapshotState.BUILDING
+        self.assertEqual(self.runner.run(self.artifacts, self.bundle, None), 1)
+        self.assertEqual(self.client.creates, 0)
+        self.assertEqual(self.state.cleanup, "not-needed")
+
     def test_wrong_snapshot_resources_never_creates(self):
         self.client.snapshot.value.mem = 8
         self.assertEqual(self.runner.run(self.artifacts, self.bundle, None), 1)
@@ -318,6 +339,46 @@ class RunnerTests(unittest.TestCase):
         self.client.fs.corrupt = False
         self.runner.collect(self.client.sandbox)
         self.assertEqual((self.output / "evidence/progress.json").read_bytes(), b"two")
+
+    def test_empty_evidence_is_materialized_without_sdk_download(self):
+        remote = REMOTE_EVIDENCE + "/installed.log"
+        self.client.fs.files[remote] = b""
+        with self.assertRaisesRegex(DaytonaError, "No file data received"):
+            list(self.client.fs.download_file_stream(remote))
+        self.client.fs.downloads.clear()
+        self.runner.collect(self.client.sandbox, final=True)
+        self.assertEqual((self.output / "evidence/installed.log").read_bytes(), b"")
+        self.assertEqual(self.state.evidence_manifest, {"installed.log": hashlib.sha256(b"").hexdigest()})
+        self.assertEqual(self.client.fs.downloads, [])
+
+    def test_empty_evidence_still_requires_correct_digest(self):
+        self.client.process.manifest_override = [{"path": "empty.log", "size": 0, "sha256": "0" * 64}]
+        with self.assertRaisesRegex(OrchestrationError, "checksum or size mismatch"):
+            self.runner.collect(self.client.sandbox, final=True)
+        self.assertIsNone(self.state.evidence_manifest)
+        self.assertFalse((self.output / "evidence/empty.log").exists())
+        self.assertFalse(self.client.fs.downloads)
+
+    def test_corrupt_nonreport_download_prevents_success_and_still_cleans(self):
+        self.client.fs.corrupt_paths.add(REMOTE_EVIDENCE + "/terminal/evidence.txt")
+        self.assertEqual(self.runner.run(self.artifacts, self.bundle, None), 1)
+        self.assertEqual(self.state.execution, "passed")
+        self.assertEqual(self.state.cleanup, "confirmed")
+        self.assertIsNone(self.state.evidence_manifest)
+        report = json.loads((self.output / "orchestration.json").read_text())
+        self.assertFalse(report["reports_complete"])
+        self.assertTrue(any("final evidence checksum or size mismatch" in error for error in self.state.errors))
+
+    def test_final_collection_rejects_stale_nonreport_copy(self):
+        remote = REMOTE_EVIDENCE + "/progress.log"
+        self.client.fs.files[remote] = b"old"
+        self.runner.collect(self.client.sandbox)
+        self.client.fs.files[remote] = b"new"
+        self.client.fs.corrupt_paths.add(remote)
+        with self.assertRaisesRegex(OrchestrationError, "checksum or size mismatch"):
+            self.runner.collect(self.client.sandbox, final=True)
+        self.assertEqual((self.output / "evidence/progress.log").read_bytes(), b"old")
+        self.assertIsNone(self.state.evidence_manifest)
 
     def test_unsafe_manifest_path_is_rejected(self):
         self.client.process.manifest_override = [{"path": "../../escape", "size": 0, "sha256": "0" * 64}]
@@ -365,6 +426,57 @@ class RunnerTests(unittest.TestCase):
         self.runner.run(self.artifacts, self.bundle, None)
         (self.output / "evidence/results.xml").unlink()
         self.assertEqual(self.runner.report(), 1)
+
+    def test_invalid_remote_junit_never_passes_recovery(self):
+        sandbox = self.runner.create()
+        self.runner.launch(sandbox, None)
+        self.client.fs.files[REMOTE_EVIDENCE + "/results.xml"] = b"not XML"
+        self.assertEqual(self.runner.recover(0), 1)
+        self.assertEqual(self.state.cleanup, "confirmed")
+        self.assertFalse(json.loads((self.output / "orchestration.json").read_text())["reports_complete"])
+        self.assertTrue(any("ParseError" in error for error in self.state.errors))
+
+    def test_junit_structure_must_match_json_inventory_and_outcomes(self):
+        sandbox = self.runner.create()
+        self.runner.launch(sandbox, None)
+        self.runner.poll(sandbox, time.time() + 1)
+        for xml in (
+            b'<not-testsuite tests="1" failures="0"><testcase name="terminal"/></not-testsuite>',
+            b'<testsuite tests="2" failures="0"><testcase name="terminal"/></testsuite>',
+            b'<testsuite tests="1" failures="0"><testcase name="other"/></testsuite>',
+            b'<testsuite tests="1" failures="0"><testcase name="terminal"><failure/></testcase></testsuite>',
+            b'<testsuite tests="1" failures="0"><testcase name="terminal"><skipped/></testcase></testsuite>',
+        ):
+            with self.subTest(xml=xml):
+                self.client.fs.files[REMOTE_EVIDENCE + "/results.xml"] = xml
+                self.runner.collect(sandbox, final=True)
+                self.assertEqual(self.runner.report(), 1)
+                self.assertFalse(json.loads((self.output / "orchestration.json").read_text())["reports_complete"])
+
+    def test_retained_nonreport_tampering_never_passes(self):
+        self.assertEqual(self.runner.run(self.artifacts, self.bundle, None), 0)
+        (self.output / "evidence/terminal/evidence.txt").write_text("tampered")
+        self.assertEqual(self.runner.report(), 1)
+        self.assertTrue(any("does not match final manifest" in error for error in self.state.errors))
+
+    def test_scenario_evidence_reference_requires_current_manifest_file(self):
+        sandbox = self.runner.create()
+        self.runner.launch(sandbox, None)
+        self.runner.collect(sandbox)
+        del self.client.fs.files[REMOTE_EVIDENCE + "/terminal/evidence.txt"]
+        self.assertEqual(self.runner.recover(0), 1)
+        self.assertTrue((self.output / "evidence/terminal/evidence.txt").exists())
+        self.assertTrue(any("missing installed scenario evidence" in error for error in self.state.errors))
+
+    def test_unsafe_scenario_evidence_reference_never_passes(self):
+        sandbox = self.runner.create()
+        self.runner.launch(sandbox, None)
+        path = REMOTE_EVIDENCE + "/results.json"
+        result = json.loads(self.client.fs.files[path])
+        result["scenarios"][0]["evidence"] = ["../outside"]
+        self.client.fs.files[path] = json.dumps(result).encode()
+        self.assertEqual(self.runner.recover(0), 1)
+        self.assertTrue(any("unsafe artifact path" in error for error in self.state.errors))
 
     def test_poll_deadline_retains_partial_evidence(self):
         self.client.fs.files[REMOTE_EVIDENCE + "/partial.log"] = b"partial"

@@ -103,10 +103,14 @@ class Terminal:
         end = min(self.deadline, time.monotonic() + 10)
         while time.monotonic() < end:
             self.capture()
-            dead = self.command("display-message", "-p", "#{pane_dead}:#{pane_dead_status}").strip()
+            dead = self.command("display-message", "-p", "#{pane_dead}:#{pane_dead_status}:#{pane_dead_signal}").strip()
             if dead.startswith("1:"):
-                assert dead == "1:0", f"Unclean terminal exit: {dead}"
-                return
+                # Older tmux may observe EOF before waitpid supplies status.
+                # A dead pane alone is not a completed or successful exit.
+                _, status, signal = dead.split(":", 2)
+                if status or signal:
+                    assert status == "0" and not signal, f"Unclean terminal exit: {dead}"
+                    return
             time.sleep(.1)
         raise AssertionError("Terminal failed to exit")
 
@@ -327,17 +331,17 @@ class Runner:
                 args = self.args_for(fixture, self.args.model)
                 marker = "behavior-live-" + uuid.uuid4().hex
                 project = root / "project"
-                (project / "input.txt").write_text(marker + "\n")
+                (project / "input.txt").write_text(marker)
                 output = self.process(executable, args + ["--no-session", "-p", "Reply with exactly: " + marker], env, project, evidence)
                 assert marker in output, "Live print marker absent"
                 terminal = Terminal(executable, args, env, project, evidence, self.deadline)
                 try:
                     terminal.wait("Ask Diffex")
                     event_mark = len(read_events(root / "events.jsonl"))
-                    terminal.send("Use read to read input.txt, then use write to copy its exact contents into output.txt. Do not use bash. Then reply with exactly: completed " + marker)
+                    terminal.send("input.txt contains a marker with no trailing newline. Use read to read input.txt, then use write to copy its exact contents into output.txt. Do not use bash. Then reply with exactly: completed " + marker)
                     terminal.wait("completed " + marker, seconds=120)
                     terminal.settled(root / "events.jsonl", 1, seconds=20)
-                    assert (project / "output.txt").read_text() == marker + "\n"
+                    assert (project / "output.txt").read_text() == marker, "Live output.txt did not contain the exact fixture marker bytes"
                     events = read_events(root / "events.jsonl")
                     assert {"read", "write"} <= {e.get("toolName") for e in events if e["type"] == "tool_result" and not e.get("isError")}
                     assert sum(e["type"] == "request" for e in events) <= 6

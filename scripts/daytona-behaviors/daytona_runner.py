@@ -173,6 +173,7 @@ class State:
     errors: list[str] = field(default_factory=list)
     downloaded: dict[str, str] = field(default_factory=dict)
     inputs: dict[str, str] = field(default_factory=dict)
+    evidence_manifest: dict[str, str] | None = None
 
     def save(self, output: Path) -> None:
         atomic_json(output / "state.json", asdict(self))
@@ -220,7 +221,7 @@ class Runner:
     def create(self) -> Sandbox:
         snapshot = self.client.snapshot.get(self.state.snapshot)
         self.check_resources(snapshot)
-        if str(snapshot.state) != "active":
+        if snapshot.state != "active":
             raise OrchestrationError("snapshot must already be active")
         self.state.create_attempted = True
         self.state.save(self.output)  # durable name + labels BEFORE the only create request
@@ -294,17 +295,28 @@ class Runner:
                      "nohup python3 /tmp/diffex-launch.py </dev/null "
                      f">{REMOTE_EVIDENCE}/launcher.log 2>&1 &", env=env)
 
-    def collect(self, sandbox: Sandbox) -> None:
+    def collect(self, sandbox: Sandbox, *, final: bool = False) -> None:
+        # Only a complete, quiescent final collection can qualify retained evidence.
+        self.state.evidence_manifest = None
         manifest = json.loads(self.execute(sandbox, "python3 -c " + shlex.quote(MANIFEST_SCRIPT)))
         if not isinstance(manifest, list):
             raise OrchestrationError("invalid evidence manifest")
         total = 0
         evidence = self.output / "evidence"
         evidence.mkdir(exist_ok=True)
+        manifest_hashes: dict[str, str] = {}
         for entry in manifest:
-            name = entry["path"]
+            if not isinstance(entry, dict):
+                raise OrchestrationError("invalid evidence manifest entry")
+            name, size, digest = entry.get("path"), entry.get("size"), entry.get("sha256")
+            if (not isinstance(name, str) or type(size) is not int
+                    or not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest)):
+                raise OrchestrationError("invalid evidence manifest entry")
             relative = safe_relative(name)
-            size, digest = entry["size"], entry["sha256"]
+            canonical = relative.as_posix()
+            if canonical in manifest_hashes:
+                raise OrchestrationError("duplicate evidence manifest path")
+            manifest_hashes[canonical] = digest
             total += size
             if size < 0 or size > MAX_FILE_BYTES or total > MAX_EVIDENCE_BYTES:
                 raise OrchestrationError("evidence exceeds download limits")
@@ -319,19 +331,27 @@ class Runner:
             received = 0
             try:
                 with temporary.open("wb") as stream:
-                    for chunk in sandbox.fs.download_file_stream(f"{REMOTE_EVIDENCE}/{name}", timeout=30):
-                        received += len(chunk)
-                        if received > MAX_FILE_BYTES:
-                            raise OrchestrationError("evidence grew beyond download limit")
-                        stream.write(chunk)
+                    # SDK 0.226.1 rejects an otherwise valid empty-file download.
+                    # Materialize it locally; the same size/SHA256 checks still apply.
+                    if size:
+                        for chunk in sandbox.fs.download_file_stream(f"{REMOTE_EVIDENCE}/{name}", timeout=30):
+                            received += len(chunk)
+                            if received > MAX_FILE_BYTES:
+                                raise OrchestrationError("evidence grew beyond download limit")
+                            stream.write(chunk)
                 if received != size or sha256(temporary) != digest:
-                    # A log may change while downloading. Keep the previous complete copy.
+                    # Polling tolerates evolving logs, but final evidence must be complete.
+                    if final:
+                        raise OrchestrationError("final evidence checksum or size mismatch")
                     continue
                 temporary.replace(target)
                 self.state.downloaded[name] = digest
                 self.state.save(self.output)
             finally:
                 temporary.unlink(missing_ok=True)
+        if final:
+            self.state.evidence_manifest = manifest_hashes
+            self.state.save(self.output)
 
     def poll(self, sandbox: Sandbox, deadline: float) -> None:
         while True:
@@ -399,18 +419,76 @@ class Runner:
             if attempt + 1 < attempts:
                 time.sleep(self.poll_seconds)
 
+    def validate_reports(self, installed: dict[str, object]) -> None:
+        evidence = self.output / "evidence"
+        manifest = self.state.evidence_manifest
+        if manifest is None or not {"results.json", "results.xml", ".orchestration-exit.json"} <= manifest.keys():
+            raise OrchestrationError("missing complete final evidence manifest")
+        for name, digest in manifest.items():
+            target = evidence.joinpath(*safe_relative(name).parts)
+            if (any(path.is_symlink() for path in [target, *target.parents])
+                    or not target.is_file() or sha256(target) != digest):
+                raise OrchestrationError("retained evidence does not match final manifest")
+        hashes, scenarios = installed.get("artifactHashes"), installed.get("scenarios")
+        if (installed.get("schemaVersion") != 1 or installed.get("commit") != self.state.commit
+                or installed.get("mode") != self.state.mode
+                or installed.get("outcome") not in ("passed", "failed")
+                or not isinstance(hashes, dict) or not hashes
+                or not all(isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value)
+                           for value in hashes.values())
+                or not isinstance(scenarios, list) or not scenarios):
+            raise OrchestrationError("invalid installed report identity or inventory")
+        scenario_outcomes: dict[str, str] = {}
+        for scenario in scenarios:
+            if not isinstance(scenario, dict):
+                raise OrchestrationError("invalid installed scenario")
+            identity, outcome, references = scenario.get("id"), scenario.get("outcome"), scenario.get("evidence")
+            if (not isinstance(identity, str) or not identity or identity in scenario_outcomes
+                    or outcome not in ("passed", "failed") or scenario.get("commit") != self.state.commit
+                    or scenario.get("artifactHashes") != hashes
+                    or not isinstance(references, list) or not references):
+                raise OrchestrationError("invalid installed scenario identity or evidence references")
+            scenario_outcomes[identity] = outcome
+            for reference in references:
+                if not isinstance(reference, str):
+                    raise OrchestrationError("invalid installed evidence reference")
+                relative = safe_relative(reference)
+                prefix = relative.as_posix()
+                target = evidence.joinpath(*relative.parts)
+                if (any(path.is_symlink() for path in [target, *target.parents])
+                        or not target.exists() or not any(
+                            name == prefix or (target.is_dir() and name.startswith(prefix + "/"))
+                            for name in manifest)):
+                    raise OrchestrationError("missing installed scenario evidence")
+        expected_outcome = "passed" if all(value == "passed" for value in scenario_outcomes.values()) else "failed"
+        if installed["outcome"] != expected_outcome:
+            raise OrchestrationError("installed report outcome disagrees with scenarios")
+        suite = ET.parse(evidence / "results.xml").getroot()
+        cases = suite.findall("testcase")
+        failures = sum(value != "passed" for value in scenario_outcomes.values())
+        if (suite.tag != "testsuite" or int(suite.get("tests", "-1")) != len(scenario_outcomes)
+                or int(suite.get("failures", "-1")) != failures or int(suite.get("errors", "0")) != 0
+                or int(suite.get("skipped", "0")) != 0 or len(cases) != len(scenario_outcomes)
+                or {case.get("name") for case in cases} != scenario_outcomes.keys()):
+            raise OrchestrationError("installed JUnit inventory disagrees with JSON report")
+        for case in cases:
+            expected_failures = int(scenario_outcomes[case.get("name")] != "passed")
+            if (len(case.findall("failure")) != expected_failures or case.find("error") is not None
+                    or case.find("skipped") is not None):
+                raise OrchestrationError("installed JUnit outcome disagrees with JSON report")
+
     def report(self) -> int:
-        results_path = self.output / "evidence" / "results.json"
         installed: dict[str, object] = {}
+        reports_complete = False
         try:
-            if results_path.exists():
-                installed = json.loads(results_path.read_text())
-        except (ValueError, OSError):
-            self.state.errors.append("report: invalid installed results.json")
-        reports_complete = (
-            results_path.is_file() and (self.output / "evidence" / "results.xml").is_file()
-            and installed.get("outcome") in ("passed", "failed")
-        )
+            value = json.loads((self.output / "evidence" / "results.json").read_text())
+            if not isinstance(value, dict):
+                raise OrchestrationError("invalid installed results.json")
+            installed = value
+            self.validate_reports(installed)
+            reports_complete = True
+        except (OrchestrationError, ValueError, OSError, TypeError, KeyError, ET.ParseError) as error:
+            self.state.error("report", error)
         success = (self.state.execution == "passed" and self.state.exit_code == 0
                    and installed.get("outcome") == "passed" and reports_complete
                    and self.state.cleanup in ("confirmed", "not-needed"))
@@ -421,7 +499,8 @@ class Runner:
                   "exit_code": self.state.exit_code, "installed_outcome": installed.get("outcome"),
                   "reports_complete": reports_complete, "cleanup": self.state.cleanup,
                   "duration_seconds": max(0, time.time() - self.state.created_at),
-                  "artifact_hashes": self.state.downloaded, "errors": self.state.errors}
+                  "artifact_hashes": self.state.downloaded, "evidence_manifest": self.state.evidence_manifest,
+                  "errors": self.state.errors}
         atomic_json(self.output / "orchestration.json", report)
         suite = ET.Element("testsuite", name="daytona-orchestration", tests="3", failures=str(sum((
             self.state.execution != "passed", not reports_complete or installed.get("outcome") != "passed",
@@ -450,7 +529,7 @@ class Runner:
         finally:
             if self.state.launch_attempted:
                 try:
-                    self.collect(self.lookup())
+                    self.collect(self.lookup(), final=True)
                 except Exception as error:
                     self.state.error("final-evidence", error)
             try:
@@ -472,6 +551,11 @@ class Runner:
         except Exception as error:
             self.state.error("recover-evidence", error)
         finally:
+            if self.state.launch_attempted and self.state.cleanup != "confirmed":
+                try:
+                    self.collect(self.lookup(), final=True)
+                except Exception as error:
+                    self.state.error("recover-final-evidence", error)
             try:
                 self.cleanup()
             except Exception as error:

@@ -101,6 +101,27 @@ class InstalledTests(unittest.TestCase):
             self.assertNotIn(env["OPENAI_API_KEY"], str(commands))
             self.assertEqual((evidence / "terminal.txt").read_text(), "[REDACTED]")
 
+    def test_terminal_waits_for_exit_status_after_dead_pane(self):
+        terminal = object.__new__(installed.Terminal)
+        terminal.deadline = float("inf")
+        statuses = iter(["1::", "1:0:"])
+        terminal.send = lambda text: None
+        terminal.capture = lambda: ""
+        terminal.command = lambda *args: next(statuses)
+        with patch.object(installed.time, "sleep"):
+            terminal.exit()
+
+    def test_terminal_rejects_nonzero_and_signaled_exit(self):
+        for status in ("1:7:", "1::TERM"):
+            with self.subTest(status=status):
+                terminal = object.__new__(installed.Terminal)
+                terminal.deadline = float("inf")
+                terminal.send = lambda text: None
+                terminal.capture = lambda: ""
+                terminal.command = lambda *args: status
+                with self.assertRaisesRegex(AssertionError, "Unclean terminal exit"):
+                    terminal.exit()
+
     def test_empty_results_cannot_pass(self):
         with tempfile.TemporaryDirectory() as temporary:
             runner = self.runner(temporary)
