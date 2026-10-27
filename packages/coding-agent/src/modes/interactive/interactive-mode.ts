@@ -316,7 +316,6 @@ type LoginProviderCompletionOption = {
 const AUTH_TYPE_ORDER = { oauth: 0, api_key: 1 } satisfies Record<AuthSelectorProvider["authType"], number>;
 const DIFFEX_ACCOUNT_LOGIN_ID = "diffex";
 const DIFFEX_ACCOUNT_SELECTOR_ID = "diffex-account";
-const DIFFEX_ACCOUNT_LOGIN_LABEL = "Sign in to Diffex";
 
 function createFuzzyAutocompleteItems<T>(
 	items: T[],
@@ -6238,7 +6237,7 @@ export class InteractiveMode {
 		const availableAuthTypes = providerOptions
 			? new Set(providerOptions.map((provider) => provider.authType))
 			: new Set<AuthSelectorProvider["authType"]>(["oauth", "api_key"]);
-		const options: string[] = providerOptions ? [] : [DIFFEX_ACCOUNT_LOGIN_LABEL];
+		const options: string[] = [];
 		if (availableAuthTypes.has("oauth")) {
 			options.push(subscriptionLabel);
 		}
@@ -6268,10 +6267,6 @@ export class InteractiveMode {
 				options,
 				(option) => {
 					done();
-					if (option === DIFFEX_ACCOUNT_LOGIN_LABEL) {
-						void this.showDiffexAccountLoginDialog();
-						return;
-					}
 					const authType = option === subscriptionLabel ? "oauth" : "api_key";
 					if (providerOptions) {
 						const providerOption = providerOptions.find((provider) => provider.authType === authType);
