@@ -1,29 +1,15 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { catalogFixture } from "./fixtures/model-catalog.mjs";
 import { publishCatalog, validateBundle } from "./publish-model-catalog.mjs";
 import { publicationAllowed } from "./model-publication-window.mjs";
 
 const source = "a".repeat(40);
 const indexKey = "models/v1/index.json";
-
-export function catalogFixture(root) {
-	mkdirSync(join(root, "providers"), { recursive: true });
-	const models = Object.fromEntries(["anthropic", "openai", "openrouter"].map((provider) => [provider,
-		Object.fromEntries(Array.from({ length: 170 }, (_, i) => [`model-${i}`, {
-			id: `model-${i}`, name: `Model ${i}`, api: "openai-completions", provider,
-			baseUrl: "https://example.test/v1", reasoning: false, input: ["text"],
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 4096, maxTokens: 1000,
-		}]))]));
-	writeFileSync(join(root, "models.json"), JSON.stringify(models));
-	writeFileSync(join(root, "providers.json"), JSON.stringify(Object.keys(models)));
-	writeFileSync(join(root, "generation.json"), JSON.stringify({ generatedAt: "2026-10-26T10:00:00.000Z", sourceCommit: source }));
-	for (const [id, shard] of Object.entries(models)) writeFileSync(join(root, "providers", `${id}.json`), JSON.stringify(shard));
-	return models;
-}
 
 function setup(t) {
 	const root = mkdtempSync(join(tmpdir(), "diffex-publish-test-"));
@@ -67,6 +53,21 @@ test("interrupted uploads leave the index untouched and can be resumed", (t) => 
 	store.put = put;
 	publishCatalog(root, store, source);
 	assert.ok(objects.has(indexKey));
+});
+
+test("preserves other compatibility tiers when advancing the current floor", (t) => {
+	const { root, store } = setup(t);
+	publishCatalog(root, store, source);
+	const previous = store.get(indexKey);
+	const index = JSON.parse(previous.bytes);
+	const older = { ...index.catalogs[0], minimumDiffexVersion: "0.3.2", revision: `sha256-${"b".repeat(64)}` };
+	index.catalogs.unshift(older);
+	assert.equal(store.put(indexKey, Buffer.from(JSON.stringify(index)), previous.etag), true);
+	const published = publishCatalog(root, store, source);
+	const next = JSON.parse(store.get(indexKey).bytes);
+	assert.deepEqual(next.catalogs[0], older);
+	assert.equal(next.catalogs.length, 2);
+	assert.equal(next.defaultRevision, published.revision);
 });
 
 test("rejects conflicting revision bytes and conditional index conflicts", (t) => {

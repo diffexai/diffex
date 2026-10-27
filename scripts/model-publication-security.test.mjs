@@ -46,6 +46,7 @@ test("publication accepts only main for scheduled and manual runs", () => {
 });
 
 test("binds artifact and publishing code to one SHA and serializes uploads without cancellation", () => {
+	assert.equal(workflow.jobs.generate.env.SOURCE_REF, "${{ github.event.workflow_run.head_sha || inputs.source_ref || github.sha }}");
 	assert.equal(workflow.jobs.publish.env.SOURCE_REF, "${{ needs.generate.outputs.source_sha }}");
 	assert.equal(workflow.jobs.publish.concurrency["cancel-in-progress"], false);
 	assert.match(workflow.jobs.publish.environment, /diffex-model-upload-staging/);
