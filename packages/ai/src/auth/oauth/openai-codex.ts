@@ -1,544 +1,305 @@
-/**
- * OpenAI Codex (ChatGPT OAuth) flow
- *
- * NOTE: This module uses Node.js crypto and http for the OAuth callback.
- * It is only intended for CLI use, not browser environments.
- */
-
-// NEVER convert to top-level imports - breaks browser/Vite builds
-let _randomBytes: typeof import("node:crypto").randomBytes | null = null;
-let _http: typeof import("node:http") | null = null;
-if (typeof process !== "undefined" && (process.versions?.node || process.versions?.bun)) {
-	import("node:crypto").then((m) => {
-		_randomBytes = m.randomBytes;
-	});
-	import("node:http").then((m) => {
-		_http = m;
-	});
-}
-
-import { getProviderEnvValue } from "../../utils/provider-env.ts";
+import { randomBytes } from "node:crypto";
+import { createServer } from "node:http";
+import { setTimeout as sleep } from "node:timers/promises";
+import { createRemoteJWKSet, customFetch, jwtVerify } from "jose";
 import type { OAuthAuth, OAuthCredential, ProviderAuthInteraction } from "../types.ts";
-import { pollOAuthDeviceCodeFlow } from "./device-code.ts";
+import { type ChatGPTRegistration, ChatGPTRegistrationStore } from "./chatgpt-registration.ts";
 import { oauthErrorHtml, oauthSuccessHtml } from "./oauth-page.ts";
 import { generatePKCE } from "./pkce.ts";
 
-const CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
-const AUTH_BASE_URL = "https://auth.openai.com";
-const AUTHORIZE_URL = `${AUTH_BASE_URL}/oauth/authorize`;
-const TOKEN_URL = `${AUTH_BASE_URL}/oauth/token`;
-const REDIRECT_URI = "http://localhost:1455/auth/callback";
-const DEVICE_USER_CODE_URL = `${AUTH_BASE_URL}/api/accounts/deviceauth/usercode`;
-const DEVICE_TOKEN_URL = `${AUTH_BASE_URL}/api/accounts/deviceauth/token`;
-const DEVICE_VERIFICATION_URI = `${AUTH_BASE_URL}/codex/device`;
-const DEVICE_REDIRECT_URI = `${AUTH_BASE_URL}/deviceauth/callback`;
-const DEVICE_CODE_TIMEOUT_SECONDS = 15 * 60;
-const OPENAI_CODEX_BROWSER_LOGIN_METHOD = "browser";
-const OPENAI_CODEX_DEVICE_CODE_LOGIN_METHOD = "device_code";
-const SCOPE = "openid profile email offline_access";
-const JWT_CLAIM_PATH = "https://api.openai.com/auth";
+const ISSUER = "https://auth.openai.com";
+const TOKEN_URL = `${ISSUER}/api/accounts/oauth/token`;
+const RESOURCE = "https://api.openai.com/v1";
+const SCOPE = "openid profile email offline_access resource.invoke chatgpt.tokens.use.direct";
+const PLAN_SCOPE = "chatgpt.tokens.use.direct";
 
-type OAuthToken = { access: string; refresh: string; expires: number };
-type TokenOperation = "exchange" | "refresh";
-
-function getCallbackHost(): string {
-	return getProviderEnvValue("DIFFEX_OAUTH_CALLBACK_HOST") || "127.0.0.1";
-}
-
-type DeviceAuthInfo = {
-	deviceAuthId: string;
-	userCode: string;
-	intervalSeconds: number;
-};
-
-type DeviceTokenSuccess = {
-	authorizationCode: string;
-	codeVerifier: string;
-};
-
-type JwtPayload = {
-	[JWT_CLAIM_PATH]?: {
-		chatgpt_account_id?: string;
-	};
-	[key: string]: unknown;
-};
-
-function createState(): string {
-	if (!_randomBytes) {
-		throw new Error("OpenAI Codex OAuth is only available in Node.js environments");
-	}
-	return _randomBytes(16).toString("hex");
-}
-
-function parseAuthorizationInput(input: string): { code?: string; state?: string } {
-	const value = input.trim();
-	if (!value) return {};
-
-	try {
-		const url = new URL(value);
-		return {
-			code: url.searchParams.get("code") ?? undefined,
-			state: url.searchParams.get("state") ?? undefined,
-		};
-	} catch {
-		// not a URL
-	}
-
-	if (value.includes("#")) {
-		const [code, state] = value.split("#", 2);
-		return { code, state };
-	}
-
-	if (value.includes("code=")) {
-		const params = new URLSearchParams(value);
-		return {
-			code: params.get("code") ?? undefined,
-			state: params.get("state") ?? undefined,
-		};
-	}
-
-	return { code: value };
-}
-
-function decodeJwt(token: string): JwtPayload | null {
-	try {
-		const parts = token.split(".");
-		if (parts.length !== 3) return null;
-		const payload = parts[1] ?? "";
-		const decoded = atob(payload);
-		return JSON.parse(decoded) as JwtPayload;
-	} catch {
-		return null;
-	}
-}
-
-async function fetchWithLoginCancellation(input: string, init: RequestInit): Promise<Response> {
-	try {
-		return await fetch(input, init);
-	} catch (error) {
-		if (init.signal?.aborted) {
-			throw new Error("Login cancelled");
-		}
-		throw error;
-	}
-}
-
-async function readTokenResponse(response: Response, operation: TokenOperation): Promise<OAuthToken> {
-	if (!response.ok) {
-		const text = await response.text().catch(() => "");
-		throw new Error(`OpenAI Codex token ${operation} failed (${response.status}): ${text || response.statusText}`);
-	}
-
-	const rawJson = await response.json();
-	const json = rawJson as {
-		access_token?: string;
-		refresh_token?: string;
-		expires_in?: number;
-	} | null;
-	if (!json?.access_token || !json.refresh_token || typeof json.expires_in !== "number") {
-		throw new Error(`OpenAI Codex token ${operation} response missing fields: ${JSON.stringify(json)}`);
-	}
-
-	return {
-		access: json.access_token,
-		refresh: json.refresh_token,
-		expires: Date.now() + json.expires_in * 1000,
-	};
-}
-
-async function exchangeAuthorizationCode(
-	code: string,
-	verifier: string,
-	redirectUri: string,
+async function tokenCredentials(
+	response: Response,
+	clientId: string,
+	hostId: string,
 	signal: AbortSignal,
-): Promise<OAuthToken> {
-	const response = await fetchWithLoginCancellation(TOKEN_URL, {
-		method: "POST",
-		headers: { "Content-Type": "application/x-www-form-urlencoded" },
-		body: new URLSearchParams({
-			grant_type: "authorization_code",
-			client_id: CLIENT_ID,
-			code,
-			code_verifier: verifier,
-			redirect_uri: redirectUri,
-		}),
-		signal,
-	});
-
-	return readTokenResponse(response, "exchange");
-}
-
-async function refreshAccessToken(refreshToken: string, signal: AbortSignal): Promise<OAuthToken> {
-	let response: Response;
-	try {
-		response = await fetch(TOKEN_URL, {
-			method: "POST",
-			headers: { "Content-Type": "application/x-www-form-urlencoded" },
-			body: new URLSearchParams({
-				grant_type: "refresh_token",
-				refresh_token: refreshToken,
-				client_id: CLIENT_ID,
-			}),
-			signal,
-		});
-	} catch (error) {
-		throw new Error(`OpenAI Codex token refresh error: ${error instanceof Error ? error.message : String(error)}`);
-	}
-
-	return readTokenResponse(response, "refresh");
-}
-
-async function startOpenAICodexDeviceAuth(signal: AbortSignal): Promise<DeviceAuthInfo> {
-	const response = await fetchWithLoginCancellation(DEVICE_USER_CODE_URL, {
-		method: "POST",
-		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify({ client_id: CLIENT_ID }),
-		signal,
-	});
-
-	if (!response.ok) {
-		if (response.status === 404) {
-			throw new Error(
-				"OpenAI Codex device code login is not enabled for this server. Use browser login or verify the server URL.",
-			);
-		}
-		const responseBody = await response.text().catch(() => "");
-		throw new Error(
-			`OpenAI Codex device code request failed with status ${response.status}${responseBody ? `: ${responseBody}` : ""}`,
-		);
-	}
-
-	const rawJson = await response.json();
-	const json = rawJson as {
-		device_auth_id?: string;
-		user_code?: string;
-		interval?: number | string;
-	} | null;
-	const intervalSeconds = typeof json?.interval === "string" ? Number(json.interval.trim()) : json?.interval;
+	options: { nonce?: string; previous?: OAuthCredential; registration?: ChatGPTRegistration },
+): Promise<OAuthCredential> {
+	if (!response.ok) throw new Error(`ChatGPT token request failed (${response.status}). Sign in again with /login.`);
+	const json = (await response.json()) as Record<string, unknown>;
 	if (
-		!json?.device_auth_id ||
-		!json.user_code ||
-		typeof intervalSeconds !== "number" ||
-		!Number.isFinite(intervalSeconds) ||
-		intervalSeconds < 0
+		typeof json.access_token !== "string" ||
+		!json.access_token ||
+		((typeof json.refresh_token !== "string" || !json.refresh_token) && !options.previous?.refresh) ||
+		typeof json.expires_in !== "number" ||
+		!Number.isFinite(json.expires_in) ||
+		json.expires_in <= 0 ||
+		typeof json.token_type !== "string" ||
+		json.token_type.toLowerCase() !== "bearer"
 	) {
-		throw new Error(`Invalid OpenAI Codex device code response: ${JSON.stringify(json)}`);
+		throw new Error("Invalid ChatGPT token response");
 	}
-
-	return {
-		deviceAuthId: json.device_auth_id,
-		userCode: json.user_code,
-		intervalSeconds,
-	};
-}
-
-async function pollOpenAICodexDeviceAuth(device: DeviceAuthInfo, signal: AbortSignal): Promise<DeviceTokenSuccess> {
-	return pollOAuthDeviceCodeFlow<DeviceTokenSuccess>({
-		intervalSeconds: device.intervalSeconds,
-		expiresInSeconds: DEVICE_CODE_TIMEOUT_SECONDS,
-		signal,
-		poll: async () => {
-			const response = await fetchWithLoginCancellation(DEVICE_TOKEN_URL, {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({
-					device_auth_id: device.deviceAuthId,
-					user_code: device.userCode,
-				}),
-				signal,
-			});
-
-			if (response.ok) {
-				const rawJson = await response.json();
-				const json = rawJson as { authorization_code?: string; code_verifier?: string } | null;
-				if (!json?.authorization_code || !json.code_verifier) {
-					return {
-						status: "failed",
-						message: `Invalid OpenAI Codex device auth token response: ${JSON.stringify(json)}`,
-					};
-				}
-				return {
-					status: "complete",
-					value: { authorizationCode: json.authorization_code, codeVerifier: json.code_verifier },
-				};
-			}
-
-			if (response.status === 403 || response.status === 404) {
-				return { status: "pending" };
-			}
-
-			const responseBody = await response.text().catch(() => "");
-			let errorCode: unknown;
-			try {
-				const json = JSON.parse(responseBody) as { error?: string | { code?: string } } | null;
-				const error = json?.error;
-				errorCode = typeof error === "object" ? error?.code : error;
-			} catch {}
-
-			if (errorCode === "deviceauth_authorization_pending") {
-				return { status: "pending" };
-			}
-			if (errorCode === "slow_down") {
-				return { status: "slow_down" };
-			}
-
-			return {
-				status: "failed",
-				message: `OpenAI Codex device auth failed with status ${response.status}${responseBody ? `: ${responseBody}` : ""}`,
-			};
-		},
-	});
-}
-
-async function createAuthorizationFlow(
-	originator: string = "diffex",
-): Promise<{ verifier: string; state: string; url: string }> {
-	const { verifier, challenge } = await generatePKCE();
-	const state = createState();
-
-	const url = new URL(AUTHORIZE_URL);
-	url.searchParams.set("response_type", "code");
-	url.searchParams.set("client_id", CLIENT_ID);
-	url.searchParams.set("redirect_uri", REDIRECT_URI);
-	url.searchParams.set("scope", SCOPE);
-	url.searchParams.set("code_challenge", challenge);
-	url.searchParams.set("code_challenge_method", "S256");
-	url.searchParams.set("state", state);
-	url.searchParams.set("id_token_add_organizations", "true");
-	url.searchParams.set("codex_cli_simplified_flow", "true");
-	url.searchParams.set("originator", originator);
-
-	return { verifier, state, url: url.toString() };
-}
-
-type OAuthServerInfo = {
-	close: () => void;
-	cancelWait: () => void;
-	waitForCode: () => Promise<{ code: string } | null>;
-};
-
-function startLocalOAuthServer(state: string): Promise<OAuthServerInfo> {
-	if (!_http) {
-		throw new Error("OpenAI Codex OAuth is only available in Node.js environments");
+	const scopes = typeof json.scope === "string" ? json.scope.split(/\s+/).filter(Boolean) : options.previous?.scopes;
+	if (!Array.isArray(scopes) || !scopes.includes(PLAN_SCOPE) || !scopes.includes("resource.invoke")) {
+		throw new Error("ChatGPT plan usage was not authorized. Run /login to authorize it.");
 	}
-
-	let settleWait: ((value: { code: string } | null) => void) | undefined;
-	const waitForCodePromise = new Promise<{ code: string } | null>((resolve) => {
-		let settled = false;
-		settleWait = (value) => {
-			if (settled) return;
-			settled = true;
-			resolve(value);
-		};
-	});
-
-	const server = _http.createServer((req, res) => {
-		try {
-			const url = new URL(req.url || "", "http://localhost");
-			if (url.pathname !== "/auth/callback") {
-				res.statusCode = 404;
-				res.setHeader("Content-Type", "text/html; charset=utf-8");
-				res.end(oauthErrorHtml("Callback route not found."));
-				return;
-			}
-			if (url.searchParams.get("state") !== state) {
-				res.statusCode = 400;
-				res.setHeader("Content-Type", "text/html; charset=utf-8");
-				res.end(oauthErrorHtml("State mismatch."));
-				return;
-			}
-			const code = url.searchParams.get("code");
-			if (!code) {
-				res.statusCode = 400;
-				res.setHeader("Content-Type", "text/html; charset=utf-8");
-				res.end(oauthErrorHtml("Missing authorization code."));
-				return;
-			}
-			res.statusCode = 200;
-			res.setHeader("Content-Type", "text/html; charset=utf-8");
-			res.end(oauthSuccessHtml());
-			settleWait?.({ code });
-		} catch {
-			res.statusCode = 500;
-			res.setHeader("Content-Type", "text/html; charset=utf-8");
-			res.end(oauthErrorHtml("Internal error while processing OAuth callback."));
-		}
-	});
-
-	return new Promise((resolve) => {
-		server
-			.listen(1455, getCallbackHost(), () => {
-				resolve({
-					close: () => server.close(),
-					cancelWait: () => {
-						settleWait?.(null);
-					},
-					waitForCode: () => waitForCodePromise,
-				});
-			})
-			.on("error", (_err: NodeJS.ErrnoException) => {
-				settleWait?.(null);
-				resolve({
-					close: () => {
-						try {
-							server.close();
-						} catch {
-							// ignore
-						}
-					},
-					cancelWait: () => {},
-					waitForCode: async () => null,
-				});
-			});
-	});
-}
-
-function getAccountId(accessToken: string): string | null {
-	const payload = decodeJwt(accessToken);
-	const auth = payload?.[JWT_CLAIM_PATH];
-	const accountId = auth?.chatgpt_account_id;
-	return typeof accountId === "string" && accountId.length > 0 ? accountId : null;
-}
-
-function credentialsFromToken(token: OAuthToken): OAuthCredential {
-	const accountId = getAccountId(token.access);
-	if (!accountId) {
-		throw new Error("Failed to extract accountId from token");
-	}
-
+	let subject = options.previous?.subject;
+	let email = options.previous?.email;
+	let idToken = options.previous?.idToken;
+	if (typeof json.id_token === "string") {
+		const jwks = createRemoteJWKSet(new URL(`${ISSUER}/.well-known/jwks.json`), {
+			[customFetch]: (url, init) => fetch(url, { ...init, signal: AbortSignal.any([signal, init.signal]) }),
+		});
+		const { payload } = await jwtVerify(json.id_token, jwks, {
+			issuer: ISSUER,
+			audience: clientId,
+			algorithms: ["RS256", "ES256"],
+			requiredClaims: ["sub", "exp", "iat", ...(options.nonce ? ["nonce"] : [])],
+			clockTolerance: 5,
+		});
+		if (options.nonce && payload.nonce !== options.nonce) throw new Error("ChatGPT ID token nonce mismatch");
+		if (!payload.sub || (payload.azp !== undefined && payload.azp !== clientId))
+			throw new Error("Invalid ChatGPT ID token identity");
+		const expectedSubject = options.registration?.subject ?? options.previous?.subject;
+		if (expectedSubject && payload.sub !== expectedSubject) throw new Error("ChatGPT account identity changed");
+		subject = payload.sub;
+		email = typeof payload.email === "string" ? payload.email : undefined;
+		idToken = json.id_token;
+	} else if (options.nonce) throw new Error("ChatGPT sign-in response is missing an ID token");
+	signal.throwIfAborted();
+	if (typeof subject !== "string" || !subject) throw new Error("Missing validated ChatGPT identity. Run /login.");
 	return {
 		type: "oauth",
-		access: token.access,
-		refresh: token.refresh,
-		expires: token.expires,
-		accountId,
+		access: json.access_token,
+		refresh:
+			typeof json.refresh_token === "string" && json.refresh_token
+				? json.refresh_token
+				: (options.previous?.refresh ?? ""),
+		expires: Date.now() + json.expires_in * 1000,
+		clientId,
+		extAgentHostId: hostId,
+		issuer: ISSUER,
+		subject,
+		email,
+		idToken,
+		scopes,
 	};
 }
 
-async function exchangeAuthorizationCodeForCredentials(
-	code: string,
-	verifier: string,
-	redirectUri: string,
-	signal: AbortSignal,
-): Promise<OAuthCredential> {
-	return credentialsFromToken(await exchangeAuthorizationCode(code, verifier, redirectUri, signal));
+function requireRegistration(credential: OAuthCredential): { clientId: string; hostId: string } {
+	if (
+		typeof credential.clientId !== "string" ||
+		!/^oaiapp_[\w-]+$/.test(credential.clientId) ||
+		typeof credential.extAgentHostId !== "string" ||
+		typeof credential.subject !== "string"
+	) {
+		throw new Error("ChatGPT registration is missing. Run /login to register Diffex.");
+	}
+	return { clientId: credential.clientId, hostId: credential.extAgentHostId };
 }
 
-async function loginOpenAICodexDeviceCode(interaction: ProviderAuthInteraction): Promise<OAuthCredential> {
-	const device = await startOpenAICodexDeviceAuth(interaction.signal);
-	interaction.notify({
-		type: "device_code",
-		userCode: device.userCode,
-		verificationUri: DEVICE_VERIFICATION_URI,
-		intervalSeconds: device.intervalSeconds,
-		expiresInSeconds: DEVICE_CODE_TIMEOUT_SECONDS,
+async function login(interaction: ProviderAuthInteraction): Promise<OAuthCredential> {
+	interaction.signal.throwIfAborted();
+	const store = new ChatGPTRegistrationStore();
+	const hostId = store.hostId();
+	const registrations = store.list();
+	let registration: ChatGPTRegistration | undefined;
+	if (registrations.length) {
+		const selected = await interaction.prompt({
+			type: "select",
+			message: "Continue with ChatGPT",
+			options: [
+				...registrations.map((entry) => ({
+					id: entry.clientId,
+					label: `${entry.email ?? entry.subject ?? "Complete registration"} (${entry.clientId})`,
+				})),
+				{ id: "new", label: "Add a ChatGPT account or workspace" },
+			],
+		});
+		registration = registrations.find((entry) => entry.clientId === selected);
+		if (!registration && selected !== "new") throw new Error("Unknown ChatGPT registration");
+	}
+	const signal = AbortSignal.any([interaction.signal, AbortSignal.timeout(10 * 60 * 1000)]);
+	signal.throwIfAborted();
+	const state = randomBytes(32).toString("base64url");
+	const nonce = randomBytes(32).toString("base64url");
+	const { verifier, challenge } = await generatePKCE();
+	let accept: (url: URL) => void = () => {};
+	const callback = new Promise<URL>((resolve) => {
+		accept = resolve;
 	});
-	const code = await pollOpenAICodexDeviceAuth(device, interaction.signal);
-	return exchangeAuthorizationCodeForCredentials(
-		code.authorizationCode,
-		code.codeVerifier,
-		DEVICE_REDIRECT_URI,
-		interaction.signal,
-	);
-}
-
-async function loginOpenAICodex(interaction: ProviderAuthInteraction): Promise<OAuthCredential> {
-	const { verifier, state, url } = await createAuthorizationFlow();
-	const server = await startLocalOAuthServer(state);
-	const manualAbort = new AbortController();
-	const onAbort = () => server.cancelWait();
-	interaction.signal.addEventListener("abort", onAbort, { once: true });
-	if (interaction.signal.aborted) onAbort();
-	let code: string | undefined;
-	let manualCode: string | undefined;
-	let manualError: Error | undefined;
-
-	interaction.notify({
-		type: "auth_url",
-		url,
-		instructions: "A browser window should open. Complete login to finish.",
+	let consumed = false;
+	const server = createServer((req, res) => {
+		const url = new URL(req.url ?? "", "http://127.0.0.1");
+		res.setHeader("Content-Type", "text/html; charset=utf-8");
+		res.setHeader("Cache-Control", "no-store");
+		if (req.method !== "GET" || url.pathname !== "/auth/callback") {
+			res.writeHead(404).end(oauthErrorHtml("Callback route not found."));
+		} else if (consumed || url.searchParams.get("state") !== state) {
+			res.writeHead(400).end(oauthErrorHtml("State mismatch or sign-in already completed."));
+		} else if (!url.searchParams.has("code") && !url.searchParams.has("error")) {
+			res.writeHead(400).end(oauthErrorHtml("Missing authorization code."));
+		} else {
+			consumed = true;
+			res.end(url.searchParams.has("error") ? oauthErrorHtml("Sign-in was declined.") : oauthSuccessHtml());
+			accept(url);
+		}
 	});
-
+	const promptController = new AbortController();
+	let onAbort: (() => void) | undefined;
 	try {
-		const manualPromise = interaction
+		await new Promise<void>((resolve, reject) => {
+			server.once("error", reject);
+			server.listen(0, "127.0.0.1", () => {
+				server.removeListener("error", reject);
+				resolve();
+			});
+		});
+		const address = server.address();
+		if (!address || typeof address === "string") throw new Error("ChatGPT callback listener unavailable");
+		const redirectUri = `http://127.0.0.1:${address.port}/auth/callback`;
+		const authorize = new URL(`${ISSUER}/api/accounts/authorize`);
+		authorize.search = new URLSearchParams({
+			client_id: registration?.clientId ?? "dynamic_agent_client",
+			ext_agent_host_id: hostId,
+			response_type: "code",
+			redirect_uri: redirectUri,
+			scope: SCOPE,
+			resource: RESOURCE,
+			state,
+			nonce,
+			code_challenge_method: "S256",
+			code_challenge: challenge,
+		}).toString();
+		if (!registration) authorize.searchParams.set("agent_name_hint", "Diffex");
+		if (registration?.idToken) authorize.searchParams.set("id_token_hint", registration.idToken);
+		if (registration?.email) authorize.searchParams.set("login_hint", registration.email);
+		interaction.notify({
+			type: "auth_url",
+			url: authorize.toString(),
+			instructions: "Continue with ChatGPT in your browser.",
+		});
+		const manual = interaction
 			.prompt({
 				type: "manual_code",
-				message: "Complete login in your browser, or paste the authorization code / redirect URL here:",
-				placeholder: REDIRECT_URI,
-				signal: manualAbort.signal,
+				message: "Complete sign-in in your browser, or paste the full redirect URL:",
+				placeholder: redirectUri,
+				signal: promptController.signal,
 			})
 			.then((input) => {
-				manualCode = input;
-				server.cancelWait();
-			})
-			.catch((error) => {
-				manualError = error instanceof Error ? error : new Error(String(error));
-				server.cancelWait();
+				const url = new URL(input.trim());
+				if (`${url.origin}${url.pathname}` !== redirectUri) throw new Error("ChatGPT redirect URI mismatch");
+				return url;
 			});
-
-		const result = await server.waitForCode();
-		if (manualError) throw manualError;
-		if (result?.code) {
-			code = result.code;
-		} else if (manualCode) {
-			const parsed = parseAuthorizationInput(manualCode);
-			if (parsed.state && parsed.state !== state) throw new Error("State mismatch");
-			code = parsed.code;
+		const cancelled = new Promise<never>((_, reject) => {
+			onAbort = () => reject(new Error("ChatGPT sign-in cancelled or timed out"));
+			signal.addEventListener("abort", onAbort, { once: true });
+			if (signal.aborted) onAbort();
+		});
+		const url = await Promise.race([callback, manual, cancelled]);
+		consumed = true;
+		if (url.searchParams.getAll("state").length !== 1 || url.searchParams.get("state") !== state)
+			throw new Error("ChatGPT state mismatch");
+		if (url.searchParams.has("error")) throw new Error("ChatGPT sign-in was declined. Run /login to try again.");
+		const code = url.searchParams.get("code");
+		const clientId = url.searchParams.get("client_id") ?? registration?.clientId;
+		if (
+			!code ||
+			url.searchParams.getAll("code").length !== 1 ||
+			!clientId ||
+			!/^oaiapp_[\w-]+$/.test(clientId) ||
+			url.searchParams.getAll("client_id").length > 1 ||
+			(registration && registration.clientId !== clientId)
+		) {
+			throw new Error("Incomplete or mismatched ChatGPT registration callback");
 		}
-
-		if (!code) {
-			await manualPromise;
-			if (manualError) throw manualError;
-			if (manualCode) {
-				const parsed = parseAuthorizationInput(manualCode);
-				if (parsed.state && parsed.state !== state) throw new Error("State mismatch");
-				code = parsed.code;
-			}
-		}
-
-		if (!code) throw new Error("Missing authorization code");
-		return exchangeAuthorizationCodeForCredentials(code, verifier, REDIRECT_URI, interaction.signal);
+		// A code may expire before exchange. Keep the issued ID for a fresh authorization attempt.
+		if (!registration) store.save({ clientId });
+		const response = await fetch(TOKEN_URL, {
+			method: "POST",
+			headers: { "Content-Type": "application/x-www-form-urlencoded" },
+			signal,
+			body: new URLSearchParams({
+				grant_type: "authorization_code",
+				client_id: clientId,
+				code,
+				code_verifier: verifier,
+				redirect_uri: redirectUri,
+				resource: RESOURCE,
+			}),
+		});
+		const credential = await tokenCredentials(response, clientId, hostId, signal, { nonce, registration });
+		store.save({
+			clientId,
+			subject: credential.subject as string,
+			email: credential.email as string | undefined,
+			idToken: credential.idToken as string,
+		});
+		return credential;
 	} finally {
-		interaction.signal.removeEventListener("abort", onAbort);
-		manualAbort.abort();
+		if (onAbort) signal.removeEventListener("abort", onAbort);
+		promptController.abort();
 		server.close();
+		server.closeAllConnections();
 	}
-}
-
-/**
- * Refresh OpenAI Codex OAuth token
- */
-async function refreshOpenAICodexToken(refreshToken: string, signal: AbortSignal): Promise<OAuthCredential> {
-	return credentialsFromToken(await refreshAccessToken(refreshToken, signal));
 }
 
 export const openaiCodexOAuth: OAuthAuth = {
-	name: "OpenAI (ChatGPT Plus/Pro)",
+	name: "ChatGPT",
 	isSubscription: true,
-
-	async login(interaction) {
-		const method = await interaction.prompt({
-			type: "select",
-			message: "Select OpenAI Codex login method:",
-			options: [
-				{ id: OPENAI_CODEX_BROWSER_LOGIN_METHOD, label: "Browser login (default)" },
-				{ id: OPENAI_CODEX_DEVICE_CODE_LOGIN_METHOD, label: "Device code login (headless)" },
-			],
+	loginLabel: "Continue with ChatGPT",
+	login,
+	async refresh(credential, signal) {
+		const { clientId, hostId } = requireRegistration(credential);
+		signal.throwIfAborted();
+		const response = await fetch(TOKEN_URL, {
+			method: "POST",
+			headers: { "Content-Type": "application/x-www-form-urlencoded" },
+			signal,
+			body: new URLSearchParams({
+				grant_type: "refresh_token",
+				client_id: clientId,
+				refresh_token: credential.refresh,
+				resource: RESOURCE,
+			}),
 		});
-
-		if (method === OPENAI_CODEX_DEVICE_CODE_LOGIN_METHOD) {
-			return loginOpenAICodexDeviceCode(interaction);
-		}
-		if (method !== OPENAI_CODEX_BROWSER_LOGIN_METHOD) {
-			throw new Error(`Unknown OpenAI Codex login method: ${method}`);
-		}
-
-		return loginOpenAICodex(interaction);
+		return tokenCredentials(response, clientId, hostId, signal, { previous: credential });
 	},
-
-	refresh: (credential, signal) => refreshOpenAICodexToken(credential.refresh, signal),
-
+	async logout(credential, signal) {
+		const { clientId } = requireRegistration(credential);
+		const store = new ChatGPTRegistrationStore();
+		const registration = store.list().find((entry) => entry.clientId === clientId);
+		if (registration) store.save({ ...registration, idToken: undefined });
+		try {
+			const discovery = await fetch(`${ISSUER}/.well-known/openid-configuration`, { signal });
+			if (!discovery.ok) throw new Error("Discovery failed");
+			const metadata = (await discovery.json()) as { issuer?: string; revocation_endpoint?: string };
+			const endpoint = new URL(metadata.revocation_endpoint ?? "");
+			if (metadata.issuer !== ISSUER || endpoint.origin !== ISSUER) throw new Error("Invalid revocation endpoint");
+			for (let attempt = 0; attempt < 3; attempt++) {
+				try {
+					const response = await fetch(endpoint, {
+						method: "POST",
+						headers: { "Content-Type": "application/x-www-form-urlencoded" },
+						signal,
+						body: new URLSearchParams({
+							token: credential.refresh,
+							token_type_hint: "refresh_token",
+							client_id: clientId,
+						}),
+					});
+					if (response.status === 200) return;
+					if (response.status < 500) break;
+				} catch {
+					if (signal.aborted) break;
+				}
+				if (attempt < 2) await sleep(250 * 2 ** attempt, undefined, { signal });
+			}
+		} catch {}
+		throw new Error(
+			"Signed out locally. Remote revocation was not confirmed; disconnect Diffex in ChatGPT Settings.",
+		);
+	},
 	async toAuth(credential) {
-		return { apiKey: credential.access };
+		requireRegistration(credential);
+		if (!Array.isArray(credential.scopes) || !credential.scopes.includes(PLAN_SCOPE)) {
+			throw new Error("ChatGPT plan usage is not authorized. Run /login.");
+		}
+		return { apiKey: credential.access, baseUrl: RESOURCE };
 	},
 };

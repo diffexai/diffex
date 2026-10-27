@@ -40,8 +40,17 @@ describe.sequential("OAuthAuth adapters", () => {
 	});
 
 	it("openai-codex toAuth derives the api key from the access token", async () => {
-		const auth = await openaiCodexOAuth.toAuth({ type: "oauth", access: "token", refresh: "r", expires: 0 });
-		expect(auth).toEqual({ apiKey: "token" });
+		const auth = await openaiCodexOAuth.toAuth({
+			type: "oauth",
+			access: "token",
+			refresh: "r",
+			expires: 0,
+			clientId: "oaiapp_diffex",
+			extAgentHostId: "urn:uuid:host",
+			subject: "subject",
+			scopes: ["chatgpt.tokens.use.direct", "resource.invoke"],
+		});
+		expect(auth).toEqual({ apiKey: "token", baseUrl: "https://api.openai.com/v1" });
 	});
 
 	it("openrouter derives the api key and keeps the permanent credential on refresh", async () => {

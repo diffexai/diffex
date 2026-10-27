@@ -1,497 +1,244 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { exportJWK, generateKeyPair, SignJWT } from "jose";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { InMemoryCredentialStore } from "../src/auth/credential-store.ts";
+import { ChatGPTRegistrationStore } from "../src/auth/oauth/chatgpt-registration.ts";
 import { openaiCodexOAuth } from "../src/auth/oauth/openai-codex.ts";
-import { defineOAuthCallbackTests } from "./oauth-callback-test-utils.ts";
+import type { OAuthCredential } from "../src/auth/types.ts";
+import { createModels, createProvider } from "../src/models.ts";
 
-defineOAuthCallbackTests(openaiCodexOAuth, {
-	name: "OpenAI Codex",
-	authorizeUrl: "https://auth.openai.com/oauth/authorize",
-	tokenUrl: "https://auth.openai.com/oauth/token",
-	clientId: "app_EMoamEEZ73f0CkXaXp7hrann",
-	scope: "openid profile email offline_access",
-	redirectUri: "http://localhost:1455/auth/callback",
-	originator: "diffex",
+const nativeFetch = globalThis.fetch;
+const issuer = "https://auth.openai.com";
+const clientId = "oaiapp_diffex_test";
+const scopes = "openid profile email offline_access resource.invoke chatgpt.tokens.use.direct";
+const key = await generateKeyPair("RS256", { extractable: true });
+const jwk = { ...(await exportJWK(key.publicKey)), kid: "test-key", alg: "RS256" };
+let directory: string;
+let authorization: URL;
+let tokenOverrides: Record<string, unknown>;
+let claims: Record<string, unknown>;
+let requests: Array<{ url: string; init?: RequestInit }>;
+
+beforeEach(() => {
+	directory = mkdtempSync(join(tmpdir(), "diffex-chatgpt-oauth-"));
+	vi.stubEnv("DIFFEX_CODING_AGENT_DIR", directory);
+	tokenOverrides = {};
+	claims = {};
+	requests = [];
+	vi.stubGlobal(
+		"fetch",
+		vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+			const url = String(input);
+			requests.push({ url, init });
+			if (url.endsWith("/.well-known/jwks.json")) return Response.json({ keys: [jwk] });
+			if (url.endsWith("/.well-known/openid-configuration"))
+				return Response.json({ issuer, revocation_endpoint: `${issuer}/oauth/revoke` });
+			if (url.endsWith("/oauth/revoke")) return new Response(null, { status: 200 });
+			if (url !== `${issuer}/api/accounts/oauth/token`) throw new Error(`Unexpected request: ${url}`);
+			const idToken = await new SignJWT({
+				nonce: authorization.searchParams.get("nonce"),
+				email: "person@example.com",
+				...claims,
+			})
+				.setProtectedHeader({ alg: "RS256", kid: "test-key" })
+				.setIssuer(issuer)
+				.setAudience(clientId)
+				.setSubject("account-subject")
+				.setIssuedAt()
+				.setExpirationTime("1h")
+				.sign(key.privateKey);
+			return Response.json({
+				access_token: "opaque-access",
+				refresh_token: "refresh-one",
+				expires_in: 3600,
+				token_type: "Bearer",
+				scope: scopes,
+				id_token: idToken,
+				...tokenOverrides,
+			});
+		}),
+	);
 });
 
-const neverAbortedSignal = new AbortController().signal;
+afterEach(() => {
+	vi.unstubAllGlobals();
+	vi.unstubAllEnvs();
+	rmSync(directory, { recursive: true, force: true });
+});
 
-function jsonResponse(body: unknown, status: number = 200): Response {
-	return new Response(JSON.stringify(body), {
-		status,
-		headers: { "Content-Type": "application/json" },
+async function startLogin(selection = clientId, signal = new AbortController().signal) {
+	let ready: () => void = () => {};
+	const started = new Promise<void>((resolve) => {
+		ready = resolve;
 	});
-}
-
-function getUrl(input: unknown): string {
-	if (typeof input === "string") return input;
-	if (input instanceof URL) return input.toString();
-	if (input instanceof Request) return input.url;
-	throw new Error(`Unsupported fetch input: ${String(input)}`);
-}
-
-function createAccessToken(accountId: string): string {
-	const header = Buffer.from(JSON.stringify({ alg: "none" })).toString("base64");
-	const payload = Buffer.from(
-		JSON.stringify({
-			"https://api.openai.com/auth": {
-				chatgpt_account_id: accountId,
-			},
-		}),
-	).toString("base64");
-	return `${header}.${payload}.signature`;
-}
-
-function deviceAuthPendingResponse(): Response {
-	return jsonResponse(
-		{
-			error: {
-				message: "Device authorization is pending. Please try again.",
-				type: "invalid_request_error",
-				param: null,
-				code: "deviceauth_authorization_pending",
-			},
-		},
-		403,
-	);
-}
-
-function loginOpenAICodexDeviceCodeForTest(options: {
-	onDeviceCode(info: {
-		userCode: string;
-		verificationUri: string;
-		intervalSeconds?: number;
-		expiresInSeconds?: number;
-	}): void;
-	signal?: AbortSignal;
-}) {
-	return openaiCodexOAuth.login({
-		signal: options.signal ?? neverAbortedSignal,
-		prompt: async (prompt) => {
-			if (prompt.type !== "select") throw new Error(`Unexpected prompt: ${prompt.type}`);
-			return "device_code";
-		},
+	const login = openaiCodexOAuth.login({
+		signal,
 		notify: (event) => {
-			if (event.type === "device_code") {
-				const { type: _, ...info } = event;
-				options.onDeviceCode(info);
+			if (event.type === "auth_url") {
+				authorization = new URL(event.url);
+				ready();
 			}
 		},
+		prompt: async (prompt) => (prompt.type === "select" ? selection : new Promise<string>(() => {})),
 	});
+	const outcome = login.catch((error: unknown) => error);
+	await Promise.race([started, login]);
+	return { login, outcome };
 }
 
-describe("OpenAI Codex OAuth", () => {
-	afterEach(() => {
-		vi.restoreAllMocks();
-		vi.unstubAllGlobals();
-		vi.useRealTimers();
+function callback(params: Record<string, string> = {}) {
+	const url = new URL(authorization.searchParams.get("redirect_uri") ?? "");
+	url.search = new URLSearchParams({
+		state: authorization.searchParams.get("state") ?? "",
+		code: "code",
+		client_id: clientId,
+		...params,
+	}).toString();
+	return url;
+}
+
+async function signIn() {
+	const attempt = await startLogin();
+	await nativeFetch(callback());
+	return attempt.login;
+}
+
+describe.sequential("ChatGPT registration and session lifecycle", () => {
+	it("persists the host before authorization and exchanges with the issued client and exact PKCE redirect", async () => {
+		const attempt = await startLogin();
+		const host = authorization.searchParams.get("ext_agent_host_id");
+		expect(readFileSync(join(directory, "chatgpt", "host"), "utf8")).toBe(host);
+		expect(authorization.searchParams.get("scope")).toBe(scopes);
+		expect(authorization.searchParams.get("resource")).toBe("https://api.openai.com/v1");
+		expect((await nativeFetch(callback({ state: "wrong" }))).status).toBe(400);
+		expect(requests).toHaveLength(0);
+		const response = await nativeFetch(callback());
+		expect(await response.text()).toContain("Continue in Diffex");
+		const credential = await attempt.login;
+		expect(credential).toMatchObject({
+			clientId,
+			subject: "account-subject",
+			extAgentHostId: host,
+			access: "opaque-access",
+		});
+		const body = new URLSearchParams(String(requests[0].init?.body));
+		expect(body.get("client_id")).toBe(clientId);
+		expect(body.get("redirect_uri")).toBe(authorization.searchParams.get("redirect_uri"));
+		const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(body.get("code_verifier") ?? ""));
+		expect(Buffer.from(digest).toString("base64url")).toBe(authorization.searchParams.get("code_challenge"));
+		expect(statSync(join(directory, "chatgpt", `${clientId}.json`)).mode & 0o777).toBe(0o600);
 	});
 
-	it("logs in with the OpenAI Codex device code flow", async () => {
-		vi.useFakeTimers();
-		const startTime = new Date("2026-05-20T00:00:00Z");
-		vi.setSystemTime(startTime);
+	it.each([
+		["wrong nonce", { nonce: "wrong" }, {}],
+		["wrong audience", {}, { id_token: "unsigned.token.value" }],
+		["missing ID token", {}, { id_token: null }],
+		["missing permission", {}, { scope: "openid profile email" }],
+		["invalid expiry", {}, { expires_in: -1 }],
+		["missing refresh", {}, { refresh_token: "" }],
+	] as const)("rejects %s without saving an account identity", async (_name, nextClaims, overrides) => {
+		claims = nextClaims;
+		tokenOverrides = overrides;
+		const attempt = await startLogin();
+		await nativeFetch(callback());
+		await expect(attempt.login).rejects.toThrow();
+		expect(new ChatGPTRegistrationStore().list()[0].subject).toBeUndefined();
+	});
 
-		const accessToken = createAccessToken("account-123");
-		const deviceInfos: Array<{
-			userCode: string;
-			verificationUri: string;
-			instructions?: string;
-			intervalSeconds?: number;
-			expiresInSeconds?: number;
-		}> = [];
-		const pollTimes: number[] = [];
-		const pollResponses = [
-			deviceAuthPendingResponse(),
-			jsonResponse({
-				authorization_code: "oauth-code",
-				code_challenge: "device-code-challenge",
-				code_verifier: "device-code-verifier",
-			}),
-		];
-
-		const fetchMock = vi.fn(async (input: unknown, init?: RequestInit): Promise<Response> => {
-			const url = getUrl(input);
-
-			if (url === "https://auth.openai.com/api/accounts/deviceauth/usercode") {
-				expect(init?.method).toBe("POST");
-				expect(init?.headers).toMatchObject({ "Content-Type": "application/json" });
-				expect(JSON.parse(String(init?.body))).toEqual({ client_id: "app_EMoamEEZ73f0CkXaXp7hrann" });
-				return jsonResponse({
-					device_auth_id: "device-auth-id",
-					user_code: "ABCD-1234",
-					interval: "5",
-				});
-			}
-
-			if (url === "https://auth.openai.com/api/accounts/deviceauth/token") {
-				pollTimes.push(Date.now());
-				expect(init?.method).toBe("POST");
-				expect(init?.headers).toMatchObject({ "Content-Type": "application/json" });
-				expect(JSON.parse(String(init?.body))).toEqual({
-					device_auth_id: "device-auth-id",
-					user_code: "ABCD-1234",
-				});
-				const response = pollResponses.shift();
-				if (!response) {
-					throw new Error("Unexpected extra device auth poll");
-				}
-				return response;
-			}
-
-			if (url === "https://auth.openai.com/oauth/token") {
-				expect(init?.method).toBe("POST");
-				expect(init?.headers).toMatchObject({ "Content-Type": "application/x-www-form-urlencoded" });
-				const params = new URLSearchParams(String(init?.body));
-				expect(params.get("grant_type")).toBe("authorization_code");
-				expect(params.get("client_id")).toBe("app_EMoamEEZ73f0CkXaXp7hrann");
-				expect(params.get("code")).toBe("oauth-code");
-				expect(params.get("redirect_uri")).toBe("https://auth.openai.com/deviceauth/callback");
-				expect(params.get("code_verifier")).toBe("device-code-verifier");
-				return jsonResponse({
-					access_token: accessToken,
-					refresh_token: "refresh-token",
-					expires_in: 3600,
-				});
-			}
-
-			throw new Error(`Unexpected fetch URL: ${url}`);
-		});
-
-		vi.stubGlobal("fetch", fetchMock);
-
-		const credentialsPromise = loginOpenAICodexDeviceCodeForTest({
-			onDeviceCode: (info) => deviceInfos.push(info),
-		});
-
-		for (let i = 0; i < 5 && pollTimes.length === 0; i++) {
-			await vi.advanceTimersByTimeAsync(0);
+	it("rejects missing issued IDs and authorization denial before exchange", async () => {
+		const callbacks: Record<string, string>[] = [{ client_id: "dynamic_agent_client" }, { error: "access_denied" }];
+		for (const params of callbacks) {
+			const attempt = await startLogin();
+			await nativeFetch(callback(params));
+			await expect(attempt.login).rejects.toThrow();
 		}
-		expect(deviceInfos).toEqual([
-			{
-				userCode: "ABCD-1234",
-				verificationUri: "https://auth.openai.com/codex/device",
-				intervalSeconds: 5,
-				expiresInSeconds: 900,
-			},
+		expect(requests).toHaveLength(0);
+	});
+
+	it("reauthorizes the saved identity using its issued ID and stable host", async () => {
+		const first = await signIn();
+		const attempt = await startLogin();
+		expect(authorization.searchParams.get("client_id")).toBe(clientId);
+		expect(authorization.searchParams.get("ext_agent_host_id")).toBe(first.extAgentHostId);
+		expect(authorization.searchParams.has("agent_name_hint")).toBe(false);
+		expect(authorization.searchParams.get("id_token_hint")).toBe(first.idToken);
+		const url = callback();
+		url.searchParams.delete("client_id");
+		await nativeFetch(url);
+		await expect(attempt.login).resolves.toMatchObject({ clientId, subject: first.subject });
+	});
+
+	it("rejects a changed client during reauthorization", async () => {
+		await signIn();
+		const count = requests.length;
+		const attempt = await startLogin();
+		await nativeFetch(callback({ client_id: "oaiapp_other" }));
+		await expect(attempt.login).rejects.toThrow("mismatched");
+		expect(requests).toHaveLength(count);
+	});
+
+	it("refreshes with the saved issued ID, rotates tokens, and retains omitted scopes", async () => {
+		const credential = await signIn();
+		tokenOverrides = { id_token: undefined, scope: undefined, refresh_token: "refresh-two" };
+		const refreshed = await openaiCodexOAuth.refresh(credential, new AbortController().signal);
+		expect(refreshed).toMatchObject({
+			refresh: "refresh-two",
+			clientId,
+			subject: credential.subject,
+			scopes: credential.scopes,
+		});
+		const body = new URLSearchParams(String(requests.at(-1)?.init?.body));
+		expect(Object.fromEntries(body)).toEqual({
+			grant_type: "refresh_token",
+			client_id: clientId,
+			refresh_token: "refresh-one",
+			resource: "https://api.openai.com/v1",
+		});
+	});
+
+	it("revokes on logout, clears local tokens, and retains registration without ID-token hints", async () => {
+		const credential = await signIn();
+		const credentials = new InMemoryCredentialStore();
+		await credentials.modify("openai-codex", async () => credential);
+		const models = createModels({ credentials });
+		models.setProvider(
+			createProvider({ id: "openai-codex", auth: { oauth: openaiCodexOAuth }, models: [], api: {} }),
+		);
+		await models.logout("openai-codex");
+		expect(await credentials.read("openai-codex")).toBeUndefined();
+		expect(new ChatGPTRegistrationStore().list()).toEqual([
+			{ clientId, subject: credential.subject, email: credential.email },
 		]);
-		expect(pollTimes).toEqual([startTime.getTime()]);
-
-		await vi.advanceTimersByTimeAsync(4999);
-		expect(pollTimes).toEqual([startTime.getTime()]);
-
-		await vi.advanceTimersByTimeAsync(1);
-		await expect(credentialsPromise).resolves.toMatchObject({
-			access: accessToken,
-			refresh: "refresh-token",
-			expires: startTime.getTime() + 5000 + 3600 * 1000,
-			accountId: "account-123",
+		const request = requests.find((entry) => entry.url.endsWith("/oauth/revoke"));
+		expect(Object.fromEntries(new URLSearchParams(String(request?.init?.body)))).toEqual({
+			token: credential.refresh,
+			token_type_hint: "refresh_token",
+			client_id: clientId,
 		});
-		expect(pollTimes).toEqual([startTime.getTime(), startTime.getTime() + 5000]);
 	});
 
-	it("offers browser login first and uses the selected OpenAI Codex device code flow", async () => {
-		const accessToken = createAccessToken("account-456");
-		const selectPrompts: Array<{
-			message: string;
-			options: readonly { id: string; label: string }[];
-		}> = [];
-		const deviceInfos: Array<{
-			userCode: string;
-			verificationUri: string;
-			intervalSeconds?: number;
-			expiresInSeconds?: number;
-		}> = [];
-
+	it("clears local credentials even when remote revocation fails", async () => {
+		const credential = await signIn();
 		vi.stubGlobal(
 			"fetch",
-			vi.fn(async (input: unknown, init?: RequestInit): Promise<Response> => {
-				const url = getUrl(input);
-				if (url === "https://auth.openai.com/api/accounts/deviceauth/usercode") {
-					expect(JSON.parse(String(init?.body))).toEqual({ client_id: "app_EMoamEEZ73f0CkXaXp7hrann" });
-					return jsonResponse({
-						device_auth_id: "device-auth-id",
-						user_code: "WXYZ-7890",
-						interval: "5",
-					});
-				}
-				if (url === "https://auth.openai.com/api/accounts/deviceauth/token") {
-					return jsonResponse({
-						authorization_code: "oauth-code",
-						code_challenge: "device-code-challenge",
-						code_verifier: "device-code-verifier",
-					});
-				}
-				if (url === "https://auth.openai.com/oauth/token") {
-					return jsonResponse({
-						access_token: accessToken,
-						refresh_token: "refresh-token",
-						expires_in: 3600,
-					});
-				}
-				throw new Error(`Unexpected fetch URL: ${url}`);
-			}),
+			vi.fn(async () => new Response(null, { status: 503 })),
 		);
-
-		await expect(
-			openaiCodexOAuth.login({
-				signal: neverAbortedSignal,
-				prompt: async (prompt) => {
-					if (prompt.type !== "select") throw new Error("Text prompt should not be used");
-					selectPrompts.push(prompt);
-					return "device_code";
-				},
-				notify: (event) => {
-					if (event.type === "auth_url") throw new Error("Browser login should not start");
-					if (event.type === "device_code") {
-						const { type: _, ...info } = event;
-						deviceInfos.push(info);
-					}
-				},
-			}),
-		).resolves.toMatchObject({
-			type: "oauth",
-			access: accessToken,
-			refresh: "refresh-token",
-			accountId: "account-456",
-		});
-
-		expect(selectPrompts).toEqual([
-			{
-				type: "select",
-				message: "Select OpenAI Codex login method:",
-				options: [
-					{ id: "browser", label: "Browser login (default)" },
-					{ id: "device_code", label: "Device code login (headless)" },
-				],
-			},
-		]);
-		expect(deviceInfos).toEqual([
-			{
-				userCode: "WXYZ-7890",
-				verificationUri: "https://auth.openai.com/codex/device",
-				intervalSeconds: 5,
-				expiresInSeconds: 900,
-			},
-		]);
+		const credentials = new InMemoryCredentialStore();
+		await credentials.modify("openai-codex", async () => credential);
+		const models = createModels({ credentials });
+		models.setProvider(
+			createProvider({ id: "openai-codex", auth: { oauth: openaiCodexOAuth }, models: [], api: {} }),
+		);
+		await expect(models.logout("openai-codex")).rejects.toThrow("Remote revocation was not confirmed");
+		expect(await credentials.read("openai-codex")).toBeUndefined();
 	});
 
-	it("cancels when OpenAI Codex login method selection is cancelled", async () => {
-		await expect(
-			openaiCodexOAuth.login({
-				signal: neverAbortedSignal,
-				prompt: async () => {
-					throw new Error("Login cancelled");
-				},
-				notify: () => {},
-			}),
-		).rejects.toThrow("Login cancelled");
-	});
-
-	it("cancels the OpenAI Codex device code flow while waiting", async () => {
-		vi.useFakeTimers();
-		const controller = new AbortController();
-		const pollTimes: number[] = [];
-
-		vi.stubGlobal(
-			"fetch",
-			vi.fn(async (input: unknown, init?: RequestInit): Promise<Response> => {
-				const url = getUrl(input);
-				if (url === "https://auth.openai.com/api/accounts/deviceauth/usercode") {
-					expect(JSON.parse(String(init?.body))).toEqual({ client_id: "app_EMoamEEZ73f0CkXaXp7hrann" });
-					return jsonResponse({
-						device_auth_id: "device-auth-id",
-						user_code: "ABCD-1234",
-						interval: "5",
-					});
-				}
-				if (url === "https://auth.openai.com/api/accounts/deviceauth/token") {
-					pollTimes.push(Date.now());
-					return deviceAuthPendingResponse();
-				}
-				throw new Error(`Unexpected fetch URL: ${url}`);
-			}),
-		);
-
-		const credentialsPromise = loginOpenAICodexDeviceCodeForTest({
-			onDeviceCode: () => {},
-			signal: controller.signal,
-		});
-		const rejectionPromise = credentialsPromise.then(
-			() => new Error("Expected login to fail"),
-			(error: unknown) => error,
-		);
-
-		for (let i = 0; i < 5 && pollTimes.length === 0; i++) {
-			await vi.advanceTimersByTimeAsync(0);
-		}
-		expect(pollTimes).toHaveLength(1);
-
-		controller.abort();
-		const rejection = await rejectionPromise;
-		expect(rejection).toBeInstanceOf(Error);
-		expect((rejection as Error).message).toBe("Login cancelled");
-	});
-
-	it("times out the OpenAI Codex device code flow after 15 minutes", async () => {
-		vi.useFakeTimers();
-		const pollTimes: number[] = [];
-
-		vi.stubGlobal(
-			"fetch",
-			vi.fn(async (input: unknown, init?: RequestInit): Promise<Response> => {
-				const url = getUrl(input);
-				if (url === "https://auth.openai.com/api/accounts/deviceauth/usercode") {
-					expect(JSON.parse(String(init?.body))).toEqual({ client_id: "app_EMoamEEZ73f0CkXaXp7hrann" });
-					return jsonResponse({
-						device_auth_id: "device-auth-id",
-						user_code: "ABCD-1234",
-						interval: "60",
-					});
-				}
-				if (url === "https://auth.openai.com/api/accounts/deviceauth/token") {
-					pollTimes.push(Date.now());
-					return deviceAuthPendingResponse();
-				}
-				throw new Error(`Unexpected fetch URL: ${url}`);
-			}),
-		);
-
-		const credentialsPromise = loginOpenAICodexDeviceCodeForTest({
-			onDeviceCode: () => {},
-		});
-		const rejectionPromise = credentialsPromise.then(
-			() => new Error("Expected login to fail"),
-			(error: unknown) => error,
-		);
-
-		for (let i = 0; i < 5 && pollTimes.length === 0; i++) {
-			await vi.advanceTimersByTimeAsync(0);
-		}
-		expect(pollTimes).toHaveLength(1);
-
-		await vi.advanceTimersByTimeAsync(15 * 60 * 1000);
-		const rejection = await rejectionPromise;
-		expect(rejection).toBeInstanceOf(Error);
-		expect((rejection as Error).message).toBe("Device flow timed out");
-	});
-
-	it("treats OpenAI Codex device auth 403 and 404 responses as pending", async () => {
-		vi.useFakeTimers();
-		const accessToken = createAccessToken("account-403-404");
-		const pollTimes: number[] = [];
-		const pollResponses = [
-			jsonResponse({ error: "access_denied", error_description: "denied" }, 403),
-			new Response("not ready", { status: 404, headers: { "Content-Type": "text/plain" } }),
-			jsonResponse({
-				authorization_code: "oauth-code",
-				code_challenge: "device-code-challenge",
-				code_verifier: "device-code-verifier",
-			}),
-		];
-
-		vi.stubGlobal(
-			"fetch",
-			vi.fn(async (input: unknown): Promise<Response> => {
-				const url = getUrl(input);
-				if (url === "https://auth.openai.com/api/accounts/deviceauth/usercode") {
-					return jsonResponse({
-						device_auth_id: "device-auth-id",
-						user_code: "ABCD-1234",
-						interval: "1",
-					});
-				}
-				if (url === "https://auth.openai.com/api/accounts/deviceauth/token") {
-					pollTimes.push(Date.now());
-					const response = pollResponses.shift();
-					if (!response) {
-						throw new Error("Unexpected extra device auth poll");
-					}
-					return response;
-				}
-				if (url === "https://auth.openai.com/oauth/token") {
-					return jsonResponse({
-						access_token: accessToken,
-						refresh_token: "refresh-token",
-						expires_in: 3600,
-					});
-				}
-				throw new Error(`Unexpected fetch URL: ${url}`);
-			}),
-		);
-
-		const credentialsPromise = loginOpenAICodexDeviceCodeForTest({
-			onDeviceCode: () => {},
-		});
-
-		for (let i = 0; i < 5 && pollTimes.length === 0; i++) {
-			await vi.advanceTimersByTimeAsync(0);
-		}
-		await vi.advanceTimersByTimeAsync(1000);
-		await vi.advanceTimersByTimeAsync(1000);
-
-		await expect(credentialsPromise).resolves.toMatchObject({
-			access: accessToken,
-			refresh: "refresh-token",
-			accountId: "account-403-404",
-		});
-		expect(pollTimes).toHaveLength(3);
-	});
-
-	it("includes the response body in OpenAI Codex device auth poll failures", async () => {
-		vi.stubGlobal(
-			"fetch",
-			vi.fn(async (input: unknown): Promise<Response> => {
-				const url = getUrl(input);
-				if (url === "https://auth.openai.com/api/accounts/deviceauth/usercode") {
-					return jsonResponse({
-						device_auth_id: "device-auth-id",
-						user_code: "ABCD-1234",
-						interval: "5",
-					});
-				}
-				if (url === "https://auth.openai.com/api/accounts/deviceauth/token") {
-					return jsonResponse({ error: "server_error", error_description: "try again later" }, 500);
-				}
-				throw new Error(`Unexpected fetch URL: ${url}`);
-			}),
-		);
-
-		await expect(
-			loginOpenAICodexDeviceCodeForTest({
-				onDeviceCode: () => {},
-			}),
-		).rejects.toThrow(
-			'OpenAI Codex device auth failed with status 500: {"error":"server_error","error_description":"try again later"}',
-		);
-	});
-
-	it("does not write token refresh failures to stderr", async () => {
-		const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
-		vi.stubGlobal(
-			"fetch",
-			vi.fn(async (): Promise<Response> => {
-				return new Response(
-					JSON.stringify({
-						error: {
-							message: "Could not validate your token. Please try signing in again.",
-							type: "invalid_request_error",
-						},
-					}),
-					{ status: 401, statusText: "Unauthorized", headers: { "Content-Type": "application/json" } },
-				);
-			}),
-		);
-
-		await expect(
-			openaiCodexOAuth.refresh(
-				{
-					type: "oauth",
-					access: "invalid-access-token",
-					refresh: "invalid-refresh-token",
-					expires: 0,
-				},
-				neverAbortedSignal,
-			),
-		).rejects.toThrow(/OpenAI Codex token refresh failed \(401\).*Could not validate your token/);
-		expect(consoleError).not.toHaveBeenCalled();
+	it("requires reauthorization for inherited credentials", async () => {
+		const credential: OAuthCredential = { type: "oauth", access: "legacy", refresh: "legacy", expires: 0 };
+		await expect(openaiCodexOAuth.refresh(credential, new AbortController().signal)).rejects.toThrow("Run /login");
+		await expect(openaiCodexOAuth.toAuth(credential)).rejects.toThrow("Run /login");
+		expect(requests).toHaveLength(0);
 	});
 });

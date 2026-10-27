@@ -221,6 +221,9 @@ export interface OAuthAuth {
 	 */
 	refresh(credential: OAuthCredential, signal: AbortSignal): Promise<OAuthCredential>;
 
+	/** End the renewable session before the app clears its local credential. */
+	logout?(credential: OAuthCredential, signal: AbortSignal): Promise<void>;
+
 	/**
 	 * Side-effect-free derivation of request auth from a valid credential.
 	 * Covers per-credential baseUrl (GitHub Copilot). Async so lazy wrappers

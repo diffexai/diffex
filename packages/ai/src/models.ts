@@ -617,12 +617,26 @@ class ModelsImpl implements MutableModels {
 	async logout(providerId: string, options?: AuthOperationOptions): Promise<void> {
 		const signal = operationSignal(options?.signal);
 		signal.throwIfAborted();
+		this.supersedeProviderRefresh(providerId);
+		let revocationError: unknown;
+		const provider = this.providers.get(providerId);
+		if (provider?.auth.oauth?.logout) {
+			await this.credentials.modify(providerId, async (current) => {
+				if (current?.type !== "oauth") return undefined;
+				try {
+					await provider.auth.oauth?.logout?.(current, AbortSignal.any([signal, AbortSignal.timeout(15_000)]));
+				} catch (error) {
+					revocationError = error;
+				}
+				return undefined;
+			});
+		}
 		try {
-			await this.credentials.delete(providerId, { signal });
+			await this.credentials.delete(providerId);
 		} catch (error) {
-			signal.throwIfAborted();
 			throw new ModelsError("auth", `Credential store delete failed for ${providerId}`, { cause: error });
 		}
+		if (revocationError) throw revocationError;
 	}
 
 	private requireProvider(model: Model<Api>): Provider {

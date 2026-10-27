@@ -669,8 +669,11 @@ export class ModelRuntime implements Models {
 	logout(providerId: string, options: AuthOperationOptions = {}): Promise<void> {
 		const signal = operationSignal(options.signal);
 		return this.enqueueCredentialOperation(providerId, signal, async () => {
-			await this.models.logout(providerId, { signal });
-			await this.synchronizeCredentialState(providerId, "logout", undefined, signal);
+			try {
+				await this.models.logout(providerId, { signal });
+			} finally {
+				await this.synchronizeCredentialState(providerId, "logout", undefined, operationSignal());
+			}
 		});
 	}
 
