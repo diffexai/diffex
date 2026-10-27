@@ -356,7 +356,7 @@ function startLocalOAuthServer(state: string): Promise<OAuthServerInfo> {
 			}
 			res.statusCode = 200;
 			res.setHeader("Content-Type", "text/html; charset=utf-8");
-			res.end(oauthSuccessHtml("OpenAI authentication completed. You can close this window."));
+			res.end(oauthSuccessHtml());
 			settleWait?.({ code });
 		} catch {
 			res.statusCode = 500;

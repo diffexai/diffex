@@ -5,6 +5,13 @@ import { createImagesModels } from "../src/images-models.ts";
 import { createModels } from "../src/models.ts";
 import { openrouterProvider } from "../src/providers/openrouter.ts";
 import { openrouterImagesProvider } from "../src/providers/openrouter-images.ts";
+import { defineOAuthCallbackTests } from "./oauth-callback-test-utils.ts";
+
+defineOAuthCallbackTests(openRouterOAuth, {
+	name: "OpenRouter",
+	authorizeUrl: "https://openrouter.ai/auth",
+	tokenUrl: "https://openrouter.ai/api/v1/auth/keys",
+});
 
 const TOKEN_URL = "https://openrouter.ai/api/v1/auth/keys";
 const nativeFetch = globalThis.fetch;
@@ -110,7 +117,7 @@ describe.sequential("OpenRouter OAuth", () => {
 	it("reports token exchange failures through both the callback page and login", async () => {
 		vi.stubGlobal(
 			"fetch",
-			vi.fn(async () => jsonResponse({ error: { message: "invalid code" } }, 403)),
+			vi.fn(async () => jsonResponse({ error: { message: "invalid code: secret-token <script>" } }, 403)),
 		);
 
 		let callbackResponse: Promise<Response> | undefined;
@@ -125,8 +132,15 @@ describe.sequential("OpenRouter OAuth", () => {
 			},
 		});
 
-		await expect(login).rejects.toThrow("OpenRouter OAuth key exchange failed (HTTP 403): invalid code");
-		expect((await callbackResponse)?.status).toBe(502);
+		await expect(login).rejects.toThrow(
+			"OpenRouter OAuth key exchange failed (HTTP 403): invalid code: secret-token <script>",
+		);
+		const response = await callbackResponse;
+		expect(response?.status).toBe(502);
+		const html = await response?.text();
+		expect(html).toContain("Diffex sign-in error");
+		expect(html).not.toContain("secret-token");
+		expect(html).not.toContain("<script>");
 	});
 
 	it("allows only one token exchange for a callback", async () => {

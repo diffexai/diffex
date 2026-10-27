@@ -9,11 +9,18 @@ function escapeHtml(value: string): string {
 		.replaceAll("'", "&#39;");
 }
 
-function renderPage(options: { title: string; heading: string; message: string; details?: string }): string {
+function renderPage(options: {
+	title: string;
+	heading: string;
+	message: string;
+	details?: string;
+	status?: string;
+}): string {
 	const title = escapeHtml(options.title);
 	const heading = escapeHtml(options.heading);
 	const message = escapeHtml(options.message);
 	const details = options.details ? escapeHtml(options.details) : undefined;
+	const status = options.status ? escapeHtml(options.status) : undefined;
 
 	return `<!doctype html>
 <html lang="en">
@@ -37,6 +44,7 @@ function renderPage(options: { title: string; heading: string; message: string; 
       display: flex;
       align-items: center;
       justify-content: center;
+      overflow-wrap: anywhere;
       padding: 24px;
       background: var(--page-bg);
       color: var(--text);
@@ -63,6 +71,7 @@ function renderPage(options: { title: string; heading: string; message: string; 
       line-height: 1.15;
       font-weight: 650;
       color: var(--text);
+      text-wrap: balance;
     }
     p {
       margin: 0;
@@ -78,6 +87,7 @@ function renderPage(options: { title: string; heading: string; message: string; 
       white-space: pre-wrap;
       word-break: break-word;
     }
+    .status { margin-top: 16px; }
   </style>
 </head>
 <body>
@@ -85,25 +95,27 @@ function renderPage(options: { title: string; heading: string; message: string; 
     <div class="logo">${LOGO_SVG}</div>
     <h1>${heading}</h1>
     <p>${message}</p>
+    ${status ? `<p class="status">${status}</p>` : ""}
     ${details ? `<div class="details">${details}</div>` : ""}
   </main>
 </body>
 </html>`;
 }
 
-export function oauthSuccessHtml(message: string): string {
+export function oauthSuccessHtml(message = "You can close this tab and return to Diffex."): string {
 	return renderPage({
-		title: "Authentication successful",
-		heading: "Authentication successful",
+		title: "Continue in Diffex",
+		heading: "Continue in Diffex",
 		message,
+		status: "Check the terminal for sign-in status.",
 	});
 }
 
 export function oauthErrorHtml(message: string, details?: string): string {
 	return renderPage({
-		title: "Authentication failed",
-		heading: "Authentication failed",
-		message,
-		details,
+		title: "Diffex sign-in error",
+		heading: "Could not complete sign-in",
+		message: "Return to Diffex and run /login to try again.",
+		details: [message, details].filter(Boolean).join("\n"),
 	});
 }

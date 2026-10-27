@@ -181,7 +181,7 @@ async function startCallbackServer(
 			const oauthError = requestUrl.searchParams.get("error");
 			if (oauthError) {
 				const description = requestUrl.searchParams.get("error_description") ?? oauthError;
-				sendHtml(response, 400, oauthErrorHtml("OpenRouter authorization was denied.", description));
+				sendHtml(response, 400, oauthErrorHtml("OpenRouter authorization was denied."));
 				finish({ error: new Error(`OpenRouter authorization failed: ${description}`) });
 				return;
 			}
@@ -195,11 +195,11 @@ async function startCallbackServer(
 
 			try {
 				const result = await exchangeAuthorizationCode(code, verifier, signal);
-				sendHtml(response, 200, oauthSuccessHtml("Signed in to OpenRouter. You may now close this page."));
+				sendHtml(response, 200, oauthSuccessHtml());
 				finish({ credential: result });
 			} catch (error) {
 				const message = error instanceof Error ? error.message : "Unknown token exchange error";
-				sendHtml(response, 502, oauthErrorHtml("OpenRouter key exchange failed.", message));
+				sendHtml(response, 502, oauthErrorHtml("OpenRouter key exchange failed. Check the terminal for details."));
 				finish({ error: error instanceof Error ? error : new Error(message) });
 			}
 		})();

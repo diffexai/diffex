@@ -1,5 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { openaiCodexOAuth } from "../src/auth/oauth/openai-codex.ts";
+import { defineOAuthCallbackTests } from "./oauth-callback-test-utils.ts";
+
+defineOAuthCallbackTests(openaiCodexOAuth, {
+	name: "OpenAI Codex",
+	authorizeUrl: "https://auth.openai.com/oauth/authorize",
+	tokenUrl: "https://auth.openai.com/oauth/token",
+	clientId: "app_EMoamEEZ73f0CkXaXp7hrann",
+	scope: "openid profile email offline_access",
+	redirectUri: "http://localhost:1455/auth/callback",
+});
 
 const neverAbortedSignal = new AbortController().signal;
 

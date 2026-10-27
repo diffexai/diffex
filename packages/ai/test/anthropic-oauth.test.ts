@@ -1,6 +1,16 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { anthropicOAuth } from "../src/auth/oauth/anthropic.ts";
 import type { AuthEvent, AuthPrompt } from "../src/auth/types.ts";
+import { defineOAuthCallbackTests } from "./oauth-callback-test-utils.ts";
+
+defineOAuthCallbackTests(anthropicOAuth, {
+	name: "Anthropic",
+	authorizeUrl: "https://claude.ai/oauth/authorize",
+	tokenUrl: "https://platform.claude.com/v1/oauth/token",
+	clientId: "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
+	scope: "org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload",
+	redirectUri: "http://localhost:53692/callback",
+});
 
 const neverAbortedSignal = new AbortController().signal;
 
