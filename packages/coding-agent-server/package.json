@@ -1,6 +1,6 @@
 {
 	"name": "@diffexai/diffex-coding-agent-server",
-	"version": "0.3.3",
+	"version": "0.4.0",
 	"description": "Hosted Diffex protocol service backed by the Diffex coding-agent runtime",
 	"type": "module",
 	"main": "./dist/index.js",
@@ -41,12 +41,12 @@
 		"directory": "packages/coding-agent-server"
 	},
 	"dependencies": {
-		"@diffexai/diffex": "^0.3.3",
-		"@diffexai/diffex-protocol": "^0.3.3",
-		"@diffexai/diffex-server": "^0.3.3"
+		"@diffexai/diffex": "^0.4.0",
+		"@diffexai/diffex-protocol": "^0.4.0",
+		"@diffexai/diffex-server": "^0.4.0"
 	},
 	"devDependencies": {
-		"@diffexai/diffex-client": "^0.3.3",
+		"@diffexai/diffex-client": "^0.4.0",
 		"@types/ws": "8.18.2",
 		"shx": "0.4.0",
 		"vitest": "4.1.12",

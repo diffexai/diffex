@@ -2,6 +2,32 @@
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-27
+
+### Breaking Changes
+
+- Migrated ChatGPT authentication to Diffex app registration; existing users must sign in again. The provider ID remains `openai-codex`.
+  See [ChatGPT setup](../coding-agent/docs/providers.md#chatgpt) ([#291](https://github.com/diffexai/diffex/pull/291)).
+- Removed Radius from supported provider types and rejected Radius provider registrations and model requests. Replace existing Radius integrations with a supported provider.
+  See [Removed providers](../coding-agent/docs/providers.md#removed-providers) ([#290](https://github.com/diffexai/diffex/pull/290), [#292](https://github.com/diffexai/diffex/pull/292)).
+
+### Added
+
+- Added `parseModelCatalog` for validating complete provider catalogs and cache provenance fields on `ModelsStoreEntry` ([#287](https://github.com/diffexai/diffex/pull/287)).
+- Added an optional OAuth logout hook for remote session revocation before local credential deletion ([#291](https://github.com/diffexai/diffex/pull/291)).
+
+### Changed
+
+- Migrated model catalog publication to validated, immutable Diffex-hosted revisions.
+  See [Model catalog contract](../../docs/model-catalog.md) ([#287](https://github.com/diffexai/diffex/pull/287)).
+- Branded OAuth callback pages and default provider request attribution as Diffex while preserving configured attribution overrides ([#288](https://github.com/diffexai/diffex/pull/288)).
+- ChatGPT now discovers account-specific models and streams through the public Responses API, with isolated account caches and subscription usage reported without API-key token prices. Saved registrations support later sign-ins; logout attempts remote revocation and clears active tokens.
+  See [ChatGPT setup](../coding-agent/docs/providers.md#chatgpt) ([#291](https://github.com/diffexai/diffex/pull/291)).
+
+### Removed
+
+- Removed Radius OAuth, API-key authentication, environment-key resolution, and inference access; saved credentials and cached models cannot restore support ([#290](https://github.com/diffexai/diffex/pull/290), [#292](https://github.com/diffexai/diffex/pull/292)).
+
 ## [0.3.3] - 2026-10-26
 
 ### Added

@@ -1,6 +1,6 @@
 {
 	"name": "@diffexai/diffex-evolution",
-	"version": "0.3.3",
+	"version": "0.4.0",
 	"description": "Private evolution pipeline contracts and orchestration for Diffex",
 	"private": true,
 	"type": "module",
@@ -36,8 +36,8 @@
 		"node": ">=22.19.0"
 	},
 	"dependencies": {
-		"@diffexai/diffex-harness-state": "^0.3.3",
-		"@diffexai/diffex-harness-trace": "^0.3.3",
+		"@diffexai/diffex-harness-state": "^0.4.0",
+		"@diffexai/diffex-harness-trace": "^0.4.0",
 		"proper-lockfile": "4.1.2"
 	},
 	"devDependencies": {

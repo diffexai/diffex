@@ -1,6 +1,6 @@
 {
 	"name": "@diffexai/diffex-telemetry",
-	"version": "0.3.3",
+	"version": "0.4.0",
 	"description": "Vendor-neutral telemetry contracts and typed schema utilities for Diffex",
 	"type": "module",
 	"main": "./dist/index.js",

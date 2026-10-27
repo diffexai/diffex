@@ -1,6 +1,6 @@
 {
 	"name": "@diffexai/diffex-harness-trace",
-	"version": "0.3.3",
+	"version": "0.4.0",
 	"description": "Private durable harness trace recording for Diffex",
 	"private": true,
 	"type": "module",
@@ -36,7 +36,7 @@
 		"node": ">=22.19.0"
 	},
 	"dependencies": {
-		"@diffexai/diffex-telemetry": "^0.3.3"
+		"@diffexai/diffex-telemetry": "^0.4.0"
 	},
 	"devDependencies": {
 		"@types/node": "26.6.5",

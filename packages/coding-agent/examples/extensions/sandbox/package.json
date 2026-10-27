@@ -1,7 +1,7 @@
 {
 	"name": "diffex-extension-sandbox",
 	"private": true,
-	"version": "0.3.3",
+	"version": "0.4.0",
 	"type": "module",
 	"scripts": {
 		"clean": "echo 'nothing to clean'",
@@ -17,6 +17,7 @@
 		"@anthropic-ai/sandbox-runtime": "0.0.78"
 	},
 	"overrides": {
+		"node-forge": "1.4.2",
 		"zod": "4.6.6"
 	}
 }

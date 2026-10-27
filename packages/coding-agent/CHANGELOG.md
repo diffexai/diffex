@@ -2,6 +2,51 @@
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-27
+
+### New Features
+
+- Added a new ChatGPT integration with Diffex app registration, reusable account and workspace registrations, account-specific models, and public Responses API streaming.
+  See [ChatGPT setup](docs/providers.md#chatgpt) ([#291](https://github.com/diffexai/diffex/pull/291)).
+- Added Diffex-hosted model catalogs with validated delivery, version-scoped caches, and offline fallback.
+  See [Model catalog contract](../../docs/model-catalog.md#serving-and-cache-provenance) ([#287](https://github.com/diffexai/diffex/pull/287)).
+
+### Breaking Changes
+
+- Previously released: replaced `/skill:name` commands and the `enableSkillCommands` setting with `/skills` selection and explicit skill-reference tokens. Update workflows that invoke skill slash commands.
+  See [Skills](docs/skills.md) ([#132](https://github.com/diffexai/diffex/pull/132)).
+- Migrated ChatGPT login to Diffex app registration; existing users must run `/login` and sign in again. The provider ID remains `openai-codex`.
+  See [ChatGPT setup](docs/providers.md#chatgpt) ([#291](https://github.com/diffexai/diffex/pull/291)).
+- Removed Radius support. Replace Radius defaults and enabled models in settings, remove Radius provider and OAuth entries from `models.json`, and select a supported provider. Resume old Radius sessions with an explicit replacement `--model provider/model`.
+  See [Removed providers](docs/providers.md#removed-providers) ([#290](https://github.com/diffexai/diffex/pull/290), [#292](https://github.com/diffexai/diffex/pull/292)).
+
+### Added
+
+- Previously released: added optional SDK `telemetryContext`, propagation across sessions and subagents, and coding-agent operation spans ([#95](https://github.com/diffexai/diffex/pull/95)).
+- Previously released: added `/version` harness selection and validated live switching while preserving conversation history.
+  See [Harness Evolution](docs/evolution.md) ([#93](https://github.com/diffexai/diffex/pull/93)).
+- Previously released: added independent selection and persistence of the background evolution model through `/evolve`.
+  See [Harness Evolution](docs/evolution.md) ([#189](https://github.com/diffexai/diffex/pull/189)).
+
+### Changed
+
+- Model catalog refreshes now use `api.diffex.ai` with validated, immutable catalog publication.
+  See [Model catalog contract](../../docs/model-catalog.md) ([#287](https://github.com/diffexai/diffex/pull/287)).
+- Branded OAuth callback pages and default provider request attribution as Diffex while preserving configured attribution overrides ([#288](https://github.com/diffexai/diffex/pull/288)).
+- Simplified the interactive login-method menu to provider authentication by removing the Diffex account option ([#289](https://github.com/diffexai/diffex/pull/289)).
+- ChatGPT login now supports saved account and workspace registrations, account-specific model discovery and offline caches, public Responses API streaming, and subscription usage without API-key token prices. Logout stops active account requests, attempts remote revocation, and clears active tokens while retaining the registration for later sign-in.
+  See [ChatGPT setup](docs/providers.md#chatgpt) ([#291](https://github.com/diffexai/diffex/pull/291)).
+
+### Fixed
+
+- Previously released: fixed OpenAI tool-schema compatibility ([#61](https://github.com/diffexai/diffex/pull/61) by [@Issacboy123](https://github.com/Issacboy123)).
+- Isolated remote model caches, refresh timers, and ETags by catalog URL and CLI version; invalid downloads and failed refreshes preserve the last valid matching cache ([#287](https://github.com/diffexai/diffex/pull/287)).
+- Rejected saved and custom Radius configurations with actionable replacement guidance instead of startup stack traces; stale credentials and cached models cannot restore access. Local credential cleanup remains available through `/logout` ([#292](https://github.com/diffexai/diffex/pull/292)).
+
+### Removed
+
+- Removed Radius from subscription and API-key login menus, provider discovery, authentication, and inference ([#290](https://github.com/diffexai/diffex/pull/290), [#292](https://github.com/diffexai/diffex/pull/292)).
+
 ## [0.3.3] - 2026-10-26
 
 ### New Features
