@@ -116,4 +116,3 @@ export function installConsumer(
 	}
 	return env;
 }
-
