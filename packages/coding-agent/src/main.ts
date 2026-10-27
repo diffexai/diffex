@@ -5,7 +5,7 @@
  * createAgentSession() options. The SDK does the heavy lifting.
  */
 
-import { type ImageContent, modelsAreEqual } from "@diffexai/diffex-ai";
+import { type ImageContent, ModelsError, modelsAreEqual } from "@diffexai/diffex-ai";
 import chalk from "chalk";
 import { type Args, type Mode, parseArgs, printHelp } from "./cli/args.ts";
 import {
@@ -730,6 +730,10 @@ export async function main(args: string[], options?: MainOptions) {
 			{ type: "error", message: error instanceof Error ? error.message : String(error) },
 		]);
 		await invocationTrace.close("failed");
+		if (error instanceof ModelsError && error.code === "provider") {
+			console.error(chalk.red(`Error: ${error.message}`));
+			process.exit(1);
+		}
 		throw error;
 	}
 	time("createAgentSessionRuntime");

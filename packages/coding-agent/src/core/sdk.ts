@@ -8,6 +8,7 @@ import {
 	type TelemetryContext,
 	type ThinkingLevel,
 } from "@diffexai/diffex-agent-core";
+import { ModelsError } from "@diffexai/diffex-ai";
 import { clampThinkingLevel, type Message, type Model, streamSimple } from "@diffexai/diffex-ai/compat";
 import { getRemovedProviderMessage } from "@diffexai/diffex-ai/providers/removed";
 import type { HarnessStateStore, HarnessVersionBundle } from "@diffexai/diffex-harness-state";
@@ -482,7 +483,7 @@ export async function createInternalAgentSession(
 	// If session has data, try to restore model from it
 	if (!model && hasExistingSession && existingSession.model) {
 		const removed = getRemovedProviderMessage(existingSession.model.provider);
-		if (removed) throw new Error(`${removed} Resume with an explicit --model provider/model.`);
+		if (removed) throw new ModelsError("provider", `${removed} Resume with an explicit --model provider/model.`);
 		const restoredModel = modelRuntime.getModel(existingSession.model.provider, existingSession.model.modelId);
 		if (restoredModel && modelRuntime.hasConfiguredAuth(restoredModel.provider)) {
 			model = restoredModel;

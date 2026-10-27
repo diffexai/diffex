@@ -335,6 +335,8 @@ describe("removed Radius integration", () => {
 			expect(result.error).toBeUndefined();
 			expect(result.status).toBe(kind === "api_key" || kind === "oauth" ? 0 : kind === "auth" ? 2 : 1);
 			expect(result.stderr).toContain("Radius support has been removed");
+			expect(result.stderr).not.toContain("\n    at ");
+			expect(result.stderr).not.toContain("Node.js v");
 			expect(result.stdout).not.toMatch(/^radius\s+auto/m);
 			expect(readFileSync(authPath, "utf8")).toBe(auth);
 		},
