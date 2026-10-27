@@ -85,6 +85,10 @@ describe("auth check command", () => {
 		if (!oauth) throw new Error("OpenAI Codex OAuth provider is not registered");
 		const refresh = vi.fn(async () => ({
 			type: "oauth" as const,
+			clientId: "oaiapp_diffex_test",
+			subject: "account",
+			extAgentHostId: "urn:uuid:host",
+			scopes: ["chatgpt.tokens.use.direct", "resource.invoke"],
 			access: "fresh-token",
 			refresh: "refresh-token",
 			expires: Date.now() + 60 * 60 * 1000,

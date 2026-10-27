@@ -2,6 +2,8 @@ import type { Api, Model } from "./types.ts";
 
 export interface ModelsStoreEntry {
 	models: readonly Model<Api>[];
+	/** Validated account registration that owns an account-specific catalog. */
+	credentialId?: string;
 	/** Exact provider catalog URL that supplied this entry. */
 	catalogUrl?: string;
 	/** Diffex client version used to select its compatibility tier. */

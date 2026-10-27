@@ -2,6 +2,7 @@ import type { ApiKeyCredential, Credential, CredentialStore, Model, Provider } f
 import { describe, expect, it, vi } from "vitest";
 import { AuthStorage } from "../src/core/auth-storage.ts";
 import { CredentialSynchronizationError, ModelRuntime } from "../src/core/model-runtime.ts";
+import { allowNetwork } from "./test-network-env.ts";
 
 function model(provider: string): Model<"openai-completions"> {
 	return {
@@ -60,6 +61,44 @@ async function runtimeWithProvider(
 }
 
 describe("ModelRuntime credential synchronization", () => {
+	it("discovers ChatGPT account models before completing login", async () => {
+		allowNetwork();
+		const registered = provider("openai-codex");
+		const networkRefresh = vi.fn();
+		registered.refreshModels = async (context) => {
+			if (context.allowNetwork) networkRefresh();
+		};
+		const runtime = await runtimeWithProvider(registered);
+		await runtime.login("openai-codex", "api_key", { prompt: async () => "unused", notify: () => {} });
+		expect(networkRefresh).toHaveBeenCalledOnce();
+	});
+
+	it("synchronizes local sign-out when remote revocation fails", async () => {
+		const credentials = AuthStorage.inMemory({
+			renewable: { type: "oauth", access: "access", refresh: "refresh", expires: Date.now() + 3600_000 },
+		});
+		const registered = provider("renewable");
+		const renewable: Provider = {
+			...registered,
+			auth: {
+				oauth: {
+					name: "Renewable",
+					login: async () => {
+						throw new Error("unused");
+					},
+					refresh: async (credential) => credential,
+					toAuth: async (credential) => ({ apiKey: credential.access }),
+					logout: async () => {
+						throw new Error("Remote revocation was not confirmed");
+					},
+				},
+			},
+		};
+		const runtime = await runtimeWithProvider(renewable, credentials);
+		await expect(runtime.logout("renewable")).rejects.toThrow("Remote revocation was not confirmed");
+		expect(await credentials.read("renewable")).toBeUndefined();
+		expect(runtime.hasConfiguredAuth("renewable")).toBe(false);
+	});
 	it("publishes locally consistent availability before login and logout resolve", async () => {
 		const credentials = AuthStorage.inMemory();
 		const runtime = await runtimeWithProvider(provider("dynamic"), credentials);

@@ -16,7 +16,7 @@ Diffex supports subscription-based providers via OAuth and API key providers via
 
 Use `/login` in interactive mode, then select a provider:
 
-- ChatGPT Plus/Pro (Codex)
+- ChatGPT
 - Claude Pro/Max
 - GitHub Copilot
 - xAI (Grok/X subscription)
@@ -24,10 +24,27 @@ Use `/login` in interactive mode, then select a provider:
 
 Use `/logout` to clear credentials. Tokens are stored in `~/.diffex/agent/auth.json` and auto-refresh when expired. OpenRouter instead mints a user-controlled API key that does not expire automatically.
 
-### OpenAI Codex
+### ChatGPT
 
-- Requires ChatGPT Plus or Pro subscription
-- Officially endorsed by OpenAI: [Codex for OSS](https://developers.openai.com/community/codex-for-oss)
+Run `/login`, select ChatGPT, and continue in your browser to register Diffex and authorize ChatGPT plan usage.
+Existing installations using the inherited client registration must sign in again.
+The provider ID remains `openai-codex` for configuration and CLI selection.
+
+Diffex stores the stable host identity and issued account registrations in `~/.diffex/agent/chatgpt/`, alongside the active credentials in `auth.json`.
+`DIFFEX_CODING_AGENT_DIR` relocates both directories.
+Later sign-ins let you select a saved registration or add another ChatGPT account or workspace.
+Remote machines can complete sign-in by pasting the full loopback redirect URL into Diffex.
+
+Models come from the signed-in account's public model catalog, with an account-specific cache for offline startup.
+Inference uses the public Responses API with streaming and storage disabled.
+Availability depends on the selected account, workspace, and granted permissions.
+Token usage is reported without applying API-key token prices to subscription usage.
+Review app limits and credits in [ChatGPT Settings - Usage](https://chatgpt.com/settings/usage).
+
+`/logout` stops the account's active requests, attempts remote session revocation, and clears the active tokens while retaining the host and registration for later sign-in.
+If remote revocation cannot be confirmed, Diffex reports that local sign-out completed and directs you to disconnect the app in ChatGPT Settings.
+
+See OpenAI's [registration guide](https://developers.openai.com/siwc/token-sharing-open-source/sign-in) and [models and inference guide](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference).
 
 ### Claude Pro/Max
 

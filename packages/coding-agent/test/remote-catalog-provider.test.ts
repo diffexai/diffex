@@ -77,6 +77,16 @@ async function refreshProvider(
 afterEach(() => vi.restoreAllMocks());
 
 describe("remote catalog provider", () => {
+	it("preserves a provider's account-specific discovery policy", () => {
+		const provider = createProvider({
+			id: "account-catalog",
+			models: [],
+			api: {},
+			auth: { apiKey: { name: "Test", resolve: async () => undefined } },
+			fetchModels: async () => [],
+		});
+		expect(withRemoteCatalog(provider)).toBe(provider);
+	});
 	it("parses keyed catalogs, sends version headers, observes the refresh TTL, and supports forced refreshes", async () => {
 		const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(
 			async () =>

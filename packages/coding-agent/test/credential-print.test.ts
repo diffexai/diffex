@@ -52,6 +52,10 @@ describe("credential print commands", () => {
 		const runtime = await createRuntime(storage);
 		const refresh = vi.fn(async () => ({
 			type: "oauth" as const,
+			clientId: "oaiapp_diffex_test",
+			subject: "account",
+			extAgentHostId: "urn:uuid:host",
+			scopes: ["chatgpt.tokens.use.direct", "resource.invoke"],
 			access: "fresh-test-token",
 			refresh: "test-refresh-token",
 			expires: Date.now() + 60 * 60 * 1000,

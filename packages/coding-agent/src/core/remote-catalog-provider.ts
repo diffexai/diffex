@@ -33,6 +33,7 @@ export function withRemoteCatalog(
 	catalogBaseUrl: string = DEFAULT_CATALOG_BASE_URL,
 	localGeneratedAt?: number,
 ): Provider {
+	if (provider.refreshModels) return provider;
 	let dynamicModels: readonly Model<Api>[] = [];
 	const catalogUrl = new URL(`/api/models/providers/${encodeURIComponent(provider.id)}`, catalogBaseUrl).href;
 	const provenance = { catalogUrl, catalogClientVersion: VERSION };
