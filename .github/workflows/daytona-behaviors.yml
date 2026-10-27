@@ -47,7 +47,8 @@ jobs:
           python3 -m venv "$RUNNER_TEMP/behavior-test-venv"
           "$RUNNER_TEMP/behavior-test-venv/bin/python" -m pip install -r scripts/daytona-behaviors/requirements.txt
           "$RUNNER_TEMP/behavior-test-venv/bin/python" -m unittest discover -s scripts/daytona-behaviors -p 'test_*.py'
-          node --test scripts/artifact-acceptance.test.mjs scripts/daytona-behaviors-workflow.test.mjs scripts/daytona-behaviors/fixture.test.mjs scripts/daytona-behaviors/live-guard.test.mjs
+          "$RUNNER_TEMP/behavior-test-venv/bin/python" -m unittest discover -s scripts -p 'test_verify_candidate_artifacts.py'
+          node --test scripts/artifact-installation.test.mjs scripts/artifact-acceptance.test.mjs scripts/daytona-behaviors-workflow.test.mjs scripts/daytona-behaviors/fixture.test.mjs scripts/daytona-behaviors/live-guard.test.mjs
       - name: Bundle checked behavior harness without rebuilding the candidate
         run: |
           mkdir -p .artifacts/daytona-bundle

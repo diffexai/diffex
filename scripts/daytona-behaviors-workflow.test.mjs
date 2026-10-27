@@ -57,6 +57,8 @@ test("one 35-minute preparation freezes, builds offline, prepares and verifies t
 	assert.ok(script.includes("npm ci --ignore-scripts"));
 	assert.ok(script.includes("sha256sum .artifacts/daytona-bundle/bundle.tar.gz"));
 	assert.match(script, /-m unittest discover -s scripts\/daytona-behaviors/);
+	assert.match(script, /-m unittest discover -s scripts -p 'test_verify_candidate_artifacts\.py'/);
+	assert.match(script, /node --test scripts\/artifact-installation\.test\.mjs/);
 	assert.match(script, /node --test .*daytona-behaviors\/fixture\.test\.mjs/);
 	for (const step of prepare.steps) {
 		assert.equal(step.env?.DAYTONA_API_KEY, undefined);

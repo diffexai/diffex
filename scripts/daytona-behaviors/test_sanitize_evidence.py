@@ -10,7 +10,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from sanitize_evidence import REPORT, sanitize
+from sanitize_evidence import REPORT, local_path, sanitize
 
 
 DAYTONA = "synthetic-daytona-secret-123456789"
@@ -105,7 +105,7 @@ class SanitizeEvidenceTests(unittest.TestCase):
         original_open = os.open
 
         def checked_open(path, *args, **kwargs):
-            self.assertEqual(Path(path).name, "normal.txt", "Excluded file was opened")
+            self.assertIn(Path(path).name, {"raw", "evidence", "nested", "normal.txt"}, "Excluded file was opened")
             return original_open(path, *args, **kwargs)
 
         # tempfile also opens a file during mkdtemp only on first use, already initialized.
@@ -163,6 +163,133 @@ class SanitizeEvidenceTests(unittest.TestCase):
             self.assertTrue(sanitize(self.root, self.output, "deterministic"))
         self.assertEqual(self.report()["credential_names"], ["DAYTONA_API_KEY"])
         self.assertEqual((self.output / "capture.txt").read_text(), OPENAI)
+
+    def test_local_scope_accepts_canonical_workspace_home_and_temp_descendants(self):
+        with patch("sanitize_evidence.os.getcwd", return_value=str(self.base / "workspace")), \
+                patch("sanitize_evidence.pwd.getpwuid") as owner, \
+                patch("sanitize_evidence.tempfile.gettempdir", return_value=str(self.base / "temp")):
+            owner.return_value.pw_dir = str(self.base / "home")
+            for root in ["workspace", "home", "temp"]:
+                path = self.base / root / "evidence" / "nested"
+                self.assertEqual(local_path(path), path)
+            with self.assertRaises(ValueError):
+                local_path(Path("/etc/diffex-publication"))
+
+    @unittest.skipUnless(sys.platform == "darwin", "Darwin OS user temp boundary")
+    def test_native_user_temp_evidence_survives_isolated_tmpdir_and_cwd(self):
+        consumer = self.base / "npm/process acceptance"
+        isolated_temp = consumer / "temp"
+        isolated_temp.mkdir(parents=True)
+        with patch.dict(os.environ, {"TMPDIR": str(isolated_temp)}), \
+                patch("sanitize_evidence.tempfile.tempdir", None), \
+                patch("sanitize_evidence.os.getcwd", return_value=str(consumer)), \
+                patch("sanitize_evidence.pwd.getpwuid") as owner:
+            owner.return_value.pw_dir = "/unrelated-owner-home"
+            self.assertEqual(tempfile.gettempdir(), str(isolated_temp))
+            self.assertTrue(sanitize(self.root, self.output, "live"))
+        self.assertTrue(self.report()["safe_to_upload"])
+
+    def test_traversal_rejected_before_filesystem_access_even_when_it_lands_inside_scope(self):
+        for path in [self.base / "nested/../safe", Path("../safe"), self.root / "../raw"]:
+            with self.subTest(path=path), patch("sanitize_evidence.os.path.realpath") as resolve:
+                with self.assertRaises(ValueError):
+                    local_path(path)
+                resolve.assert_not_called()
+
+    def test_ancestor_symlinks_and_dangling_publication_links_fail_closed(self):
+        outside = self.base / "outside"
+        outside.mkdir()
+        linked = self.base / "linked"
+        linked.symlink_to(outside, target_is_directory=True)
+        for destination in [linked / "safe", self.base / "dangling"]:
+            if destination.name == "dangling":
+                destination.symlink_to(self.base / "missing")
+            with self.subTest(destination=destination), self.assertRaises(ValueError):
+                sanitize(self.root, destination, "live")
+        (outside / "raw").mkdir()
+        with self.assertRaises(ValueError):
+            sanitize(linked / "raw", self.output, "live")
+        self.assertFalse((outside / "safe").exists())
+        self.assertFalse(self.output.exists())
+
+    def test_overlapping_output_scopes_fail_closed(self):
+        for destination in [self.root, self.root / "published", self.base]:
+            with self.subTest(destination=destination), self.assertRaises(ValueError):
+                sanitize(self.root, destination, "live")
+        self.assertFalse((self.root / "published").exists())
+
+    def test_scope_prefix_sibling_is_not_an_ancestor(self):
+        with patch("sanitize_evidence.os.getcwd", return_value="/scoped"), \
+                patch("sanitize_evidence.pwd.getpwuid") as owner, \
+                patch("sanitize_evidence.tempfile.gettempdir", return_value="/system-temp"):
+            owner.return_value.pw_dir = "/owner-home"
+            for path in ["/scoped-foreign/log", "/owner-home-foreign/log", "/system-temp-foreign/log"]:
+                with self.subTest(path=path), self.assertRaises(ValueError):
+                    local_path(Path(path))
+
+    def test_os_temp_alias_is_allowed_but_user_directory_links_are_not(self):
+        actual = self.base / "actual-temp"
+        actual.mkdir()
+        alias = self.base / "system-temp"
+        alias.symlink_to(actual, target_is_directory=True)
+        with patch("sanitize_evidence.tempfile.gettempdir", return_value=str(alias)):
+            self.assertEqual(local_path(alias / "output"), actual / "output")
+            (actual / "redirect").symlink_to(self.root, target_is_directory=True)
+            with self.assertRaises(ValueError):
+                local_path(alias / "redirect" / "output")
+
+    def test_child_directory_swap_cannot_redirect_evidence_reads(self):
+        nested = self.root / "nested"
+        nested.mkdir()
+        (nested / "visible.txt").write_text("original")
+        outside = self.base / "outside"
+        outside.mkdir()
+        (outside / "private.txt").write_text("must not be published")
+        original_open = os.open
+
+        def swapped_open(path, *args, **kwargs):
+            if path == "nested":
+                nested.rename(self.root / "original")
+                nested.symlink_to(outside, target_is_directory=True)
+            return original_open(path, *args, **kwargs)
+
+        with patch("sanitize_evidence.os.open", side_effect=swapped_open):
+            with self.assertRaises(OSError):
+                sanitize(self.root, self.output, "live")
+        self.assertFalse(self.output.exists())
+        self.assertFalse(list(self.base.glob(".publication-*")))
+
+    def test_invalid_workflow_output_symlink_blocks_upload_without_touching_target(self):
+        target = self.base / "private"
+        target.write_text("unchanged")
+        github_output = self.base / "github-output"
+        github_output.symlink_to(target)
+        with patch.dict(os.environ, {"GITHUB_OUTPUT": str(github_output)}):
+            result = subprocess.run([sys.executable, str(SCRIPT), "--root", str(self.root),
+                                     "--output", str(self.output), "--mode", "live"],
+                                    capture_output=True, check=False)
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(target.read_text(), "unchanged")
+        self.assertFalse(self.output.exists())
+        self.assertNotIn(b"Traceback", result.stderr)
+
+    def test_workflow_output_hardlink_cannot_append_outside_selected_path(self):
+        target = self.base / "private"
+        target.write_text("unchanged")
+        github_output = self.base / "github-output"
+        os.link(target, github_output)
+        with patch.dict(os.environ, {"GITHUB_OUTPUT": str(github_output)}):
+            result = subprocess.run([sys.executable, str(SCRIPT), "--root", str(self.root),
+                                     "--output", str(self.output), "--mode", "live"],
+                                    capture_output=True, check=False)
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(target.read_text(), "unchanged")
+        self.assertFalse(self.output.exists())
+
+    def test_unknown_api_mode_cannot_skip_live_credential_scan(self):
+        with self.assertRaises(ValueError):
+            sanitize(self.root, self.output, "LIVE")
+        self.assertFalse(self.output.exists())
 
     def test_existing_destination_and_symlink_root_fail_closed(self):
         self.output.mkdir()
