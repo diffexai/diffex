@@ -1,6 +1,7 @@
 node_modules/
 dist/
 .artifacts/
+/evals/
 *.log
 .DS_Store
 *.tsbuildinfo

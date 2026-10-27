@@ -1,8 +1,0 @@
-# Ubuntu 24.04 platform manifests from index
-# sha256:224a1869083a311ef3f13648a154ba79832fbef6364d31493642ca03082da254.
-platform = "linux/amd64"
-environment_timeout_sec = 600
-
-[images]
-"linux/amd64" = "ubuntu@sha256:a61567bd31828687156d735ea8eb01ba4e37636e225dd6a48ba94136a70d9d61"
-"linux/arm64" = "ubuntu@sha256:ec0b1c9058e44c837a21c3f9d8a3d5e9aaa94ed28edceb18e154af5efecf0950"

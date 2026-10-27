@@ -66,10 +66,3 @@ A supervisor must validate current process identities before signaling or preser
 Never signal a numeric PID or group ID from a stale record without checking identity.
 Missing, invalid, or ambiguous records are not proof of an environment handoff.
 Records are a cooperation protocol within the trusted trial environment, not a security boundary against task code that can modify that environment.
-
-## Terminal-Bench integration
-
-This option provides the Diffex ownership boundary described by process-lifetime issue 1.
-The adapter must enable it for every task once its pinned Diffex release supports these flags and its pre-verifier cleanup consumes the ownership records.
-The separate adapter cleanup change in issue 2 is still required: marker-based cleanup that kills all trial processes will also kill transferred services.
-Final environment deletion remains responsible for removing task services after verification.
