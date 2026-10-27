@@ -37,6 +37,7 @@ import {
 	type StreamOptions,
 } from "@diffexai/diffex-ai";
 import * as builtinProviderCatalog from "@diffexai/diffex-ai/providers/all";
+import { getRemovedProviderMessage } from "@diffexai/diffex-ai/providers/removed";
 import { getAgentDir } from "../config.ts";
 import { operationSignal, raceWithAbortSignal } from "../utils/abort.ts";
 import { AuthStorage as DefaultAuthStorage } from "./auth-storage.ts";
@@ -515,6 +516,8 @@ export class ModelRuntime implements Models {
 	setRuntimeApiKey(providerId: string, apiKey: string, options: AuthOperationOptions = {}): Promise<void> {
 		const signal = operationSignal(options.signal);
 		return this.enqueueCredentialOperation(providerId, signal, async () => {
+			const removed = getRemovedProviderMessage(providerId);
+			if (removed) throw new ModelsError("provider", removed);
 			this.credentials.setRuntimeApiKey(providerId, apiKey);
 			await this.synchronizeCredentialState(
 				providerId,
@@ -538,6 +541,7 @@ export class ModelRuntime implements Models {
 	}
 
 	getProviderAuthStatus(providerId: string): AuthStatus {
+		if (getRemovedProviderMessage(providerId)) return { configured: false };
 		if (this.credentials.hasRuntimeApiKey(providerId)) return { configured: true, source: "runtime" };
 		if (this.snapshot.storedProviders.has(providerId)) return { configured: true, source: "stored" };
 		const configured = configuredRequestAuthStatus(
@@ -558,7 +562,11 @@ export class ModelRuntime implements Models {
 		options: Omit<TOptions, "transformHeaders"> & ProviderRequestOptions;
 	}> {
 		const provider = this.models.getProvider(model.provider);
-		if (!provider) throw new ModelsError("provider", `Unknown provider: ${model.provider}`);
+		if (!provider)
+			throw new ModelsError(
+				"provider",
+				getRemovedProviderMessage(model.provider) ?? `Unknown provider: ${model.provider}`,
+			);
 		const resolution = await this.getAuth(model, {
 			apiKey: options?.apiKey,
 			env: options?.env,
@@ -724,6 +732,8 @@ export class ModelRuntime implements Models {
 	}
 
 	registerNativeProvider(provider: Provider): void {
+		const removed = getRemovedProviderMessage(provider.id);
+		if (removed) throw new ModelsError("provider", removed);
 		if (!provider.id.trim()) throw new Error("Provider id must not be empty.");
 		this.extensionProviders.delete(provider.id);
 		this.nativeExtensionProviders.set(provider.id, provider);
@@ -733,6 +743,8 @@ export class ModelRuntime implements Models {
 	}
 
 	registerProvider(providerId: string, config: ProviderConfigInput): void {
+		const removed = getRemovedProviderMessage(providerId);
+		if (removed) throw new ModelsError("provider", removed);
 		// Validate the incoming registration on its own, like the legacy registry:
 		// a broken re-registration must throw without touching the stored config.
 		validateExtensionProvider(providerId, this.builtins.get(providerId), this.config.getProvider(providerId), config);

@@ -1,4 +1,5 @@
 import type { CredentialStore } from "@diffexai/diffex-ai";
+import { getRemovedProviderMessage } from "@diffexai/diffex-ai/providers/removed";
 import { resolveCliModel } from "../core/model-resolver.ts";
 import { ModelRuntime } from "../core/model-runtime.ts";
 import { InMemoryCodingAgentModelsStore } from "../core/models-store.ts";
@@ -34,6 +35,8 @@ export async function checkProviderAuth(
 		provider = resolved.model.provider;
 	}
 	if (!provider) throw new AuthCommandError("Unable to resolve an auth provider");
+	const removed = getRemovedProviderMessage(provider);
+	if (removed) throw new AuthCommandError(removed);
 	if (modelRuntime.getError()) {
 		return { status: "invalid", provider, reason: "invalid_state" };
 	}
@@ -58,6 +61,8 @@ export async function getProviderCredential(
 	credentials: CredentialStore,
 	options: { refresh: boolean },
 ): Promise<string | undefined> {
+	const removed = getRemovedProviderMessage(providerId);
+	if (removed) throw new AuthCommandError(removed);
 	const credential = await credentials.read(providerId);
 	if (!options.refresh && credential?.type === "oauth") return credential.access;
 	return getAuthCredential(await modelRuntime.getAuth(providerId));

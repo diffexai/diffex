@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import { type DiffexMessagesOptions, stream, streamSimple } from "../src/api/diffex-messages.ts";
+import { getApiProvider } from "../src/compat.ts";
 import type { Api, AssistantMessageEvent, Context, Model, StopReason } from "../src/types.ts";
 
 type RecordedRequest = {
@@ -68,9 +69,9 @@ async function startServer(options: ResponderOptions): Promise<{ baseUrl: string
 function createModel(baseUrl: string): Model<"diffex-messages"> {
 	return {
 		id: "auto",
-		name: "Radius Auto",
+		name: "Test Backend",
 		api: "diffex-messages",
-		provider: "radius",
+		provider: "test-backend",
 		baseUrl,
 		reasoning: false,
 		input: ["text"],
@@ -137,7 +138,7 @@ describe("diffex-messages", () => {
 		expect(message.usage).toEqual(usage);
 		expect(message.responseId).toBe("resp_1");
 		expect(message.model).toBe("auto");
-		expect(message.provider).toBe("radius");
+		expect(message.provider).toBe("test-backend");
 		expect(message.content).toEqual([
 			{ type: "text", text: "Hello", textSignature: undefined },
 			{ type: "toolCall", id: "call_1", name: "read", arguments: { path: "a.txt" } },
@@ -159,7 +160,7 @@ describe("diffex-messages", () => {
 
 	it("appends debug=1 and reports response headers via onResponse", async () => {
 		const { baseUrl, requests } = await startServer({
-			headers: { "x-pi-gateway-upstream-provider": "anthropic" },
+			headers: { "x-test-backend-upstream-provider": "anthropic" },
 			events: [{ type: "done", reason: "stop", usage }],
 		});
 		const model = createModel(baseUrl);
@@ -176,7 +177,7 @@ describe("diffex-messages", () => {
 
 		expect(message.stopReason).toBe("stop");
 		expect(requests[0].url).toBe("/v1/messages?debug=1");
-		expect(observedHeaders?.["x-pi-gateway-upstream-provider"]).toBe("anthropic");
+		expect(observedHeaders?.["x-test-backend-upstream-provider"]).toBe("anthropic");
 	});
 
 	it("surfaces backend error responses with diagnostics", async () => {
@@ -237,7 +238,6 @@ describe("diffex-messages", () => {
 
 describe("diffex-messages api registration", () => {
 	it("is registered as a builtin api provider", async () => {
-		const { getApiProvider } = await import("../src/compat.ts");
 		expect(getApiProvider("diffex-messages")).toBeDefined();
 	});
 

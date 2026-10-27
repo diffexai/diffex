@@ -10,6 +10,7 @@ import {
 	type Model,
 	modelsAreEqual,
 } from "@diffexai/diffex-ai";
+import { getRemovedProviderMessage } from "@diffexai/diffex-ai/providers/removed";
 import chalk from "chalk";
 import { minimatch } from "minimatch";
 import { isValidThinkingLevel } from "../cli/args.ts";
@@ -286,6 +287,8 @@ export function resolveModelScopeFromModels(
 	const diagnostics: ModelScopeDiagnostic[] = [];
 
 	for (const pattern of patterns) {
+		const removed = getRemovedProviderMessage(pattern.split("/")[0]);
+		if (removed) throw new Error(removed);
 		// Check if pattern contains glob characters
 		if (pattern.includes("*") || pattern.includes("?") || pattern.includes("[")) {
 			// Extract optional thinking level suffix (e.g., "provider/*:high")
@@ -408,6 +411,8 @@ export function resolveCliModel(options: {
 	modelRuntime: ModelRuntime;
 }): ResolveCliModelResult {
 	const { cliProvider, cliModel, cliThinking, modelRuntime } = options;
+	const removed = getRemovedProviderMessage(cliProvider ?? cliModel?.split("/")[0] ?? "");
+	if (removed) return { model: undefined, warning: undefined, error: removed };
 
 	if (!cliModel) {
 		return { model: undefined, warning: undefined, error: undefined };
@@ -667,6 +672,8 @@ export async function findInitialModel(options: {
 	}
 
 	// 3. Try saved default from settings if auth is configured.
+	const removedDefault = defaultProvider ? getRemovedProviderMessage(defaultProvider) : undefined;
+	if (removedDefault) throw new Error(`${removedDefault} Update defaultProvider and defaultModel in settings.json.`);
 	if (defaultProvider && defaultModelId) {
 		const found = modelRuntime.getModel(defaultProvider, defaultModelId);
 		if (found && modelRuntime.hasConfiguredAuth(found.provider)) {
@@ -709,6 +716,8 @@ export async function restoreModelFromSession(
 	shouldPrintMessages: boolean,
 	modelRuntime: ModelRuntime,
 ): Promise<{ model: Model<Api> | undefined; fallbackMessage: string | undefined }> {
+	const removed = getRemovedProviderMessage(savedProvider);
+	if (removed) throw new Error(`${removed} Resume with an explicit --model provider/model.`);
 	const restoredModel = modelRuntime.getModel(savedProvider, savedModelId);
 
 	// Check if restored model exists and still has auth configured

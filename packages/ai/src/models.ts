@@ -14,6 +14,7 @@ import type {
 	ProviderAuth,
 } from "./auth/types.ts";
 import { InMemoryModelsStore, type ModelsStore, type ModelsStoreEntry } from "./models-store.ts";
+import { getRemovedProviderMessage } from "./providers/removed.ts";
 import type {
 	Api,
 	ApiStreamOptions,
@@ -267,6 +268,8 @@ class ModelsImpl implements MutableModels {
 	}
 
 	setProvider(provider: Provider): void {
+		const removed = getRemovedProviderMessage(provider.id);
+		if (removed) throw new ModelsError("provider", removed);
 		this.supersedeProviderRefresh(provider.id);
 		this.providers.set(provider.id, provider);
 	}
@@ -557,7 +560,8 @@ class ModelsImpl implements MutableModels {
 		const signal = operationSignal(interaction.signal);
 		signal.throwIfAborted();
 		const provider = this.providers.get(providerId);
-		if (!provider) throw new ModelsError("provider", `Unknown provider: ${providerId}`);
+		if (!provider)
+			throw new ModelsError("provider", getRemovedProviderMessage(providerId) ?? `Unknown provider: ${providerId}`);
 		const method = type === "oauth" ? provider.auth.oauth : provider.auth.apiKey;
 		if (!method?.login) {
 			throw new ModelsError("auth", `${provider.name} does not support ${type} login`);
@@ -633,7 +637,10 @@ class ModelsImpl implements MutableModels {
 	private requireProvider(model: Model<Api>): Provider {
 		const provider = this.providers.get(model.provider);
 		if (!provider) {
-			throw new ModelsError("provider", `Unknown provider: ${model.provider}`);
+			throw new ModelsError(
+				"provider",
+				getRemovedProviderMessage(model.provider) ?? `Unknown provider: ${model.provider}`,
+			);
 		}
 		return provider;
 	}
@@ -777,6 +784,8 @@ export interface CreateProviderOptions<TApi extends Api = Api> {
  * produces a stream error.
  */
 export function createProvider<TApi extends Api = Api>(input: CreateProviderOptions<TApi>): Provider<TApi> {
+	const removed = getRemovedProviderMessage(input.id);
+	if (removed) throw new ModelsError("provider", removed);
 	const baselineModels = input.models;
 	let dynamicModels: readonly Model<TApi>[] = [];
 	const fetchModels = input.fetchModels;

@@ -1,6 +1,7 @@
 /** Immutable, credential-blind models.json snapshot. */
 
 import { readFile } from "node:fs/promises";
+import { getRemovedProviderMessage } from "@diffexai/diffex-ai/providers/removed";
 import { type Static, Type } from "typebox";
 import { Compile } from "typebox/compile";
 import type { TLocalizedValidationError } from "typebox/error";
@@ -265,6 +266,25 @@ export class ModelConfig {
 				new Map(),
 				`Failed to parse models.json: ${error instanceof Error ? error.message : error}\n\nFile: ${path}`,
 			);
+		}
+
+		if (typeof parsed === "object" && parsed !== null && "providers" in parsed) {
+			const entries = parsed.providers;
+			if (typeof entries === "object" && entries !== null && !Array.isArray(entries)) {
+				for (const [providerId, provider] of Object.entries(entries)) {
+					const oauth =
+						typeof provider === "object" && provider !== null && "oauth" in provider ? provider.oauth : undefined;
+					const removed =
+						getRemovedProviderMessage(providerId) ??
+						(typeof oauth === "string" ? getRemovedProviderMessage(oauth) : undefined);
+					if (removed) {
+						return new ModelConfig(
+							new Map(),
+							`Invalid models.json: providers.${providerId}: ${removed}\n\nFile: ${path}`,
+						);
+					}
+				}
+			}
 		}
 
 		if (!validateModelsConfig.Check(parsed)) {
