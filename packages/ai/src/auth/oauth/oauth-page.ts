@@ -1,4 +1,18 @@
-const LOGO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 800" aria-hidden="true"><path fill="#fff" fill-rule="evenodd" d="M165.29 165.29 H517.36 V400 H400 V517.36 H282.65 V634.72 H165.29 Z M282.65 282.65 V400 H400 V282.65 Z"/><path fill="#fff" d="M517.36 400 H634.72 V634.72 H517.36 Z"/></svg>`;
+import { DIFFEX_LOGO_SVG } from "./diffex-logo.ts";
+
+// Pixel rendition of the entrance animation's rotor, cabin, portholes, hull, and wake.
+const BOAT_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 48" shape-rendering="crispEdges" aria-hidden="true">
+  <g fill="#82aaff">
+    <path d="M46 2h2v20h-2z M38 2h2v2h-2z M40 4h2v2h-2z M42 6h2v2h-2z M44 8h2v2h-2z M54 2h2v2h-2z M52 4h2v2h-2z M50 6h2v2h-2z M48 8h2v2h-2z M36 10h10v2H36z M48 10h10v2H48z"/>
+    <path d="M34 20h26v2H34z M32 22h2v2h-2z M60 22h2v2h-2z M30 24h2v4h-2z M62 24h2v4h-2z M26 28h4v2h-4z M64 28h6v2h-6z M20 30h6v2h-6z M70 30h8v2h-8z"/>
+  </g>
+  <path fill="#a9c4ff" d="M18 32h62v2h-2v2h-2v2h-4v2H28v-2h-4v-2h-4v-2h-2z"/>
+  <path fill="#5d7eaf" d="M28 38h44v2H28z M34 22h26v2H34z"/>
+  <path fill="#ccd9f5" d="M39 25h4v4h-4z M53 25h4v4h-4z"/>
+  <g fill="#82aaff" opacity=".45">
+    <path d="M2 36h10v1H2z M82 36h10v1H82z M12 42h12v1H12z M30 44h14v1H30z M51 43h12v1H51z M70 42h14v1H70z M4 47h18v1H4z M40 48h18v1H40z M78 47h18v1H78z"/>
+  </g>
+</svg>`;
 
 function escapeHtml(value: string): string {
 	return value
@@ -9,18 +23,11 @@ function escapeHtml(value: string): string {
 		.replaceAll("'", "&#39;");
 }
 
-function renderPage(options: {
-	title: string;
-	heading: string;
-	message: string;
-	details?: string;
-	status?: string;
-}): string {
+function renderPage(options: { title: string; heading: string; message: string; details?: string }): string {
 	const title = escapeHtml(options.title);
 	const heading = escapeHtml(options.heading);
 	const message = escapeHtml(options.message);
 	const details = options.details ? escapeHtml(options.details) : undefined;
-	const status = options.status ? escapeHtml(options.status) : undefined;
 
 	return `<!doctype html>
 <html lang="en">
@@ -51,7 +58,22 @@ function renderPage(options: {
       font-family: var(--font-sans);
       text-align: center;
     }
+    .scene {
+      position: fixed;
+      inset: 0;
+      overflow: hidden;
+      pointer-events: none;
+    }
+    .boat {
+      position: absolute;
+      left: 50%;
+      bottom: 5vh;
+      width: min(520px, 90vw);
+      transform: translateX(-50%);
+      opacity: .2;
+    }
     main {
+      position: relative;
       width: 100%;
       max-width: 560px;
       display: flex;
@@ -87,15 +109,17 @@ function renderPage(options: {
       white-space: pre-wrap;
       word-break: break-word;
     }
-    .status { margin-top: 16px; }
+    @media (max-height: 600px) {
+      .boat { bottom: -48px; opacity: .07; }
+    }
   </style>
 </head>
 <body>
+  <div class="scene" aria-hidden="true"><div class="boat">${BOAT_SVG}</div></div>
   <main>
-    <div class="logo">${LOGO_SVG}</div>
+    <div class="logo">${DIFFEX_LOGO_SVG}</div>
     <h1>${heading}</h1>
     <p>${message}</p>
-    ${status ? `<p class="status">${status}</p>` : ""}
     ${details ? `<div class="details">${details}</div>` : ""}
   </main>
 </body>
@@ -107,7 +131,6 @@ export function oauthSuccessHtml(message = "You can close this tab and return to
 		title: "Continue in Diffex",
 		heading: "Continue in Diffex",
 		message,
-		status: "Check the terminal for sign-in status.",
 	});
 }
 

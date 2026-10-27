@@ -203,7 +203,7 @@ function assertSuccessPage(html: string): void {
 	expect(html).toContain("<title>Continue in Diffex</title>");
 	expect(html).toContain("<h1>Continue in Diffex</h1>");
 	expect(html).toContain("You can close this tab and return to Diffex.");
-	expect(html).toContain("Check the terminal for sign-in status.");
+	expect(html).not.toContain("Check the terminal for sign-in status.");
 	expect(html).not.toMatch(/authentication (successful|completed)|signed in|window\.close|<script/i);
 }
 

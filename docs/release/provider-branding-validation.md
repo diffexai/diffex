@@ -19,8 +19,8 @@ Optional attribution still defaults off and honors `DIFFEX_PROVIDER_ATTRIBUTION`
 OpenCode session attribution remains independent of that setting and requires a session ID.
 Explicit header overrides and `null` removal take precedence over branding defaults, including Codex originator and User-Agent.
 
-Codex, Anthropic, and OpenRouter callbacks use the shared Diffex logo and presentation.
-Success pages ask users to return to Diffex and check the terminal for sign-in status without claiming credential persistence.
+Codex, Anthropic, and OpenRouter callbacks use the Diffex four-loop mark and an inline pixel-art background based on the entrance animation's boat.
+Success pages ask users to close the tab and return to Diffex without claiming credential persistence.
 Handled errors use safe explanations instead of displaying raw provider responses.
 Callback routes, validation, HTTP status codes, and response timing are preserved.
 
