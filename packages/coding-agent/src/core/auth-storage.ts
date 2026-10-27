@@ -74,7 +74,7 @@ export class FileAuthStorageBackend implements AuthStorageBackend {
 		const target = realpathSync(this.authPath);
 		const temporary = join(dirname(target), `.auth-${randomUUID()}.tmp`);
 		try {
-			writeFileSync(temporary, content, { ...AUTH_FILE_WRITE_OPTIONS, flag: "wx" });
+			writeFileSync(temporary, content, { encoding: "utf-8", mode: 0o600, flag: "wx" });
 			renameSync(temporary, target);
 		} finally {
 			rmSync(temporary, { force: true });
