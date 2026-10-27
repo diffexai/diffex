@@ -120,7 +120,7 @@ for runtime, exe in executables.items():
                     os.write(fd, b"/login\r")
                     stage = "login"
                 elif stage == "login" and "Select authentication method:" in text:
-                    os.write(fd, b"\x1b[B\r")
+                    os.write(fd, b"\r")
                     stage = "accounts"
                 elif stage == "accounts" and all(
                     name in text for name in ["OpenAI Codex", "Radius", "xAI"]
