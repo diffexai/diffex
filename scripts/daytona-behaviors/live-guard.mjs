@@ -2,7 +2,11 @@ import { appendFileSync, existsSync, readFileSync } from "node:fs";
 
 // Observes the installed provider transport; never supplies a model response.
 export default function (diffex) {
-	const record = (event) => appendFileSync(process.env.DIFFEX_BEHAVIOR_RECORD, `${JSON.stringify(event)}\n`);
+	const record = (event) => {
+		const serialized = JSON.stringify(event);
+		const key = process.env.OPENAI_API_KEY;
+		appendFileSync(process.env.DIFFEX_BEHAVIOR_RECORD, `${key ? serialized.replaceAll(key, "[REDACTED]") : serialized}\n`);
+	};
 	const originalFetch = globalThis.fetch;
 	const started = Number(process.env.DIFFEX_BEHAVIOR_STARTED);
 	let requests = existsSync(process.env.DIFFEX_BEHAVIOR_RECORD)

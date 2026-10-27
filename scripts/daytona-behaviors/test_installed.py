@@ -2,9 +2,11 @@
 import argparse
 import importlib.util
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 import xml.etree.ElementTree as ET
 
 SPEC = importlib.util.spec_from_file_location("installed", Path(__file__).with_name("installed.py"))
@@ -66,6 +68,38 @@ class InstalledTests(unittest.TestCase):
         env = {"HOME": "/tmp/home", "DIFFEX_PROJECT": "/tmp/project"}
         actual = installed.normalize_screen("Diffex v0.4.0\n  /tmp/project\nbehavior-tools-ok\n", env)
         self.assertEqual(actual, "Diffex v<VERSION>\n  <PROJECT>\nbehavior-tools-ok\n")
+
+    def test_live_evidence_is_redacted_before_publication_and_excludes_auth(self):
+        with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, {"OPENAI_API_KEY": "test-secret-never-persist"}):
+            root = Path(temporary)
+            executable = root / "consumer/node_modules/.bin/diffex"
+            executable.parent.mkdir(parents=True)
+            evidence = root / "output"
+            runner = self.runner(evidence)
+            runner.args.mode = "live"
+            runner.secrets = [os.environ["OPENAI_API_KEY"]]
+            def action(env, work, fixture):
+                (work / "events.jsonl").write_text(json.dumps({"type": "test", "content": os.environ["OPENAI_API_KEY"]}) + "\n")
+                (work / "project/result.txt").write_text(os.environ["OPENAI_API_KEY"])
+                (work / "project/auth.json").write_text("must not be copied")
+            runner.behavior(str(executable), evidence, action)
+            self.assertEqual((evidence / "project/result.txt").read_text(), "[REDACTED]")
+            self.assertFalse((evidence / "project/auth.json").exists())
+            self.assertNotIn(os.environ["OPENAI_API_KEY"], (evidence / "events.jsonl").read_text())
+
+    def test_terminal_key_is_never_in_command_arguments_or_capture(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            evidence = Path(temporary)
+            commands = []
+            def command(terminal, *args):
+                commands.append(args)
+                return "test-secret-never-persist" if args[0] == "capture-pane" else ""
+            env = {"HOME": temporary, "OPENAI_API_KEY": "test-secret-never-persist"}
+            with patch.object(installed.Terminal, "command", command):
+                terminal = installed.Terminal("/installed/diffex", [], env, evidence, evidence, 100)
+                terminal.capture()
+            self.assertNotIn(env["OPENAI_API_KEY"], str(commands))
+            self.assertEqual((evidence / "terminal.txt").read_text(), "[REDACTED]")
 
     def test_empty_results_cannot_pass(self):
         with tempfile.TemporaryDirectory() as temporary:

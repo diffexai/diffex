@@ -37,7 +37,6 @@ class Terminal:
                      "-c", str(project),
                      " ".join(shlex.quote(a) for a in [executable, *args]))
         self.command("set-option", "-g", "remain-on-exit", "on")
-        self.command("pipe-pane", "-o", "cat >> " + shlex.quote(str(evidence / "terminal.raw")))
 
     def command(self, *args):
         result = subprocess.run(["tmux", "-f", str(self.evidence / "tmux.conf"), "-L", self.socket, *args], capture_output=True, text=True,
@@ -52,7 +51,7 @@ class Terminal:
 
     def capture(self):
         screen = self.command("capture-pane", "-p", "-S", "-2000")
-        (self.evidence / "terminal.txt").write_text(screen)
+        (self.evidence / "terminal.txt").write_text(screen.replace(self.env.get("OPENAI_API_KEY", "\0"), "[REDACTED]"))
         return screen
 
     def wait(self, text, seconds=30):
@@ -199,8 +198,12 @@ class Runner:
         remaining = self.deadline - time.monotonic()
         assert remaining > 0, "Run deadline exceeded"
         result = subprocess.run([executable, *args], cwd=project, env=env, capture_output=True, text=True, timeout=min(40, remaining))
-        (evidence / "stdout.txt").write_text(result.stdout)
-        (evidence / "stderr.txt").write_text(result.stderr)
+        stdout, stderr = result.stdout, result.stderr
+        for secret in self.secrets:
+            if secret:
+                stdout, stderr = stdout.replace(secret, "[REDACTED]"), stderr.replace(secret, "[REDACTED]")
+        (evidence / "stdout.txt").write_text(stdout)
+        (evidence / "stderr.txt").write_text(stderr)
         assert result.returncode == 0, f"Exit code {result.returncode}; see stdout/stderr"
         return result.stdout
 
@@ -220,18 +223,19 @@ class Runner:
                 for source, target in [(root / "events.jsonl", evidence / "events.jsonl"),
                                        (root / "agent/sessions", evidence / "sessions"),
                                        (root / "project", evidence / "project")]:
-                    if source.is_dir():
-                        shutil.copytree(source, target)
-                    elif source.exists():
-                        shutil.copyfile(source, target)
-                # Never copy home, agent/auth.json, settings, or process environment.
-                for file in evidence.rglob("*"):
-                    if file.is_file():
+                    files = source.rglob("*") if source.is_dir() else [source]
+                    for file in files:
+                        if not file.is_file() or file.is_symlink() or file.name in {"auth.json", ".npmrc", ".netrc", ".env"} or file.name.startswith(".env."):
+                            continue
+                        destination = target / file.relative_to(source) if source.is_dir() else target
                         text = file.read_text(errors="replace")
                         for secret in self.secrets:
                             if secret:
                                 text = text.replace(secret, "[REDACTED]")
-                        file.write_text(text)
+                        destination.parent.mkdir(parents=True, exist_ok=True)
+                        destination.write_text(text)
+                # Never copy home, auth files, settings, or process environment.
+                # Redaction happens BEFORE files become incrementally downloadable.
 
     def deterministic(self, executable, runtime):
         def run_case(name, fn):
