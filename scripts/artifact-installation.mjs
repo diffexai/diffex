@@ -108,11 +108,17 @@ export function installConsumer(
 	records,
 	tarballDirectory,
 	cacheDirectory = join(directory, "cache"),
+	options = {},
 ) {
+	assert(ACCEPTANCE_MANAGERS.includes(manager), "Unsupported package manager");
+	assert(options !== null && typeof options === "object" && !Array.isArray(options), "Invalid installation options");
+	assert(Object.keys(options).every((key) => key === "lifecycleScripts"), "Unsupported installation option");
+	const lifecycleScripts = options.lifecycleScripts === undefined ? "disabled" : options.lifecycleScripts;
+	assert(["disabled", "enabled"].includes(lifecycleScripts), "Invalid lifecycle scripts mode");
+	assert(lifecycleScripts === "disabled" || manager === "npm", "Lifecycle scripts opt-in is supported only for npm");
 	directory = resolveArtifactDirectory(directory);
 	cacheDirectory = resolveArtifactDirectory(cacheDirectory);
 	tarballDirectory = resolveArtifactDirectory(tarballDirectory);
-	assert(ACCEPTANCE_MANAGERS.includes(manager), "Unsupported package manager");
 	const command = manager;
 	assert(selected.every((pkg) => typeof pkg.name === "string" && /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/.test(pkg.name)), "Invalid package name");
 	mkdirSync(directory, { recursive: true });
@@ -139,7 +145,9 @@ export function installConsumer(
 	execFileSync(
 		command,
 		manager === "npm"
-			? ["install", "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund"]
+			// Explicit false defeats npm's built-in config as well as inherited config;
+			// only this audited npm consumer path may enable dependency lifecycle hooks.
+			? ["install", "--omit=dev", lifecycleScripts === "enabled" ? "--ignore-scripts=false" : "--ignore-scripts", "--no-audit", "--no-fund"]
 			: manager === "pnpm"
 				? ["install", "--prod", "--ignore-scripts", "--no-frozen-lockfile"]
 				: ["install", "--production", "--ignore-scripts", "--network-concurrency=8"],

@@ -43,11 +43,15 @@ test("isolated installation environment copies literal non-secret allowlisted fi
 		process.env.XDG_DATA_HOME = "/private/data";
 		process.env.COREPACK_NPM_TOKEN = "synthetic-private-corepack-token";
 		process.env.npm_config_registry = "https://private.invalid";
+		process.env.npm_config_ignore_scripts = "true";
+		process.env.NPM_CONFIG_IGNORE_SCRIPTS = "true";
 		const environment = isolatedEnvironment(root);
 		assert.equal(environment.PATH, original.PATH);
 		assert.equal(environment.OPENAI_API_KEY, undefined);
 		assert.equal(environment.DAYTONA_API_KEY, undefined);
 		assert.equal(environment.NODE_OPTIONS, undefined);
+		assert.equal(environment.npm_config_ignore_scripts, undefined);
+		assert.equal(environment.NPM_CONFIG_IGNORE_SCRIPTS, undefined);
 		assert.equal(environment.HOME, join(realpathSync(root), "home"));
 		assert.equal(environment.NPM_TOKEN, undefined);
 		assert.equal(environment.COREPACK_NPM_TOKEN, undefined);
@@ -123,6 +127,96 @@ test("real pnpm installs dependency-first local tarballs with private-scope regi
 		writeFileSync(join(consumer, "node_modules/@diffexai/diffex/index.js"), "tampered");
 		assert.throws(() => verifyInstalledConsumer(consumer, selected, records, root), /Installed bytes differ/);
 		assert.throws(() => globalManagerLayout("unknown", consumer, env), /Unsupported/);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("only opted-in npm runs the audited local dependency postinstall and preserves installed inventories", { timeout: 60000 }, () => {
+	const root = mkdtempSync(join(tmpdir(), "diffex-lifecycle-consumer-"));
+	const original = { ...process.env };
+	try {
+		// This local fixture is the entire lifecycle audit: it only writes a marker
+		// beside its own package files and reports isolation state, never credentials.
+		const postinstall = [
+			"const { writeFileSync } = require('node:fs');",
+			"writeFileSync('postinstall-marker.json', JSON.stringify({",
+			"  scriptsDisabled: process.env.npm_config_ignore_scripts === 'true',",
+			"  home: process.env.HOME,",
+			"  userconfig: process.env.npm_config_userconfig,",
+			"  inheritedUppercaseIgnoreScripts: Object.hasOwn(process.env, 'NPM_CONFIG_IGNORE_SCRIPTS'),",
+			"  inheritedCredentials: ['NPM_TOKEN', 'NODE_AUTH_TOKEN', 'OPENAI_API_KEY', 'DAYTONA_API_KEY', 'COREPACK_NPM_TOKEN'].some(key => Object.hasOwn(process.env, key)),",
+			"}));",
+		].join("\n");
+		const packages = [
+			{ name: "@diffexai/lifecycle-fixture", version: "1.2.3", scripts: { postinstall: "node postinstall.cjs" } },
+			{ name: "@diffexai/diffex", version: "1.2.3", dependencies: { "@diffexai/lifecycle-fixture": "1.2.3" } },
+		];
+		const records = packages.map((pkg) => {
+			const stage = join(root, pkg.name.split("/").pop(), "package");
+			mkdirSync(stage, { recursive: true });
+			const files = { "package.json": JSON.stringify(pkg), "postinstall.cjs": postinstall };
+			const inventory = { files: Object.entries(files).map(([path, bytes]) => ({ path, sha256: createHash("sha256").update(bytes).digest("hex") })) };
+			for (const [path, bytes] of Object.entries({ ...files, "distribution-files.json": JSON.stringify(inventory) })) {
+				writeFileSync(join(stage, path), bytes);
+			}
+			const filename = `${pkg.name.replace("@", "").replace("/", "-")}-${pkg.version}.tgz`;
+			execFileSync("tar", ["-czf", join(root, filename), "-C", dirname(stage), "package"]);
+			return { ...pkg, filename, sha256: createHash("sha256").update(readFileSync(join(root, filename))).digest("hex") };
+		});
+		verifyTarballs(root, records, packages);
+		process.env.npm_config_ignore_scripts = "true";
+		process.env.NPM_CONFIG_IGNORE_SCRIPTS = "true";
+		process.env.npm_config_userconfig = "/private/credential.npmrc";
+		for (const key of ["NPM_TOKEN", "NODE_AUTH_TOKEN", "OPENAI_API_KEY", "DAYTONA_API_KEY", "COREPACK_NPM_TOKEN"])
+			process.env[key] = "synthetic-private-credential";
+		for (const [manager, enabled] of [["npm", false], ["npm", true], ["pnpm", false], ["bun", false]]) {
+			const consumer = join(root, `${manager}-${enabled ? "enabled" : "default"}`);
+			const env = enabled
+				? installConsumer(consumer, manager, packages, records, root, join(consumer, "cache"), { lifecycleScripts: "enabled" })
+				: installConsumer(consumer, manager, packages, records, root);
+			const installed = join(consumer, "node_modules", packages[0].name);
+			const marker = join(installed, "postinstall-marker.json");
+			assert.equal(existsSync(marker), enabled, `${manager} dependency lifecycle execution must match the opt-in`);
+			assert.equal(env.npm_config_ignore_scripts, undefined);
+			assert.equal(env.NPM_CONFIG_IGNORE_SCRIPTS, undefined);
+			if (enabled) {
+				assert.deepEqual(JSON.parse(readFileSync(marker, "utf8")), {
+					scriptsDisabled: false,
+					home: env.HOME,
+					userconfig: env.npm_config_userconfig,
+					inheritedUppercaseIgnoreScripts: false,
+					inheritedCredentials: false,
+				});
+				writeFileSync(join(installed, "postinstall.cjs"), "tampered");
+				assert.throws(() => verifyInstalledConsumer(consumer, packages, records, root), /Installed bytes differ/);
+				writeFileSync(join(installed, "postinstall.cjs"), postinstall);
+			}
+			verifyInstalledConsumer(consumer, packages, records, root);
+		}
+		verifyTarballs(root, records, packages);
+	} finally {
+		process.env = original;
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("lifecycle modes reject invalid options and unsupported managers before creating or executing a consumer", () => {
+	const root = mkdtempSync(join(tmpdir(), "diffex-lifecycle-modes-"));
+	try {
+		const consumer = join(root, "consumer");
+		for (const lifecycleScripts of [true, false, null, "enable", "", 1]) {
+			assert.throws(() => installConsumer(consumer, "npm", [], [], root, join(root, "cache"), { lifecycleScripts }), /Invalid lifecycle scripts mode/);
+		}
+		for (const options of [null, true, "enabled", []]) {
+			assert.throws(() => installConsumer(consumer, "npm", [], [], root, join(root, "cache"), options), /Invalid installation options/);
+		}
+		assert.throws(() => installConsumer(consumer, "npm", [], [], root, join(root, "cache"), { ignoreScripts: false }), /Unsupported installation option/);
+		for (const manager of ["pnpm", "bun"]) {
+			assert.throws(() => installConsumer(consumer, manager, [], [], root, join(root, "cache"), { lifecycleScripts: "enabled" }), /supported only for npm/);
+		}
+		assert(!existsSync(consumer), "Rejected options must not create a consumer or execute its package manager");
+		assert(!existsSync(join(root, "cache")), "Rejected options must not initialize caches");
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
