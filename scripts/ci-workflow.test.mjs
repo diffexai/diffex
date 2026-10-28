@@ -26,6 +26,18 @@ test("script-test jobs provision exact pnpm before exercising real package-manag
 	assert(local.includes('options.skipBunInstall ? ["npm", "pnpm"] : ["npm", "pnpm", "bun"]'));
 });
 
+test("script-test jobs provision exact Bun before exercising its installation fixtures", () => {
+	const release = parse(readFileSync(new URL("../.github/workflows/build-binaries.yml", import.meta.url), "utf8"));
+	for (const job of [workflow.jobs["workspace-tests"], release.jobs["prepare-artifacts"]]) {
+		const setup = job.steps.findIndex((step) => step.uses === "oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6");
+		const tests = job.steps.findIndex((step) => step.run?.includes("./test.sh"));
+		assert(setup !== -1 && tests > setup, "Pinned Bun must be available before the real fixture tests");
+		assert.equal(job.steps[setup].with["bun-version"], "1.3.11");
+	}
+	assert.equal(release.jobs["prepare-artifacts"].steps.find((step) => step.uses?.startsWith("oven-sh/setup-bun@")).if,
+		"steps.restore.outputs.restored != 'true'");
+});
+
 test("the CI aggregate requires build checks and every isolated test shard", () => {
 	const jobs = workflow.jobs;
 	assert.deepEqual(jobs["build-check-test"].needs, ["build-check", "workspace-tests", "coding-agent"]);

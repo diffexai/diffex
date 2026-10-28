@@ -23,6 +23,18 @@ function fixture() {
 	};
 	for (const file of ["package-lock.json", "docs/release/distribution-policy.json", "packages/coding-agent/package.json", "packages/evolution/package.json", "packages/harness-trace/package.json", ...cliDistribution().bundled.map((pkg) => `${pkg.directory}/package.json`)]) copy(file);
 	copy("packages/ai/dist");
+	// Mirror preparePackageDistribution's map stripping in the temporary copy only.
+	// Calling it directly would archive private debug maps under the real repo root.
+	const dist = join(root, "packages/ai/dist");
+	for (const file of readdirSync(dist, { recursive: true })) {
+		const path = join(dist, file);
+		if (file.endsWith(".map")) rmSync(path);
+		else if (file.endsWith(".js") || file.endsWith(".d.ts")) {
+			const text = readFileSync(path, "utf8");
+			const filtered = text.replace(/^[\t ]*\/\/[#@]\s*sourceMappingURL=[^\r\n]*(?:\r?\n|$)/gm, "");
+			if (filtered !== text) writeFileSync(path, filtered);
+		}
+	}
 	symlinkSync(resolve("node_modules"), join(root, "node_modules"), "dir");
 	mkdirSync(join(root, "packages/ai/node_modules/@mistralai"), { recursive: true });
 	for (const name of readdirSync("packages/ai/node_modules")) {
