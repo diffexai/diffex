@@ -96,6 +96,9 @@ jobs:
           node scripts/release-artifacts.mjs freeze .artifacts/release
           npm run build:offline
           git diff --exit-code HEAD
+      - name: Install pinned pnpm for real package-manager fixtures
+        if: steps.restore.outputs.restored != 'true'
+        run: npm install --global --ignore-scripts pnpm@10.28.2
       - name: Validate release candidate
         if: steps.restore.outputs.restored != 'true'
         run: |

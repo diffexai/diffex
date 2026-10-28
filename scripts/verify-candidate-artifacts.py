@@ -45,11 +45,11 @@ def local_path(value):
 
 
 def installed_executable(value):
-    """Validate the operator-selected npm/Bun consumer before executing its bin.
+    """Validate an npm/Bun symlink or pnpm shim, then execute only the checked JS.
 
-    Consumers may be anywhere, independently of local evidence output roots.
-    Their intentional .bin symlink must resolve to the declared Diffex package
-    entrypoint, with no package/directory links redirecting code or fixture I/O.
+    pnpm's package link must stay within this consumer's virtual store. Its shell
+    shim is never executed: the declared, validated JavaScript entrypoint is used
+    directly. Fixture I/O always stays in the original consumer, not .pnpm.
     """
     value = pathlib.Path(value)
     if ".." in value.parts or value.parts[-3:] != ("node_modules", ".bin", "diffex"):
@@ -64,15 +64,38 @@ def installed_executable(value):
                       for root in aliases)
     if requested_consumer != consumer and not alias_match:
         raise ValueError("consumer path traverses a symlink")
-    resolved = os.path.realpath(absolute)
-    if not resolved.startswith(consumer + os.path.sep):
+    modules = pathlib.Path(consumer) / "node_modules"
+    if os.path.realpath(modules) != str(modules) or os.path.realpath(modules / ".bin") != str(modules / ".bin"):
+        raise ValueError("installed module directories traverse a symlink")
+    package = modules / "@diffexai/diffex"
+    canonical_package = pathlib.Path(os.path.realpath(package))
+    if package.is_symlink():
+        store = modules / ".pnpm"
+        if os.path.realpath(store) != str(store):
+            raise ValueError("pnpm virtual store traverses a symlink")
+        if not canonical_package.is_relative_to(store):
+            raise ValueError("pnpm package escapes its installed consumer")
+        local = canonical_package.relative_to(store).parts
+        if len(local) != 4 or local[1:] != ("node_modules", "@diffexai", "diffex"):
+            raise ValueError("unexpected pnpm package target")
+        descriptor = os.open(absolute, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(descriptor, "rb") as stream:
+            if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+                raise ValueError("invalid pnpm executable shim")
+            shim = stream.read(65537)
+        targets = [package / "dist/cli.js", canonical_package / "dist/cli.js"]
+        references = [f'"$basedir/{os.path.relpath(target, modules / ".bin")}"'.encode() for target in targets]
+        if len(shim) > 65536 or not shim.startswith(b"#!/bin/sh\n") or not any(ref in shim for ref in references):
+            raise ValueError("unexpected pnpm executable shim")
+        resolved = os.path.realpath(canonical_package / "dist/cli.js")
+        if resolved != str(canonical_package / "dist/cli.js"):
+            raise ValueError("unexpected pnpm executable target")
+    else:
+        resolved = os.path.realpath(absolute)
+        if resolved != str(package / "dist/cli.js") or canonical_package != package:
+            raise ValueError("unexpected installed executable target")
+    if not resolved.startswith(consumer + os.path.sep) or os.path.commonpath([consumer, resolved]) != consumer:
         raise ValueError("executable escapes its installed consumer")
-    if os.path.commonpath([consumer, resolved]) != consumer:
-        raise ValueError("executable escapes its installed consumer")
-    package = pathlib.Path(consumer) / "node_modules/@diffexai/diffex"
-    expected = package / "dist/cli.js"
-    if resolved != str(expected) or os.path.realpath(package) != str(package):
-        raise ValueError("unexpected installed executable target")
     package = pathlib.Path(resolved).parent.parent
     metadata_path = package / "package.json"
     descriptor = os.open(metadata_path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
@@ -84,7 +107,7 @@ def installed_executable(value):
         raise ValueError("installed package executable identity mismatch")
     if not pathlib.Path(resolved).is_file() or not os.access(resolved, os.X_OK):
         raise ValueError("installed executable is not executable")
-    return resolved, pathlib.Path(resolved).parents[4]
+    return resolved, pathlib.Path(consumer)
 
 
 def write_evidence(out, name, text):

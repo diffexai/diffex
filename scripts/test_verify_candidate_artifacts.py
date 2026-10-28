@@ -41,6 +41,55 @@ class VerifyCandidateArtifactsTests(unittest.TestCase):
         with patch.object(verifier, "local_path", side_effect=AssertionError("output-only guard")):
             self.assertEqual(verifier.installed_executable(self.executable), (str(self.cli), self.consumer))
 
+    def pnpm_layout(self):
+        target = self.consumer / "node_modules/.pnpm/@diffexai+diffex@1.2.3/node_modules/@diffexai/diffex"
+        target.parent.mkdir(parents=True)
+        self.package.rename(target)
+        self.package.symlink_to(os.path.relpath(target, self.package.parent), target_is_directory=True)
+        self.executable.unlink()
+        self.executable.write_text('#!/bin/sh\nexec node "$basedir/../@diffexai/diffex/dist/cli.js" "$@"\n')
+        self.executable.chmod(0o755)
+        return target
+
+    def test_pnpm_shim_resolves_only_declared_js_and_keeps_original_consumer(self):
+        target = self.pnpm_layout()
+        self.assertEqual(verifier.installed_executable(self.executable), (str(target / "dist/cli.js"), self.consumer))
+
+    def test_pnpm_virtual_store_and_package_links_cannot_escape(self):
+        target = self.pnpm_layout()
+        for destination in [self.base / "foreign", self.consumer / "node_modules/foreign"]:
+            destination.mkdir(parents=True)
+            self.package.unlink()
+            self.package.symlink_to(destination, target_is_directory=True)
+            with self.subTest(destination=destination), self.assertRaises(ValueError):
+                verifier.installed_executable(self.executable)
+        self.package.unlink()
+        self.package.symlink_to(target, target_is_directory=True)
+        store = self.consumer / "node_modules/.pnpm"
+        moved = self.base / "foreign-store"
+        store.rename(moved)
+        store.symlink_to(moved, target_is_directory=True)
+        with self.assertRaises(ValueError):
+            verifier.installed_executable(self.executable)
+
+    def test_pnpm_shim_and_cli_links_are_rejected(self):
+        target = self.pnpm_layout()
+        for shim in ["#!/bin/sh\nexec foreign\n", "#!/bin/sh\n" + "x" * 65536, "#!/usr/bin/env node\n"]:
+            self.executable.write_text(shim)
+            with self.subTest(shim=shim[:40]), self.assertRaises(ValueError):
+                verifier.installed_executable(self.executable)
+        self.executable.write_text('#!/bin/sh\nexec node "$basedir/../@diffexai/diffex/dist/cli.js" "$@"\n')
+        cli = target / "dist/cli.js"
+        outside = self.base / "outside.js"
+        cli.rename(outside)
+        cli.symlink_to(outside)
+        with self.assertRaises(ValueError):
+            verifier.installed_executable(self.executable)
+        self.executable.unlink()
+        self.executable.symlink_to(outside)
+        with self.assertRaises(OSError):
+            verifier.installed_executable(self.executable)
+
     def test_consumer_symlink_and_parent_traversal_are_rejected(self):
         linked = self.base / "linked-consumer"
         linked.symlink_to(self.consumer, target_is_directory=True)

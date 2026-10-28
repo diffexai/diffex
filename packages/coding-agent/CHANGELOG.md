@@ -5,6 +5,7 @@
 ### Changed
 
 - Added a compact terminal activity display for npm and pnpm self-updates, while preserving package-manager warnings, failure diagnostics, and redirected logs.
+- Added pnpm installation, upgrade, integrity, and removal coverage to release acceptance alongside npm and Bun.
 
 ### Fixed
 

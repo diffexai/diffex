@@ -1,4 +1,4 @@
-import { assertContained, installConsumer, isolatedEnvironment, verifyTarballs } from "./artifact-installation.mjs";
+import { ACCEPTANCE_MANAGERS, assertContained, installConsumer, isolatedEnvironment, verifyTarballs } from "./artifact-installation.mjs";
 export { assertContained, installConsumer, isolatedEnvironment, verifyTarballs } from "./artifact-installation.mjs";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -104,10 +104,10 @@ export const operations = {
 	"@diffexai/diffex-coding-agent-server": `const reporter = api.createDurableUsageReporter({ endpoint: "http://127.0.0.1:1/usage", sharedSecret: "local-artifact-fixture-only-32-bytes", outboxDirectory: path.join(process.env.DIFFEX_CODING_AGENT_DIR, "outbox"), fetch: () => { throw new Error("Unexpected usage"); } }); await reporter.close();`,
 };
 
-export function acceptArtifacts(artifactDirectory, outputDirectory, { managers = ["npm", "bun"] } = {}) {
+export function acceptArtifacts(artifactDirectory, outputDirectory, { managers = ACCEPTANCE_MANAGERS } = {}) {
 	assert(
-		managers.length && managers.every((manager) => ["npm", "bun"].includes(manager)),
-		"Expected npm or Bun acceptance",
+		managers.length && managers.every((manager) => ACCEPTANCE_MANAGERS.includes(manager)),
+		"Expected npm, pnpm or Bun acceptance",
 	);
 	const packages = getPublicWorkspacePackages().map((pkg) => ({
 		...cliDistribution(root).manifest,
@@ -138,8 +138,10 @@ export function acceptArtifacts(artifactDirectory, outputDirectory, { managers =
 				assert(operations[pkg.name], `Missing representative operation: ${pkg.name}`);
 				const consumer = join(temporary, manager, pkg.name.split("/").pop());
 				const selected = packageClosure(pkg.name, packages);
-				const env = installConsumer(consumer, manager, selected, records, tarballDirectory, cacheDirectory);
-				const packageRoot = join(consumer, "node_modules", pkg.name);
+				const env = installConsumer(consumer, manager, selected, records, tarballDirectory,
+					manager === "pnpm" ? join(consumer, "cache") : cacheDirectory);
+				// createRequire preserves an artificial filename's lexical path; use pnpm's real package root.
+				const packageRoot = realpathSync(join(consumer, "node_modules", pkg.name));
 				const imports = declaredEntrypoints(pkg, packageRoot);
 				const source = [
 					`import assert from "node:assert/strict"; import path from "node:path"; import { createRequire } from "node:module"; import { execFileSync } from "node:child_process"; import { readFileSync } from "node:fs";`,
@@ -163,7 +165,7 @@ export function acceptArtifacts(artifactDirectory, outputDirectory, { managers =
 				});
 				evidence.packages.push({
 					manager,
-					managerVersion: execFileSync(manager, ["--version"], { encoding: "utf8" }).trim(),
+					managerVersion: execFileSync(manager, ["--version"], { cwd: consumer, env, encoding: "utf8" }).trim(),
 					name: pkg.name,
 					version: pkg.version,
 					entrypoints: imports,
@@ -173,7 +175,8 @@ export function acceptArtifacts(artifactDirectory, outputDirectory, { managers =
 				console.log(`Accepted ${manager}: ${pkg.name}`);
 			}
 			const consumer = join(temporary, manager, "process acceptance");
-			const env = installConsumer(consumer, manager, packages, records, tarballDirectory, cacheDirectory);
+			const env = installConsumer(consumer, manager, packages, records, tarballDirectory,
+				manager === "pnpm" ? join(consumer, "cache") : cacheDirectory);
 			const project = join(consumer, "project");
 			writeFileSync(join(project, "artifact helper.txt"), "artifact-helper-confirmation\n");
 			const helperOptions = { cwd: project, env, encoding: "utf8", timeout: 10000 };
@@ -217,6 +220,7 @@ export function acceptArtifacts(artifactDirectory, outputDirectory, { managers =
 				join(tarballDirectory, cli.filename),
 				outputDirectory,
 				...(managers.includes("bun") ? [] : ["--skip-bun"]),
+				...(managers.includes("pnpm") ? [] : ["--skip-pnpm"]),
 			],
 			{ cwd: root, stdio: "inherit", timeout: 3_600_000 },
 		);

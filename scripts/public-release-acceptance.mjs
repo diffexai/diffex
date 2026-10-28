@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import { tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { ACCEPTANCE_MANAGERS, assertPnpmVersion, globalManagerLayout, isolatedEnvironment } from "./artifact-installation.mjs";
 import { verifyNpmArtifact } from "./release-registry.mjs";
 
 const REGISTRY = "https://registry.npmjs.org";
@@ -121,41 +122,20 @@ export async function acceptPublicRelease(manifest, previous, output) {
 			tarball: predecessorMetadata.dist.tarball,
 			integrity: predecessorMetadata.dist.integrity,
 		};
-		for (const manager of ["npm", "bun"]) {
+		for (const manager of ACCEPTANCE_MANAGERS) {
 			const directory = join(temporary, manager);
-			for (const name of ["home", "config", "cache", "prefix", "agent", "project/.diffex", "temp"])
-				mkdirSync(join(directory, name), { recursive: true });
-			const prefix = join(directory, "prefix");
-			const bun = join(directory, "bun");
-			const bin = manager === "npm" ? join(prefix, "bin") : join(bun, "bin");
-			const packageRoot =
-				manager === "npm"
-					? join(prefix, "lib/node_modules", PACKAGE)
-					: join(bun, "install/global/node_modules", PACKAGE);
-			const executable = join(bin, "diffex");
-			const env = {
-				PATH: `${bin}:${process.env.PATH}`,
-				HOME: join(directory, "home"),
-				XDG_CONFIG_HOME: join(directory, "config"),
-				XDG_CACHE_HOME: join(directory, "cache"),
-				LANG: "en_US.UTF-8",
-				TERM: "xterm-256color",
-				TMPDIR: join(directory, "temp"),
-				npm_config_prefix: prefix,
-				npm_config_cache: join(directory, "cache/npm"),
-				npm_config_userconfig: join(directory, "empty.npmrc"),
-				npm_config_globalconfig: join(directory, "empty-global.npmrc"),
-				npm_config_registry: REGISTRY,
-				npm_config_update_notifier: "false",
-				npm_config_audit: "false",
-				npm_config_fund: "false",
-				BUN_INSTALL: bun,
-				BUN_INSTALL_BIN: bin,
-				BUN_INSTALL_GLOBAL_DIR: join(bun, "install/global"),
-				BUN_INSTALL_CACHE_DIR: join(directory, "cache/bun"),
-				DIFFEX_CODING_AGENT_DIR: join(directory, "agent"),
-				DIFFEX_NO_LOCAL_LLM: "1",
-			};
+			const env = isolatedEnvironment(directory, manager);
+			delete env.DIFFEX_OFFLINE;
+			mkdirSync(join(directory, "project/.diffex"), { recursive: true });
+			const bun = join(realpathSync(directory), "bun");
+			env.BUN_INSTALL = bun;
+			env.BUN_INSTALL_BIN = join(bun, "bin");
+			env.BUN_INSTALL_GLOBAL_DIR = join(bun, "install/global");
+			if (manager === "pnpm") assertPnpmVersion(join(directory, "project"), env);
+			const { bin, packageRoot, executable } = globalManagerLayout(manager, directory, env);
+			env.PATH = `${bin}:${env.PATH}`;
+			env.npm_config_audit = "false";
+			env.npm_config_fund = "false";
 			const retained = join(env.DIFFEX_CODING_AGENT_DIR, "retained.txt");
 			const projectData = join(directory, "project/.diffex/retained.txt");
 			writeFileSync(retained, "retain user data");
@@ -175,6 +155,9 @@ export async function acceptPublicRelease(manifest, previous, output) {
 					return text.trim();
 				} catch (error) {
 					item.exitCode = error.status;
+					item.signal = error.signal;
+					item.stdout = String(error.stdout ?? "").slice(-65536);
+					item.stderr = String(error.stderr ?? "").slice(-65536);
 					throw error;
 				}
 			};
@@ -197,13 +180,18 @@ export async function acceptPublicRelease(manifest, previous, output) {
 			// Empty manager caches prove the updater retrieves the new public artifact.
 			env.npm_config_cache = join(directory, "cache/npm-upgrade");
 			env.BUN_INSTALL_CACHE_DIR = join(directory, "cache/bun-upgrade");
+			if (manager === "pnpm") {
+				// Keep the configured store identity: pnpm rejects changing it under a live global installation.
+				rmSync(env.npm_config_store_dir, { recursive: true, force: true });
+				assert(!existsSync(env.npm_config_store_dir));
+			}
 			const updateOutput = run(executable, ["update", "--self"]);
 			assert(updateOutput.includes(pkg.version));
 			smoke(pkg.version);
 			verifyInstalledFiles(packageRoot, inventory);
 			const afterVersion = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8")).version;
 			const remove = () => {
-				run(manager, ["uninstall", "-g", ...(manager === "npm" ? ["--ignore-scripts"] : []), PACKAGE]);
+				run(manager, ["uninstall", "-g", ...(["npm", "pnpm"].includes(manager) ? ["--ignore-scripts"] : []), PACKAGE]);
 				assert(!existsSync(executable) && !existsSync(packageRoot));
 				assert.equal(readFileSync(retained, "utf8"), "retain user data");
 				assert.equal(readFileSync(projectData, "utf8"), "retain project data");
@@ -211,6 +199,10 @@ export async function acceptPublicRelease(manifest, previous, output) {
 			remove();
 			env.npm_config_cache = join(directory, "cache/npm-fresh");
 			env.BUN_INSTALL_CACHE_DIR = join(directory, "cache/bun-fresh");
+			if (manager === "pnpm") {
+				rmSync(env.npm_config_store_dir, { recursive: true, force: true });
+				assert(!existsSync(env.npm_config_store_dir));
+			}
 			install(pkg.version);
 			smoke(pkg.version);
 			verifyInstalledFiles(packageRoot, inventory);
@@ -225,6 +217,8 @@ export async function acceptPublicRelease(manifest, previous, output) {
 				uninstall: "passed",
 				userDataRetained: true,
 				projectDataRetained: true,
+				emptyUpgradeCache: true,
+				emptyFreshInstallCache: true,
 			});
 			console.log(`Public ${manager} lifecycle passed: ${beforeVersion} -> ${afterVersion}`);
 		}

@@ -1,16 +1,19 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
+export const PNPM_VERSION = "10.28.2";
+export const ACCEPTANCE_MANAGERS = ["npm", "pnpm", "bun"];
+
 const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const readJson = (file) => JSON.parse(readFileSync(file, "utf8"));
 
 export function resolveArtifactDirectory(value) {
 	assert(typeof value === "string" && value.length > 0 && !value.includes("\0"), "Invalid artifact directory");
 	const directory = resolve(value);
-	for (const base of [process.cwd(), tmpdir(), homedir(), "/tmp"]) {
+	for (const base of [process.cwd(), tmpdir(), realpathSync(tmpdir()), homedir(), "/tmp"]) {
 		const root = resolve(base);
 		if (!directory.startsWith(root + sep)) continue;
 		let current = root;
@@ -47,8 +50,12 @@ export function verifyTarballs(directory, records, packages) {
 	}
 }
 
-export function isolatedEnvironment(directory) {
+export function isolatedEnvironment(directory, manager = "npm") {
+	assert(ACCEPTANCE_MANAGERS.includes(manager), "Unsupported package manager");
 	directory = resolveArtifactDirectory(directory);
+	mkdirSync(directory, { recursive: true });
+	// pnpm records absolute virtual-store paths; macOS /var and /private/var must not mix.
+	directory = realpathSync(directory);
 	// Read literal allowlisted names: dynamic environment lookups can accidentally
 	// admit credentials when this helper is reused by installation/lifecycle code.
 	const env = Object.fromEntries(Object.entries({
@@ -59,8 +66,10 @@ export function isolatedEnvironment(directory) {
 		PATHEXT: process.env.PATHEXT,
 		LANG: process.env.LANG,
 	}).filter(([, value]) => typeof value === "string"));
-	for (const dir of ["home", "config", "cache", "prefix", "project", "agent", "temp"])
+	for (const dir of ["home", "config", "cache", "prefix", "project", "agent", "temp", "pnpm/bin"])
 		mkdirSync(resolveArtifactDirectory(join(directory, dir)), { recursive: true });
+	writeFileSync(join(directory, "empty.npmrc"), "");
+	writeFileSync(join(directory, "empty-global.npmrc"), "");
 	return {
 		...env,
 		HOME: join(directory, "home"),
@@ -73,6 +82,14 @@ export function isolatedEnvironment(directory) {
 		npm_config_globalconfig: join(directory, "empty-global.npmrc"),
 		npm_config_registry: "https://registry.npmjs.org",
 		npm_config_update_notifier: "false",
+		...(manager === "pnpm" ? {
+			PNPM_HOME: join(directory, "pnpm", "bin"),
+			npm_config_global_bin_dir: join(directory, "pnpm", "bin"),
+			npm_config_global_dir: join(directory, "pnpm", "global"),
+			npm_config_store_dir: join(directory, "cache", "pnpm"),
+			npm_config_manage_package_manager_versions: "false",
+			npm_config_package_manager_strict: "false",
+		} : {}),
 		BUN_INSTALL_CACHE_DIR: join(directory, "cache", "bun"),
 		TMPDIR: join(directory, "temp"),
 		TMP: join(directory, "temp"),
@@ -95,14 +112,19 @@ export function installConsumer(
 	directory = resolveArtifactDirectory(directory);
 	cacheDirectory = resolveArtifactDirectory(cacheDirectory);
 	tarballDirectory = resolveArtifactDirectory(tarballDirectory);
-	assert(manager === "npm" || manager === "bun", "Unsupported package manager");
-	const command = manager === "npm" ? "npm" : "bun";
+	assert(ACCEPTANCE_MANAGERS.includes(manager), "Unsupported package manager");
+	const command = manager;
 	assert(selected.every((pkg) => typeof pkg.name === "string" && /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/.test(pkg.name)), "Invalid package name");
 	mkdirSync(directory, { recursive: true });
-	const env = isolatedEnvironment(directory);
+	const env = isolatedEnvironment(directory, manager);
 	mkdirSync(cacheDirectory, { recursive: true });
 	env.npm_config_cache = join(cacheDirectory, "npm");
 	env.BUN_INSTALL_CACHE_DIR = join(cacheDirectory, "bun");
+	if (manager === "pnpm") {
+		env.npm_config_store_dir = join(realpathSync(cacheDirectory), "pnpm");
+		assert(!existsSync(env.npm_config_store_dir), "pnpm consumer acceptance requires an empty store");
+		assertPnpmVersion(directory, env);
+	}
 	writeFileSync(join(directory, ".npmrc"), "@diffexai:registry=http://127.0.0.1:9/\n");
 	const dependencies = Object.fromEntries(
 		selected.map((pkg) => [
@@ -112,15 +134,22 @@ export function installConsumer(
 	);
 	writeFileSync(
 		join(directory, "package.json"),
-		JSON.stringify({ private: true, type: "module", dependencies, overrides: dependencies }),
+		JSON.stringify({ private: true, type: "module", dependencies, overrides: dependencies, pnpm: { overrides: dependencies } }),
 	);
 	execFileSync(
 		command,
 		manager === "npm"
 			? ["install", "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund"]
-			: ["install", "--production", "--ignore-scripts", "--network-concurrency=8"],
+			: manager === "pnpm"
+				? ["install", "--prod", "--ignore-scripts", "--no-frozen-lockfile"]
+				: ["install", "--production", "--ignore-scripts", "--network-concurrency=8"],
 		{ cwd: directory, env, stdio: "inherit", timeout: 600_000 },
 	);
+	verifyInstalledConsumer(directory, selected, records, tarballDirectory);
+	return env;
+}
+
+export function verifyInstalledConsumer(directory, selected, records, tarballDirectory) {
 	for (const pkg of selected) {
 		const installed = join(directory, "node_modules", pkg.name);
 		assertContained(installed, directory);
@@ -149,5 +178,30 @@ export function installConsumer(
 			);
 		}
 	}
-	return env;
+}
+
+export function assertPnpmVersion(directory, env) {
+	let version;
+	const remedy = `Install it with: npm install --global --ignore-scripts pnpm@${PNPM_VERSION}`;
+	try {
+		version = execFileSync("pnpm", ["--version"], { cwd: directory, env, encoding: "utf8", timeout: 30000 }).trim();
+	} catch (cause) {
+		throw new Error(`Acceptance requires pnpm@${PNPM_VERSION} on PATH. ${remedy}`, { cause });
+	}
+	assert.equal(version, PNPM_VERSION, `Acceptance requires pnpm@${PNPM_VERSION}; found ${version}. ${remedy}`);
+	return version;
+}
+
+export function globalManagerLayout(manager, directory, env) {
+	assert(ACCEPTANCE_MANAGERS.includes(manager), "Unsupported package manager");
+	const bin = manager === "npm" ? join(env.npm_config_prefix, "bin")
+		: manager === "pnpm" ? env.PNPM_HOME : env.BUN_INSTALL_BIN;
+	const modules = manager === "npm" ? join(env.npm_config_prefix, "lib/node_modules")
+		: manager === "pnpm" ? execFileSync("pnpm", ["root", "--global"], {
+			cwd: directory, env: { ...env, PATH: `${bin}:${env.PATH}` }, encoding: "utf8", timeout: 30000,
+		}).trim() : join(env.BUN_INSTALL_GLOBAL_DIR, "node_modules");
+	assert(isAbsolute(modules), `Invalid ${manager} global module directory: ${modules}`);
+	const local = relative(realpathSync(directory), modules);
+	assert(local && !local.startsWith("..") && !isAbsolute(local), `${manager} global root escapes isolation`);
+	return { bin, modules, packageRoot: join(modules, "@diffexai/diffex"), executable: join(bin, "diffex") };
 }

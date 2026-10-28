@@ -17,6 +17,7 @@ function printUsage() {
 
 Builds and packs the publishable packages, then installs the tarballs into an
 isolated directory outside the repository for local release testing.
+Acceptance requires npm, pnpm@10.28.2, and Bun (unless --skip-bun-install).
 
 Options:
   --out <dir>          Output directory. Defaults to a new directory under ${tmpdir()}
@@ -193,7 +194,7 @@ for (const pkg of packages) {
 writeFileSync(join(outDir, "manifest.json"), `${JSON.stringify(records, null, 2)}\n`);
 
 if (!options.skipInstall) {
-	acceptArtifacts(outDir, join(outDir, "acceptance"), { managers: options.skipBunInstall ? ["npm"] : ["npm", "bun"] });
+	acceptArtifacts(outDir, join(outDir, "acceptance"), { managers: options.skipBunInstall ? ["npm", "pnpm"] : ["npm", "pnpm", "bun"] });
 	// Standalone compilation is deliberately excluded by the approved policy.
 
 	mkdirSync(nodeInstallDirectory, { recursive: true });

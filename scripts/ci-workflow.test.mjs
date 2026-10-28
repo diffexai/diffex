@@ -13,6 +13,19 @@ test("standard CI runs for pull requests targeting main or a stacked branch", ()
 	assert.deepEqual(workflow.on.push.branches, ["main"]);
 });
 
+test("script-test jobs provision exact pnpm before exercising real package-manager fixtures", () => {
+	const release = parse(readFileSync(new URL("../.github/workflows/build-binaries.yml", import.meta.url), "utf8"));
+	for (const job of [workflow.jobs["workspace-tests"], release.jobs["prepare-artifacts"]]) {
+		const setup = job.steps.findIndex((step) => step.run === "npm install --global --ignore-scripts pnpm@10.28.2");
+		const tests = job.steps.findIndex((step) => step.run?.includes("./test.sh"));
+		assert(setup !== -1 && tests > setup, "Pinned pnpm must be available before the real fixture tests");
+	}
+	assert.equal(release.jobs["prepare-artifacts"].steps.find((step) => step.run === "npm install --global --ignore-scripts pnpm@10.28.2").if,
+		"steps.restore.outputs.restored != 'true'");
+	const local = readFileSync(new URL("./local-release.mjs", import.meta.url), "utf8");
+	assert(local.includes('options.skipBunInstall ? ["npm", "pnpm"] : ["npm", "pnpm", "bun"]'));
+});
+
 test("the CI aggregate requires build checks and every isolated test shard", () => {
 	const jobs = workflow.jobs;
 	assert.deepEqual(jobs["build-check-test"].needs, ["build-check", "workspace-tests", "coding-agent"]);

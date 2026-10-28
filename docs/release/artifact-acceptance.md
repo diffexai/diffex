@@ -3,7 +3,8 @@
 The release gate installs every package returned by `scripts/release-packages.mjs` from its reviewed local tarball.
 Each package receives a separate consumer with only its public dependency closure, ordered before the package that requires it.
 Consumers live outside the repository in paths containing spaces, with separate homes, configuration, projects, temporary files, and package prefixes.
-Each manager starts with an empty registry cache shared only among consumers in that acceptance run, and Bun registry concurrency is bounded.
+npm and Bun start with an empty registry cache shared only among consumers in that acceptance run, and Bun registry concurrency is bounded.
+pnpm consumers use isolated stores, homes, configuration and global executable directories; no user store or credentials are inherited.
 Installed file identities are rechecked in every consumer even when downloaded dependencies are cached.
 Lifecycle scripts are disabled and the Diffex registry scope points to an unavailable loopback endpoint, so a missing local override fails instead of fetching an older Diffex package.
 External npm dependencies still resolve from the public registry.
@@ -39,13 +40,15 @@ Malformed and foreign metadata, redirects, outages, no release, and checksum mis
 An interrupted npm download demonstrates the documented pinned repair and, when npm reports `ENOTEMPTY`, relocation of the affected CLI installation or its exact stale backup before retrying.
 Interruption itself can mutate npm's prefix and is not claimed to preserve the executable.
 Uninstall verifies executable removal and retained global and project data.
-The same harness verifies Bun global installation and PATH, rejects a foreign release identity without mutation, upgrades with the real Bun subprocess, checks the installed runtime hashes, and uninstalls while retaining user and project data.
+The same harness verifies Bun and pnpm global installation and PATH, rejects a foreign release identity without mutation, upgrades with real package-manager subprocesses, checks the installed runtime hashes, and uninstalls while retaining user and project data.
+pnpm upgrades reuse the same store location with its contents cleared, preserving store identity while requiring fresh package downloads.
+pnpm's shell executable shim and package links are checked against the isolated consumer rather than treated as npm-style direct executable symlinks.
 An isolated Bun global scope registry ensures that the upgrade receives the reviewed candidate bytes.
 `npm-lifecycle.json` records commands, identities, results, limitations, and cleanup.
 
 ## Supported distribution scope
 
-The approved channel remains npm, installed with npm or Bun and executed on Node 22.19.0 or newer.
+The approved channel remains the npm registry, installed with npm, pnpm or Bun and executed on Node 22.19.0 or newer.
 Bun package installation is distinct from a Bun standalone executable.
 Standalone publication remains deferred for every platform under the approved redistribution policy, and the manifest advertises no binary assets or binary platforms.
 Windows npm targets are now explicitly deferred until equivalent terminal acceptance is available.
@@ -87,7 +90,7 @@ Public acceptance must compare the actual downloaded npm bytes with these retain
 
 The baseline CLI-only acceptance passed on Darwin arm64 but emitted no per-package operation or hosted-server result.
 The previous expanded acceptance covered eleven packages and the hosted server lifecycle before the owner reduced the public inventory on 2026-09-13.
-Current acceptance validates the complete CLI-only tarball through both managers.
+Current acceptance validates the complete CLI-only tarball through npm, pnpm and Bun.
 The owner specified that no live provider test environment is available, so real login and inference remain pending.
 Native runner results and exact committed-candidate evidence are recorded in the implementation pull request and accompanying acceptance record.
 Public downloads and public-to-public upgrades remain unexecuted until publication; local fixture inference does not establish those results.

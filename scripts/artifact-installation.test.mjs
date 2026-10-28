@@ -1,9 +1,13 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
-import { installConsumer, isolatedEnvironment, resolveArtifactDirectory, verifyTarballs } from "./artifact-installation.mjs";
+import { ACCEPTANCE_MANAGERS, assertPnpmVersion, globalManagerLayout, installConsumer, isolatedEnvironment, PNPM_VERSION, resolveArtifactDirectory, verifyInstalledConsumer, verifyTarballs } from "./artifact-installation.mjs";
 
 test("artifact directories stay within trusted roots and reject symlink components", () => {
 	const root = mkdtempSync(join(tmpdir(), "diffex-artifact-paths-"));
@@ -32,14 +36,94 @@ test("isolated installation environment copies literal non-secret allowlisted fi
 		process.env.OPENAI_API_KEY = "synthetic-private-openai-value";
 		process.env.DAYTONA_API_KEY = "synthetic-private-daytona-value";
 		process.env.NODE_OPTIONS = "synthetic-private-node-options";
+		process.env.NPM_TOKEN = "synthetic-private-npm-token";
+		process.env.npm_config_userconfig = "/private/credential.npmrc";
+		process.env.npm_config_store_dir = "/private/warm-store";
+		process.env.PNPM_HOME = "/private/pnpm-home";
+		process.env.XDG_DATA_HOME = "/private/data";
+		process.env.COREPACK_NPM_TOKEN = "synthetic-private-corepack-token";
+		process.env.npm_config_registry = "https://private.invalid";
 		const environment = isolatedEnvironment(root);
 		assert.equal(environment.PATH, original.PATH);
 		assert.equal(environment.OPENAI_API_KEY, undefined);
 		assert.equal(environment.DAYTONA_API_KEY, undefined);
 		assert.equal(environment.NODE_OPTIONS, undefined);
-		assert.equal(environment.HOME, join(root, "home"));
+		assert.equal(environment.HOME, join(realpathSync(root), "home"));
+		assert.equal(environment.NPM_TOKEN, undefined);
+		assert.equal(environment.COREPACK_NPM_TOKEN, undefined);
+		assert.equal(environment.XDG_DATA_HOME, undefined);
+		assert.equal(environment.PNPM_HOME, undefined);
+		const pnpm = isolatedEnvironment(root, "pnpm");
+		assert.equal(pnpm.PNPM_HOME, join(realpathSync(root), "pnpm/bin"));
+		assert.equal(pnpm.npm_config_store_dir, join(realpathSync(root), "cache/pnpm"));
+		assert.equal(pnpm.npm_config_registry, "https://registry.npmjs.org");
+		assert.equal(readFileSync(pnpm.npm_config_userconfig, "utf8"), "");
+		assert.equal(readFileSync(pnpm.npm_config_globalconfig, "utf8"), "");
+		assert(!existsSync(pnpm.npm_config_store_dir));
+		assert.throws(() => assertPnpmVersion(root, { ...pnpm, PATH: root }), /npm install --global --ignore-scripts pnpm@10\.28\.2/);
 	} finally {
 		process.env = original;
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("real pnpm installs dependency-first local tarballs with private-scope registry blocked and inventories checked", { timeout: 30000 }, () => {
+	const root = mkdtempSync(join(tmpdir(), "diffex-pnpm-consumer-"));
+	try {
+		assert.deepEqual(ACCEPTANCE_MANAGERS, ["npm", "pnpm", "bun"]);
+		const packages = [
+			{ name: "diffex-transitive-fixture", version: "1.2.3", main: "index.cjs" },
+			{ name: "@diffexai/dependency", version: "1.2.3" },
+			{ name: "@diffexai/diffex", version: "1.2.3", bin: { diffex: "dist/cli.js" }, dependencies: {
+				"@diffexai/dependency": "1.2.3",
+				"diffex-transitive-fixture": `file:${join(root, "diffex-transitive-fixture-1.2.3.tgz")}`,
+			} },
+		];
+		const records = packages.map((pkg) => {
+			const stage = join(root, pkg.name.split("/").pop());
+			mkdirSync(join(stage, "package"), { recursive: true });
+			const files = { "package.json": JSON.stringify(pkg), "index.js": "export const fixture = true;\n", "index.cjs": "module.exports = { fixture: 'non-hoisted transitive dependency' };\n", "dist/cli.js": "#!/usr/bin/env node\nconsole.log('fixture');\n" };
+			const inventory = { files: Object.entries(files).map(([path, bytes]) => ({ path, sha256: createHash("sha256").update(bytes).digest("hex") })) };
+			for (const [path, bytes] of Object.entries({ ...files, "distribution-files.json": JSON.stringify(inventory) })) {
+				mkdirSync(dirname(join(stage, "package", path)), { recursive: true });
+				writeFileSync(join(stage, "package", path), bytes, { mode: 0o755 });
+			}
+			const filename = `${pkg.name.replace("@", "").replace("/", "-")}-${pkg.version}.tgz`;
+			execFileSync("tar", ["-czf", join(root, filename), "-C", stage, "package"]);
+			return { ...pkg, filename, sha256: createHash("sha256").update(readFileSync(join(root, filename))).digest("hex") };
+		});
+		verifyTarballs(root, records, packages);
+		const consumer = join(root, "consumer");
+		const selected = packages.filter((pkg) => pkg.name !== "diffex-transitive-fixture");
+		const env = installConsumer(consumer, "pnpm", selected, records, root);
+		assert.equal(assertPnpmVersion(consumer, env), PNPM_VERSION);
+		const lexicalPackageRoot = join(consumer, "node_modules/@diffexai/diffex");
+		const packageRoot = realpathSync(lexicalPackageRoot);
+		assert.match(packageRoot, /[\\/]\.pnpm[\\/]/);
+		assert(!existsSync(join(consumer, "node_modules/diffex-transitive-fixture")), "Transitive fixture must not be hoisted to the consumer root");
+		assert.throws(() => createRequire(join(lexicalPackageRoot, "package.json"))("diffex-transitive-fixture"), { code: "MODULE_NOT_FOUND" });
+		const cliRequire = createRequire(join(packageRoot, "package.json"));
+		assert.deepEqual(cliRequire("diffex-transitive-fixture"), { fixture: "non-hoisted transitive dependency" });
+		const validator = join(root, "validate.py");
+		writeFileSync(validator, [
+			"import importlib.util, json, sys",
+			"spec = importlib.util.spec_from_file_location('verifier', sys.argv[1])",
+			"module = importlib.util.module_from_spec(spec)",
+			"spec.loader.exec_module(module)",
+			"executable, consumer = module.installed_executable(sys.argv[2])",
+			"print(json.dumps([executable, str(consumer)]))",
+		].join("\n"));
+		const terminal = JSON.parse(execFileSync("python3", [validator,
+			fileURLToPath(new URL("./verify-candidate-artifacts.py", import.meta.url)),
+			join(consumer, "node_modules/.bin/diffex")], { encoding: "utf8", env, cwd: consumer }));
+		assert.deepEqual(terminal, [realpathSync(join(consumer, "node_modules/@diffexai/diffex/dist/cli.js")), realpathSync(consumer)]);
+		const layout = globalManagerLayout("pnpm", consumer, env);
+		assert.equal(layout.bin, env.PNPM_HOME);
+		assert.match(layout.modules, /[\\/]pnpm[\\/]global[\\/]5[\\/]node_modules$/);
+		writeFileSync(join(consumer, "node_modules/@diffexai/diffex/index.js"), "tampered");
+		assert.throws(() => verifyInstalledConsumer(consumer, selected, records, root), /Installed bytes differ/);
+		assert.throws(() => globalManagerLayout("unknown", consumer, env), /Unsupported/);
+	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
 });
