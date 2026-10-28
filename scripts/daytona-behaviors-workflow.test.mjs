@@ -55,6 +55,10 @@ test("one 35-minute preparation freezes, builds offline, prepares and verifies t
 		previous = position;
 	}
 	assert.ok(script.includes("npm ci --ignore-scripts"));
+	assert.ok(script.includes("npm install -g npm@11.16.0 pnpm@10.28.2 --ignore-scripts"));
+	assert.ok(prepare.steps.some((step) => step.uses?.startsWith("oven-sh/setup-bun@") && step.with["bun-version"] === "1.3.11"));
+	assert.ok(script.includes("scripts/daytona-behaviors/npm-global-install.test.mjs"));
+	assert.ok(script.includes("scripts/daytona-behaviors/npm-global-install.mjs"));
 	assert.ok(script.includes("sha256sum .artifacts/daytona-bundle/bundle.tar.gz"));
 	assert.match(script, /-m unittest discover -s scripts\/daytona-behaviors/);
 	assert.match(script, /-m unittest discover -s scripts -p 'test_verify_candidate_artifacts\.py'/);
@@ -87,6 +91,13 @@ test("one 35-minute preparation freezes, builds offline, prepares and verifies t
 		assert.equal(job.steps.at(-1).if, "${{ always() && steps.sanitize.outputs.safe_to_upload == 'true' }}");
 	}
 	assert.deepEqual(workflow.jobs["daytona-behaviors"].needs, ["prepare", "deterministic", "live"]);
+});
+
+test("Daytona npm behaviors enable scripts while Bun and ordinary artifact consumers remain disabled", () => {
+	const installer = readFileSync(new URL("./daytona-behaviors/install.mjs", import.meta.url), "utf8");
+	assert.match(installer, /const lifecycleScripts = manager === "npm" \? "enabled" : "disabled"/);
+	assert.match(installer, /\{ lifecycleScripts \}/);
+	assert.match(installer, /manager, lifecycleScripts, executable/);
 });
 
 test("only a completed all-files credential guard permits sanitized evidence publication", () => {
@@ -150,7 +161,7 @@ for (const scenario of ["pass", "missing-artifact", "missing-result", "invalid-r
 				}));
 				const identities = mode === "live"
 					? ["artifact-integrity", "npm-package-integrity", "npm-live-openai"]
-					: ["artifact-integrity", "npm-package-integrity", "bun-package-integrity", ...["npm", "bun"].flatMap((manager) =>
+					: ["artifact-integrity", "npm-global-installation", "npm-package-integrity", "bun-package-integrity", ...["npm", "bun"].flatMap((manager) =>
 						["installation", "print", "builtin-auth-transport", "terminal-tools-cancel-resume", "artifact-terminal"].map((name) => `${manager}-${name}`))];
 				writeFileSync(join(directory, "evidence/results.json"), JSON.stringify({
 					schemaVersion: 1, commit, mode, outcome: "passed", artifactHashes: { "diffex.tgz": "c".repeat(64) },

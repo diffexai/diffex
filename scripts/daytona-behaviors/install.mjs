@@ -15,10 +15,12 @@ const packages = manifest.packages;
 assert.equal(packages.length, 1, "Expected the standalone CLI distribution");
 assert.equal(packages[0].name, "@diffexai/diffex");
 verifyTarballs(artifactDirectory, packages, packages);
-installConsumer(consumerDirectory, manager, packages, packages, artifactDirectory);
+const lifecycleScripts = manager === "npm" ? "enabled" : "disabled";
+installConsumer(consumerDirectory, manager, packages, packages, artifactDirectory,
+	join(consumerDirectory, "cache"), { lifecycleScripts });
 const executable = join(consumerDirectory, "node_modules/.bin/diffex");
 assert(realpathSync(executable).startsWith(`${consumerDirectory}/node_modules/`));
 writeFileSync(join(consumerDirectory, "installation.json"), `${JSON.stringify({
-	manager, executable, resolved: realpathSync(executable), commit,
+	manager, lifecycleScripts, executable, resolved: realpathSync(executable), commit,
 	artifacts: packages.map(({ name, sha256 }) => ({ name, sha256 })), integrity: "passed",
 }, null, 2)}\n`);

@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 import shutil
 import shlex
+import signal
 import subprocess
 import sys
 import tempfile
@@ -24,6 +25,30 @@ def read_events(path):
 
 def write_json(path, value):
     path.write_text(json.dumps(value, indent=2) + "\n")
+
+
+def run_global_installation(command):
+    # The validator owns a 600-second total deadline and cleans its active npm
+    # groups on SIGTERM. Leave a bounded grace before forcing sandbox-local exit.
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                               text=True, start_new_session=True)
+    timed_out = False
+    try:
+        stdout, stderr = process.communicate(timeout=630)
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        for termination in (signal.SIGTERM, signal.SIGKILL):
+            try:
+                os.killpg(process.pid, termination)
+            except ProcessLookupError:
+                pass
+            try:
+                stdout, stderr = process.communicate(timeout=10)
+                break
+            except subprocess.TimeoutExpired:
+                if termination == signal.SIGKILL:
+                    raise RuntimeError("Global npm validator did not terminate after SIGKILL")
+    return subprocess.CompletedProcess(command, 124 if timed_out else process.returncode, stdout, stderr)
 
 
 class Terminal:
@@ -395,12 +420,31 @@ class Runner:
                 write_json(evidence / "manifest.json", manifest)
             if not self.scenario("artifact-integrity", manifest_check, "configuration"):
                 return False
+            if self.args.mode == "deterministic":
+                def global_install(evidence):
+                    result = run_global_installation(["node", str(HERE / "npm-global-install.mjs"),
+                        str(self.args.artifacts), self.args.commit, str(evidence)])
+                    (evidence / "install.txt").write_text(result.stdout + result.stderr)
+                    assert result.returncode == 0, "Normal global npm installation failed; see install.txt"
+                    report = json.loads((evidence / "npm-global-installation.json").read_text())
+                    assert report["schemaVersion"] == 1 and report["sourceCommit"] == self.args.commit, "Global npm evidence identity mismatch"
+                    assert report["status"] == "passed" and report["cleanup"] is True, "Global npm validation or cleanup failed"
+                    assert report["publicCommand"] == "npm i -g @diffexai/diffex", "Unexpected public install command"
+                    entries = report["entries"]
+                    assert len(entries) == 2 and {entry["kind"] for entry in entries} == {"candidate", "public"}, "Incomplete global npm installations"
+                    assert all(entry["status"] == "passed" and entry["scripts"] == "enabled" and
+                        entry["ignoreScripts"] == "false" and entry["coldCache"] is True and
+                        entry["installedInventory"] == "passed" for entry in entries), "Global npm scripts, cache or inventory not verified"
+                self.scenario("npm-global-installation", global_install, "configuration")
             for manager in (["npm"] if self.args.mode == "live" else ["npm", "bun"]):
                 consumer = Path(tempfile.mkdtemp(prefix="diffex-installed-"))
                 def install(evidence):
                     result = subprocess.run(["node", str(HERE / "install.mjs"), str(self.args.artifacts), str(consumer), manager, self.args.commit], capture_output=True, text=True, timeout=600)
                     (evidence / "install.txt").write_text(result.stdout + result.stderr)
                     assert result.returncode == 0, "Artifact installation/integrity failed; see install.txt"
+                    installation = json.loads((consumer / "installation.json").read_text())
+                    expected_policy = "enabled" if manager == "npm" else "disabled"
+                    assert installation["lifecycleScripts"] == expected_policy, "Unexpected installation script policy"
                     shutil.copyfile(consumer / "installation.json", evidence / "installation.json")
                 if self.scenario(manager + "-package-integrity", install, "configuration"):
                     installations.append((manager, str(consumer / "node_modules/.bin/diffex")))
