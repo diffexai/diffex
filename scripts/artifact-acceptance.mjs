@@ -140,7 +140,8 @@ export function acceptArtifacts(artifactDirectory, outputDirectory, { managers =
 				const selected = packageClosure(pkg.name, packages);
 				const env = installConsumer(consumer, manager, selected, records, tarballDirectory,
 					manager === "pnpm" ? join(consumer, "cache") : cacheDirectory);
-				const packageRoot = join(consumer, "node_modules", pkg.name);
+				// createRequire preserves an artificial filename's lexical path; use pnpm's real package root.
+				const packageRoot = realpathSync(join(consumer, "node_modules", pkg.name));
 				const imports = declaredEntrypoints(pkg, packageRoot);
 				const source = [
 					`import assert from "node:assert/strict"; import path from "node:path"; import { createRequire } from "node:module"; import { execFileSync } from "node:child_process"; import { readFileSync } from "node:fs";`,

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -71,13 +72,17 @@ test("real pnpm installs dependency-first local tarballs with private-scope regi
 	try {
 		assert.deepEqual(ACCEPTANCE_MANAGERS, ["npm", "pnpm", "bun"]);
 		const packages = [
+			{ name: "diffex-transitive-fixture", version: "1.2.3", main: "index.cjs" },
 			{ name: "@diffexai/dependency", version: "1.2.3" },
-			{ name: "@diffexai/diffex", version: "1.2.3", bin: { diffex: "dist/cli.js" }, dependencies: { "@diffexai/dependency": "1.2.3" } },
+			{ name: "@diffexai/diffex", version: "1.2.3", bin: { diffex: "dist/cli.js" }, dependencies: {
+				"@diffexai/dependency": "1.2.3",
+				"diffex-transitive-fixture": `file:${join(root, "diffex-transitive-fixture-1.2.3.tgz")}`,
+			} },
 		];
 		const records = packages.map((pkg) => {
 			const stage = join(root, pkg.name.split("/").pop());
 			mkdirSync(join(stage, "package"), { recursive: true });
-			const files = { "package.json": JSON.stringify(pkg), "index.js": "export const fixture = true;\n", "dist/cli.js": "#!/usr/bin/env node\nconsole.log('fixture');\n" };
+			const files = { "package.json": JSON.stringify(pkg), "index.js": "export const fixture = true;\n", "index.cjs": "module.exports = { fixture: 'non-hoisted transitive dependency' };\n", "dist/cli.js": "#!/usr/bin/env node\nconsole.log('fixture');\n" };
 			const inventory = { files: Object.entries(files).map(([path, bytes]) => ({ path, sha256: createHash("sha256").update(bytes).digest("hex") })) };
 			for (const [path, bytes] of Object.entries({ ...files, "distribution-files.json": JSON.stringify(inventory) })) {
 				mkdirSync(dirname(join(stage, "package", path)), { recursive: true });
@@ -89,9 +94,16 @@ test("real pnpm installs dependency-first local tarballs with private-scope regi
 		});
 		verifyTarballs(root, records, packages);
 		const consumer = join(root, "consumer");
-		const env = installConsumer(consumer, "pnpm", packages, records, root);
+		const selected = packages.filter((pkg) => pkg.name !== "diffex-transitive-fixture");
+		const env = installConsumer(consumer, "pnpm", selected, records, root);
 		assert.equal(assertPnpmVersion(consumer, env), PNPM_VERSION);
-		assert.match(realpathSync(join(consumer, "node_modules/@diffexai/diffex")), /[\\/]\.pnpm[\\/]/);
+		const lexicalPackageRoot = join(consumer, "node_modules/@diffexai/diffex");
+		const packageRoot = realpathSync(lexicalPackageRoot);
+		assert.match(packageRoot, /[\\/]\.pnpm[\\/]/);
+		assert(!existsSync(join(consumer, "node_modules/diffex-transitive-fixture")), "Transitive fixture must not be hoisted to the consumer root");
+		assert.throws(() => createRequire(join(lexicalPackageRoot, "package.json"))("diffex-transitive-fixture"), { code: "MODULE_NOT_FOUND" });
+		const cliRequire = createRequire(join(packageRoot, "package.json"));
+		assert.deepEqual(cliRequire("diffex-transitive-fixture"), { fixture: "non-hoisted transitive dependency" });
 		const validator = join(root, "validate.py");
 		writeFileSync(validator, [
 			"import importlib.util, json, sys",
@@ -109,7 +121,7 @@ test("real pnpm installs dependency-first local tarballs with private-scope regi
 		assert.equal(layout.bin, env.PNPM_HOME);
 		assert.match(layout.modules, /[\\/]pnpm[\\/]global[\\/]5[\\/]node_modules$/);
 		writeFileSync(join(consumer, "node_modules/@diffexai/diffex/index.js"), "tampered");
-		assert.throws(() => verifyInstalledConsumer(consumer, packages, records, root), /Installed bytes differ/);
+		assert.throws(() => verifyInstalledConsumer(consumer, selected, records, root), /Installed bytes differ/);
 		assert.throws(() => globalManagerLayout("unknown", consumer, env), /Unsupported/);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
