@@ -1,7 +1,8 @@
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { delimiter, join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { getSelfUpdateCommand } from "../src/config.ts";
 import { getSelfUpdateFailureHints, runSelfUpdate, SelfUpdateError } from "../src/utils/self-update.ts";
 
 describe("self-update output and diagnostics", () => {
@@ -9,7 +10,10 @@ describe("self-update output and diagnostics", () => {
 	beforeEach(() => {
 		directory = mkdtempSync(join(tmpdir(), "diffex-self-update-"));
 	});
-	afterEach(() => rmSync(directory, { recursive: true, force: true }));
+	afterEach(() => {
+		vi.unstubAllEnvs();
+		rmSync(directory, { recursive: true, force: true });
+	});
 
 	function manager(name: string, script: string) {
 		const file = join(directory, `${name}.cjs`);
@@ -112,6 +116,90 @@ describe("self-update output and diagnostics", () => {
 		);
 		expect(capture.stdout.join("")).not.toContain("with pnpm");
 	});
+
+	it.each([
+		{ failure: "EINTEGRITY", renamed: false },
+		{ failure: "ECONNRESET", renamed: false },
+		{ failure: "EINTEGRITY", renamed: true },
+		{ failure: "ECONNRESET", renamed: true },
+		{ failure: undefined, renamed: false },
+		{ failure: undefined, renamed: true },
+	])(
+		"validates the native npm target before replacement ($failure, renamed=$renamed)",
+		async ({ failure, renamed }) => {
+			const prefix = join(directory, "prefix with spaces");
+			const installedName = renamed ? "@mariozechner/pi-coding-agent" : "@diffexai/diffex";
+			const packageDir = join(prefix, "lib", "node_modules", ...installedName.split("/"));
+			const sentinel = join(packageDir, "sentinel");
+			const records = join(directory, "commands.jsonl");
+			mkdirSync(packageDir, { recursive: true });
+			writeFileSync(sentinel, "existing installation");
+			manager(
+				"npm",
+				`const fs = require("node:fs");
+const args = process.argv.slice(2);
+if (args.includes("root")) {
+ console.log(${JSON.stringify(join(prefix, "lib", "node_modules"))});
+ process.exit(0);
+}
+fs.appendFileSync(${JSON.stringify(records)}, JSON.stringify(args) + "\\n");
+if (args.includes("cache") && ${JSON.stringify(failure ?? "")}) {
+ console.error("npm error " + ${JSON.stringify(failure ?? "")});
+ process.exit(23);
+}
+if (args.includes("install") || args.includes("uninstall")) fs.writeFileSync(${JSON.stringify(sentinel)}, "replacement started");
+`,
+			);
+			vi.stubEnv("PATH", `${directory}${delimiter}${process.env.PATH ?? ""}`);
+			vi.stubEnv("DIFFEX_PACKAGE_DIR", packageDir);
+			const descriptor = Object.getOwnPropertyDescriptor(process, "execPath");
+			Object.defineProperty(process, "execPath", { value: join(packageDir, "dist", "cli.js"), configurable: true });
+			try {
+				const command = getSelfUpdateCommand(installedName, undefined, {
+					packageName: "@diffexai/diffex",
+					installSpec: "@diffexai/diffex@1.2.3",
+				});
+				expect(command).toBeDefined();
+				if (!command) throw new Error("Expected a native npm update command");
+				const capture = output(false);
+				if (failure) {
+					await expect(runSelfUpdate(command, capture.streams)).rejects.toThrow("exited with code 23");
+					expect(capture.stderr.join("")).toContain(failure);
+					expect(readFileSync(sentinel, "utf8")).toBe("existing installation");
+				} else {
+					await runSelfUpdate(command, capture.streams);
+					expect(readFileSync(sentinel, "utf8")).toBe("replacement started");
+				}
+				const cache = [
+					"--prefix",
+					prefix,
+					"cache",
+					"add",
+					"--ignore-scripts",
+					"--min-release-age=0",
+					"@diffexai/diffex@1.2.3",
+				];
+				const install = [
+					"--prefix",
+					prefix,
+					"install",
+					"-g",
+					"--ignore-scripts",
+					"--min-release-age=0",
+					"@diffexai/diffex@1.2.3",
+				];
+				const uninstall = ["--prefix", prefix, "uninstall", "-g", installedName];
+				expect(
+					readFileSync(records, "utf8")
+						.trim()
+						.split("\n")
+						.map((line) => JSON.parse(line)),
+				).toEqual(failure ? [cache] : renamed ? [cache, uninstall, install] : [cache, install]);
+			} finally {
+				if (descriptor) Object.defineProperty(process, "execPath", descriptor);
+			}
+		},
+	);
 
 	it.each([
 		["ENOTEMPTY", "move only the Diffex package directory"],

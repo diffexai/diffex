@@ -218,11 +218,21 @@ describe("detectInstallMethod", () => {
 
 		const command = getSelfUpdateCommand("@diffexai/diffex");
 
-		expect(detectInstallMethod()).toBe("npm");
-		expect(command).toEqual({
+		const install = {
 			command: "npm",
 			args: ["--prefix", prefix, "install", "-g", "--ignore-scripts", "--min-release-age=0", "@diffexai/diffex"],
 			display: `npm --prefix ${prefix} install -g --ignore-scripts --min-release-age=0 @diffexai/diffex`,
+		};
+		const cache = {
+			command: "npm",
+			args: ["--prefix", prefix, "cache", "add", "--ignore-scripts", "--min-release-age=0", "@diffexai/diffex"],
+			display: `npm --prefix ${prefix} cache add --ignore-scripts --min-release-age=0 @diffexai/diffex`,
+		};
+		expect(detectInstallMethod()).toBe("npm");
+		expect(command).toEqual({
+			...install,
+			display: `${cache.display} && ${install.display}`,
+			steps: [cache, install],
 		});
 	});
 
@@ -234,7 +244,7 @@ describe("detectInstallMethod", () => {
 			installSpec: "@diffexai/diffex@1.2.3",
 		});
 
-		expect(command).toEqual({
+		const install = {
 			command: "npm",
 			args: [
 				"--prefix",
@@ -246,6 +256,24 @@ describe("detectInstallMethod", () => {
 				"@diffexai/diffex@1.2.3",
 			],
 			display: `npm --prefix ${prefix} install -g --ignore-scripts --min-release-age=0 @diffexai/diffex@1.2.3`,
+		};
+		const cache = {
+			command: "npm",
+			args: [
+				"--prefix",
+				prefix,
+				"cache",
+				"add",
+				"--ignore-scripts",
+				"--min-release-age=0",
+				"@diffexai/diffex@1.2.3",
+			],
+			display: `npm --prefix ${prefix} cache add --ignore-scripts --min-release-age=0 @diffexai/diffex@1.2.3`,
+		};
+		expect(command).toEqual({
+			...install,
+			display: `${cache.display} && ${install.display}`,
+			steps: [cache, install],
 		});
 	});
 
@@ -257,8 +285,13 @@ describe("detectInstallMethod", () => {
 		expect(command).toEqual({
 			command: "npm",
 			args: ["--prefix", prefix, "install", "-g", "--ignore-scripts", "--min-release-age=0", "@new-scope/pi"],
-			display: `npm --prefix ${prefix} uninstall -g @mariozechner/pi-coding-agent && npm --prefix ${prefix} install -g --ignore-scripts --min-release-age=0 @new-scope/pi`,
+			display: `npm --prefix ${prefix} cache add --ignore-scripts --min-release-age=0 @new-scope/pi && npm --prefix ${prefix} uninstall -g @mariozechner/pi-coding-agent && npm --prefix ${prefix} install -g --ignore-scripts --min-release-age=0 @new-scope/pi`,
 			steps: [
+				{
+					command: "npm",
+					args: ["--prefix", prefix, "cache", "add", "--ignore-scripts", "--min-release-age=0", "@new-scope/pi"],
+					display: `npm --prefix ${prefix} cache add --ignore-scripts --min-release-age=0 @new-scope/pi`,
+				},
 				{
 					command: "npm",
 					args: ["--prefix", prefix, "uninstall", "-g", "@mariozechner/pi-coding-agent"],
@@ -290,14 +323,10 @@ describe("detectInstallMethod", () => {
 
 		const command = getSelfUpdateCommand("@diffexai/diffex", []);
 
-		expect(command?.args).toEqual([
-			"--prefix",
-			prefix,
-			"install",
-			"-g",
-			"--ignore-scripts",
-			"--min-release-age=0",
-			"@diffexai/diffex",
+		expect(command).toEqual(getSelfUpdateCommand("@diffexai/diffex"));
+		expect(command?.steps?.map((step) => step.args)).toEqual([
+			["--prefix", prefix, "cache", "add", "--ignore-scripts", "--min-release-age=0", "@diffexai/diffex"],
+			["--prefix", prefix, "install", "-g", "--ignore-scripts", "--min-release-age=0", "@diffexai/diffex"],
 		]);
 	});
 
@@ -307,7 +336,7 @@ describe("detectInstallMethod", () => {
 		const command = getSelfUpdateCommand("@diffexai/diffex");
 
 		expect(command?.display).toBe(
-			`npm --prefix "${prefix}" install -g --ignore-scripts --min-release-age=0 @diffexai/diffex`,
+			`npm --prefix "${prefix}" cache add --ignore-scripts --min-release-age=0 @diffexai/diffex && npm --prefix "${prefix}" install -g --ignore-scripts --min-release-age=0 @diffexai/diffex`,
 		);
 	});
 
@@ -318,7 +347,7 @@ describe("detectInstallMethod", () => {
 
 		expect(detectInstallMethod()).toBe("npm");
 		expect(getUpdateInstruction("@diffexai/diffex")).toBe(
-			"Run: npm install -g --ignore-scripts --min-release-age=0 @diffexai/diffex",
+			"Run: npm cache add --ignore-scripts --min-release-age=0 @diffexai/diffex && npm install -g --ignore-scripts --min-release-age=0 @diffexai/diffex",
 		);
 	});
 
