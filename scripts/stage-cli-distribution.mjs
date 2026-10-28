@@ -19,7 +19,7 @@ export function stageCliDistribution(directory, stage) {
 		join(stage, "README.md"),
 		"# Diffex\n\nCoding agent for your terminal.\n\n" +
 			"## Requirements\n\nNode.js 22.19.0 or newer. Supports macOS and Linux on arm64 and x64.\n\n" +
-			"## Install\n\n```sh\nnpm install -g --ignore-scripts @diffexai/diffex\n```\n\n" +
+			"## Install\n\n```sh\nnpm i -g @diffexai/diffex\n```\n\n" +
 			"Or with pnpm:\n\n```sh\npnpm add -g --ignore-scripts @diffexai/diffex\n```\n\n" +
 			"## Usage\n\n```sh\ndiffex --version\ndiffex --help\ndiffex\n```\n\n" +
 			"Use `/login` in Diffex to connect your provider account.\n\n" +

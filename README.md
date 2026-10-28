@@ -33,7 +33,7 @@ Diffex is a lightweight, self-evolving coding agent that lives in your CLI. Ask 
 Requires Node.js 22.19 or newer and npm or pnpm.
 
 ```bash
-npm install -g --ignore-scripts @diffexai/diffex
+npm i -g @diffexai/diffex
 cd your-project
 diffex
 ```

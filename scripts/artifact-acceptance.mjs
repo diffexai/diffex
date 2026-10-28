@@ -22,6 +22,11 @@ import { getPublicWorkspacePackages } from "./release-packages.mjs";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const readJson = (file) => JSON.parse(readFileSync(file, "utf8"));
 
+export function candidateInstallationOptions(manager) {
+	assert(ACCEPTANCE_MANAGERS.includes(manager), "Unsupported package manager");
+	return { lifecycleScripts: manager === "npm" ? "enabled" : "disabled" };
+}
+
 export function packageClosure(name, packages) {
 	const result = [];
 	const visiting = new Set();
@@ -133,13 +138,14 @@ export function acceptArtifacts(artifactDirectory, outputDirectory, { managers =
 	};
 	try {
 		for (const manager of managers) {
+			const installationOptions = candidateInstallationOptions(manager);
 			const cacheDirectory = join(temporary, manager, "registry-cache");
 			for (const pkg of packages) {
 				assert(operations[pkg.name], `Missing representative operation: ${pkg.name}`);
 				const consumer = join(temporary, manager, pkg.name.split("/").pop());
 				const selected = packageClosure(pkg.name, packages);
 				const env = installConsumer(consumer, manager, selected, records, tarballDirectory,
-					manager === "pnpm" ? join(consumer, "cache") : cacheDirectory);
+					manager === "pnpm" ? join(consumer, "cache") : cacheDirectory, installationOptions);
 				// createRequire preserves an artificial filename's lexical path; use pnpm's real package root.
 				const packageRoot = realpathSync(join(consumer, "node_modules", pkg.name));
 				const imports = declaredEntrypoints(pkg, packageRoot);
@@ -166,6 +172,7 @@ export function acceptArtifacts(artifactDirectory, outputDirectory, { managers =
 				evidence.packages.push({
 					manager,
 					managerVersion: execFileSync(manager, ["--version"], { cwd: consumer, env, encoding: "utf8" }).trim(),
+					lifecycleScripts: installationOptions.lifecycleScripts,
 					name: pkg.name,
 					version: pkg.version,
 					entrypoints: imports,
@@ -176,7 +183,7 @@ export function acceptArtifacts(artifactDirectory, outputDirectory, { managers =
 			}
 			const consumer = join(temporary, manager, "process acceptance");
 			const env = installConsumer(consumer, manager, packages, records, tarballDirectory,
-				manager === "pnpm" ? join(consumer, "cache") : cacheDirectory);
+				manager === "pnpm" ? join(consumer, "cache") : cacheDirectory, installationOptions);
 			const project = join(consumer, "project");
 			writeFileSync(join(project, "artifact helper.txt"), "artifact-helper-confirmation\n");
 			const helperOptions = { cwd: project, env, encoding: "utf8", timeout: 10000 };
@@ -207,6 +214,7 @@ export function acceptArtifacts(artifactDirectory, outputDirectory, { managers =
 			}
 			evidence.processes.push({
 				manager,
+				lifecycleScripts: installationOptions.lifecycleScripts,
 				server: "Excluded from CLI distribution; hosted runtime remains private",
 				terminal: "passed",
 				helpers,

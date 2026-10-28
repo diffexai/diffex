@@ -47,10 +47,10 @@ Diffex runs in four modes: interactive, print or JSON, RPC for process integrati
 ## Quick Start
 
 ```bash
-npm install -g --ignore-scripts @diffexai/diffex
+npm i -g @diffexai/diffex
 ```
 
-`--ignore-scripts` disables dependency lifecycle scripts during install. Diffex does not require install scripts for normal npm installs.
+Requires Node.js 22.19.0 or newer. Diffex does not require install scripts; its pinned dependency hooks are reviewed and normal npm installation is covered by acceptance tests. Add `--ignore-scripts` if your environment requires scripts-disabled installation.
 
 Authenticate with an API key:
 

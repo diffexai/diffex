@@ -12,6 +12,8 @@ The [2026-10-27 qualification record](daytona-behaviors-qualification.md) docume
 This is a standalone acceptance gate for the packaged Diffex CLI, not the hosted product's runtime image, a release publisher or a replacement for native artifact acceptance.
 It installs the exact reviewed candidate tarballs into isolated consumers outside the repository.
 The deterministic mode controls inference while exercising installed behavior; the live mode uses a bounded real OpenAI request path.
+Npm behavior consumers explicitly enable dependency lifecycle scripts; Bun consumers retain the scripts-disabled path.
+A separate deterministic `npm-global-installation` scenario checks normal global npm installation of both the exact candidate tarball and the currently published CLI, each in its own fresh isolated prefix and cache.
 A passing deterministic run is not live-provider evidence.
 The snapshot is toolchain-only; each run uploads its candidate artifacts and checked harness rather than baking repository source or credentials into a snapshot.
 Version 1 covers the Linux installed CLI only; hosted-runtime behavior and subscription/OAuth login qualification are out of scope.
@@ -47,10 +49,12 @@ The workflow never sets its own qualification variable.
 
    ```text
    scripts/artifact-installation.mjs
+   scripts/npm-lifecycle-registry.mjs
    scripts/verify-candidate-artifacts.py
    scripts/fixtures/artifact-handoff.mjs
    scripts/daytona-behaviors/installed.py
    scripts/daytona-behaviors/install.mjs
+   scripts/daytona-behaviors/npm-global-install.mjs
    scripts/daytona-behaviors/fixture.mjs
    scripts/daytona-behaviors/live-guard.mjs
    scripts/daytona-behaviors/baselines/
@@ -91,6 +95,26 @@ This repository is public: GitHub Actions artifacts can be downloaded by authent
 The release and bundle artifacts contain no credentials; per-mode and aggregate evidence must contain only the guarded, sanitized publication copies.
 They are workflow artifacts, not npm or release assets; that distinction does not make them private.
 Never rely on GitHub log masking or artifact access controls to protect keys.
+
+## Normal npm installation validation
+
+The `npm-global-installation` scenario runs the advertised `npm i -g @diffexai/diffex` command without `--ignore-scripts`, after verifying that isolated npm configuration has `ignore-scripts=false`.
+The separate candidate installation serves its retained tarball through a loopback-only registry, not an unpublished public registry version.
+The fixture advertises npm's `_hasShrinkwrap` metadata only after validating the embedded lock. This matches published-package resolution: npm 10 can ignore a nested shrinkwrap when the dependency is supplied directly as a local tarball.
+Synchronous local npm consumers seed their root installation lock from the same verified candidate shrinkwrap, including exact archive integrity, rather than letting a file-based install re-resolve reviewed dependency ranges.
+The public installation uses the independently verified public npm archive: a candidate and the public package may share a version while having different bytes, so their inventories must never be interchanged.
+Public metadata and tarball fetches reject redirects, enforce bounded reads, and verify SHA-512 registry integrity before installation; the public latest identity must remain unchanged across the run.
+Each installation checks its own expected version, help, models, executable resolution through PATH, and installed runtime file hashes against its own pre-install archive inventory.
+The report records script policy, cold-cache state, package identities, command outcomes, successful execution of both exact reviewed dependency hooks, and confirmed temporary-prefix cleanup.
+Hook evidence is extracted from isolated npm debug logs as reviewed package/version/hook/exit tuples; raw logs, hook output, auth files and configuration are not copied into the report.
+The global validator shares a 600-second deadline across downloads and commands, terminates active command process groups on timeout or cancellation, and cleans prefixes before returning.
+Its Python supervisor allows 630 seconds, then sends SIGTERM to permit validator cleanup before a bounded SIGKILL fallback; a supervisory timeout remains a failure.
+Missing entries, disabled scripts, hash mismatches or failed cleanup fail the installed scenario and aggregate.
+The complete deterministic/live behavior suite still exercises the candidate rather than substituting public release behavior for candidate coverage.
+
+This is validation infrastructure, not a record that the changed workflow has passed remotely.
+Public installation guidance uses the ordinary npm command, with scripts-disabled installation retained as an option. Local command validation is not remote Daytona qualification: do not enable automatic runs until the qualification below is complete.
+Preparation, publishing and self-updates continue to disable lifecycle scripts. Native and Daytona npm candidate consumers explicitly opt into reviewed hooks; pnpm and Bun consumers remain scripts-disabled. This does not authorize enabling scripts throughout CI.
 
 ## Configure access and a snapshot
 

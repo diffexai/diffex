@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -108,11 +108,21 @@ export function installConsumer(
 	records,
 	tarballDirectory,
 	cacheDirectory = join(directory, "cache"),
+	options = {},
 ) {
+	assert(ACCEPTANCE_MANAGERS.includes(manager), "Unsupported package manager");
+	assert(options !== null && typeof options === "object" && !Array.isArray(options), "Invalid installation options");
+	assert(Object.keys(options).every((key) => ["lifecycleScripts", "timeoutMilliseconds"].includes(key)), "Unsupported installation option");
+	const lifecycleScripts = options.lifecycleScripts === undefined ? "disabled" : options.lifecycleScripts;
+	assert(["disabled", "enabled"].includes(lifecycleScripts), "Invalid lifecycle scripts mode");
+	assert(lifecycleScripts === "disabled" || manager === "npm", "Lifecycle scripts opt-in is supported only for npm");
+	const timeoutMilliseconds = options.timeoutMilliseconds === undefined ? 600_000 : options.timeoutMilliseconds;
+	assert(Number.isSafeInteger(timeoutMilliseconds) && timeoutMilliseconds > 0 && timeoutMilliseconds <= 600_000, "Invalid installation timeoutMilliseconds");
+	assert(options.timeoutMilliseconds === undefined || lifecycleScripts === "enabled", "Custom timeout requires script-enabled npm");
+	assert(lifecycleScripts === "disabled" || process.platform !== "win32", "Script-enabled npm requires POSIX process groups");
 	directory = resolveArtifactDirectory(directory);
 	cacheDirectory = resolveArtifactDirectory(cacheDirectory);
 	tarballDirectory = resolveArtifactDirectory(tarballDirectory);
-	assert(ACCEPTANCE_MANAGERS.includes(manager), "Unsupported package manager");
 	const command = manager;
 	assert(selected.every((pkg) => typeof pkg.name === "string" && /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/.test(pkg.name)), "Invalid package name");
 	mkdirSync(directory, { recursive: true });
@@ -136,15 +146,78 @@ export function installConsumer(
 		join(directory, "package.json"),
 		JSON.stringify({ private: true, type: "module", dependencies, overrides: dependencies, pnpm: { overrides: dependencies } }),
 	);
-	execFileSync(
-		command,
-		manager === "npm"
-			? ["install", "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund"]
-			: manager === "pnpm"
-				? ["install", "--prod", "--ignore-scripts", "--no-frozen-lockfile"]
-				: ["install", "--production", "--ignore-scripts", "--network-concurrency=8"],
-		{ cwd: directory, env, stdio: "inherit", timeout: 600_000 },
-	);
+	if (manager === "npm") {
+		const selectedRecords = selected.map((pkg) => records.find((record) => record.name === pkg.name));
+		verifyTarballs(tarballDirectory, selectedRecords, selected);
+		const packages = { "": { dependencies } };
+		let shrinkwrapped = false;
+		for (const pkg of selected) {
+			const archive = dependencies[pkg.name].slice("file:".length);
+			const archiveOptions = { encoding: "utf8", maxBuffer: 32 * 1024 * 1024, timeout: 30000 };
+			const paths = execFileSync("tar", ["-tzf", archive], archiveOptions).trim().split("\n");
+			if (!paths.includes("package/npm-shrinkwrap.json")) continue;
+			assert.equal(paths.filter((path) => path === "package/npm-shrinkwrap.json").length, 1, "Duplicate candidate shrinkwrap");
+			assert.equal(paths.filter((path) => path === "package/package.json").length, 1, "Duplicate candidate manifest");
+			const manifest = JSON.parse(execFileSync("tar", ["-xOf", archive, "package/package.json"], archiveOptions));
+			const lock = JSON.parse(execFileSync("tar", ["-xOf", archive, "package/npm-shrinkwrap.json"], archiveOptions));
+			assert.equal(manifest.name, pkg.name, "Candidate manifest name mismatch");
+			assert.equal(manifest.version, pkg.version, "Candidate manifest version mismatch");
+			assert.equal(lock.name, manifest.name, "Candidate shrinkwrap name mismatch");
+			assert.equal(lock.version, manifest.version, "Candidate shrinkwrap version mismatch");
+			assert.equal(lock.lockfileVersion, 3, "Candidate shrinkwrap must use lockfileVersion 3");
+			assert(lock.packages && lock.packages[""], "Candidate shrinkwrap has no root entry");
+			assert.equal(lock.packages[""].name, manifest.name, "Candidate shrinkwrap root name mismatch");
+			assert.equal(lock.packages[""].version, manifest.version, "Candidate shrinkwrap root version mismatch");
+			for (const field of ["dependencies", "optionalDependencies", "peerDependencies", "peerDependenciesMeta"])
+				assert.deepEqual(lock.packages[""][field] ?? {}, manifest[field] ?? {}, `Candidate shrinkwrap ${field} mismatch`);
+			const target = `node_modules/${pkg.name}`;
+			packages[target] = {
+				...lock.packages[""], resolved: dependencies[pkg.name],
+				integrity: `sha512-${createHash("sha512").update(readFileSync(archive)).digest("base64")}`,
+				hasShrinkwrap: true,
+			};
+			for (const [path, entry] of Object.entries(lock.packages)) {
+				if (!path) continue;
+				assert(path.startsWith("node_modules/") && !path.includes("\\") && !path.split("/").some((part) => ["", ".", ".."].includes(part)), "Invalid candidate shrinkwrap path");
+				assert(entry && !entry.link, "Candidate shrinkwrap must not contain links");
+				packages[`${target}/${path}`] = entry;
+			}
+			shrinkwrapped = true;
+		}
+		// Local tarball manifests do not expose the registry's _hasShrinkwrap flag.
+		// Seed it in the consumer lock, not in the immutable published artifact, so
+		// npm inflates the reviewed graph instead of resolving transitive ranges.
+		if (shrinkwrapped)
+			writeFileSync(join(directory, "package-lock.json"), JSON.stringify({ lockfileVersion: 3, requires: true, packages }));
+	}
+	const args = manager === "npm"
+		// Explicit false defeats npm's built-in config as well as inherited config;
+		// only this audited npm consumer path may enable dependency lifecycle hooks.
+		? ["install", "--omit=dev", lifecycleScripts === "enabled" ? "--ignore-scripts=false" : "--ignore-scripts", "--no-audit", "--no-fund"]
+		: manager === "pnpm"
+			? ["install", "--prod", "--ignore-scripts", "--no-frozen-lockfile"]
+			: ["install", "--production", "--ignore-scripts", "--network-concurrency=8"];
+	if (lifecycleScripts === "enabled") {
+		// spawnSync reaps npm, including on timeout. Inherited stdio cannot keep
+		// its pipes open; SIGKILL bounds a hook that ignores npm's termination.
+		const result = spawnSync(command, args, {
+			cwd: directory, env, stdio: "inherit", detached: true,
+			timeout: timeoutMilliseconds, killSignal: "SIGKILL",
+		});
+		if (result.pid) {
+			try {
+				process.kill(-result.pid, "SIGTERM");
+				Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
+				process.kill(-result.pid, "SIGKILL");
+			} catch (error) {
+				if (error.code !== "ESRCH") throw error;
+			}
+		}
+		if (result.error) throw result.error;
+		assert.equal(result.status, 0, `npm installation exited with ${result.status ?? result.signal}`);
+	} else {
+		execFileSync(command, args, { cwd: directory, env, stdio: "inherit", timeout: 600_000 });
+	}
 	verifyInstalledConsumer(directory, selected, records, tarballDirectory);
 	return env;
 }

@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 import xml.etree.ElementTree as ET
 
 SPEC = importlib.util.spec_from_file_location("installed", Path(__file__).with_name("installed.py"))
@@ -44,6 +44,80 @@ class InstalledTests(unittest.TestCase):
             self.assertFalse(runner.run())
             self.assertEqual([s["id"] for s in runner.results], ["artifact-integrity"])
             self.assertIn("checksum", runner.results[0]["error"])
+
+    def test_global_validator_timeout_terminates_group_gracefully_then_forces_and_reaps(self):
+        for expirations in (0, 1, 2):
+            with self.subTest(expirations=expirations):
+                process = Mock(pid=12345, returncode=0)
+                process.communicate.side_effect = [installed.subprocess.TimeoutExpired("fixture", 630)] * expirations + [("output", "diagnostics")]
+                with patch.object(installed.subprocess, "Popen", return_value=process) as spawn, \
+                     patch.object(installed.os, "killpg") as kill:
+                    result = installed.run_global_installation(["node", "fixture.mjs"])
+                self.assertEqual(result.returncode, 124 if expirations else 0)
+                self.assertEqual((result.stdout, result.stderr), ("output", "diagnostics"))
+                self.assertTrue(spawn.call_args.kwargs["start_new_session"])
+                self.assertEqual([call.args[1] for call in kill.call_args_list],
+                    [installed.signal.SIGTERM, installed.signal.SIGKILL][:expirations])
+                self.assertEqual([call.kwargs["timeout"] for call in process.communicate.call_args_list],
+                    [630] + [10] * expirations)
+
+    def test_normal_npm_global_validation_and_local_script_policy_fail_closed(self):
+        for fault in (None, "global-exit", "global-report", "global-cleanup", "global-identity", "global-script-policy", "global-entry-missing", "global-hook-execution", "global-hook-missing", "global-hook-version", "global-hook-failed", "npm-policy", "bun-policy"):
+            with self.subTest(fault=fault), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                installed.write_json(root / "manifest.json", {
+                    "source": {"commit": "a" * 40}, "packages": []})
+                runner = self.runner(root / "output", root)
+                calls = []
+
+                def check_output(command, **kwargs):
+                    return {"node": "v22.23.2", "npm": "11.16.0", "bun": "1.3.11"}.get(command[0], "fixture")
+
+                def run(command, **kwargs):
+                    calls.append(command)
+                    if command[1].endswith("npm-global-install.mjs"):
+                        self.assertEqual(command[2:4], [str(root), "a" * 40])
+                        hooks = [
+                            {"packageId": "@google/genai@2.31.0", "hook": "preinstall", "exitCode": 0, "signal": None},
+                            {"packageId": "protobufjs@7.6.6" if fault == "global-hook-version" else "protobufjs@7.6.5",
+                             "hook": "postinstall", "exitCode": 23 if fault == "global-hook-failed" else 0, "signal": None},
+                        ]
+                        entries = [{"kind": kind, "status": "passed", "scripts": "enabled",
+                            "ignoreScripts": "true" if fault == "global-script-policy" else "false",
+                            "coldCache": True, "installedInventory": "passed",
+                            "lifecycleExecution": "unchecked" if fault == "global-hook-execution" else "passed",
+                            "lifecycleHooks": hooks[:1] if fault == "global-hook-missing" else hooks}
+                            for kind in ("candidate", "public")]
+                        installed.write_json(Path(command[4]) / "npm-global-installation.json", {
+                            "schemaVersion": 1, "sourceCommit": ("b" if fault == "global-identity" else "a") * 40,
+                            "publicCommand": "npm i -g @diffexai/diffex",
+                            "entries": entries[:1] if fault == "global-entry-missing" else entries,
+                            "status": "failed" if fault == "global-report" else "passed",
+                            "cleanup": fault != "global-cleanup"})
+                        return installed.subprocess.CompletedProcess(command,
+                            1 if fault == "global-exit" else 0, "global install output", "")
+                    self.assertTrue(command[1].endswith("install.mjs"))
+                    self.assertEqual(kwargs["timeout"], 615, "Outer deadline must allow inner npm timeout and group teardown")
+                    manager = command[4]
+                    policy = "enabled" if manager == "npm" else "disabled"
+                    if fault == manager + "-policy":
+                        policy = "disabled" if manager == "npm" else "enabled"
+                    installed.write_json(Path(command[3]) / "installation.json", {
+                        "manager": manager, "lifecycleScripts": policy})
+                    return installed.subprocess.CompletedProcess(command, 0, "local install output", "")
+
+                with patch.object(installed.subprocess, "check_output", check_output), \
+                     patch.object(installed.subprocess, "run", run), \
+                     patch.object(installed, "run_global_installation", run), \
+                     patch.object(installed.Runner, "deterministic"):
+                    self.assertEqual(runner.run(), fault is None)
+                self.assertEqual(len([c for c in calls if c[1].endswith("npm-global-install.mjs")]), 1)
+                global_result = next(r for r in runner.results if r["id"] == "npm-global-installation")
+                self.assertEqual(global_result["outcome"], "failed" if fault and fault.startswith("global-") else "passed")
+                for manager in ("npm", "bun"):
+                    result = next(r for r in runner.results if r["id"] == manager + "-package-integrity")
+                    self.assertEqual(result["outcome"], "failed" if fault == manager + "-policy" else "passed")
+                self.assertEqual((root / "output/npm-global-installation/install.txt").read_text(), "global install output")
 
     def test_provider_and_configuration_failures_are_distinct(self):
         for status, category in ((400, "configuration"), (401, "configuration"), (404, "configuration"), (429, "provider"), (503, "provider")):

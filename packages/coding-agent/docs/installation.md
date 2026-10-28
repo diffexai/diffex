@@ -10,15 +10,17 @@ The hosted runtime image is for the cloud service.
 ```sh
 node --version
 npm --version
-npm install -g --ignore-scripts --registry=https://registry.npmjs.org @diffexai/diffex
+npm i -g @diffexai/diffex
 diffex --version
 diffex --help
 diffex --list-models
 ```
 
 Only the CLI package is needed; its internal Diffex modules are included.
-`--ignore-scripts` disables dependency installation scripts.
+Normal npm installation enables dependency lifecycle scripts. The pinned dependency hooks are reviewed; Diffex itself does not require an install script or download a runtime during installation.
 Npm verifies downloaded package bytes against registry integrity metadata.
+If your policy disables lifecycle scripts, `npm i -g --ignore-scripts @diffexai/diffex` remains supported.
+If your configured registry or mirror does not carry Diffex, select the canonical registry with `--registry=https://registry.npmjs.org`.
 For a reproducible installation, replace the package argument with `@diffexai/diffex@<verified-version>`, using an exact version you have checked on npmjs.org.
 
 The executable directory is `$(npm prefix -g)/bin` on supported platforms.
@@ -54,7 +56,7 @@ Use `pnpm bin -g` to locate the executable directory and ensure it is on PATH.
 Use pnpm for subsequent upgrades, repairs, and removal of this installation; do not mix npm and pnpm in the same installation directory.
 For a reproducible installation, specify `@diffexai/diffex@<verified-version>` instead of the unversioned package.
 
-npm and pnpm own the initial download display. Diffex does not execute install scripts or print a second installer banner.
+npm and pnpm own the initial download display. Diffex's package has no install script or second installer banner; npm can run the reviewed dependency hooks.
 `diffex update --self` shows a compact activity indicator in terminals, retains warnings and failure diagnostics, and streams package-manager output when redirected to a log.
 The indicator shows activity, not an estimated download percentage.
 
@@ -66,6 +68,7 @@ diffex --version
 ```
 
 Self-update validates the response from `https://api.diffex.ai/api/latest-version` and installs exactly `@diffexai/diffex@<verified-version>` using the detected package manager.
+The updater intentionally disables lifecycle scripts; this stricter update policy is independent of the ordinary npm installation command.
 It rejects malformed metadata, foreign package names, redirects, and unavailable discovery before starting installation.
 `--force` permits reinstalling a verified release; it does not bypass identity checks.
 The discovery service can report no generally announced release even when a bootstrap package exists on npm.
@@ -73,7 +76,7 @@ The discovery service can report no generally announced release even when a boot
 To install a reviewed npm version directly, including when discovery has no release:
 
 ```sh
-npm install -g --ignore-scripts --registry=https://registry.npmjs.org '@diffexai/diffex@<verified-version>'
+npm i -g --registry=https://registry.npmjs.org '@diffexai/diffex@<verified-version>'
 diffex --version
 ```
 
@@ -125,7 +128,7 @@ Use a separate backup directory and retry:
 DIFFEX_RECOVERY_FROM='/exact/affected/CLI/installation/or/backup'
 DIFFEX_RECOVERY_DIR="$(mktemp -d)"
 mv "$DIFFEX_RECOVERY_FROM" "$DIFFEX_RECOVERY_DIR/"
-npm install -g --ignore-scripts --registry=https://registry.npmjs.org '@diffexai/diffex@<verified-version>'
+npm i -g --registry=https://registry.npmjs.org '@diffexai/diffex@<verified-version>'
 diffex --version
 diffex --help
 ```
