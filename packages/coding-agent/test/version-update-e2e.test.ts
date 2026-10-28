@@ -131,11 +131,24 @@ describe.skipIf(process.platform === "win32")("version discovery through the sou
 		},
 	);
 
-	it("installs the exact canonical newer version after automatic opt-out without uninstalling", async () => {
+	it("prefetches then installs the exact canonical newer version after automatic opt-out without uninstalling", async () => {
 		const result = await reproduce({ sharedTempDir, skip: true, packageName: installed.name });
 		expect(result.code, result.output).toBe(0);
 		expectCanonicalRequest(result.events);
 		expect(result.events.filter((event) => event.type === "spawn")).toEqual([
+			{
+				type: "spawn",
+				command: "npm",
+				args: [
+					"--prefix",
+					result.prefix,
+					"cache",
+					"add",
+					"--ignore-scripts",
+					"--min-release-age=0",
+					`${installed.name}@9999.0.0`,
+				],
+			},
 			{
 				type: "spawn",
 				command: "npm",
