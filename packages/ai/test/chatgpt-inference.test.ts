@@ -5,8 +5,9 @@ import { Type } from "typebox";
 import { afterEach, expect, it, vi } from "vitest";
 import { InMemoryCredentialStore } from "../src/auth/credential-store.ts";
 import type { OAuthCredential } from "../src/auth/types.ts";
-import { createModels } from "../src/models.ts";
+import { createModels, hasApi } from "../src/models.ts";
 import { InMemoryModelsStore } from "../src/models-store.ts";
+import { openaiProvider } from "../src/providers/openai.ts";
 import { openaiCodexProvider } from "../src/providers/openai-codex.ts";
 import type { Context } from "../src/types.ts";
 
@@ -166,6 +167,81 @@ it("streams text and usage over public Responses with subscription billing", asy
 		include: ["reasoning.encrypted_content"],
 	});
 });
+
+it.each(["fresh", "cached offline", "cached after refresh failure"])(
+	"omits unsupported prompt-cache options for summaries with a %s catalog",
+	async (catalogState) => {
+		const bodies: Record<string, unknown>[] = [];
+		let failCatalogRefresh = false;
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+				if (String(input).endsWith("/models")) {
+					if (failCatalogRefresh) return new Response(null, { status: 503 });
+					return Response.json(catalog);
+				}
+				const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+				bodies.push(body);
+				if ("prompt_cache_options" in body) {
+					return Response.json(
+						{
+							error: {
+								message: "prompt_cache_options is not supported on this model",
+								type: "invalid_request_error",
+								param: "prompt_cache_options",
+								code: "invalid_parameter",
+							},
+						},
+						{ status: 400 },
+					);
+				}
+				return sse([...textEvents(), completed()]);
+			}),
+		);
+		const initial = await runtime();
+		let models = initial.models;
+		if (catalogState !== "fresh") {
+			const stored = await initial.store.read("openai-codex");
+			if (!stored) throw new Error("Catalog not persisted");
+			// Simulate a catalog persisted before the hotfix with inherited API-key capabilities.
+			await initial.store.write("openai-codex", {
+				...stored,
+				models: stored.models.map((model) => ({
+					...model,
+					compat: { ...model.compat, supportsExplicitPromptCacheMode: true },
+				})),
+			});
+			models = createModels({ credentials: initial.credentials, modelsStore: initial.store });
+			models.setProvider(openaiCodexProvider());
+			failCatalogRefresh = catalogState === "cached after refresh failure";
+			const refresh = await models.refresh({ allowNetwork: failCatalogRefresh });
+			expect(refresh.errors.size).toBe(failCatalogRefresh ? 1 : 0);
+		}
+		const model = models.getModel("openai-codex", "gpt-6.1-sol");
+		if (!model || !hasApi(model, "openai-responses")) throw new Error("Responses model not discovered");
+		const options = { cacheRetention: "none" as const, sessionId: "summary-session" };
+		for (const result of [
+			await models.completeSimple(model, context, options),
+			await models.complete(model, context, options),
+		]) {
+			expect(result.stopReason).toBe("stop");
+			expect(result.content).toEqual([expect.objectContaining({ type: "text", text: "Hello" })]);
+		}
+		expect(model.compat?.supportsExplicitPromptCacheMode).toBe(false);
+		expect(model.compat?.supportsStrictMode).toBe(true);
+		expect(model.compat?.supportsOpenAIGrammarTools).toBe(true);
+		const apiKeyModel = openaiProvider()
+			.getModels()
+			.find((entry) => entry.id === model.id);
+		expect(apiKeyModel?.compat?.supportsExplicitPromptCacheMode).toBe(true);
+		expect(bodies).toHaveLength(2);
+		for (const body of bodies) {
+			expect(body).not.toHaveProperty("prompt_cache_options");
+			expect(body).not.toHaveProperty("prompt_cache_key");
+			expect(body).not.toHaveProperty("prompt_cache_retention");
+		}
+	},
+);
 
 it("streams tool arguments and replays tool results and encrypted reasoning", async () => {
 	const bodies: Record<string, unknown>[] = [];
