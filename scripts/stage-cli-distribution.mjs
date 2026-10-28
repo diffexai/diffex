@@ -1,4 +1,6 @@
+import { execFileSync } from "node:child_process";
 import { cpSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { cliDistribution } from "./cli-distribution.mjs";
@@ -15,7 +17,15 @@ export function stageCliDistribution(directory, stage) {
 	}
 	writeFileSync(
 		join(stage, "README.md"),
-		"# Diffex\n\nCoding agent for your terminal.\nSee the [Diffex documentation](https://diffex.ai/docs/overview/) for installation and usage.\n\nDiffex is licensed under MIT; Pi-derived portions retain their MIT terms.\nSee LICENSE and THIRD-PARTY-NOTICES.txt.\n",
+		"# Diffex\n\nCoding agent for your terminal.\n\n" +
+			"## Requirements\n\nNode.js 22.19.0 or newer. Supports macOS and Linux on arm64 and x64.\n\n" +
+			"## Install\n\n```sh\nnpm install -g --ignore-scripts @diffexai/diffex\n```\n\n" +
+			"Or with pnpm:\n\n```sh\npnpm add -g --ignore-scripts @diffexai/diffex\n```\n\n" +
+			"## Usage\n\n```sh\ndiffex --version\ndiffex --help\ndiffex\n```\n\n" +
+			"Use `/login` in Diffex to connect your provider account.\n\n" +
+			"## Update\n\n```sh\ndiffex update --self\n```\n\n" +
+			"See the [Diffex website](https://diffex.ai/) for project information.\n\n" +
+			"## License\n\nDiffex is licensed under MIT; Pi-derived portions retain their MIT terms.\nSee LICENSE and THIRD-PARTY-NOTICES.txt, including bundled dependency licenses.\n",
 	);
 	const inventory = JSON.parse(readFileSync(join(directory, "distribution-files.json"), "utf8"));
 	const components = JSON.parse(readFileSync(join(directory, "distribution-components.json"), "utf8")).filter(
@@ -63,6 +73,40 @@ export function stageCliDistribution(directory, stage) {
 				.digest("hex"),
 		});
 	}
+	const providerBundles = JSON.parse(
+		execFileSync(process.execPath, [fileURLToPath(new URL("./bundle-cli-providers.mjs", import.meta.url)), stage], {
+			encoding: "utf8",
+			maxBuffer: 20 * 1024 * 1024,
+		}),
+	);
+	for (const bundle of providerBundles) {
+		for (const prefix of ["", bundle.prefix]) {
+			const target = join(stage, prefix);
+			const componentPath = join(target, "distribution-components.json");
+			const localComponents = prefix ? JSON.parse(readFileSync(componentPath, "utf8")) : components;
+			const stale = localComponents.findIndex((component) => component.name === bundle.dependency && component.distribution?.startsWith("resolved separately"));
+			if (stale !== -1) localComponents.splice(stale, 1);
+			writeFileSync(join(target, "THIRD-PARTY-NOTICES.txt"), readFileSync(join(target, "THIRD-PARTY-NOTICES.txt"), "utf8") + bundle.notices);
+			localComponents.push(...bundle.components.map((component) => ({
+				...component,
+				portions: prefix ? component.portions.slice(prefix.length + 1) : component.portions,
+			})));
+			for (const component of localComponents)
+				if (component.notice)
+					component.noticeSha256 = createHash("sha256").update(readFileSync(join(target, component.notice))).digest("hex");
+			if (prefix) {
+				writeFileSync(componentPath, JSON.stringify(localComponents, null, 2) + "\n");
+				const localInventory = JSON.parse(readFileSync(join(target, "distribution-files.json"), "utf8"));
+				for (const file of localInventory.files)
+					file.sha256 = createHash("sha256").update(readFileSync(join(target, file.path))).digest("hex");
+				writeFileSync(join(target, "distribution-files.json"), JSON.stringify(localInventory, null, 2) + "\n");
+			}
+		}
+	}
+	// Bundling changes a provider implementation and the nested metadata/notices;
+	// checksum final staged bytes, never the private workspace build inputs.
+	for (const file of inventory.files)
+		file.sha256 = createHash("sha256").update(readFileSync(join(stage, file.path))).digest("hex");
 	inventory.files.sort((a, b) => a.path.localeCompare(b.path));
 	writeFileSync(join(stage, "distribution-files.json"), JSON.stringify(inventory, null, 2) + "\n");
 	writeFileSync(join(stage, "distribution-components.json"), JSON.stringify(components, null, 2) + "\n");

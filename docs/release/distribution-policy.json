@@ -36,8 +36,17 @@
     "runtime theme and model JSON",
     "SQLite migration SQL",
     "user-facing documentation explicitly listed in scripts/distribution-docs.json",
-    "Diffex-owned TUI native prebuilds using system APIs"
+    "Diffex-owned TUI native prebuilds using system APIs",
+    "reviewed external pure JavaScript bundled only into the Mistral provider implementation, with exact npm input identities and complete license/NOTICE attribution"
   ],
+  "bundledNpmDependencies": {
+    "@mistralai/mistralai": {
+      "@mistralai/mistralai": { "version": "3.2.0", "license": "Apache-2.0" },
+      "zod": { "version": "4.6.6", "license": "MIT" },
+      "zod-to-json-schema": { "version": "3.25.2", "license": "ISC" },
+      "@opentelemetry/semantic-conventions": { "version": "1.41.1", "license": "Apache-2.0" }
+    }
+  },
   "publicHosting": "npmjs",
   "publicRegistry": "https://registry.npmjs.org",
   "immutableTarballUrl": "https://registry.npmjs.org/<PACKAGE>/-/<UNSCOPED_NAME>-<VERSION>.tgz",
