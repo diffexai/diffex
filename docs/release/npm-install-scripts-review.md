@@ -2,11 +2,13 @@
 
 ## Status
 
-Static dependency review and local fixture tests support testing npm's normal script-enabled installation path.
-The modified Daytona scenario still requires remote execution and evidence review before the public installation instructions are shortened.
+The public npm installation command is `npm i -g @diffexai/diffex`.
+Static dependency review and isolated script-enabled installation checks support that command; scripts-disabled installation remains supported.
+The modified Daytona scenario still requires explicit remote qualification and evidence review before automatic behavior runs are enabled or the remote path is treated as qualified. Its workflow is manual or qualified post-merge, not an automatic pull-request check; environment secrets remain restricted to `main`.
 This record does not claim that GitHub Actions or Daytona has executed the changed tests.
 
-No dependency versions, lockfiles, published package bytes, self-update behavior or publishing safeguards are changed by this work.
+The normal-install follow-up changes instructions and acceptance coverage, not dependency versions, lockfiles, self-update behavior or publishing safeguards.
+The generated npm README now shows the ordinary command; no install or postinstall hook is added to Diffex itself.
 
 ## Reviewed scope
 
@@ -43,11 +45,15 @@ This inspection does not prove that arbitrary future package versions or unrelat
 
 ## Validation contract
 
-- Ordinary artifact consumers continue to disable lifecycle scripts by default.
+- The reusable artifact installer continues to disable lifecycle scripts by default.
+- Native candidate acceptance explicitly enables scripts for npm package/process consumers and records that mode. pnpm and Bun acceptance remain scripts-disabled.
+- Public-release npm initial and fresh installations require `ignore-scripts=false` and omit the flag from the install command; self-updates intentionally remain scripts-disabled.
 - The explicit npm-only consumer option enables scripts and rejects opt-in for other package managers.
 - Local audited fixtures prove that enabled npm hooks actually run, inherited credentials/configuration do not enter them, and scripts-disabled consumers remain disabled.
 - Daytona's candidate npm consumers enable scripts and retain the full installed CLI behavior tests; Bun remains on its existing scripts-disabled path.
 - The separate `npm-global-installation` scenario tests the retained candidate and independently verified public latest package in separate cold prefixes.
+- Candidate registry metadata and seeded consumer installation locks preserve the reviewed shrinkwrap. npm 10 file/tarball transport can otherwise ignore a nested shrinkwrap and re-resolve transitive ranges; a real check caught unreviewed `protobufjs@7.6.6` before this correction.
+- Both global installs require positive debug-log evidence that the exact two reviewed hook commands started and completed successfully. Configuration alone is not execution evidence. Raw npm logs are not retained.
 - The public path executes exactly `npm i -g @diffexai/diffex`, with no `--ignore-scripts` flag and verified default configuration of `false`.
 - Both global paths require executable resolution through PATH, expected version/help/models, exact installed runtime inventories and positive cleanup.
 - Missing evidence, public latest movement, hash mismatches, scripts-disabled configuration or cleanup failure remain failures.

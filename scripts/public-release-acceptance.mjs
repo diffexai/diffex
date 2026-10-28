@@ -55,6 +55,23 @@ export function verifyInstalledFiles(directory, inventory) {
 	}
 }
 
+export function installPublicPackage(manager, version, run) {
+	assert(ACCEPTANCE_MANAGERS.includes(manager), "Unsupported package manager");
+	assert(stable(version), "Expected a stable installation version");
+	const lifecycleScripts = manager === "npm" ? "enabled" : "disabled";
+	const ignoreScripts = manager === "npm" ? run("npm", ["config", "get", "ignore-scripts"]) : null;
+	if (manager === "npm")
+		assert.equal(ignoreScripts, "false", "Ordinary public npm installation requires scripts enabled by default");
+	run(manager, [
+		"install",
+		"-g",
+		...(manager === "npm" ? [] : ["--ignore-scripts"]),
+		`${PACKAGE}@${version}`,
+		...(manager === "npm" ? [`--registry=${REGISTRY}`] : []),
+	]);
+	return { version, lifecycleScripts, ignoreScripts };
+}
+
 export async function acceptPublicRelease(manifest, previous, output) {
 	const pkg = validateAcceptanceManifest(manifest, previous);
 	const evidence = {
@@ -161,20 +178,12 @@ export async function acceptPublicRelease(manifest, previous, output) {
 					throw error;
 				}
 			};
-			const install = (version) =>
-				run(manager, [
-					"install",
-					"-g",
-					"--ignore-scripts",
-					`${PACKAGE}@${version}`,
-					...(manager === "npm" ? [`--registry=${REGISTRY}`] : []),
-				]);
 			const smoke = (version) => {
 				assert.equal(run(executable, ["--version"]), version);
 				assert.match(run(executable, ["--help"]), /Diffex/);
 				assert(run(executable, ["--list-models"], { DIFFEX_OFFLINE: "1" }).length > 100);
 			};
-			install(previous);
+			const initialInstallation = installPublicPackage(manager, previous, run);
 			smoke(previous);
 			const beforeVersion = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8")).version;
 			// Empty manager caches prove the updater retrieves the new public artifact.
@@ -203,13 +212,15 @@ export async function acceptPublicRelease(manifest, previous, output) {
 				rmSync(env.npm_config_store_dir, { recursive: true, force: true });
 				assert(!existsSync(env.npm_config_store_dir));
 			}
-			install(pkg.version);
+			const freshInstallation = installPublicPackage(manager, pkg.version, run);
 			smoke(pkg.version);
 			verifyInstalledFiles(packageRoot, inventory);
 			remove();
 			evidence.managers.push({
 				manager,
 				managerVersion: run(manager, ["--version"]),
+				installations: [initialInstallation, freshInstallation],
+				updaterLifecycleScripts: "disabled",
 				beforeVersion,
 				afterVersion,
 				freshInstall: "passed",

@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import {
 	assertContained,
+	candidateInstallationOptions,
 	declaredEntrypoints,
 	isolatedEnvironment,
 	operations,
@@ -14,6 +15,13 @@ import {
 } from "./artifact-acceptance.mjs";
 import { cliDistribution } from "./cli-distribution.mjs";
 import { getPublicWorkspacePackages } from "./release-packages.mjs";
+
+test("native candidate consumers explicitly enable npm hooks and keep pnpm and Bun disabled", () => {
+	assert.deepEqual(candidateInstallationOptions("npm"), { lifecycleScripts: "enabled" });
+	for (const manager of ["pnpm", "bun"])
+		assert.deepEqual(candidateInstallationOptions(manager), { lifecycleScripts: "disabled" });
+	assert.throws(() => candidateInstallationOptions("unknown"), /Unsupported package manager/);
+});
 
 test("every public package has an operation and a dependency-first local closure", () => {
 	const packages = getPublicWorkspacePackages().map((pkg) => cliDistribution().manifest);

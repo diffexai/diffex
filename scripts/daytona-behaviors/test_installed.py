@@ -62,7 +62,7 @@ class InstalledTests(unittest.TestCase):
                     [630] + [10] * expirations)
 
     def test_normal_npm_global_validation_and_local_script_policy_fail_closed(self):
-        for fault in (None, "global-exit", "global-report", "global-cleanup", "global-identity", "global-script-policy", "global-entry-missing", "npm-policy", "bun-policy"):
+        for fault in (None, "global-exit", "global-report", "global-cleanup", "global-identity", "global-script-policy", "global-entry-missing", "global-hook-execution", "global-hook-missing", "global-hook-version", "global-hook-failed", "npm-policy", "bun-policy"):
             with self.subTest(fault=fault), tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary)
                 installed.write_json(root / "manifest.json", {
@@ -77,9 +77,17 @@ class InstalledTests(unittest.TestCase):
                     calls.append(command)
                     if command[1].endswith("npm-global-install.mjs"):
                         self.assertEqual(command[2:4], [str(root), "a" * 40])
+                        hooks = [
+                            {"packageId": "@google/genai@2.31.0", "hook": "preinstall", "exitCode": 0, "signal": None},
+                            {"packageId": "protobufjs@7.6.6" if fault == "global-hook-version" else "protobufjs@7.6.5",
+                             "hook": "postinstall", "exitCode": 23 if fault == "global-hook-failed" else 0, "signal": None},
+                        ]
                         entries = [{"kind": kind, "status": "passed", "scripts": "enabled",
                             "ignoreScripts": "true" if fault == "global-script-policy" else "false",
-                            "coldCache": True, "installedInventory": "passed"} for kind in ("candidate", "public")]
+                            "coldCache": True, "installedInventory": "passed",
+                            "lifecycleExecution": "unchecked" if fault == "global-hook-execution" else "passed",
+                            "lifecycleHooks": hooks[:1] if fault == "global-hook-missing" else hooks}
+                            for kind in ("candidate", "public")]
                         installed.write_json(Path(command[4]) / "npm-global-installation.json", {
                             "schemaVersion": 1, "sourceCommit": ("b" if fault == "global-identity" else "a") * 40,
                             "publicCommand": "npm i -g @diffexai/diffex",
@@ -89,6 +97,7 @@ class InstalledTests(unittest.TestCase):
                         return installed.subprocess.CompletedProcess(command,
                             1 if fault == "global-exit" else 0, "global install output", "")
                     self.assertTrue(command[1].endswith("install.mjs"))
+                    self.assertEqual(kwargs["timeout"], 615, "Outer deadline must allow inner npm timeout and group teardown")
                     manager = command[4]
                     policy = "enabled" if manager == "npm" else "disabled"
                     if fault == manager + "-policy":

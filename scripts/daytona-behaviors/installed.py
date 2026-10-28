@@ -432,14 +432,22 @@ class Runner:
                     assert report["publicCommand"] == "npm i -g @diffexai/diffex", "Unexpected public install command"
                     entries = report["entries"]
                     assert len(entries) == 2 and {entry["kind"] for entry in entries} == {"candidate", "public"}, "Incomplete global npm installations"
+                    expected_hooks = [
+                        {"packageId": "@google/genai@2.31.0", "hook": "preinstall", "exitCode": 0, "signal": None},
+                        {"packageId": "protobufjs@7.6.5", "hook": "postinstall", "exitCode": 0, "signal": None},
+                    ]
                     assert all(entry["status"] == "passed" and entry["scripts"] == "enabled" and
                         entry["ignoreScripts"] == "false" and entry["coldCache"] is True and
-                        entry["installedInventory"] == "passed" for entry in entries), "Global npm scripts, cache or inventory not verified"
+                        entry["installedInventory"] == "passed" and
+                        entry["lifecycleExecution"] == "passed" and entry["lifecycleHooks"] == expected_hooks
+                        for entry in entries), "Global npm scripts, hook execution, cache or inventory not verified"
                 self.scenario("npm-global-installation", global_install, "configuration")
             for manager in (["npm"] if self.args.mode == "live" else ["npm", "bun"]):
                 consumer = Path(tempfile.mkdtemp(prefix="diffex-installed-"))
                 def install(evidence):
-                    result = subprocess.run(["node", str(HERE / "install.mjs"), str(self.args.artifacts), str(consumer), manager, self.args.commit], capture_output=True, text=True, timeout=600)
+                    # The inner npm deadline is 600s; leave time for synchronous
+                    # process-group teardown, integrity checks and helper exit.
+                    result = subprocess.run(["node", str(HERE / "install.mjs"), str(self.args.artifacts), str(consumer), manager, self.args.commit], capture_output=True, text=True, timeout=615)
                     (evidence / "install.txt").write_text(result.stdout + result.stderr)
                     assert result.returncode == 0, "Artifact installation/integrity failed; see install.txt"
                     installation = json.loads((consumer / "installation.json").read_text())

@@ -58,6 +58,7 @@ jobs:
           mkdir -p .artifacts/daytona-bundle
           tar -czf .artifacts/daytona-bundle/bundle.tar.gz \
             scripts/artifact-installation.mjs \
+            scripts/npm-lifecycle-registry.mjs \
             scripts/verify-candidate-artifacts.py \
             scripts/fixtures/artifact-handoff.mjs \
             scripts/daytona-behaviors/installed.py \

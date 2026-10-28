@@ -6,6 +6,7 @@ import { test } from "node:test";
 import { createHash } from "node:crypto";
 import { ACCEPTANCE_MANAGERS, PNPM_VERSION } from "./artifact-installation.mjs";
 import {
+	installPublicPackage,
 	validateAcceptanceManifest,
 	verifyInstalledFiles,
 	verifyPublicDiscovery,
@@ -37,6 +38,44 @@ test("native and public acceptance provision the same exact pnpm release without
 	}
 	const publicWorkflow = readFileSync(new URL("../.github/workflows/artifact-acceptance.yml", import.meta.url), "utf8");
 	assert(publicWorkflow.includes("/scripts/artifact-installation.mjs"), "Sparse public tools must include isolated pnpm support");
+});
+
+test("public npm initial and fresh installs require scripts enabled by default without overriding configuration", () => {
+	const commands = [];
+	const run = (command, args) => {
+		commands.push({ command, args });
+		return args[0] === "config" ? "false" : "installed";
+	};
+	for (const version of ["0.2.1", manifest.version]) {
+		assert.deepEqual(installPublicPackage("npm", version, run), {
+			version, lifecycleScripts: "enabled", ignoreScripts: "false",
+		});
+	}
+	assert.deepEqual(commands, ["0.2.1", manifest.version].flatMap((version) => [
+		{ command: "npm", args: ["config", "get", "ignore-scripts"] },
+		{ command: "npm", args: ["install", "-g", `@diffexai/diffex@${version}`, "--registry=https://registry.npmjs.org"] },
+	]));
+	for (const ignoreScripts of ["true", "", "undefined"]) {
+		const rejected = [];
+		assert.throws(() => installPublicPackage("npm", manifest.version, (command, args) => {
+			rejected.push({ command, args });
+			return ignoreScripts;
+		}), /requires scripts enabled by default/);
+		assert.deepEqual(rejected, [{ command: "npm", args: ["config", "get", "ignore-scripts"] }]);
+	}
+});
+
+test("public pnpm and Bun installs retain explicit scripts-disabled behavior and evidence", () => {
+	for (const manager of ["pnpm", "bun"]) {
+		const commands = [];
+		assert.deepEqual(installPublicPackage(manager, manifest.version, (command, args) => {
+			commands.push({ command, args });
+		}), { version: manifest.version, lifecycleScripts: "disabled", ignoreScripts: null });
+		assert.deepEqual(commands, [{ command: manager, args: ["install", "-g", "--ignore-scripts", `@diffexai/diffex@${manifest.version}`] }]);
+	}
+	const unexpected = () => assert.fail("Invalid install must not execute a command");
+	assert.throws(() => installPublicPackage("unknown", manifest.version, unexpected), /Unsupported package manager/);
+	assert.throws(() => installPublicPackage("npm", "latest", unexpected), /stable installation version/);
 });
 
 test("public acceptance rejects unreviewed identities and non-upgrades before installation", () => {

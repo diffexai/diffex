@@ -59,6 +59,7 @@ test("one 35-minute preparation freezes, builds offline, prepares and verifies t
 	assert.ok(prepare.steps.some((step) => step.uses?.startsWith("oven-sh/setup-bun@") && step.with["bun-version"] === "1.3.11"));
 	assert.ok(script.includes("scripts/daytona-behaviors/npm-global-install.test.mjs"));
 	assert.ok(script.includes("scripts/daytona-behaviors/npm-global-install.mjs"));
+	assert.ok(script.includes("scripts/npm-lifecycle-registry.mjs"), "Bundle must include the global validator's registry helper");
 	assert.ok(script.includes("sha256sum .artifacts/daytona-bundle/bundle.tar.gz"));
 	assert.match(script, /-m unittest discover -s scripts\/daytona-behaviors/);
 	assert.match(script, /-m unittest discover -s scripts -p 'test_verify_candidate_artifacts\.py'/);
