@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -72,7 +72,7 @@ test("declared exports include patterns and reject missing declarations and esca
 		const env = isolatedEnvironment(consumer);
 		assert.equal(env.NODE_PATH, undefined);
 		assert.equal(env.NODE_OPTIONS, undefined);
-		assert.equal(env.HOME, join(consumer, "home"));
+		assert.equal(env.HOME, join(realpathSync(consumer), "home"));
 	} finally {
 		rmSync(directory, { recursive: true, force: true });
 	}

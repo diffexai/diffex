@@ -55,6 +55,7 @@ test("metadata and exact archive bytes use closed, distinct sockets", { timeout:
 	assert.equal(manifest.headers["content-type"], "application/json");
 	const parsed = JSON.parse(manifest.body);
 	assert.deepEqual(parsed["dist-tags"], { latest: metadata.version });
+	assert.deepEqual(parsed.time, { [metadata.version]: "2020-01-01T00:00:00.000Z" });
 	assert.equal(parsed.name, metadata.name);
 	const pkg = parsed.versions[metadata.version];
 	assert.deepEqual(pkg, { ...metadata, dist: { tarball: `${url}/diffex.tgz`, integrity } });

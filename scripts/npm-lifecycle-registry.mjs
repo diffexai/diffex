@@ -23,6 +23,7 @@ export function createLifecycleRegistry({ metadata, bytes, getMode, onArchive })
 				JSON.stringify({
 					name: metadata.name,
 					"dist-tags": { latest: metadata.version },
+					time: { [metadata.version]: "2020-01-01T00:00:00.000Z" },
 					versions: { [metadata.version]: pkg },
 				}),
 			);

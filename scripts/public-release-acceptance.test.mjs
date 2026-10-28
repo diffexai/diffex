@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { createHash } from "node:crypto";
+import { ACCEPTANCE_MANAGERS, PNPM_VERSION } from "./artifact-installation.mjs";
 import {
 	validateAcceptanceManifest,
 	verifyInstalledFiles,
@@ -24,6 +25,19 @@ const manifest = {
 		},
 	],
 };
+
+test("native and public acceptance provision the same exact pnpm release without dropping npm or Bun", () => {
+	assert.deepEqual(ACCEPTANCE_MANAGERS, ["npm", "pnpm", "bun"]);
+	assert.equal(PNPM_VERSION, "10.28.2");
+	for (const name of ["native-artifact-acceptance.yml", "artifact-acceptance.yml"]) {
+		const workflow = readFileSync(new URL(`../.github/workflows/${name}`, import.meta.url), "utf8");
+		assert(workflow.includes(`npm install -g npm@11.16.0 pnpm@${PNPM_VERSION} --ignore-scripts`));
+		assert(workflow.includes("bun-version: '1.3.11'"));
+		assert(workflow.includes("persist-credentials: false"));
+	}
+	const publicWorkflow = readFileSync(new URL("../.github/workflows/artifact-acceptance.yml", import.meta.url), "utf8");
+	assert(publicWorkflow.includes("/scripts/artifact-installation.mjs"), "Sparse public tools must include isolated pnpm support");
+});
 
 test("public acceptance rejects unreviewed identities and non-upgrades before installation", () => {
 	assert.equal(validateAcceptanceManifest(manifest, "0.2.1"), manifest.packages[0]);
