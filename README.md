@@ -30,13 +30,17 @@ Diffex is a lightweight, self-evolving coding agent that lives in your CLI. Ask 
 
 ## Quick start
 
-Requires Node.js 22.19 or newer and npm.
+Requires Node.js 22.19 or newer and npm or pnpm.
 
 ```bash
 npm install -g --ignore-scripts @diffexai/diffex
 cd your-project
 diffex
 ```
+
+Alternatively, install with `pnpm add -g --ignore-scripts @diffexai/diffex`.
+Use `diffex update --self` to update with the package manager that owns your installation.
+See [installation and troubleshooting](packages/coding-agent/docs/installation.md) for PATH, permissions, and interrupted-download recovery.
 
 Use `/login` to connect a supported subscription provider, or set a provider API key such as `ANTHROPIC_API_KEY` before launching. Then describe what you want to build or change.
 

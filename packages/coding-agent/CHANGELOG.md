@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Added a compact terminal activity display for npm and pnpm self-updates, while preserving package-manager warnings, failure diagnostics, and redirected logs.
+
+### Fixed
+
+- Added actionable installation recovery guidance for permissions, unsupported Node versions, interrupted updates, registry failures, and integrity errors without deleting user data or blindly pruning caches.
+- Check the CLI's Node.js requirement before initializing application dependencies.
+
 ## [0.4.0] - 2026-10-27
 
 ### New Features

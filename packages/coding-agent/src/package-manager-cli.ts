@@ -13,7 +13,6 @@ import {
 	getSelfUpdateCommand,
 	getSelfUpdateUnavailableInstruction,
 	PACKAGE_NAME,
-	type SelfUpdateCommand,
 	type SelfUpdatePackageTarget,
 	VERSION,
 } from "./config.ts";
@@ -24,8 +23,8 @@ import { type AppMode, resolveProjectTrusted } from "./core/project-trust.ts";
 import { DefaultResourceLoader } from "./core/resource-loader.ts";
 import { SettingsManager } from "./core/settings-manager.ts";
 import { hasTrustRequiringProjectResources, ProjectTrustStore } from "./core/trust-manager.ts";
-import { spawnProcess } from "./utils/child-process.ts";
 import { isStableVersion, RELEASE_PACKAGE_NAME } from "./utils/release-contract.ts";
+import { getSelfUpdateFailureHints, runSelfUpdate } from "./utils/self-update.ts";
 import {
 	formatVersionCheckError,
 	getLatestDiffexRelease,
@@ -445,15 +444,6 @@ function printSelfUpdateUnavailable(
 	}
 }
 
-function printSelfUpdateFallback(command: SelfUpdateCommand): void {
-	console.error(chalk.dim(`If this keeps failing, run this command yourself: ${command.display}`));
-}
-
-function printPnpmSelfUpdateMetadataHint(): void {
-	console.error(chalk.yellow("If pnpm reports missing package versions, its cached registry metadata may be stale."));
-	console.error(chalk.yellow(`Run \`pnpm store prune\` and retry \`${APP_NAME} update --self\`.`));
-}
-
 function printSelfUpdateNote(note: string): void {
 	const trimmedNote = note.trim();
 	if (!trimmedNote) {
@@ -513,29 +503,6 @@ async function getSelfUpdatePlan(force: boolean): Promise<SelfUpdatePlan> {
 
 	console.log(chalk.green(`${APP_NAME} is already up to date (v${VERSION})`));
 	return { packageName, installSpec, version: latestRelease.version, shouldRun: false };
-}
-
-async function runSelfUpdate(command: SelfUpdateCommand): Promise<void> {
-	console.log(chalk.dim(`Updating ${APP_NAME} with ${command.display}...`));
-	for (const step of command.steps ?? [command]) {
-		await new Promise<void>((resolve, reject) => {
-			const child = spawnProcess(step.command, step.args, {
-				stdio: "inherit",
-			});
-			child.on("error", (error) => {
-				reject(error);
-			});
-			child.on("close", (code, signal) => {
-				if (code === 0) {
-					resolve();
-				} else if (signal) {
-					reject(new Error(`${step.display} terminated by signal ${signal}`));
-				} else {
-					reject(new Error(`${step.display} exited with code ${code ?? "unknown"}`));
-				}
-			});
-		});
-	}
 }
 
 function prepareWindowsNpmSelfUpdate(): void {
@@ -919,6 +886,7 @@ export async function handlePackageCommand(
 					if (selfUpdatePlan.note) {
 						printSelfUpdateNote(selfUpdatePlan.note);
 					}
+					console.log(chalk.bold(`Diffex update  ${VERSION} -> ${selfUpdatePlan.version}`));
 					try {
 						if (installMethod === "npm") {
 							prepareWindowsNpmSelfUpdate();
@@ -927,10 +895,9 @@ export async function handlePackageCommand(
 					} catch (error: unknown) {
 						const message = error instanceof Error ? error.message : "Unknown package command error";
 						console.error(chalk.red(`Error: ${message}`));
-						if (installMethod === "pnpm") {
-							printPnpmSelfUpdateMetadataHint();
-						}
-						printSelfUpdateFallback(selfUpdateCommand);
+						for (const hint of getSelfUpdateFailureHints(error)) console.error(chalk.yellow(hint));
+						console.error(chalk.dim(`Retry or repair with: ${selfUpdateCommand.display}`));
+						console.error(chalk.dim("Your settings, credentials, and sessions do not need to be removed."));
 						process.exitCode = 1;
 						return true;
 					}

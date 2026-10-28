@@ -747,7 +747,7 @@ else {
 		});
 	});
 
-	it("prints a pnpm metadata hint when self-update fails", async () => {
+	it("prints a targeted pnpm registry hint for missing release metadata", async () => {
 		const globalRoot = join(tempDir, "pnpm", "global", "v11");
 		const selfPackageDir = join(globalRoot, "node_modules", "@diffexai", "diffex");
 		const fakeBinDir = join(tempDir, "bin");
@@ -757,8 +757,8 @@ else {
 		writeFileSync(join(selfPackageDir, "package.json"), JSON.stringify({ name: PACKAGE_NAME, version: VERSION }));
 		const fakePnpmScript =
 			process.platform === "win32"
-				? `@echo off\r\nif "%1"=="root" if "%2"=="-g" (echo ${globalRoot} & exit /b 0)\r\nexit /b 23\r\n`
-				: `#!/bin/sh\nif [ "$1" = "root" ] && [ "$2" = "-g" ]; then\n\tprintf '%s\\n' '${globalRoot.replaceAll("'", "'\\''")}'\n\texit 0\nfi\nexit 23\n`;
+				? `@echo off\r\nif "%1"=="root" if "%2"=="-g" (echo ${globalRoot} & exit /b 0)\r\necho ERR_PNPM_NO_MATCHING_VERSION fixture\r\nexit /b 23\r\n`
+				: `#!/bin/sh\nif [ "$1" = "root" ] && [ "$2" = "-g" ]; then\n\tprintf '%s\\n' '${globalRoot.replaceAll("'", "'\\''")}'\n\texit 0\nfi\nprintf '%s\\n' 'ERR_PNPM_NO_MATCHING_VERSION fixture'\nexit 23\n`;
 		writeFileSync(fakePnpmPath, fakePnpmScript);
 		chmodSync(fakePnpmPath, 0o755);
 		process.env.PATH = `${fakeBinDir}${process.env.PATH ? `${delimiter}${process.env.PATH}` : ""}`;
@@ -783,8 +783,9 @@ else {
 			const stderr = errorSpy.mock.calls.map(([message]) => String(message)).join("\n");
 			expect(stdout).not.toContain("Updated diffex");
 			expect(stderr).toContain("exited with code 23");
-			expect(stderr).toContain("If pnpm reports missing package versions");
-			expect(stderr).toContain("Run `pnpm store prune` and retry `diffex update --self`.");
+			expect(stderr).toContain("The verified release is not available from your configured registry or mirror.");
+			expect(stderr).toContain("Retry or repair with:");
+			expect(stderr).not.toContain("pnpm store prune");
 		} finally {
 			logSpy.mockRestore();
 			errorSpy.mockRestore();
