@@ -24,6 +24,14 @@ function credentialId(credential: Credential | undefined): string | undefined {
 		: undefined;
 }
 
+function withChatGPTCompat(model: Model<"openai-responses">): Model<"openai-responses"> {
+	return {
+		...model,
+		// ChatGPT subscription requests reject the API-key model's explicit-cache parameter.
+		compat: { ...model.compat, supportsExplicitPromptCacheMode: false },
+	};
+}
+
 function parseCatalog(value: unknown): Model<"openai-responses">[] {
 	if (!value || typeof value !== "object" || !("models" in value) || !Array.isArray(value.models)) {
 		throw new Error("Invalid ChatGPT model catalog");
@@ -57,20 +65,22 @@ function parseCatalog(value: unknown): Model<"openai-responses">[] {
 			item.max_output_tokens > 0
 				? item.max_output_tokens
 				: (known?.maxTokens ?? 16_384);
-		models.push({
-			...known,
-			id: item.slug,
-			name: item.display_name,
-			api: "openai-responses",
-			provider: "openai-codex",
-			baseUrl: BASE_URL,
-			reasoning: known?.reasoning ?? false,
-			input: known?.input ?? ["text"],
-			contextWindow,
-			maxTokens: Math.min(maxTokens, contextWindow),
-			// ChatGPT plan usage is not billed at API-key token prices.
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-		});
+		models.push(
+			withChatGPTCompat({
+				...known,
+				id: item.slug,
+				name: item.display_name,
+				api: "openai-responses",
+				provider: "openai-codex",
+				baseUrl: BASE_URL,
+				reasoning: known?.reasoning ?? false,
+				input: known?.input ?? ["text"],
+				contextWindow,
+				maxTokens: Math.min(maxTokens, contextWindow),
+				// ChatGPT plan usage is not billed at API-key token prices.
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			}),
+		);
 	}
 	return models;
 }
@@ -165,12 +175,14 @@ export function openaiCodexProvider(): Provider<"openai-responses"> {
 					update: () => {
 						activate(owner);
 						if (stored) {
-							catalog = stored.models.filter(
-								(model): model is Model<"openai-responses"> =>
-									model.provider === "openai-codex" &&
-									model.api === "openai-responses" &&
-									model.baseUrl === BASE_URL,
-							);
+							catalog = stored.models
+								.filter(
+									(model): model is Model<"openai-responses"> =>
+										model.provider === "openai-codex" &&
+										model.api === "openai-responses" &&
+										model.baseUrl === BASE_URL,
+								)
+								.map(withChatGPTCompat);
 							catalogOwner = owner;
 						}
 					},
