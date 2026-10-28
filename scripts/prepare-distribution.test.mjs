@@ -18,6 +18,11 @@ import { test } from "node:test";
 import { PROJECT_CHANGELOGS } from "./prepare-distribution.mjs";
 import { cliDistribution } from "./cli-distribution.mjs";
 
+test("public install entry points document the ordinary npm command", () => {
+	for (const file of ["README.md", "packages/coding-agent/README.md", "packages/coding-agent/docs/quickstart.md", "packages/coding-agent/docs/installation.md"])
+		assert(readFileSync(file, "utf8").includes("\nnpm i -g @diffexai/diffex\n"), `${file} must show the normal npm command`);
+});
+
 test("packed CLI links to online documentation and excludes the docs directory", () => {
 	const root = mkdtempSync(join(tmpdir(), "diffex-cli-presentation-"));
 	try {
@@ -134,7 +139,7 @@ test("packed CLI links to online documentation and excludes the docs directory",
 			assert.equal(component.license, "MIT", component.name);
 		}
 		const readme = execFileSync("tar", ["-xOf", archive, "package/README.md"], { encoding: "utf8" });
-		for (const text of ["Node.js 22.19.0", "macOS and Linux", "arm64 and x64", "npm install -g --ignore-scripts @diffexai/diffex", "pnpm add -g --ignore-scripts @diffexai/diffex", "diffex --version", "diffex --help", "diffex update --self", "/login", "THIRD-PARTY-NOTICES.txt"])
+		for (const text of ["Node.js 22.19.0", "macOS and Linux", "arm64 and x64", "npm i -g @diffexai/diffex", "pnpm add -g --ignore-scripts @diffexai/diffex", "diffex --version", "diffex --help", "diffex update --self", "/login", "THIRD-PARTY-NOTICES.txt"])
 			assert(readme.includes(text), text);
 		assert(!packed.files.some(({ path }) => path.split("/").includes("docs")));
 		for (const file of readdirSync(join(pkg, "docs"), { recursive: true })) {

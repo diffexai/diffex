@@ -8,7 +8,7 @@ Use Node.js 22.19.0 or newer on macOS or Linux, on arm64 or x64.
 Install the canonical package from npmjs.org:
 
 ```bash
-npm install -g --ignore-scripts --registry=https://registry.npmjs.org @diffexai/diffex
+npm i -g @diffexai/diffex
 diffex --version
 ```
 

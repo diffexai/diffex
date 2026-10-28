@@ -49,6 +49,7 @@ The workflow never sets its own qualification variable.
 
    ```text
    scripts/artifact-installation.mjs
+   scripts/npm-lifecycle-registry.mjs
    scripts/verify-candidate-artifacts.py
    scripts/fixtures/artifact-handoff.mjs
    scripts/daytona-behaviors/installed.py
@@ -98,19 +99,22 @@ Never rely on GitHub log masking or artifact access controls to protect keys.
 ## Normal npm installation validation
 
 The `npm-global-installation` scenario runs the advertised `npm i -g @diffexai/diffex` command without `--ignore-scripts`, after verifying that isolated npm configuration has `ignore-scripts=false`.
-The separate candidate installation uses its retained local tarball, not an unpublished registry version.
+The separate candidate installation serves its retained tarball through a loopback-only registry, not an unpublished public registry version.
+The fixture advertises npm's `_hasShrinkwrap` metadata only after validating the embedded lock. This matches published-package resolution: npm 10 can ignore a nested shrinkwrap when the dependency is supplied directly as a local tarball.
+Synchronous local npm consumers seed their root installation lock from the same verified candidate shrinkwrap, including exact archive integrity, rather than letting a file-based install re-resolve reviewed dependency ranges.
 The public installation uses the independently verified public npm archive: a candidate and the public package may share a version while having different bytes, so their inventories must never be interchanged.
 Public metadata and tarball fetches reject redirects, enforce bounded reads, and verify SHA-512 registry integrity before installation; the public latest identity must remain unchanged across the run.
 Each installation checks its own expected version, help, models, executable resolution through PATH, and installed runtime file hashes against its own pre-install archive inventory.
-The report records script policy, cold-cache state, package identities, command outcomes and confirmed temporary-prefix cleanup.
+The report records script policy, cold-cache state, package identities, command outcomes, successful execution of both exact reviewed dependency hooks, and confirmed temporary-prefix cleanup.
+Hook evidence is extracted from isolated npm debug logs as reviewed package/version/hook/exit tuples; raw logs, hook output, auth files and configuration are not copied into the report.
 The global validator shares a 600-second deadline across downloads and commands, terminates active command process groups on timeout or cancellation, and cleans prefixes before returning.
 Its Python supervisor allows 630 seconds, then sends SIGTERM to permit validator cleanup before a bounded SIGKILL fallback; a supervisory timeout remains a failure.
 Missing entries, disabled scripts, hash mismatches or failed cleanup fail the installed scenario and aggregate.
 The complete deterministic/live behavior suite still exercises the candidate rather than substituting public release behavior for candidate coverage.
 
 This is validation infrastructure, not a record that the changed workflow has passed remotely.
-Do not shorten the public installation guidance until a successful run of these checks has been retained and reviewed.
-Preparation, publishing and other artifact consumers continue to disable lifecycle scripts; public npm command validation does not authorize enabling scripts throughout CI.
+Public installation guidance uses the ordinary npm command, with scripts-disabled installation retained as an option. Local command validation is not remote Daytona qualification: do not enable automatic runs until the qualification below is complete.
+Preparation, publishing and self-updates continue to disable lifecycle scripts. Native and Daytona npm candidate consumers explicitly opt into reviewed hooks; pnpm and Bun consumers remain scripts-disabled. This does not authorize enabling scripts throughout CI.
 
 ## Configure access and a snapshot
 
