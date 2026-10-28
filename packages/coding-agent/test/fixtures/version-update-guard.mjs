@@ -107,10 +107,27 @@ childProcess.spawn = (command, args, options) => {
 		return originalSpawn(command, args, options);
 	}
 	record({ type: "spawn", command, args });
-	if (command !== "npm" || args?.[0] !== "--prefix" || !["uninstall", "install"].includes(args?.[2])) {
+	const cacheArgs = [
+		"--prefix",
+		join(process.env.DIFFEX_PACKAGE_DIR ?? "", "../../../.."),
+		"cache",
+		"add",
+		"--ignore-scripts",
+		"--min-release-age=0",
+		`@diffexai/diffex@${process.env.DIFFEX_REPRO_VERSION}`,
+	];
+	const cacheAdd =
+		Boolean(process.env.DIFFEX_PACKAGE_DIR) &&
+		process.env.DIFFEX_REPRO_PACKAGE === "@diffexai/diffex" &&
+		args?.length === cacheArgs.length &&
+		cacheArgs.every((arg, index) => args[index] === arg);
+	if (
+		command !== "npm" ||
+		(!cacheAdd && (args?.[0] !== "--prefix" || !["uninstall", "install"].includes(args?.[2])))
+	) {
 		throw new Error("Unexpected subprocess blocked by the version-update reproduction");
 	}
-	// Simulate completion so both uninstall and install attempts can be observed.
+	// Simulate completion so cache prefetch, uninstall and install attempts can be observed.
 	const child = new EventEmitter();
 	queueMicrotask(() => child.emit("close", 0, null));
 	return child;

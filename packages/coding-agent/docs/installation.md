@@ -1,7 +1,7 @@
 # Install, update, and remove Diffex
 
 Diffex is distributed through npmjs.org as `@diffexai/diffex`.
-Use Node.js 22.19.0 or newer and npm on macOS or Linux, on arm64 or x64.
+Use Node.js 22.19.0 or newer and npm or pnpm on macOS or Linux, on arm64 or x64.
 Windows, Android/Termux, standalone binaries, and additional installation channels are not accepted release targets.
 The hosted runtime image is for the cloud service.
 
@@ -37,6 +37,27 @@ Changing Node installations can change the npm prefix; check `command -v diffex`
 Start `diffex` in your project directory, use `/login` to configure your provider, and send a short prompt.
 See [Quickstart](quickstart.md) and [Providers](providers.md) for authentication and execution.
 
+## Install with pnpm
+
+pnpm installs the same package from npmjs.org; no separate registry or release is required:
+
+```sh
+node --version
+pnpm --version
+pnpm add -g --ignore-scripts --registry=https://registry.npmjs.org @diffexai/diffex
+diffex --version
+diffex --help
+```
+
+If pnpm reports `ERR_PNPM_NO_GLOBAL_BIN_DIR`, run `pnpm setup` and open a new terminal before retrying.
+Use `pnpm bin -g` to locate the executable directory and ensure it is on PATH.
+Use pnpm for subsequent upgrades, repairs, and removal of this installation; do not mix npm and pnpm in the same installation directory.
+For a reproducible installation, specify `@diffexai/diffex@<verified-version>` instead of the unversioned package.
+
+npm and pnpm own the initial download display. Diffex does not execute install scripts or print a second installer banner.
+`diffex update --self` shows a compact activity indicator in terminals, retains warnings and failure diagnostics, and streams package-manager output when redirected to a log.
+The indicator shows activity, not an estimated download percentage.
+
 ## Upgrade
 
 ```sh
@@ -60,6 +81,34 @@ Replace `<verified-version>` before running the command.
 Use your original npm prefix if it differs from the active default.
 Legacy clients that still trust Pi cannot migrate just by contacting the Diffex endpoint.
 Install the canonical package directly with the command above, then verify `command -v diffex` and `diffex --version`.
+
+## Diagnose installation failures
+
+Check the active tools and installation before retrying:
+
+```sh
+node --version
+npm --version
+npm prefix -g
+command -v diffex
+```
+
+For pnpm, also check `pnpm --version` and `pnpm bin -g`.
+Changing Node installations can change both the active executable and the global prefix.
+
+| Error or symptom | Action |
+| --- | --- |
+| `EBADENGINE`, unsupported engine, or the Node requirement message | Upgrade to Node.js 22.19.0 or newer using your Node version manager, then retry with the same manager and prefix. |
+| `EACCES` or `EPERM` | Use a user-writable prefix or the Node version manager that owns the installation. Do not recursively change permissions on the global directory or other packages. |
+| `diffex: command not found` after a successful install | Check the npm prefix or `pnpm bin -g`, add its executable directory to PATH, and open a new terminal. |
+| `ETIMEDOUT`, `ECONNRESET`, or registry fetch failure | Check your network, proxy, and configured registry. Retry the exact pinned installation command. |
+| `ETARGET` or `ERR_PNPM_NO_MATCHING_VERSION` | Check whether your registry mirror has the reviewed version; wait for it to refresh or use the canonical npmjs.org registry. Do not substitute an unverified version. |
+| `EINTEGRITY` or tarball integrity failure | Retry from a trusted registry or refreshed mirror. Do not disable integrity checks. |
+| `ENOSPC` | Free space on the installation and cache disks, then retry. |
+| `ENOTEMPTY` during npm replacement | Follow the recovery procedure below; do not delete settings or sessions. |
+
+Do not clear the entire npm cache or pnpm store as a first response to an unrelated error.
+If reporting a failure, include the command, OS/architecture, Node and package-manager versions, and the first error code. Redact tokens, proxy credentials, and private registry URLs.
 
 ## Recover an interrupted installation
 
@@ -100,6 +149,24 @@ If your shell caches command locations, open a new terminal or refresh its comma
 Removal retains settings, credentials, sessions, installed extensions, and harness data under `~/.diffex/agent/`, or the directory selected by `DIFFEX_CODING_AGENT_DIR`.
 Project `.diffex` directories and any separately configured session directory are also retained.
 Keep this data for reinstallation; delete it separately only if you intend to erase it.
+
+## Repair and remove pnpm installations
+
+Retry a failed pnpm installation with the same manager and reviewed version:
+
+```sh
+pnpm add -g --ignore-scripts --registry=https://registry.npmjs.org '@diffexai/diffex@<verified-version>'
+diffex --version
+diffex --help
+```
+
+Do not apply npm's `.diffex-...` backup recovery procedure to pnpm's shared store.
+To remove the pnpm-managed executable while retaining settings and sessions:
+
+```sh
+pnpm remove -g @diffexai/diffex
+command -v diffex
+```
 
 ## Bun package installations
 
