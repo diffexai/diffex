@@ -179,7 +179,23 @@ function getSelfUpdateCommandForMethod(
 				target.packageName === installedPackageName
 					? undefined
 					: makeSelfUpdateCommandStep(command, [...prefixArgs, "uninstall", "-g", installedPackageName]);
-			return makeSelfUpdateCommand(installStep, uninstallStep);
+			const updateCommand = makeSelfUpdateCommand(installStep, uninstallStep);
+			// Configured wrappers may implement install without supporting npm's cache API.
+			if (npmCommand?.length) return updateCommand;
+			// Validate the target archive before npm can retire the installed package.
+			const cacheStep = makeSelfUpdateCommandStep(command, [
+				...prefixArgs,
+				"cache",
+				"add",
+				"--ignore-scripts",
+				"--min-release-age=0",
+				target.installSpec,
+			]);
+			return {
+				...updateCommand,
+				display: `${cacheStep.display} && ${updateCommand.display}`,
+				steps: [cacheStep, ...(updateCommand.steps ?? [installStep])],
+			};
 		}
 		case "unknown":
 			return undefined;
