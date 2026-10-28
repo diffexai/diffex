@@ -9,10 +9,11 @@ import {
 	readFileSync,
 	rmSync,
 	statSync,
+	symlinkSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { test } from "node:test";
 import { PROJECT_CHANGELOGS } from "./prepare-distribution.mjs";
 import { cliDistribution } from "./cli-distribution.mjs";
@@ -33,10 +34,12 @@ test("packed CLI links to online documentation and excludes the docs directory",
 			"distribution-docs.json",
 			"cli-distribution.mjs",
 			"stage-cli-distribution.mjs",
+			"bundle-cli-providers.mjs",
 		])
 			copy(`scripts/${script}`);
 		for (const file of [
 			"LICENSE",
+			"package-lock.json",
 			"AGENTS_release.md",
 			"docs/release/distribution-policy.json",
 			"legal/upstream/highlight-11.9.0.LICENSE",
@@ -59,6 +62,15 @@ test("packed CLI links to online documentation and excludes the docs directory",
 			writeFileSync(join(root, directory, "dist/index.js"), "export const value = 1;\n");
 			for (const file of ["README.md", "CONTRIBUTING.md", "docs/skills.md", "CHANGELOG.md"])
 				writeFileSync(join(root, directory, file), "Repository documentation\n");
+		}
+		symlinkSync(resolve("node_modules"), join(root, "node_modules"), "dir");
+		symlinkSync(resolve("packages/ai/node_modules"), join(root, "packages/ai/node_modules"), "dir");
+		for (const folder of ["src", "dist"]) {
+			mkdirSync(join(root, "packages/ai", folder, "api"), { recursive: true });
+			writeFileSync(join(root, "packages/ai", folder, "api/mistral-conversations." + (folder === "src" ? "ts" : "js")),
+				'import { Chat } from "@mistralai/mistralai/sdk/chat.js";\n' +
+				'import { HTTPClient } from "@mistralai/mistralai/lib/http.js";\n' +
+				'export const stream = Chat; export const streamSimple = HTTPClient;\n');
 		}
 		const pkg = join(root, "packages/coding-agent");
 		writeFileSync(join(root, "AGENTS.md"), "Private repository instructions must never ship");
@@ -121,10 +133,9 @@ test("packed CLI links to online documentation and excludes the docs directory",
 		for (const component of components.filter(({ name }) => name.startsWith("@diffexai/"))) {
 			assert.equal(component.license, "MIT", component.name);
 		}
-		assert.match(
-			execFileSync("tar", ["-xOf", archive, "package/README.md"], { encoding: "utf8" }),
-			/https:\/\/diffex\.ai\/docs\/overview\//,
-		);
+		const readme = execFileSync("tar", ["-xOf", archive, "package/README.md"], { encoding: "utf8" });
+		for (const text of ["Node.js 22.19.0", "macOS and Linux", "arm64 and x64", "npm install -g --ignore-scripts @diffexai/diffex", "pnpm add -g --ignore-scripts @diffexai/diffex", "diffex --version", "diffex --help", "diffex update --self", "/login", "THIRD-PARTY-NOTICES.txt"])
+			assert(readme.includes(text), text);
 		assert(!packed.files.some(({ path }) => path.split("/").includes("docs")));
 		for (const file of readdirSync(join(pkg, "docs"), { recursive: true })) {
 			const source = join(pkg, "docs", file);

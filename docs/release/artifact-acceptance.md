@@ -7,7 +7,11 @@ npm and Bun start with an empty registry cache shared only among consumers in th
 pnpm consumers use isolated stores, homes, configuration and global executable directories; no user store or credentials are inherited.
 Installed file identities are rechecked in every consumer even when downloaded dependencies are cached.
 Lifecycle scripts are disabled and the Diffex registry scope points to an unavailable loopback endpoint, so a missing local override fails instead of fetching an older Diffex package.
-External npm dependencies still resolve from the public registry.
+External npm dependencies still resolve from the public registry, except for the reviewed Mistral provider bundle.
+Only that provider implementation absorbs its required pure-JavaScript SDK code; other implementation paths, declarations, lazy loading, extensions, native bindings and WASM remain unchanged.
+Bundling checks exact approved npm versions/licenses, records input hashes and registry integrity, preserves complete license/NOTICE text, and rehashes the final staged runtime inventory.
+New unresolved dependency references, location-sensitive inputs, unreviewed dynamic imports, missing legal documents or unexpected bundle output fail packaging.
+A mock-fetch regression exercises Mistral streaming, request options, errors and cancellation without live provider credentials.
 
 Declared runtime exports, wildcard exports, declarations, main files, and executable targets must exist inside the installed package.
 Runtime imports and representative operations execute in fresh Node processes.

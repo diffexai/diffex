@@ -7,6 +7,33 @@ export const distributionDocs = JSON.parse(
 	readFileSync(fileURLToPath(new URL("./distribution-docs.json", import.meta.url)), "utf8"),
 );
 
+// Only this provider implementation absorbs npm code. All other runtime modules,
+// declarations, extension resolution and native/WASM dependencies remain intact.
+export const cliProviderBundles = [
+	{
+		dependency: "@mistralai/mistralai",
+		version: "3.2.0",
+		workspace: "@diffexai/diffex-ai",
+		entry: "dist/api/mistral-conversations.js",
+		inputs: {
+			"@mistralai/mistralai": { version: "3.2.0", license: "Apache-2.0" },
+			zod: { version: "4.6.6", license: "MIT" },
+			"zod-to-json-schema": { version: "3.25.2", license: "ISC" },
+			"@opentelemetry/semantic-conventions": { version: "1.41.1", license: "Apache-2.0" },
+		},
+		// Mistral's tracing hook deliberately loads these optional peers dynamically.
+		// Keep them external, optional, and discoverable from the installed CLI.
+		optionalPeers: {
+			"@opentelemetry/sdk-trace-base": "^2.9.0",
+			"@opentelemetry/exporter-trace-otlp-http": "^0.220.0",
+			"@opentelemetry/resources": "^2.9.0",
+		},
+		dynamicInputs: {
+			"@mistralai/mistralai/esm/extra/observability/telemetry.js": "67c630b221e671eaa6816dd7d30f2d2e51ef9a35197e8a62a0c44a66e983a739",
+		},
+	},
+];
+
 export function cliDistribution(root = ".") {
 	const workspaces = new Map(
 		findPackageDirectories(join(root, "packages"))
@@ -57,6 +84,13 @@ export function cliDistribution(root = ".") {
 	for (const pkg of bundled.values())
 		if (pkg.manifest.version !== cli.manifest.version)
 			throw new Error(`Bundled workspace version differs from CLI: ${pkg.manifest.name}`);
+	for (const bundle of cliProviderBundles) {
+		if (dependencies[bundle.dependency] !== bundle.version)
+			throw new Error(`Bundled provider version needs review: ${bundle.dependency}`);
+		if (JSON.stringify(policy.bundledNpmDependencies?.[bundle.dependency]) !== JSON.stringify(bundle.inputs))
+			throw new Error(`Bundled npm inputs differ from the approved disclosure policy: ${bundle.dependency}`);
+		delete dependencies[bundle.dependency];
+	}
 	for (const name of Object.keys(dependencies)) delete optionalDependencies[name];
 	const manifest = structuredClone(cli.manifest);
 	manifest.homepage = "https://diffex.ai/";
@@ -75,6 +109,12 @@ export function cliDistribution(root = ".") {
 		"distribution-files.json",
 		"release",
 	];
+	for (const bundle of cliProviderBundles) {
+		for (const [name, spec] of Object.entries(bundle.optionalPeers)) {
+			manifest.peerDependencies = { ...manifest.peerDependencies, [name]: spec };
+			manifest.peerDependenciesMeta = { ...manifest.peerDependenciesMeta, [name]: { optional: true } };
+		}
+	}
 	manifest.dependencies = Object.fromEntries(Object.entries(dependencies).sort(([a], [b]) => a.localeCompare(b)));
 	manifest.optionalDependencies = Object.fromEntries(
 		Object.entries(optionalDependencies).sort(([a], [b]) => a.localeCompare(b)),

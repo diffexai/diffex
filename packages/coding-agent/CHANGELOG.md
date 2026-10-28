@@ -6,6 +6,8 @@
 
 - Added a compact terminal activity display for npm and pnpm self-updates, while preserving package-manager warnings, failure diagnostics, and redirected logs.
 - Added pnpm installation, upgrade, integrity, and removal coverage to release acceptance alongside npm and Bun.
+- Bundle the Mistral provider's required JavaScript into npm releases, reducing the external lockfile from 228 to 140 package entries while preserving provider behavior, optional tracing integrations, and complete dependency license attribution.
+- Expanded the published npm README with requirements, npm/pnpm commands, verification, login, and update instructions.
 
 ### Fixed
 
