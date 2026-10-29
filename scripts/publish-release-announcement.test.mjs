@@ -308,6 +308,25 @@ test("enabling public binary assets without an availability gate fails before pr
 	}
 });
 
+test("an enabled Homebrew channel cannot announce without retained public archive verification", () => {
+	const fixture = createPublicationFixture();
+	try {
+		const result = fixture.run("0.0.3", {
+			mutatePolicy: (policy) => {
+				policy.channels.homebrew = "enable";
+				policy.homebrewApproval = { status: "approved", reviewedAt: "2026-10-23", redistribution: "approved",
+					nativeAcceptance: ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64"], quarantine: "accepted", daytona: "accepted",
+					publicRepository: "diffexai/diffex", tapRepository: "diffexai/homebrew-tap" };
+				return policy;
+			},
+		});
+		assert.equal(result.status, 1);
+		assert.match(result.stderr, /require retained archive verification/);
+		assert.equal(fixture.state().registryCalls, undefined);
+		assert.deepEqual(fixture.state().objects, {});
+	} finally { fixture.cleanup(); }
+});
+
 test("bootstrap dry run writes nothing and completion verifies all packages without latest or R2", () => {
 	const fixture = createPublicationFixture();
 	try {

@@ -7,6 +7,7 @@ import { packReviewedPackage } from "./pack-reviewed-package.mjs";
 import { integrity, sha256 } from "./release-registry.mjs";
 import { getPublicWorkspacePackages } from "./release-packages.mjs";
 import { assertPackageVersion, git, isStableVersion } from "./release-source.mjs";
+import { assertHomebrewPublicationPolicy } from "./homebrew-policy.mjs";
 
 export function assertEnabledChannels(policy) {
 	if (
@@ -15,11 +16,13 @@ export function assertEnabledChannels(policy) {
 		policy.publicRegistry !== "https://registry.npmjs.org" ||
 		policy.publicHosting !== "npmjs" ||
 		policy.channels?.npmjs !== "enable" ||
-		Object.entries(policy.channels).some(([name, value]) => name !== "npmjs" && value !== "defer")
+		Object.entries(policy.channels).some(([name, value]) => !["npmjs", "homebrew"].includes(name) && value !== "defer") ||
+		!["defer", "enable"].includes(policy.channels?.homebrew)
 	)
 		throw new Error(
 			"Unapproved distribution channels: public asset verification must be implemented before enabling another channel",
 		);
+	if (policy.channels.homebrew === "enable") assertHomebrewPublicationPolicy(policy);
 }
 
 function sourceIdentity() {

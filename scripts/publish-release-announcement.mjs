@@ -9,6 +9,7 @@ import { isDeepStrictEqual } from "node:util";
 import { isReleaseRecord, isStableVersion } from "../packages/coding-agent/src/utils/release-contract.ts";
 import { readReleaseArtifacts } from "./release-artifacts.mjs";
 import { verifyNpmArtifact } from "./release-registry.mjs";
+import { verifyPublicHomebrewRelease } from "./homebrew-release.mjs";
 
 const RELEASES_PREFIX = "releases/v1";
 const RETRY_DELAY_MS = 5000;
@@ -19,6 +20,7 @@ const STABLE_SEMVER_RE = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 function parseArgs(args) {
 	const options = {
 		artifacts: undefined,
+		homebrewArtifacts: undefined,
 		bucket: undefined,
 		endpoint: undefined,
 		sourceCommit: undefined,
@@ -29,6 +31,7 @@ function parseArgs(args) {
 		const arg = args[index];
 		if (
 			arg !== "--artifacts" &&
+			arg !== "--homebrew-artifacts" &&
 			arg !== "--bucket" &&
 			arg !== "--endpoint" &&
 			arg !== "--source-commit" &&
@@ -41,6 +44,7 @@ function parseArgs(args) {
 		options[
 			{
 				"--artifacts": "artifacts",
+				"--homebrew-artifacts": "homebrewArtifacts",
 				"--bucket": "bucket",
 				"--endpoint": "endpoint",
 				"--source-commit": "sourceCommit",
@@ -214,6 +218,11 @@ async function main() {
 	const manifest = readReleaseArtifacts(options.artifacts, { version: options.version, sourceCommit });
 	const packages = manifest.packages;
 
+	const policy = JSON.parse(readFileSync("docs/release/distribution-policy.json", "utf8"));
+	if (policy.channels.homebrew === "enable") {
+		if (!options.homebrewArtifacts) throw new Error("Enabled Homebrew releases require retained archive verification before announcement");
+		await verifyPublicHomebrewRelease(options.homebrewArtifacts, { version: options.version, sourceCommit });
+	}
 	const publishedPackages = await verifyPackagesAreAvailable(packages);
 	const release = {
 		schemaVersion: 1,

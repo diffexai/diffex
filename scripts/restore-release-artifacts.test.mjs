@@ -8,7 +8,7 @@ import test from "node:test";
 
 const script = fileURLToPath(new URL("./restore-release-artifacts.mjs", import.meta.url));
 const commit = "a".repeat(40);
-function runFixture(configuration, recovery) {
+function runFixture(configuration, recovery, extraEnv = {}) {
 	const directory = mkdtempSync(join(tmpdir(), "diffex-retained-artifacts-"));
 	try {
 		const bin = join(directory, "bin");
@@ -44,6 +44,7 @@ else throw new Error('Unmocked endpoint');
 				RECOVERY_RUN_ID: recovery ?? "",
 				DIFFEX_SOURCE_COMMIT: commit,
 				GITHUB_OUTPUT: output,
+				...extraEnv,
 			},
 			encoding: "utf8",
 			timeout: 10000,
@@ -80,7 +81,24 @@ test("recovery copies the original artifact once and its retry reuses the copy",
 	assert.equal(retry.status, 0, retry.stderr);
 	assert.equal(retry.output, "restored=true\nupload=false\n");
 });
+test("Homebrew recovery restores exact platform and signed bundle artifacts, never npm inputs", () => {
+	for (const [extraEnv, name, directory] of [
+		[{ HOMEBREW_PLATFORM: "darwin-arm64" }, `homebrew-darwin-arm64-${commit}`, ".artifacts/homebrew/darwin-arm64"],
+		[{ HOMEBREW_RELEASE: "true" }, `homebrew-release-${commit}`, ".artifacts/homebrew-release"],
+	]) {
+		const result = runFixture({ 100: { artifacts: [{ name, expired: false }] } }, undefined, extraEnv);
+		assert.equal(result.status, 0, result.stderr);
+		assert(result.calls.some((args) => args[0] === "run" && args.includes(name) && args.includes(directory)));
+	}
+	assert.equal(runFixture({ 100: {} }, undefined, { HOMEBREW_PLATFORM: "../../auth" }).status, 1);
+});
+
 for (const [name, configuration, recovery] of [
+	[
+		"missing evidence after Homebrew publication started",
+		{ 100: { jobs: [{ name: "publish-homebrew", steps: [{ status: "completed" }] }] } },
+		undefined,
+	],
 	[
 		"missing evidence after npm started",
 		{ 100: { jobs: [{ name: "publish-npm", steps: [{ status: "completed" }] }] } },

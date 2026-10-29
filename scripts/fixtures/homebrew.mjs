@@ -8,8 +8,8 @@ export function homebrewFixture(version = "1.2.3") {
 		product: "@diffexai/diffex",
 		version,
 		sourceCommit: "a".repeat(40),
-		nodeVersion: "22.19.0",
-		npmVersion: "10.8.2",
+		nodeVersion: "22.23.4",
+		npmVersion: "10.9.9",
 		platforms: HOMEBREW_PLATFORMS.map((platform) => ({
 			platform,
 			filename: `diffex-${version}-${platform}.tar.gz`,
