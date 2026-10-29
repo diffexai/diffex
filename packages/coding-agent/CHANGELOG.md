@@ -2,17 +2,62 @@
 
 ## [Unreleased]
 
+### New Features
+
+- Added clearer, safer self-updates with terminal activity feedback, actionable recovery guidance, and npm target-archive prefetch before installation replacement.
+  See [Upgrade](docs/installation.md#upgrade) ([#298](https://github.com/diffexai/diffex/pull/298)).
+- Made npm installations leaner by bundling the Mistral provider's required JavaScript, reducing external dependencies while preserving provider behavior.
+  See [Installation](docs/installation.md#install-and-verify) ([#300](https://github.com/diffexai/diffex/pull/300)).
+- Added account-aware ChatGPT defaults that respect model availability and preserve usable saved choices across startup, login, account switching, and session restoration.
+  See [ChatGPT setup](docs/providers.md#chatgpt) ([#303](https://github.com/diffexai/diffex/pull/303)).
+
+### Breaking Changes
+
+- Previously released: `AgentSession.dispose()` returns `Promise<void>`. SDK consumers must await disposal before releasing process resources or deleting a session workspace.
+  See [AgentSession](docs/sdk.md#agentsession) ([#20](https://github.com/diffexai/diffex/pull/20)).
+- Previously released: changed `BuildSystemPromptOptions.promptGuidelines` from a flat array to guideline arrays keyed by tool name. Update direct prompt-builder integrations to pass an object such as `{ my_tool: ["Guidance"] }`; individual tool definitions still use arrays.
+  See [Custom tools](docs/extensions.md#custom-tools) ([#232](https://github.com/diffexai/diffex/pull/232)).
+- Previously released: replaced the interactive `/new` and `/quit` commands with `/clear` and `/exit`. Update command-driven workflows ([#10](https://github.com/diffexai/diffex/pull/10)).
+- Previously released: renamed `PI_CACHE_RETENTION` and `PI_OAUTH_CALLBACK_HOST` to `DIFFEX_CACHE_RETENTION` and `DIFFEX_OAUTH_CALLBACK_HOST`. Update provider configuration and OAuth callback-host overrides ([#2](https://github.com/diffexai/diffex/pull/2)).
+
+### Added
+
+- Previously released: added durable, branch-aware subagent restoration and child-to-parent escalation coordination ([#114](https://github.com/diffexai/diffex/pull/114) by [@Issacboy123](https://github.com/Issacboy123), [#115](https://github.com/diffexai/diffex/pull/115) by [@Issacboy123](https://github.com/Issacboy123), [#117](https://github.com/diffexai/diffex/pull/117) by [@Issacboy123](https://github.com/Issacboy123), [#119](https://github.com/diffexai/diffex/pull/119) by [@Issacboy123](https://github.com/Issacboy123), [#120](https://github.com/diffexai/diffex/pull/120) by [@Issacboy123](https://github.com/Issacboy123), [#121](https://github.com/diffexai/diffex/pull/121) by [@Issacboy123](https://github.com/Issacboy123)).
+- Previously released: added SDK `PromptOptions.signal` support to cancel prompt preflight before agent start while preserving session state.
+  See [Prompting and message queueing](docs/sdk.md#prompting-and-message-queueing) ([#143](https://github.com/diffexai/diffex/pull/143) by [@Issacboy123](https://github.com/Issacboy123)).
+- Added post-merge installed-CLI and terminal behavior checks in isolated Daytona sandboxes, with sanitized diagnostic artifacts for regression investigation.
+  See [Daytona behavior checks](../../docs/daytona-behaviors.md) ([#295](https://github.com/diffexai/diffex/pull/295)).
+
 ### Changed
 
-- Added a compact terminal activity display for npm and pnpm self-updates, while preserving package-manager warnings, failure diagnostics, and redirected logs.
-- Added pnpm installation, upgrade, integrity, and removal coverage to release acceptance alongside npm and Bun.
-- Bundle the Mistral provider's required JavaScript into npm releases, reducing the external lockfile from 228 to 140 package entries while preserving provider behavior, optional tracing integrations, and complete dependency license attribution.
-- Expanded the published npm README with requirements, npm/pnpm commands, verification, login, and update instructions.
+- Previously released: deleting a parent session first cleans up its owned child-session files, retains the parent if child cleanup fails, and reports partial failures ([#118](https://github.com/diffexai/diffex/pull/118) by [@Issacboy123](https://github.com/Issacboy123)).
+- Previously released: `/share` returns the secret GitHub Gist's direct URL instead of depending on the upstream share viewer, while preserving custom viewer configuration ([#3](https://github.com/diffexai/diffex/pull/3) by [@jefft72](https://github.com/jefft72)).
+- Added a compact terminal activity display for npm and pnpm self-updates, while preserving package-manager warnings, failure diagnostics, and redirected logs ([#298](https://github.com/diffexai/diffex/pull/298)).
+- Added pnpm installation, upgrade, integrity, and removal coverage to release acceptance alongside npm and Bun ([#299](https://github.com/diffexai/diffex/pull/299)).
+- Bundle the Mistral provider's required JavaScript into npm releases, reducing the external lockfile from 228 to 140 package entries while preserving provider behavior, optional tracing integrations, and complete dependency license attribution ([#300](https://github.com/diffexai/diffex/pull/300)).
+- Expanded the published npm README with requirements, npm/pnpm commands, verification, login, and update instructions ([#300](https://github.com/diffexai/diffex/pull/300)).
+- Made ordinary `npm i -g @diffexai/diffex` the default installation command, with reviewed dependency lifecycle hooks; installation with `--ignore-scripts` remains supported and self-updates continue to disable scripts.
+  See [Installation](docs/installation.md#install-and-verify) ([#301](https://github.com/diffexai/diffex/pull/301)).
 
 ### Fixed
 
-- Added actionable installation recovery guidance for permissions, unsupported Node versions, interrupted updates, registry failures, and integrity errors without deleting user data or blindly pruning caches.
-- Check the CLI's Node.js requirement before initializing application dependencies.
+- Previously released: fixed subagent cancellation, inherited hook-policy enforcement, selected-branch spawn provenance, and prompt URL metadata compatibility ([#141](https://github.com/diffexai/diffex/pull/141) by [@Issacboy123](https://github.com/Issacboy123), [#144](https://github.com/diffexai/diffex/pull/144) by [@Issacboy123](https://github.com/Issacboy123), [#145](https://github.com/diffexai/diffex/pull/145) by [@Issacboy123](https://github.com/Issacboy123), [#160](https://github.com/diffexai/diffex/pull/160) by [@Issacboy123](https://github.com/Issacboy123)).
+- Previously released: kept Workers AI models discoverable through Cloudflare AI Gateway when the upstream catalog omits duplicate gateway entries ([#111](https://github.com/diffexai/diffex/pull/111)).
+- Previously released: fixed cancelled authentication and lazy provider setup being reported as errors instead of aborted requests.
+- Previously released: preserved Kimi Coding models after the upstream catalog source key changed.
+- Previously released: patched the sandbox extension example's transitive `node-forge` dependency to 1.4.2 to reject malformed RSA signature algorithm structures.
+- Previously released: enabled interactive update-available notifications when the release check finds a newer version.
+- Added actionable installation recovery guidance for permissions, unsupported Node versions, interrupted updates, registry failures, and integrity errors without deleting user data or blindly pruning caches ([#298](https://github.com/diffexai/diffex/pull/298)).
+- Check the CLI's Node.js requirement before initializing application dependencies ([#298](https://github.com/diffexai/diffex/pull/298)).
+- Prefetch the verified target npm package archive before replacing the installed CLI, so a failed archive download does not start installation replacement ([#298](https://github.com/diffexai/diffex/pull/298)).
+- Fixed ChatGPT compaction failures by omitting unsupported explicit prompt-cache options from both freshly discovered and cached account models ([#302](https://github.com/diffexai/diffex/pull/302)).
+- Fixed ChatGPT model selection at startup, login, account switching, and session restoration to use the account's available catalog while preserving available saved and custom choices. Unavailable saved models fall back within the same provider before considering another provider, without rewriting saved defaults.
+  See [ChatGPT setup](docs/providers.md#chatgpt) ([#303](https://github.com/diffexai/diffex/pull/303)).
+
+### Removed
+
+- Previously released: disabled `/cl` prompt-template discovery and execution in production installations; changelog maintenance remains available in development checkouts ([#216](https://github.com/diffexai/diffex/pull/216)).
+- Removed the standalone root benchmark project and its Terminal-Bench workflow ([#294](https://github.com/diffexai/diffex/pull/294)).
 
 ## [0.4.0] - 2026-10-27
 
