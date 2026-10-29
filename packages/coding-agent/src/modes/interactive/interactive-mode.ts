@@ -95,7 +95,7 @@ import { configureHttpDispatcher, formatHttpIdleTimeoutMs } from "../../core/htt
 import { type AppKeybinding, KeybindingsManager } from "../../core/keybindings.ts";
 import { createCompactionSummaryMessage } from "../../core/messages.ts";
 import {
-	defaultModelPerProvider,
+	findDefaultModel,
 	findExactModelReferenceMatch,
 	resolveModelScopeFromModels,
 } from "../../core/model-resolver.ts";
@@ -300,10 +300,6 @@ export function formatResumeCommand(sessionManager: SessionManager): string | un
 	}
 	args.push("--session", sessionManager.getSessionId());
 	return args.join(" ");
-}
-
-function hasDefaultModelProvider(providerId: string): providerId is keyof typeof defaultModelPerProvider {
-	return providerId in defaultModelPerProvider;
 }
 
 type LoginProviderCompletionOption = {
@@ -6454,26 +6450,26 @@ export class InteractiveMode {
 
 		let selectedModel: Model<any> | undefined;
 		let selectionError: string | undefined;
-		if (isUnknownModel(previousModel)) {
-			const availableModels = this.session.modelRuntime.getAvailableSnapshot();
-			const providerModels = availableModels.filter((model) => model.provider === providerId);
-			if (!hasDefaultModelProvider(providerId)) {
-				selectionError = `${actionLabel}, but no default model is configured for provider "${providerId}". Use /model to select a model.`;
-			} else if (providerModels.length === 0) {
+		const availableModels = this.session.modelRuntime.getAvailableSnapshot();
+		if (
+			!previousModel ||
+			isUnknownModel(previousModel) ||
+			(previousModel.provider === providerId &&
+				providerId === "openai-codex" &&
+				!availableModels.some(
+					(model) => model.provider === previousModel.provider && model.id === previousModel.id,
+				))
+		) {
+			selectedModel = findDefaultModel(availableModels, providerId);
+			if (!selectedModel) {
 				selectionError = `${actionLabel}, but no models are available for that provider. Use /model to select a model.`;
 			} else {
-				const defaultModelId = defaultModelPerProvider[providerId];
-				selectedModel = providerModels.find((model) => model.id === defaultModelId);
-				if (!selectedModel) {
-					selectionError = `${actionLabel}, but its default model "${defaultModelId}" is not available. Use /model to select a model.`;
-				} else {
-					try {
-						await this.session.setModel(selectedModel);
-					} catch (error: unknown) {
-						selectedModel = undefined;
-						const errorMessage = error instanceof Error ? error.message : String(error);
-						selectionError = `${actionLabel}, but selecting its default model failed: ${errorMessage}. Use /model to select a model.`;
-					}
+				try {
+					await this.session.setModel(selectedModel);
+				} catch (error: unknown) {
+					selectedModel = undefined;
+					const errorMessage = error instanceof Error ? error.message : String(error);
+					selectionError = `${actionLabel}, but selecting its default model failed: ${errorMessage}. Use /model to select a model.`;
 				}
 			}
 		}
