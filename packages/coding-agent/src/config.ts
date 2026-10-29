@@ -2,6 +2,7 @@ import { accessSync, constants, existsSync, readFileSync, realpathSync } from "f
 import { homedir } from "os";
 import { basename, dirname, join, resolve, sep, win32 } from "path";
 import { fileURLToPath } from "url";
+import { HOMEBREW_UPDATE_COMMAND, isHomebrewInstall } from "./utils/bundled-runtime.ts";
 import { spawnProcessSync } from "./utils/child-process.ts";
 import { normalizePath } from "./utils/paths.ts";
 
@@ -26,7 +27,7 @@ export const isBunRuntime = !!process.versions.bun;
 // Install Method Detection
 // =============================================================================
 
-export type InstallMethod = "bun-binary" | "npm" | "pnpm" | "yarn" | "bun" | "unknown";
+export type InstallMethod = "homebrew" | "bun-binary" | "npm" | "pnpm" | "yarn" | "bun" | "unknown";
 
 interface SelfUpdateCommandStep {
 	command: string;
@@ -71,6 +72,7 @@ function makeSelfUpdateCommandStep(command: string, args: string[]): SelfUpdateC
 }
 
 export function detectInstallMethod(): InstallMethod {
+	if (isHomebrewInstall(getPackageDir())) return "homebrew";
 	if (isBunBinary) {
 		return "bun-binary";
 	}
@@ -120,6 +122,7 @@ function getSelfUpdateCommandForMethod(
 ): SelfUpdateCommand | undefined {
 	const target = normalizeSelfUpdatePackageTarget(updatePackageTarget);
 	switch (method) {
+		case "homebrew":
 		case "bun-binary":
 			return undefined;
 		case "pnpm": {
@@ -258,6 +261,7 @@ function getGlobalPackageRoots(method: InstallMethod, _packageName: string, npmC
 			}
 			return roots;
 		}
+		case "homebrew":
 		case "bun-binary":
 		case "unknown":
 			return [];
@@ -348,6 +352,7 @@ export function getSelfUpdateUnavailableInstruction(
 ): string {
 	const method = detectInstallMethod();
 	const target = normalizeSelfUpdatePackageTarget(updatePackageTarget);
+	if (method === "homebrew") return `Run: ${HOMEBREW_UPDATE_COMMAND}`;
 	if (method === "bun-binary") {
 		return `Standalone updates are deferred for this release. The supported distribution is the @diffexai/diffex npm package.`;
 	}

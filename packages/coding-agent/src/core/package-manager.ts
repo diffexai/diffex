@@ -28,7 +28,8 @@ import { globSync } from "glob";
 import ignore from "ignore";
 import { minimatch } from "minimatch";
 import { maxSatisfying, rcompare, satisfies, valid, validRange } from "semver";
-import { CONFIG_DIR_NAME } from "../config.ts";
+import { CONFIG_DIR_NAME, getPackageDir } from "../config.ts";
+import { getBundledRuntime, withBundledRuntimePath } from "../utils/bundled-runtime.ts";
 import { spawnProcess, spawnProcessSync } from "../utils/child-process.ts";
 import { type GitSource, parseGitUrl } from "../utils/git.ts";
 import { canonicalizePath, isLocalPath, markPathIgnoredByCloudSync, resolvePath } from "../utils/paths.ts";
@@ -1720,7 +1721,8 @@ export class DefaultPackageManager implements PackageManager {
 	private getNpmCommand(): { command: string; args: string[] } {
 		const configuredCommand = this.settingsManager.getNpmCommand();
 		if (!configuredCommand || configuredCommand.length === 0) {
-			return { command: "npm", args: [] };
+			const runtime = getBundledRuntime(getPackageDir());
+			return runtime ? { command: runtime.node, args: [runtime.npmCli] } : { command: "npm", args: [] };
 		}
 		const [command, ...args] = configuredCommand;
 		if (!command) {
@@ -1733,8 +1735,11 @@ export class DefaultPackageManager implements PackageManager {
 		const npmCommand = this.getNpmCommand();
 		const commandParts = [npmCommand.command, ...npmCommand.args];
 		const separatorIndex = commandParts.lastIndexOf("--");
-		const packageManagerCommand = separatorIndex >= 0 ? commandParts[separatorIndex + 1] : npmCommand.command;
-		return packageManagerCommand ? basename(packageManagerCommand).replace(/\.(cmd|exe)$/i, "") : "";
+		const commandIndex = separatorIndex >= 0 ? separatorIndex + 1 : 0;
+		const packageManagerCommand = commandParts[commandIndex];
+		const name = packageManagerCommand ? basename(packageManagerCommand).replace(/\.(cmd|exe)$/i, "") : "";
+		if (name === "node" && basename(commandParts[commandIndex + 1] ?? "") === "npm-cli.js") return "npm";
+		return name;
 	}
 
 	private async runNpmCommand(args: string[], options?: { cwd?: string }): Promise<void> {
@@ -2580,7 +2585,7 @@ export class DefaultPackageManager implements PackageManager {
 	}
 
 	private spawnCommand(command: string, args: string[], options?: { cwd?: string }): ChildProcess {
-		const env = getEnv();
+		const env = withBundledRuntimePath(getEnv(), getPackageDir());
 		return spawnProcess(command, args, {
 			cwd: options?.cwd,
 			stdio: isStdoutTakenOver() ? ["ignore", 2, 2] : "inherit",
@@ -2593,7 +2598,7 @@ export class DefaultPackageManager implements PackageManager {
 		args: string[],
 		options?: { cwd?: string; env?: Record<string, string> },
 	): ChildProcessByStdio<null, Readable, Readable> {
-		const baseEnv = getEnv();
+		const baseEnv = withBundledRuntimePath(getEnv(), getPackageDir());
 		const env = options?.env ? { ...baseEnv, ...options.env } : baseEnv;
 		return spawnProcess(command, args, {
 			cwd: options?.cwd,
@@ -2661,7 +2666,7 @@ export class DefaultPackageManager implements PackageManager {
 	}
 
 	private runCommandSync(command: string, args: string[]): string {
-		const env = getEnv();
+		const env = withBundledRuntimePath(getEnv(), getPackageDir());
 		const result = spawnProcessSync(command, args, {
 			stdio: ["ignore", "pipe", "pipe"],
 			encoding: "utf-8",
