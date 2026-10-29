@@ -29,7 +29,7 @@ import {
 } from "./harness-state-runtime.ts";
 import { createLessonReportContinuation } from "./lesson-reports.ts";
 import { convertToLlm } from "./messages.ts";
-import { findInitialModel } from "./model-resolver.ts";
+import { findDefaultModel, findInitialModel } from "./model-resolver.ts";
 import { ModelRuntime } from "./model-runtime.ts";
 import { mergeProviderAttributionHeaders } from "./provider-attribution.ts";
 import type { ResourceLoader } from "./resource-loader.ts";
@@ -154,7 +154,7 @@ export interface CreateAgentSessionResult {
 	session: AgentSession;
 	/** Extensions result (for UI context setup in interactive mode) */
 	extensionsResult: LoadExtensionsResult;
-	/** Warning if session was restored with a different model than saved */
+	/** Warning if a saved session model or default could not be selected. */
 	modelFallbackMessage?: string;
 	/** Non-fatal warning when optional harness state could not be activated. */
 	harnessStateWarning?: string;
@@ -484,12 +484,17 @@ export async function createInternalAgentSession(
 	if (!model && hasExistingSession && existingSession.model) {
 		const removed = getRemovedProviderMessage(existingSession.model.provider);
 		if (removed) throw new ModelsError("provider", `${removed} Resume with an explicit --model provider/model.`);
-		const restoredModel = modelRuntime.getModel(existingSession.model.provider, existingSession.model.modelId);
-		if (restoredModel && modelRuntime.hasConfiguredAuth(restoredModel.provider)) {
-			model = restoredModel;
-		}
+		const savedModel = existingSession.model;
+		const availableModels = modelRuntime.getAvailableSnapshot();
+		model = availableModels.find(
+			(candidate) => candidate.provider === savedModel.provider && candidate.id === savedModel.modelId,
+		);
 		if (!model) {
+			model = findDefaultModel(availableModels, existingSession.model.provider);
 			modelFallbackMessage = `Could not restore model ${existingSession.model.provider}/${existingSession.model.modelId}`;
+			if (model) {
+				modelFallbackMessage += `. Using ${model.provider}/${model.id}`;
+			}
 		}
 	}
 
@@ -508,6 +513,8 @@ export async function createInternalAgentSession(
 			modelFallbackMessage = formatNoModelsAvailableMessage();
 		} else if (modelFallbackMessage) {
 			modelFallbackMessage += `. Using ${model.provider}/${model.id}`;
+		} else {
+			modelFallbackMessage = result.fallbackMessage;
 		}
 	}
 

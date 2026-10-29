@@ -43,6 +43,12 @@ Availability depends on the selected account, workspace, and granted permissions
 Token usage is reported without applying API-key token prices to subscription usage.
 Review app limits and credits in [ChatGPT Settings - Usage](https://chatgpt.com/settings/usage).
 
+When choosing a default, Diffex prefers `gpt-5.6-terra` if it is in the available ChatGPT catalog; otherwise it uses the first model in the account's catalog order. Available saved defaults and session models are preserved, not automatically upgraded.
+
+At startup or session restoration, if a saved ChatGPT model is no longer available, Diffex reports the replacement and stays with ChatGPT while that account has available models. It falls back to another configured provider only when ChatGPT has none. These fallbacks do not rewrite your saved default; use `/model` to save a new choice.
+
+Login selects and saves an available model when there is no current model or switching ChatGPT accounts makes the current ChatGPT model unavailable. If the newly authenticated provider has no models, login reports that instead of selecting a different provider. Logging in does not replace an available current choice or an unrelated custom model.
+
 `/logout` stops the account's active requests, attempts remote session revocation, and clears the active tokens while retaining the host and registration for later sign-in.
 If remote revocation cannot be confirmed, Diffex reports that local sign-out completed and directs you to disconnect the app in ChatGPT Settings.
 An unusable refresh token clears the local token set and requires a new sign-in with the saved registration.

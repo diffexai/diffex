@@ -2,11 +2,13 @@ import type { Model } from "@diffexai/diffex-ai";
 import { describe, expect, test, vi } from "vitest";
 import {
 	defaultModelPerProvider,
+	findDefaultModel,
 	findInitialModel,
 	parseModelPattern,
 	resolveCliModel,
 	resolveModelScope,
 	resolveModelScopeWithDiagnostics,
+	restoreModelFromSession,
 } from "../src/core/model-resolver.ts";
 
 // Mock models for testing
@@ -693,10 +695,161 @@ describe("resolveCliModel", () => {
 	});
 });
 
+describe("account-specific default model selection", () => {
+	const codexModel = (id: string): Model<"openai-responses"> => ({
+		...mockModels[1],
+		id,
+		name: id,
+		api: "openai-responses",
+		provider: "openai-codex",
+	});
+	const oldModel = codexModel("gpt-5.5");
+	const preferredModel = codexModel("gpt-5.6-terra");
+	const futureModel = codexModel("future-chatgpt-model");
+	const otherProviderModel = { ...mockModels[0], id: defaultModelPerProvider.anthropic };
+	const models = [otherProviderModel, oldModel, preferredModel, futureModel];
+	const runtime = (available = models) =>
+		({
+			getModels: () => models,
+			getModel: (provider: string, id: string) =>
+				models.find((model) => model.provider === provider && model.id === id),
+			getAvailableSnapshot: () => available,
+			hasConfiguredAuth: (provider: string) => available.some((model) => model.provider === provider),
+		}) as unknown as Parameters<typeof findInitialModel>[0]["modelRuntime"];
+
+	test("prefers Terra only when listed for the selected provider", () => {
+		expect(findDefaultModel(models, "openai-codex")).toBe(preferredModel);
+		expect(findDefaultModel([otherProviderModel, futureModel], "openai-codex")).toBe(futureModel);
+		expect(findDefaultModel([otherProviderModel], "openai-codex")).toBeUndefined();
+	});
+
+	test("preserves provider catalog order when the preferred model is absent", () => {
+		expect(findDefaultModel([futureModel, oldModel], "openai-codex")).toBe(futureModel);
+		expect(findDefaultModel([oldModel, futureModel], "openai-codex")).toBe(oldModel);
+	});
+
+	test("preserves global provider priority and handles empty catalogs", () => {
+		expect(findDefaultModel([preferredModel, otherProviderModel])).toBe(otherProviderModel);
+		expect(findDefaultModel([futureModel, oldModel])).toBe(futureModel);
+		expect(findDefaultModel([])).toBeUndefined();
+		expect(findDefaultModel([], "openai-codex")).toBeUndefined();
+	});
+
+	test("new ChatGPT-only installations prefer Terra over a listed older model", async () => {
+		const result = await findInitialModel({
+			scopedModels: [],
+			isContinuing: false,
+			modelRuntime: runtime([oldModel, preferredModel]),
+		});
+		expect(result.model).toBe(preferredModel);
+		expect(result.fallbackMessage).toBeUndefined();
+	});
+
+	test.each([oldModel, futureModel])("preserves an available saved choice: $id", async (saved) => {
+		const result = await findInitialModel({
+			defaultProvider: "openai-codex",
+			defaultModelId: saved.id,
+			defaultThinkingLevel: "high",
+			scopedModels: [],
+			isContinuing: false,
+			modelRuntime: runtime(),
+		});
+		expect(result.model).toBe(saved);
+		expect(result.thinkingLevel).toBe("high");
+		expect(result.fallbackMessage).toBeUndefined();
+	});
+
+	test.each([
+		{ available: [otherProviderModel, preferredModel, futureModel], expected: preferredModel },
+		{ available: [otherProviderModel, futureModel], expected: futureModel },
+		{ available: [otherProviderModel], expected: otherProviderModel },
+	])("falls back from a retired saved model to $expected.id", async ({ available, expected }) => {
+		const result = await findInitialModel({
+			defaultProvider: "openai-codex",
+			defaultModelId: oldModel.id,
+			defaultThinkingLevel: "high",
+			scopedModels: [],
+			isContinuing: false,
+			modelRuntime: runtime(available),
+		});
+		expect(result.model).toBe(expected);
+		expect(result.thinkingLevel).toBe("high");
+		expect(result.fallbackMessage).toBe(
+			`Saved default model openai-codex/gpt-5.5 is unavailable. Using ${expected.provider}/${expected.id}.`,
+		);
+	});
+
+	test("honors a saved provider even without a saved model", async () => {
+		const result = await findInitialModel({
+			defaultProvider: "openai-codex",
+			scopedModels: [],
+			isContinuing: false,
+			modelRuntime: runtime(),
+		});
+		expect(result.model).toBe(preferredModel);
+		expect(result.fallbackMessage).toBeUndefined();
+	});
+
+	test("an explicit model scope still takes precedence over saved defaults", async () => {
+		const result = await findInitialModel({
+			defaultProvider: "openai-codex",
+			defaultModelId: oldModel.id,
+			scopedModels: [{ model: futureModel, thinkingLevel: "low" }],
+			isContinuing: false,
+			modelRuntime: runtime(),
+		});
+		expect(result.model).toBe(futureModel);
+		expect(result.thinkingLevel).toBe("low");
+	});
+
+	test("does not invent a model when the account has an empty catalog", async () => {
+		const result = await findInitialModel({
+			defaultProvider: "openai-codex",
+			defaultModelId: oldModel.id,
+			scopedModels: [],
+			isContinuing: false,
+			modelRuntime: runtime([]),
+		});
+		expect(result.model).toBeUndefined();
+	});
+
+	test.each([oldModel, futureModel])("restores an available session choice: $id", async (saved) => {
+		const result = await restoreModelFromSession("openai-codex", saved.id, undefined, false, runtime());
+		expect(result.model).toBe(saved);
+		expect(result.fallbackMessage).toBeUndefined();
+	});
+
+	test.each([
+		{ available: [otherProviderModel, preferredModel], expected: preferredModel },
+		{ available: [otherProviderModel, futureModel], expected: futureModel },
+		{ available: [otherProviderModel], expected: otherProviderModel },
+	])("restores an unavailable session model with $expected.id", async ({ available, expected }) => {
+		const result = await restoreModelFromSession("openai-codex", oldModel.id, undefined, false, runtime(available));
+		expect(result.model).toBe(expected);
+		expect(result.fallbackMessage).toContain(`Using ${expected.provider}/${expected.id}.`);
+	});
+
+	test("preserves an explicit current model as the session fallback", async () => {
+		const result = await restoreModelFromSession(
+			"openai-codex",
+			"retired-model",
+			otherProviderModel,
+			false,
+			runtime(),
+		);
+		expect(result.model).toBe(otherProviderModel);
+	});
+
+	test("session fallback returns no model for an empty catalog", async () => {
+		const result = await restoreModelFromSession("openai-codex", oldModel.id, undefined, false, runtime([]));
+		expect(result.model).toBeUndefined();
+	});
+});
+
 describe("default model selection", () => {
 	test("openai defaults track current models", () => {
 		expect(defaultModelPerProvider.openai).toBe("gpt-5.5");
-		expect(defaultModelPerProvider["openai-codex"]).toBe("gpt-5.5");
+		expect(defaultModelPerProvider["openai-codex"]).toBe("gpt-5.6-terra");
 	});
 
 	test("zai, minimax, cerebras, and ant-ling defaults track current models", () => {

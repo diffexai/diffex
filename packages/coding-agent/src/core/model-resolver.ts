@@ -25,7 +25,7 @@ export const defaultModelPerProvider: Record<KnownProvider, string> = {
 	anthropic: "claude-opus-4-8",
 	openai: "gpt-5.5",
 	"azure-openai-responses": "gpt-5.4",
-	"openai-codex": "gpt-5.5",
+	"openai-codex": "gpt-5.6-terra",
 	nvidia: "nvidia/nemotron-3-super-120b-a12b",
 	deepseek: "deepseek-v4-pro",
 	google: "gemini-3.1-pro-preview",
@@ -60,6 +60,26 @@ export const defaultModelPerProvider: Record<KnownProvider, string> = {
 	"xiaomi-token-plan-ams": "mimo-v2.5-pro",
 	"xiaomi-token-plan-sgp": "mimo-v2.5-pro",
 };
+
+/**
+ * Select a preferred model only from the supplied available catalog.
+ * Provider-scoped fallback preserves catalog order, including ChatGPT's account-specific order.
+ */
+export function findDefaultModel(availableModels: readonly Model<Api>[], provider?: string): Model<Api> | undefined {
+	if (provider !== undefined) {
+		const providerModels = availableModels.filter((model) => model.provider === provider);
+		return (
+			providerModels.find((model) => model.id === defaultModelPerProvider[provider as KnownProvider]) ??
+			providerModels[0]
+		);
+	}
+
+	for (const [providerId, defaultId] of Object.entries(defaultModelPerProvider)) {
+		const match = availableModels.find((model) => model.provider === providerId && model.id === defaultId);
+		if (match) return match;
+	}
+	return availableModels[0];
+}
 
 export interface ScopedModel {
 	model: Model<Api>;
@@ -173,13 +193,8 @@ export interface ParsedModelResult {
 }
 
 function buildFallbackModel(provider: string, modelId: string, availableModels: Model<Api>[]): Model<Api> | undefined {
-	const providerModels = availableModels.filter((m) => m.provider === provider);
-	if (providerModels.length === 0) return undefined;
-
-	const defaultId = defaultModelPerProvider[provider as KnownProvider];
-	const baseModel = defaultId
-		? (providerModels.find((m) => m.id === defaultId) ?? providerModels[0])
-		: providerModels[0];
+	const baseModel = findDefaultModel(availableModels, provider);
+	if (!baseModel) return undefined;
 
 	return {
 		...baseModel,
@@ -645,7 +660,7 @@ export async function findInitialModel(options: {
 	} = options;
 
 	let model: Model<Api> | undefined;
-	let thinkingLevel: ThinkingLevel = DEFAULT_THINKING_LEVEL;
+	const thinkingLevel: ThinkingLevel = DEFAULT_THINKING_LEVEL;
 
 	// 1. CLI args take priority
 	if (cliProvider && cliModel) {
@@ -676,36 +691,32 @@ export async function findInitialModel(options: {
 	const removedDefault = defaultProvider ? getRemovedProviderMessage(defaultProvider) : undefined;
 	if (removedDefault)
 		throw new ModelsError("provider", `${removedDefault} Update defaultProvider and defaultModel in settings.json.`);
-	if (defaultProvider && defaultModelId) {
-		const found = modelRuntime.getModel(defaultProvider, defaultModelId);
-		if (found && modelRuntime.hasConfiguredAuth(found.provider)) {
-			model = found;
-			if (defaultThinkingLevel) {
-				thinkingLevel = defaultThinkingLevel;
-			}
-			return { model, thinkingLevel, fallbackMessage: undefined };
-		}
-	}
-
-	// 4. Try first available model with valid API key
-	const availableModels = [...modelRuntime.getAvailableSnapshot()];
-
-	if (availableModels.length > 0) {
-		// Try to find a default model from known providers
-		for (const provider of Object.keys(defaultModelPerProvider) as KnownProvider[]) {
-			const defaultId = defaultModelPerProvider[provider];
-			const match = availableModels.find((m) => m.provider === provider && m.id === defaultId);
-			if (match) {
-				return { model: match, thinkingLevel: DEFAULT_THINKING_LEVEL, fallbackMessage: undefined };
-			}
+	const availableModels = modelRuntime.getAvailableSnapshot();
+	if (defaultProvider) {
+		const found = availableModels.find((entry) => entry.provider === defaultProvider && entry.id === defaultModelId);
+		if (found) {
+			return {
+				model: found,
+				thinkingLevel: defaultThinkingLevel ?? DEFAULT_THINKING_LEVEL,
+				fallbackMessage: undefined,
+			};
 		}
 
-		// If no default found, use first available
-		return { model: availableModels[0], thinkingLevel: DEFAULT_THINKING_LEVEL, fallbackMessage: undefined };
+		// A retired or account-restricted saved model should not switch providers when
+		// the selected provider still has usable models. Never synthesize a model ID here.
+		model = findDefaultModel(availableModels, defaultProvider);
 	}
 
-	// 5. No model found
-	return { model: undefined, thinkingLevel: DEFAULT_THINKING_LEVEL, fallbackMessage: undefined };
+	// 4. Fall back across providers only when the saved provider has no available models.
+	model ??= findDefaultModel(availableModels);
+	if (model && defaultProvider && defaultModelId) {
+		return {
+			model,
+			thinkingLevel: defaultThinkingLevel ?? DEFAULT_THINKING_LEVEL,
+			fallbackMessage: `Saved default model ${defaultProvider}/${defaultModelId} is unavailable. Using ${model.provider}/${model.id}.`,
+		};
+	}
+	return { model, thinkingLevel, fallbackMessage: undefined };
 }
 
 /**
@@ -720,12 +731,10 @@ export async function restoreModelFromSession(
 ): Promise<{ model: Model<Api> | undefined; fallbackMessage: string | undefined }> {
 	const removed = getRemovedProviderMessage(savedProvider);
 	if (removed) throw new ModelsError("provider", `${removed} Resume with an explicit --model provider/model.`);
-	const restoredModel = modelRuntime.getModel(savedProvider, savedModelId);
+	const availableModels = modelRuntime.getAvailableSnapshot();
+	const restoredModel = availableModels.find((model) => model.provider === savedProvider && model.id === savedModelId);
 
-	// Check if restored model exists and still has auth configured
-	const hasConfiguredAuth = restoredModel ? modelRuntime.hasConfiguredAuth(restoredModel.provider) : false;
-
-	if (restoredModel && hasConfiguredAuth) {
+	if (restoredModel) {
 		if (shouldPrintMessages) {
 			console.log(chalk.dim(`Restored model: ${savedProvider}/${savedModelId}`));
 		}
@@ -733,7 +742,7 @@ export async function restoreModelFromSession(
 	}
 
 	// Model not found or no API key - fall back
-	const reason = !restoredModel ? "model no longer exists" : "no auth configured";
+	const reason = !modelRuntime.hasConfiguredAuth(savedProvider) ? "no auth configured" : "model is unavailable";
 
 	if (shouldPrintMessages) {
 		console.error(chalk.yellow(`Warning: Could not restore model ${savedProvider}/${savedModelId} (${reason}).`));
@@ -751,25 +760,9 @@ export async function restoreModelFromSession(
 	}
 
 	// Try to find any available model
-	const availableModels = [...modelRuntime.getAvailableSnapshot()];
+	const fallbackModel = findDefaultModel(availableModels, savedProvider) ?? findDefaultModel(availableModels);
 
-	if (availableModels.length > 0) {
-		// Try to find a default model from known providers
-		let fallbackModel: Model<Api> | undefined;
-		for (const provider of Object.keys(defaultModelPerProvider) as KnownProvider[]) {
-			const defaultId = defaultModelPerProvider[provider];
-			const match = availableModels.find((m) => m.provider === provider && m.id === defaultId);
-			if (match) {
-				fallbackModel = match;
-				break;
-			}
-		}
-
-		// If no default found, use first available
-		if (!fallbackModel) {
-			fallbackModel = availableModels[0];
-		}
-
+	if (fallbackModel) {
 		if (shouldPrintMessages) {
 			console.log(chalk.dim(`Falling back to: ${fallbackModel.provider}/${fallbackModel.id}`));
 		}
