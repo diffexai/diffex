@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-10-29
+
 ### Breaking Changes
 
 - Previously released: renamed `PI_CACHE_RETENTION` and `PI_OAUTH_CALLBACK_HOST` to `DIFFEX_CACHE_RETENTION` and `DIFFEX_OAUTH_CALLBACK_HOST`. Update provider configuration and OAuth callback-host overrides ([#2](https://github.com/diffexai/diffex/pull/2)).

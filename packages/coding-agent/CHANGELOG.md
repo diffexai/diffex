@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-10-29
+
 ### New Features
 
 - Added clearer, safer self-updates with terminal activity feedback, actionable recovery guidance, and npm target-archive prefetch before installation replacement.

@@ -1,6 +1,6 @@
 {
 	"name": "@diffexai/diffex-agent-core",
-	"version": "0.4.0",
+	"version": "0.4.1",
 	"description": "General-purpose agent with transport abstraction, state management, and attachment support",
 	"type": "module",
 	"main": "./dist/index.js",
@@ -41,8 +41,8 @@
 		"prepack": "node ../../scripts/prepare-distribution.mjs packages/agent"
 	},
 	"dependencies": {
-		"@diffexai/diffex-ai": "^0.4.0",
-		"@diffexai/diffex-telemetry": "^0.4.0",
+		"@diffexai/diffex-ai": "^0.4.1",
+		"@diffexai/diffex-telemetry": "^0.4.1",
 		"diff": "9.0.0",
 		"ignore": "7.0.14",
 		"typebox": "1.4.3",
