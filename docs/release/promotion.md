@@ -1,8 +1,8 @@
 # Release promotion and recovery
 
 This implementation builds on CLI PR #209 and cloud PR #150.
-The approved policy enables only the CLI npm package and defers standalone binaries, Python, secondary installers, and runtime images.
-No binary or GitHub Release is created, and the private source repository stays private.
+The default approved policy enables only the CLI npm package and defers direct standalone installation, Python, secondary installers, and runtime images.
+The [Homebrew-only archive path](homebrew.md) is implemented behind a separate pending approval gate. With that gate deferred, no archive or GitHub Release is published and the private source repository stays private. Authorizing public release hosting must not silently expose private source history or source/debug Actions artifacts.
 Enabling another channel fails closed until required asset enumeration, immutable publication, and anonymous byte verification exist for that channel.
 The R2 schema remains the [npm release contract](contract.md), without a binary manifest or new client fields.
 
@@ -111,7 +111,7 @@ GitHub supports the normal atomic path; the command intentionally refuses automa
 Draft cleanup is unrelated to public recovery: the approved npm-only workflow creates no GitHub draft to delete.
 Private temporary build directories may be discarded before publication if no retained evidence exists.
 After any npm publication, retain evidence and immutable artifacts; never delete a version record to make a conflicting retry pass.
-When standalone distribution is eventually enabled, draft cleanup must remain separate from public asset recovery and anonymous asset verification must precede announcement.
+For the optional Homebrew channel, preserve all platform archives and the complete signed bundle; recovery counts both npm and Homebrew publication attempts and never rebuilds after either started. Existing GitHub assets must match retained bytes before any missing upload. Anonymous asset verification precedes announcement, GitHub latest advancement and the tap update PR. See [Homebrew recovery](homebrew.md#release-ordering-and-exact-byte-recovery). Direct standalone installation remains deferred.
 
 ## Validation and limits
 

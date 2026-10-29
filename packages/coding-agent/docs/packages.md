@@ -66,6 +66,7 @@ npm:pkg
 - User installs go under `~/.diffex/agent/npm/`.
 - Project installs go under `.diffex/npm/`.
 - Set `npmCommand` in `settings.json` to pin npm package lookup and install operations to a specific wrapper command such as `mise` or `asdf`.
+- Homebrew payloads default to private npm invoked with bundled Node; an explicit `npmCommand` takes precedence. Extension subprocesses can locate bundled Node without a system Node/npm installation. Packages still install in the user/project directories above, never the immutable Homebrew application. Git and native build tools may remain external prerequisites.
 
 Example:
 
