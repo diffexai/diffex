@@ -1,6 +1,6 @@
 {
 	"name": "@diffexai/diffex",
-	"version": "0.4.0",
+	"version": "0.4.1",
 	"description": "Coding agent CLI with read, bash, edit, write, update_plan tools and session management",
 	"type": "module",
 	"imports": {
@@ -50,12 +50,12 @@
 		"prepack": "node ../../scripts/prepare-distribution.mjs packages/coding-agent"
 	},
 	"dependencies": {
-		"@diffexai/diffex-agent-core": "^0.4.0",
-		"@diffexai/diffex-ai": "^0.4.0",
-		"@diffexai/diffex-client": "^0.4.0",
-		"@diffexai/diffex-harness-state": "^0.4.0",
-		"@diffexai/diffex-protocol": "^0.4.0",
-		"@diffexai/diffex-tui": "^0.4.0",
+		"@diffexai/diffex-agent-core": "^0.4.1",
+		"@diffexai/diffex-ai": "^0.4.1",
+		"@diffexai/diffex-client": "^0.4.1",
+		"@diffexai/diffex-harness-state": "^0.4.1",
+		"@diffexai/diffex-protocol": "^0.4.1",
+		"@diffexai/diffex-tui": "^0.4.1",
 		"@napi-rs/keyring": "2.1.2",
 		"@silvia-odwyer/photon-node": "0.3.4",
 		"chalk": "6.0.1",
