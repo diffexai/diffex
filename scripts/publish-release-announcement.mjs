@@ -209,15 +209,17 @@ export async function advanceLatestRelease(version, readLatest, writeLatest) {
 export async function verifyAnnouncementChannels(policy, options, verifyHomebrew = verifyPublicHomebrewRelease) {
 	// Validate the committed policy regardless of which fixed channel action is selected.
 	assertEnabledChannels(policy);
-	const channelChecks = Object.freeze({
-		defer: async () => {},
-		enable: async () => {
+	const channelChecks = new Map([
+		["defer", async () => {}],
+		["enable", async () => {
 			if (!options.homebrewArtifacts)
 				throw new Error("Enabled Homebrew releases require retained archive verification before announcement");
 			await verifyHomebrew(options.homebrewArtifacts, { version: options.version, sourceCommit: options.sourceCommit });
-		},
-	});
-	await channelChecks[policy.channels.homebrew]();
+		}],
+	]);
+	const checkChannel = channelChecks.get(policy.channels.homebrew);
+	if (!checkChannel) throw new Error("Unapproved Homebrew announcement channel");
+	await checkChannel();
 }
 
 async function main() {

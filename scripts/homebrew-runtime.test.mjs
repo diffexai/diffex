@@ -82,6 +82,8 @@ test("retained reads inspect and read the same descriptor even when its pathname
 	const other = join(directory, "other.json");
 	writeFileSync(file, "original retained bytes");
 	writeFileSync(other, "replacement bytes must not be read");
+	const originalMode = fs.statSync(file).mode;
+	const openSpy = mock.method(fs, "openSync");
 	const fstat = fs.fstatSync;
 	const spy = mock.method(fs, "fstatSync", (descriptor) => {
 		renameSync(file, saved);
@@ -92,8 +94,13 @@ test("retained reads inspect and read the same descriptor even when its pathname
 	try {
 		assert.equal(readHomebrewFile(file).toString(), "original retained bytes");
 		assert.equal(spy.mock.callCount(), 1);
+		assert.equal(openSpy.mock.callCount(), 1);
+		assert.equal(openSpy.mock.calls[0].arguments[1], fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
+		assert.equal(openSpy.mock.calls[0].arguments[2], 0o600, "read-only open supplies a private creation default");
+		assert.equal(fs.statSync(saved).mode, originalMode, "read-only mode argument must not change retained permissions");
 	} finally {
 		spy.mock.restore();
+		openSpy.mock.restore();
 		syncBuiltinESMExports();
 	}
 });

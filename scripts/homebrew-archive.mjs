@@ -194,7 +194,7 @@ export async function prepareHomebrewArchive({
 		// Reserve both destinations atomically; never decide whether to write by
 		// checking existence first. A collision must not truncate retained bytes.
 		for (const file of [output, recordFile]) outputs.push({ file,
-			descriptor: openSync(file, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o644) });
+			descriptor: openSync(file, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600) });
 		const source = validateHomebrewSource(releaseDirectory, manifest);
 		const runtime = await verifyHomebrewRuntime({ platform, arch, runtimeDirectory, pins: runtimePins, fetcher });
 		work = mkdtempSync(join(realpathSync(tmpdir()), "diffex-homebrew-"));

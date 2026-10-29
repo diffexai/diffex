@@ -19,7 +19,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, dirname, join, resolve } from "node:path";
+import { delimiter, dirname, join, relative, resolve } from "node:path";
 import { PassThrough } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -271,13 +271,15 @@ describe("Homebrew ownership", () => {
 		mkdirSync(home);
 		mkdirSync(workspace);
 		const snapshot = () =>
-			readdirSync(tempDir, { recursive: true, encoding: "utf-8" })
-				.sort()
-				.map((path) => {
-					const fullPath = join(tempDir, path);
-					const entry = lstatSync(fullPath);
-					if (!entry.isFile()) return { path, mode: entry.mode, mtimeMs: entry.mtimeMs, content: undefined };
-					const fd = openSync(fullPath, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+			readdirSync(tempDir, { recursive: true, withFileTypes: true })
+				.map((entry) => {
+					const fullPath = join(entry.parentPath, entry.name);
+					const path = relative(tempDir, fullPath);
+					if (!entry.isFile()) {
+						const stats = lstatSync(fullPath);
+						return { path, mode: stats.mode, mtimeMs: stats.mtimeMs, content: undefined };
+					}
+					const fd = openSync(fullPath, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK, 0o600);
 					try {
 						const stats = fstatSync(fd);
 						if (!stats.isFile()) throw new Error("Fixture snapshot requires a regular file");
@@ -285,7 +287,8 @@ describe("Homebrew ownership", () => {
 					} finally {
 						closeSync(fd);
 					}
-				});
+				})
+				.sort((a, b) => a.path.localeCompare(b.path));
 		const before = snapshot();
 		const result = spawnSync(
 			originalExecPath,

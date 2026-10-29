@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash, generateKeyPairSync } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import test from "node:test";
@@ -121,6 +121,16 @@ test("trusted directory and file validation rejects outside roots, unsafe names 
 		assert.throws(() => readReleaseArtifacts(npm), /ELOOP|symbolic link/);
 		assert.throws(() => writeRetainedFile(f.directory, "SHA256SUMS", "replacement"), { code: "EEXIST" });
 		assert.throws(() => readRetainedFile(f.directory, "homebrew-manifest.json", 1), /regular retained/);
+	} finally { f.cleanup(); }
+});
+
+test("retained artifact creation grants no group or other access", () => {
+	const f = fixture();
+	try {
+		writeRetainedFile(f.root, "private-artifact", "reviewed bytes");
+		for (const file of [join(f.root, "private-artifact"), join(f.directory, "SHA256SUMS.sig"),
+			join(f.directory, "homebrew-manifest.json"), ...f.manifest.platforms.map((entry) => join(f.directory, entry.filename))])
+			assert.equal(statSync(file).mode & 0o077, 0);
 	} finally { f.cleanup(); }
 });
 

@@ -16,6 +16,7 @@ import json
 import os
 from pathlib import Path, PurePosixPath
 import platform
+import pwd
 import re
 import shutil
 import stat
@@ -33,22 +34,52 @@ TOOLS = ("sh", "bash", "dirname", "readlink", "uname", "cat", "env", "tmux", "py
 
 
 def safe_directory(value):
-    """Restrict CLI inputs to the workspace or native temporary directories."""
-    directory = Path(value).resolve()
-    roots = (Path.cwd().resolve(), Path(tempfile.gettempdir()).resolve(), Path("/tmp").resolve())
-    if not any(root != Path(root.anchor) and
-               (directory == root or str(directory).startswith(str(root) + os.sep)) for root in roots):
-        raise ValueError("Directory must be inside the workspace or a temporary directory")
-    return directory
+    """Confine CLI directories before converting them to filesystem Paths."""
+    value = os.fspath(value)
+    if ".." in value.split(os.sep):
+        raise ValueError("Directory traversal is not permitted")
+    roots = {os.path.abspath(root) for root in
+             (os.getcwd(), pwd.getpwuid(os.getuid()).pw_dir, tempfile.gettempdir(), "/tmp")}
+    if os.uname().sysname == "Darwin":
+        native = os.confstr(65537)  # _CS_DARWIN_USER_TEMP_DIR, independent of TMPDIR.
+        if not native:
+            raise ValueError("Missing OS user temporary directory")
+        metadata = os.stat(os.path.realpath(native))
+        if (not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != os.getuid() or
+                stat.S_IMODE(metadata.st_mode) & 0o077):
+            raise ValueError("OS user temporary directory is not owner-private")
+        roots.add(os.path.abspath(native))
+    roots.discard(os.path.sep)
+    roots.update(os.path.realpath(root) for root in tuple(roots))
+    # Include the separator when allowing a root itself, not its prefix siblings.
+    absolute = os.path.join(os.path.abspath(value), "")
+    if not absolute.startswith(tuple(root + os.sep for root in roots)):
+        raise ValueError("Directory outside local harness roots")
+    scope = max((root for root in roots if absolute.startswith(root + os.sep)), key=len)
+    canonical_scope = os.path.realpath(scope)
+    canonical = os.path.join(os.path.realpath(absolute), "")
+    if not canonical.startswith(canonical_scope + os.sep):
+        raise ValueError("Directory outside local harness root")
+    expected = os.path.join(os.path.abspath(os.path.join(canonical_scope, os.path.relpath(absolute, scope))), "")
+    if canonical != expected:
+        raise ValueError("Directory traverses a symlink")
+    return Path(canonical)
 
 
 def retained_file(directory, name, suffix):
     """Validate a retained basename and reject symlinks before accessing its bytes."""
     if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*" + re.escape(suffix), name):
         raise ValueError("Invalid retained filename")
-    path = (directory / name).resolve(strict=True)
-    if not str(path).startswith(str(directory) + os.sep) or path != directory / name:
+    directory = safe_directory(directory)
+    absolute = os.path.abspath(os.path.join(directory, name))
+    if not absolute.startswith(str(directory) + os.sep):
         raise ValueError("Retained file must be directly inside the artifact directory")
+    canonical = os.path.realpath(absolute)
+    if not canonical.startswith(str(directory) + os.sep):
+        raise ValueError("Retained file must be directly inside the artifact directory")
+    if canonical != absolute:
+        raise ValueError("Retained file must not traverse symlinks")
+    path = Path(canonical)
     if not path.is_file():
         raise ValueError("Retained artifact must be a regular file")
     return path
@@ -194,12 +225,20 @@ def choose_record(artifacts, commit):
 class HomebrewRunner(Runner):
     def __init__(self, args):
         # Existing deterministic provider/tools/TUI/cancel/resume implementation.
-        args.mode = "deterministic"
-        args.update_baselines = False
-        args.output = safe_directory(args.output)
-        if getattr(args, "artifacts", None) is not None:
-            args.artifacts = safe_directory(args.artifacts)
-        super().__init__(args)
+        commit = args.commit
+        if not isinstance(commit, str) or not re.fullmatch(r"[a-f0-9]{40}", commit):
+            raise ValueError("Commit must be a full SHA")
+        output = safe_directory(args.output)
+        artifacts = getattr(args, "artifacts", None)
+        if artifacts is not None:
+            artifacts = safe_directory(artifacts)
+        # Do not retain the raw argparse namespace: the base harness has broader
+        # modes and executable/model controls which this lifecycle never accepts.
+        configuration = argparse.Namespace(output=output, artifacts=artifacts, commit=commit,
+                                           mode="deterministic", executable=None,
+                                           model="openai/gpt-4.1-mini", update_baselines=False,
+                                           lifecycle_only=True if getattr(args, "lifecycle_only", False) else False)
+        super().__init__(configuration)
         self.payload = None
         self.tools = None
         self.fixture_root = None
@@ -376,6 +415,8 @@ def main():
     parser.add_argument("--lifecycle-only", action="store_true",
                         help="Native real-brew install/upgrade/uninstall; no Daytona SDK, tmux or TUI scenarios required")
     args = parser.parse_args()
+    if not re.fullmatch(r"[a-f0-9]{40}", args.commit):
+        parser.error("--commit must be a full SHA")
     runner = HomebrewRunner(args)
     try:
         passed = runner.run()

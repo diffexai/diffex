@@ -44,7 +44,7 @@ export function readRetainedFile(directory, name, limit, encoding) {
 
 /** Creation and no-replace semantics are one filesystem operation, not an existence check. */
 export function writeRetainedFile(directory, name, bytes) {
-	const fd = openSync(releaseFilePath(directory, name), constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o644);
+	const fd = openSync(releaseFilePath(directory, name), constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
 	try {
 		if (!fstatSync(fd).isFile()) throw new Error("Invalid retained artifact file type");
 		writeFileSync(fd, bytes);

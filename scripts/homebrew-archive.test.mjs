@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { after, before, test } from "node:test";
 import { distributionDocs } from "./cli-distribution.mjs";
@@ -124,6 +124,8 @@ test("prepares/inspects a native self-contained archive with an exact tap record
 	assert.deepEqual(Object.keys(record).sort(), ["platform", "filename", "size", "sha256", "inventorySha256", "osBaseline", "version", "sourceCommit", "nodeVersion", "npmVersion"].sort());
 	assert.equal(record.platform, target);
 	assert.equal(record.sha256, digest(readFileSync(archive)));
+	assert.equal(statSync(archive).mode & 0o777, 0o600, "new retained archive must be private");
+	assert.equal(statSync(archive.replace(/\.tar\.gz$/, ".json")).mode & 0o777, 0o600, "new retained record must be private");
 	assert.equal(inspectHomebrewArchive(archive, { record }).inventorySha256, record.inventorySha256);
 	assert.equal(homebrewArchiveUrl(version, target), `https://github.com/diffexai/diffex/releases/download/v${version}/${record.filename}`);
 	const output = join(directory, "extracted with spaces");

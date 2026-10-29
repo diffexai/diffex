@@ -216,7 +216,7 @@ export async function acceptHomebrewArchive(archive, recordFile, output) {
 		rmSync(temporary, { recursive: true, force: true });
 		report.cleanup = !existsSync(temporary);
 		// Publish a fixed-schema summary only. No logs, environment, auth/config or raw failures.
-		const fd = openSync(releaseFilePath(output, "homebrew-acceptance.json"), constants.O_WRONLY | constants.O_CREAT | constants.O_NOFOLLOW | constants.O_NONBLOCK, 0o644);
+		const fd = openSync(releaseFilePath(output, "homebrew-acceptance.json"), constants.O_WRONLY | constants.O_CREAT | constants.O_NOFOLLOW | constants.O_NONBLOCK, 0o600);
 		try {
 			assert(fstatSync(fd).isFile(), "Evidence summary must be a regular file");
 			ftruncateSync(fd, 0);

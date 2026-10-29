@@ -64,7 +64,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
 	const [manifest, output, ...extra] = process.argv.slice(2);
 	assert(manifest && output && !extra.length, "Usage: node scripts/homebrew-formula.mjs MANIFEST OUTPUT");
 	const formula = generateHomebrewFormula(JSON.parse(readHomebrewFile(manifest, 64 * 1024).toString("utf8")));
-	const descriptor = openSync(resolveHomebrewFile(output), constants.O_WRONLY | constants.O_CREAT | constants.O_NOFOLLOW | constants.O_NONBLOCK, 0o644);
+	const descriptor = openSync(resolveHomebrewFile(output), constants.O_WRONLY | constants.O_CREAT | constants.O_NOFOLLOW | constants.O_NONBLOCK, 0o600);
 	try {
 		assert(fstatSync(descriptor).isFile(), "Formula output must be a regular file");
 		// Keep intentional regeneration of existing formula files, but only after

@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { join } from "node:path";
 import test from "node:test";
 import { createPublicationFixture } from "./fixtures/release-publication/harness.mjs";
 import { advanceLatestRelease, compareReleaseVersions, verifyAnnouncementChannels } from "./publish-release-announcement.mjs";
@@ -255,6 +257,53 @@ test("version record survives an actual pointer-write failure and recovery prese
 	}
 });
 
+test("retained manifest packages return only workspace identities and measured artifact fields", () => {
+	const fixture = createPublicationFixture();
+	try {
+		fixture.run("0.0.3", { credentials: false, mutateManifest: (manifest) => {
+			manifest.packages.reverse();
+			for (const pkg of manifest.packages) {
+				pkg.published = true;
+				pkg.registered = true;
+				pkg.unreviewed = "must not propagate";
+			}
+		} });
+		const script = `import { readReleaseArtifacts } from ${JSON.stringify(new URL("./release-artifacts.mjs", import.meta.url).href)}; console.log(JSON.stringify(readReleaseArtifacts("artifacts")));`;
+		const result = spawnSync(process.execPath, ["--input-type=module", "--eval", script], {
+			cwd: fixture.directory,
+			env: { PATH: `${join(fixture.directory, "bin")}:${process.env.PATH}`, DIFFEX_PUBLICATION_FIXTURE: join(fixture.directory, "registry.json") },
+			encoding: "utf8", timeout: 10_000,
+		});
+		assert.ifError(result.error);
+		assert.equal(result.status, 0, result.stderr);
+		const manifest = JSON.parse(result.stdout);
+		assert.equal(manifest.packages[0].name, "@diffexai/diffex-agent-core", "Return authoritative workspace order, not retained JSON order");
+		assert.equal(manifest.packages.length, fixture.packageCount);
+		for (const pkg of manifest.packages) {
+			assert.deepEqual(Object.keys(pkg).sort(), ["filename", "integrity", "name", "sha256", "size", "version"]);
+			assert.equal(pkg.version, "0.0.3");
+			assert.equal(pkg.filename, `${pkg.name.replace("@", "").replace("/", "-")}-0.0.3.tgz`);
+		}
+		assert.deepEqual(fixture.state().calls, []);
+		assert.equal(fixture.state().registryCalls, undefined);
+	} finally { fixture.cleanup(); }
+});
+
+test("untrusted package publication flags cannot skip registry checks or missing-version uploads", () => {
+	for (const bootstrap of [false, true]) {
+		const fixture = createPublicationFixture();
+		try {
+			const result = fixture.run("0.0.3", { command: "publish", bootstrap, missing: true,
+				mutateManifest: (manifest) => {
+					for (const pkg of manifest.packages) { pkg.published = true; pkg.registered = true; }
+				} });
+			assert.equal(result.status, 0, result.stderr);
+			assert.equal(fixture.state().published.length, fixture.packageCount);
+			assert.deepEqual(fixture.state().objects, {});
+		} finally { fixture.cleanup(); }
+	}
+});
+
 test("partial npm publication resumes original bytes and never republishes completed versions", () => {
 	const fixture = createPublicationFixture();
 	try {
@@ -297,6 +346,15 @@ for (const mutateManifest of [
 	},
 	(manifest) => {
 		manifest.packages[0].sha256 = "b".repeat(64);
+	},
+	(manifest) => {
+		manifest.packages[0].name = "@elsewhere/unapproved";
+	},
+	(manifest) => {
+		manifest.packages[0].version = "0.0.3/../../auth.json";
+	},
+	(manifest) => {
+		manifest.packages[0].filename = "../auth.json";
 	},
 	(manifest) => {
 		manifest.snapshot.sha256 = "b".repeat(64);

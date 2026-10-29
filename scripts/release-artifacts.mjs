@@ -57,28 +57,28 @@ export function readReleaseArtifacts(directory, { version, sourceCommit } = {}) 
 		new Set(manifest.packages.map((pkg) => pkg.name)).size !== packages.length
 	)
 		throw new Error("Artifact inventory must contain every public package exactly once");
-	for (const pkg of packages) {
+	const approvedArtifacts = packages.map((pkg) => {
+		const filename = `${pkg.name.replace("@", "").replace("/", "-")}-${pkg.version}.tgz`;
 		const artifact = manifest.packages.find((artifact) => artifact.name === pkg.name);
 		if (
 			!artifact ||
 			artifact.version !== pkg.version ||
-			artifact.filename !== `${pkg.name.replace("@", "").replace("/", "-")}-${pkg.version}.tgz` ||
+			artifact.filename !== filename ||
 			!/^[a-f0-9]{64}$/.test(artifact.sha256) ||
 			!/^sha512-[A-Za-z0-9+/]{86}==$/.test(artifact.integrity) ||
 			!Number.isSafeInteger(artifact.size) ||
 			artifact.size <= 0
 		)
 			throw new Error(`Invalid approved artifact: ${pkg.name}`);
-		{
-			const bytes = readRetainedFile(directory, artifact.filename, 512 * 1024 * 1024);
-			if (
-				bytes.length !== artifact.size ||
-				sha256(bytes) !== artifact.sha256 ||
-				integrity(bytes) !== artifact.integrity
-			)
-				throw new Error(`Retained tarball identity mismatch: ${pkg.name}`);
-		}
-	}
+		const bytes = readRetainedFile(directory, filename, 512 * 1024 * 1024);
+		const checksum = sha256(bytes);
+		const sri = integrity(bytes);
+		if (bytes.length !== artifact.size || checksum !== artifact.sha256 || sri !== artifact.integrity)
+			throw new Error(`Retained tarball identity mismatch: ${pkg.name}`);
+		// Network identities come from the checked workspace, never raw retained
+		// JSON. Only measured, verified byte identities accompany them downstream.
+		return { name: pkg.name, version: pkg.version, filename, size: bytes.length, sha256: checksum, integrity: sri };
+	});
 	if (
 		manifest.snapshot?.filename !== "source.tar.gz" ||
 		!/^[a-f0-9]{64}$/.test(manifest.snapshot.sha256) ||
@@ -92,7 +92,15 @@ export function readReleaseArtifacts(directory, { version, sourceCommit } = {}) 
 	const { schemaVersion, packages: artifacts, ...recordedInputs } = manifest;
 	if (!isDeepStrictEqual(inputs, recordedInputs))
 		throw new Error("Approved manifest differs from the frozen build inputs");
-	return manifest;
+	return {
+		schemaVersion: 1,
+		version: packages[0].version,
+		source: identity,
+		modelData: manifest.modelData,
+		snapshot: manifest.snapshot,
+		toolchain: manifest.toolchain,
+		packages: approvedArtifacts,
+	};
 }
 
 function modelSnapshot() {

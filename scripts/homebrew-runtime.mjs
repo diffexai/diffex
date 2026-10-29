@@ -49,7 +49,8 @@ export function readHomebrewFile(file, limit = MAX_HOMEBREW_BYTES, { optional = 
 
 function regularHomebrewBytes(file, limit) {
 	assert(Number.isSafeInteger(limit) && limit > 0 && limit <= MAX_HOMEBREW_BYTES, "Invalid Homebrew file byte limit");
-	const descriptor = openSync(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+	// Read-only opens ignore mode; keep a private default if flags ever gain creation.
+	const descriptor = openSync(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK, 0o600);
 	try {
 		const stat = fstatSync(descriptor);
 		assert(stat.isFile() && stat.size > 0 && stat.size <= limit, `Invalid regular retained file: ${basename(file)}`);

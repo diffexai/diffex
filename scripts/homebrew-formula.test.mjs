@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -81,9 +81,11 @@ test("formula CLI validates trusted paths and refuses linked or nonregular input
 	try {
 		writeFileSync(input, manifestBytes);
 		assert.equal(run("approved manifest.json", "diffex formula.rb").status, 0);
+		assert.equal(statSync(output).mode & 0o777, 0o600, "new formula output must be private");
 		assert.equal(readFileSync(output, "utf8"), generateHomebrewFormula(manifest));
 		writeFileSync(output, "stale generated contents".repeat(1000));
 		assert.equal(run(input, output).status, 0, "intentional formula regeneration remains supported");
+		assert.equal(statSync(output).mode & 0o777, 0o600, "regeneration preserves existing permissions");
 		assert.equal(readFileSync(output, "utf8"), generateHomebrewFormula(manifest));
 		const link = join(directory, "linked.json");
 		symlinkSync(input, link);

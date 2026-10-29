@@ -1,6 +1,7 @@
 """Credential-free Homebrew fixture/report contracts, not real brew qualification."""
 import argparse
 import hashlib
+import io
 import json
 import os
 import stat
@@ -9,7 +10,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from homebrew import HomebrewRunner, MARKER, candidate_formula, choose_record, fingerprint, link_fixture_modules, safe_directory, verify_payload_inventory
+from homebrew import HomebrewRunner, MARKER, candidate_formula, choose_record, fingerprint, link_fixture_modules, main, safe_directory, verify_payload_inventory
 from daytona_runner import REMOTE_BUNDLE, Runner as DaytonaRunner, State
 from test_daytona_runner import FakeClient
 import time
@@ -93,6 +94,86 @@ class HomebrewTests(unittest.TestCase):
             link.symlink_to("/etc", target_is_directory=True)
             with self.assertRaises(ValueError):
                 safe_directory(link / "evidence")
+
+    def test_runner_copies_only_validated_lifecycle_configuration(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            args = argparse.Namespace(output=root / "evidence", artifacts=root, commit="a" * 40,
+                                      mode="live", executable=Path("/untrusted/executable"),
+                                      model="untrusted/model", update_baselines=True, lifecycle_only=True,
+                                      unexpected="must not propagate")
+            runner = HomebrewRunner(args)
+            self.assertIsNot(runner.args, args)
+            self.assertEqual(vars(runner.args), {"output": (root / "evidence").resolve(),
+                "artifacts": root.resolve(), "commit": "a" * 40, "mode": "deterministic",
+                "executable": None, "model": "openai/gpt-4.1-mini", "update_baselines": False,
+                "lifecycle_only": True})
+            self.assertEqual(args.mode, "live")
+            args.output = Path("/etc")
+            args.commit = "unvalidated"
+            self.assertEqual(runner.args.commit, "a" * 40)
+            self.assertEqual(runner.args.output, (root / "evidence").resolve())
+
+    def test_cli_and_runner_require_full_commit_before_creating_evidence(self):
+        for commit in ("short", "A" * 40, "a" * 39, "a" * 40 + "\n", "a" * 40 + ";other"):
+            with self.subTest(commit=commit), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                output = root / "evidence"
+                with self.assertRaisesRegex(ValueError, "full SHA"):
+                    HomebrewRunner(argparse.Namespace(output=output, artifacts=root, commit=commit))
+                with patch("homebrew.sys.argv", ["homebrew.py", "--artifacts", str(root), "--output", str(output),
+                                                 "--commit", commit]), patch("homebrew.sys.stderr", new=io.StringIO()), \
+                     patch("homebrew.HomebrewRunner") as runner:
+                    with self.assertRaises(SystemExit) as failure:
+                        main()
+                    self.assertEqual(failure.exception.code, 2)
+                    runner.assert_not_called()
+                self.assertFalse(output.exists())
+
+    def test_valid_cli_passes_only_checked_fields_to_the_lifecycle_runner(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with patch("homebrew.sys.argv", ["homebrew.py", "--artifacts", str(root),
+                                             "--output", str(root / "evidence"), "--commit", "a" * 40,
+                                             "--lifecycle-only"]), \
+                 patch.object(HomebrewRunner, "run", autospec=True, return_value=True) as run:
+                with self.assertRaises(SystemExit) as result:
+                    main()
+                self.assertEqual(result.exception.code, 0)
+                configuration = run.call_args.args[0].args
+                self.assertEqual(configuration.artifacts, root.resolve())
+                self.assertEqual(configuration.output, (root / "evidence").resolve())
+                self.assertEqual(configuration.commit, "a" * 40)
+                self.assertTrue(configuration.lifecycle_only)
+                self.assertIsNone(configuration.executable)
+                self.assertEqual(configuration.mode, "deterministic")
+
+    def test_cli_directory_rejects_traversal_and_internal_symlinks_before_access(self):
+        with patch("homebrew.Path", side_effect=AssertionError("must validate before Path conversion")):
+            with self.assertRaisesRegex(ValueError, "outside"):
+                safe_directory("/tmp-diffex-not-a-root/evidence")
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            traversal = root / "unused/../evidence"
+            with patch("homebrew.os.path.realpath", side_effect=AssertionError("must not resolve traversal")):
+                with self.assertRaisesRegex(ValueError, "traversal"):
+                    safe_directory(traversal)
+            target = root / "target"
+            target.mkdir()
+            link = root / "redirect"
+            link.symlink_to(target, target_is_directory=True)
+            with self.assertRaisesRegex(ValueError, "symlink"):
+                safe_directory(link / "evidence")
+            self.assertEqual(safe_directory(Path.cwd()), Path.cwd().resolve())
+            self.assertEqual(safe_directory(tempfile.gettempdir()), Path(tempfile.gettempdir()).resolve())
+
+    def test_native_user_temporary_directory_survives_an_isolated_tmpdir(self):
+        if os.uname().sysname != "Darwin":
+            self.skipTest("Darwin native user temporary-directory contract")
+        with tempfile.TemporaryDirectory() as temporary, tempfile.TemporaryDirectory(dir="/tmp") as isolated:
+            root = Path(temporary)
+            with patch("homebrew.tempfile.gettempdir", return_value=isolated), patch("homebrew.os.getcwd", return_value=isolated):
+                self.assertEqual(safe_directory(root / "evidence"), root.resolve() / "evidence")
 
     def test_formula_rejects_archive_symlinks_and_unexpected_filenames(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -224,8 +305,9 @@ class HomebrewTests(unittest.TestCase):
             runner.process = product
             with patch("homebrew.choose_record", return_value=(root / "candidate.tar.gz", root / "candidate.json", record)), \
                  patch("homebrew.shutil.which", side_effect=lambda name: "/fixture/brew" if name == "brew" else None), \
-                 patch("homebrew.os.getuid", return_value=1000), patch("homebrew.subprocess.run"), \
-                 patch.object(runner, "deterministic") as tui:
+                 patch("homebrew.os.getuid", return_value=os.getuid() or 1000), \
+                 patch("homebrew.pwd.getpwuid", return_value=argparse.Namespace(pw_dir=str(root))), \
+                 patch("homebrew.subprocess.run"), patch.object(runner, "deterministic") as tui:
                 self.assertTrue(runner.run())
                 tui.assert_not_called()
             self.assertEqual([item["id"] for item in runner.results], ["homebrew-formula-install", "homebrew-formula-upgrade-retention", "homebrew-formula-uninstall-retention"])
