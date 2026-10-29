@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      homebrew_candidate:
+        description: Run real Homebrew lifecycle against retained prepublication candidate bytes
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -260,8 +265,146 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  prepare-homebrew:
+    needs: prepare
+    if: ${{ vars.HOMEBREW_QUALIFIED == 'true' || (github.event_name == 'workflow_dispatch' && inputs.homebrew_candidate) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Checkout exact event commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Setup Node for archive preparation and harness checks
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22.19.0'
+      - name: Download exact retained npm candidate
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: daytona-release-${{ github.sha }}-${{ github.run_attempt }}
+          path: .artifacts/release
+      - name: Install runtime signature verification prerequisite
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gnupg
+      - name: Prepare native archive from retained candidate without rebuilding
+        run: |
+          node scripts/prepare-homebrew-archive.mjs .artifacts/release .artifacts/daytona-homebrew-candidate
+          node --test scripts/homebrew-acceptance.test.mjs
+      - name: Bundle Homebrew behavior harness only
+        run: |
+          mkdir -p .artifacts/daytona-homebrew-bundle
+          tar -czf .artifacts/daytona-homebrew-bundle/bundle.tar.gz \
+            scripts/homebrew-acceptance.mjs scripts/homebrew-extract.py \
+            scripts/fixtures/homebrew-runtime-operations.mjs \
+            scripts/npm-lifecycle-registry.mjs \
+            scripts/daytona-behaviors/homebrew.py scripts/daytona-behaviors/installed.py \
+            scripts/daytona-behaviors/fixture.mjs scripts/daytona-behaviors/baselines
+          sha256sum .artifacts/daytona-homebrew-bundle/bundle.tar.gz > .artifacts/daytona-homebrew-bundle/SHA256SUMS
+      - name: Retain only native candidate archive and identity record
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: daytona-homebrew-candidate-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            .artifacts/daytona-homebrew-candidate/*.tar.gz
+            .artifacts/daytona-homebrew-candidate/*.json
+          if-no-files-found: error
+          retention-days: 30
+      - name: Retain exact Homebrew behavior bundle
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: daytona-homebrew-bundle-${{ github.sha }}-${{ github.run_attempt }}
+          path: .artifacts/daytona-homebrew-bundle/
+          if-no-files-found: error
+          retention-days: 30
+
+  homebrew:
+    needs: prepare-homebrew
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    environment: daytona-behaviors
+    env:
+      DAYTONA_BEHAVIOR_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}-homebrew
+      # Separate preprovisioned non-root Linuxbrew snapshot; never install brew at run time.
+      DAYTONA_SNAPSHOT: ${{ vars.DAYTONA_HOMEBREW_SNAPSHOT }}
+    steps:
+      - name: Checkout exact event commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Install pinned Daytona SDK in an isolated environment
+        run: |
+          python3 -m venv "$RUNNER_TEMP/daytona-venv"
+          "$RUNNER_TEMP/daytona-venv/bin/python" -m pip install -r scripts/daytona-behaviors/requirements.txt
+      - name: Download retained native archive and record
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: daytona-homebrew-candidate-${{ github.sha }}-${{ github.run_attempt }}
+          path: .artifacts/daytona-homebrew-candidate
+      - name: Download exact Homebrew behavior bundle
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: daytona-homebrew-bundle-${{ github.sha }}-${{ github.run_attempt }}
+          path: .artifacts/daytona-homebrew-bundle
+      - name: Verify retained harness and require provisioned Homebrew snapshot
+        run: |
+          sha256sum -c .artifacts/daytona-homebrew-bundle/SHA256SUMS
+          test -n "$DAYTONA_SNAPSHOT"
+      - name: Run real brew lifecycle and installed behaviors in Daytona
+        id: run
+        timeout-minutes: 25
+        env:
+          DAYTONA_API_KEY: ${{ secrets.DAYTONA_API_KEY }}
+        run: |
+          "$RUNNER_TEMP/daytona-venv/bin/python" scripts/daytona-behaviors/daytona_runner.py run \
+            --artifacts .artifacts/daytona-homebrew-candidate --bundle .artifacts/daytona-homebrew-bundle/bundle.tar.gz \
+            --snapshot "$DAYTONA_SNAPSHOT" --output .artifacts/daytona-homebrew \
+            --mode homebrew --commit "$DIFFEX_SOURCE_COMMIT" --run-id "$DAYTONA_BEHAVIOR_RUN_ID" \
+            --timeout-seconds 1200
+      - name: Recover Homebrew evidence and independently confirm sandbox cleanup
+        id: recover
+        if: ${{ always() && steps.run.outcome != 'skipped' }}
+        timeout-minutes: 5
+        env:
+          DAYTONA_API_KEY: ${{ secrets.DAYTONA_API_KEY }}
+        run: |
+          "$RUNNER_TEMP/daytona-venv/bin/python" scripts/daytona-behaviors/daytona_runner.py recover \
+            --output .artifacts/daytona-homebrew
+      - name: Record Homebrew execution and cleanup outcomes
+        if: always()
+        env:
+          EXECUTION: ${{ steps.run.outcome }}
+          RECOVERY: ${{ steps.recover.outcome }}
+        run: |
+          mkdir -p .artifacts/daytona-homebrew
+          jq -n --arg commit "$DIFFEX_SOURCE_COMMIT" --arg runId "$DAYTONA_BEHAVIOR_RUN_ID" \
+            --arg execution "$EXECUTION" --arg recovery "$RECOVERY" \
+            '{commit: $commit, runId: $runId, mode: "homebrew", execution: $execution, recovery: $recovery}' \
+            > .artifacts/daytona-homebrew/workflow-job.json
+      - name: Guard all Homebrew evidence before publication
+        id: sanitize
+        if: always()
+        env:
+          DAYTONA_API_KEY: ${{ secrets.DAYTONA_API_KEY }}
+        run: |
+          python3 scripts/daytona-behaviors/sanitize_evidence.py \
+            --root .artifacts/daytona-homebrew --output .artifacts/daytona-homebrew-sanitized \
+            --mode deterministic
+      - name: Retain sanitized Homebrew evidence even on failure
+        if: ${{ always() && steps.sanitize.outputs.safe_to_upload == 'true' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: daytona-evidence-homebrew-${{ github.sha }}-${{ github.run_attempt }}
+          path: .artifacts/daytona-homebrew-sanitized/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30
+
   daytona-behaviors:
-    needs: [prepare, deterministic, live]
+    needs: [prepare, deterministic, live, homebrew]
     if: ${{ always() && (github.event_name == 'workflow_dispatch' || vars.DAYTONA_BEHAVIORS_QUALIFIED == 'true') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -270,6 +413,8 @@ jobs:
       PREPARE_RESULT: ${{ needs.prepare.result }}
       DETERMINISTIC_RESULT: ${{ needs.deterministic.result }}
       LIVE_RESULT: ${{ needs.live.result }}
+      HOMEBREW_RESULT: ${{ needs.homebrew.result }}
+      HOMEBREW_REQUIRED: ${{ vars.HOMEBREW_QUALIFIED == 'true' || (github.event_name == 'workflow_dispatch' && inputs.homebrew_candidate) }}
     steps:
       - name: Aggregate both modes, missing evidence and cleanup failures
         run: |
@@ -278,6 +423,33 @@ jobs:
           for result in "$PREPARE_RESULT" "$DETERMINISTIC_RESULT" "$LIVE_RESULT"; do
             if [[ "$result" != success ]]; then failed=1; fi
           done
+          if [[ "${HOMEBREW_REQUIRED:-false}" == true ]]; then
+            if [[ "${HOMEBREW_RESULT:-missing}" != success ]]; then failed=1; fi
+            evidence=".artifacts/daytona-summary/homebrew"
+            if ! gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+              --name "daytona-evidence-homebrew-$DIFFEX_SOURCE_COMMIT-$GITHUB_RUN_ATTEMPT" --dir "$evidence"; then
+              echo '::error::Missing Homebrew evidence artifact'
+              failed=1
+            else
+              if ! jq --exit-status '.safe_to_upload == true and .outcome == "clean" and .credential_matches == 0' \
+                "$evidence/publication-safety.json" > /dev/null; then failed=1; fi
+              if ! jq --exit-status --arg commit "$DIFFEX_SOURCE_COMMIT" \
+                --arg runId "$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-homebrew" \
+                '.commit == $commit and .runId == $runId and .mode == "homebrew" and .execution == "success" and .recovery == "success"' \
+                "$evidence/workflow-job.json" > /dev/null; then failed=1; fi
+              if ! jq --exit-status --arg commit "$DIFFEX_SOURCE_COMMIT" \
+                --arg runId "$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-homebrew" \
+                '.commit == $commit and .run_id == $runId and .mode == "homebrew" and .outcome == "passed" and .reports_complete == true and .cleanup == "confirmed"' \
+                "$evidence/orchestration.json" > /dev/null; then failed=1; fi
+              expected='["homebrew-formula-install","homebrew-retained-archive","homebrew-installation","homebrew-print","homebrew-builtin-auth-transport","homebrew-terminal-tools-cancel-resume","homebrew-formula-upgrade-retention","homebrew-formula-uninstall-retention"]'
+              if ! jq --exit-status --arg commit "$DIFFEX_SOURCE_COMMIT" --argjson expected "$expected" \
+                '.schemaVersion == 1 and .commit == $commit and .mode == "homebrew" and .outcome == "passed" and (.artifactHashes | type == "object" and length > 0) and ((.scenarios | map(.id) | sort) == ($expected | sort)) and all(.scenarios[]; .commit == $commit and .outcome == "passed")' \
+                "$evidence/evidence/results.json" > /dev/null; then failed=1; fi
+              for result in orchestration.xml evidence/results.xml; do
+                if [[ ! -s "$evidence/$result" ]]; then failed=1; fi
+              done
+            fi
+          fi
           for mode in deterministic live; do
             evidence=".artifacts/daytona-summary/$mode"
             if ! gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" \

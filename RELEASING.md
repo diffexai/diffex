@@ -2,7 +2,8 @@
 
 Diffex publishes only `@diffexai/diffex` and uses GitHub Actions trusted publishing for normal npm releases.
 The release tag publishes the approved npm packages and then announces the verified npm release.
-Standalone archives and other installation channels are deferred by the [approved distribution policy](docs/release/distribution-policy.json).
+Direct standalone installation remains deferred by the [approved distribution policy](docs/release/distribution-policy.json).
+Homebrew archive/formula infrastructure is implemented but publication remains gated on redistribution review, signing setup, public hosting authorization and native/Daytona acceptance. See [Homebrew release and recovery](docs/release/homebrew.md); do not advertise the tap before those gates are approved.
 
 ## Prerequisites
 
@@ -36,7 +37,7 @@ Each package carries `distribution-files.json` with SHA-256 hashes for its appro
 The complete tarball's npm `dist.integrity` is the registry verification value.
 Versioned anonymous downloads use `https://registry.npmjs.org/<PACKAGE>/-/<UNSCOPED_NAME>-<VERSION>.tgz`.
 For the CLI at version 0.2.1, that URL is `https://registry.npmjs.org/@diffexai/diffex/-/diffex-0.2.1.tgz`; it becomes available only after separately authorized publication.
-No GitHub release publication or separate asset-repository credential is used.
+The default npm-only path does not publish GitHub release assets. A separately enabled Homebrew release uses the retained self-contained archives and exact-byte gates described in [Homebrew release and recovery](docs/release/homebrew.md), not a standalone installer.
 Npm trust remains bound to the private source repository and the existing workflow filename.
 
 ## First npm publication
@@ -122,5 +123,6 @@ Review the target version and obtain approval for the remote push before running
 
 The pushed tag triggers `.github/workflows/build-binaries.yml`.
 Do not announce the release until the workflow verifies npm publication and writes the release announcement successfully.
+When Homebrew is explicitly enabled, both npm and signed GitHub archive publication must pass anonymous exact-byte verification before that same announcement. GitHub latest promotion follows announcement; the tap update PR follows promotion and is not automatically merged. Keep the workflow filename and npm-publish OIDC identity unchanged.
 
 See [release promotion and recovery](docs/release/promotion.md) for immutable source selection, retained artifact recovery, and exact failure procedures.

@@ -75,7 +75,7 @@ import { builtInExtensions } from "./extensions/index.ts";
 import { runMigrations, showDeprecationWarnings } from "./migrations.ts";
 import { InteractiveMode, runPrintMode, runRpcMode } from "./modes/index.ts";
 import { initTheme, stopThemeWatcher } from "./modes/interactive/theme/theme.ts";
-import { handleConfigCommand, handlePackageCommand } from "./package-manager-cli.ts";
+import { handleConfigCommand, handleHomebrewSelfUpdate, handlePackageCommand } from "./package-manager-cli.ts";
 import { isLocalPath, normalizePath, resolvePath } from "./utils/paths.ts";
 import { cleanupWindowsSelfUpdateQuarantine } from "./utils/windows-self-update.ts";
 
@@ -374,6 +374,9 @@ export interface MainOptions {
 }
 
 export async function main(args: string[], options?: MainOptions) {
+	// Homebrew owns self-updates; do not bootstrap settings, HTTP, or resources.
+	if (handleHomebrewSelfUpdate(args)) return;
+
 	resetTimings();
 	const extensionFactories = [...builtInExtensions, ...(options?.extensionFactories ?? [])];
 	const offlineMode = args.includes("--offline") || isTruthyEnvFlag(process.env.DIFFEX_OFFLINE);

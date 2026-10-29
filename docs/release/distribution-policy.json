@@ -27,7 +27,17 @@
     "date": "2026-09-13",
     "authority": "owner approved CLI-only 0.2.1 replacement and retirement of 0.2.0 and separate packages"
   },
-  "standaloneDeferral": "Bun static runtime redistribution and native dependency source/object review must be completed before enabling standalone publication.",
+  "standaloneDeferral": "Direct installation and standalone self-update remain deferred. The Homebrew-only Node archive tooling does not enable those channels.",
+  "homebrewApproval": {
+    "status": "pending",
+    "redistribution": "pending",
+    "nativeAcceptance": [],
+    "quarantine": "pending",
+    "daytona": "pending",
+    "publicRepository": "diffexai/diffex",
+    "tapRepository": "diffexai/homebrew-tap",
+    "requiredReview": "Node runtime pins and signing-key authority, private npm and complete third-party licenses/source materials, all four retained payloads, public repository visibility and credential scope. Set channels.homebrew to enable only in the reviewed approval commit."
+  },
   "approvedRuntimeAssets": [
     "compiled JavaScript from public workspace src inputs",
     "declarations from those inputs",

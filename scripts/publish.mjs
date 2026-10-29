@@ -80,7 +80,12 @@ const manifest = readReleaseArtifacts(artifactDirectory, {
 const packageStates = [];
 for (const pkg of manifest.packages) {
 	packageStates.push({
-		...pkg,
+		name: pkg.name,
+		version: pkg.version,
+		filename: pkg.filename,
+		size: pkg.size,
+		sha256: pkg.sha256,
+		integrity: pkg.integrity,
 		published: Boolean(await verifyNpmArtifact(pkg, { allowMissing: true })),
 		registered: false,
 	});

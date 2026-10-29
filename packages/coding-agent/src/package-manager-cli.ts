@@ -23,6 +23,7 @@ import { type AppMode, resolveProjectTrusted } from "./core/project-trust.ts";
 import { DefaultResourceLoader } from "./core/resource-loader.ts";
 import { SettingsManager } from "./core/settings-manager.ts";
 import { hasTrustRequiringProjectResources, ProjectTrustStore } from "./core/trust-manager.ts";
+import { HOMEBREW_UPDATE_COMMAND } from "./utils/bundled-runtime.ts";
 import { isStableVersion, RELEASE_PACKAGE_NAME } from "./utils/release-contract.ts";
 import { getSelfUpdateFailureHints, runSelfUpdate } from "./utils/self-update.ts";
 import {
@@ -677,6 +678,25 @@ export async function handleConfigCommand(
 	process.exit(0);
 }
 
+/** Handle only valid, pure Homebrew self-updates before settings or runtime bootstrap. */
+export function handleHomebrewSelfUpdate(args: string[]): boolean {
+	const options = parsePackageCommand(args);
+	if (
+		options?.command !== "update" ||
+		options.updateTarget?.type !== "self" ||
+		options.help ||
+		options.invalidOption ||
+		options.invalidArgument ||
+		options.missingOptionValue ||
+		options.conflictingOptions ||
+		detectInstallMethod() !== "homebrew"
+	) {
+		return false;
+	}
+	console.log(`Run: ${HOMEBREW_UPDATE_COMMAND}`);
+	return true;
+}
+
 export async function handlePackageCommand(
 	args: string[],
 	runtimeOptions: PackageCommandRuntimeOptions = {},
@@ -726,6 +746,8 @@ export async function handlePackageCommand(
 		process.exitCode = 1;
 		return true;
 	}
+
+	if (handleHomebrewSelfUpdate(args)) return true;
 
 	if (options.command === "update" && options.updateTarget?.type === "models") {
 		try {
@@ -860,6 +882,10 @@ export async function handlePackageCommand(
 					}
 				}
 				if (updateTargetIncludesSelf(target)) {
+					if (detectInstallMethod() === "homebrew") {
+						console.log(`Run: ${HOMEBREW_UPDATE_COMMAND}`);
+						return true;
+					}
 					const selfUpdatePlan = await getSelfUpdatePlan(options.force);
 					if (!selfUpdatePlan.shouldRun) {
 						return true;

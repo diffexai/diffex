@@ -6,6 +6,10 @@ The implementation starts from CLI PR #208 at `ae811d134dd63b0a688aea10ea0368c09
 The canonical source repository remains private, and the hosted image identity remains `ghcr.io/diffexai/diffex-runtime`.
 This work does not authorize npm bootstrap or production publication.
 
+## Pending Homebrew-only review
+
+The Homebrew archive/formula implementation is separate from the historical Bun standalone proposal. It bundles a pinned official Node runtime and private npm, preserves third-party legal/source files under a dedicated checker, and does not add a direct installer or standalone self-updater. This is implementation permission, not redistribution or publication approval. `channels.homebrew` remains deferred and the release signing-key list remains empty until the owner approves the runtime/dependency inventory, signer authority, four-target native evidence, macOS quarantine, Daytona lifecycle evidence and authorized anonymous hosting. See [Homebrew release and recovery](homebrew.md) for the exact review checklist and retained-byte contract. The original npm disclosure restrictions below are unchanged.
+
 ## Distributions and source disclosure
 
 [distribution-policy.json](distribution-policy.json) records the approved decisions.

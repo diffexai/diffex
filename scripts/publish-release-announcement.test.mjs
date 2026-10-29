@@ -1,7 +1,39 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { join } from "node:path";
 import test from "node:test";
 import { createPublicationFixture } from "./fixtures/release-publication/harness.mjs";
-import { advanceLatestRelease, compareReleaseVersions } from "./publish-release-announcement.mjs";
+import { advanceLatestRelease, compareReleaseVersions, verifyAnnouncementChannels } from "./publish-release-announcement.mjs";
+import { HOMEBREW_TARGETS } from "./homebrew-policy.mjs";
+
+test("announcement channel actions always validate policy and cannot bypass enabled Homebrew verification", async () => {
+	const policy = {
+		status: "approved", sourceRepository: "diffexai/diffex", publicRegistry: "https://registry.npmjs.org", publicHosting: "npmjs",
+		channels: { npmjs: "enable", homebrew: "enable", standalone: "defer" },
+		homebrewApproval: { status: "approved", reviewedAt: "2026-10-23", publicRepository: "diffexai/diffex", tapRepository: "diffexai/homebrew-tap",
+			redistribution: "approved", nativeAcceptance: HOMEBREW_TARGETS, quarantine: "accepted", daytona: "accepted" },
+	};
+	const options = { homebrewArtifacts: "/retained/homebrew", version: "1.2.3", sourceCommit: "a".repeat(40) };
+	let calls = 0;
+	const verifyHomebrew = async (directory, identity) => {
+		calls++;
+		assert.equal(directory, options.homebrewArtifacts);
+		assert.deepEqual(identity, { version: options.version, sourceCommit: options.sourceCommit });
+	};
+	await verifyAnnouncementChannels(policy, options, verifyHomebrew);
+	assert.equal(calls, 1);
+	await assert.rejects(verifyAnnouncementChannels(policy, { ...options, homebrewArtifacts: undefined }, verifyHomebrew), /require retained/);
+	await assert.rejects(verifyAnnouncementChannels(policy, options, async () => { throw new Error("public byte mismatch"); }), /public byte mismatch/);
+	for (const channel of ["constructor", "__proto__", "unexpected", undefined]) {
+		const invalid = structuredClone(policy); invalid.channels.homebrew = channel;
+		await assert.rejects(verifyAnnouncementChannels(invalid, options, verifyHomebrew), /Unapproved/);
+	}
+	const invalid = structuredClone(policy); invalid.homebrewApproval.redistribution = "pending";
+	await assert.rejects(verifyAnnouncementChannels(invalid, options, verifyHomebrew), /publication requires/);
+	const deferred = structuredClone(policy); deferred.channels.homebrew = "defer";
+	await verifyAnnouncementChannels(deferred, options, verifyHomebrew);
+	assert.equal(calls, 1);
+});
 
 test("compares stable release versions numerically", () => {
 	assert.ok(compareReleaseVersions("0.85.0", "0.84.9") > 0);
@@ -225,6 +257,53 @@ test("version record survives an actual pointer-write failure and recovery prese
 	}
 });
 
+test("retained manifest packages return only workspace identities and measured artifact fields", () => {
+	const fixture = createPublicationFixture();
+	try {
+		fixture.run("0.0.3", { credentials: false, mutateManifest: (manifest) => {
+			manifest.packages.reverse();
+			for (const pkg of manifest.packages) {
+				pkg.published = true;
+				pkg.registered = true;
+				pkg.unreviewed = "must not propagate";
+			}
+		} });
+		const script = `import { readReleaseArtifacts } from ${JSON.stringify(new URL("./release-artifacts.mjs", import.meta.url).href)}; console.log(JSON.stringify(readReleaseArtifacts("artifacts")));`;
+		const result = spawnSync(process.execPath, ["--input-type=module", "--eval", script], {
+			cwd: fixture.directory,
+			env: { PATH: `${join(fixture.directory, "bin")}:${process.env.PATH}`, DIFFEX_PUBLICATION_FIXTURE: join(fixture.directory, "registry.json") },
+			encoding: "utf8", timeout: 10_000,
+		});
+		assert.ifError(result.error);
+		assert.equal(result.status, 0, result.stderr);
+		const manifest = JSON.parse(result.stdout);
+		assert.equal(manifest.packages[0].name, "@diffexai/diffex-agent-core", "Return authoritative workspace order, not retained JSON order");
+		assert.equal(manifest.packages.length, fixture.packageCount);
+		for (const pkg of manifest.packages) {
+			assert.deepEqual(Object.keys(pkg).sort(), ["filename", "integrity", "name", "sha256", "size", "version"]);
+			assert.equal(pkg.version, "0.0.3");
+			assert.equal(pkg.filename, `${pkg.name.replace("@", "").replace("/", "-")}-0.0.3.tgz`);
+		}
+		assert.deepEqual(fixture.state().calls, []);
+		assert.equal(fixture.state().registryCalls, undefined);
+	} finally { fixture.cleanup(); }
+});
+
+test("untrusted package publication flags cannot skip registry checks or missing-version uploads", () => {
+	for (const bootstrap of [false, true]) {
+		const fixture = createPublicationFixture();
+		try {
+			const result = fixture.run("0.0.3", { command: "publish", bootstrap, missing: true,
+				mutateManifest: (manifest) => {
+					for (const pkg of manifest.packages) { pkg.published = true; pkg.registered = true; }
+				} });
+			assert.equal(result.status, 0, result.stderr);
+			assert.equal(fixture.state().published.length, fixture.packageCount);
+			assert.deepEqual(fixture.state().objects, {});
+		} finally { fixture.cleanup(); }
+	}
+});
+
 test("partial npm publication resumes original bytes and never republishes completed versions", () => {
 	const fixture = createPublicationFixture();
 	try {
@@ -269,6 +348,15 @@ for (const mutateManifest of [
 		manifest.packages[0].sha256 = "b".repeat(64);
 	},
 	(manifest) => {
+		manifest.packages[0].name = "@elsewhere/unapproved";
+	},
+	(manifest) => {
+		manifest.packages[0].version = "0.0.3/../../auth.json";
+	},
+	(manifest) => {
+		manifest.packages[0].filename = "../auth.json";
+	},
+	(manifest) => {
 		manifest.snapshot.sha256 = "b".repeat(64);
 	},
 	(manifest) => {
@@ -306,6 +394,25 @@ test("enabling public binary assets without an availability gate fails before pr
 	} finally {
 		fixture.cleanup();
 	}
+});
+
+test("an enabled Homebrew channel cannot announce without retained public archive verification", () => {
+	const fixture = createPublicationFixture();
+	try {
+		const result = fixture.run("0.0.3", {
+			mutatePolicy: (policy) => {
+				policy.channels.homebrew = "enable";
+				policy.homebrewApproval = { status: "approved", reviewedAt: "2026-10-23", redistribution: "approved",
+					nativeAcceptance: ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64"], quarantine: "accepted", daytona: "accepted",
+					publicRepository: "diffexai/diffex", tapRepository: "diffexai/homebrew-tap" };
+				return policy;
+			},
+		});
+		assert.equal(result.status, 1);
+		assert.match(result.stderr, /require retained archive verification/);
+		assert.equal(fixture.state().registryCalls, undefined);
+		assert.deepEqual(fixture.state().objects, {});
+	} finally { fixture.cleanup(); }
 });
 
 test("bootstrap dry run writes nothing and completion verifies all packages without latest or R2", () => {

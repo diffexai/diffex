@@ -1,0 +1,65 @@
+name: Tap checks
+
+on:
+  pull_request:
+    paths:
+      - Formula/diffex.rb
+      - homebrew-manifest.json
+      - test/lifecycle.rb
+      - .github/workflows/test.yml
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x86_64
+          - runner: ubuntu-24.04-arm
+            arch: aarch64
+          - runner: ubuntu-24.04
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_ANALYTICS: "1"
+      HOMEBREW_NO_INSTALL_CLEANUP: "1"
+      DIFFEX_OFFLINE: "1"
+      DIFFEX_SKIP_UPDATE_CHECK: "1"
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Configure native Homebrew
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = '${{ matrix.arch }}'
+          if [ -x /home/linuxbrew/.linuxbrew/bin/brew ]; then
+            eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+          fi
+          command -v brew
+          echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
+          tap="$(brew --repository)/Library/Taps/diffexai/homebrew-tap"
+          mkdir -p "$(dirname "$tap")"
+          test ! -e "$tap"
+          ln -s "$GITHUB_WORKSPACE" "$tap"
+      - name: Formula style and offline audit
+        run: |
+          brew style diffexai/tap/diffex
+          brew audit --strict diffexai/tap/diffex
+      - name: Install and test the approved public runtime
+        run: |
+          brew install --formula diffexai/tap/diffex
+          brew test diffexai/tap/diffex
+          brew uninstall --formula diffexai/tap/diffex
+      - name: Native install, upgrade, and uninstall fixtures
+        run: brew ruby test/lifecycle.rb

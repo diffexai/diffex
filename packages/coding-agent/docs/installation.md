@@ -2,7 +2,8 @@
 
 Diffex is distributed through npmjs.org as `@diffexai/diffex`.
 Use Node.js 22.19.0 or newer and npm or pnpm on macOS or Linux, on arm64 or x64.
-Windows, Android/Termux, standalone binaries, and additional installation channels are not accepted release targets.
+Windows, Android/Termux and direct standalone installation are not accepted release targets.
+The Homebrew channel below is implemented but remains unavailable until its redistribution and native qualification gates are approved.
 The hosted runtime image is for the cloud service.
 
 ## Install and verify
@@ -38,6 +39,28 @@ Changing Node installations can change the npm prefix; check `command -v diffex`
 
 Start `diffex` in your project directory, use `/login` to configure your provider, and send a short prompt.
 See [Quickstart](quickstart.md) and [Providers](providers.md) for authentication and execution.
+
+## Homebrew (pending first qualified release)
+
+The official tap is not enabled yet. After its first separately authorized release, use the explicit formula name:
+
+```sh
+brew install diffexai/tap/diffex
+diffex --version
+diffex --help
+brew upgrade diffexai/tap/diffex
+brew uninstall diffexai/tap/diffex
+```
+
+Homebrew installs a prebuilt, SHA-256-pinned application archive with private Node/npm; it does not run npm to install Diffex and requires no separately installed Node/npm. Initial targets are macOS 15+ and Ubuntu 24.04-class glibc Linux (glibc 2.39+), arm64/x64. Musl/Alpine and older systems are unsupported. The formula also installs `fd`, Git and ripgrep.
+
+Homebrew owns upgrades. `diffex update`, `diffex update --self` and `--force` only print `brew upgrade diffexai/tap/diffex`; they do not run Brew/npm or change the application or user data. `diffex update --extensions` still updates extensions; `--all` retains extension updates but only prints the Brew command for Diffex itself. Repair with `brew reinstall diffexai/tap/diffex`.
+
+Extensions keep their existing user/project storage. Unless you explicitly configure `npmCommand`, extension installation uses the private npm with bundled Node on subprocess PATH. Existing project trust and lifecycle-script behavior is unchanged. Git, shell utilities, OS credential/clipboard services and native extension build tools may still be needed.
+
+Check `command -v diffex` before migrating from npm or pnpm. Uninstall the old application with its owning package manager, not by deleting a shared prefix; then verify the Brew executable is first on PATH. No installer automatically overwrites or adopts another channel. Homebrew uninstall retains `~/.diffex/agent`, project `.diffex` directories, credentials, sessions and separately configured session directories. Homebrew normally tracks the tap's current version; for an exact reviewed version, use an approved historical formula/tap commit and verify its pinned archive hashes rather than changing its URL alone.
+
+Homebrew's trust anchor is the reviewed tap/formula and its archive SHA-256. Downloading an adjacent checksum, signature or public key is not independent authentication. Bundled runtime security fixes ship as reviewed Diffex archive/formula updates. There is no supported `curl | sh` installer or standalone self-update in this channel.
 
 ## Install with pnpm
 

@@ -9,6 +9,9 @@ import { acceptArtifacts, isolatedEnvironment } from "./artifact-acceptance.mjs"
 import { getPublicWorkspacePackages } from "./release-packages.mjs";
 import { packReviewedPackage } from "./pack-reviewed-package.mjs";
 import { assertChangelogsReady } from "./prepare-distribution.mjs";
+import { prepareHomebrewArchive } from "./homebrew-archive.mjs";
+import { acceptHomebrewArchive } from "./homebrew-acceptance.mjs";
+import { integrity } from "./release-registry.mjs";
 
 const packages = getPublicWorkspacePackages();
 
@@ -26,6 +29,7 @@ Options:
   --skip-test          Do not run ./test.sh before building
   --skip-install       Only create tarballs; do not create isolated installs
   --skip-bun-install   Do not create the isolated Bun install
+  --homebrew           Also prepare the native self-contained Homebrew candidate archive
   --help               Show this help
 `);
 }
@@ -33,6 +37,7 @@ Options:
 function parseArgs() {
 	const options = {
 		force: false,
+		homebrew: false,
 		outDir: undefined,
 		skipBunInstall: false,
 		skipCheck: false,
@@ -46,6 +51,10 @@ function parseArgs() {
 		if (arg === "--help") {
 			printUsage();
 			process.exit(0);
+		}
+		if (arg === "--homebrew") {
+			options.homebrew = true;
+			continue;
 		}
 		if (arg === "--force") {
 			options.force = true;
@@ -187,15 +196,26 @@ const records = [];
 for (const pkg of packages) {
 	const packed = packReviewedPackage(pkg, tarballDirectory);
 	const tarball = packed.file;
-	records.push({ name: pkg.name, version: pkg.version, filename: tarball.split(/[\\/]/).pop(), sha256: packed.sha256 });
+	records.push({ name: pkg.name, version: pkg.version, filename: tarball.split(/[\\/]/).pop(), sha256: packed.sha256,
+		size: readFileSync(tarball).length, integrity: integrity(readFileSync(tarball)) });
 	tarballs.set(pkg.name, tarball);
 }
 
 writeFileSync(join(outDir, "manifest.json"), `${JSON.stringify(records, null, 2)}\n`);
 
+if (options.homebrew) {
+	const sourceCommit = run("git", ["rev-parse", "HEAD"], { capture: true }).trim();
+	const record = await prepareHomebrewArchive({
+		releaseDirectory: tarballDirectory, outputDirectory: join(outDir, "homebrew"),
+		manifest: { schemaVersion: 1, version: packages[0].version, source: { repository: "diffexai/diffex", commit: sourceCommit }, packages: records },
+	});
+	if (!options.skipInstall) await acceptHomebrewArchive(join(outDir, "homebrew", record.filename),
+		join(outDir, "homebrew", record.filename.replace(/\.tar\.gz$/, ".json")), join(outDir, "homebrew-acceptance"));
+}
+
 if (!options.skipInstall) {
 	acceptArtifacts(outDir, join(outDir, "acceptance"), { managers: options.skipBunInstall ? ["npm", "pnpm"] : ["npm", "pnpm", "bun"] });
-	// Standalone compilation is deliberately excluded by the approved policy.
+	// Direct installers, standalone updates and Bun compilation remain excluded.
 
 	mkdirSync(nodeInstallDirectory, { recursive: true });
 	const dependencies = Object.fromEntries(

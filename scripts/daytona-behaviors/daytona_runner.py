@@ -274,7 +274,8 @@ class Runner:
         self.execute(sandbox, f"test -f {INSTALLED} && mkdir -p {REMOTE_EVIDENCE}")
 
     def launch(self, sandbox: Sandbox, live_key: str | None) -> None:
-        argv = ["python3", INSTALLED, "--artifacts", REMOTE_RELEASE,
+        entrypoint = f"{REMOTE_BUNDLE}/scripts/daytona-behaviors/homebrew.py" if self.state.mode == "homebrew" else INSTALLED
+        argv = ["python3", entrypoint, "--artifacts", REMOTE_RELEASE,
                 "--output", REMOTE_EVIDENCE, "--mode", self.state.mode,
                 "--commit", self.state.commit]
         script = (
@@ -595,7 +596,7 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--snapshot", required=True)
     run.add_argument("--run-id", required=True)
     run.add_argument("--commit", required=True)
-    run.add_argument("--mode", choices=("deterministic", "live"), required=True)
+    run.add_argument("--mode", choices=("deterministic", "live", "homebrew"), required=True)
     run.add_argument("--timeout-seconds", type=int, default=2100)
     run.add_argument("--live-key-env", choices=("OPENAI_API_KEY",), default="OPENAI_API_KEY")
     recover = commands.add_parser("recover")

@@ -2,12 +2,17 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added the Homebrew-only distribution infrastructure: pinned Node/private npm archives, reviewed payload inventories, canonical formula generation, immutable release verification/recovery, and gated native/Daytona acceptance. Publication remains deferred pending redistribution and native qualification; no standalone installer or self-updater is included.
+
 ### Changed
 
 - Added a compact terminal activity display for npm and pnpm self-updates, while preserving package-manager warnings, failure diagnostics, and redirected logs.
 - Added pnpm installation, upgrade, integrity, and removal coverage to release acceptance alongside npm and Bun.
 - Bundle the Mistral provider's required JavaScript into npm releases, reducing the external lockfile from 228 to 140 package entries while preserving provider behavior, optional tracing integrations, and complete dependency license attribution.
 - Expanded the published npm README with requirements, npm/pnpm commands, verification, login, and update instructions.
+- Recognize Homebrew ownership before npm heuristics and direct self-updates to `brew upgrade diffexai/tap/diffex` without mutation; extension installs use bundled Node/private npm unless `npmCommand` is configured.
 
 ### Fixed
 

@@ -246,12 +246,15 @@ class Runner:
         assert result.returncode == 0, f"Exit code {result.returncode}; see stdout/stderr"
         return result.stdout
 
+    def fixture_directory(self, executable):
+        return Path(executable).parent.parent.parent
+
     def behavior(self, executable, evidence, action):
         with tempfile.TemporaryDirectory(prefix="db-", dir="/tmp") as temporary:
             root = Path(temporary)
             env = self.environment(root)
             # Keep the fixture beside node_modules so its import resolves the installed SDK, never the repository.
-            fixture = Path(executable).parent.parent.parent / ("behavior-" + uuid.uuid4().hex + ".mjs")
+            fixture = self.fixture_directory(executable) / ("behavior-" + uuid.uuid4().hex + ".mjs")
             shutil.copyfile(HERE / ("live-guard.mjs" if self.args.mode == "live" else "fixture.mjs"), fixture)
             try:
                 action(env, root, fixture)
@@ -276,7 +279,7 @@ class Runner:
                 # Never copy home, auth files, settings, or process environment.
                 # Redaction happens BEFORE files become incrementally downloadable.
 
-    def deterministic(self, executable, runtime):
+    def deterministic(self, executable, runtime, include_artifact_terminal=True):
         def run_case(name, fn):
             return self.scenario(runtime + "-" + name, lambda evidence: self.behavior(executable, evidence, lambda env, root, fixture: fn(env, root, fixture, evidence)))
 
@@ -355,7 +358,8 @@ class Runner:
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
             module.verify(evidence, {runtime: executable}, HERE.parent / "fixtures/artifact-handoff.mjs")
-        self.scenario(runtime + "-artifact-terminal", legacy)
+        if include_artifact_terminal:
+            self.scenario(runtime + "-artifact-terminal", legacy)
 
     def live(self, executable):
         def operation(evidence):

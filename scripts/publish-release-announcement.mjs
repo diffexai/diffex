@@ -1,14 +1,15 @@
 #!/usr/bin/env node
 
+import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import { isReleaseRecord, isStableVersion } from "../packages/coding-agent/src/utils/release-contract.ts";
-import { readReleaseArtifacts } from "./release-artifacts.mjs";
+import { assertEnabledChannels, readReleaseArtifacts } from "./release-artifacts.mjs";
 import { verifyNpmArtifact } from "./release-registry.mjs";
+import { verifyPublicHomebrewRelease } from "./homebrew-release.mjs";
 
 const RELEASES_PREFIX = "releases/v1";
 const RETRY_DELAY_MS = 5000;
@@ -19,6 +20,7 @@ const STABLE_SEMVER_RE = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 function parseArgs(args) {
 	const options = {
 		artifacts: undefined,
+		homebrewArtifacts: undefined,
 		bucket: undefined,
 		endpoint: undefined,
 		sourceCommit: undefined,
@@ -29,6 +31,7 @@ function parseArgs(args) {
 		const arg = args[index];
 		if (
 			arg !== "--artifacts" &&
+			arg !== "--homebrew-artifacts" &&
 			arg !== "--bucket" &&
 			arg !== "--endpoint" &&
 			arg !== "--source-commit" &&
@@ -41,6 +44,7 @@ function parseArgs(args) {
 		options[
 			{
 				"--artifacts": "artifacts",
+				"--homebrew-artifacts": "homebrewArtifacts",
 				"--bucket": "bucket",
 				"--endpoint": "endpoint",
 				"--source-commit": "sourceCommit",
@@ -203,6 +207,22 @@ export async function advanceLatestRelease(version, readLatest, writeLatest) {
 	);
 }
 
+export async function verifyAnnouncementChannels(policy, options, verifyHomebrew = verifyPublicHomebrewRelease) {
+	assertEnabledChannels(policy);
+	// Exhaustive literal states cannot select an arbitrary method or callback.
+	switch (policy.channels.homebrew) {
+		case "defer":
+			return;
+		case "enable":
+			assert(typeof options.homebrewArtifacts === "string" && options.homebrewArtifacts.length > 0,
+				"Enabled Homebrew releases require retained archive verification before announcement");
+			await verifyHomebrew(options.homebrewArtifacts, { version: options.version, sourceCommit: options.sourceCommit });
+			return;
+		default:
+			throw new Error("Unapproved Homebrew announcement channel");
+	}
+}
+
 async function main() {
 	const options = parseArgs(process.argv.slice(2));
 	if (!process.env.AWS_ACCESS_KEY_ID?.trim() || !process.env.AWS_SECRET_ACCESS_KEY?.trim()) {
@@ -214,6 +234,8 @@ async function main() {
 	const manifest = readReleaseArtifacts(options.artifacts, { version: options.version, sourceCommit });
 	const packages = manifest.packages;
 
+	const policy = JSON.parse(readFileSync("docs/release/distribution-policy.json", "utf8"));
+	await verifyAnnouncementChannels(policy, { ...options, sourceCommit });
 	const publishedPackages = await verifyPackagesAreAvailable(packages);
 	const release = {
 		schemaVersion: 1,
@@ -286,7 +308,7 @@ async function main() {
 	}
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (import.meta.main) {
 	main().catch((error) => {
 		console.error(error instanceof Error ? error.message : error);
 		process.exitCode = 1;

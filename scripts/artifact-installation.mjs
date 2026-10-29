@@ -13,8 +13,9 @@ const readJson = (file) => JSON.parse(readFileSync(file, "utf8"));
 export function resolveArtifactDirectory(value) {
 	assert(typeof value === "string" && value.length > 0 && !value.includes("\0"), "Invalid artifact directory");
 	const directory = resolve(value);
-	for (const base of [process.cwd(), tmpdir(), realpathSync(tmpdir()), homedir(), "/tmp"]) {
-		const root = resolve(base);
+	const roots = [process.cwd(), tmpdir(), homedir(), "/tmp"].flatMap((base) =>
+		existsSync(base) ? [resolve(base), realpathSync(base)] : [resolve(base)]);
+	for (const root of new Set(roots)) {
 		if (!directory.startsWith(root + sep)) continue;
 		let current = root;
 		for (const component of relative(root, directory).split(sep)) {
