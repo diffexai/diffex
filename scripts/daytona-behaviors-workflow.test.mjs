@@ -91,7 +91,7 @@ test("one 35-minute preparation freezes, builds offline, prepares and verifies t
 		assert.equal(run.env.OPENAI_API_KEY !== undefined, mode === "live");
 		assert.equal(job.steps.at(-1).if, "${{ always() && steps.sanitize.outputs.safe_to_upload == 'true' }}");
 	}
-	assert.deepEqual(workflow.jobs["daytona-behaviors"].needs, ["prepare", "deterministic", "live"]);
+	assert.deepEqual(workflow.jobs["daytona-behaviors"].needs, ["prepare", "deterministic", "live", "homebrew"]);
 });
 
 test("Daytona npm behaviors enable scripts while Bun and ordinary artifact consumers remain disabled", () => {
@@ -140,13 +140,42 @@ test("only a completed all-files credential guard permits sanitized evidence pub
 	}
 });
 
-for (const scenario of ["pass", "missing-artifact", "missing-result", "invalid-result", "missing-xml", "failed-job", "sanitizer-failed", "missing-safety-report", "unsafe-report", "credential-found", "cleanup-failed", "wrong-commit", "wrong-run", "orchestration-failed", "cleanup-unconfirmed", "partial-scenarios", "wrong-result-commit", "different-tarballs"]) {
+test("Homebrew qualification and dispatch use retained native bytes and an isolated snapshot", () => {
+	assert.equal(workflow.on.workflow_dispatch.inputs.homebrew_candidate.type, "boolean");
+	assert.equal(workflow.on.workflow_dispatch.inputs.homebrew_candidate.default, false);
+	const prepare = workflow.jobs["prepare-homebrew"];
+	assert.ok(prepare.if.includes("vars.HOMEBREW_QUALIFIED == 'true'"));
+	assert.ok(prepare.if.includes("inputs.homebrew_candidate"));
+	assert.equal(prepare.needs, "prepare");
+	const commands = prepare.steps.map((step) => step.run ?? "").join("\n");
+	assert.match(commands, /prepare-homebrew-archive\.mjs \.artifacts\/release \.artifacts\/daytona-homebrew-candidate/);
+	assert.doesNotMatch(commands, /npm run build|release-artifacts\.mjs (prepare|freeze)/);
+	assert.match(commands, /scripts\/daytona-behaviors\/homebrew\.py/);
+	assert.match(commands, /scripts\/fixtures\/homebrew-runtime-operations\.mjs/);
+	const upload = prepare.steps.find((step) => step.with?.name?.startsWith("daytona-homebrew-candidate-"));
+	assert.equal(upload.with.path, ".artifacts/daytona-homebrew-candidate/*.tar.gz\n.artifacts/daytona-homebrew-candidate/*.json\n");
+	assert.doesNotMatch(upload.with.path, /release\/|source/);
+	const job = workflow.jobs.homebrew;
+	assert.equal(job.needs, "prepare-homebrew");
+	assert.equal(job.env.DAYTONA_SNAPSHOT, "${{ vars.DAYTONA_HOMEBREW_SNAPSHOT }}");
+	assert.equal(job.environment, "daytona-behaviors");
+	const run = job.steps.find((step) => step.id === "run");
+	assert.match(run.run, /--mode homebrew/);
+	assert.equal(run.env.OPENAI_API_KEY, undefined);
+	assert.match(job.steps.find((step) => step.id === "recover").run, /daytona_runner\.py recover/);
+	assert.match(job.steps.find((step) => step.id === "sanitize").run, /--mode deterministic/);
+	assert.equal(job.steps.at(-1).if, "${{ always() && steps.sanitize.outputs.safe_to_upload == 'true' }}");
+	assert.equal(job.steps.at(-1).with.path, ".artifacts/daytona-homebrew-sanitized/");
+	for (const step of job.steps) assert.equal(step.env?.OPENAI_API_KEY, undefined);
+});
+
+for (const scenario of ["homebrew-pass", "homebrew-missing-artifact", "homebrew-failed-job", "homebrew-cleanup-unconfirmed", "homebrew-partial-scenarios", "homebrew-credential-found", "pass", "missing-artifact", "missing-result", "invalid-result", "missing-xml", "failed-job", "sanitizer-failed", "missing-safety-report", "unsafe-report", "credential-found", "cleanup-failed", "wrong-commit", "wrong-run", "orchestration-failed", "cleanup-unconfirmed", "partial-scenarios", "wrong-result-commit", "different-tarballs"]) {
 	test(`aggregate fails closed: ${scenario}`, () => {
 		const root = mkdtempSync(join(tmpdir(), "daytona workflow "));
 		try {
 			const commit = "a".repeat(40);
 			const fixtures = join(root, "fixtures");
-			for (const mode of ["deterministic", "live"]) {
+			for (const mode of ["deterministic", "live", "homebrew"]) {
 				const directory = join(fixtures, mode);
 				mkdirSync(join(directory, "evidence"), { recursive: true });
 				writeFileSync(join(directory, "publication-safety.json"), JSON.stringify({
@@ -160,7 +189,9 @@ for (const scenario of ["pass", "missing-artifact", "missing-result", "invalid-r
 					commit, mode, run_id: `123-2-${mode}`, outcome: "passed", execution: "passed",
 					exit_code: 0, installed_outcome: "passed", reports_complete: true, cleanup: "confirmed",
 				}));
-				const identities = mode === "live"
+				const identities = mode === "homebrew"
+					? ["homebrew-formula-install", "homebrew-retained-archive", "homebrew-installation", "homebrew-print", "homebrew-builtin-auth-transport", "homebrew-terminal-tools-cancel-resume", "homebrew-formula-upgrade-retention", "homebrew-formula-uninstall-retention"]
+					: mode === "live"
 					? ["artifact-integrity", "npm-package-integrity", "npm-live-openai"]
 					: ["artifact-integrity", "npm-global-installation", "npm-package-integrity", "bun-package-integrity", ...["npm", "bun"].flatMap((manager) =>
 						["installation", "print", "builtin-auth-transport", "terminal-tools-cancel-resume", "artifact-terminal"].map((name) => `${manager}-${name}`))];
@@ -169,6 +200,23 @@ for (const scenario of ["pass", "missing-artifact", "missing-result", "invalid-r
 					scenarios: identities.map((id) => ({ id, commit, outcome: "passed" })),
 				}));
 				for (const file of ["orchestration.xml", "evidence/results.xml"]) writeFileSync(join(directory, file), "<testsuites/>");
+			}
+			const homebrew = join(fixtures, "homebrew");
+			if (scenario === "homebrew-missing-artifact") rmSync(homebrew, { recursive: true });
+			for (const [fault, file, key, value] of [
+				["homebrew-cleanup-unconfirmed", "orchestration.json", "cleanup", "unconfirmed"],
+				["homebrew-credential-found", "publication-safety.json", "credential_matches", 1],
+			]) {
+				if (scenario === fault) {
+					const report = JSON.parse(readFileSync(join(homebrew, file), "utf8"));
+					report[key] = value;
+					writeFileSync(join(homebrew, file), JSON.stringify(report));
+				}
+			}
+			if (scenario === "homebrew-partial-scenarios") {
+				const report = JSON.parse(readFileSync(join(homebrew, "evidence/results.json"), "utf8"));
+				report.scenarios.pop();
+				writeFileSync(join(homebrew, "evidence/results.json"), JSON.stringify(report));
 			}
 			const live = join(fixtures, "live");
 			if (scenario === "missing-artifact") rmSync(live, { recursive: true });
@@ -211,7 +259,7 @@ const { cpSync, existsSync } = require("node:fs");
 const { join } = require("node:path");
 const args = process.argv.slice(2);
 const name = args[args.indexOf("--name") + 1];
-const mode = name.includes("-deterministic-") ? "deterministic" : "live";
+const mode = name.includes("-homebrew-") ? "homebrew" : name.includes("-deterministic-") ? "deterministic" : "live";
 const source = join(process.env.DAYTONA_FIXTURES, mode);
 if (!existsSync(source)) process.exit(1);
 cpSync(source, args[args.indexOf("--dir") + 1], { recursive: true });
@@ -229,14 +277,16 @@ cpSync(source, args[args.indexOf("--dir") + 1], { recursive: true });
 					GITHUB_RUN_ATTEMPT: "2",
 					GITHUB_REPOSITORY: "diffexai/diffex",
 					GITHUB_STEP_SUMMARY: join(root, "summary.md"),
+					HOMEBREW_REQUIRED: scenario.startsWith("homebrew-") ? "true" : "false",
+					HOMEBREW_RESULT: scenario === "homebrew-failed-job" ? "failure" : "success",
 					PREPARE_RESULT: "success",
 					DETERMINISTIC_RESULT: "success",
 					LIVE_RESULT: ["failed-job", "sanitizer-failed"].includes(scenario) ? "failure" : "success",
 				},
 			});
-			assert.equal(result.status, scenario === "pass" ? 0 : 1, `${result.stdout}\n${result.stderr}`);
+			assert.equal(result.status, ["pass", "homebrew-pass"].includes(scenario) ? 0 : 1, `${result.stdout}\n${result.stderr}`);
 			const summary = JSON.parse(readFileSync(join(root, ".artifacts/daytona-summary/summary.json"), "utf8"));
-			assert.equal(summary.passed, scenario === "pass");
+			assert.equal(summary.passed, ["pass", "homebrew-pass"].includes(scenario));
 			// No evidence JSON (including provider response fields) is echoed into job logs.
 			assert.doesNotMatch(result.stdout, /artifactHashes|diffex\.tgz|credential_matches|schemaVersion/);
 			// Downloaded evidence, including hidden digest members, survives failed cases.

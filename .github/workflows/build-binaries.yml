@@ -143,8 +143,149 @@ jobs:
     with:
       source_commit: ${{ needs.resolve-source.outputs.commit }}
 
+  prepare-homebrew:
+    needs: [resolve-source, prepare-artifacts]
+    if: ${{ vars.HOMEBREW_CANDIDATES_ENABLED == 'true' || vars.HOMEBREW_DISTRIBUTION_ENABLED == 'true' }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: macos-15, platform: darwin-arm64 }
+          - { runner: macos-15-intel, platform: darwin-x64 }
+          - { runner: ubuntu-24.04-arm, platform: linux-arm64 }
+          - { runner: ubuntu-24.04, platform: linux-x64 }
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      actions: read
+    env:
+      DIFFEX_SOURCE_COMMIT: ${{ needs.resolve-source.outputs.commit }}
+      HOMEBREW_PLATFORM: ${{ matrix.platform }}
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Checkout immutable release commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.resolve-source.outputs.commit }}
+          persist-credentials: false
+      - name: Setup Node for preparation only
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22.19.0'
+      - name: Restore exact retained platform bytes before considering preparation
+        id: restore
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RECOVERY_RUN_ID: ${{ inputs.recovery_run_id }}
+        run: node scripts/restore-release-artifacts.mjs
+      - name: Download exact reviewed npm input
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run download "$GITHUB_RUN_ID" --repo diffexai/diffex --name "private-release-$DIFFEX_SOURCE_COMMIT" --dir .artifacts/release
+      - name: Install Linux preparation and acceptance prerequisites
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gnupg python3
+          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+          echo /home/linuxbrew/.linuxbrew/bin >> "$GITHUB_PATH"
+          brew install fd ripgrep
+      - name: Install macOS preparation and acceptance prerequisites
+        if: runner.os == 'macOS'
+        run: brew install gnupg fd ripgrep
+      - name: Assemble reviewed native archive without lifecycle scripts
+        if: steps.restore.outputs.restored != 'true'
+        run: node scripts/prepare-homebrew-archive.mjs .artifacts/release ".artifacts/homebrew/$HOMEBREW_PLATFORM"
+      - name: Accept retained archive outside the workspace without system Node or npm
+        run: |
+          version="$(cat packages/coding-agent/package.json | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')"
+          base=".artifacts/homebrew/$HOMEBREW_PLATFORM/diffex-$version-$HOMEBREW_PLATFORM"
+          node scripts/homebrew-acceptance.mjs "$base.tar.gz" "$base.json" .artifacts/homebrew-acceptance
+      - name: Exercise real Homebrew install upgrade and uninstall against retained bytes
+        run: |
+          python3 scripts/daytona-behaviors/homebrew.py \
+            --artifacts ".artifacts/homebrew/$HOMEBREW_PLATFORM" \
+            --output .artifacts/homebrew-lifecycle --commit "$DIFFEX_SOURCE_COMMIT" --lifecycle-only
+      - name: Retain only reviewed platform archives and records
+        if: steps.restore.outputs.upload == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: homebrew-${{ matrix.platform }}-${{ needs.resolve-source.outputs.commit }}
+          path: |
+            .artifacts/homebrew/${{ matrix.platform }}/*.tar.gz
+            .artifacts/homebrew/${{ matrix.platform }}/*.json
+          if-no-files-found: error
+          retention-days: 90
+      - name: Retain sanitized archive acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: homebrew-acceptance-${{ matrix.platform }}-${{ needs.resolve-source.outputs.commit }}
+          path: |
+            .artifacts/homebrew-acceptance/homebrew-acceptance.json
+            .artifacts/homebrew-lifecycle/results.json
+            .artifacts/homebrew-lifecycle/results.xml
+            .artifacts/homebrew-lifecycle/*/lifecycle.json
+          if-no-files-found: error
+          retention-days: 90
+
+  retain-homebrew:
+    needs: [resolve-source, prepare-homebrew]
+    if: ${{ vars.HOMEBREW_DISTRIBUTION_ENABLED == 'true' }}
+    runs-on: ubuntu-24.04
+    environment: homebrew-release
+    permissions:
+      contents: read
+      actions: read
+    env:
+      DIFFEX_SOURCE_COMMIT: ${{ needs.resolve-source.outputs.commit }}
+      HOMEBREW_RELEASE: 'true'
+    steps:
+      - name: Checkout immutable release commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.resolve-source.outputs.commit }}
+          persist-credentials: false
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22.19.0'
+      - name: Restore complete signed release before considering aggregation
+        id: restore
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RECOVERY_RUN_ID: ${{ inputs.recovery_run_id }}
+        run: node scripts/restore-release-artifacts.mjs
+      - name: Download retained approved inputs
+        if: steps.restore.outputs.restored != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download "$GITHUB_RUN_ID" --repo diffexai/diffex --name "private-release-$DIFFEX_SOURCE_COMMIT" --dir .artifacts/release
+          for platform in darwin-arm64 darwin-x64 linux-arm64 linux-x64; do
+            gh run download "$GITHUB_RUN_ID" --repo diffexai/diffex --name "homebrew-$platform-$DIFFEX_SOURCE_COMMIT" --dir ".artifacts/homebrew/$platform"
+          done
+          node scripts/homebrew-release.mjs collect .artifacts/homebrew .artifacts/homebrew-release
+      - name: Sign approved checksum list with the protected release credential
+        if: steps.restore.outputs.restored != 'true'
+        env:
+          HOMEBREW_SIGNING_KEY: ${{ secrets.HOMEBREW_SIGNING_KEY }}
+        run: node scripts/homebrew-release.mjs sign .artifacts/homebrew-release
+      - name: Verify complete retained signed release
+        run: node scripts/homebrew-release.mjs verify .artifacts/homebrew-release
+      - name: Retain exact signed public bytes before any publication
+        if: steps.restore.outputs.upload == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: homebrew-release-${{ needs.resolve-source.outputs.commit }}
+          path: .artifacts/homebrew-release/
+          if-no-files-found: error
+          retention-days: 90
+
   publish-npm:
-    needs: [resolve-source, prepare-artifacts, native-acceptance]
+    needs: [resolve-source, prepare-artifacts, native-acceptance, prepare-homebrew, retain-homebrew]
+    if: ${{ always() && needs.native-acceptance.result == 'success' && (needs.prepare-homebrew.result == 'success' || needs.prepare-homebrew.result == 'skipped') && (needs.retain-homebrew.result == 'success' || needs.retain-homebrew.result == 'skipped') }}
     runs-on: ubuntu-latest
     environment: npm-publish
     permissions:
@@ -173,8 +314,38 @@ jobs:
       - name: Publish or verify exact npm tarballs
         run: node scripts/publish.mjs --artifacts .artifacts/release
 
+  publish-homebrew:
+    needs: [resolve-source, publish-npm, retain-homebrew]
+    if: ${{ vars.HOMEBREW_DISTRIBUTION_ENABLED == 'true' }}
+    runs-on: ubuntu-24.04
+    environment: homebrew-release
+    permissions:
+      contents: write
+      actions: read
+    env:
+      DIFFEX_SOURCE_COMMIT: ${{ needs.resolve-source.outputs.commit }}
+    steps:
+      - name: Checkout immutable release commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.resolve-source.outputs.commit }}
+          persist-credentials: false
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22.19.0'
+      - name: Download complete retained signed release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run download "$GITHUB_RUN_ID" --repo diffexai/diffex --name "homebrew-release-$DIFFEX_SOURCE_COMMIT" --dir .artifacts/homebrew-release
+      - name: Publish immutable assets without advancing latest and verify anonymously
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/homebrew-release.mjs publish .artifacts/homebrew-release
+
   announce-diffex-release:
-    needs: [resolve-source, publish-npm]
+    needs: [resolve-source, publish-npm, publish-homebrew]
+    if: ${{ always() && needs.publish-npm.result == 'success' && (needs.publish-homebrew.result == 'success' || needs.publish-homebrew.result == 'skipped') }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: diffex-release-upload
@@ -182,11 +353,12 @@ jobs:
       group: announce-diffex-release
       cancel-in-progress: false
     permissions:
-      contents: read
+      contents: write
       actions: read
     env:
       RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
       DIFFEX_SOURCE_COMMIT: ${{ needs.resolve-source.outputs.commit }}
+      HOMEBREW_ENABLED: ${{ vars.HOMEBREW_DISTRIBUTION_ENABLED }}
     steps:
       - name: Checkout immutable release commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -201,6 +373,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh run download "$GITHUB_RUN_ID" --repo diffexai/diffex --name "private-release-$DIFFEX_SOURCE_COMMIT" --dir .artifacts/release
+      - name: Download retained Homebrew bytes when enabled
+        if: vars.HOMEBREW_DISTRIBUTION_ENABLED == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run download "$GITHUB_RUN_ID" --repo diffexai/diffex --name "homebrew-release-$DIFFEX_SOURCE_COMMIT" --dir .artifacts/homebrew-release
       - name: Verify AWS CLI
         run: aws --version
       - name: Announce verified Diffex release
@@ -211,9 +388,59 @@ jobs:
           AWS_EC2_METADATA_DISABLED: 'true'
           R2_ENDPOINT: https://6b24afa849f8254ab5e6e2d1956239cc.r2.cloudflarestorage.com
         run: |
+          homebrew_args=()
+          if [[ "$HOMEBREW_ENABLED" == true ]]; then
+            homebrew_args=(--homebrew-artifacts .artifacts/homebrew-release)
+          fi
           node scripts/publish-release-announcement.mjs \
             --version "${RELEASE_TAG#v}" \
             --source-commit "$DIFFEX_SOURCE_COMMIT" \
             --artifacts .artifacts/release \
             --bucket diffex-artifacts \
-            --endpoint "$R2_ENDPOINT"
+            --endpoint "$R2_ENDPOINT" "${homebrew_args[@]}"
+      - name: Promote GitHub latest monotonically after verified announcement
+        if: vars.HOMEBREW_DISTRIBUTION_ENABLED == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/homebrew-release.mjs promote .artifacts/homebrew-release
+
+  update-homebrew-tap:
+    needs: [resolve-source, announce-diffex-release]
+    if: ${{ vars.HOMEBREW_DISTRIBUTION_ENABLED == 'true' }}
+    runs-on: ubuntu-24.04
+    environment: homebrew-tap
+    permissions:
+      contents: read
+      actions: read
+    env:
+      DIFFEX_SOURCE_COMMIT: ${{ needs.resolve-source.outputs.commit }}
+    steps:
+      - name: Checkout immutable release commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.resolve-source.outputs.commit }}
+          persist-credentials: false
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22.19.0'
+      - name: Download retained signed Homebrew release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run download "$GITHUB_RUN_ID" --repo diffexai/diffex --name "homebrew-release-$DIFFEX_SOURCE_COMMIT" --dir .artifacts/homebrew-release
+      - name: Reverify public release bytes before issuing a tap credential
+        run: node scripts/homebrew-release.mjs verify-public .artifacts/homebrew-release
+      - name: Issue a repository-scoped short-lived GitHub App token
+        id: tap-token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ vars.HOMEBREW_TAP_APP_ID }}
+          private-key: ${{ secrets.HOMEBREW_TAP_APP_PRIVATE_KEY }}
+          owner: diffexai
+          repositories: homebrew-tap
+          permission-contents: write
+          permission-pull-requests: write
+      - name: Open the version and checksum update PR without merging
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ steps.tap-token.outputs.token }}
+        run: node scripts/update-homebrew-tap.mjs --manifest .artifacts/homebrew-release/homebrew-manifest.json
