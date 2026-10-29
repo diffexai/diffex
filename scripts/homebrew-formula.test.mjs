@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { closeSync, constants, fstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -71,6 +71,13 @@ test("canonical formula pins fixed assets and preserves the whole bundled runtim
 	if (!ruby.error) assert.equal(ruby.status, 0, ruby.stderr);
 });
 
+function readFormulaOutput(file) {
+	const descriptor = openSync(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK, 0o600);
+	try {
+		return { mode: fstatSync(descriptor).mode & 0o777, contents: readFileSync(descriptor, "utf8") };
+	} finally { closeSync(descriptor); }
+}
+
 test("formula CLI validates trusted paths and refuses linked or nonregular inputs/outputs", () => {
 	const directory = mkdtempSync(join(tmpdir(), "diffex-formula-paths-"));
 	const script = fileURLToPath(new URL("./homebrew-formula.mjs", import.meta.url));
@@ -81,12 +88,10 @@ test("formula CLI validates trusted paths and refuses linked or nonregular input
 	try {
 		writeFileSync(input, manifestBytes);
 		assert.equal(run("approved manifest.json", "diffex formula.rb").status, 0);
-		assert.equal(statSync(output).mode & 0o777, 0o600, "new formula output must be private");
-		assert.equal(readFileSync(output, "utf8"), generateHomebrewFormula(manifest));
+		assert.deepEqual(readFormulaOutput(output), { mode: 0o600, contents: generateHomebrewFormula(manifest) }, "new formula output must be private and complete");
 		writeFileSync(output, "stale generated contents".repeat(1000));
 		assert.equal(run(input, output).status, 0, "intentional formula regeneration remains supported");
-		assert.equal(statSync(output).mode & 0o777, 0o600, "regeneration preserves existing permissions");
-		assert.equal(readFileSync(output, "utf8"), generateHomebrewFormula(manifest));
+		assert.deepEqual(readFormulaOutput(output), { mode: 0o600, contents: generateHomebrewFormula(manifest) }, "regeneration preserves existing permissions and contents");
 		const link = join(directory, "linked.json");
 		symlinkSync(input, link);
 		assert.notEqual(run(link, output).status, 0);

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -207,19 +208,19 @@ export async function advanceLatestRelease(version, readLatest, writeLatest) {
 }
 
 export async function verifyAnnouncementChannels(policy, options, verifyHomebrew = verifyPublicHomebrewRelease) {
-	// Validate the committed policy regardless of which fixed channel action is selected.
 	assertEnabledChannels(policy);
-	const channelChecks = new Map([
-		["defer", async () => {}],
-		["enable", async () => {
-			if (!options.homebrewArtifacts)
-				throw new Error("Enabled Homebrew releases require retained archive verification before announcement");
+	// Exhaustive literal states cannot select an arbitrary method or callback.
+	switch (policy.channels.homebrew) {
+		case "defer":
+			return;
+		case "enable":
+			assert(typeof options.homebrewArtifacts === "string" && options.homebrewArtifacts.length > 0,
+				"Enabled Homebrew releases require retained archive verification before announcement");
 			await verifyHomebrew(options.homebrewArtifacts, { version: options.version, sourceCommit: options.sourceCommit });
-		}],
-	]);
-	const checkChannel = channelChecks.get(policy.channels.homebrew);
-	if (!checkChannel) throw new Error("Unapproved Homebrew announcement channel");
-	await checkChannel();
+			return;
+		default:
+			throw new Error("Unapproved Homebrew announcement channel");
+	}
 }
 
 async function main() {
