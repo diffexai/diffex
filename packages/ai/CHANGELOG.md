@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- Previously released: renamed `PI_CACHE_RETENTION` and `PI_OAUTH_CALLBACK_HOST` to `DIFFEX_CACHE_RETENTION` and `DIFFEX_OAUTH_CALLBACK_HOST`. Update provider configuration and OAuth callback-host overrides ([#2](https://github.com/diffexai/diffex/pull/2)).
+
+### Fixed
+
+- Previously released: preserved Workers AI models in Cloudflare AI Gateway catalog generation when the upstream catalog omits duplicate gateway entries ([#111](https://github.com/diffexai/diffex/pull/111)).
+- Fixed ChatGPT compaction failures by omitting unsupported explicit prompt-cache options from both freshly discovered and cached account models ([#302](https://github.com/diffexai/diffex/pull/302)).
+
 ## [0.4.0] - 2026-10-27
 
 ### Breaking Changes
