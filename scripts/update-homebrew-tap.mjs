@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { readFileSync, realpathSync } from "node:fs";
+import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import { generateHomebrewFormula, homebrewAssetUrl, validateHomebrewManifest } from "./homebrew-formula.mjs";
+import { readHomebrewFile } from "./homebrew-runtime.mjs";
 
 export const TAP_REPOSITORY = "diffexai/homebrew-tap";
 export const TAP_FILES = Object.freeze(["Formula/diffex.rb", "homebrew-manifest.json"]);
@@ -169,7 +170,7 @@ export async function updateHomebrewTap(approved, { token, request = fetch, publ
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
 	const [flag, path, ...extra] = process.argv.slice(2);
 	assert(flag === "--manifest" && path && !extra.length, "Usage: node scripts/update-homebrew-tap.mjs --manifest PATH");
-	const manifestBytes = readFileSync(path);
+	const manifestBytes = readHomebrewFile(path, MAX_MANIFEST_SIZE);
 	const result = await updateHomebrewTap(JSON.parse(manifestBytes.toString("utf8")), {
 		token: process.env.HOMEBREW_TAP_TOKEN,
 		manifestBytes,

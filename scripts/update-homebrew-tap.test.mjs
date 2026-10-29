@@ -1,5 +1,10 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import { homebrewFixture } from "./fixtures/homebrew.mjs";
 import { generateHomebrewFormula } from "./homebrew-formula.mjs";
 import { TAP_FILES, updateHomebrewTap, verifyPublicHomebrewAssets } from "./update-homebrew-tap.mjs";
@@ -231,6 +236,31 @@ test("merged identical versions are no-ops, older versions and same-version inpu
 		const value = fixture({ previous });
 		await assert.rejects(run(value));
 		assert.equal(value.mutations.length, 0);
+	}
+});
+
+test("tap CLI reads only bounded regular manifests under trusted roots before any public request", () => {
+	const directory = mkdtempSync(join(tmpdir(), "diffex-tap-paths-"));
+	const script = fileURLToPath(new URL("./update-homebrew-tap.mjs", import.meta.url));
+	const input = join(directory, "approved manifest.json");
+	// An empty token guarantees no network operation even for the valid fixture.
+	const run = (path) => spawnSync(process.execPath, [script, "--manifest", path], {
+		cwd: directory, encoding: "utf8", env: { ...process.env, HOMEBREW_TAP_TOKEN: "" },
+	});
+	try {
+		writeFileSync(input, homebrewFixture().manifestBytes);
+		assert.match(run("approved manifest.json").stderr, /HOMEBREW_TAP_TOKEN is required/);
+		const link = join(directory, "linked.json");
+		symlinkSync(input, link);
+		assert.match(run(link).stderr, /ELOOP/);
+		const parent = join(directory, "linked-parent");
+		symlinkSync(directory, parent);
+		assert.match(run(join(parent, "approved manifest.json")).stderr, /symlink/);
+		assert.match(run("/etc/passwd").stderr, /must be inside/);
+		writeFileSync(input, Buffer.alloc(64 * 1024 + 1, "x"));
+		assert.match(run(input).stderr, /Invalid regular retained file/);
+	} finally {
+		rmSync(directory, { recursive: true, force: true });
 	}
 });
 

@@ -1,12 +1,14 @@
 import { execFileSync } from "node:child_process";
 import { createHash, createPrivateKey, createPublicKey, sign, verify } from "node:crypto";
-import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { HOMEBREW_PLATFORMS, validateHomebrewManifest } from "./homebrew-formula.mjs";
 import { readReleaseArtifacts } from "./release-artifacts.mjs";
 import { assertHomebrewPublicationPolicy } from "./homebrew-policy.mjs";
-import { readRuntimePins } from "./homebrew-runtime.mjs";
+import { readRuntimePins, resolveHomebrewFile } from "./homebrew-runtime.mjs";
+import { readRetainedFile, releaseFilePath, resolveReleaseDirectory, writeRetainedFile } from "./homebrew-release-paths.mjs";
 
 const repository = "diffexai/diffex";
 const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");
@@ -16,9 +18,7 @@ const metadataNames = ["homebrew-manifest.json", "SHA256SUMS", "SHA256SUMS.sig"]
 
 function retainedBytes(path, encoding) {
 	const limit = basename(path).endsWith(".tar.gz") ? 512 * 1024 * 1024 : 64 * 1024;
-	const stat = lstatSync(path);
-	if (!stat.isFile() || stat.size <= 0 || stat.size > limit) throw new Error("Invalid retained Homebrew file type or size");
-	return readFileSync(path, encoding);
+	return readRetainedFile(resolve(path, ".."), basename(path), limit, encoding);
 }
 
 export function trustedHomebrewKeys(configuration = JSON.parse(readFileSync(signerFile, "utf8"))) {
@@ -36,49 +36,64 @@ export function trustedHomebrewKeys(configuration = JSON.parse(readFileSync(sign
 }
 
 export function homebrewChecksums(directory, manifest) {
+	directory = resolveReleaseDirectory(directory);
 	validateHomebrewManifest(manifest);
 	const names = ["homebrew-manifest.json", ...manifest.platforms.map((entry) => entry.filename)].sort();
 	return names.map((name) => `${digest(retainedBytes(join(directory, name)))}  ${name}\n`).join("");
 }
 
 export function inspectHomebrewArchive(file) {
-	return JSON.parse(execFileSync("python3", [fileURLToPath(new URL("./check-homebrew-payload.py", import.meta.url)), "inspect", resolve(file)], {
+	return JSON.parse(execFileSync("python3", [fileURLToPath(new URL("./check-homebrew-payload.py", import.meta.url)), "inspect", resolveHomebrewFile(file)], {
 		encoding: "utf8", timeout: 120_000, maxBuffer: 4 * 1024 * 1024,
 	}));
 }
 
 export function collectHomebrewRelease(inputDirectory, outputDirectory, release, inspectArchive = inspectHomebrewArchive) {
-	if (existsSync(outputDirectory)) throw new Error("Homebrew release already exists; reuse retained bytes instead of rebuilding");
-	const records = HOMEBREW_PLATFORMS.map((platform) => {
-		const filename = `diffex-${release.version}-${platform}`;
-		const directory = join(inputDirectory, platform);
-		const record = JSON.parse(retainedBytes(join(directory, `${filename}.json`), "utf8"));
-		if (record.platform !== platform || record.version !== release.version || record.sourceCommit !== release.source.commit ||
-			record.filename !== `${filename}.tar.gz`) throw new Error("Homebrew platform source/version conflicts with retained npm artifacts");
-		const bytes = retainedBytes(join(directory, record.filename));
-		if (bytes.length !== record.size || digest(bytes) !== record.sha256) throw new Error("Retained Homebrew archive identity mismatch");
-		const inspected = inspectArchive(join(directory, record.filename));
-		for (const field of ["version", "sourceCommit", "platform", "nodeVersion", "npmVersion", "inventorySha256"])
-			if (inspected[field] !== record[field]) throw new Error("Inspected payload differs from retained platform record");
-		return record;
-	});
-	const pins = readRuntimePins();
-	if (records.some((record) => record.nodeVersion !== pins.nodeVersion || record.npmVersion !== pins.npmVersion))
-		throw new Error("Homebrew platforms must use the committed reviewed runtime versions");
-	const manifest = validateHomebrewManifest({
-		schemaVersion: 1, product: "@diffexai/diffex", version: release.version, sourceCommit: release.source.commit,
-		nodeVersion: records[0].nodeVersion, npmVersion: records[0].npmVersion,
-		platforms: records.map(({ platform, filename, size, sha256, inventorySha256, osBaseline }) =>
-			({ platform, filename, size, sha256, inventorySha256, osBaseline })),
-	});
-	mkdirSync(outputDirectory, { recursive: true });
-	for (const record of records) copyFileSync(join(inputDirectory, record.platform, record.filename), join(outputDirectory, record.filename));
-	writeFileSync(join(outputDirectory, "homebrew-manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, { flag: "wx" });
-	writeFileSync(join(outputDirectory, "SHA256SUMS"), homebrewChecksums(outputDirectory, manifest), { flag: "wx" });
-	return manifest;
+	inputDirectory = resolveReleaseDirectory(inputDirectory);
+	outputDirectory = resolveReleaseDirectory(outputDirectory);
+	if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(release.version) ||
+		!/^[a-f0-9]{40}$/.test(release.source?.commit)) throw new Error("Invalid approved release identity");
+	// Inspect and publish the same private snapshots, never reopen a checked input for copying.
+	const staging = mkdtempSync(join(tmpdir(), "diffex-homebrew-collect-"));
+	try {
+		const records = HOMEBREW_PLATFORMS.map((platform) => {
+			const filename = `diffex-${release.version}-${platform}`;
+			const directory = join(inputDirectory, platform);
+			const record = JSON.parse(retainedBytes(join(directory, `${filename}.json`), "utf8"));
+			if (record.platform !== platform || record.version !== release.version || record.sourceCommit !== release.source.commit ||
+				record.filename !== `${filename}.tar.gz`) throw new Error("Homebrew platform source/version conflicts with retained npm artifacts");
+			const bytes = retainedBytes(join(directory, record.filename));
+			if (bytes.length !== record.size || digest(bytes) !== record.sha256) throw new Error("Retained Homebrew archive identity mismatch");
+			writeRetainedFile(staging, record.filename, bytes);
+			const inspected = inspectArchive(releaseFilePath(staging, record.filename));
+			for (const field of ["version", "sourceCommit", "platform", "nodeVersion", "npmVersion", "inventorySha256"])
+				if (inspected[field] !== record[field]) throw new Error("Inspected payload differs from retained platform record");
+			return record;
+		});
+		const pins = readRuntimePins();
+		if (records.some((record) => record.nodeVersion !== pins.nodeVersion || record.npmVersion !== pins.npmVersion))
+			throw new Error("Homebrew platforms must use the committed reviewed runtime versions");
+		const manifest = validateHomebrewManifest({
+			schemaVersion: 1, product: "@diffexai/diffex", version: release.version, sourceCommit: release.source.commit,
+			nodeVersion: records[0].nodeVersion, npmVersion: records[0].npmVersion,
+			platforms: records.map(({ platform, filename, size, sha256, inventorySha256, osBaseline }) =>
+				({ platform, filename, size, sha256, inventorySha256, osBaseline })),
+		});
+		mkdirSync(resolve(outputDirectory, ".."), { recursive: true });
+		try { mkdirSync(outputDirectory); }
+		catch (error) {
+			if (error.code === "EEXIST") throw new Error("Homebrew release already exists; reuse retained bytes instead of rebuilding");
+			throw error;
+		}
+		for (const record of records) writeRetainedFile(outputDirectory, record.filename, retainedBytes(join(staging, record.filename)));
+		writeRetainedFile(outputDirectory, "homebrew-manifest.json", `${JSON.stringify(manifest, null, 2)}\n`);
+		writeRetainedFile(outputDirectory, "SHA256SUMS", homebrewChecksums(outputDirectory, manifest));
+		return manifest;
+	} finally { rmSync(staging, { recursive: true, force: true }); }
 }
 
 export function signHomebrewRelease(directory, privateKeyPem, configuration) {
+	directory = resolveReleaseDirectory(directory);
 	const manifest = readHomebrewRelease(directory, { signature: false });
 	const keys = trustedHomebrewKeys(configuration);
 	const key = createPrivateKey(privateKeyPem);
@@ -87,14 +102,17 @@ export function signHomebrewRelease(directory, privateKeyPem, configuration) {
 	if (key.asymmetricKeyType !== "rsa" || key.asymmetricKeyDetails?.modulusLength !== 3072 ||
 		!keys.some((entry) => entry.sha256 === fingerprint)) throw new Error("Signing credential does not match a reviewed release key");
 	const signature = sign("sha256", retainedBytes(join(directory, "SHA256SUMS")), key);
-	const path = join(directory, "SHA256SUMS.sig");
-	if (existsSync(path)) {
-		if (!retainedBytes(path).equals(signature)) throw new Error("Existing retained signature conflicts with signing credential");
-	} else writeFileSync(path, signature, { flag: "wx" });
+	try { writeRetainedFile(directory, "SHA256SUMS.sig", signature); }
+	catch (error) {
+		if (error.code !== "EEXIST") throw error;
+		if (!retainedBytes(join(directory, "SHA256SUMS.sig")).equals(signature))
+			throw new Error("Existing retained signature conflicts with signing credential");
+	}
 	return manifest;
 }
 
 export function readHomebrewRelease(directory, { version, sourceCommit = process.env.DIFFEX_SOURCE_COMMIT, signature = true, configuration } = {}) {
+	directory = resolveReleaseDirectory(directory);
 	const manifest = validateHomebrewManifest(JSON.parse(retainedBytes(join(directory, "homebrew-manifest.json"), "utf8")));
 	const pins = readRuntimePins();
 	if (manifest.nodeVersion !== pins.nodeVersion || manifest.npmVersion !== pins.npmVersion)
@@ -128,11 +146,25 @@ export async function downloadHomebrewAsset(url, size, request = fetch) {
 	const signal = AbortSignal.timeout(120_000);
 	for (let redirects = 0; redirects <= 3; redirects++) {
 		const target = new URL(url);
-		if (target.protocol !== "https:" || target.username || target.password || target.port || target.hash ||
-			!((redirects === 0 && target.hostname === "github.com" && target.pathname.startsWith(`/${repository}/releases/download/`)) ||
-				(redirects > 0 && ["release-assets.githubusercontent.com", "objects.githubusercontent.com"].includes(target.hostname))))
+		if (target.protocol !== "https:" || target.username || target.password || target.port || target.hash)
 			throw new Error("Unexpected Homebrew asset download origin");
-		const response = await request(target.href, { redirect: "manual", signal, credentials: "omit", referrerPolicy: "no-referrer" });
+		// Reconstruct from literal trusted origins; never send the caller/redirect URL to fetch.
+		let allowedUrl;
+		if (redirects === 0) {
+			const match = /^\/diffexai\/diffex\/releases\/download\/v([^/]+)\/([^/]+)$/.exec(target.pathname);
+			if (target.hostname !== "github.com" || target.search || !match) throw new Error("Unexpected Homebrew asset download origin");
+			allowedUrl = homebrewReleaseUrl(match[1], match[2]);
+		} else {
+			switch (target.hostname) {
+				case "release-assets.githubusercontent.com": allowedUrl = new URL("https://release-assets.githubusercontent.com/"); break;
+				case "objects.githubusercontent.com": allowedUrl = new URL("https://objects.githubusercontent.com/"); break;
+				default: throw new Error("Unexpected Homebrew asset download origin");
+			}
+			allowedUrl.pathname = target.pathname;
+			allowedUrl.search = target.search;
+			allowedUrl = allowedUrl.href;
+		}
+		const response = await request(allowedUrl, { redirect: "manual", signal, credentials: "omit", referrerPolicy: "no-referrer" });
 		if ([301, 302, 303, 307, 308].includes(response.status)) {
 			await response.body?.cancel();
 			const location = response.headers.get("location");
@@ -157,6 +189,7 @@ export async function downloadHomebrewAsset(url, size, request = fetch) {
 }
 
 export async function verifyPublicHomebrewRelease(directory, options = {}) {
+	directory = resolveReleaseDirectory(directory);
 	const manifest = readHomebrewRelease(directory, options);
 	for (const filename of [...metadataNames, ...manifest.platforms.map((entry) => entry.filename)]) {
 		const retained = retainedBytes(join(directory, filename));
@@ -186,6 +219,7 @@ function githubReleases(runGh) {
 }
 
 export async function publishHomebrewRelease(directory, { runGh = gh, request = fetch, policy, configuration } = {}) {
+	directory = resolveReleaseDirectory(directory);
 	assertHomebrewPublicationPolicy(policy ?? JSON.parse(readFileSync(policyFile, "utf8")));
 	const manifest = readHomebrewRelease(directory, { configuration });
 	const remoteCommit = JSON.parse(runGh(["api", `repos/${repository}/commits/v${manifest.version}`]));
@@ -229,17 +263,21 @@ export async function promoteHomebrewLatest(directory, { runGh = gh, request = f
 	return true;
 }
 
-if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
-	const [command, directory, other] = process.argv.slice(2);
-	if (!directory) throw new Error("Usage: homebrew-release.mjs <collect|sign|verify|publish|verify-public|promote> DIRECTORY [OUTPUT]");
-	if (command === "collect") collectHomebrewRelease(directory, other, readReleaseArtifacts(".artifacts/release"));
-	else if (command === "sign") {
+const releaseActions = Object.freeze({
+	collect: (directory, output) => collectHomebrewRelease(directory, output, readReleaseArtifacts(".artifacts/release")),
+	sign: (directory) => {
 		assertHomebrewPublicationPolicy(JSON.parse(readFileSync(policyFile, "utf8")));
-		signHomebrewRelease(directory, process.env.HOMEBREW_SIGNING_KEY);
-	}
-	else if (command === "verify") readHomebrewRelease(directory);
-	else if (command === "publish") await publishHomebrewRelease(directory);
-	else if (command === "verify-public") await verifyPublicHomebrewRelease(directory);
-	else if (command === "promote") await promoteHomebrewLatest(directory);
-	else throw new Error("Unknown Homebrew release command");
+		return signHomebrewRelease(directory, process.env.HOMEBREW_SIGNING_KEY);
+	},
+	verify: (directory) => readHomebrewRelease(directory),
+	publish: (directory) => publishHomebrewRelease(directory),
+	"verify-public": (directory) => verifyPublicHomebrewRelease(directory),
+	promote: (directory) => promoteHomebrewLatest(directory),
+});
+
+export async function runHomebrewReleaseCommand(command, directory, output) {
+	if (!Object.hasOwn(releaseActions, command)) throw new Error("Unknown Homebrew release command");
+	return releaseActions[command](resolveReleaseDirectory(directory), output);
 }
+
+if (import.meta.main) await runHomebrewReleaseCommand(...process.argv.slice(2));

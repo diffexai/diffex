@@ -1,13 +1,13 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import { packReviewedPackage } from "./pack-reviewed-package.mjs";
 import { integrity, sha256 } from "./release-registry.mjs";
 import { getPublicWorkspacePackages } from "./release-packages.mjs";
 import { assertPackageVersion, git, isStableVersion } from "./release-source.mjs";
 import { assertHomebrewPublicationPolicy } from "./homebrew-policy.mjs";
+import { readRetainedFile, resolveReleaseDirectory, writeRetainedFile } from "./homebrew-release-paths.mjs";
 
 export function assertEnabledChannels(policy) {
 	if (
@@ -38,7 +38,8 @@ function sourceIdentity() {
 }
 
 export function readReleaseArtifacts(directory, { version, sourceCommit } = {}) {
-	const manifest = JSON.parse(readFileSync(join(directory, "manifest.json"), "utf8"));
+	directory = resolveReleaseDirectory(directory);
+	const manifest = JSON.parse(readRetainedFile(directory, "manifest.json", 1024 * 1024, "utf8"));
 	const identity = sourceIdentity();
 	if (
 		!/^[a-f0-9]{40}$/.test(identity.commit) ||
@@ -69,7 +70,7 @@ export function readReleaseArtifacts(directory, { version, sourceCommit } = {}) 
 		)
 			throw new Error(`Invalid approved artifact: ${pkg.name}`);
 		{
-			const bytes = readFileSync(join(directory, artifact.filename));
+			const bytes = readRetainedFile(directory, artifact.filename, 512 * 1024 * 1024);
 			if (
 				bytes.length !== artifact.size ||
 				sha256(bytes) !== artifact.sha256 ||
@@ -85,9 +86,9 @@ export function readReleaseArtifacts(directory, { version, sourceCommit } = {}) 
 		!manifest.modelData.length
 	)
 		throw new Error("Missing frozen source/model snapshot");
-	if (sha256(readFileSync(join(directory, "source.tar.gz"))) !== manifest.snapshot.sha256)
+	if (sha256(readRetainedFile(directory, "source.tar.gz", 512 * 1024 * 1024)) !== manifest.snapshot.sha256)
 		throw new Error("Frozen source snapshot integrity mismatch");
-	const inputs = JSON.parse(readFileSync(join(directory, "inputs.json"), "utf8"));
+	const inputs = JSON.parse(readRetainedFile(directory, "inputs.json", 1024 * 1024, "utf8"));
 	const { schemaVersion, packages: artifacts, ...recordedInputs } = manifest;
 	if (!isDeepStrictEqual(inputs, recordedInputs))
 		throw new Error("Approved manifest differs from the frozen build inputs");
@@ -103,6 +104,7 @@ function modelSnapshot() {
 }
 
 export function freezeReleaseInputs(directory) {
+	directory = resolveReleaseDirectory(directory);
 	if (existsSync(directory))
 		throw new Error("Artifact directory already exists; verify and reuse it instead of rebuilding");
 	if (git("status", "--porcelain", "--untracked-files=all"))
@@ -131,7 +133,7 @@ export function freezeReleaseInputs(directory) {
 		version,
 		source,
 		modelData,
-		snapshot: { filename: "source.tar.gz", sha256: sha256(readFileSync(join(directory, "source.tar.gz"))) },
+		snapshot: { filename: "source.tar.gz", sha256: sha256(readRetainedFile(directory, "source.tar.gz", 512 * 1024 * 1024)) },
 		toolchain: {
 			node: process.version,
 			npm: execFileSync("npm", ["--version"], { encoding: "utf8" }).trim(),
@@ -139,25 +141,26 @@ export function freezeReleaseInputs(directory) {
 			arch: process.arch,
 		},
 	};
-	writeFileSync(join(directory, "inputs.json"), `${JSON.stringify(inputs, null, 2)}\n`, { flag: "wx" });
+	writeRetainedFile(directory, "inputs.json", `${JSON.stringify(inputs, null, 2)}\n`);
 	return inputs;
 }
 
 export function prepareReleaseArtifacts(directory) {
+	directory = resolveReleaseDirectory(directory);
 	if (!existsSync(directory)) freezeReleaseInputs(directory);
 	if (existsSync(join(directory, "manifest.json")))
 		throw new Error("Approved artifacts already exist; never repack a published version");
-	const inputs = JSON.parse(readFileSync(join(directory, "inputs.json"), "utf8"));
+	const inputs = JSON.parse(readRetainedFile(directory, "inputs.json", 1024 * 1024, "utf8"));
 	if (
 		!isDeepStrictEqual(inputs.source, sourceIdentity()) ||
 		!isDeepStrictEqual(inputs.modelData, modelSnapshot()) ||
-		sha256(readFileSync(join(directory, "source.tar.gz"))) !== inputs.snapshot.sha256
+		sha256(readRetainedFile(directory, "source.tar.gz", 512 * 1024 * 1024)) !== inputs.snapshot.sha256
 	)
 		throw new Error("Frozen release inputs changed during the build");
 	const packages = assertPackageVersion(inputs.version);
 	const artifacts = packages.map((pkg) => {
 		const packed = packReviewedPackage(pkg, directory);
-		const bytes = readFileSync(packed.file);
+		const bytes = readRetainedFile(directory, basename(packed.file), 512 * 1024 * 1024);
 		return {
 			name: pkg.name,
 			version: inputs.version,
@@ -170,22 +173,23 @@ export function prepareReleaseArtifacts(directory) {
 	if (git("diff", "--name-only", "HEAD") || !isDeepStrictEqual(inputs.modelData, modelSnapshot()))
 		throw new Error("Build or packing changed release inputs");
 	const manifest = { schemaVersion: 1, ...inputs, packages: artifacts };
-	writeFileSync(join(directory, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, { flag: "wx" });
+	writeRetainedFile(directory, "manifest.json", `${JSON.stringify(manifest, null, 2)}\n`);
 	return readReleaseArtifacts(directory);
 }
 
-if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
+const artifactActions = Object.freeze({
+	freeze: freezeReleaseInputs,
+	prepare: prepareReleaseArtifacts,
+	verify: (directory) => readReleaseArtifacts(directory, {
+		sourceCommit: process.env.DIFFEX_SOURCE_COMMIT,
+		version: process.env.RELEASE_TAG?.slice(1),
+	}),
+});
+
+if (import.meta.main) {
 	const [command, directory] = process.argv.slice(2);
-	if (!directory || !["freeze", "prepare", "verify"].includes(command))
+	if (!directory || !Object.hasOwn(artifactActions, command))
 		throw new Error("Usage: node scripts/release-artifacts.mjs <freeze|prepare|verify> DIRECTORY");
-	const manifest =
-		command === "freeze"
-			? freezeReleaseInputs(directory)
-			: command === "prepare"
-				? prepareReleaseArtifacts(directory)
-				: readReleaseArtifacts(directory, {
-						sourceCommit: process.env.DIFFEX_SOURCE_COMMIT,
-						version: process.env.RELEASE_TAG?.slice(1),
-					});
+	const manifest = artifactActions[command](resolveReleaseDirectory(directory));
 	console.log(`Verified ${manifest.packages?.length ?? 0} retained artifacts for ${manifest.source.commit}`);
 }

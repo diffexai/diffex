@@ -1,15 +1,18 @@
 import assert from "node:assert/strict";
 import { createHash, generateKeyPairSync } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import { homebrewFixture } from "./fixtures/homebrew.mjs";
 import { assertHomebrewPublicationPolicy, HOMEBREW_TARGETS } from "./homebrew-policy.mjs";
-import { assertEnabledChannels } from "./release-artifacts.mjs";
+import { assertEnabledChannels, readReleaseArtifacts } from "./release-artifacts.mjs";
+import { readRetainedFile, releaseFilePath, resolveReleaseDirectory, writeRetainedFile } from "./homebrew-release-paths.mjs";
 import {
 	collectHomebrewRelease, downloadHomebrewAsset, homebrewReleaseUrl, publishHomebrewRelease,
-	promoteHomebrewLatest, readHomebrewRelease, signHomebrewRelease, trustedHomebrewKeys, verifyPublicHomebrewRelease,
+	promoteHomebrewLatest, readHomebrewRelease, runHomebrewReleaseCommand, signHomebrewRelease, trustedHomebrewKeys, verifyPublicHomebrewRelease,
 } from "./homebrew-release.mjs";
 
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
@@ -73,7 +76,8 @@ test("collect binds all platform bytes, source identities and inspection before 
 	const f = fixture();
 	try {
 		assert.deepEqual(readHomebrewRelease(f.directory, { configuration }), f.manifest);
-		assert.throws(() => collectHomebrewRelease(f.input, f.directory, f.release), /already exists/);
+		assert.throws(() => collectHomebrewRelease(f.input, f.directory, f.release,
+			(file) => f.records.get(basename(file))), /already exists/);
 		assert.throws(() => collectHomebrewRelease(f.input, join(f.root, "bad"), f.release,
 			() => ({ version: "8.0.0" })), /differs/);
 		assert.throws(() => readHomebrewRelease(f.directory, { configuration, version: "9.0.0" }), /mismatch/);
@@ -90,14 +94,86 @@ test("retained public files cannot be links, oversized metadata or extra unrevie
 		const outside = join(f.root, "outside");
 		writeFileSync(outside, readFileSync(archive));
 		rmSync(archive); symlinkSync(outside, archive);
-		assert.throws(() => readHomebrewRelease(f.directory, { configuration }), /file type/);
+		assert.throws(() => readHomebrewRelease(f.directory, { configuration }), /ELOOP|symbolic link|regular retained/);
 		rmSync(archive); writeFileSync(archive, readFileSync(outside));
 		writeFileSync(join(f.directory, "auth.json"), "must not upload");
 		assert.throws(() => readHomebrewRelease(f.directory, { configuration }), /Unexpected files/);
 		rmSync(join(f.directory, "auth.json"));
 		writeFileSync(join(f.directory, "homebrew-manifest.json"), Buffer.alloc(64 * 1024 + 1));
-		assert.throws(() => readHomebrewRelease(f.directory, { configuration }), /file type or size/);
+		assert.throws(() => readHomebrewRelease(f.directory, { configuration }), /regular retained/);
 	} finally { f.cleanup(); }
+});
+
+test("trusted directory and file validation rejects outside roots, unsafe names and symlink parents", () => {
+	const f = fixture();
+	try {
+		for (const directory of ["/etc/diffex-release", "/", "", undefined, "bad\0directory"])
+			assert.throws(() => resolveReleaseDirectory(directory));
+		for (const name of ["../auth.json", "auth/name", "auth\\name", ".", "..", "bad\0name"])
+			assert.throws(() => releaseFilePath(f.directory, name));
+		const linked = join(f.root, "linked");
+		symlinkSync(f.directory, linked);
+		assert.throws(() => readHomebrewRelease(linked, { configuration }), /symlink/);
+		assert.throws(() => collectHomebrewRelease(f.input, join(linked, "new"), f.release), /symlink/);
+		assert.throws(() => readReleaseArtifacts(linked), /symlink/);
+		const npm = join(f.root, "npm"); mkdirSync(npm);
+		symlinkSync(join(f.directory, "homebrew-manifest.json"), join(npm, "manifest.json"));
+		assert.throws(() => readReleaseArtifacts(npm), /ELOOP|symbolic link/);
+		assert.throws(() => writeRetainedFile(f.directory, "SHA256SUMS", "replacement"), { code: "EEXIST" });
+		assert.throws(() => readRetainedFile(f.directory, "homebrew-manifest.json", 1), /regular retained/);
+	} finally { f.cleanup(); }
+});
+
+test("collection inspects and copies private snapshots rather than reopening mutable input archives", () => {
+	const f = fixture();
+	try {
+		const output = join(f.root, "snapshot");
+		collectHomebrewRelease(f.input, output, f.release, (file) => {
+			const record = f.records.get(basename(file));
+			writeFileSync(join(f.input, record.platform, record.filename), "changed after inspection snapshot");
+			return record;
+		});
+		assert.deepEqual(readHomebrewRelease(output, { signature: false }), f.manifest);
+		assert.throws(() => collectHomebrewRelease(f.input, join(f.root, "invalid"),
+			{ version: "../../outside", source: f.release.source }), /release identity/);
+	} finally { f.cleanup(); }
+});
+
+test("signature creation is exclusive, idempotent, and does not follow an existing signature link", () => {
+	const f = fixture();
+	try {
+		assert.deepEqual(signHomebrewRelease(f.directory, privateKey, configuration), f.manifest);
+		const signature = join(f.directory, "SHA256SUMS.sig");
+		const outside = join(f.root, "outside-signature");
+		const bytes = readFileSync(signature); writeFileSync(outside, bytes);
+		rmSync(signature); symlinkSync(outside, signature);
+		assert.throws(() => signHomebrewRelease(f.directory, privateKey, configuration), /ELOOP|symbolic link/);
+		assert.deepEqual(readFileSync(outside), bytes);
+	} finally { f.cleanup(); }
+});
+
+test("fixed CLI actions reject inherited names and retain the sign publication policy gate", async () => {
+	for (const command of ["constructor", "__proto__", "toString", "unknown"])
+		await assert.rejects(runHomebrewReleaseCommand(command, "/etc/unused"), /Unknown/);
+	const f = fixture();
+	try {
+		await assert.rejects(runHomebrewReleaseCommand("sign", f.directory), /publication requires/);
+	} finally { f.cleanup(); }
+});
+
+test("release CLIs reject untrusted argv directories before artifact reads or remote actions", () => {
+	for (const [script, args, expected] of [
+		["homebrew-release.mjs", ["verify", "/etc/diffex-release"], /inside the workspace/],
+		["homebrew-release.mjs", ["constructor", "/etc/diffex-release"], /Unknown/],
+		["release-artifacts.mjs", ["verify", "/etc/diffex-release"], /inside the workspace/],
+		["release-artifacts.mjs", ["constructor", "/etc/diffex-release"], /Usage/],
+	]) {
+		const result = spawnSync(process.execPath, [fileURLToPath(new URL(`./${script}`, import.meta.url)), ...args],
+			{ encoding: "utf8", timeout: 10_000 });
+		assert.ifError(result.error);
+		assert.equal(result.status, 1);
+		assert.match(result.stderr, expected);
+	}
 });
 
 test("signature validation requires pinned RSA3072 identity and rejects tampering", () => {
@@ -129,6 +205,12 @@ test("bounded downloader permits only GitHub asset CDN redirects and exact sizes
 		: new Response("ok"))).toString(), "ok");
 	for (const location of ["http://github.com/x", "https://evil.test/a", "https://user:pass@release-assets.githubusercontent.com/a", "https://github.com/unrelated/a", "https://release-assets.githubusercontent.com:444/a"]) {
 		await assert.rejects(downloadHomebrewAsset(url, 2, async () => new Response(null, { status: 302, headers: { location } })), /origin/);
+	}
+	for (const initial of ["https://evil.test/a", "https://github.com/diffexai/diffex/releases/download/v1.2.3/auth.json",
+		`${url}?query=unexpected`, "https://github.com/diffexai/diffex/releases/download/v1.2.3/%2e%2e%2fauth.json"]) {
+		let requested = false;
+		await assert.rejects(downloadHomebrewAsset(initial, 2, async () => { requested = true; return new Response("ok"); }));
+		assert.equal(requested, false);
 	}
 	for (const response of [new Response("x"), new Response("xxx"), new Response("ok", { headers: { "content-length": "3" } }), new Response(null, { status: 404 })])
 		await assert.rejects(downloadHomebrewAsset(url, 2, async () => response), /size|truncated|exceeds|unavailable/);

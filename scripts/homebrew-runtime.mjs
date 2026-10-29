@@ -1,21 +1,87 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { closeSync, constants, fstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolveArtifactDirectory } from "./artifact-installation.mjs";
 
 export const MAX_HOMEBREW_BYTES = 512 * 1024 * 1024;
 export const HOMEBREW_PLATFORMS = ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64"];
 export const runtimePinsFile = fileURLToPath(new URL("../docs/release/node-runtime.json", import.meta.url));
 export const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");
 
+// CLI paths may live in the workspace, home, or temporary directory, but the
+// caller's own parent directory is not itself a trust anchor. Validate against
+// the shared artifact roots before canonicalizing, and never follow file links.
+export function resolveHomebrewFile(file) {
+	assert(typeof file === "string" && file.length > 0 && !/[\x00-\x1f\x7f\\]/.test(file), "Invalid Homebrew file path");
+	const name = basename(file);
+	assert(name !== "." && name !== ".." && /^[A-Za-z0-9_. -]+$/.test(name) && name.trim() === name, "Invalid Homebrew filename");
+	const directory = dirname(resolve(file));
+	for (const base of [process.cwd(), homedir(), tmpdir(), "/tmp"]) {
+		const root = realpathSync(base);
+		for (const anchor of [resolve(base), root]) {
+			const local = relative(anchor, directory);
+			if (isAbsolute(local) || local === ".." || local.startsWith("../")) continue;
+			// The shared validator rejects links in every descendant component.
+			// Translate canonical /private/tmp back to /tmp on macOS when needed.
+			const parent = realpathSync(local === "" ? base : resolveArtifactDirectory(join(base, local)));
+			const contained = relative(root, parent);
+			assert(!isAbsolute(contained) && contained !== ".." && !contained.startsWith("../"), "Homebrew directory escapes its trusted root");
+			const result = join(parent, name);
+			assert.equal(relative(parent, result), name, "Homebrew file escapes its trusted directory");
+			return result;
+		}
+	}
+	throw new Error("Homebrew file must be inside the workspace, home, or temporary directory");
+}
+
+export function readHomebrewFile(file, limit = MAX_HOMEBREW_BYTES, { optional = false } = {}) {
+	try {
+		return regularHomebrewBytes(resolveHomebrewFile(file), limit);
+	} catch (error) {
+		if (optional && error.code === "ENOENT") return undefined;
+		throw error;
+	}
+}
+
+function regularHomebrewBytes(file, limit) {
+	assert(Number.isSafeInteger(limit) && limit > 0 && limit <= MAX_HOMEBREW_BYTES, "Invalid Homebrew file byte limit");
+	const descriptor = openSync(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+	try {
+		const stat = fstatSync(descriptor);
+		assert(stat.isFile() && stat.size > 0 && stat.size <= limit, `Invalid regular retained file: ${basename(file)}`);
+		const chunks = [];
+		let size = 0;
+		// Read at most the inspected size plus one byte: concurrent growth cannot
+		// turn a bounded retained input into an unbounded allocation.
+		while (size <= stat.size) {
+			const chunk = Buffer.alloc(Math.min(64 * 1024, stat.size + 1 - size));
+			const count = readSync(descriptor, chunk, 0, chunk.length, null);
+			if (!count) break;
+			chunks.push(chunk.subarray(0, count));
+			size += count;
+		}
+		assert.equal(size, stat.size, "Retained Homebrew file size changed while reading");
+		return Buffer.concat(chunks, size);
+	} finally {
+		closeSync(descriptor);
+	}
+}
+
 export function readRuntimePins(file = runtimePinsFile) {
-	return validateRuntimePins(JSON.parse(readFileSync(file, "utf8")));
+	// The fixed module-owned authority remains trusted when publication fixtures
+	// run from an external cwd with an isolated HOME. This exception trusts only
+	// this compile-time file, never a caller-supplied parent or repository root.
+	const bytes = file === runtimePinsFile ? regularHomebrewBytes(runtimePinsFile, 64 * 1024) : readHomebrewFile(file, 64 * 1024);
+	return validateRuntimePins(JSON.parse(bytes.toString("utf8")));
 }
 
 export function validateRuntimePins(pins) {
 	assert.equal(pins.schemaVersion, 1, "Invalid Node runtime pins schema");
+	assert(typeof pins.nodeVersion === "string" && pins.nodeVersion.trim() === pins.nodeVersion, "Invalid Node version");
 	assert.match(pins.nodeVersion, /^22\.\d+\.\d+$/, "Homebrew requires a patched, maintained Node 22 release");
 	assert.match(pins.npmVersion, /^\d+\.\d+\.\d+$/);
 	assert.match(pins.releaseKey?.fingerprint, /^[A-F0-9]{40}$/);
@@ -65,6 +131,7 @@ export async function verifyHomebrewRuntime({
 	const identity = runtimeIdentity(pins, platform, arch);
 	assert.equal(platform, process.platform, "Runtime preparation requires a native OS runner");
 	assert.equal(arch, process.arch, "Runtime preparation requires a native CPU runner");
+	if (runtimeDirectory !== undefined) runtimeDirectory = resolveArtifactDirectory(runtimeDirectory);
 	// Only macOS/glibc Linux are supported. GPG still probes its agent socket
 	// during public-key import, so keep this private keyring below sockaddr_un's
 	// path limit even when the calling test/build has a deeply nested TMPDIR.
@@ -78,13 +145,8 @@ export async function verifyHomebrewRuntime({
 			[identity.filename, identity.url, identity.sha256, MAX_HOMEBREW_BYTES],
 		];
 		for (const [name, url, expected, limit] of inputs) {
-			const retained = runtimeDirectory && join(runtimeDirectory, name);
-			let bytes;
-			if (retained && existsSync(retained)) {
-				const stat = lstatSync(retained);
-				assert(stat.isFile() && stat.size <= limit, "Invalid retained Node input");
-				bytes = readFileSync(retained);
-			} else bytes = await boundedFetch(url, limit, fetcher);
+			const retained = runtimeDirectory === undefined ? undefined : readHomebrewFile(join(runtimeDirectory, name), limit, { optional: true });
+			const bytes = retained ?? await boundedFetch(url, limit, fetcher);
 			assert.equal(digest(bytes), expected, `Official Node input checksum mismatch: ${name}`);
 			writeFileSync(join(temporary, name), bytes, { flag: "wx" });
 		}

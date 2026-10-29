@@ -2,13 +2,18 @@ import { type ChildProcess, spawnSync } from "node:child_process";
 import { EventEmitter } from "node:events";
 import {
 	chmodSync,
+	closeSync,
+	constants,
 	existsSync,
+	fstatSync,
 	lstatSync,
 	mkdirSync,
 	mkdtempSync,
+	openSync,
 	readdirSync,
 	readFileSync,
 	realpathSync,
+	renameSync,
 	rmSync,
 	symlinkSync,
 	writeFileSync,
@@ -131,6 +136,30 @@ describe("bundled runtime layout", () => {
 		expect(isHomebrewInstall(packageDir)).toBe(false);
 	});
 
+	it("supports relocated package overrides outside a Homebrew layout", () => {
+		const relocated = join(tempDir, "custom installation");
+		renameSync(root, relocated);
+		expect(getBundledRuntime(join(relocated, "app", "node_modules", "@diffexai", "diffex"))?.root).toBe(relocated);
+		expect(isHomebrewInstall(join(relocated, "app", "node_modules", "@diffexai", "diffex"))).toBe(false);
+	});
+
+	it("rejects a symlinked package manifest even when it has the expected identity", () => {
+		const manifest = join(packageDir, "package.json");
+		const external = join(tempDir, "manifest.json");
+		writeFixture(external, JSON.stringify({ name: "@diffexai/diffex" }));
+		rmSync(manifest);
+		symlinkSync(external, manifest);
+		expect(getBundledRuntime(packageDir)).toBeUndefined();
+	});
+
+	it("rejects a payload runtime directory replaced by a sibling-prefix alias", () => {
+		const sibling = join(tempDir, "libexec", "diffex-other");
+		writeFixture(join(sibling, "bin", "node"));
+		rmSync(join(root, "runtime"), { recursive: true });
+		symlinkSync(sibling, join(root, "runtime"), "junction");
+		expect(getBundledRuntime(packageDir)).toBeUndefined();
+	});
+
 	it("requires the expected package identity", () => {
 		writeFixture(join(packageDir, "package.json"), JSON.stringify({ name: "other" }));
 		expect(getBundledRuntime(packageDir)).toBeUndefined();
@@ -246,13 +275,16 @@ describe("Homebrew ownership", () => {
 				.sort()
 				.map((path) => {
 					const fullPath = join(tempDir, path);
-					const stats = lstatSync(fullPath);
-					return {
-						path,
-						mode: stats.mode,
-						mtimeMs: stats.mtimeMs,
-						content: stats.isFile() ? readFileSync(fullPath, "base64") : undefined,
-					};
+					const entry = lstatSync(fullPath);
+					if (!entry.isFile()) return { path, mode: entry.mode, mtimeMs: entry.mtimeMs, content: undefined };
+					const fd = openSync(fullPath, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+					try {
+						const stats = fstatSync(fd);
+						if (!stats.isFile()) throw new Error("Fixture snapshot requires a regular file");
+						return { path, mode: stats.mode, mtimeMs: stats.mtimeMs, content: readFileSync(fd, "base64") };
+					} finally {
+						closeSync(fd);
+					}
 				});
 		const before = snapshot();
 		const result = spawnSync(

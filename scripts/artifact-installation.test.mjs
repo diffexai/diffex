@@ -31,6 +31,20 @@ test("artifact directories stay within trusted roots and reject symlink componen
 	}
 });
 
+test("canonical OS temporary-root aliases stay trusted without allowing arbitrary private paths", () => {
+	if (!existsSync("/tmp")) return;
+	const root = mkdtempSync(join("/tmp", "diffex-artifact-canonical-"));
+	try {
+		const canonical = realpathSync(root);
+		assert.equal(resolveArtifactDirectory(join(canonical, "new-consumer")), join(canonical, "new-consumer"));
+		const target = join(canonical, "target");
+		mkdirSync(target);
+		symlinkSync(target, join(canonical, "linked"));
+		assert.throws(() => resolveArtifactDirectory(join(canonical, "linked", "consumer")), /symlinks/);
+		assert.throws(() => resolveArtifactDirectory("/private/unapproved-diffex-artifacts"), /workspace, home, or temporary/);
+	} finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test("isolated installation environment copies literal non-secret allowlisted fields only", () => {
 	const root = mkdtempSync(join(tmpdir(), "diffex-artifact-env-"));
 	const original = { ...process.env };

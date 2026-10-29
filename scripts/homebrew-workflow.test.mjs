@@ -13,7 +13,13 @@ test("Homebrew candidates use native maintained targets and retained reviewed np
 		{ runner: "ubuntu-24.04-arm", platform: "linux-arm64" },
 		{ runner: "ubuntu-24.04", platform: "linux-x64" },
 	]);
+	const checkout = job.steps.find((step) => step.uses?.startsWith("actions/checkout@"));
+	assert.equal(checkout.with.ref, "${{ github.sha }}", "Dispatch inputs must not select executable workflow control code");
+	assert.equal(checkout.with["fetch-depth"], 0, "Local tag/main ancestry must be independently revalidated");
+	assert.equal(checkout.with["persist-credentials"], false);
+	const approved = job.steps.findIndex((step) => step.run === "node scripts/checkout-approved-release.mjs");
 	const restore = job.steps.findIndex((step) => step.run === "node scripts/restore-release-artifacts.mjs");
+	assert(approved >= 0 && approved < restore);
 	const build = job.steps.findIndex((step) => step.run?.startsWith("node scripts/prepare-homebrew-archive.mjs"));
 	const accept = job.steps.findIndex((step) => step.run?.includes("node scripts/homebrew-acceptance.mjs"));
 	assert(restore >= 0 && build > restore && accept > build);

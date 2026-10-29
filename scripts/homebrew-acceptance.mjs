@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { closeSync, constants, existsSync, fstatSync, ftruncateSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, delimiter, dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createLifecycleRegistry } from "./npm-lifecycle-registry.mjs";
+import { readHomebrewFile, resolveHomebrewFile } from "./homebrew-runtime.mjs";
+import { releaseFilePath, resolveReleaseDirectory } from "./homebrew-release-paths.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 export const homebrewMarker = { schemaVersion: 1, package: "@diffexai/diffex", formula: "diffexai/tap/diffex" };
@@ -13,11 +15,14 @@ const tools = ["sh", "bash", "dirname", "readlink", "uname", "cat", "env", "tmux
 export const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 
 export function verifyHomebrewRecord(archive, record, { platform = process.platform, arch = process.arch } = {}) {
+	return validateHomebrewRecord(archive, record, readHomebrewFile(archive), platform, arch);
+}
+
+function validateHomebrewRecord(archive, record, bytes, platform, arch) {
 	assert.equal(record.platform, `${platform}-${arch}`, "Archive must be tested on its native platform");
 	assert.equal(record.filename, basename(archive), "Archive filename mismatch");
 	assert.match(record.sourceCommit, /^[a-f0-9]{40}$/, "Missing source commit");
 	assert.match(record.version, /^\d+\.\d+\.\d+(?:[-+][\w.-]+)?$/, "Missing candidate version");
-	const bytes = readFileSync(archive);
 	assert.equal(bytes.length, record.size, "Archive size mismatch");
 	assert.equal(sha256(bytes), record.sha256, "Archive SHA256 mismatch");
 	return record;
@@ -63,19 +68,34 @@ export function linkHomebrewFixtureModules(payload, fixtureRoot) {
 }
 
 export function payloadDigest(directory) {
+	const root = realpathSync(directory);
 	const entries = [];
 	function visit(current) {
-		for (const name of readdirSync(current).sort()) {
-			const file = join(current, name);
-			const info = lstatSync(file);
-			if (info.isDirectory()) {
-				entries.push([relative(directory, file), info.mode & 0o777, "directory"]);
-				visit(file);
+		assert(current === root || current.startsWith(root + sep), "Digest directory escapes its root");
+		assert.equal(realpathSync(current), current, "Digest directory must not traverse links");
+		for (const entry of readdirSync(current, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+			const file = resolve(current, entry.name);
+			assert(file.startsWith(root + sep), "Digest entry escapes its root");
+			if (entry.isSymbolicLink()) {
+				// Hash the link itself, not bytes from an arbitrary target.
+				entries.push([relative(root, file), "symlink", readlinkSync(file)]);
+				continue;
 			}
-			else entries.push([relative(directory, file), info.mode & 0o777, info.isSymbolicLink() ? realpathSync(file) : sha256(readFileSync(file))]);
+			assert.equal(realpathSync(file), file, "Digest entry must not traverse links");
+			const fd = openSync(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+			try {
+				const info = fstatSync(fd);
+				if (info.isDirectory()) {
+					entries.push([relative(root, file), info.mode & 0o777, "directory"]);
+					visit(file);
+				} else {
+					assert(info.isFile(), "Digest requires regular files or directories");
+					entries.push([relative(root, file), info.mode & 0o777, sha256(readFileSync(fd))]);
+				}
+			} finally { closeSync(fd); }
 		}
 	}
-	visit(directory);
+	visit(root);
 	return sha256(JSON.stringify(entries));
 }
 
@@ -118,9 +138,10 @@ export async function exerciseHomebrewPayload(payload, root, record) {
 	mkdirSync(fixtureRoot);
 	const before = payloadDigest(payload);
 	const checks = [];
-	for (const [name, args, expected] of [["help", ["--help"], /Usage/i], ["version", ["--version"], new RegExp(`^${record.version.replaceAll(".", "\\.")}\\s*$`)], ["models", ["--list-models"], /\S/]]) {
+	for (const [name, args, expected] of [["help", ["--help"], /Usage/i], ["version", ["--version"], undefined], ["models", ["--list-models"], /\S/]]) {
 		const result = await execute(executable, args, env, project);
-		assert.match(result.stdout, expected, `${name} output mismatch`);
+		if (name === "version") assert.equal(result.stdout.trimEnd(), record.version, "version output mismatch");
+		else assert.match(result.stdout, expected, `${name} output mismatch`);
 		checks.push(name);
 	}
 	linkHomebrewFixtureModules(payload, fixtureRoot);
@@ -171,15 +192,21 @@ export async function exerciseHomebrewPayload(payload, root, record) {
 }
 
 export async function acceptHomebrewArchive(archive, recordFile, output) {
-	const record = verifyHomebrewRecord(archive, JSON.parse(readFileSync(recordFile, "utf8")));
+	archive = resolveHomebrewFile(archive);
+	const archiveBytes = readHomebrewFile(archive);
+	const record = validateHomebrewRecord(archive, JSON.parse(readHomebrewFile(recordFile, 64 * 1024).toString("utf8")), archiveBytes, process.platform, process.arch);
+	output = resolveReleaseDirectory(output);
 	mkdirSync(output, { recursive: true });
-	const temporary = mkdtempSync(join(tmpdir(), "diffex-homebrew-acceptance-"));
+	const temporary = realpathSync(mkdtempSync(join(tmpdir(), "diffex-homebrew-acceptance-")));
 	const repository = resolve(here, "..");
 	assert(!realpathSync(temporary).startsWith(realpathSync(repository) + sep), "Acceptance must run outside repository");
 	const report = { schemaVersion: 1, sourceCommit: record.sourceCommit, platform: record.platform, archiveSha256: record.sha256, status: "failed", cleanup: false, kind: "archive-not-brew-lifecycle" };
 	try {
+		// Extract exactly the bytes that were verified, not a reopened caller path.
+		const retainedArchive = join(temporary, "candidate.tar.gz");
+		writeFileSync(retainedArchive, archiveBytes, { flag: "wx" });
 		const libexec = join(temporary, "cellar/libexec");
-		const extracted = spawnSync("python3", [join(here, "homebrew-extract.py"), resolve(archive), libexec], { encoding: "utf8" });
+		const extracted = spawnSync("python3", [join(here, "homebrew-extract.py"), retainedArchive, libexec], { encoding: "utf8" });
 		assert.equal(extracted.status, 0, "Candidate extraction failed safety checks");
 		writeFileSync(join(libexec, ".diffex-homebrew.json"), JSON.stringify(homebrewMarker));
 		Object.assign(report, await exerciseHomebrewPayload(join(libexec, "diffex"), temporary, record));
@@ -189,14 +216,19 @@ export async function acceptHomebrewArchive(archive, recordFile, output) {
 		rmSync(temporary, { recursive: true, force: true });
 		report.cleanup = !existsSync(temporary);
 		// Publish a fixed-schema summary only. No logs, environment, auth/config or raw failures.
-		writeFileSync(join(output, "homebrew-acceptance.json"), `${JSON.stringify(report, null, 2)}\n`);
+		const fd = openSync(releaseFilePath(output, "homebrew-acceptance.json"), constants.O_WRONLY | constants.O_CREAT | constants.O_NOFOLLOW | constants.O_NONBLOCK, 0o644);
+		try {
+			assert(fstatSync(fd).isFile(), "Evidence summary must be a regular file");
+			ftruncateSync(fd, 0);
+			writeFileSync(fd, `${JSON.stringify(report, null, 2)}\n`);
+		} finally { closeSync(fd); }
 	}
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
 	const [archive, record, output] = process.argv.slice(2);
 	assert(archive && record && output, "Usage: node scripts/homebrew-acceptance.mjs ARCHIVE RECORD OUTPUT");
-	acceptHomebrewArchive(resolve(archive), resolve(record), resolve(output)).catch(() => {
+	acceptHomebrewArchive(archive, record, output).catch(() => {
 		console.error("Homebrew archive acceptance failed; see fixed-schema evidence summary");
 		process.exitCode = 1;
 	});

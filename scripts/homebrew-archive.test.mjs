@@ -4,7 +4,7 @@ import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, re
 import { dirname, join, resolve } from "node:path";
 import { after, before, test } from "node:test";
 import { distributionDocs } from "./cli-distribution.mjs";
-import { HOMEBREW_LAUNCHER, homebrewArchiveUrl, inspectHomebrewArchive, prepareHomebrewArchive, substituteHomebrewInstallLock } from "./homebrew-archive.mjs";
+import { HOMEBREW_LAUNCHER, homebrewArchiveFilename, homebrewArchiveUrl, inspectHomebrewArchive, prepareHomebrewArchive, substituteHomebrewInstallLock, validateHomebrewSource } from "./homebrew-archive.mjs";
 import { digest, HOMEBREW_PLATFORMS, MAX_HOMEBREW_BYTES, readRuntimePins, runtimeIdentity, verifyHomebrewRuntime } from "./homebrew-runtime.mjs";
 import { integrity } from "./release-registry.mjs";
 import { createDistributionManifest } from "./release-distribution-manifest.mjs";
@@ -171,6 +171,68 @@ test("archive preparation refuses cross compilation, mutated retained inputs, an
 	await assert.rejects(prepareHomebrewArchive({ ...options, arch: process.arch === "arm64" ? "x64" : "arm64" }), /native CPU/);
 	await assert.rejects(prepareHomebrewArchive(options), /already exist/);
 	await assert.rejects(prepareHomebrewArchive({ ...options, outputDirectory: join(directory, "bad-source"), manifest: { ...manifest, packages: [{ ...manifest.packages[0], sha256: "0".repeat(64) }] } }), /checksum mismatch/);
+});
+
+test("retained archive/source reads reject linked files and untrusted directories", () => {
+	const linked = join(directory, "linked-archive.tar.gz");
+	symlinkSync(archive, linked);
+	assert.throws(() => inspectHomebrewArchive(linked), { code: "ELOOP" });
+	assert.throws(() => inspectHomebrewArchive("/etc/passwd"), /must be inside/);
+	const release = join(directory, "linked-release-input");
+	mkdirSync(release);
+	symlinkSync(join(directory, "release", manifest.packages[0].filename), join(release, manifest.packages[0].filename));
+	assert.throws(() => validateHomebrewSource(release, manifest), { code: "ELOOP" });
+	for (const candidate of ["1.2.3\n", "../1.2.3", "1.2.3/../../other"])
+		assert.throws(() => homebrewArchiveFilename(candidate, target));
+});
+
+test("archive output reservations refuse collisions without following links or damaging retained bytes", async () => {
+	const options = { releaseDirectory: join(directory, "release"), manifest, runtimeDirectory, runtimePins: pins,
+		fetcher: () => { throw new Error("Network forbidden"); } };
+	const filename = homebrewArchiveFilename(version, target);
+	const recordName = filename.replace(/\.tar\.gz$/, ".json");
+	const sentinel = join(directory, "retained-sentinel");
+	writeFileSync(sentinel, "must remain unchanged");
+	for (const collision of [filename, recordName]) {
+		const outputDirectory = join(directory, `collision-${collision}`);
+		mkdirSync(outputDirectory);
+		symlinkSync(sentinel, join(outputDirectory, collision));
+		await assert.rejects(prepareHomebrewArchive({ ...options, outputDirectory }), { code: "EEXIST" });
+		assert.equal(readFileSync(sentinel, "utf8"), "must remain unchanged");
+		assert.equal(readFileSync(join(outputDirectory, collision), "utf8"), "must remain unchanged");
+		assert(!existsSync(join(outputDirectory, collision === filename ? recordName : filename)), "remove only this invocation's incomplete reservation");
+	}
+	const failed = join(directory, "failed-reservations");
+	await assert.rejects(prepareHomebrewArchive({ ...options, outputDirectory: failed,
+		manifest: { ...manifest, packages: [{ ...manifest.packages[0], sha256: "0".repeat(64) }] } }), /checksum mismatch/);
+	assert(!existsSync(join(failed, filename)));
+	assert(!existsSync(join(failed, recordName)));
+});
+
+test("offline runtime cache refuses final and parent symlinks instead of fetching around them", async () => {
+	const cache = join(directory, "linked-runtime");
+	cpSync(runtimeDirectory, cache, { recursive: true });
+	const input = join(cache, "release-key.asc");
+	rmSync(input);
+	symlinkSync(join(runtimeDirectory, "release-key.asc"), input);
+	const options = { pins, fetcher: () => assert.fail("Invalid retained input must not fall back to network") };
+	await assert.rejects(verifyHomebrewRuntime({ ...options, runtimeDirectory: cache }), { code: "ELOOP" });
+	const parent = join(directory, "linked-runtime-parent");
+	symlinkSync(runtimeDirectory, parent);
+	await assert.rejects(verifyHomebrewRuntime({ ...options, runtimeDirectory: parent }), /symlink/);
+});
+
+test("a missing offline runtime input still uses the bounded pinned fetch path", async () => {
+	const cache = join(directory, "partial-runtime");
+	cpSync(runtimeDirectory, cache, { recursive: true });
+	rmSync(join(cache, "release-key.asc"));
+	const requested = [];
+	const runtime = await verifyHomebrewRuntime({ runtimeDirectory: cache, pins, fetcher: async (url) => {
+		requested.push(url);
+		return new Response(readFileSync(join(runtimeDirectory, "release-key.asc")));
+	} });
+	assert.equal(runtime.identity.sha256, pins.platforms[target]);
+	assert.deepEqual(requested, [`https://keys.openpgp.org/vks/v1/by-fingerprint/${pins.releaseKey.fingerprint}`]);
 });
 
 test("offline runtime verification rejects corrupt signed inputs and an unauthorized signer", async () => {

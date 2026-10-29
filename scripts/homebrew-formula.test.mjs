@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { homebrewFixture } from "./fixtures/homebrew.mjs";
 import { generateHomebrewFormula, HOMEBREW_PLATFORMS, homebrewAssetUrl, validateHomebrewManifest } from "./homebrew-formula.mjs";
@@ -66,6 +69,45 @@ test("canonical formula pins fixed assets and preserves the whole bundled runtim
 	assert(formula.indexOf("before = snapshot.call") < formula.indexOf("shell_output(\"#{bin}/diffex update --self\")"));
 	const ruby = spawnSync("ruby", ["-c"], { input: formula, encoding: "utf8" });
 	if (!ruby.error) assert.equal(ruby.status, 0, ruby.stderr);
+});
+
+test("formula CLI validates trusted paths and refuses linked or nonregular inputs/outputs", () => {
+	const directory = mkdtempSync(join(tmpdir(), "diffex-formula-paths-"));
+	const script = fileURLToPath(new URL("./homebrew-formula.mjs", import.meta.url));
+	const { manifest, manifestBytes } = homebrewFixture();
+	const input = join(directory, "approved manifest.json");
+	const output = join(directory, "diffex formula.rb");
+	const run = (source, destination) => spawnSync(process.execPath, [script, source, destination], { cwd: directory, encoding: "utf8" });
+	try {
+		writeFileSync(input, manifestBytes);
+		assert.equal(run("approved manifest.json", "diffex formula.rb").status, 0);
+		assert.equal(readFileSync(output, "utf8"), generateHomebrewFormula(manifest));
+		writeFileSync(output, "stale generated contents".repeat(1000));
+		assert.equal(run(input, output).status, 0, "intentional formula regeneration remains supported");
+		assert.equal(readFileSync(output, "utf8"), generateHomebrewFormula(manifest));
+		const link = join(directory, "linked.json");
+		symlinkSync(input, link);
+		assert.notEqual(run(link, output).status, 0);
+		const target = join(directory, "do-not-overwrite.rb");
+		writeFileSync(target, "original");
+		const linkedOutput = join(directory, "linked.rb");
+		symlinkSync(target, linkedOutput);
+		assert.notEqual(run(input, linkedOutput).status, 0);
+		assert.equal(readFileSync(target, "utf8"), "original");
+		const parent = join(directory, "linked-parent");
+		symlinkSync(directory, parent);
+		assert.notEqual(run(join(parent, "approved manifest.json"), output).status, 0);
+		assert.notEqual(run(input, join(parent, "generated.rb")).status, 0);
+		assert.notEqual(run("/etc/passwd", output).status, 0);
+		assert.notEqual(run(input, "/etc/diffex-homebrew-test.rb").status, 0);
+		const nonregular = join(directory, "directory.rb");
+		mkdirSync(nonregular);
+		assert.notEqual(run(input, nonregular).status, 0);
+		writeFileSync(input, Buffer.alloc(64 * 1024 + 1, "x"));
+		assert.notEqual(run(input, output).status, 0);
+	} finally {
+		rmSync(directory, { recursive: true, force: true });
+	}
 });
 
 test("tap CI template exercises four native targets without executing PR-controlled workflows with credentials", () => {

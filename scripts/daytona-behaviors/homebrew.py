@@ -32,13 +32,36 @@ TOOLS = ("sh", "bash", "dirname", "readlink", "uname", "cat", "env", "tmux", "py
          "date", "realpath", "cut", "sort", "wc", "find", "xargs", "ls", "cp", "rm")
 
 
+def safe_directory(value):
+    """Restrict CLI inputs to the workspace or native temporary directories."""
+    directory = Path(value).resolve()
+    roots = (Path.cwd().resolve(), Path(tempfile.gettempdir()).resolve(), Path("/tmp").resolve())
+    if not any(root != Path(root.anchor) and
+               (directory == root or str(directory).startswith(str(root) + os.sep)) for root in roots):
+        raise ValueError("Directory must be inside the workspace or a temporary directory")
+    return directory
+
+
+def retained_file(directory, name, suffix):
+    """Validate a retained basename and reject symlinks before accessing its bytes."""
+    if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*" + re.escape(suffix), name):
+        raise ValueError("Invalid retained filename")
+    path = (directory / name).resolve(strict=True)
+    if not str(path).startswith(str(directory) + os.sep) or path != directory / name:
+        raise ValueError("Retained file must be directly inside the artifact directory")
+    if not path.is_file():
+        raise ValueError("Retained artifact must be a regular file")
+    return path
+
+
 def candidate_formula(archive, record, revision=0):
     # Explicit trusted prepublication file fixture. No production URL override API.
     # Brew strips the sole diffex/ archive root before the canonical install stanza.
+    archive = retained_file(safe_directory(archive.parent), archive.name, ".tar.gz")
     return f'''class Diffex < Formula
   desc "Diffex retained candidate lifecycle fixture (not the published tap)"
   homepage "https://github.com/diffexai/diffex"
-  url {json.dumps(archive.resolve().as_uri())}
+  url {json.dumps(archive.as_uri())}
   version {json.dumps(record["version"])}
   sha256 {json.dumps(record["sha256"])}
   revision {revision}
@@ -95,7 +118,7 @@ def verify_payload_inventory(payload, record):
         path, info = actual[name]
         assert type(item["mode"]) is int and stat.S_IMODE(info.st_mode) == item["mode"], "Installed payload mode differs from retained inventory"
         if item["type"] == "link":
-            assert stat.S_ISLNK(info.st_mode) and item["mode"] == 0o777, "Installed payload link type changed"
+            assert stat.S_ISLNK(info.st_mode) and item["mode"] in {0o755, 0o777}, "Installed payload link type changed"
             assert os.readlink(path) == item["target"], "Installed payload link target changed"
             assert not Path(item["target"]).is_absolute() and path.resolve(strict=True).is_relative_to(payload), "Installed payload link escapes or is dangling"
         else:
@@ -146,9 +169,13 @@ def fingerprint(directory):
 
 
 def choose_record(artifacts, commit):
+    artifacts = safe_directory(artifacts)
+    if not artifacts.is_dir():
+        raise ValueError("Artifact directory does not exist")
     native = sys.platform + "-" + {"x86_64": "x64", "aarch64": "arm64", "arm64": "arm64"}[platform.machine()]
     candidates = []
-    for path in artifacts.glob("*.json"):
+    for entry in artifacts.glob("*.json"):
+        path = retained_file(artifacts, entry.name, ".json")
         value = json.loads(path.read_text())
         if value.get("platform") == native and value.get("filename", "").endswith(".tar.gz"):
             candidates.append((path, value))
@@ -158,8 +185,7 @@ def choose_record(artifacts, commit):
     assert record["sourceCommit"] == commit
     assert re.fullmatch(r"\d+\.\d+\.\d+", record["version"])
     assert re.fullmatch(r"[a-f0-9]{64}", record["sha256"])
-    assert Path(record["filename"]).name == record["filename"]
-    archive = artifacts / record["filename"]
+    archive = retained_file(artifacts, record["filename"], ".tar.gz")
     content = archive.read_bytes()
     assert len(content) == record["size"] and hashlib.sha256(content).hexdigest() == record["sha256"]
     return archive, path, record
@@ -170,6 +196,9 @@ class HomebrewRunner(Runner):
         # Existing deterministic provider/tools/TUI/cancel/resume implementation.
         args.mode = "deterministic"
         args.update_baselines = False
+        args.output = safe_directory(args.output)
+        if getattr(args, "artifacts", None) is not None:
+            args.artifacts = safe_directory(args.artifacts)
         super().__init__(args)
         self.payload = None
         self.tools = None
@@ -340,8 +369,8 @@ class HomebrewRunner(Runner):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--artifacts", type=lambda value: Path(value).resolve(), required=True)
-    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--artifacts", type=safe_directory, required=True)
+    parser.add_argument("--output", type=safe_directory, required=True)
     parser.add_argument("--commit", required=True)
     parser.add_argument("--mode", choices=["homebrew"], default="homebrew")
     parser.add_argument("--lifecycle-only", action="store_true",

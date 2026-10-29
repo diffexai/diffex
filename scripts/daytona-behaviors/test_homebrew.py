@@ -9,7 +9,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from homebrew import HomebrewRunner, MARKER, candidate_formula, choose_record, fingerprint, link_fixture_modules, verify_payload_inventory
+from homebrew import HomebrewRunner, MARKER, candidate_formula, choose_record, fingerprint, link_fixture_modules, safe_directory, verify_payload_inventory
 from daytona_runner import REMOTE_BUNDLE, Runner as DaytonaRunner, State
 from test_daytona_runner import FakeClient
 import time
@@ -56,8 +56,6 @@ def make_payload_fixture(payload):
     (payload / "bin/diffex").chmod(0o755)
     link = payload / "bin/alias"
     link.symlink_to("diffex")
-    if stat.S_IMODE(link.lstat().st_mode) != 0o777:
-        os.chmod(link, 0o777, follow_symlinks=False)
     seal_payload_fixture(payload, record)
     return record
 
@@ -66,6 +64,7 @@ class HomebrewTests(unittest.TestCase):
     def test_formula_uses_explicit_local_archive_and_canonical_marker_layout(self):
         with tempfile.TemporaryDirectory() as temporary:
             archive = Path(temporary) / "candidate.tar.gz"
+            archive.write_bytes(b"retained")
             record = {"version": "1.2.3", "sha256": "a" * 64}
             formula = candidate_formula(archive, record, 1)
             self.assertIn(archive.resolve().as_uri(), formula)
@@ -76,6 +75,75 @@ class HomebrewTests(unittest.TestCase):
             self.assertEqual(MARKER["schemaVersion"], 1)
             self.assertNotIn("https://github.com/diffexai/diffex/releases/download", formula)
 
+    def test_cli_directories_preserve_native_temporary_paths_and_reject_external_roots(self):
+        for parent in (None, "/tmp"):
+            with self.subTest(parent=parent), tempfile.TemporaryDirectory(dir=parent) as temporary:
+                root = Path(temporary).resolve()
+                self.assertEqual(safe_directory(root / "retained"), root / "retained")
+                runner = HomebrewRunner(argparse.Namespace(output=root / "evidence", artifacts=root,
+                                                           commit="a" * 40))
+                self.assertEqual(runner.output, root / "evidence")
+                self.assertEqual(runner.args.artifacts, root)
+        with self.assertRaises(ValueError):
+            safe_directory("/etc")
+        with self.assertRaises(ValueError):
+            HomebrewRunner(argparse.Namespace(output=Path("/etc"), commit="a" * 40))
+        with tempfile.TemporaryDirectory() as temporary:
+            link = Path(temporary) / "escape"
+            link.symlink_to("/etc", target_is_directory=True)
+            with self.assertRaises(ValueError):
+                safe_directory(link / "evidence")
+
+    def test_formula_rejects_archive_symlinks_and_unexpected_filenames(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            archive = root / "retained/candidate.tar.gz"
+            archive.parent.mkdir()
+            archive.write_bytes(b"retained")
+            outside = root / "retained-sibling/candidate.tar.gz"
+            outside.parent.mkdir()
+            outside.write_bytes(b"outside")
+            record = {"version": "1.2.3", "sha256": "a" * 64}
+            for target in (archive, outside):
+                with self.subTest(target=target):
+                    link = archive.parent / "linked.tar.gz"
+                    link.symlink_to(target)
+                    with self.assertRaises(ValueError):
+                        candidate_formula(link, record)
+                    link.unlink()
+            with self.assertRaises(ValueError):
+                candidate_formula(archive.with_name("not-an-archive.txt"), record)
+
+    def test_record_selection_rejects_unsafe_archive_names_and_symlink_escapes(self):
+        with tempfile.TemporaryDirectory() as temporary, patch("homebrew.platform.machine", return_value="x86_64"), patch("homebrew.sys.platform", "linux"):
+            root = Path(temporary)
+            artifacts = root / "retained"
+            artifacts.mkdir()
+            outside = root / "retained-sibling/candidate.tar.gz"
+            outside.parent.mkdir()
+            outside.write_bytes(b"retained")
+            record = {"version": "1.2.3", "sourceCommit": "a" * 40, "platform": "linux-x64",
+                      "filename": "candidate.tar.gz", "size": 8, "sha256": hashlib.sha256(b"retained").hexdigest()}
+            record_path = artifacts / "candidate.json"
+            for name in ("../retained-sibling/candidate.tar.gz", str(outside), "nested/candidate.tar.gz",
+                         r"..\candidate.tar.gz", "C:candidate.tar.gz", ".hidden.tar.gz", "line\nbreak.tar.gz"):
+                with self.subTest(filename=name):
+                    record_path.write_text(json.dumps({**record, "filename": name}))
+                    with self.assertRaises(ValueError):
+                        choose_record(artifacts, "a" * 40)
+            record_path.write_text(json.dumps(record))
+            archive = artifacts / "candidate.tar.gz"
+            archive.symlink_to(outside)
+            with self.assertRaises(ValueError):
+                choose_record(artifacts, "a" * 40)
+            archive.unlink()
+            archive.write_bytes(b"retained")
+            external_record = outside.with_suffix(".json")
+            record_path.replace(external_record)
+            record_path.symlink_to(external_record)
+            with self.assertRaises(ValueError):
+                choose_record(artifacts, "a" * 40)
+
     def test_record_selection_verifies_source_hash_size_and_unique_native_record(self):
         with tempfile.TemporaryDirectory() as temporary, patch("homebrew.platform.machine", return_value="x86_64"), patch("homebrew.sys.platform", "linux"):
             root = Path(temporary)
@@ -85,7 +153,12 @@ class HomebrewTests(unittest.TestCase):
                       "filename": archive.name, "size": 8, "sha256": hashlib.sha256(b"retained").hexdigest()}
             path = root / "candidate.json"
             path.write_text(json.dumps(record))
-            self.assertEqual(choose_record(root, "a" * 40), (archive, path, record))
+            self.assertEqual(choose_record(root, "a" * 40), (archive.resolve(), path.resolve(), record))
+            duplicate = root / "duplicate.json"
+            duplicate.write_text(json.dumps(record))
+            with self.assertRaises(AssertionError):
+                choose_record(root, "a" * 40)
+            duplicate.unlink()
             with self.assertRaises(AssertionError):
                 choose_record(root, "b" * 40)
             archive.write_bytes(b"tampered")
@@ -112,6 +185,7 @@ class HomebrewTests(unittest.TestCase):
             runner = HomebrewRunner(argparse.Namespace(output=root / "evidence", commit="a" * 40,
                                                        artifacts=root, lifecycle_only=True))
             record = {"version": "1.2.3", "sha256": "b" * 64, "filename": "candidate.tar.gz"}
+            (root / "candidate.tar.gz").write_bytes(b"retained")
             calls = []
             revision = 0
             present = False
@@ -179,7 +253,7 @@ class HomebrewTests(unittest.TestCase):
                 elif mutation == "size":
                     data.write_text("truncated")
                 elif mutation == "mode":
-                    data.chmod(0o600)
+                    data.chmod(0o744)
                 elif mutation == "missing":
                     data.unlink()
                 elif mutation == "extra":
@@ -190,8 +264,6 @@ class HomebrewTests(unittest.TestCase):
                 elif mutation == "link":
                     (payload / "bin/alias").unlink()
                     (payload / "bin/alias").symlink_to("../data.txt")
-                    if stat.S_IMODE((payload / "bin/alias").lstat().st_mode) != 0o777:
-                        os.chmod(payload / "bin/alias", 0o777, follow_symlinks=False)
                 elif mutation in {"source", "version", "platform", "runtime"}:
                     metadata = json.loads((payload / "distribution.json").read_text())
                     if mutation == "runtime":
@@ -217,6 +289,26 @@ class HomebrewTests(unittest.TestCase):
                         verify_payload_inventory(payload, record)
                 if before is not None:
                     self.assertEqual(fingerprint(payload), before, "Inventory verification mutated the candidate")
+
+    def test_installed_inventory_requires_exact_declared_native_symlink_mode(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            payload = Path(temporary) / "payload"
+            record = make_payload_fixture(payload)
+            link = payload / "bin/alias"
+            mode = stat.S_IMODE(link.lstat().st_mode)
+            self.assertIn(mode, {0o755, 0o777})
+            verify_payload_inventory(payload, record)
+            inventory_path = payload / "distribution-files.json"
+            inventory = json.loads(inventory_path.read_text())
+            item = next(item for item in inventory["files"] if item["path"] == "bin/alias")
+            self.assertEqual(item["mode"], mode)
+            item["mode"] = 0o755 if mode == 0o777 else 0o777
+            inventory_path.write_text(json.dumps(inventory))
+            record["inventorySha256"] = hashlib.sha256(inventory_path.read_bytes()).hexdigest()
+            before = fingerprint(payload)
+            with self.assertRaisesRegex(AssertionError, "mode differs"):
+                verify_payload_inventory(payload, record)
+            self.assertEqual(fingerprint(payload), before)
 
     def test_external_provider_modules_link_to_cli_bundled_layout_without_top_level_ai_or_tui(self):
         with tempfile.TemporaryDirectory() as temporary:

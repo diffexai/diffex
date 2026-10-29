@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
-import { readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { closeSync, constants, fstatSync, ftruncateSync, openSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { readHomebrewFile, resolveHomebrewFile } from "./homebrew-runtime.mjs";
 
 export const HOMEBREW_PLATFORMS = Object.freeze(["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64"]);
 export const HOMEBREW_MAX_ASSET_SIZE = 512 * 1024 * 1024;
@@ -62,5 +63,15 @@ export function generateHomebrewFormula(manifest) {
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
 	const [manifest, output, ...extra] = process.argv.slice(2);
 	assert(manifest && output && !extra.length, "Usage: node scripts/homebrew-formula.mjs MANIFEST OUTPUT");
-	writeFileSync(output, generateHomebrewFormula(JSON.parse(readFileSync(manifest, "utf8"))));
+	const formula = generateHomebrewFormula(JSON.parse(readHomebrewFile(manifest, 64 * 1024).toString("utf8")));
+	const descriptor = openSync(resolveHomebrewFile(output), constants.O_WRONLY | constants.O_CREAT | constants.O_NOFOLLOW | constants.O_NONBLOCK, 0o644);
+	try {
+		assert(fstatSync(descriptor).isFile(), "Formula output must be a regular file");
+		// Keep intentional regeneration of existing formula files, but only after
+		// validating the opened descriptor, never by following a caller's symlink.
+		ftruncateSync(descriptor, 0);
+		writeFileSync(descriptor, formula);
+	} finally {
+		closeSync(descriptor);
+	}
 }

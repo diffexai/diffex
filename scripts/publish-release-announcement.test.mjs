@@ -1,7 +1,37 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createPublicationFixture } from "./fixtures/release-publication/harness.mjs";
-import { advanceLatestRelease, compareReleaseVersions } from "./publish-release-announcement.mjs";
+import { advanceLatestRelease, compareReleaseVersions, verifyAnnouncementChannels } from "./publish-release-announcement.mjs";
+import { HOMEBREW_TARGETS } from "./homebrew-policy.mjs";
+
+test("announcement channel actions always validate policy and cannot bypass enabled Homebrew verification", async () => {
+	const policy = {
+		status: "approved", sourceRepository: "diffexai/diffex", publicRegistry: "https://registry.npmjs.org", publicHosting: "npmjs",
+		channels: { npmjs: "enable", homebrew: "enable", standalone: "defer" },
+		homebrewApproval: { status: "approved", reviewedAt: "2026-10-23", publicRepository: "diffexai/diffex", tapRepository: "diffexai/homebrew-tap",
+			redistribution: "approved", nativeAcceptance: HOMEBREW_TARGETS, quarantine: "accepted", daytona: "accepted" },
+	};
+	const options = { homebrewArtifacts: "/retained/homebrew", version: "1.2.3", sourceCommit: "a".repeat(40) };
+	let calls = 0;
+	const verifyHomebrew = async (directory, identity) => {
+		calls++;
+		assert.equal(directory, options.homebrewArtifacts);
+		assert.deepEqual(identity, { version: options.version, sourceCommit: options.sourceCommit });
+	};
+	await verifyAnnouncementChannels(policy, options, verifyHomebrew);
+	assert.equal(calls, 1);
+	await assert.rejects(verifyAnnouncementChannels(policy, { ...options, homebrewArtifacts: undefined }, verifyHomebrew), /require retained/);
+	await assert.rejects(verifyAnnouncementChannels(policy, options, async () => { throw new Error("public byte mismatch"); }), /public byte mismatch/);
+	for (const channel of ["constructor", "__proto__", "unexpected", undefined]) {
+		const invalid = structuredClone(policy); invalid.channels.homebrew = channel;
+		await assert.rejects(verifyAnnouncementChannels(invalid, options, verifyHomebrew), /Unapproved/);
+	}
+	const invalid = structuredClone(policy); invalid.homebrewApproval.redistribution = "pending";
+	await assert.rejects(verifyAnnouncementChannels(invalid, options, verifyHomebrew), /publication requires/);
+	const deferred = structuredClone(policy); deferred.channels.homebrew = "defer";
+	await verifyAnnouncementChannels(deferred, options, verifyHomebrew);
+	assert.equal(calls, 1);
+});
 
 test("compares stable release versions numerically", () => {
 	assert.ok(compareReleaseVersions("0.85.0", "0.84.9") > 0);

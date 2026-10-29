@@ -10,9 +10,11 @@ import hashlib
 import io
 import json
 import os
+import pwd
 import re
 import stat
 import tarfile
+import tempfile
 from pathlib import Path, PurePosixPath
 
 import importlib.util
@@ -32,6 +34,51 @@ PRIVATE = {'.git', '.hg', '.svn', '.github', '.diffex', '.pi', '.ssh', '.aws', '
 
 def fail(name, reason):
     raise ValueError(f'{name}: {reason}')
+
+
+def local_path(value):
+    """Confine CLI paths to the workspace, account home, or temporary storage."""
+    value = Path(value)
+    if '..' in value.parts:
+        raise ValueError('path traversal is not permitted')
+    temporary = [tempfile.gettempdir(), '/tmp']
+    if sys.platform == 'darwin':
+        native = os.confstr(65537)  # _CS_DARWIN_USER_TEMP_DIR, independent of TMPDIR.
+        if not native:
+            raise ValueError('missing OS user temporary directory')
+        metadata = os.stat(os.path.realpath(native))
+        if (not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != os.getuid() or
+                stat.S_IMODE(metadata.st_mode) & 0o077):
+            raise ValueError('OS user temporary directory is not owner-private')
+        temporary.append(native)
+    roots = {os.path.abspath(root) for root in
+             (os.getcwd(), pwd.getpwuid(os.getuid()).pw_dir, *temporary)}
+    roots.discard(os.path.sep)
+    roots.update(os.path.realpath(root) for root in tuple(roots))
+    absolute = os.path.abspath(value)
+    if not absolute.startswith(tuple(root + os.path.sep for root in roots)):
+        raise ValueError('path outside local artifact roots')
+    scope = max((root for root in roots if absolute.startswith(root + os.path.sep)), key=len)
+    canonical_scope = os.path.realpath(scope)
+    canonical = os.path.realpath(absolute)
+    if not canonical.startswith(canonical_scope + os.path.sep):
+        raise ValueError('path outside local artifact root')
+    if canonical != os.path.join(canonical_scope, os.path.relpath(absolute, scope)):
+        raise ValueError('local artifact path traverses a symlink')
+    return Path(canonical)
+
+
+def contained_path(root, name):
+    """Check the actual destination, not only the spelling of a tar member."""
+    absolute = os.path.abspath(os.path.join(root, name))
+    if not absolute.startswith(str(root) + os.path.sep):
+        raise ValueError('path outside payload root')
+    canonical = os.path.realpath(absolute)
+    if not canonical.startswith(str(root) + os.path.sep):
+        raise ValueError('path outside payload root')
+    if canonical != absolute:
+        raise ValueError('payload path traverses a symlink')
+    return Path(canonical)
 
 
 def sha(data):
@@ -60,7 +107,10 @@ def link_target(name, target):
 
 
 def read_archive(file, root):
-    if Path(file).stat().st_size > MAX_BYTES:
+    file = local_path(file)
+    if safe_name(root) != root or len(PurePosixPath(root).parts) != 1:
+        fail(root, 'expected a single archive root directory')
+    if file.stat().st_size > MAX_BYTES:
         fail(file, 'archive exceeds 512 MiB')
     entries = {}
     folded = set()
@@ -241,6 +291,7 @@ def validate_installed(entries, metadata):
 
 
 def inspect_entries(entries, license_file):
+    license_file = local_path(license_file)
     for name in entries:
         private_path(name)
         local = name.removeprefix('diffex/')
@@ -309,7 +360,6 @@ def inspect_entries(entries, license_file):
             item.size = len(value)
             archive.addfile(item, io.BytesIO(value))
     # Existing checker expects an on-disk file and verifies legal/docs/runtime hashes.
-    import tempfile
     with tempfile.TemporaryDirectory(prefix='diffex-homebrew-owned-') as temporary:
         candidate = Path(temporary, 'package.tgz')
         candidate.write_bytes(stream.getvalue())
@@ -324,12 +374,16 @@ def inspect_entries(entries, license_file):
 
 
 def tree_entries(root):
-    root = Path(root)
+    root = local_path(root)
     entries = {'diffex': ('dir', None, 0o755)}
     total = 0
     for directory, dirs, files in os.walk(root, followlinks=False):
         for filename in sorted(dirs + files):
-            path = Path(directory, filename)
+            # Keep the final symlink itself for inventory, without dereferencing it.
+            absolute = os.path.abspath(os.path.join(directory, filename))
+            if not absolute.startswith(str(root) + os.path.sep):
+                raise ValueError('path outside payload root')
+            path = Path(absolute)
             name = 'diffex/' + path.relative_to(root).as_posix()
             safe_name(name)
             mode = path.lstat().st_mode
@@ -338,6 +392,7 @@ def tree_entries(root):
             elif stat.S_ISDIR(mode):
                 entries[name] = ('dir', None, 0o755)
             elif stat.S_ISREG(mode):
+                path = contained_path(root, path)
                 total += path.stat().st_size
                 if total > MAX_BYTES:
                     fail(name, 'payload exceeds 512 MiB')
@@ -351,9 +406,12 @@ def tree_entries(root):
 
 
 def prepare(root, output, license_file):
+    root = local_path(root)
+    output = local_path(output)
+    license_file = local_path(license_file)
     entries = tree_entries(root)
     data = (json.dumps(inventory(entries), sort_keys=True, separators=(',', ':')) + '\n').encode()
-    Path(root, 'distribution-files.json').write_bytes(data)
+    contained_path(root, 'distribution-files.json').write_bytes(data)
     entries['diffex/distribution-files.json'] = ('file', data, 0o644)
     inspected = inspect_entries(entries, license_file)
     with open(output, 'xb') as file:
@@ -377,8 +435,8 @@ def prepare(root, output, license_file):
 
 
 def extract(file, output, root):
+    target = local_path(output)
     entries = read_archive(file, root)
-    target = Path(output)
     if target.exists():
         fail(output, 'safe extraction requires a new directory')
     target.mkdir(parents=True)
@@ -387,12 +445,13 @@ def extract(file, output, root):
         for name, (kind, value, mode) in sorted(entries.items()):
             if kind != kind_wanted:
                 continue
-            path = target.joinpath(*PurePosixPath(name).parts)
+            path = contained_path(target, name)
             path.parent.mkdir(parents=True, exist_ok=True)
             if kind == 'dir':
                 path.mkdir(exist_ok=True)
             elif kind == 'file':
-                path.write_bytes(value)
+                with path.open('xb') as stream:
+                    stream.write(value)
                 path.chmod(mode)
             else:
                 path.symlink_to(value)

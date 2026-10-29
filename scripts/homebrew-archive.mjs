@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, constants, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import { isolatedEnvironment, resolveArtifactDirectory } from "./artifact-installation.mjs";
-import { digest, HOMEBREW_PLATFORMS, MAX_HOMEBREW_BYTES, readRuntimePins, verifyHomebrewRuntime } from "./homebrew-runtime.mjs";
+import { digest, HOMEBREW_PLATFORMS, readHomebrewFile as regularBytes, readRuntimePins, resolveHomebrewFile, verifyHomebrewRuntime } from "./homebrew-runtime.mjs";
 import { integrity } from "./release-registry.mjs";
 
 const checker = fileURLToPath(new URL("./check-homebrew-payload.py", import.meta.url));
@@ -41,6 +41,7 @@ function python(args) {
 }
 
 export function homebrewArchiveFilename(version, platform) {
+	assert(typeof version === "string" && version.trim() === version, "Invalid Homebrew archive version");
 	assert.match(version, /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/);
 	assert(HOMEBREW_PLATFORMS.includes(platform), "Unsupported Homebrew archive platform");
 	return `diffex-${version}-${platform}.tar.gz`;
@@ -50,15 +51,10 @@ export function homebrewArchiveUrl(version, platform) {
 	return `https://github.com/diffexai/diffex/releases/download/v${version}/${homebrewArchiveFilename(version, platform)}`;
 }
 
-function regularBytes(file, limit = MAX_HOMEBREW_BYTES) {
-	const stat = lstatSync(file);
-	assert(stat.isFile() && stat.size > 0 && stat.size <= limit, `Invalid regular retained file: ${basename(file)}`);
-	return readFileSync(file);
-}
-
 // The caller supplies readReleaseArtifacts(...)'s retained manifest. Keeping this
 // module independent of release-artifacts prevents a release/packaging import cycle.
 export function validateHomebrewSource(releaseDirectory, manifest) {
+	releaseDirectory = realpathSync(resolveArtifactDirectory(releaseDirectory));
 	assert.equal(manifest?.schemaVersion, 1, "A verified retained release manifest is required");
 	homebrewArchiveFilename(manifest.version, `${process.platform}-${process.arch}`);
 	assert.equal(manifest.source?.repository, "diffexai/diffex");
@@ -163,6 +159,7 @@ function installedPackages(app, lock, platform, arch) {
 }
 
 export function inspectHomebrewArchive(archive, { record } = {}) {
+	archive = resolveHomebrewFile(archive);
 	const bytes = regularBytes(archive);
 	const inspected = python(["inspect", resolve(archive)]);
 	if (record) {
@@ -184,19 +181,25 @@ export async function prepareHomebrewArchive({
 	assert.equal(arch, process.arch, "Homebrew archive requires native CPU preparation");
 	const target = `${platform}-${arch}`;
 	const filename = homebrewArchiveFilename(manifest?.version, target);
-	releaseDirectory = realpathSync(releaseDirectory);
+	releaseDirectory = realpathSync(resolveArtifactDirectory(releaseDirectory));
 	outputDirectory = resolveArtifactDirectory(outputDirectory);
 	mkdirSync(outputDirectory, { recursive: true });
 	outputDirectory = realpathSync(outputDirectory);
-	const output = join(outputDirectory, filename);
-	const recordFile = join(outputDirectory, filename.replace(/\.tar\.gz$/, ".json"));
-	assert(!existsSync(output) && !existsSync(recordFile), "Retained Homebrew outputs already exist; do not rebuild them");
-	const source = validateHomebrewSource(releaseDirectory, manifest);
-	const runtime = await verifyHomebrewRuntime({ platform, arch, runtimeDirectory, pins: runtimePins, fetcher });
-	const work = mkdtempSync(join(realpathSync(tmpdir()), "diffex-homebrew-"));
+	const output = resolveHomebrewFile(join(outputDirectory, filename));
+	const recordFile = resolveHomebrewFile(join(outputDirectory, filename.replace(/\.tar\.gz$/, ".json")));
+	const outputs = [];
+	let work;
+	let completed = false;
 	try {
+		// Reserve both destinations atomically; never decide whether to write by
+		// checking existence first. A collision must not truncate retained bytes.
+		for (const file of [output, recordFile]) outputs.push({ file,
+			descriptor: openSync(file, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o644) });
+		const source = validateHomebrewSource(releaseDirectory, manifest);
+		const runtime = await verifyHomebrewRuntime({ platform, arch, runtimeDirectory, pins: runtimePins, fetcher });
+		work = mkdtempSync(join(realpathSync(tmpdir()), "diffex-homebrew-"));
 		const retained = join(work, source.artifact.filename);
-		cpSync(join(releaseDirectory, source.artifact.filename), retained);
+		writeFileSync(retained, regularBytes(join(releaseDirectory, source.artifact.filename)), { flag: "wx" });
 		assert.equal(digest(regularBytes(retained)), source.artifact.sha256, "Retained CLI changed while preparing archive");
 		python(["extract", retained, join(work, "candidate"), "--root", "package"]);
 		const candidate = join(work, "candidate/package");
@@ -280,10 +283,13 @@ export async function prepareHomebrewArchive({
 			sourceCommit: manifest.source.commit, nodeVersion: runtimePins.nodeVersion, npmVersion: runtimePins.npmVersion,
 		};
 		inspectHomebrewArchive(staged, { record });
-		writeFileSync(output, bytes, { flag: "wx" });
-		writeFileSync(recordFile, json(record), { flag: "wx" });
+		writeFileSync(outputs[0].descriptor, bytes);
+		writeFileSync(outputs[1].descriptor, json(record));
+		completed = true;
 		return record;
 	} finally {
-		rmSync(work, { recursive: true, force: true });
+		for (const { descriptor } of outputs) closeSync(descriptor);
+		if (!completed) for (const { file } of outputs) rmSync(file, { force: true });
+		if (work) rmSync(work, { recursive: true, force: true });
 	}
 }
