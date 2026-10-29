@@ -185,6 +185,21 @@ test("offline runtime verification rejects corrupt signed inputs and an unauthor
 	await assert.rejects(verifyHomebrewRuntime({ ...options, runtimeDirectory: corrupted, pins: changed }), /Command failed/);
 });
 
+test("public runtime verification uses a private short GPG keyring under long isolated TMPDIRs", async () => {
+	const original = process.env.TMPDIR;
+	const long = join(directory, "isolated-home-and-temporary-directory-".repeat(5));
+	mkdirSync(long);
+	process.env.TMPDIR = long;
+	try {
+		const result = await verifyHomebrewRuntime({ runtimeDirectory, pins,
+			fetcher: () => { throw new Error("Network forbidden"); } });
+		assert.equal(result.identity.sha256, pins.platforms[target]);
+	} finally {
+		if (original === undefined) delete process.env.TMPDIR;
+		else process.env.TMPDIR = original;
+	}
+});
+
 test("bounded runtime fetch rejects oversized authority responses before buffering", async () => {
 	await assert.rejects(verifyHomebrewRuntime({ pins, fetcher: async () => new Response("x", { headers: { "content-length": String(MAX_HOMEBREW_BYTES + 1) } }) }), /byte limit/);
 });

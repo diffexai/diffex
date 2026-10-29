@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -66,7 +65,10 @@ export async function verifyHomebrewRuntime({
 	const identity = runtimeIdentity(pins, platform, arch);
 	assert.equal(platform, process.platform, "Runtime preparation requires a native OS runner");
 	assert.equal(arch, process.arch, "Runtime preparation requires a native CPU runner");
-	const temporary = mkdtempSync(join(tmpdir(), "diffex-node-trust-"));
+	// Only macOS/glibc Linux are supported. GPG still probes its agent socket
+	// during public-key import, so keep this private keyring below sockaddr_un's
+	// path limit even when the calling test/build has a deeply nested TMPDIR.
+	const temporary = mkdtempSync("/tmp/diffex-node-trust-");
 	try {
 		const base = `https://nodejs.org/dist/v${pins.nodeVersion}`;
 		const inputs = [
@@ -89,7 +91,9 @@ export async function verifyHomebrewRuntime({
 		const home = join(temporary, "gnupg");
 		mkdirSync(home, { mode: 0o700 });
 		const options = { encoding: "utf8", timeout: 30_000, maxBuffer: 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] };
-		const args = ["--homedir", home, "--batch", "--no-options", "--no-auto-key-retrieve"];
+		// Public-key import/signature verification needs no agent. Do not spawn a
+		// persistent daemon or exceed Unix socket limits under isolated long TMPDIRs.
+		const args = ["--homedir", home, "--batch", "--no-options", "--no-auto-key-retrieve", "--no-autostart"];
 		execFileSync("gpg", [...args, "--import", join(temporary, "release-key.asc")], options);
 		const fingerprints = execFileSync("gpg", [...args, "--with-colons", "--fingerprint"], options)
 			.split("\n").filter((line) => line.startsWith("fpr:")).map((line) => line.split(":")[9]);
