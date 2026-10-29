@@ -1,0 +1,89 @@
+require "json"
+
+class Diffex < Formula
+  desc "Terminal coding agent"
+  homepage "https://diffex.ai/"
+  version "@@VERSION@@"
+  license "MIT"
+
+  on_macos do
+    on_arm do
+      url "@@DARWIN_ARM64_URL@@"
+      sha256 "@@DARWIN_ARM64_SHA256@@"
+    end
+    on_intel do
+      url "@@DARWIN_X64_URL@@"
+      sha256 "@@DARWIN_X64_SHA256@@"
+    end
+
+    depends_on macos: :sequoia
+  end
+
+  on_linux do
+    on_arm do
+      url "@@LINUX_ARM64_URL@@"
+      sha256 "@@LINUX_ARM64_SHA256@@"
+    end
+    on_intel do
+      url "@@LINUX_X64_URL@@"
+      sha256 "@@LINUX_X64_SHA256@@"
+    end
+  end
+
+  depends_on arch: :arm64 if Hardware::CPU.arm?
+  depends_on arch: :x86_64 if Hardware::CPU.intel?
+  depends_on "fd"
+  depends_on "git"
+  depends_on "ripgrep"
+
+  def install
+    odie "Diffex requires an arm64 or x86_64 CPU" unless Hardware::CPU.arm? || Hardware::CPU.intel?
+    if OS.linux?
+      ldd = Utils.safe_popen_read("ldd", "--version")
+      odie "Diffex requires glibc (Ubuntu 24.04 baseline), not musl" if ldd.downcase.include?("musl")
+      match = ldd.lines.first.to_s.match(/(\d+\.\d+)\s*$/)
+      unless match && Gem::Version.new(match[1]) >= Gem::Version.new("2.39")
+        odie "Diffex requires glibc 2.39 or newer (Ubuntu 24.04 baseline)"
+      end
+    end
+    # Homebrew strips the sole archive root directory before invoking install.
+    # Preserve the entire payload, including dotfiles; the marker is a sibling.
+    libexec.install buildpath => "diffex"
+    (libexec/".diffex-homebrew.json").write JSON.generate({
+      schemaVersion: 1,
+      package: "@diffexai/diffex",
+      formula: "diffexai/tap/diffex",
+    }) + "\n"
+    bin.install_symlink libexec/"diffex/bin/diffex"
+  end
+
+  test do
+    ENV["DIFFEX_OFFLINE"] = "1"
+    ENV["DIFFEX_SKIP_UPDATE_CHECK"] = "1"
+    ENV["DIFFEX_CODING_AGENT_DIR"] = (testpath/"user-data").to_s
+    ENV["XDG_CONFIG_HOME"] = (testpath/"config").to_s
+    ENV["XDG_CACHE_HOME"] = (testpath/"cache").to_s
+    ENV["XDG_DATA_HOME"] = (testpath/"data").to_s
+    (testpath/"user-data").mkpath
+    (testpath/".diffex").mkpath
+    (testpath/"user-data/retained.txt").write "retain user data\n"
+    (testpath/".diffex/retained.txt").write "retain project data\n"
+    snapshot = lambda do
+      Dir.glob("**/*", File::FNM_DOTMATCH).sort.filter_map do |path|
+        next if [".", ".."].include?(File.basename(path))
+
+        [path, File.directory?(path) ? nil : File.binread(path)]
+      end
+    end
+    assert_equal version.to_s, shell_output("#{bin}/diffex --version").strip
+    assert_match "Diffex", shell_output("#{bin}/diffex --help")
+    assert_match(/\S/, shell_output("#{bin}/diffex --list-models"))
+    before = snapshot.call
+    assert_match "brew upgrade diffexai/tap/diffex", shell_output("#{bin}/diffex update --self")
+    assert_equal before, snapshot.call, "Ownership-denied self update must not mutate user or project data"
+    assert_equal({ "schemaVersion" => 1, "package" => "@diffexai/diffex", "formula" => "diffexai/tap/diffex" },
+                 JSON.parse((libexec/".diffex-homebrew.json").read))
+    refute_path_exists libexec/"diffex/.diffex-homebrew.json"
+    assert_equal ["diffex"], bin.children.map { |path| path.basename.to_s }
+  end
+end
