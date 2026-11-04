@@ -57,14 +57,18 @@ export interface FooterComponentOptions {
 
 export class CustomFooterPlanModeIndicator implements Component {
 	private readonly shouldShow: () => boolean;
+	private readonly shouldShowGoal: () => boolean;
 
-	constructor(shouldShow: () => boolean) {
+	constructor(shouldShow: () => boolean, shouldShowGoal: () => boolean = () => false) {
 		this.shouldShow = shouldShow;
+		this.shouldShowGoal = shouldShowGoal;
 	}
 
 	render(width: number): string[] {
-		if (width <= 0 || !this.shouldShow()) return [];
-		return [truncateToWidth(theme.fg("warning", "Plan mode"), width, getGlyphs().ellipsis)];
+		if (width <= 0) return [];
+		const labels = [this.shouldShow() ? "Plan mode" : "", this.shouldShowGoal() ? "Goal" : ""].filter(Boolean);
+		if (labels.length === 0) return [];
+		return [truncateToWidth(theme.fg("warning", labels.join(" · ")), width, getGlyphs().ellipsis)];
 	}
 
 	invalidate(): void {}
@@ -166,9 +170,17 @@ export class FooterComponent implements Component {
 				? `${((cacheRead / promptTokens) * 100).toFixed(1)}%`
 				: undefined;
 
-		const planMode = getCollaborationMode(this.session) === "plan";
-		const planFull = theme.fg("warning", "Plan mode");
-		const planCompact = theme.fg("warning", "Plan");
+		const inPlanMode = getCollaborationMode(this.session) === "plan";
+		const inGoalMode = this.session.isGoalModeEnabled;
+		const planMode = inPlanMode || inGoalMode;
+		const planFull = theme.fg(
+			"warning",
+			[inPlanMode ? "Plan mode" : "", inGoalMode ? "Goal" : ""].filter(Boolean).join(" · "),
+		);
+		const planCompact = theme.fg(
+			"warning",
+			[inPlanMode ? "Plan" : "", inGoalMode ? "Goal" : ""].filter(Boolean).join(" · "),
+		);
 
 		if (planMode && width < visibleWidth(planCompact)) {
 			return [truncateToWidth(planCompact, width, glyphs.ellipsis)];
