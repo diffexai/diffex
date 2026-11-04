@@ -29,6 +29,7 @@ import {
 	createCustomMessage,
 } from "./messages.ts";
 import { stripCurrentPlanSnapshot } from "./plan-snapshot.ts";
+import { GOAL_MODE_ENTRY, GOAL_REPLACEMENT_ENTRY, type GoalArchive, projectGoalEntries } from "./pocket-context.ts";
 
 export const CURRENT_SESSION_VERSION = 3;
 
@@ -73,6 +74,8 @@ export interface ModelChangeEntry extends SessionEntryBase {
 
 export interface CompactionEntry<T = unknown> extends SessionEntryBase {
 	type: "compaction";
+	/** Goal-only recall provenance, committed and rolled back with this summary. */
+	goalArchive?: GoalArchive;
 	summary: string;
 	firstKeptEntryId: string;
 	tokensBefore: number;
@@ -455,6 +458,9 @@ export function buildContextEntries(
 	byId?: Map<string, SessionEntry>,
 ): SessionEntry[] {
 	const path = buildSessionPath(entries, leafId, byId);
+	if (path.some((entry) => entry.type === "custom" && entry.customType === GOAL_REPLACEMENT_ENTRY)) {
+		return projectGoalEntries(path);
+	}
 	let compaction: CompactionEntry | null = null;
 
 	for (const entry of path) {
@@ -1230,11 +1236,13 @@ export class SessionManager {
 		details?: T,
 		fromHook?: boolean,
 		usage?: Usage,
+		goalArchive?: GoalArchive,
 	): CompactionAppendTransaction<T> {
 		const previousLeafId = this.leafId;
 		const previousFlushed = this.flushed;
 		const entry: CompactionEntry<T> = {
 			type: "compaction",
+			...(goalArchive ? { goalArchive } : {}),
 			id: generateId(this.byId),
 			parentId: previousLeafId,
 			timestamp: new Date().toISOString(),
@@ -1315,7 +1323,7 @@ export class SessionManager {
 		return entry.id;
 	}
 
-	[APPEND_CUSTOM_ENTRY_WITH_ROLLBACK](customType: string, data?: unknown): string {
+	[APPEND_CUSTOM_ENTRY_WITH_ROLLBACK](customType: string, data?: unknown, durable = false): string {
 		const previousLeafId = this.leafId;
 		const previousFlushed = this.flushed;
 		const entry: CustomEntry = {
@@ -1328,6 +1336,7 @@ export class SessionManager {
 		};
 		try {
 			this._appendEntry(entry);
+			if (durable && this.persist && this.sessionFile) this[PERSIST_SESSION_STATE]();
 			return entry.id;
 		} catch (error) {
 			if (this.fileEntries.at(-1) === entry) this.fileEntries.pop();
@@ -1777,17 +1786,17 @@ export class SessionManager {
 			this.sessionFile = newSessionFile;
 			this._buildIndex();
 
-			// Only write the file now if it contains an assistant message.
-			// Otherwise defer to _persist(), which creates the file on the
-			// first assistant response, matching the newSession() contract
-			// and avoiding the duplicate-header bug when _persist()'s
-			// no-assistant guard later resets flushed to false.
+			// Goal mode is durable even when the branch has no assistant response.
+			// Other empty branches retain the normal lazy session-saving behavior.
 			const hasAssistant = this.fileEntries.some((e) => e.type === "message" && e.message.role === "assistant");
 			if (hasAssistant) {
 				this._rewriteFile();
 				this.flushed = true;
 			} else {
 				this.flushed = false;
+				if (this.fileEntries.some((entry) => entry.type === "custom" && entry.customType === GOAL_MODE_ENTRY)) {
+					this[PERSIST_SESSION_STATE]();
+				}
 			}
 
 			return newSessionFile;
@@ -2017,8 +2026,9 @@ export function appendCustomEntryWithRollback(
 	sessionManager: SessionManager,
 	customType: string,
 	data?: unknown,
+	durable = false,
 ): string {
-	return sessionManager[APPEND_CUSTOM_ENTRY_WITH_ROLLBACK](customType, data);
+	return sessionManager[APPEND_CUSTOM_ENTRY_WITH_ROLLBACK](customType, data, durable);
 }
 
 /** Internal synchronous selected-branch append with live-state rollback on persistence failure. */
@@ -2041,6 +2051,7 @@ export function appendCompactionTransaction<T = unknown>(
 	details?: T,
 	fromHook?: boolean,
 	usage?: Usage,
+	goalArchive?: GoalArchive,
 ): CompactionAppendTransaction<T> {
 	return sessionManager[APPEND_COMPACTION_TRANSACTION](
 		summary,
@@ -2049,5 +2060,6 @@ export function appendCompactionTransaction<T = unknown>(
 		details,
 		fromHook,
 		usage,
+		goalArchive,
 	);
 }
