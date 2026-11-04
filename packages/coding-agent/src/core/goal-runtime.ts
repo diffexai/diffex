@@ -17,6 +17,7 @@ import {
 	type GoalArchive,
 	type GoalBlock,
 	GoalBlockIdRegistry,
+	type GoalBudget,
 	goalArchiveFromEntry,
 	goalNoteDetails,
 	goalSelectionError,
@@ -349,13 +350,39 @@ export class GoalRuntime {
 			contextWindow: model.contextWindow,
 			maxTokens: model.maxTokens,
 		};
+		const previousNoteIndex = messages.findLastIndex((message) => goalNoteDetails(message) !== undefined);
+		const previousUsage =
+			previousNoteIndex < 0 ? undefined : goalNoteDetails(messages[previousNoteIndex])?.reportedUsage;
+		const previousBudget =
+			previousUsage === undefined
+				? undefined
+				: calculateGoalBudget({
+						...budgetInput,
+						estimatedInputTokens: previousUsage * model.contextWindow,
+					});
+		// Derive cadence from immutable boundaries so retries, branches, and discarded
+		// preflight notes cannot advance a mutable counter. Always label each exchange.
+		const formatNote = (budget: GoalBudget): string => {
+			const reportUsage =
+				!includeUsage ||
+				messages.at(-1)?.role !== "toolResult" ||
+				messages[previousNoteIndex - 1]?.role !== "toolResult" ||
+				previousBudget === undefined ||
+				(budget.nudge !== undefined &&
+					budget.nudge !== previousBudget.nudge &&
+					budget.usage > previousBudget.usage);
+			return reportUsage
+				? `${formatGoalUsageNote(budget)}\n[context ${details.blockId}]`
+				: `[context ${details.blockId}]`;
+		};
 		let budget = calculateGoalBudget(budgetInput);
-		let content = `${formatGoalUsageNote(budget)}\n[context ${details.blockId}]`;
+		let content = formatNote(budget);
 		budget = calculateGoalBudget({
 			...budgetInput,
 			estimatedInputTokens: budgetInput.estimatedInputTokens + estimateTextTokens(content),
 		});
-		content = `${formatGoalUsageNote(budget)}\n[context ${details.blockId}]`;
+		content = formatNote(budget);
+		if (content.startsWith("Context usage:")) details.reportedUsage = budget.usage;
 		const note: CustomMessage = {
 			role: "custom",
 			customType: GOAL_NOTE_TYPE,

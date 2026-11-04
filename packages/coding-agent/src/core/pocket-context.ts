@@ -12,6 +12,8 @@ export const GOAL_LABEL_TYPE = "goal-context-label";
 export interface GoalNoteDetails {
 	blockId: string;
 	assignments: Array<[string, string]>;
+	/** Present only when this boundary reports context usage to the model. */
+	reportedUsage?: number;
 }
 
 export function goalNoteDetails(message: AgentMessage): GoalNoteDetails | undefined {
@@ -19,6 +21,10 @@ export function goalNoteDetails(message: AgentMessage): GoalNoteDetails | undefi
 	const details = message.details as Partial<GoalNoteDetails> | undefined;
 	if (!details || typeof details.blockId !== "string" || !/^b\d{3,}$/.test(details.blockId)) return undefined;
 	if (
+		(details.reportedUsage !== undefined &&
+			(typeof details.reportedUsage !== "number" ||
+				!Number.isFinite(details.reportedUsage) ||
+				details.reportedUsage < 0)) ||
 		!Array.isArray(details.assignments) ||
 		!details.assignments.every(
 			(item) =>

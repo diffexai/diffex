@@ -227,9 +227,13 @@ it("adds bounded metadata and preserves every previous request prefix over a sus
 			expect(requests[index].tools).toEqual(requests[0].tools);
 		}
 		const notes = goalNotes(requests.at(-1)!);
-		expect(notes).toHaveLength(30);
+		expect(notes).toHaveLength(16);
 		expect(Math.max(...notes.map((note) => note.length))).toBeLessThan(150);
-		expect(new Set(notes.map((note) => note.match(/\[context (b\d+)\]/)?.[1])).size).toBe(30);
+		const markers = requests.map(
+			(request) => getMessageText(request.messages.at(-1)).match(/\[context (b\d+)\]/)?.[1],
+		);
+		expect(markers.every((marker) => marker !== undefined)).toBe(true);
+		expect(new Set(markers).size).toBe(30);
 	} finally {
 		await harness.cleanup();
 	}

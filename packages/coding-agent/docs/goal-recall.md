@@ -21,6 +21,10 @@ Argument and output contents are preserved even when they contain keys resemblin
 Goal context usage measures the estimated request size as a fraction of the model's entire context window.
 The 40% voluntary-compaction threshold and pressure guidance at 60%, 75%, and 85% use that full-window percentage.
 At 60% the agent is prompted to consider compacting completed work, at 75% to compact older work soon, and at 85% to compact older context now.
+During a tool loop, usage and guidance appear after the first completed tool batch and then every other batch.
+A higher pressure tier is reported immediately, and the next ordinary batch omits the usage note.
+New user input and request configuration changes receive a fresh usage note.
+Stable context markers and request-fit checks remain present for every batch, including batches whose usage note is omitted.
 A separate request-fit check subtracts the adapter's 4,096-token safety reserve and response headroom of `min(model.maxTokens, 8192, floor(model.contextWindow / 4))`.
 Reaching that smaller input capacity triggers emergency recovery even below 100% full-window usage, independently of ordinary automatic-compaction settings.
 Summary requests reserve the same output allowance and check the complete serialized prompt, including earlier interpretive history and supported images, before dispatch.
