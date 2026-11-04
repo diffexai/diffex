@@ -519,7 +519,7 @@ export async function main(args: string[], options?: MainOptions) {
 		},
 	});
 	const synchronizeEvolutionSettings = () => {
-		void evolutionCoordinator.setEnabled(startupSettingsManager.getEvolutionEnabled()).catch((error: unknown) => {
+		void evolutionCoordinator.synchronizeEnabled().catch((error: unknown) => {
 			reportDiagnostics([
 				{
 					type: "warning",
@@ -531,7 +531,7 @@ export async function main(args: string[], options?: MainOptions) {
 	};
 	const stopSettingsSynchronization = startupSettingsManager.watchExternalChanges(synchronizeEvolutionSettings);
 	await startupSettingsManager.reload();
-	await evolutionCoordinator.setEnabled(startupSettingsManager.getEvolutionEnabled());
+	await evolutionCoordinator.synchronizeEnabled();
 	reportDiagnostics(collectSettingsDiagnostics(startupSettingsManager, "settings synchronization"));
 	if (invocationTraceResult.diagnostic) {
 		reportDiagnostics([invocationTraceResult.diagnostic]);

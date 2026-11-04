@@ -220,6 +220,36 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 		events.push(event);
 	});
 
+	// Goal scenarios snapshot provider-visible schemas, without executable tools.
+	// Other scenarios retain the original tool identities for lifecycle checks.
+	let snapshotGoalContexts = false;
+	const adaptResponses = (responses: FauxResponseStep[]): FauxResponseStep[] =>
+		responses.map((response) => {
+			if (typeof response !== "function") return response;
+			return (context, streamOptions, state, requestModel) => {
+				const goalTools = context.tools?.some((tool) =>
+					["compact_block", "query_block", "expand_block"].includes(tool.name),
+				);
+				snapshotGoalContexts ||= goalTools ?? false;
+				return response(
+					snapshotGoalContexts
+						? {
+								...context,
+								tools: context.tools?.map(({ name, description, parameters, constrainedSampling }) => ({
+									name,
+									description,
+									parameters,
+									...(constrainedSampling === undefined ? {} : { constrainedSampling }),
+								})),
+							}
+						: context,
+					streamOptions,
+					state,
+					requestModel,
+				);
+			};
+		});
+
 	return {
 		session,
 		sessionManager,
@@ -228,8 +258,8 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 		faux: fauxProvider,
 		models: fauxProvider.models,
 		getModel: fauxProvider.getModel,
-		setResponses: fauxProvider.setResponses,
-		appendResponses: fauxProvider.appendResponses,
+		setResponses: (responses) => fauxProvider.setResponses(adaptResponses(responses)),
+		appendResponses: (responses) => fauxProvider.appendResponses(adaptResponses(responses)),
 		getPendingResponseCount: fauxProvider.getPendingResponseCount,
 		events,
 		eventsOfType<T extends AgentSessionEvent["type"]>(type: T) {

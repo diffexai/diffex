@@ -274,12 +274,13 @@ export class InvocationTrace implements AgentSessionLifecycleObserver, Telemetry
 		taskLineageId?: string;
 		sessionManager: SessionManager;
 		firstEntryOrdinal: number;
+		excludeEvidence?: boolean;
 	}): Promise<void> {
 		const settlement = this.#settlementQueue.then(async () => {
 			if (this.#untracedOperations.delete(options.operationId)) return;
 			const recorder = await this.#ensureRecorder();
 			const bindingId = this.#sessionBindings.get(options.sessionManager);
-			if (recorder && bindingId) {
+			if (recorder && bindingId && !options.excludeEvidence) {
 				const cursor = options.sessionManager.getEntryCursorRange(options.firstEntryOrdinal);
 				if (cursor) {
 					recorder.recordSessionSegment({

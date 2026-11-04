@@ -1292,6 +1292,7 @@ export class EvolutionRuntimeCoordinator implements AgentSessionLifecycleObserve
 	#runtime: CodingAgentEvolutionRuntime | null = null;
 	#unsubscribe: (() => void) | null = null;
 	#enabled: boolean;
+	#goalSuspended = false;
 	#toggleQueue: Promise<void> = Promise.resolve();
 
 	constructor(
@@ -1321,7 +1322,7 @@ export class EvolutionRuntimeCoordinator implements AgentSessionLifecycleObserve
 		this.#unsubscribe = null;
 		this.#runtime = null;
 		await previous?.stop();
-		if (this.#enabled && this.#getEnabled()) await runtime.start();
+		if (!this.#goalSuspended && this.#enabled && this.#getEnabled()) await runtime.start();
 		this.#runtime = runtime;
 		this.#unsubscribe = runtime.control.subscribe((event) => {
 			for (const listener of this.#listeners) listener(event);
@@ -1330,11 +1331,15 @@ export class EvolutionRuntimeCoordinator implements AgentSessionLifecycleObserve
 
 	async operationSettled(settlement: AgentSessionOperationSettlement): Promise<void> {
 		await this.#trace.operationSettled(settlement);
-		if (this.#enabled && this.#getEnabled()) this.#runtime?.evaluateAutomatic();
+		if (!this.#goalSuspended && this.#enabled && this.#getEnabled()) this.#runtime?.evaluateAutomatic();
 	}
 
 	getEnabled(): boolean {
 		return this.#enabled;
+	}
+
+	getGoalSuspended(): boolean {
+		return this.#goalSuspended;
 	}
 
 	getEvolutionModel(): EvolutionModelSelection | undefined {
@@ -1346,13 +1351,42 @@ export class EvolutionRuntimeCoordinator implements AgentSessionLifecycleObserve
 	}
 
 	setEnabled(enabled: boolean): Promise<void> {
+		return this.#queueEnabledChange(enabled);
+	}
+
+	/** Apply an externally changed preference without changing goal-mode suspension. */
+	synchronizeEnabled(): Promise<void> {
+		return this.#queueEnabledChange();
+	}
+
+	#queueEnabledChange(requested?: boolean): Promise<void> {
 		const update = this.#toggleQueue.then(async () => {
-			if (this.#getEnabled() !== enabled) await this.#setEnabled(enabled);
+			const enabled = requested ?? this.#getEnabled();
+			if (requested === true && this.#goalSuspended) {
+				throw new Error("Disable /goal before enabling self-evolution.");
+			}
+			if (requested !== undefined && this.#getEnabled() !== enabled) await this.#setEnabled(enabled);
 			if (this.#enabled === enabled) return;
 			this.#enabled = enabled;
 			await Promise.all([this.#trace.setEnabled(enabled), enabled ? Promise.resolve() : this.#runtime?.stop()]);
-			if (enabled) await this.#runtime?.start();
+			if (enabled && !this.#goalSuspended) await this.#runtime?.start();
 			for (const listener of this.#listeners) listener({ type: "enabled-changed", enabled });
+		});
+		this.#toggleQueue = update.catch(() => {});
+		return update;
+	}
+
+	setGoalSuspended(suspended: boolean): Promise<void> {
+		// Set the gate synchronously so no manual or automatic job can enter
+		// while existing process-owned workers are stopping at their checkpoints.
+		this.#goalSuspended = suspended;
+		const update = this.#toggleQueue.then(async () => {
+			if (suspended) {
+				await this.#runtime?.stop();
+			} else {
+				this.#enabled = this.#getEnabled();
+				if (this.#enabled) await this.#runtime?.start();
+			}
 		});
 		this.#toggleQueue = update.catch(() => {});
 		return update;
@@ -1373,7 +1407,7 @@ export class EvolutionRuntimeCoordinator implements AgentSessionLifecycleObserve
 	}
 
 	#enabledControl(): EvolutionControlService {
-		if (!this.#enabled || !this.#getEnabled()) throw new Error("Self-evolution is disabled");
+		if (this.#goalSuspended || !this.#enabled || !this.#getEnabled()) throw new Error("Self-evolution is disabled");
 		return this.#control();
 	}
 
