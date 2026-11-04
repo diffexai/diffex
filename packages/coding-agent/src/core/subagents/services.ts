@@ -30,6 +30,7 @@ export interface CreateSubagentServicesOptions {
 	harnessStateStore?: HarnessStateStore;
 	harnessVersionBundle?: HarnessVersionBundle;
 	telemetryContext?: TelemetryContext;
+	recallPrompt?: string;
 }
 
 export interface SubagentSessionConfig {
@@ -55,6 +56,8 @@ export interface CreateSubagentSessionOptions {
 	readonly sessionManagerFactory?: SubagentSessionManagerFactory;
 	readonly sessionManager?: SessionManager;
 	readonly escalateToParent?: SubagentEscalationCallback;
+	/** Isolated recall profile with no inherited tools, skills, or extensions. */
+	readonly recallProfile?: { prompt: string; tools: ToolDefinition[] };
 }
 
 export interface ResolvedRestoredSubagentConfig {
@@ -82,10 +85,14 @@ export function createSubagentServices(options: CreateSubagentServicesOptions): 
 		telemetryContext: options.telemetryContext,
 		resourceLoaderOptions: {
 			noExtensions: true,
+			noSkills: options.recallPrompt !== undefined,
+			noContextFiles: options.recallPrompt !== undefined,
 			noPromptTemplates: true,
 			noThemes: true,
 			reloadSettings: false,
-			appendSystemPromptOverride: (base) => [...base, SUBAGENT_SYSTEM_PROMPT],
+			systemPromptOverride: options.recallPrompt === undefined ? undefined : () => options.recallPrompt,
+			appendSystemPromptOverride: (base) =>
+				options.recallPrompt === undefined ? [...base, SUBAGENT_SYSTEM_PROMPT] : [],
 		},
 	});
 }
@@ -203,6 +210,7 @@ export async function createSubagentSession(
 		harnessStateStore: config.harnessStateStore,
 		harnessVersionBundle: config.harnessVersionBundle,
 		telemetryContext: config.telemetryContext,
+		recallPrompt: options.recallProfile?.prompt,
 	});
 	options.signal?.throwIfAborted();
 
@@ -220,20 +228,23 @@ export async function createSubagentSession(
 	markFixedHarnessSubagentSession(sessionManager);
 	const { session } = await createInternalAgentSessionFromServices(
 		{
-			services,
+			services: options.recallProfile ? { ...services, harnessVersionBundle: undefined } : services,
 			backgroundProcessPolicy: config.backgroundProcessPolicy,
 			sessionManager,
 			model: config.model,
 			thinkingLevel: config.thinkingLevel,
-			tools: [...config.tools],
+			tools: options.recallProfile ? [] : [...config.tools],
 			scopedModels: [],
 			customTools: [],
 			subagents: false,
 		},
-		options.escalateToParent
-			? [createEscalateToParentTool(options.escalateToParent) as unknown as ToolDefinition]
-			: undefined,
+		options.recallProfile
+			? options.recallProfile.tools
+			: options.escalateToParent
+				? [createEscalateToParentTool(options.escalateToParent) as unknown as ToolDefinition]
+				: undefined,
 	);
+	if (options.recallProfile) session.agent.preparePrivateContinuation = undefined;
 
 	try {
 		options.signal?.throwIfAborted();
