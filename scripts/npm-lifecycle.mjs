@@ -342,12 +342,16 @@ export async function acceptLifecycle(archiveArgument, evidenceArgument, { skipB
 }
 
 // Real pnpm processes and archive bytes; only release discovery and the scoped registry are fixtures.
-export async function acceptPnpmLifecycle(archive, metadata, inventory) {
+export async function acceptPnpmLifecycle(archive, metadata, inventory, { registry = "https://registry.npmjs.org" } = {}) {
 	const temporary = mkdtempSync(join(tmpdir(), "diffex pnpm lifecycle "));
 	const env = isolatedEnvironment(temporary, "pnpm");
 	delete env.DIFFEX_OFFLINE;
 	env.PATH = `${env.PNPM_HOME}:${env.PATH}`;
-	env.npm_config_fetch_retries = "0";
+	env.npm_config_registry = registry;
+	// Cold-store installs still need bounded retries for transient registry failures.
+	env.npm_config_fetch_retries = "2";
+	env.npm_config_fetch_retry_mintimeout = "1000";
+	env.npm_config_fetch_retry_maxtimeout = "5000";
 	const options = { cwd: join(temporary, "project"), env, timeout: 180000, maxBuffer: 10 * 1024 * 1024 };
 	const evidence = { manager: "pnpm", commands: [], checks: [], status: "failed", cleanup: false };
 	const bytes = readFileSync(archive);

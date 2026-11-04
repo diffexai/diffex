@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
@@ -24,8 +25,8 @@ else if (process.argv.includes("update")) {
 } else throw new Error("Unexpected fixture command");
 `;
 
-function fixture(directory, failing = false) {
-	const metadata = { name: "@diffexai/diffex", version: "1.2.3", type: "module", bin: { diffex: "dist/cli.js" } };
+function fixture(directory, failing = false, dependencies = {}) {
+	const metadata = { name: "@diffexai/diffex", version: "1.2.3", type: "module", bin: { diffex: "dist/cli.js" }, dependencies };
 	const files = { "package.json": JSON.stringify(metadata), "dist/cli.js": failing ? "#!/usr/bin/env node\nprocess.exit(41);\n" : cli, "dist/core/http-dispatcher.js": "export {};\n" };
 	const inventory = { sourceCommit: "a".repeat(40), files: Object.entries(files).map(([path, value]) => ({ path, sha256: createHash("sha256").update(value).digest("hex") })) };
 	for (const [path, value] of Object.entries({ ...files, "distribution-files.json": JSON.stringify(inventory) })) {
@@ -68,6 +69,51 @@ test("pnpm lifecycle failures carry bounded manager-specific diagnostics and cle
 			return true;
 		});
 	} finally {
+		rmSync(directory, { recursive: true, force: true });
+	}
+});
+
+test("real pnpm lifecycle recovers from a transient dependency tarball 502 and still rejects corrupt archives", { timeout: 180000 }, async () => {
+	const directory = mkdtempSync(join(tmpdir(), "diffex-pnpm-fetch-retry-"));
+	let attempts = 0;
+	const server = createServer((request, reply) => {
+		if (request.url === "/retry-fixture") {
+			const dependency = {
+				name: "retry-fixture", version: "1.0.0",
+				dist: {
+					tarball: `http://127.0.0.1:${server.address().port}/dependency.tgz`,
+					integrity: `sha512-${createHash("sha512").update(readFileSync(join(directory, "dependency.tgz"))).digest("base64")}`,
+				},
+			};
+			reply.setHeader("content-type", "application/json");
+			reply.end(JSON.stringify({ name: dependency.name, "dist-tags": { latest: dependency.version }, versions: { [dependency.version]: dependency } }));
+		} else if (request.url === "/dependency.tgz") {
+			attempts++;
+			if (attempts === 1) reply.writeHead(502).end("Temporary registry failure");
+			else reply.end(readFileSync(join(directory, "dependency.tgz")));
+		} else reply.writeHead(404).end();
+	});
+	try {
+		const dependency = join(directory, "dependency", "package");
+		mkdirSync(dependency, { recursive: true });
+		writeFileSync(join(dependency, "package.json"), JSON.stringify({ name: "retry-fixture", version: "1.0.0" }));
+		execFileSync("tar", ["-czf", join(directory, "dependency.tgz"), "-C", dirname(dependency), "package"]);
+		await new Promise((done, reject) => {
+			server.once("error", reject);
+			server.listen(0, "127.0.0.1", done);
+		});
+		const { archive, metadata, inventory } = fixture(directory, false, { "retry-fixture": "1.0.0" });
+		const evidence = await acceptPnpmLifecycle(archive, metadata, inventory, {
+			registry: `http://127.0.0.1:${server.address().port}/`,
+		});
+		assert.equal(evidence.status, "passed");
+		assert.equal(evidence.cleanup, true);
+		assert(attempts >= 2, "pnpm must retry the failed dependency request");
+		assert(evidence.checks.some((check) => check.corruptIntegrityRejected));
+		assert(evidence.checks.some((check) => check.offlineCacheReuse === "passed"));
+	} finally {
+		server.closeAllConnections();
+		if (server.listening) await new Promise((done) => server.close(done));
 		rmSync(directory, { recursive: true, force: true });
 	}
 });
