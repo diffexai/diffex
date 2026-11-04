@@ -118,6 +118,8 @@ Attribution:
 - Internal (from issues): `Fixed foo bar ([#123](https://github.com/diffexai/diffex/issues/123))`
 - External contributions: `Added feature X ([#456](https://github.com/diffexai/diffex/pull/456) by [@username](https://github.com/username))`
 
+Never modify changelogs unless it is a /cl run.
+
 ## Releasing
 
 **Lockstep versioning**: all packages share one version; every release updates all together. `patch` = fixes + additions, `minor` = breaking changes. No major releases.
