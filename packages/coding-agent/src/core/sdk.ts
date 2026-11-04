@@ -689,6 +689,7 @@ export async function createInternalAgentSession(
 		sessionManager,
 		settingsManager,
 		cwd,
+		agentDir,
 		scopedModels: options.scopedModels,
 		resourceLoader,
 		customTools,
@@ -759,6 +760,7 @@ export async function createInternalAgentSession(
 		},
 	});
 	agent.preparePrivateContinuation = (context, model) => {
+		if (session.isGoalModeEnabled) return undefined;
 		const continuations: PrivateContinuation[] = [];
 		for (const prepare of [prepareLessonReport, prepareSkillReport]) {
 			try {
