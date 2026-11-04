@@ -688,6 +688,7 @@ export class InteractiveMode {
 		this.widgetContainerBelow = new Container();
 		this.customFooterPlanModeIndicator = new CustomFooterPlanModeIndicator(
 			() => this.customFooter !== undefined && getCollaborationMode(this.session) === "plan",
+			() => this.customFooter !== undefined && this.session.isGoalModeEnabled,
 		);
 		this.keybindings = KeybindingsManager.create();
 		setKeybindings(this.keybindings);
@@ -3318,6 +3319,29 @@ export class InteractiveMode {
 			}
 			if (text === "/plan" || text.startsWith("/plan ")) {
 				await this.handlePlanCommand(text);
+				return;
+			}
+			if (text === "/goal") {
+				if (this.directBashCommandsInProgress > 0) {
+					this.editor.setText(text);
+					this.showWarning("Cannot change goal mode while the session is busy.");
+					return;
+				}
+				try {
+					await this.session.setGoalModeEnabled(!this.session.isGoalModeEnabled);
+					this.editor.addToHistory?.(text);
+					this.editor.setText("");
+					this.showStatus(
+						this.session.isGoalModeEnabled
+							? "Goal mode enabled (experimental). Self-evolution is disabled for this session."
+							: "Goal mode disabled.",
+					);
+					this.footer.invalidate();
+					this.ui.requestRender();
+				} catch (error) {
+					this.editor.setText(text);
+					this.showError(error instanceof Error ? error.message : String(error));
+				}
 				return;
 			}
 			if (text === "/skills") {
