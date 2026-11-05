@@ -81,8 +81,8 @@ def scan_bytes(data, path, budget, depth=0, default_agents=False):
     if budget['bytes'] > MAX_BYTES or budget['files'] > MAX_FILES:
         fail(path, 'inspection resource limit exceeded')
     declaration = check_path(path, default_agents=default_agents)
-    if default_agents and data != Path(__file__).resolve().parent.parent.joinpath('AGENTS_release.md').read_bytes():
-        fail(path, 'prohibited repository instructions: default AGENTS.md differs from AGENTS_release.md')
+    if default_agents and data != Path(__file__).resolve().parent.parent.joinpath('scripts/assets/default-agent.md').read_bytes():
+        fail(path, 'prohibited repository instructions: default AGENTS.md differs from scripts/assets/default-agent.md')
     if MAP_DIRECTIVE.search(data) or MAP_CONTENT.search(data):
         fail(path, 'embedded source map')
     if PurePosixPath(path).suffix in {'.js', '.mjs', '.cjs', '.ts', '.node'} and REMOVED_PROVIDER_RUNTIME.search(data):

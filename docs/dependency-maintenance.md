@@ -9,7 +9,7 @@ npm run check
 ./test.sh
 ```
 
-Keep each dependency's pins synchronized across consuming workspaces and examples. Update live documentation examples when their dependency versions change; do not rewrite historical release records or notices for unchanged vendored files. The HTML exporter still vendors marked 18.0.5 and highlight.js 11.9.0; packaging reads their tracked licenses under `legal/upstream/`, independently of installed runtime versions.
+Keep each dependency's pins synchronized across consuming workspaces and examples. Update live documentation examples when their dependency versions change; do not rewrite historical release records or notices for unchanged vendored files. The HTML exporter still vendors marked 18.0.5 and highlight.js 11.9.0; packaging reads their tracked licenses under `scripts/assets/licenses/`, independently of installed runtime versions.
 
 ## Compatibility exceptions
 
