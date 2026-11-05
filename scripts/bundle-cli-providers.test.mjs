@@ -21,7 +21,7 @@ function fixture() {
 		mkdirSync(dirname(join(root, file)), { recursive: true });
 		cpSync(file, join(root, file), { recursive: true });
 	};
-	for (const file of ["package-lock.json", "docs/release/distribution-policy.json", "packages/coding-agent/package.json", "packages/evolution/package.json", "packages/harness-trace/package.json", ...cliDistribution().bundled.map((pkg) => `${pkg.directory}/package.json`)]) copy(file);
+	for (const file of ["package-lock.json", "scripts/distribution-policy.json", "packages/coding-agent/package.json", "packages/evolution/package.json", "packages/harness-trace/package.json", ...cliDistribution().bundled.map((pkg) => `${pkg.directory}/package.json`)]) copy(file);
 	copy("packages/ai/dist");
 	// Mirror preparePackageDistribution's map stripping in the temporary copy only.
 	// Calling it directly would archive private debug maps under the real repo root.

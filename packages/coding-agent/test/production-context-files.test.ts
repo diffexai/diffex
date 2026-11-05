@@ -21,7 +21,7 @@ describe("production default context files", () => {
 	let agentDir: string;
 	let cwd: string;
 	let defaultPath: string;
-	const instructions = readFileSync(new URL("../../../AGENTS_release.md", import.meta.url), "utf8");
+	const instructions = readFileSync(new URL("../../../scripts/assets/default-agent.md", import.meta.url), "utf8");
 
 	beforeEach(() => {
 		directory = mkdtempSync(join(tmpdir(), "diffex-production-context-"));
@@ -46,7 +46,7 @@ describe("production default context files", () => {
 		expect(loader.getAgentsFiles().agentsFiles[0]).toEqual({ path: defaultPath, content: instructions });
 		const prompt = buildSystemPrompt({ cwd, contextFiles: loader.getAgentsFiles().agentsFiles });
 		expect(prompt).toContain(`<project_instructions path="${defaultPath}">\n${instructions}`);
-		expect(prompt).not.toContain("AGENTS_release.md");
+		expect(prompt).not.toContain("scripts/assets/default-agent.md");
 		const conversationalStyle = [
 			"When the user asks a question, answer it first before making edits or running implementation commands.",
 			"Keep responses concise and direct, adapting detail and terminology to the user.",

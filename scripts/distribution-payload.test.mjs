@@ -26,7 +26,7 @@ function fixture(extra, omit) {
 		"distribution-components.json": JSON.stringify([{ name: "Diffex", license: "MIT" }]),
 		"dist/index.js": "export const value = 1;\n",
 		"dist/index.d.ts": "export declare const value: number;\n",
-		"dist/AGENTS.md": readFileSync("AGENTS_release.md"),
+		"dist/AGENTS.md": readFileSync("scripts/assets/default-agent.md"),
 		"release/distribution-manifest.json": JSON.stringify(
 			createDistributionManifest({
 				packages: getPublicWorkspacePackages(),
@@ -139,7 +139,7 @@ for (const [name, content, reason] of [
 	["examples/example.ts", "export const value = 1", /prohibited source or private path/],
 	["AGENTS.md", "Private repository instructions", /prohibited repository instructions/],
 	["dist/AGENTS.md", "Private repository instructions", /prohibited repository instructions/],
-	["AGENTS_release.md", readFileSync("AGENTS_release.md"), /unapproved distribution documentation/],
+	["scripts/assets/default-agent.md", readFileSync("scripts/assets/default-agent.md"), /unapproved distribution documentation/],
 	["docs/agents.MD", "Private repository instructions", /prohibited repository instructions/],
 	[
 		"dist/node_modules/@diffexai/diffex-ai/AGENTS.md",
@@ -194,7 +194,7 @@ test("rejects a CLI artifact missing the default instructions", () => {
 });
 
 test("rejects a case variant of the approved default path", () => {
-	const result = inspect({ "dist/agents.MD": readFileSync("AGENTS_release.md") }, "dist/AGENTS.md");
+	const result = inspect({ "dist/agents.MD": readFileSync("scripts/assets/default-agent.md") }, "dist/AGENTS.md");
 	assert.notEqual(result.status, 0);
 	assert.match(result.stderr, /prohibited repository instructions/);
 });
