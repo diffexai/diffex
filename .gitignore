@@ -55,6 +55,5 @@ packages/coding-agent/release/
 # Owner-only instructions and release records
 /AGENTS.md
 /RELEASING.md
-/docs/release/
-/docs/maintenance/identity-residual-allowlist.md
+/docs/
 /.diffex/prompts/cl.md

@@ -1,15 +1,15 @@
 <p align="center">
   <a href="https://diffex.ai/">
-    <img src="docs/assets/diffex-wordmark.png" alt="diffex.ai wordmark" width="760">
+    <img src=".github/assets/diffex-wordmark.png" alt="diffex.ai wordmark" width="760">
   </a>
 </p>
 
 <p align="center">
-  <img src="docs/assets/daytona-startup-grid.png" alt="Daytona Startup Grid" width="240">
+  <img src=".github/assets/daytona-startup-grid.png" alt="Daytona Startup Grid" width="240">
 </p>
 
 <p align="center">
-  <img src="docs/assets/e2b-startups.png" alt="E2B for Startups" width="151">
+  <img src=".github/assets/e2b-startups.png" alt="E2B for Startups" width="151">
 </p>
 
 <p align="center">
@@ -76,14 +76,14 @@ git clone https://github.com/diffexai/diffex.git
 cd diffex
 npm install --ignore-scripts
 npm run build:offline
-./diffex-test.sh
+./scripts/diffex-test.sh
 ```
 
 Validate changes with:
 
 ```bash
 npm run check
-./test.sh
+./scripts/test.sh
 ```
 
 The checks cover formatting, linting, dependency policy, and TypeScript. The test command runs non-E2E suites without activating tests that require provider credentials.
