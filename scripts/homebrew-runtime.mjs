@@ -9,7 +9,7 @@ import { resolveArtifactDirectory } from "./artifact-installation.mjs";
 
 export const MAX_HOMEBREW_BYTES = 512 * 1024 * 1024;
 export const HOMEBREW_PLATFORMS = ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64"];
-export const runtimePinsFile = fileURLToPath(new URL("../docs/release/node-runtime.json", import.meta.url));
+export const runtimePinsFile = fileURLToPath(new URL("./node-runtime.json", import.meta.url));
 export const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");
 
 // CLI paths may live in the workspace, home, or temporary directory, but the

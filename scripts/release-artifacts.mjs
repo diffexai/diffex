@@ -26,7 +26,7 @@ export function assertEnabledChannels(policy) {
 }
 
 function sourceIdentity() {
-	const policyBytes = readFileSync("docs/release/distribution-policy.json");
+	const policyBytes = readFileSync("scripts/distribution-policy.json");
 	assertEnabledChannels(JSON.parse(policyBytes));
 	return {
 		repository: "diffexai/diffex",

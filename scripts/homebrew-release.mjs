@@ -12,8 +12,8 @@ import { readRetainedFile, releaseFilePath, resolveReleaseDirectory, writeRetain
 
 const repository = "diffexai/diffex";
 const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");
-const signerFile = new URL("../docs/release/homebrew-signers.json", import.meta.url);
-const policyFile = new URL("../docs/release/distribution-policy.json", import.meta.url);
+const signerFile = new URL("./homebrew-signers.json", import.meta.url);
+const policyFile = new URL("./distribution-policy.json", import.meta.url);
 const metadataNames = ["homebrew-manifest.json", "SHA256SUMS", "SHA256SUMS.sig"];
 
 function retainedBytes(path, encoding) {

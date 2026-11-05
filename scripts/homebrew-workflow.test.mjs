@@ -65,11 +65,11 @@ test("tap token is short-lived, repository scoped, and issued only after anonymo
 });
 
 test("publication remains disabled until an explicit policy review; no direct installer is added", () => {
-	const policy = JSON.parse(readFileSync(new URL("../docs/release/distribution-policy.json", import.meta.url), "utf8"));
+	const policy = JSON.parse(readFileSync(new URL("./distribution-policy.json", import.meta.url), "utf8"));
 	assert.equal(policy.channels.homebrew, "defer");
 	assert.equal(policy.channels.standalone, "defer");
 	assert.equal(policy.homebrewApproval.status, "pending");
-	assert.deepEqual(JSON.parse(readFileSync(new URL("../docs/release/homebrew-signers.json", import.meta.url), "utf8")).keys, []);
+	assert.deepEqual(JSON.parse(readFileSync(new URL("./homebrew-signers.json", import.meta.url), "utf8")).keys, []);
 	assert(workflow.jobs["publish-homebrew"].if.includes("HOMEBREW_DISTRIBUTION_ENABLED"));
 	const local = readFileSync(new URL("./local-release.mjs", import.meta.url), "utf8");
 	assert(local.includes('arg === "--homebrew"'));

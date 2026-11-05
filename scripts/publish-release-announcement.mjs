@@ -234,7 +234,7 @@ async function main() {
 	const manifest = readReleaseArtifacts(options.artifacts, { version: options.version, sourceCommit });
 	const packages = manifest.packages;
 
-	const policy = JSON.parse(readFileSync("docs/release/distribution-policy.json", "utf8"));
+	const policy = JSON.parse(readFileSync("scripts/distribution-policy.json", "utf8"));
 	await verifyAnnouncementChannels(policy, { ...options, sourceCommit });
 	const publishedPackages = await verifyPackagesAreAvailable(packages);
 	const release = {

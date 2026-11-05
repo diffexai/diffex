@@ -45,10 +45,10 @@ test("packed CLI links to online documentation and excludes the docs directory",
 		for (const file of [
 			"LICENSE",
 			"package-lock.json",
-			"AGENTS_release.md",
-			"docs/release/distribution-policy.json",
-			"legal/upstream/highlight-11.9.0.LICENSE",
-			"legal/upstream/marked-18.0.5.LICENSE",
+			"scripts/assets/default-agent.md",
+			"scripts/distribution-policy.json",
+			"scripts/assets/licenses/highlight-11.9.0.LICENSE",
+			"scripts/assets/licenses/marked-18.0.5.LICENSE",
 			"packages/coding-agent/npm-shrinkwrap.json",
 			"packages/coding-agent/install-lock/package.json",
 			"packages/coding-agent/install-lock/package-lock.json",
@@ -118,7 +118,7 @@ test("packed CLI links to online documentation and excludes the docs directory",
 		const archive = join(root, "stage", packed.filename);
 		assert.deepEqual(
 			execFileSync("tar", ["-xOf", archive, "package/dist/AGENTS.md"]),
-			readFileSync("AGENTS_release.md"),
+			readFileSync("scripts/assets/default-agent.md"),
 		);
 		assert.deepEqual(
 			packed.files.filter(({ path }) => /agents.*\.md$/i.test(path)).map(({ path }) => path),
