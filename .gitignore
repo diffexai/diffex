@@ -57,3 +57,4 @@ packages/coding-agent/release/
 /RELEASING.md
 /docs/release/
 /docs/maintenance/identity-residual-allowlist.md
+/.diffex/prompts/cl.md
