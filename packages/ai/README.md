@@ -241,7 +241,7 @@ The Anthropic, Google GenAI, Mistral, and OpenAI SDK updates leave existing prov
 - **Anthropic**: API version `2026-10-21` no longer accepts `temperature`, `top_p`, or `top_k`. The adapter omits these sampling parameters; the public unified `temperature` option is now ignored for Anthropic.
 - **Google Gemini and Vertex AI**: The adapters explicitly set `automaticContinuation: false`. A `CONTINUATION` finish reason ends the request rather than triggering hidden SDK follow-up requests; applications control any subsequent request.
 
-See [Stop Reasons](#stop-reasons) for limit/continuation mappings and [dependency maintenance](../../docs/dependency-maintenance.md) for update procedures and compatibility notes.
+See [Stop Reasons](#stop-reasons) for limit/continuation mappings and [contributor guidelines](../../CONTRIBUTING.md#engineering-expectations) for dependency requirements.
 
 ### Provider Factories
 

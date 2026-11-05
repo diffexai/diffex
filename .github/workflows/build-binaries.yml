@@ -108,7 +108,7 @@ jobs:
         if: steps.restore.outputs.restored != 'true'
         run: |
           npm run check
-          ./test.sh
+          ./scripts/test.sh
           git diff --exit-code HEAD
       - name: Prepare reviewed tarballs and private source snapshot
         if: steps.restore.outputs.restored != 'true'

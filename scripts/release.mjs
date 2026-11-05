@@ -189,7 +189,7 @@ run("npm run build:offline");
 console.log();
 
 console.log("Running tests...");
-run("./test.sh");
+run("./scripts/test.sh");
 console.log();
 
 // Commit and tag

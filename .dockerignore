@@ -17,3 +17,5 @@ packages/coding-agent/binaries
 **/.env
 **/.env.*
 **/__pycache__
+
+/docs
