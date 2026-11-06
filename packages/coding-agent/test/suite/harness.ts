@@ -3,7 +3,7 @@ import { createInMemoryModelRegistry, createModelRegistry, getModelRuntime } fro
  * Local test harness for the new coding-agent test suite.
  */
 
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentMessage, AgentTool, TelemetryContext } from "@diffexai/diffex-agent-core";
@@ -104,14 +104,8 @@ export interface Harness {
 	cleanup: () => Promise<void>;
 }
 
-function createTempDir(): string {
-	const tempDir = join(tmpdir(), `pi-suite-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-	mkdirSync(tempDir, { recursive: true });
-	return tempDir;
-}
-
 export async function createHarness(options: HarnessOptions = {}): Promise<Harness> {
-	const tempDir = createTempDir();
+	const tempDir = mkdtempSync(join(tmpdir(), "diffex-suite-"));
 	const fauxProvider: FauxProviderRegistration = registerFauxProvider({
 		models: options.models,
 	});
@@ -220,6 +214,36 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 		events.push(event);
 	});
 
+	// Goal scenarios snapshot provider-visible schemas, without executable tools.
+	// Other scenarios retain the original tool identities for lifecycle checks.
+	let snapshotGoalContexts = false;
+	const adaptResponses = (responses: FauxResponseStep[]): FauxResponseStep[] =>
+		responses.map((response) => {
+			if (typeof response !== "function") return response;
+			return (context, streamOptions, state, requestModel) => {
+				const goalTools = context.tools?.some((tool) =>
+					["compact_block", "query_block", "expand_block"].includes(tool.name),
+				);
+				snapshotGoalContexts ||= goalTools ?? false;
+				return response(
+					snapshotGoalContexts
+						? {
+								...context,
+								tools: context.tools?.map(({ name, description, parameters, constrainedSampling }) => ({
+									name,
+									description,
+									parameters,
+									...(constrainedSampling === undefined ? {} : { constrainedSampling }),
+								})),
+							}
+						: context,
+					streamOptions,
+					state,
+					requestModel,
+				);
+			};
+		});
+
 	return {
 		session,
 		sessionManager,
@@ -228,8 +252,8 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 		faux: fauxProvider,
 		models: fauxProvider.models,
 		getModel: fauxProvider.getModel,
-		setResponses: fauxProvider.setResponses,
-		appendResponses: fauxProvider.appendResponses,
+		setResponses: (responses) => fauxProvider.setResponses(adaptResponses(responses)),
+		appendResponses: (responses) => fauxProvider.appendResponses(adaptResponses(responses)),
 		getPendingResponseCount: fauxProvider.getPendingResponseCount,
 		events,
 		eventsOfType<T extends AgentSessionEvent["type"]>(type: T) {

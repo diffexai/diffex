@@ -160,11 +160,12 @@ Type `/` in the editor to trigger commands. [Extensions](#extensions) can regist
 | `/scoped-models` | Enable/disable models for Ctrl+P cycling |
 | `/settings` | Theme, installed skills, message delivery, transport |
 | `/plan [request]` | Enter Plan mode, optionally submitting a planning request |
+| `/goal` | Toggle experimental goal context management for this session |
 | [`/skills`](docs/skills.md#skill-commands) | Search and reference one or more skills in the editor |
 | [`/evolve`](docs/evolution.md) | Inspect and control harness evolution and generated skills |
 | [`/version`](docs/evolution.md#controls) | Select the active harness revision |
 | `/resume` | Pick from previous sessions |
-| `/new` | Start a new session |
+| `/clear` | Start a new session |
 | `/name <name>` | Set session display name |
 | `/session` | Show session info (file, ID, messages, tokens, cost) |
 | `/subagents` | Show all sub-agents in the current session |
@@ -180,7 +181,7 @@ Type `/` in the editor to trigger commands. [Extensions](#extensions) can regist
 | `/reload` | Reload keybindings, extensions, skills, prompts, themes, and context files |
 | `/hotkeys` | Show all keyboard shortcuts |
 | `/changelog` | Display version history |
-| `/quit` | Quit Diffex |
+| `/exit` | Quit Diffex |
 
 `/subagents` runs immediately, including while the parent agent is working or compacting.
 It displays the current in-memory roster without adding the command or roster to model context.
@@ -219,6 +220,38 @@ The official response must contain exactly one non-empty plan between standalone
 Plan mode is an interactive branch preference. Resume, fork, and `/tree` navigation restore the newest matching mode entry on the selected branch when it is valid; new sessions, malformed newest matching entries, and non-interactive print, JSON, RPC, and SDK use remain in Default. Historical plans never replay the implementation offer. `update_plan` is a separate execution-time progress checklist and does not enter or leave Plan mode.
 
 Mode changes use normal lazy session saving: toggling in a new disk-backed session remains in memory until its first assistant message is saved or the session is explicitly persisted. Starting a new run discards an older implementation offer, including when an extension starts the run. Temporary busy activity defers the offer and blocks acceptance until idle, including awaited direct-Bash extension hooks. See [Plan mode details](docs/usage.md#plan-mode).
+
+### Goal Mode
+
+Use `/goal` to toggle experimental context management for the current session.
+Goal mode does not start or continue a task, and it can be combined with Plan mode.
+The footer shows `Goal` while the mode is active, and the selected branch retains the setting across resume, fork, and clone.
+New sessions start with goal mode disabled.
+
+While enabled, the assistant receives a short context usage note and stable markers such as `[context b042]` beside history blocks.
+A marker is reserved before each assistant exchange, and every associated tool result shares its ID without rewriting the assistant response.
+Surviving markers remain stable across compaction, resume, and branching.
+Goal mode adds its tools and guidance to the normal system and project instructions.
+It can call `compact_block` with `start_id` and `end_id` to replace a consecutive eligible range with a decision record once context usage reaches 40%.
+That call must be the only tool call in its batch.
+The current request, recent exchange, instructions, and incomplete exchanges remain protected.
+
+The assistant can call `query_block` with `archive_id` (such as `ctx-0001`) and a `query` to ask a restricted recall subagent about archived evidence.
+To discover archives whose summaries are no longer visible, it can omit `archive_id` and search summaries with `query`, or use `query: "*"` to list them.
+Archive discovery and evidence expansion omit `cursor` for the first page and use the returned `next_cursor` for later pages.
+The subagent can follow references using `expand_block`, but cannot use filesystem tools or delegate work.
+Archives remain available for recall after goal mode is turned off.
+Their original session records are retained across ordinary compaction and session export.
+
+Usage is estimated against usable input capacity after reserving 4,096 provider safety tokens and response headroom of up to 8,192 tokens, capped at one quarter of the model window and its output limit.
+Goal mode provides progressively stronger compaction guidance as usage grows and invokes ordinary compaction before that headroom is exhausted, even when automatic compaction is disabled.
+Summary requests preserve conversation evidence and source IDs while excluding opaque provider signatures and accounting metadata.
+Selections that exceed the helper input budget are rejected before dispatch with guidance to select a smaller range or a larger model; the original history remains intact.
+Archive discovery ranks summary terms and offers `query: "*"` browsing when matches are weak or empty.
+If the provider reports an overflow sooner, Diffex uses its normal overflow recovery.
+Self-evolution and its feedback are suspended for this session while goal mode is enabled; the global preference is unchanged and takes effect again on exit.
+Disable `/goal` before enabling self-evolution with `/evolve`.
+SDK integrations can inspect `session.isGoalModeEnabled` and call `await session.setGoalModeEnabled(true)` or `await session.setGoalModeEnabled(false)` while the session is idle.
 
 ### Message Queue
 

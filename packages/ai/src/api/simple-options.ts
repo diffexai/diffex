@@ -9,7 +9,7 @@ import type {
 } from "../types.ts";
 import { estimateContextTokens } from "../utils/estimate.ts";
 
-const CONTEXT_SAFETY_TOKENS = 4096;
+export const CONTEXT_SAFETY_TOKENS = 4096;
 const MIN_MAX_TOKENS = 1;
 
 export function clampMaxTokensToContext(model: Model<Api>, context: Context, maxTokens: number): number {

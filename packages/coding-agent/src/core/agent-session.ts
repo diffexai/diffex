@@ -81,6 +81,7 @@ import {
 	calculateContextTokens,
 	collectEntriesForBranchSummary,
 	compact,
+	completeSummarization,
 	estimateContextTokens,
 	estimateTokens,
 	generateBranchSummary,
@@ -119,9 +120,21 @@ import {
 } from "./extensions/index.ts";
 import { emitSessionShutdownEvent } from "./extensions/runner.ts";
 import { parseFinalizedPlanResponse } from "./finalized-plan.ts";
+import { recallGoalArchive } from "./goal-recall.ts";
+import { GOAL_RECOVERY_NOTICE, prepareGoalRecovery, prepareGoalRecoveryArchive } from "./goal-recovery.ts";
+import { GOAL_TOOL_GUIDELINES, GoalRuntime } from "./goal-runtime.ts";
+import { GoalSummaryBudgetError, goalSummaryText, prepareGoalSummaryRequest } from "./goal-summary.ts";
 import type { BashExecutionMessage, CustomMessage } from "./messages.ts";
 import { ModelRegistry } from "./model-registry.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
+import { stripCurrentPlanSnapshot } from "./plan-snapshot.ts";
+import {
+	formatGoalArchiveCatalog,
+	GOAL_ARCHIVE_CATALOG_TYPE,
+	GOAL_MODE_ENTRY,
+	readGoalArchives,
+	readGoalMode,
+} from "./pocket-context.ts";
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.ts";
 import type { ResourceExtensionPaths, ResourceLoader } from "./resource-loader.ts";
 import type {
@@ -137,6 +150,7 @@ import {
 	CURRENT_SESSION_VERSION,
 	getLatestCompactionEntry,
 	type SessionHeader,
+	sessionEntryToContextMessages,
 } from "./session-manager.ts";
 import type { SettingsManager } from "./settings-manager.ts";
 import {
@@ -309,6 +323,8 @@ export interface AgentSessionConfig {
 	sessionManager: SessionManager;
 	settingsManager: SettingsManager;
 	cwd: string;
+	/** Global agent data directory, used when constructing isolated helpers. */
+	agentDir?: string;
 	/** Models to cycle through with Ctrl+P (from --models flag) */
 	scopedModels?: Array<{ model: Model<any>; thinkingLevel?: ThinkingLevel }>;
 	/** Resource loader for extensions, skills, prompts, themes, context files, and system prompt */
@@ -532,6 +548,7 @@ export class AgentSession {
 	private _requestUserInputDefinition: ToolDefinition | undefined;
 	private _requestUserInputTool: AgentTool | undefined;
 	private _cwd: string;
+	private readonly _agentDir: string;
 	private _extensionRunnerRef?: { current?: ExtensionRunner };
 	private _initialActiveToolNames?: string[];
 	private _allowedToolNames?: Set<string>;
@@ -579,6 +596,11 @@ export class AgentSession {
 	private readonly _pendingIdleSubagentEscalations = new Map<string, number>();
 	private _agentRunAborted = false;
 	private _disposePromise: Promise<void> | undefined;
+	private _goalModeEnabled: boolean;
+	private _goalTransitionInProgress = false;
+	private _goalLifecycleReady: Promise<void>;
+	private readonly _goalRuntime: GoalRuntime;
+	private _goalRecallGeneration = 0;
 
 	constructor(config: AgentSessionConfig) {
 		this._shellProcesses = new OwnedShellProcesses(config.backgroundProcessPolicy);
@@ -589,6 +611,7 @@ export class AgentSession {
 		this._resourceLoader = config.resourceLoader;
 		this._customTools = config.customTools ?? [];
 		this._cwd = config.cwd;
+		this._agentDir = config.agentDir ?? config.cwd;
 		this._modelRuntime = config.modelRuntime;
 		this._extensionRunnerRef = config.extensionRunnerRef;
 		this._initialActiveToolNames = config.initialActiveToolNames;
@@ -608,12 +631,24 @@ export class AgentSession {
 		);
 		this._telemetryContext = config.telemetryContext ?? NOOP_TELEMETRY_CONTEXT;
 		this._lifecycleObserver = config.lifecycleObserver;
+		this._goalModeEnabled = readGoalMode(this.sessionManager.getBranch());
+		this._goalLifecycleReady = Promise.resolve(this._lifecycleObserver?.setGoalSuspended?.(this._goalModeEnabled));
+		this._goalRuntime = new GoalRuntime({
+			manager: this.sessionManager,
+			getMessages: () => this.agent.state.messages,
+			getModel: () => this.model,
+			getSystemPrompt: () => this.agent.state.systemPrompt,
+			getTools: () => this.agent.state.tools,
+			summarize: (messages, start, signal, entryIds) => this._summarizeGoal(messages, start, signal, entryIds),
+			recall: (archiveId, query, signal) => this._recallGoal(archiveId, query, signal),
+		});
 
 		// Always subscribe to agent events for internal handling
 		// (session persistence, extensions, auto-compaction, retry logic)
 		this._unsubscribeAgent = this.agent.subscribe(this._handleAgentEvent);
 		this._installAgentToolHooks();
 		this._installAgentNextTurnRefresh();
+		this._installGoalRequestGuard();
 
 		this._buildRuntime({
 			activeToolNames: this._initialActiveToolNames,
@@ -712,6 +747,38 @@ export class AgentSession {
 		}
 	}
 
+	private async _summarizeGoal(
+		messages: AgentMessage[],
+		start: number,
+		signal?: AbortSignal,
+		entryIds?: readonly string[],
+	): Promise<AssistantMessage> {
+		const model = this.model;
+		if (!model) throw new Error(formatNoModelSelectedMessage());
+		const auth = await this._getSummarizationRequestAuth(model, signal);
+		const { context, maxTokens } = prepareGoalSummaryRequest(messages, start, auth.model, entryIds);
+		return completeSummarization(
+			auth.model,
+			context,
+			{
+				apiKey: auth.apiKey,
+				headers: auth.headers,
+				env: auth.env,
+				signal,
+				maxTokens,
+				...(model.reasoning && this.thinkingLevel !== "off" ? { reasoning: this.thinkingLevel } : {}),
+				telemetryContext: this.agent.telemetryContext,
+			},
+			this.agent.streamFunction,
+			this.settingsManager.getRetrySettings(),
+			this._summarizationRetryCallbacks({ source: "compaction", reason: "threshold" }),
+		);
+	}
+
+	private _recallGoal(archiveId: string, query: string, signal?: AbortSignal) {
+		return recallGoalArchive({ parent: this, agentDir: this._agentDir, archiveId, query, signal });
+	}
+
 	/**
 	 * Install tool hooks once on the Agent instance.
 	 *
@@ -721,7 +788,25 @@ export class AgentSession {
 	 * happens here instead of in wrappers.
 	 */
 	private _installAgentToolHooks(): void {
-		this.agent.beforeToolCall = async ({ toolCall, args, context }) => {
+		this.agent.beforeToolCall = async ({ toolCall, args, context, assistantMessage }) => {
+			if (this._goalModeEnabled && toolCall.name === "update_plan") {
+				return { block: true, reason: 'Tool "update_plan" is unavailable in goal mode.' };
+			}
+			const calls = assistantMessage.content.filter((part) => part.type === "toolCall");
+			const activeCompact = context.tools?.find((tool) => tool.name === "compact_block");
+			if (
+				activeCompact === this._goalRuntime.compactTool &&
+				calls.length > 1 &&
+				calls.some((call) => call.name === "compact_block")
+			) {
+				return { block: true, reason: "compact_block must be the only call in its tool batch." };
+			}
+			if (
+				toolCall.name === "query_block" &&
+				context.tools?.find((tool) => tool.name === toolCall.name) === this._goalRuntime.queryTool
+			) {
+				this._goalRecallGeneration++;
+			}
 			if (toolCall.name === REQUEST_USER_INPUT_TOOL_NAME && this._activeRunCollaborationMode !== "plan") {
 				return {
 					block: true,
@@ -731,7 +816,11 @@ export class AgentSession {
 			if (this._activeRunCollaborationMode === "plan") {
 				const capturedTool = this._activeRunCollaborationState?.tools.find((tool) => tool.name === toolCall.name);
 				const activeTool = context.tools?.find((tool) => tool.name === toolCall.name);
-				if (!(PLAN_MODE_TOOL_NAMES as readonly string[]).includes(toolCall.name) || activeTool !== capturedTool) {
+				const goalTool = toolCall.name === "compact_block" || toolCall.name === "query_block";
+				if (
+					(!(PLAN_MODE_TOOL_NAMES as readonly string[]).includes(toolCall.name) && !goalTool) ||
+					activeTool !== capturedTool
+				) {
 					return {
 						block: true,
 						reason: `Tool "${toolCall.name}" is unavailable in Plan mode.`,
@@ -803,9 +892,34 @@ export class AgentSession {
 			const previousSnapshot = await previousPrepareNextTurnWithContext?.(turn, signal);
 			const previousContext = previousSnapshot?.context ?? turn.context;
 			let messages = previousContext.messages;
+			if (this._goalModeEnabled && turn.toolResults.length > 0 && !signal?.aborted) {
+				if (this._goalRuntime.consumeRebuild()) {
+					this.agent.state.messages = this.sessionManager.buildSessionContext().messages;
+				}
+				messages = this.agent.state.messages;
+				let note = this._goalRuntime.createNote(messages);
+				if (this._goalRuntime.requiresEmergencyCompaction) {
+					this._goalRuntime.recordEmergencyCompaction();
+					const before = this.agent.state.messages;
+					await this._runAutoCompaction("threshold", true, signal);
+					if (before === this.agent.state.messages)
+						throw new Error(
+							"Emergency context compaction failed or was cancelled. Reduce the context or choose a larger model.",
+						);
+					messages = this.agent.state.messages;
+					note = this._goalRuntime.createNote(messages);
+					if (this._goalRuntime.requiresEmergencyCompaction)
+						throw new Error(
+							"Emergency context compaction could not make the request fit. Reduce the context or choose a larger model.",
+						);
+				}
+				appendCustomMessageWithRollback(this.sessionManager, note.customType, note.content, false, note.details);
+				messages = [...messages, note];
+				this.agent.state.messages = messages;
+			}
 			// Tool output is part of the next request even though the model's usage
 			// only describes the request before that output. Check every complete batch.
-			if (turn.toolResults.length > 0 && !signal?.aborted && this.model) {
+			if (!this._goalModeEnabled && turn.toolResults.length > 0 && !signal?.aborted && this.model) {
 				const settings = this.settingsManager.getCompactionSettings();
 				if (shouldCompact(estimateContextTokens(messages).tokens, this.model.contextWindow, settings)) {
 					const beforeCompaction = this.agent.state.messages;
@@ -833,6 +947,44 @@ export class AgentSession {
 				model: this.agent.state.model,
 				thinkingLevel: this.agent.state.thinkingLevel,
 			};
+		};
+	}
+
+	private _installGoalRequestGuard(): void {
+		const previousTransform = this.agent.transformContext;
+		this.agent.transformContext = async (messages, signal) => {
+			if (this._goalModeEnabled && !this._goalRuntime.matchesRequest(messages)) {
+				let note = this._goalRuntime.createNote(messages);
+				if (this._goalRuntime.requiresEmergencyCompaction) {
+					this._goalRuntime.recordEmergencyCompaction();
+					const before = this.agent.state.messages;
+					await this._runAutoCompaction("threshold", true, signal);
+					if (before === this.agent.state.messages) {
+						throw new Error(
+							"Emergency context compaction failed or was cancelled. Reduce the context or choose a larger model.",
+						);
+					}
+					messages.splice(0, messages.length, ...this.agent.state.messages);
+					note = this._goalRuntime.createNote(messages);
+					if (this._goalRuntime.requiresEmergencyCompaction) {
+						throw new Error(
+							"Emergency context compaction could not make the request fit. Reduce the context or choose a larger model.",
+						);
+					}
+				}
+				appendCustomMessageWithRollback(this.sessionManager, note.customType, note.content, false, note.details);
+				messages.push(note);
+				if (messages !== this.agent.state.messages) this.agent.state.messages.push(note);
+			}
+			const transformed = previousTransform ? await previousTransform(messages, signal) : messages;
+			const labeled = this._goalRuntime.labelMessages(transformed, this._goalModeEnabled);
+			return this._goalModeEnabled
+				? labeled.map((message) =>
+						message.role === "compactionSummary" || message.role === "branchSummary"
+							? { ...message, summary: stripCurrentPlanSnapshot(message.summary) }
+							: message,
+					)
+				: labeled;
 		};
 	}
 
@@ -1299,6 +1451,65 @@ export class AgentSession {
 		return !this._isAgentRunActive;
 	}
 
+	/** Whether Pocket Context is enabled on the selected session branch. */
+	get isGoalModeEnabled(): boolean {
+		return this._goalModeEnabled;
+	}
+
+	/** Session-local operational counts, never included in model context. */
+	getGoalDiagnostics() {
+		return this._goalRuntime.getDiagnostics();
+	}
+
+	/** Enable or disable goal mode without changing global evolution preferences. */
+	async setGoalModeEnabled(enabled: boolean): Promise<void> {
+		if (this._goalTransitionInProgress || this[IS_COLLABORATION_MODE_BUSY]() || this.agent.hasQueuedMessages()) {
+			throw new Error("Cannot change goal mode while the session is busy.");
+		}
+		if (enabled === this._goalModeEnabled) return;
+		this._goalTransitionInProgress = true;
+		try {
+			await this._goalLifecycleReady;
+			if (enabled) await this._lifecycleObserver?.setGoalSuspended?.(true);
+			try {
+				appendCustomEntryWithRollback(this.sessionManager, GOAL_MODE_ENTRY, { version: 1, enabled }, true);
+			} catch (error) {
+				if (enabled) await this._lifecycleObserver?.setGoalSuspended?.(false);
+				throw error;
+			}
+			this._goalModeEnabled = enabled;
+			this._installCollaborationModeState(this._deriveCollaborationModeState(this._collaborationMode));
+			if (!enabled) {
+				try {
+					this._refreshGoalArchiveCatalog();
+				} finally {
+					await this._lifecycleObserver?.setGoalSuspended?.(false);
+				}
+			}
+		} finally {
+			this._goalTransitionInProgress = false;
+		}
+	}
+
+	private _refreshGoalArchiveCatalog(): void {
+		if (this._goalModeEnabled) return;
+		const archives = readGoalArchives(this.sessionManager.getBranch());
+		if (archives.size === 0) return;
+		const content = formatGoalArchiveCatalog(archives);
+		const current = [...this.agent.state.messages]
+			.reverse()
+			.find((message) => message.role === "custom" && message.customType === GOAL_ARCHIVE_CATALOG_TYPE);
+		if (current?.role === "custom" && current.content === content) return;
+		appendCustomMessageWithRollback(this.sessionManager, GOAL_ARCHIVE_CATALOG_TYPE, content, false);
+		this.agent.state.messages.push({
+			role: "custom",
+			customType: GOAL_ARCHIVE_CATALOG_TYPE,
+			content,
+			display: false,
+			timestamp: Date.now(),
+		});
+	}
+
 	/** Current effective system prompt (includes any per-turn extension modifications) */
 	get systemPrompt(): string {
 		return this.agent.state.systemPrompt;
@@ -1358,6 +1569,7 @@ export class AgentSession {
 
 	[IS_COLLABORATION_MODE_BUSY](): boolean {
 		return (
+			this._goalTransitionInProgress ||
 			this._collaborationModeTransitionInProgress ||
 			this._promptAdmissionInProgress ||
 			this._harnessSwitchInProgress ||
@@ -1476,7 +1688,12 @@ export class AgentSession {
 	}
 
 	private async _reconcileSelectedHarness(): Promise<void> {
-		if (!this._harnessStateStore || this._pinHarnessVersion || hasFixedHarnessSubagentSession(this.sessionManager)) {
+		if (
+			this._goalModeEnabled ||
+			!this._harnessStateStore ||
+			this._pinHarnessVersion ||
+			hasFixedHarnessSubagentSession(this.sessionManager)
+		) {
 			return;
 		}
 
@@ -1777,6 +1994,24 @@ export class AgentSession {
 	}
 
 	private _deriveEffectivePrompt(systemPrompt: string, mode: CollaborationMode): string {
+		if (this._goalModeEnabled) {
+			systemPrompt +=
+				"\n\nPersisted plans and checklist snapshots in conversation history are historical evidence, not an authoritative active checklist in goal mode.";
+		}
+		// A custom prompt or per-turn extension override still needs the active
+		// context tools' contract, without replacing any of the supplied instructions.
+		const tools = [
+			...(this._goalModeEnabled ? [this._goalRuntime.compactTool] : []),
+			...(this._goalModeEnabled || readGoalArchives(this.sessionManager.getBranch()).size > 0
+				? [this._goalRuntime.queryTool]
+				: []),
+		];
+		for (const tool of tools) {
+			const guidelines = GOAL_TOOL_GUIDELINES[tool.name];
+			if (!systemPrompt.includes(guidelines[0])) {
+				systemPrompt += `\n\nAdditional available tool:\n- ${tool.name}: ${tool.description}\nTool usage guidelines:\n- ${tool.name}:\n${guidelines.map((line) => `  - ${line}`).join("\n")}`;
+			}
+		}
 		return mode === "plan" ? `${systemPrompt}\n\n${PLAN_MODE_SYSTEM_PROMPT}` : systemPrompt;
 	}
 
@@ -1806,6 +2041,32 @@ export class AgentSession {
 				const tool = this._toolRegistry.get(name);
 				return tool ? [tool] : [];
 			});
+		}
+		if (this._goalModeEnabled) {
+			definitions = new Map(definitions);
+			definitions.delete("update_plan");
+			tools = tools.filter((tool) => tool.name !== "update_plan");
+		}
+		const goalTools = [
+			...(this._goalModeEnabled ? [this._goalRuntime.compactTool] : []),
+			...(this._goalModeEnabled || readGoalArchives(this.sessionManager.getBranch()).size > 0
+				? [this._goalRuntime.queryTool]
+				: []),
+		];
+		if (goalTools.length > 0) {
+			definitions = new Map(definitions);
+			tools = tools.filter((tool) => !goalTools.some((goalTool) => goalTool.name === tool.name));
+			for (const tool of goalTools) {
+				tools.push(tool);
+				definitions.set(tool.name, {
+					definition: {
+						...createToolDefinitionFromAgentTool(tool),
+						promptSnippet: tool.description,
+						promptGuidelines: GOAL_TOOL_GUIDELINES[tool.name],
+					},
+					sourceInfo: createSyntheticSourceInfo(`<builtin:${tool.name}>`, { source: "builtin" }),
+				});
+			}
 		}
 
 		const { prompt, options } = this._createSystemPrompt(
@@ -1853,10 +2114,12 @@ export class AgentSession {
 		) => Result | Promise<Result>,
 	): Promise<Result> {
 		const operationId = uuidv7();
+		const goalOperation = this._goalModeEnabled;
+		const goalRecallGeneration = this._goalRecallGeneration;
 		const taskLineageId = kind === "prompt" ? operationId : undefined;
 		const firstEntryOrdinal = this.sessionManager.getEntryCount();
 		const operation = startCodingAgentSpan(
-			this.agent.telemetryContext,
+			goalOperation ? NOOP_TELEMETRY_CONTEXT : this.agent.telemetryContext,
 			"diffex.coding_agent.operation",
 			{
 				"diffex.operation.id": operationId,
@@ -1888,13 +2151,23 @@ export class AgentSession {
 				}
 			},
 		);
-		return operation.finally(() => this._notifyOperationSettled({ operationId, taskLineageId, firstEntryOrdinal }));
+		return goalOperation
+			? operation
+			: operation.finally(() =>
+					this._notifyOperationSettled({
+						operationId,
+						taskLineageId,
+						firstEntryOrdinal,
+						excludeEvidence: this._goalModeEnabled || this._goalRecallGeneration !== goalRecallGeneration,
+					}),
+				);
 	}
 
 	private async _notifyOperationSettled(options: {
 		operationId: string;
 		taskLineageId?: string;
 		firstEntryOrdinal: number;
+		excludeEvidence?: boolean;
 	}): Promise<void> {
 		try {
 			await this._lifecycleObserver?.operationSettled({
@@ -2318,6 +2591,7 @@ export class AgentSession {
 		collaborationMode: CollaborationMode,
 		collaborationState: CollaborationModeState | undefined,
 	): Promise<void> {
+		await this._goalLifecycleReady;
 		if (this._harnessSwitchInProgress) {
 			throw new Error("Cannot submit a prompt while a harness version switch is in progress.");
 		}
@@ -2333,6 +2607,7 @@ export class AgentSession {
 			if (!pendingCompaction) return;
 			pendingCompaction.commit();
 			pendingCompaction = undefined;
+			this._refreshGoalArchiveCatalog();
 			// Do not refresh a harness for compaction that cancellable preflight can still roll back.
 			const refreshError = await this._refreshHarnessAfterCompaction();
 			if (refreshError) {
@@ -2590,6 +2865,24 @@ export class AgentSession {
 		if (signal?.aborted) {
 			this._pendingNextTurnMessages = [...(consumedNextTurnMessages ?? []), ...this._pendingNextTurnMessages];
 			throw signal.reason;
+		}
+		if (this._goalModeEnabled) {
+			let note = this._goalRuntime.createNote([...this.agent.state.messages, ...messages]);
+			if (this._goalRuntime.requiresEmergencyCompaction) {
+				this._goalRuntime.recordEmergencyCompaction();
+				const before = this.agent.state.messages;
+				await this._runAutoCompaction("threshold", false, signal);
+				if (before === this.agent.state.messages)
+					throw new Error(
+						"Emergency context compaction failed or was cancelled. Reduce the context or choose a larger model.",
+					);
+				note = this._goalRuntime.createNote([...this.agent.state.messages, ...messages]);
+				if (this._goalRuntime.requiresEmergencyCompaction)
+					throw new Error(
+						"Emergency context compaction could not make the request fit. Reduce the context or choose a larger model.",
+					);
+			}
+			messages.push(note);
 		}
 		consumedNextTurnMessages = undefined;
 		releaseUnsignaledPreflight();
@@ -3328,7 +3621,9 @@ export class AgentSession {
 			const pathEntries = this.sessionManager.getBranch();
 			const settings = this.settingsManager.getCompactionSettings();
 
-			const preparation = prepareCompaction(pathEntries, settings);
+			const preparation = this._goalModeEnabled
+				? prepareGoalRecovery(pathEntries, settings, requestModel)
+				: prepareCompaction(pathEntries, settings);
 			if (!preparation) {
 				// Check why we can't compact
 				const lastEntry = pathEntries[pathEntries.length - 1];
@@ -3411,6 +3706,8 @@ export class AgentSession {
 				fromExtension,
 				usage,
 				willRetry: false,
+				signal: this._compactionAbortController.signal,
+				expectedLeafId: pathEntries.at(-1)?.id ?? null,
 			});
 			const refreshError = await this._refreshHarnessAfterCompaction();
 			// compaction_end listeners may submit queued prompts, so expose idle state before notifying them.
@@ -3468,8 +3765,17 @@ export class AgentSession {
 		willRetry: boolean;
 		signal?: AbortSignal;
 		deferCommit?: (transaction: CompactionAppendTransaction) => void;
+		expectedLeafId?: string | null;
 	}): Promise<CompactionResult> {
-		const summary = `${options.summary}\n\n${formatCurrentPlanSnapshot(this.sessionManager)}`;
+		options.signal?.throwIfAborted();
+		if (this._goalModeEnabled && options.expectedLeafId !== this.sessionManager.getLeafId())
+			throw new Error("The context changed during emergency compaction. No archive was created.");
+		const goalArchive = this._goalModeEnabled
+			? prepareGoalRecoveryArchive(this.sessionManager.getBranch(), options.firstKeptEntryId, options.summary)
+			: undefined;
+		const summary = goalArchive
+			? `[${goalArchive.archiveId}] ${options.summary}`
+			: `${options.summary}\n\n${formatCurrentPlanSnapshot(this.sessionManager)}`;
 		const transaction = appendCompactionTransaction(
 			this.sessionManager,
 			summary,
@@ -3478,9 +3784,11 @@ export class AgentSession {
 			options.details,
 			options.fromExtension,
 			options.usage,
+			goalArchive,
 		);
 		const sessionContext = this.sessionManager.buildSessionContext();
 		this.agent.state.messages = sessionContext.messages;
+		this._goalRuntime.invalidateUsage();
 		const estimatedTokensAfter = estimateMessagesTokens(sessionContext.messages);
 
 		if (this._extensionRunner) {
@@ -3508,7 +3816,10 @@ export class AgentSession {
 			throw options.signal.reason;
 		}
 		if (options.deferCommit) options.deferCommit(transaction);
-		else transaction.commit();
+		else {
+			transaction.commit();
+			this._refreshGoalArchiveCatalog();
+		}
 
 		const compactionResult: CompactionResult = {
 			summary,
@@ -3540,7 +3851,7 @@ export class AgentSession {
 		deferCommit?: (transaction: CompactionAppendTransaction) => void,
 	): Promise<boolean> {
 		const settings = this.settingsManager.getCompactionSettings();
-		if (!settings.enabled) return false;
+		if (!settings.enabled && !this._goalModeEnabled) return false;
 
 		// Skip if message was aborted (user cancelled) - unless skipAbortedCheck is false
 		if (skipAbortedCheck && assistantMessage.stopReason === "aborted") return false;
@@ -3600,6 +3911,7 @@ export class AgentSession {
 			return await this._runAutoCompaction("overflow", willRetry, signal, deferCommit);
 		}
 
+		if (this._goalModeEnabled) return false;
 		// Case 2: Threshold - context is getting large
 		// For error messages or all-zero usage messages, estimate from the last valid response.
 		// This ensures sessions that hit persistent API errors (e.g. 529) or malformed zero-usage
@@ -3676,7 +3988,9 @@ export class AgentSession {
 
 			const pathEntries = this.sessionManager.getBranch();
 
-			const preparation = prepareCompaction(pathEntries, settings);
+			const preparation = this._goalModeEnabled
+				? prepareGoalRecovery(pathEntries, settings, requestModel)
+				: prepareCompaction(pathEntries, settings);
 			if (!preparation) {
 				return false;
 			}
@@ -3734,20 +4048,27 @@ export class AgentSession {
 				details = extensionCompaction.details;
 			} else {
 				// Generate compaction result
-				const compactResult = await compact(
-					preparation,
-					requestModel,
-					apiKey,
-					headers,
-					undefined,
-					compactionSignal,
-					this.thinkingLevel,
-					this.agent.streamFunction,
-					env,
-					this.settingsManager.getRetrySettings(),
-					this._summarizationRetryCallbacks({ source: "compaction", reason }, telemetryContext),
-					telemetryContext,
-				);
+				const compactResult = this._goalModeEnabled
+					? await this._compactGoalRecovery(
+							pathEntries,
+							preparation.firstKeptEntryId,
+							preparation.tokensBefore,
+							compactionSignal,
+						)
+					: await compact(
+							preparation,
+							requestModel,
+							apiKey,
+							headers,
+							undefined,
+							compactionSignal,
+							this.thinkingLevel,
+							this.agent.streamFunction,
+							env,
+							this.settingsManager.getRetrySettings(),
+							this._summarizationRetryCallbacks({ source: "compaction", reason }, telemetryContext),
+							telemetryContext,
+						);
 				summary = compactResult.summary;
 				firstKeptEntryId = compactResult.firstKeptEntryId;
 				tokensBefore = compactResult.tokensBefore;
@@ -3775,8 +4096,9 @@ export class AgentSession {
 				fromExtension,
 				usage,
 				willRetry,
-				signal,
+				signal: compactionSignal,
 				deferCommit,
+				expectedLeafId: pathEntries.at(-1)?.id ?? null,
 			});
 			const refreshError = deferCommit ? undefined : await this._refreshHarnessAfterCompaction();
 			this._emit({ type: "compaction_end", reason, result, aborted: false, willRetry, errorMessage: refreshError });
@@ -3821,6 +4143,29 @@ export class AgentSession {
 		} finally {
 			this._autoCompactionAbortController = undefined;
 		}
+	}
+
+	private async _compactGoalRecovery(
+		entries: SessionEntry[],
+		firstKeptEntryId: string,
+		tokensBefore: number,
+		signal: AbortSignal,
+	): Promise<CompactionResult> {
+		const archive = prepareGoalRecoveryArchive(entries, firstKeptEntryId, GOAL_RECOVERY_NOTICE);
+		const selected = new Set(archive.entryIds);
+		const projected = this.sessionManager.buildContextEntries().filter((entry) => selected.has(entry.id));
+		const messages = projected.flatMap(sessionEntryToContextMessages);
+		const model = this.model!;
+		try {
+			prepareGoalSummaryRequest(messages, 0, model, archive.entryIds);
+		} catch (error) {
+			if (!(error instanceof GoalSummaryBudgetError)) throw error;
+			signal.throwIfAborted();
+			return { summary: GOAL_RECOVERY_NOTICE, firstKeptEntryId, tokensBefore };
+		}
+		const response = await this._summarizeGoal(messages, 0, signal, archive.entryIds);
+		signal.throwIfAborted();
+		return { summary: goalSummaryText(response), firstKeptEntryId, tokensBefore, usage: response.usage };
 	}
 
 	/**
@@ -4743,7 +5088,10 @@ export class AgentSession {
 			let summaryEntry: BranchSummaryEntry | undefined;
 			const mutateLeaf = (): void => {
 				if (summaryText) {
-					const summary = `${summaryText}\n\nThe plan below is authoritative for the selected conversation branch. Plan references in the exploration summary above are historical.\n${formatCurrentPlanSnapshot(this.sessionManager, newLeafId)}`;
+					const targetGoalMode = readGoalMode(newLeafId === null ? [] : this.sessionManager.getBranch(newLeafId));
+					const summary = targetGoalMode
+						? summaryText
+						: `${summaryText}\n\nThe plan below is authoritative for the selected conversation branch. Plan references in the exploration summary above are historical.\n${formatCurrentPlanSnapshot(this.sessionManager, newLeafId)}`;
 					const summaryId = this.sessionManager.branchWithSummary(
 						newLeafId,
 						summary,
@@ -4775,6 +5123,14 @@ export class AgentSession {
 			this._planHandoffGeneration++;
 			const sessionContext = this.sessionManager.buildSessionContext();
 			this.agent.state.messages = sessionContext.messages;
+			this._goalRuntime.invalidateUsage();
+			const restoredGoalMode = readGoalMode(this.sessionManager.getBranch());
+			if (restoredGoalMode !== this._goalModeEnabled) {
+				await this._lifecycleObserver?.setGoalSuspended?.(restoredGoalMode);
+				this._goalModeEnabled = restoredGoalMode;
+				this._installCollaborationModeState(this._deriveCollaborationModeState(this._collaborationMode));
+			}
+			this._refreshGoalArchiveCatalog();
 			this._filterPendingIdleSubagentEscalationsToSelectedBranch();
 
 			// Emit session_tree event

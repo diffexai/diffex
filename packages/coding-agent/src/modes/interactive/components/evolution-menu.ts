@@ -35,6 +35,7 @@ export { formatEvolutionTimestamp } from "./harness-version-display.ts";
 
 export interface EvolutionMenuClient {
 	getEnabled(): boolean;
+	getGoalSuspended?(): boolean;
 	setEnabled(enabled: boolean): Promise<void>;
 	subscribe(listener: (event: EvolutionRuntimeEvent) => void): () => void;
 	overview(): Promise<EvolutionOverview>;
@@ -525,6 +526,7 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 
 	#overviewEntries(overview: EvolutionOverview): readonly MenuEntry[] {
 		const evolutionEnabled = this.#client.getEnabled();
+		const goalSuspended = this.#client.getGoalSuspended?.() ?? false;
 		const evolutionModel = this.#getModel();
 		const cancellableJob =
 			[overview.activeJob, overview.newestResumableJob].find((job) => job?.cancellable === true) ?? null;
@@ -532,23 +534,27 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 			{ label: "Refresh", enabled: evolutionEnabled, select: () => void this.refresh() },
 			{
 				label: "Evolve",
-				enabled: evolutionEnabled && overview.activeJob === null,
-				disabledStatus: evolutionEnabled && overview.activeJob !== null ? "Started" : undefined,
+				enabled: evolutionEnabled && !goalSuspended && overview.activeJob === null,
+				disabledStatus: evolutionEnabled && !goalSuspended && overview.activeJob !== null ? "Started" : undefined,
 				select: () => this.#confirm("start"),
 			},
 			{
 				label: "Resume",
-				enabled: evolutionEnabled && overview.newestResumableJob !== null && overview.activeJob === null,
+				enabled:
+					evolutionEnabled &&
+					!goalSuspended &&
+					overview.newestResumableJob !== null &&
+					overview.activeJob === null,
 				select: () => this.#confirm("resume"),
 			},
 			{
 				label: "Browse",
-				enabled: evolutionEnabled,
+				enabled: evolutionEnabled && !goalSuspended,
 				select: () => this.#push({ kind: "jobs" }),
 			},
 			{
 				label: "Cancel",
-				enabled: evolutionEnabled && cancellableJob !== null,
+				enabled: evolutionEnabled && !goalSuspended && cancellableJob !== null,
 				select: () => {
 					if (cancellableJob !== null) this.#confirm("cancel", cancellableJob.jobId);
 				},
@@ -560,7 +566,8 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 			},
 			{
 				label: `Toggle [${evolutionEnabled ? "on" : "off"}]`,
-				enabled: true,
+				enabled: evolutionEnabled || !goalSuspended,
+				disabledStatus: goalSuspended && !evolutionEnabled ? "disable /goal first" : undefined,
 				select: () => {
 					const enabled = !this.#client.getEnabled();
 					void this.#client
@@ -679,6 +686,7 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 
 	#renderOverview(overview: EvolutionOverview): void {
 		const evolutionEnabled = this.#client.getEnabled();
+		const goalSuspended = this.#client.getGoalSuspended?.() ?? false;
 		this.#addLine(`Evolution tokens: ${overview.unprocessedTokens.toLocaleString()}`);
 		this.#addLine(`Evolution invocations: ${overview.settledInvocationCount}`);
 		if (overview.firstEvidenceFailure !== null && overview.firstEvidenceFailure !== undefined) {
@@ -688,16 +696,19 @@ export class EvolutionMenuComponent extends Container implements Focusable {
 			);
 		}
 		this.#addLine(`Last evolution: ${formatEvolutionTimestamp(overview.lastEvolutionAt)}`);
+		if (goalSuspended) this.#addLine("Self-evolution is paused. Disable /goal to enable it.", "warning");
 		this.#addLine(
-			!evolutionEnabled
-				? "Next automatic evolution: Disabled"
-				: overview.automaticEligibility.eligible
-					? "Next automatic evolution: Eligible"
-					: `Next automatic evolution: ${
-							overview.automaticEligibility.reason === "insufficient-tokens"
-								? "Insufficient information"
-								: overview.automaticEligibility.reason
-						}`,
+			goalSuspended
+				? "Next automatic evolution: Paused by goal mode"
+				: !evolutionEnabled
+					? "Next automatic evolution: Disabled"
+					: overview.automaticEligibility.eligible
+						? "Next automatic evolution: Eligible"
+						: `Next automatic evolution: ${
+								overview.automaticEligibility.reason === "insufficient-tokens"
+									? "Insufficient information"
+									: overview.automaticEligibility.reason
+							}`,
 		);
 		this.#addLine(`Cooldown: ${duration(overview.cooldownRemainingMs)}`);
 		this.#addLine(

@@ -19,7 +19,9 @@ import type { AssistantMessage, Context, Model, SimpleStreamOptions, Usage } fro
 import { completeSimple } from "@diffexai/diffex-ai/compat";
 import { convertToLlm } from "../messages.ts";
 import { stripCurrentPlanSnapshot } from "../plan-snapshot.ts";
+import { GOAL_ARCHIVE_CATALOG_TYPE, GOAL_NOTE_TYPE, GOAL_REPLACEMENT_ENTRY } from "../pocket-context.ts";
 import {
+	buildContextEntries,
 	buildSessionContext,
 	type CompactionEntry,
 	type SessionEntry,
@@ -285,16 +287,20 @@ export function estimateTokens(message: AgentMessage): number {
 		}
 		case "assistant": {
 			const assistant = message as AssistantMessage;
+			let hasOpaqueReasoning = false;
 			for (const block of assistant.content) {
 				if (block.type === "text") {
 					chars += block.text.length;
 				} else if (block.type === "thinking") {
 					chars += block.thinking.length;
+					hasOpaqueReasoning ||= Boolean(block.thinkingSignature);
 				} else if (block.type === "toolCall") {
 					chars += block.name.length + JSON.stringify(block.arguments).length;
 				}
 			}
-			return Math.ceil(chars / 4);
+			// Providers may retain opaque reasoning that is much larger than its visible summary.
+			const visibleTokens = Math.ceil(chars / 4);
+			return hasOpaqueReasoning ? Math.max(visibleTokens, assistant.usage?.output ?? 0) : visibleTokens;
 		}
 		case "custom":
 		case "toolResult": {
@@ -320,10 +326,11 @@ function isCutPointMessage(message: AgentMessage): boolean {
 		case "user":
 		case "assistant":
 		case "bashExecution":
-		case "custom":
 		case "branchSummary":
 		case "compactionSummary":
 			return true;
+		case "custom":
+			return message.customType !== GOAL_NOTE_TYPE && message.customType !== GOAL_ARCHIVE_CATALOG_TYPE;
 		case "toolResult":
 			return false;
 	}
@@ -334,10 +341,11 @@ function isTurnStartMessage(message: AgentMessage): boolean {
 	switch (message.role) {
 		case "user":
 		case "bashExecution":
-		case "custom":
 		case "branchSummary":
 		case "compactionSummary":
 			return true;
+		case "custom":
+			return message.customType !== GOAL_NOTE_TYPE && message.customType !== GOAL_ARCHIVE_CATALOG_TYPE;
 		case "assistant":
 		case "toolResult":
 			return false;
@@ -775,13 +783,20 @@ export function prepareCompaction(
 	pathEntries: SessionEntry[],
 	settings: CompactionSettings,
 ): CompactionPreparation | undefined {
+	// Pocket Context replacements are appended after their selected range.
+	// Work from the replayed projection so a later ordinary compaction cannot
+	// summarize original entries that have already been replaced.
+	const hasGoalReplacements = pathEntries.some(
+		(entry) => entry.type === "custom" && entry.customType === GOAL_REPLACEMENT_ENTRY,
+	);
+	const activeEntries = hasGoalReplacements ? buildContextEntries(pathEntries) : pathEntries;
 	if (pathEntries.length > 0 && pathEntries[pathEntries.length - 1].type === "compaction") {
 		return undefined;
 	}
 
 	let prevCompactionIndex = -1;
-	for (let i = pathEntries.length - 1; i >= 0; i--) {
-		if (pathEntries[i].type === "compaction") {
+	for (let i = activeEntries.length - 1; i >= 0; i--) {
+		if (activeEntries[i].type === "compaction") {
 			prevCompactionIndex = i;
 			break;
 		}
@@ -790,19 +805,19 @@ export function prepareCompaction(
 	let previousSummary: string | undefined;
 	let boundaryStart = 0;
 	if (prevCompactionIndex >= 0) {
-		const prevCompaction = pathEntries[prevCompactionIndex] as CompactionEntry;
+		const prevCompaction = activeEntries[prevCompactionIndex] as CompactionEntry;
 		previousSummary = stripCurrentPlanSnapshot(prevCompaction.summary);
-		const firstKeptEntryIndex = pathEntries.findIndex((entry) => entry.id === prevCompaction.firstKeptEntryId);
+		const firstKeptEntryIndex = activeEntries.findIndex((entry) => entry.id === prevCompaction.firstKeptEntryId);
 		boundaryStart = firstKeptEntryIndex >= 0 ? firstKeptEntryIndex : prevCompactionIndex + 1;
 	}
-	const boundaryEnd = pathEntries.length;
+	const boundaryEnd = activeEntries.length;
 
 	const tokensBefore = estimateContextTokens(buildSessionContext(pathEntries).messages).tokens;
 
-	const cutPoint = findCutPoint(pathEntries, boundaryStart, boundaryEnd, settings.keepRecentTokens);
+	const cutPoint = findCutPoint(activeEntries, boundaryStart, boundaryEnd, settings.keepRecentTokens);
 
 	// Get UUID of first kept entry
-	const firstKeptEntry = pathEntries[cutPoint.firstKeptEntryIndex];
+	const firstKeptEntry = activeEntries[cutPoint.firstKeptEntryIndex];
 	if (!firstKeptEntry?.id) {
 		return undefined; // Session needs migration
 	}
@@ -813,7 +828,7 @@ export function prepareCompaction(
 	// Messages to summarize (will be discarded after summary)
 	const messagesToSummarize: AgentMessage[] = [];
 	for (let i = boundaryStart; i < historyEnd; i++) {
-		const msg = getMessageFromEntryForCompaction(pathEntries[i]);
+		const msg = getMessageFromEntryForCompaction(activeEntries[i]);
 		if (msg) messagesToSummarize.push(msg);
 	}
 
@@ -821,7 +836,7 @@ export function prepareCompaction(
 	const turnPrefixMessages: AgentMessage[] = [];
 	if (cutPoint.isSplitTurn) {
 		for (let i = cutPoint.turnStartIndex; i < cutPoint.firstKeptEntryIndex; i++) {
-			const msg = getMessageFromEntryForCompaction(pathEntries[i]);
+			const msg = getMessageFromEntryForCompaction(activeEntries[i]);
 			if (msg) turnPrefixMessages.push(msg);
 		}
 	}
@@ -831,7 +846,7 @@ export function prepareCompaction(
 	}
 
 	// Extract file operations from messages and previous compaction
-	const fileOps = extractFileOperations(messagesToSummarize, pathEntries, prevCompactionIndex);
+	const fileOps = extractFileOperations(messagesToSummarize, activeEntries, prevCompactionIndex);
 
 	// Also extract file ops from turn prefix if splitting
 	if (cutPoint.isSplitTurn) {
