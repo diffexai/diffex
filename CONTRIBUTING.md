@@ -19,7 +19,7 @@ npm run build:offline
 Run the coding agent from source with:
 
 ```bash
-./diffex-test.sh
+./scripts/diffex-test.sh
 ```
 
 The launcher can be run from any directory and preserves the caller's working directory.
@@ -27,7 +27,7 @@ The launcher can be run from any directory and preserves the caller's working di
 ## Before Making Changes
 
 Read [AGENTS.md](AGENTS.md) before changing code.
-It defines the repository's source, dependency, testing, Git, and release rules.
+It defines the repository's source, dependency, testing, and Git rules.
 
 Diffex is a TypeScript monorepo forked from the Pi Agent Harness.
 Preserve package boundaries and keep the agent core minimal and extensible.
@@ -55,11 +55,11 @@ Run the repository checks before requesting review:
 
 ```bash
 npm run check
-./test.sh
+./scripts/test.sh
 ```
 
 `npm run check` performs formatting, linting, dependency policy checks, and TypeScript validation.
-`./test.sh` runs non-E2E tests without activating suites that depend on provider endpoints or credentials.
+`./scripts/test.sh` runs non-E2E tests without activating suites that depend on provider endpoints or credentials.
 
 When you create or modify a test file, run that test directly and iterate until it passes.
 From a package directory, use the repository's Vitest executable with the specific test path.
@@ -71,7 +71,7 @@ node ../../node_modules/vitest/dist/cli.js --run test/specific.test.ts
 Do not run the full Vitest suite directly.
 Some E2E tests activate when endpoint or authentication environment variables are present.
 
-For terminal UI changes, run `./diffex-test.sh` in a controlled terminal and exercise the affected view, dialog, navigation flow, and exit path.
+For terminal UI changes, run `./scripts/diffex-test.sh` in a controlled terminal and exercise the affected view, dialog, navigation flow, and exit path.
 For coding-agent E2E regressions, use the test harness and faux provider under `packages/coding-agent/test/suite`.
 
 ## Engineering Expectations

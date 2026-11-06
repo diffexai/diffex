@@ -3,7 +3,7 @@ import { createInMemoryModelRegistry, createModelRegistry, getModelRuntime } fro
  * Local test harness for the new coding-agent test suite.
  */
 
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentMessage, AgentTool, TelemetryContext } from "@diffexai/diffex-agent-core";
@@ -104,14 +104,8 @@ export interface Harness {
 	cleanup: () => Promise<void>;
 }
 
-function createTempDir(): string {
-	const tempDir = join(tmpdir(), `pi-suite-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-	mkdirSync(tempDir, { recursive: true });
-	return tempDir;
-}
-
 export async function createHarness(options: HarnessOptions = {}): Promise<Harness> {
-	const tempDir = createTempDir();
+	const tempDir = mkdtempSync(join(tmpdir(), "diffex-suite-"));
 	const fauxProvider: FauxProviderRegistration = registerFauxProvider({
 		models: options.models,
 	});

@@ -10,15 +10,18 @@ const oldEvidence = `Older deployment evidence. ${"historical observations ".rep
 const laterEvidence = `Later deployment evidence. ${"more observations ".repeat(6_000)}`;
 
 // The provenance-field name is an adapter for the final versioned record format.
-function corruptProvenance(value: unknown, oldId: string, newValue: unknown, inReferences = false): boolean {
+function corruptProvenance(value: unknown, oldId: string, newValue: unknown): boolean {
 	if (typeof value !== "object" || value === null) return false;
 	let changed = false;
-	for (const [key, entry] of Object.entries(value)) {
-		const isReference = inReferences || /reference|refs/i.test(key);
-		if (isReference && entry === oldId) {
-			(value as Record<string, unknown>)[key] = newValue;
+	if ("references" in value && Array.isArray(value.references)) {
+		value.references = value.references.map((reference: unknown) => {
+			if (reference !== oldId) return reference;
 			changed = true;
-		} else if (corruptProvenance(entry, oldId, newValue, isReference)) changed = true;
+			return newValue;
+		});
+	}
+	for (const entry of Object.values(value)) {
+		if (corruptProvenance(entry, oldId, newValue)) changed = true;
 	}
 	return changed;
 }

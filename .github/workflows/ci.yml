@@ -42,7 +42,7 @@ jobs:
         run: npm install --global --ignore-scripts pnpm@10.28.2
 
       - name: Test scripts and other workspaces
-        run: ./test.sh other --shard=${{ matrix.shard }}/2
+        run: ./scripts/test.sh other --shard=${{ matrix.shard }}/2
 
   coding-agent:
     runs-on: ubuntu-latest
@@ -75,7 +75,7 @@ jobs:
           restore-keys: ${{ steps.vitest-cache-key.outputs.prefix }}
 
       - name: Test
-        run: ./test.sh coding-agent --shard=${{ matrix.shard }}/4 --pool=forks --maxWorkers=2 --isolate
+        run: ./scripts/test.sh coding-agent --shard=${{ matrix.shard }}/4 --pool=forks --maxWorkers=2 --isolate
 
       - name: Save Vitest module cache
         if: success() && vars.VITEST_FS_CACHE == 'true' && steps.vitest-cache.outputs.cache-hit != 'true'

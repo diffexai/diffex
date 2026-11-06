@@ -9,15 +9,18 @@ import { createHarness, getMessageText, type Harness } from "./harness.ts";
 const originalEvidence = `The red deployment gate failed. ${"Historical evidence. ".repeat(6_000)}`;
 
 // Adapt the reference-field matcher to the final versioned provenance format.
-function replaceArchivedReference(value: unknown, originalId: string, brokenId: string, inReferences = false): boolean {
+function replaceArchivedReference(value: unknown, originalId: string, brokenId: string): boolean {
 	if (typeof value !== "object" || value === null) return false;
 	let changed = false;
-	for (const [key, entry] of Object.entries(value)) {
-		const isReference = inReferences || /reference|refs/i.test(key);
-		if (isReference && entry === originalId) {
-			(value as Record<string, unknown>)[key] = brokenId;
+	if ("references" in value && Array.isArray(value.references)) {
+		value.references = value.references.map((reference: unknown) => {
+			if (reference !== originalId) return reference;
 			changed = true;
-		} else if (replaceArchivedReference(entry, originalId, brokenId, isReference)) changed = true;
+			return brokenId;
+		});
+	}
+	for (const entry of Object.values(value)) {
+		if (replaceArchivedReference(entry, originalId, brokenId)) changed = true;
 	}
 	return changed;
 }

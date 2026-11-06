@@ -17,7 +17,7 @@ test("script-test jobs provision exact pnpm before exercising real package-manag
 	const release = parse(readFileSync(new URL("../.github/workflows/build-binaries.yml", import.meta.url), "utf8"));
 	for (const job of [workflow.jobs["workspace-tests"], release.jobs["prepare-artifacts"]]) {
 		const setup = job.steps.findIndex((step) => step.run === "npm install --global --ignore-scripts pnpm@10.28.2");
-		const tests = job.steps.findIndex((step) => step.run?.includes("./test.sh"));
+		const tests = job.steps.findIndex((step) => step.run?.includes("./scripts/test.sh"));
 		assert(setup !== -1 && tests > setup, "Pinned pnpm must be available before the real fixture tests");
 	}
 	assert.equal(release.jobs["prepare-artifacts"].steps.find((step) => step.run === "npm install --global --ignore-scripts pnpm@10.28.2").if,
@@ -30,7 +30,7 @@ test("script-test jobs provision exact Bun before exercising its installation fi
 	const release = parse(readFileSync(new URL("../.github/workflows/build-binaries.yml", import.meta.url), "utf8"));
 	for (const job of [workflow.jobs["workspace-tests"], release.jobs["prepare-artifacts"]]) {
 		const setup = job.steps.findIndex((step) => step.uses === "oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6");
-		const tests = job.steps.findIndex((step) => step.run?.includes("./test.sh"));
+		const tests = job.steps.findIndex((step) => step.run?.includes("./scripts/test.sh"));
 		assert(setup !== -1 && tests > setup, "Pinned Bun must be available before the real fixture tests");
 		assert.equal(job.steps[setup].with["bun-version"], "1.3.11");
 	}
@@ -46,6 +46,6 @@ test("the CI aggregate requires build checks and every isolated test shard", () 
 	assert.deepEqual(jobs["workspace-tests"].strategy.matrix.shard, [1, 2]);
 	assert.deepEqual(jobs["coding-agent"].strategy.matrix.shard, [1, 2, 3, 4]);
 	for (const job of ["workspace-tests", "coding-agent"]) {
-		assert.ok(jobs[job].steps.some((step) => step.run?.startsWith("./test.sh ")));
+		assert.ok(jobs[job].steps.some((step) => step.run?.startsWith("./scripts/test.sh ")));
 	}
 });

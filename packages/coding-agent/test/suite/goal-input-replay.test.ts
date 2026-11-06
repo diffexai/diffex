@@ -1,4 +1,3 @@
-import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { type Context, type FauxResponseStep, fauxAssistantMessage, fauxToolCall } from "@diffexai/diffex-ai";
@@ -7,13 +6,13 @@ import { expect, it } from "vitest";
 import { GoalRecallRetrieval, type RecallSearchHit } from "../../src/core/goal-retrieval.ts";
 import { GOAL_REPLACEMENT_ENTRY, type GoalArchive } from "../../src/core/pocket-context.ts";
 import { SessionManager } from "../../src/core/session-manager.ts";
+import { writeGoalReport } from "./goal-report.ts";
 import { createHarness, getMessageText } from "./harness.ts";
 
 function writeReport(name: string, report: object): void {
 	const output = process.env.DIFFEX_GOAL_COMPARISON_OUTPUT;
 	if (!output) return;
-	mkdirSync(output, { recursive: true });
-	writeFileSync(join(output, `${name}.json`), `${JSON.stringify(report, null, 2)}\n`);
+	writeGoalReport(join(output, `${name}.json`), `${JSON.stringify(report, null, 2)}\n`);
 }
 
 function visibleMessages(context: Context, removeGoalMetadata: boolean) {

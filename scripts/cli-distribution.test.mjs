@@ -49,7 +49,7 @@ test("an unreviewed private dependency cannot silently enter the public CLI tarb
 			mkdirSync(join(directory, path, ".."), { recursive: true });
 			writeFileSync(join(directory, path), JSON.stringify(value));
 		};
-		write("docs/release/distribution-policy.json", {
+		write("scripts/distribution-policy.json", {
 			status: "approved",
 			bundledWorkspaces: ["evolution", "harness-trace"],
 		});
