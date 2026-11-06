@@ -14,6 +14,7 @@ function corruptProvenance(value: unknown, oldId: string, newValue: unknown, inR
 	if (typeof value !== "object" || value === null) return false;
 	let changed = false;
 	for (const [key, entry] of Object.entries(value)) {
+		if (key === "__proto__" || key === "constructor" || key === "prototype") continue;
 		const isReference = inReferences || /reference|refs/i.test(key);
 		if (isReference && entry === oldId) {
 			(value as Record<string, unknown>)[key] = newValue;

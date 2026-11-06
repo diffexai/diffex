@@ -13,6 +13,7 @@ function replaceArchivedReference(value: unknown, originalId: string, brokenId: 
 	if (typeof value !== "object" || value === null) return false;
 	let changed = false;
 	for (const [key, entry] of Object.entries(value)) {
+		if (key === "__proto__" || key === "constructor" || key === "prototype") continue;
 		const isReference = inReferences || /reference|refs/i.test(key);
 		if (isReference && entry === originalId) {
 			(value as Record<string, unknown>)[key] = brokenId;
