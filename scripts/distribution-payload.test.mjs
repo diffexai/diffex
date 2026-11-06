@@ -139,7 +139,6 @@ for (const [name, content, reason] of [
 	["examples/example.ts", "export const value = 1", /prohibited source or private path/],
 	["AGENTS.md", "Private repository instructions", /prohibited repository instructions/],
 	["dist/AGENTS.md", "Private repository instructions", /prohibited repository instructions/],
-	["scripts/assets/default-agent.md", readFileSync("scripts/assets/default-agent.md"), /unapproved distribution documentation/],
 	["docs/agents.MD", "Private repository instructions", /prohibited repository instructions/],
 	[
 		"dist/node_modules/@diffexai/diffex-ai/AGENTS.md",
@@ -153,6 +152,14 @@ for (const [name, content, reason] of [
 		assert.match(result.stderr, reason);
 	});
 }
+
+test("rejects prohibited content in scripts/assets/default-agent.md", () => {
+	const result = inspect({
+		"scripts/assets/default-agent.md": readFileSync("scripts/assets/default-agent.md"),
+	});
+	assert.notEqual(result.status, 0);
+	assert.match(result.stderr, /unapproved distribution documentation/);
+});
 
 test("inspects a nested archive even when renamed to a binary resource", () => {
 	const nested = fixture({ "dist/private.ts": "export const hidden = 1" }, ["README.md", "dist/AGENTS.md"]);
