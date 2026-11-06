@@ -19,7 +19,7 @@ test("image inspection rejects separate NOTICE files and development documents i
 		write(`${layer}runtime-distribution.json`, JSON.stringify({ sourceCommit: "a".repeat(40) }));
 		write(`${workspace}LICENSE`, readFileSync("LICENSE"));
 		write(`${workspace}THIRD-PARTY-NOTICES.txt`, "Reviewed notice");
-		write(`${workspace}dist/AGENTS.md`, readFileSync("AGENTS_release.md"));
+		write(`${workspace}dist/AGENTS.md`, readFileSync("scripts/assets/default-agent.md"));
 		for (const doc of distributionDocs) write(workspace + doc, "User-facing guide");
 		write(
 			"config.json",
@@ -62,8 +62,8 @@ test("image inspection rejects separate NOTICE files and development documents i
 		const substituted = inspect();
 		assert.notEqual(substituted.status, 0);
 		assert.match(substituted.stderr, /prohibited repository instructions/);
-		write(`${workspace}dist/AGENTS.md`, readFileSync("AGENTS_release.md"));
-		write(`${layer}packages/agent/dist/AGENTS.md`, readFileSync("AGENTS_release.md"));
+		write(`${workspace}dist/AGENTS.md`, readFileSync("scripts/assets/default-agent.md"));
+		write(`${layer}packages/agent/dist/AGENTS.md`, readFileSync("scripts/assets/default-agent.md"));
 		const misplaced = inspect();
 		assert.notEqual(misplaced.status, 0);
 		assert.match(misplaced.stderr, /prohibited repository instructions/);

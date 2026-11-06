@@ -71,7 +71,7 @@ export function cliDistribution(root = ".") {
 	visit("@diffexai/diffex-evolution");
 	visit("@diffexai/diffex-harness-trace");
 	bundled.delete(cli.manifest.name);
-	const policy = JSON.parse(readFileSync(join(root, "docs/release/distribution-policy.json"), "utf8"));
+	const policy = JSON.parse(readFileSync(join(root, "scripts/distribution-policy.json"), "utf8"));
 	const actual = [...bundled.values()]
 		.map((pkg) => relative(join(root, "packages"), pkg.directory).replaceAll("\\", "/"))
 		.sort();

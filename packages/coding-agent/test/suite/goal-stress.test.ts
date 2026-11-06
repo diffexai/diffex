@@ -1,4 +1,3 @@
-import { appendFileSync } from "node:fs";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { type Context, estimateContextTokens, fauxAssistantMessage, fauxToolCall } from "@diffexai/diffex-ai";
@@ -8,13 +7,14 @@ import { GoalArchiveDiscovery, GoalRecallRetrieval } from "../../src/core/goal-r
 import { readGoalArchives, validateGoalProvenance } from "../../src/core/pocket-context.ts";
 import { SessionManager } from "../../src/core/session-manager.ts";
 import { compactPriorHistory, toolResult } from "./goal-harness.ts";
+import { writeGoalReport } from "./goal-report.ts";
 import { createHarness, getMessageText, type Harness } from "./harness.ts";
 
 const harnesses: Harness[] = [];
 
 function recordMetric(value: Record<string, unknown>) {
 	if (process.env.DIFFEX_GOAL_STRESS_OUTPUT)
-		appendFileSync(process.env.DIFFEX_GOAL_STRESS_OUTPUT, `${JSON.stringify(value)}\n`);
+		writeGoalReport(process.env.DIFFEX_GOAL_STRESS_OUTPUT, `${JSON.stringify(value)}\n`, true);
 }
 afterEach(async () => {
 	while (harnesses.length) await harnesses.pop()?.cleanup();

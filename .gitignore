@@ -51,3 +51,9 @@ packages/**/THIRD-PARTY-NOTICES.txt
 packages/**/distribution-components.json
 packages/**/distribution-files.json
 packages/coding-agent/release/
+
+# Owner-only instructions and release records
+/AGENTS.md
+/RELEASING.md
+/docs/
+/.diffex/prompts/cl.md

@@ -1,5 +1,8 @@
 # Development Rules
 
+This is a recommended system prompt for developing Diffex.
+Releases and changelog maintenance are handled exclusively by the project owner.
+
 ## Conversational Style
 
 - Keep answers short and concise
@@ -27,7 +30,7 @@
 
 - After code changes (not docs): `npm run check` (full output, no tail). Fix all errors, warnings, and infos before committing. Does not run tests.
 - Never run `npm run build` or `npm test` unless requested by the user.
-- Never run the full vitest suite directly: it includes e2e tests that activate when endpoint/auth env vars are present. For all non-e2e tests, run `./test.sh` from the repo root. Otherwise run specific tests from the package root: `node ../../node_modules/vitest/dist/cli.js --run test/specific.test.ts`.
+- Never run the full vitest suite directly: it includes e2e tests that activate when endpoint/auth env vars are present. For all non-e2e tests, run `./scripts/test.sh` from the repo root. Otherwise run specific tests from the package root: `node ../../node_modules/vitest/dist/cli.js --run test/specific.test.ts`.
 - If you create or modify a test file, run it and iterate on test or implementation until it passes.
 - For `packages/coding-agent/test/suite/`, use `test/suite/harness.ts` + the faux provider. No real provider APIs, keys, or paid tokens.
 - Put issue-specific regressions under `packages/coding-agent/test/suite/regressions/` named `<issue-number>-<short-slug>.test.ts`.
@@ -95,68 +98,12 @@ Run the TUI in a controlled terminal (from the repo root):
 
 ```bash
 tmux new-session -d -s diffex-test -x 80 -y 24
-tmux send-keys -t diffex-test "./diffex-test.sh" Enter
+tmux send-keys -t diffex-test "./scripts/diffex-test.sh" Enter
 sleep 3 && tmux capture-pane -t diffex-test -p     # capture after startup
 tmux send-keys -t diffex-test "your prompt here" Enter
 tmux send-keys -t diffex-test Escape               # special keys (also C-o for ctrl+o, etc.)
 tmux kill-session -t diffex-test
 ```
-
-## Changelog
-
-Location: `packages/*/CHANGELOG.md` (one per package).
-
-Sections under `## [Unreleased]`: `### Breaking Changes` (API changes requiring migration), `### Added`, `### Changed`, `### Fixed`, `### Removed`.
-
-Rules:
-
-- All new entries go under `## [Unreleased]`. Read the full section first and append to existing subsections; never duplicate them.
-- Released version sections (e.g. `## [0.12.2]`) are immutable; never modify them.
-
-Attribution:
-
-- Internal (from issues): `Fixed foo bar ([#123](https://github.com/diffexai/diffex/issues/123))`
-- External contributions: `Added feature X ([#456](https://github.com/diffexai/diffex/pull/456) by [@username](https://github.com/username))`
-
-## Releasing
-
-**Lockstep versioning**: all packages share one version; every release updates all together. `patch` = fixes + additions, `minor` = breaking changes. No major releases.
-
-1. **Update CHANGELOGs**: ask the user whether they ran the `/cl` prompt on the latest commit on `main`. If not, they must run `/cl` first to audit and update each package's `[Unreleased]` section before releasing.
-
-2. **Local smoke test**: build an unpublished release and smoke test from outside the repo (so it can't resolve workspace files):
-   ```bash
-   npm run release:local -- --out /tmp/diffex-local-release --force
-   cd /tmp
-
-   # Node package install smoke tests
-   /tmp/diffex-local-release/node/diffex --help
-   /tmp/diffex-local-release/node/diffex --version
-   /tmp/diffex-local-release/node/diffex --list-models
-   /tmp/diffex-local-release/node/diffex -p "Say exactly: ok"
-   /tmp/diffex-local-release/node/diffex
-
-   # Bun binary smoke tests
-   /tmp/diffex-local-release/bun/diffex --help
-   /tmp/diffex-local-release/bun/diffex --version
-   /tmp/diffex-local-release/bun/diffex --list-models
-   /tmp/diffex-local-release/bun/diffex -p "Say exactly: ok"
-   /tmp/diffex-local-release/bun/diffex
-   ```
-   Verify both Node and Bun startup, model/account listing, interactive startup, and at least one real prompt with the intended default provider. The bare commands `/tmp/diffex-local-release/node/diffex` and `/tmp/diffex-local-release/bun/diffex` start interactive mode; run each in tmux, submit a prompt, and wait for the model reply before considering the interactive smoke test passed. Failures are release blockers unless the user explicitly accepts the risk.
-
-3. **Run the release script**:
-   ```bash
-   DIFFEX_ALLOW_LOCKFILE_CHANGE=1 npm_config_min_release_age=0 npm run release:patch    # fixes + additions
-   DIFFEX_ALLOW_LOCKFILE_CHANGE=1 npm_config_min_release_age=0 npm run release:minor    # breaking changes
-   ```
-   Use `npm_config_min_release_age=0` only for the release command. The repo's normal npm age gate can otherwise block the release lockfile refresh when the current workspace package version was published recently. Review any lockfile or shrinkwrap diffs the release creates before push.
-
-   The release script bumps all package versions, updates changelogs, regenerates release artifacts, runs `npm run check`, commits `Release vX.Y.Z`, tags `vX.Y.Z`, adds fresh `## [Unreleased]` changelog sections, commits `Add [Unreleased] section for next cycle`, then pushes `main` and the tag. Do not rerun the release script after a tag was pushed.
-
-4. **CI verifies and announces the npm release**: pushing the `vX.Y.Z` tag triggers `.github/workflows/build-binaries.yml`. The `publish-npm` job uses npm trusted publishing through GitHub Actions OIDC with environment `npm-publish`; no local `npm publish`, `npm whoami`, OTP, or WebAuthn flow is required. After publishing, `announce-diffex-release` verifies every public workspace package resolves at the exact release version and that its npm tarball is available, then writes the verified release marker to R2. The release marker must never be published before npm verification succeeds.
-
-5. **If CI publish or announcement fails**: inspect the failed job. The publish helper is idempotent and skips package versions already present on npm; the announcement job rechecks availability before updating the R2 marker. Rerun the failed job or workflow after fixing CI or transient npm issues. Do not rerun `npm run release:patch` or `npm run release:minor` for the same version.
 
 ## User Override
 

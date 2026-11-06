@@ -25,10 +25,10 @@ export function createPublicationFixture({ staging = false } = {}) {
 		chmodSync(file, 0o700);
 	}
 	const policy = JSON.parse(
-		readFileSync(new URL("../../../docs/release/distribution-policy.json", import.meta.url), "utf8"),
+		readFileSync(new URL("../../../scripts/distribution-policy.json", import.meta.url), "utf8"),
 	);
-	mkdirSync(join(directory, "docs/release"), { recursive: true });
-	writeFileSync(join(directory, "docs/release/distribution-policy.json"), JSON.stringify(policy));
+	mkdirSync(join(directory, "scripts"), { recursive: true });
+	writeFileSync(join(directory, "scripts/distribution-policy.json"), JSON.stringify(policy));
 	writeFileSync(join(directory, "package-lock.json"), "fixture locked inputs");
 	const artifactDirectory = join(directory, "artifacts");
 	mkdirSync(artifactDirectory);
@@ -67,7 +67,7 @@ export function createPublicationFixture({ staging = false } = {}) {
 		) {
 			writeFileSync(join(directory, "package.json"), JSON.stringify({ version, private: true }));
 			writeFileSync(
-				join(directory, "docs/release/distribution-policy.json"),
+				join(directory, "scripts/distribution-policy.json"),
 				JSON.stringify(mutatePolicy ? mutatePolicy(structuredClone(policy)) : policy),
 			);
 			const manifests = packages.map((pkg, index) => {
@@ -97,7 +97,7 @@ export function createPublicationFixture({ staging = false } = {}) {
 					commit,
 					tree: "c".repeat(40),
 					lockSha256: sha256(readFileSync(join(directory, "package-lock.json"))),
-					policySha256: sha256(readFileSync(join(directory, "docs/release/distribution-policy.json"))),
+					policySha256: sha256(readFileSync(join(directory, "scripts/distribution-policy.json"))),
 				},
 				modelData: [{ path: "fixture.json", sha256: sha256("fixture models") }],
 				snapshot: { filename: "source.tar.gz", sha256: sha256("fixture frozen source") },
