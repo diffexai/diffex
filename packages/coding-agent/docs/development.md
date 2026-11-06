@@ -14,7 +14,7 @@ npm run build
 Run from source:
 
 ```bash
-/path/to/diffex/diffex-test.sh
+/path/to/diffex/scripts/diffex-test.sh
 ```
 
 The script can be run from any directory. Diffex keeps the caller's current working directory.
@@ -55,7 +55,7 @@ Never use `__dirname` directly for package assets.
 ## Testing
 
 ```bash
-./test.sh # Run non-E2E tests with credentials isolated
+./scripts/test.sh # Run non-E2E tests with credentials isolated
 
 # From the relevant package directory:
 node ../../node_modules/vitest/dist/cli.js --run test/specific.test.ts
@@ -63,7 +63,7 @@ node ../../node_modules/vitest/dist/cli.js --run test/specific.test.ts
 
 Do not run the full Vitest suite directly: endpoint or authentication environment variables can activate provider E2E tests.
 
-See [dependency maintenance](../../../docs/dependency-maintenance.md) for dependency update constraints and validation.
+See [contributor guidelines](../../../CONTRIBUTING.md#engineering-expectations) for dependency update constraints and validation.
 
 ## Project Structure
 

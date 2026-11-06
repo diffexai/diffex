@@ -32,7 +32,7 @@ jobs:
         run: |
           for sample in 1 2 3; do
             echo "Worker sample $sample: pool=$POOL workers=$WORKERS"
-            ./test.sh coding-agent --pool="$POOL" --maxWorkers="$WORKERS" --isolate --experimental.fsModuleCache=false
+            ./scripts/test.sh coding-agent --pool="$POOL" --maxWorkers="$WORKERS" --isolate --experimental.fsModuleCache=false
           done
 
   cache-seed:
@@ -44,7 +44,7 @@ jobs:
       - uses: ./.github/actions/setup
         id: setup
       - name: Populate a cold module cache
-        run: ./test.sh coding-agent --pool=forks --maxWorkers=1 --isolate
+        run: ./scripts/test.sh coding-agent --pool=forks --maxWorkers=1 --isolate
       - name: Measure cache save
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -72,4 +72,4 @@ jobs:
           key: ci-benchmark-${{ runner.os }}-${{ runner.arch }}-node-${{ steps.setup.outputs.node-version }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           fail-on-cache-miss: true
       - name: Measure complete suite
-        run: ./test.sh coding-agent --pool=forks --maxWorkers=1 --isolate
+        run: ./scripts/test.sh coding-agent --pool=forks --maxWorkers=1 --isolate

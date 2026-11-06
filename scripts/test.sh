@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo_root"
+
 # Isolate user resources, credentials, temporary files, and tool configuration.
 temp_parent="${TMPDIR:-/tmp}"
 temp_parent="${temp_parent%/}"
@@ -77,6 +80,6 @@ done
 
 echo "Running tests without API keys in isolated home: $test_root/home"
 # Optional groups let CI split suites without bypassing credential isolation.
-# ./test.sh coding-agent --shard=1/4
-# ./test.sh other
+# ./scripts/test.sh coding-agent --shard=1/4
+# ./scripts/test.sh other
 env -i "${test_env[@]}" node scripts/run-tests.mjs "$@"

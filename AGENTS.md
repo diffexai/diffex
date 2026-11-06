@@ -30,7 +30,7 @@ Releases and changelog maintenance are handled exclusively by the project owner.
 
 - After code changes (not docs): `npm run check` (full output, no tail). Fix all errors, warnings, and infos before committing. Does not run tests.
 - Never run `npm run build` or `npm test` unless requested by the user.
-- Never run the full vitest suite directly: it includes e2e tests that activate when endpoint/auth env vars are present. For all non-e2e tests, run `./test.sh` from the repo root. Otherwise run specific tests from the package root: `node ../../node_modules/vitest/dist/cli.js --run test/specific.test.ts`.
+- Never run the full vitest suite directly: it includes e2e tests that activate when endpoint/auth env vars are present. For all non-e2e tests, run `./scripts/test.sh` from the repo root. Otherwise run specific tests from the package root: `node ../../node_modules/vitest/dist/cli.js --run test/specific.test.ts`.
 - If you create or modify a test file, run it and iterate on test or implementation until it passes.
 - For `packages/coding-agent/test/suite/`, use `test/suite/harness.ts` + the faux provider. No real provider APIs, keys, or paid tokens.
 - Put issue-specific regressions under `packages/coding-agent/test/suite/regressions/` named `<issue-number>-<short-slug>.test.ts`.
@@ -98,7 +98,7 @@ Run the TUI in a controlled terminal (from the repo root):
 
 ```bash
 tmux new-session -d -s diffex-test -x 80 -y 24
-tmux send-keys -t diffex-test "./diffex-test.sh" Enter
+tmux send-keys -t diffex-test "./scripts/diffex-test.sh" Enter
 sleep 3 && tmux capture-pane -t diffex-test -p     # capture after startup
 tmux send-keys -t diffex-test "your prompt here" Enter
 tmux send-keys -t diffex-test Escape               # special keys (also C-o for ctrl+o, etc.)

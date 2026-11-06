@@ -72,13 +72,13 @@ Object.defineProperty(globalThis, "fetch", { configurable: true, get: () => rout
 `);
 	const cliEnv = { ...process.env, DIFFEX_CODING_AGENT_DIR: agentDir, NODE_OPTIONS: `--import=${preload}` };
 	for (let i = 0; i < 2; i++) {
-		const output = execFileSync("./diffex-test.sh", ["--no-env", "update", "--models"], { env: cliEnv, encoding: "utf8", timeout: 30_000 });
+		const output = execFileSync("./scripts/diffex-test.sh", ["--no-env", "update", "--models"], { env: cliEnv, encoding: "utf8", timeout: 30_000 });
 		assert.match(output, /Model catalogs refreshed/);
 		const cache = JSON.parse(readFileSync(join(agentDir, "models-store.json"), "utf8"));
 		assert.equal(cache.openai.models.length, 170);
 		assert.equal(cache.openai.etag.replace(/^W\//, ""), `"${fixtureRevision}:openai"`);
 	}
-	const offline = execFileSync("./diffex-test.sh", ["--no-env", "--list-models", "model-0"], { env: { ...cliEnv, DIFFEX_OFFLINE: "1" }, encoding: "utf8", timeout: 30_000 });
+	const offline = execFileSync("./scripts/diffex-test.sh", ["--no-env", "--list-models", "model-0"], { env: { ...cliEnv, DIFFEX_OFFLINE: "1" }, encoding: "utf8", timeout: 30_000 });
 	assert.match(offline, /model-0/);
 	console.log(JSON.stringify({ staging: true, revision: fixtureRevision, interruptedUploadPreservedIndex: true, conditionalConflictsRejected: true, identicalRetryPreservedManifest: true, clientRefreshAndOfflineRecovery: true, statuses: [first.status, revalidated.status, head.status] }));
 } finally {
