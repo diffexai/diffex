@@ -54,7 +54,7 @@ Restoring the source passed all 36 tests again.
 `DEBUG=vitest:cache:fs` exposes cache reads and writes for this check.
 
 The affected test files and shared harness consumers passed 212 tests, with 26 credential-dependent tests skipped.
-The full offline suite passed through `./test.sh`, including 2,862 coding-agent tests with 49 expected skips.
+The full offline suite passed through `./scripts/test.sh`, including 2,862 coding-agent tests with 49 expected skips.
 The suite required execution outside the filesystem/network sandbox for localhost test servers.
 `npm run check` and static workflow validation passed.
 
@@ -85,9 +85,9 @@ The existing `build-check-test` required check succeeds only when every group su
 Cache keys include the shard number and count to avoid reusing a partial cache from a different shard.
 
 ```bash
-./test.sh coding-agent --shard=1/4
-./test.sh other
-./test.sh other --shard=1/2
+./scripts/test.sh coding-agent --shard=1/4
+./scripts/test.sh other
+./scripts/test.sh other --shard=1/2
 ```
 
 Run `CI benchmark` manually, or add the `ci-benchmark` label to a pull request containing that workflow.

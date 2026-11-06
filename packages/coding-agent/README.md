@@ -1,6 +1,6 @@
 <p align="center">
   <a href="https://diffex.ai/">
-    <img alt="Diffex wordmark" src="https://raw.githubusercontent.com/diffexai/diffex/main/docs/assets/diffex-wordmark.png" width="480">
+    <img alt="Diffex wordmark" src="https://raw.githubusercontent.com/diffexai/diffex/main/.github/assets/diffex-wordmark.png" width="480">
   </a>
 </p>
 <p align="center">

@@ -73,8 +73,8 @@ export function preparePackageDistribution(directory) {
 			});
 		}
 		for (const [name, version, license, file] of [
-			["highlight.js", "11.9.0", "BSD-3-Clause", "legal/upstream/highlight-11.9.0.LICENSE"],
-			["marked", "18.0.5", "MIT", "legal/upstream/marked-18.0.5.LICENSE"],
+			["highlight.js", "11.9.0", "BSD-3-Clause", "scripts/assets/licenses/highlight-11.9.0.LICENSE"],
+			["marked", "18.0.5", "MIT", "scripts/assets/licenses/marked-18.0.5.LICENSE"],
 		]) {
 			const text = readFileSync(join(root, file), "utf8");
 			notices += `\n===== ${name}@${version} (${license}) =====\n${text}\n`;
@@ -117,7 +117,7 @@ export function preparePackageDistribution(directory) {
 		} else if (!local.endsWith(".ts")) allowedSources.set(`dist/${local}`, source);
 	}
 	if (pkg.name === "@diffexai/diffex") {
-		const defaultInstructions = join(root, "AGENTS_release.md");
+		const defaultInstructions = join(root, "scripts/assets/default-agent.md");
 		cpSync(defaultInstructions, join(dist, "AGENTS.md"));
 		allowedSources.set("dist/AGENTS.md", defaultInstructions);
 		for (const workspace of ["evolution", "harness-trace"]) {
@@ -166,7 +166,7 @@ export function preparePackageDistribution(directory) {
 	if (pkg.name === "@diffexai/diffex") {
 		const release = join(absolute, "release");
 		mkdirSync(release, { recursive: true });
-		const policy = JSON.parse(readFileSync(join(root, "docs/release/distribution-policy.json"), "utf8"));
+		const policy = JSON.parse(readFileSync(join(root, "scripts/distribution-policy.json"), "utf8"));
 		if (policy.status !== "approved" || policy.publicHosting !== "npmjs" || policy.channels.standalone !== "defer")
 			throw new Error("Unapproved distribution policy");
 		const manifest = createDistributionManifest({

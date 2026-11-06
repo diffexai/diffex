@@ -66,7 +66,7 @@ const routed = (input, init) => {
 Object.defineProperty(globalThis, "fetch", { configurable: true, get: () => routed, set: (value) => { original = value; } });
 `);
 	const cliEnv = { DIFFEX_CODING_AGENT_DIR: agentDir, NODE_OPTIONS: `--import=${preload}` };
-	const cli = join(repo, "diffex-test.sh");
+	const cli = join(repo, "scripts/diffex-test.sh");
 	console.log(await run(cli, ["--no-env", "update", "--models"], cliEnv));
 	const cache = JSON.parse(readFileSync(join(agentDir, "models-store.json"), "utf8"));
 	assert.equal(cache.openai.models.length, 170);
