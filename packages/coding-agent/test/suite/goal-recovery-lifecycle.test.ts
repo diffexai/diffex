@@ -52,7 +52,7 @@ it("archives and retains whole tool exchanges during emergency recovery inside t
 		fauxAssistantMessage("Investigation completed."),
 		(context) => {
 			expect(context.systemPrompt).toBe(systemPrompt);
-			expect(context.messages.map(getMessageText)).toContain("Inspect the deployment evidence in two probes.");
+			expect(context.messages.map(getMessageText)).not.toContain("Inspect the deployment evidence in two probes.");
 			expect(context.messages.map(getMessageText)).toContain("Keep project instructions verbatim.");
 			expect(
 				context.messages.some((message) => message.role === "toolResult" && message.toolCallId === "old-probe"),
@@ -76,13 +76,13 @@ it("archives and retains whole tool exchanges during emergency recovery inside t
 				message.content.some((part) => part.type === "toolCall" && part.id === "old-probe"),
 		),
 	).toBe(true);
-	expect(removed.some((message) => message.role === "user")).toBe(false);
+	expect(removed.some((message) => message.role === "user")).toBe(true);
 	const exported = harness.session.exportToJsonl(join(harness.tempDir, "protected-recovery.jsonl"));
 	for (const manager of [
 		SessionManager.open(exported),
 		harness.sessionManager.forkBranch(harness.sessionManager.getLeafId()!),
 	]) {
-		expect(manager.buildSessionContext().messages.map(getMessageText)).toContain(
+		expect(manager.buildSessionContext().messages.map(getMessageText)).not.toContain(
 			"Inspect the deployment evidence in two probes.",
 		);
 		expect(manager.buildSessionContext().messages.map(getMessageText)).toContain(

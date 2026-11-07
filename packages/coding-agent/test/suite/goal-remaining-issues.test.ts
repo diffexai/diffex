@@ -188,6 +188,11 @@ it.each([
 		harnesses.push(harness);
 		harness.setResponses([fauxAssistantMessage("Recorded.")]);
 		await harness.session.prompt("record ".repeat(8_000));
+		await harness.session.sendCustomMessage({
+			customType: "project-rule",
+			content: "Protected project instruction.",
+			display: false,
+		});
 		await harness.session.setGoalModeEnabled(true);
 		let error = "";
 		let receipt = "";
@@ -195,7 +200,7 @@ it.each([
 			(context) => {
 				const oldest = liveIds(context)[0];
 				const requestIndex = context.messages.findIndex(
-					(message) => getMessageText(message) === "Compact completed work.",
+					(message) => getMessageText(message) === "Protected project instruction.",
 				);
 				const protectedId = getMessageText(context.messages[requestIndex - 1]).match(/\[context (b\d+)\]/)![1];
 				const args =
