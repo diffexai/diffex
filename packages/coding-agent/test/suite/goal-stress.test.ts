@@ -151,7 +151,7 @@ it.each([17, 739, 918])(
 	60_000,
 );
 
-it("fails closed on an oversized latest exchange, preserves evidence, and recovers with a larger model", async () => {
+it("preserves evidence after failed oversized recovery and recovers with a larger model", async () => {
 	const harness = await createHarness({
 		models: [{ id: "stress", contextWindow: 32_000, maxTokens: 8_000 }],
 		settings: { compaction: { enabled: false, reserveTokens: 0, keepRecentTokens: 1 } },
@@ -179,11 +179,12 @@ it("fails closed on an oversized latest exchange, preserves evidence, and recove
 	await harness.session.setGoalModeEnabled(true);
 	harness.setResponses([
 		fauxAssistantMessage(fauxToolCall("probe", {}, { id: "oversized" }), { stopReason: "toolUse" }),
+		fauxAssistantMessage("", { stopReason: "length" }),
 	]);
 	await harness.session.prompt("Inspect the evidence and determine the deployment decision.");
 	expect(harness.getPendingResponseCount()).toBe(0);
 	expect(harness.session.state.errorMessage).toContain("Emergency context compaction failed");
-	expect(harness.faux.state.callCount).toBe(1);
+	expect(harness.faux.state.callCount).toBe(2);
 	expect(readGoalArchives(harness.sessionManager.getBranch()).size).toBe(0);
 	expect(harness.session.messages.map(getMessageText)).toContain(
 		"Inspect the evidence and determine the deployment decision.",

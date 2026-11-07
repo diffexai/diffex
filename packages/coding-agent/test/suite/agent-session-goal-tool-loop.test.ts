@@ -96,7 +96,7 @@ it("protects an exchange if an assistant response arrives before its tool result
 	const blocks = indexGoalBlocks(messages);
 	expect(blocks).toHaveLength(3);
 	expect(blocks[1]).toMatchObject({ startIndex: 1, endIndex: 4, protected: true });
-	expect(blocks[2]).toMatchObject({ startIndex: 5, endIndex: 6, protected: true });
+	expect(blocks[2]).toMatchObject({ startIndex: 5, endIndex: 6, protected: false });
 });
 
 it("compacts and recalls an earlier completed tool batch within one user request", async () => {

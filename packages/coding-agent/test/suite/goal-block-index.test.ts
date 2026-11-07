@@ -40,7 +40,7 @@ function history(): AgentMessage[] {
 }
 
 describe("goal block selection contract", () => {
-	it("indexes complete exchanges as one unit and protects the latest request and incomplete exchange", () => {
+	it("indexes complete exchanges as one unit and protects only the incomplete exchange", () => {
 		const blocks = indexGoalBlocks(history());
 		const previous = blocks.find((block) => block.startIndex <= 1 && block.endIndex >= 4);
 		const latestUser = blocks.find((block) => block.startIndex <= 6 && block.endIndex >= 6);
@@ -48,7 +48,7 @@ describe("goal block selection contract", () => {
 		expect(previous).toBeDefined();
 		expect(previous?.protected).toBe(false);
 		expect(previous?.endIndex).toBeLessThan(6);
-		expect(latestUser?.protected).toBe(true);
+		expect(latestUser?.protected).toBe(false);
 		expect(unfinished?.protected).toBe(true);
 		expect(blocks.some((block) => block.startIndex === 5 && block.endIndex === 5)).toBe(false);
 	});
@@ -60,7 +60,7 @@ describe("goal block selection contract", () => {
 		const unfinished = blocks.find((block) => block.startIndex <= 7 && block.endIndex >= 7);
 		if (!previous || !latestUser || !unfinished) throw new Error("Missing indexed test blocks");
 		expect(validateGoalSelection(blocks, previous.id, previous.id)).toBe(true);
-		expect(validateGoalSelection(blocks, previous.id, latestUser.id)).toBe(false);
+		expect(validateGoalSelection(blocks, previous.id, latestUser.id)).toBe(true);
 		expect(validateGoalSelection(blocks, previous.id, unfinished.id)).toBe(false);
 		expect(validateGoalSelection(blocks, unfinished.id, unfinished.id)).toBe(false);
 	});

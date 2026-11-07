@@ -9,7 +9,7 @@ afterEach(async () => {
 	while (harnesses.length) await harnesses.pop()?.cleanup();
 });
 
-it.each(["project", "latest user", "incomplete", "latest assistant"])(
+it.each(["project", "incomplete"])(
 	"rejects a model attempt to compact %s content without invoking a summarizer",
 	async (target) => {
 		const harness = await createHarness({
@@ -40,9 +40,7 @@ it.each(["project", "latest user", "incomplete", "latest assistant"])(
 		const systemPrompt = harness.session.systemPrompt;
 		const expected = {
 			project: "Project instruction.",
-			"latest user": "Latest user request.",
 			incomplete: "Incomplete exchange.",
-			"latest assistant": "Latest assistant exchange.",
 		}[target]!;
 		let error = "";
 		harness.setResponses([

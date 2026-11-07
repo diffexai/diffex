@@ -329,8 +329,6 @@ export interface GoalBlock {
 /** Index complete exchanges without exposing runtime notes as selectable blocks. */
 export function indexGoalBlocks(messages: readonly AgentMessage[]): GoalBlock[] {
 	const blocks: GoalBlock[] = [];
-	let latestUser = -1;
-	let latestExchange = -1;
 	for (let index = 0; index < messages.length; ) {
 		let message = messages[index];
 		const boundary = goalNoteDetails(message);
@@ -379,10 +377,8 @@ export function indexGoalBlocks(messages: readonly AgentMessage[]): GoalBlock[] 
 				index++;
 			}
 			incomplete ||= pending.size > 0;
-			latestExchange = blocks.length;
 		} else {
 			index++;
-			if (message.role === "user") latestUser = blocks.length;
 		}
 		blocks.push({
 			id: boundary?.blockId ?? `b${String(blocks.length + 1).padStart(3, "0")}`,
@@ -391,8 +387,6 @@ export function indexGoalBlocks(messages: readonly AgentMessage[]): GoalBlock[] 
 			protected: incomplete,
 		});
 	}
-	if (latestUser >= 0) blocks[latestUser].protected = true;
-	if (latestExchange >= 0) blocks[latestExchange].protected = true;
 	return blocks;
 }
 
