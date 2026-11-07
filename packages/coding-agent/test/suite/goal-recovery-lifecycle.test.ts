@@ -40,11 +40,20 @@ it("archives and retains whole tool exchanges during emergency recovery inside t
 		],
 	});
 	await harness.session.setGoalModeEnabled(true);
+	const systemPrompt = harness.session.systemPrompt;
+	await harness.session.sendCustomMessage({
+		customType: "project-rule",
+		content: "Keep project instructions verbatim.",
+		display: false,
+	});
 	harness.setResponses([
 		fauxAssistantMessage(fauxToolCall("probe", {}, { id: "old-probe" }), { stopReason: "toolUse" }),
 		fauxAssistantMessage(fauxToolCall("probe", {}, { id: "recent-probe" }), { stopReason: "toolUse" }),
 		fauxAssistantMessage("Investigation completed."),
 		(context) => {
+			expect(context.systemPrompt).toBe(systemPrompt);
+			expect(context.messages.map(getMessageText)).toContain("Inspect the deployment evidence in two probes.");
+			expect(context.messages.map(getMessageText)).toContain("Keep project instructions verbatim.");
 			expect(
 				context.messages.some((message) => message.role === "toolResult" && message.toolCallId === "old-probe"),
 			).toBe(false);
@@ -67,6 +76,19 @@ it("archives and retains whole tool exchanges during emergency recovery inside t
 				message.content.some((part) => part.type === "toolCall" && part.id === "old-probe"),
 		),
 	).toBe(true);
+	expect(removed.some((message) => message.role === "user")).toBe(false);
+	const exported = harness.session.exportToJsonl(join(harness.tempDir, "protected-recovery.jsonl"));
+	for (const manager of [
+		SessionManager.open(exported),
+		harness.sessionManager.forkBranch(harness.sessionManager.getLeafId()!),
+	]) {
+		expect(manager.buildSessionContext().messages.map(getMessageText)).toContain(
+			"Inspect the deployment evidence in two probes.",
+		);
+		expect(manager.buildSessionContext().messages.map(getMessageText)).toContain(
+			"Keep project instructions verbatim.",
+		);
+	}
 	expect(removed.some((message) => message.role === "toolResult" && message.toolCallId === "old-probe")).toBe(true);
 	expect(removed.some((message) => message.role === "toolResult" && message.toolCallId === "recent-probe")).toBe(
 		false,
@@ -119,7 +141,7 @@ async function recall(harness: Harness, archiveId: string, identifier: string) {
 it("recalls exact evidence after repeated oversized recovery, export, resume, and forks", async () => {
 	const harness = await recoveryHarness();
 	harness.setResponses([fauxAssistantMessage("Recorded.")]);
-	await harness.session.prompt(`receipt739: owner Mira. ${"evidence ".repeat(10_000)}`);
+	await harness.session.prompt(`receipt739: owner Mira. ${"evidence ".repeat(13_000)}`);
 	await harness.session.setGoalModeEnabled(true);
 	const beforeRecovery = harness.sessionManager.getLeafId()!;
 	const calls = harness.faux.state.callCount;
@@ -174,7 +196,7 @@ it("preserves an existing voluntary archive through recovery and a later volunta
 	expect(readGoalArchives(harness.sessionManager.getBranch()).get("ctx-0002")?.references).toContain("ctx-0001");
 	harness.setResponses([fauxAssistantMessage("Recorded more work.")]);
 	await harness.session.prompt("record ".repeat(7_000));
-	await compactPriorHistory(harness, "All investigations completed.", "final-archive");
+	await compactPriorHistory(harness, "All investigations completed.", "final-archive", "last");
 	expect(readGoalArchives(harness.sessionManager.getBranch()).get("ctx-0003")?.references).toContain("ctx-0002");
 	await recall(harness, "ctx-0003", "receipt739");
 	await recall(harness, "ctx-0003", "receipt840");
@@ -313,6 +335,8 @@ it.each([false, true])(
 		});
 		harness.setResponses([fauxAssistantMessage("Recorded.")]);
 		await harness.session.prompt("receipt739: owner Mira.");
+		harness.setResponses([fauxAssistantMessage("Recorded later work.")]);
+		await harness.session.prompt("Keep this latest request verbatim.");
 		await harness.session.setGoalModeEnabled(true);
 		manager.appendMessage({
 			...fauxAssistantMessage("", { stopReason: "error", errorMessage: "prompt is too long" }),

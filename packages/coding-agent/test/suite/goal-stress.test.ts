@@ -179,15 +179,15 @@ it("fails closed on an oversized latest exchange, preserves evidence, and recove
 	await harness.session.setGoalModeEnabled(true);
 	harness.setResponses([
 		fauxAssistantMessage(fauxToolCall("probe", {}, { id: "oversized" }), { stopReason: "toolUse" }),
-		(context) => {
-			expect(estimateContextTokens(context).tokens + 8_000 + 4_096).toBeLessThanOrEqual(32_000);
-			return fauxAssistantMessage("Recovered.");
-		},
 	]);
 	await harness.session.prompt("Inspect the evidence and determine the deployment decision.");
 	expect(harness.getPendingResponseCount()).toBe(0);
-	expect(harness.session.state.errorMessage).toContain("could not make the request fit");
-	expect(harness.faux.state.callCount).toBe(2);
+	expect(harness.session.state.errorMessage).toContain("Emergency context compaction failed");
+	expect(harness.faux.state.callCount).toBe(1);
+	expect(readGoalArchives(harness.sessionManager.getBranch()).size).toBe(0);
+	expect(harness.session.messages.map(getMessageText)).toContain(
+		"Inspect the evidence and determine the deployment decision.",
+	);
 	expect(harness.session.messages.some((message) => getMessageText(message).includes("oversizedReceipt739"))).toBe(
 		true,
 	);

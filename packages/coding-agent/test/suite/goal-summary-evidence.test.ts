@@ -173,6 +173,7 @@ it("budgets the system prompt, earlier history, JSON escaping, and images before
 		fauxAssistantMessage("Selected observation."),
 	];
 	const request = prepareGoalSummaryRequest(messages, 1, model);
+	expect(request.maxTokens).toBe(8_000);
 	expect(
 		estimateContextTokens(request.context).tokens + request.maxTokens + CONTEXT_SAFETY_TOKENS,
 	).toBeLessThanOrEqual(32_000);
@@ -182,11 +183,27 @@ it("budgets the system prompt, earlier history, JSON escaping, and images before
 		{ role: "user", content: [{ type: "text", text: "x".repeat(77_000) }, image], timestamp: 1 },
 		messages[1],
 	];
-	expect(() => prepareGoalSummaryRequest(withImage, 1, model)).toThrow("input budget exceeded");
+	const imageRequest = prepareGoalSummaryRequest(withImage, 1, model);
+	expect(imageRequest.maxTokens).toBeLessThan(request.maxTokens);
+	expect(imageRequest.maxTokens).toBeGreaterThan(0);
+	expect(estimateContextTokens(imageRequest.context).tokens + imageRequest.maxTokens + CONTEXT_SAFETY_TOKENS).toBe(
+		32_000,
+	);
+	expect(imageRequest.context.messages[0].content).toContainEqual(image);
 	expect(() =>
 		prepareGoalSummaryRequest([{ role: "user", content: "\u0000".repeat(20_000), timestamp: 1 }], 0, model),
 	).toThrow("input budget exceeded");
+	const largerRequest = prepareGoalSummaryRequest(
+		[{ role: "user", content: "x".repeat(90_000), timestamp: 1 }, messages[1]],
+		1,
+		model,
+	);
+	expect(largerRequest.maxTokens).toBeLessThan(request.maxTokens);
+	expect(largerRequest.maxTokens).toBeGreaterThan(0);
+	expect(estimateContextTokens(largerRequest.context).tokens + largerRequest.maxTokens + CONTEXT_SAFETY_TOKENS).toBe(
+		32_000,
+	);
 	expect(() =>
-		prepareGoalSummaryRequest([{ role: "user", content: "x".repeat(90_000), timestamp: 1 }, messages[1]], 1, model),
+		prepareGoalSummaryRequest([{ role: "user", content: "x".repeat(120_000), timestamp: 1 }, messages[1]], 1, model),
 	).toThrow("oldest eligible blocks");
 });

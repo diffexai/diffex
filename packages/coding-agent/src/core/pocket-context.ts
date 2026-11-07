@@ -191,6 +191,23 @@ export function projectGoalEntries(path: readonly SessionEntry[]): SessionEntry[
 	let active: SessionEntry[] = [];
 	for (const entry of path) {
 		if (entry.type === "compaction") {
+			if (entry.goalArchive) {
+				// Recovery replaces only eligible entries. Protected islands remain verbatim.
+				const removed = new Set(entry.goalArchive.entryIds);
+				const visibleIds = active.filter((candidate) => removed.has(candidate.id)).map((candidate) => candidate.id);
+				if (
+					visibleIds.length !== removed.size ||
+					visibleIds.some((id, index) => id !== entry.goalArchive!.entryIds[index])
+				)
+					throw new Error("Cannot replay inconsistent goal recovery archive.");
+				const start = active.findIndex((candidate) => removed.has(candidate.id));
+				active = [
+					...active.slice(0, start),
+					entry,
+					...active.slice(start).filter((candidate) => !removed.has(candidate.id)),
+				];
+				continue;
+			}
 			const kept = active.findIndex((candidate) => candidate.id === entry.firstKeptEntryId);
 			if (kept < 0) throw new Error("Cannot replay compaction: retained context is unavailable.");
 			active = [entry, ...active.slice(kept)];
@@ -338,12 +355,13 @@ export function indexGoalBlocks(messages: readonly AgentMessage[]): GoalBlock[] 
 					continue;
 				}
 				if (current.role === "assistant") {
-					// Keep final text with its batch, but index a later tool batch separately.
+					// Keep final text with its batch, but a failed continuation is its own
+					// incomplete exchange and must not pin an already completed tool batch.
 					if (
-						!boundary &&
-						index > startIndex &&
+						index > startIndex + (boundary ? 1 : 0) &&
 						pending.size === 0 &&
-						current.content.some((part) => part.type === "toolCall")
+						((!boundary && current.content.some((part) => part.type === "toolCall")) ||
+							["pending", "aborted", "error", "length"].includes(current.stopReason))
 					) {
 						break;
 					}
