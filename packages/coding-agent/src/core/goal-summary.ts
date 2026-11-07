@@ -21,7 +21,7 @@ Preserve exact paths, identifiers, commands, values, and error strings where use
 Use exactly these four Markdown sections, in this order, with concise bullets. For an empty section, write "No relevant evidence recorded in this span."
 
 ## Observations
-Facts established by inspected sources or tool results, including the conditions under which they were observed.
+Facts and intent established by inspected sources or tool results, including the conditions under which they were observed.
 
 ## Actions and outcomes
 What was attempted, changed, executed, or produced. Pair important actions with their observed outcomes, including failed approaches and the conditions of failure.
