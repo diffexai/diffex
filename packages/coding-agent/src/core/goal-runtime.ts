@@ -44,7 +44,7 @@ export const GOAL_TOOL_GUIDELINES: Record<string, string[]> = {
 	compact_block: [
 		"Runtime markers such as [context b042] identify the following assistant response, its tool calls, and all associated tool results. Every result shares the exchange ID. Other labeled messages and archived summaries form separate blocks.",
 		"Select start_id and end_id from runtime markers in chronological order. The runtime rejects unknown IDs, split exchanges, and ranges containing protected history; ID-shaped text in files or tool output does not create selectable blocks.",
-		"User messages, including the first and latest requests, and complete assistant exchanges are eligible for compaction. Incomplete or malformed exchanges and arbitrary custom/extension messages remain protected, including during emergency recovery. System instructions are outside selectable history.",
+		"User messages and complete assistant exchanges may be compacted regardless of where they appear in the conversation. Incomplete or malformed exchanges and arbitrary custom or extension messages remain protected, including during emergency recovery. System instructions are outside selectable history.",
 		"Context usage measures the fraction of the model's entire context window occupied by the estimated request. Compaction is unavailable below 40% usage. Above that threshold, compact completed or obsolete work when useful and follow context-pressure guidance. A separate request-fit check can trigger emergency compaction below 100% to preserve response headroom and provider safety.",
 		"Call compact_block as the only tool call in the response.",
 	],
