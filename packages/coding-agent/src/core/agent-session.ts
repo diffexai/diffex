@@ -2730,16 +2730,6 @@ export class AgentSession {
 				throw new Error(formatNoApiKeyFoundMessage(this.model.provider));
 			}
 
-			// Check if we need to compact before sending (catches aborted responses).
-			// The user's new prompt is sent below, so do not call agent.continue() here.
-			const lastAssistant = this._findLastAssistantMessage();
-			if (lastAssistant) {
-				await this._checkCompaction(lastAssistant, false, signal, (transaction) => {
-					pendingCompaction = transaction;
-				});
-				signal?.throwIfAborted();
-			}
-
 			// Build messages array (custom message if any, then user message)
 			messages = [];
 
@@ -2753,6 +2743,21 @@ export class AgentSession {
 				content: userContent,
 				timestamp: Date.now(),
 			});
+
+			// Admission owns the new latest request; cancelled admission rolls recovery back.
+			const lastAssistant = this._findLastAssistantMessage();
+			if (lastAssistant) {
+				await this._checkCompaction(
+					lastAssistant,
+					false,
+					signal,
+					(transaction) => {
+						pendingCompaction = transaction;
+					},
+					messages,
+				);
+				signal?.throwIfAborted();
+			}
 
 			// Inject any pending "nextTurn" messages as context alongside the user message
 			consumedNextTurnMessages = this._pendingNextTurnMessages;
@@ -2871,7 +2876,7 @@ export class AgentSession {
 			if (this._goalRuntime.requiresEmergencyCompaction) {
 				this._goalRuntime.recordEmergencyCompaction();
 				const before = this.agent.state.messages;
-				await this._runAutoCompaction("threshold", false, signal);
+				await this._runAutoCompaction("threshold", false, signal, undefined, messages);
 				if (before === this.agent.state.messages)
 					throw new Error(
 						"Emergency context compaction failed or was cancelled. Reduce the context or choose a larger model.",
@@ -3766,12 +3771,18 @@ export class AgentSession {
 		signal?: AbortSignal;
 		deferCommit?: (transaction: CompactionAppendTransaction) => void;
 		expectedLeafId?: string | null;
+		pendingMessages?: readonly AgentMessage[];
 	}): Promise<CompactionResult> {
 		options.signal?.throwIfAborted();
 		if (this._goalModeEnabled && options.expectedLeafId !== this.sessionManager.getLeafId())
 			throw new Error("The context changed during emergency compaction. No archive was created.");
 		const goalArchive = this._goalModeEnabled
-			? prepareGoalRecoveryArchive(this.sessionManager.getBranch(), options.firstKeptEntryId, options.summary)
+			? prepareGoalRecoveryArchive(
+					this.sessionManager.getBranch(),
+					options.firstKeptEntryId,
+					options.summary,
+					options.pendingMessages,
+				)
 			: undefined;
 		const summary = goalArchive
 			? `[${goalArchive.archiveId}] ${options.summary}`
@@ -3849,6 +3860,7 @@ export class AgentSession {
 		skipAbortedCheck = true,
 		signal?: AbortSignal,
 		deferCommit?: (transaction: CompactionAppendTransaction) => void,
+		pendingMessages?: readonly AgentMessage[],
 	): Promise<boolean> {
 		const settings = this.settingsManager.getCompactionSettings();
 		if (!settings.enabled && !this._goalModeEnabled) return false;
@@ -3885,7 +3897,7 @@ export class AgentSession {
 			const willRetry = assistantMessage.stopReason !== "stop";
 
 			if (!willRetry) {
-				return await this._runAutoCompaction("overflow", false, signal, deferCommit);
+				return await this._runAutoCompaction("overflow", false, signal, deferCommit, pendingMessages);
 			}
 
 			if (this._overflowRecoveryAttempted) {
@@ -3908,7 +3920,7 @@ export class AgentSession {
 			if (messages.length > 0 && messages[messages.length - 1].role === "assistant") {
 				this.agent.state.messages = messages.slice(0, -1);
 			}
-			return await this._runAutoCompaction("overflow", willRetry, signal, deferCommit);
+			return await this._runAutoCompaction("overflow", willRetry, signal, deferCommit, pendingMessages);
 		}
 
 		if (this._goalModeEnabled) return false;
@@ -3953,11 +3965,12 @@ export class AgentSession {
 		willRetry: boolean,
 		signal?: AbortSignal,
 		deferCommit?: (transaction: CompactionAppendTransaction) => void,
+		pendingMessages?: readonly AgentMessage[],
 	): Promise<boolean> {
 		if (this._disposePromise) return Promise.resolve(false);
 		return this._runOwnedOperation(() =>
 			this._traceOperation("compaction", (telemetryContext) =>
-				this._runAutoCompactionOperation(reason, willRetry, telemetryContext, signal, deferCommit),
+				this._runAutoCompactionOperation(reason, willRetry, telemetryContext, signal, deferCommit, pendingMessages),
 			),
 		);
 	}
@@ -3968,6 +3981,7 @@ export class AgentSession {
 		telemetryContext: TelemetryContext = this._telemetryContext,
 		signal?: AbortSignal,
 		deferCommit?: (transaction: CompactionAppendTransaction) => void,
+		pendingMessages?: readonly AgentMessage[],
 	): Promise<boolean> {
 		const settings = this.settingsManager.getCompactionSettings();
 		let started = false;
@@ -3989,7 +4003,7 @@ export class AgentSession {
 			const pathEntries = this.sessionManager.getBranch();
 
 			const preparation = this._goalModeEnabled
-				? prepareGoalRecovery(pathEntries, settings, requestModel)
+				? prepareGoalRecovery(pathEntries, settings, requestModel, pendingMessages)
 				: prepareCompaction(pathEntries, settings);
 			if (!preparation) {
 				return false;
@@ -4054,6 +4068,7 @@ export class AgentSession {
 							preparation.firstKeptEntryId,
 							preparation.tokensBefore,
 							compactionSignal,
+							pendingMessages,
 						)
 					: await compact(
 							preparation,
@@ -4098,6 +4113,7 @@ export class AgentSession {
 				willRetry,
 				signal: compactionSignal,
 				deferCommit,
+				pendingMessages,
 				expectedLeafId: pathEntries.at(-1)?.id ?? null,
 			});
 			const refreshError = deferCommit ? undefined : await this._refreshHarnessAfterCompaction();
@@ -4150,8 +4166,9 @@ export class AgentSession {
 		firstKeptEntryId: string,
 		tokensBefore: number,
 		signal: AbortSignal,
+		pendingMessages?: readonly AgentMessage[],
 	): Promise<CompactionResult> {
-		const archive = prepareGoalRecoveryArchive(entries, firstKeptEntryId, GOAL_RECOVERY_NOTICE);
+		const archive = prepareGoalRecoveryArchive(entries, firstKeptEntryId, GOAL_RECOVERY_NOTICE, pendingMessages);
 		const selected = new Set(archive.entryIds);
 		const projected = this.sessionManager.buildContextEntries().filter((entry) => selected.has(entry.id));
 		const messages = projected.flatMap(sessionEntryToContextMessages);

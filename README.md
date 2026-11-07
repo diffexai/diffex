@@ -61,6 +61,7 @@ On Terminal-Bench 2.1, Diffex's reported GPT-5.6 Luna score is **4.12 percentage
 
 ## Documentation
 
+- [SWE-Marathon final data](docs/swe-marathon-final-data.md)
 - [Quickstart](packages/coding-agent/docs/quickstart.md)
 - [Usage and commands](packages/coding-agent/docs/usage.md)
 - [Providers and authentication](packages/coding-agent/docs/providers.md)

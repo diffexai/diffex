@@ -44,7 +44,12 @@ export function toolResult(context: Context, callId: string): Extract<Message, {
 }
 
 /** Create a real archive through a model-originated tool call and the summarization pipeline. */
-export async function compactPriorHistory(harness: Harness, summary: string, callId: string) {
+export async function compactPriorHistory(
+	harness: Harness,
+	summary: string,
+	callId: string,
+	selection: "all" | "last" = "all",
+) {
 	const requests: Context[] = [];
 	const modelIds: string[] = [];
 	const reasoning: Array<string | undefined> = [];
@@ -54,7 +59,8 @@ export async function compactPriorHistory(harness: Harness, summary: string, cal
 			requests.push(structuredClone(context));
 			modelIds.push(model.id);
 			reasoning.push(options?.reasoning);
-			selected = liveIds(context);
+			const ids = liveIds(context);
+			selected = selection === "last" ? ids.slice(-1) : ids;
 			return fauxAssistantMessage(
 				fauxToolCall(
 					"compact_block",

@@ -1,4 +1,10 @@
-import { type Context, estimateContextTokens, fauxAssistantMessage, fauxToolCall } from "@diffexai/diffex-ai";
+import {
+	CONTEXT_SAFETY_TOKENS,
+	type Context,
+	estimateContextTokens,
+	fauxAssistantMessage,
+	fauxToolCall,
+} from "@diffexai/diffex-ai";
 import { afterEach, expect, it } from "vitest";
 import { GoalRecallRetrieval } from "../../src/core/goal-retrieval.ts";
 import { readGoalArchives } from "../../src/core/pocket-context.ts";
@@ -9,6 +15,70 @@ const harnesses: Harness[] = [];
 afterEach(async () => {
 	while (harnesses.length) await harnesses.pop()?.cleanup();
 });
+
+it.each([440_000, 780_000])(
+	"completes a reasoning summary beyond 8192 tokens with %i characters of evidence",
+	async (evidenceCharacters) => {
+		const harness = await createHarness({
+			models: [{ id: "reasoning", reasoning: true, contextWindow: 272_000, maxTokens: 131_072 }],
+			settings: { compaction: { enabled: false, reserveTokens: 0 }, retry: { enabled: false } },
+		});
+		harnesses.push(harness);
+		harness.getModel().thinkingLevelMap = { max: "max" };
+		harness.session.setThinkingLevel("max");
+		const evidence = "x".repeat(evidenceCharacters);
+		harness.setResponses([fauxAssistantMessage("Recorded.")]);
+		await harness.session.prompt(evidence);
+		await harness.session.setGoalModeEnabled(true);
+		let helperLimit = 0;
+		let helperInput = 0;
+		let final: Context | undefined;
+		const reasoning: Array<string | undefined> = [];
+		harness.setResponses([
+			(context, options) => {
+				reasoning.push(options?.reasoning);
+				const ids = liveIds(context);
+				return fauxAssistantMessage(
+					fauxToolCall("compact_block", { start_id: ids[0], end_id: ids.at(-1) }, { id: "large-summary" }),
+					{ stopReason: "toolUse" },
+				);
+			},
+			(context, options) => {
+				reasoning.push(options?.reasoning);
+				helperLimit = options?.maxTokens ?? 0;
+				helperInput = estimateContextTokens(context).tokens;
+				// Simulate a provider whose reasoning alone needs more than the former shared output cap.
+				return helperLimit < 12_000
+					? fauxAssistantMessage("", { stopReason: "length" })
+					: fauxAssistantMessage([
+							{ type: "thinking", thinking: "r".repeat(44_000) },
+							{ type: "text", text: "Preserved evidence. ".repeat(200) },
+						]);
+			},
+			(context, options) => {
+				reasoning.push(options?.reasoning);
+				final = context;
+				return fauxAssistantMessage("Continued.");
+			},
+		]);
+		await harness.session.prompt("Compact completed work.");
+		expect(final).toBeDefined();
+		const result = toolResult(final!, "large-summary");
+		expect(result.isError, getMessageText(result)).toBe(false);
+		expect(reasoning).toEqual(["max", "max", "max"]);
+		expect(helperLimit).toBeGreaterThan(8_192);
+		expect(helperLimit).toBeLessThanOrEqual(131_072);
+		expect(helperInput + helperLimit + CONTEXT_SAFETY_TOKENS).toBeLessThanOrEqual(272_000);
+		if (evidenceCharacters === 440_000) expect(helperLimit).toBe(131_072);
+		else {
+			expect(helperLimit).toBeLessThan(131_072);
+			expect(helperInput + helperLimit + CONTEXT_SAFETY_TOKENS).toBe(272_000);
+		}
+		expect(readGoalArchives(harness.sessionManager.getBranch()).size).toBe(1);
+		expect(JSON.stringify(harness.sessionManager.getBranch())).toContain(evidence);
+		expect(final!.messages.map(getMessageText)).not.toContain(evidence);
+	},
+);
 
 it("rejects expanded JSON evidence before dispatch and preserves the selected history", async () => {
 	const harness = await createHarness({

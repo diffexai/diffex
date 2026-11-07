@@ -787,7 +787,9 @@ export function prepareCompaction(
 	// Work from the replayed projection so a later ordinary compaction cannot
 	// summarize original entries that have already been replaced.
 	const hasGoalReplacements = pathEntries.some(
-		(entry) => entry.type === "custom" && entry.customType === GOAL_REPLACEMENT_ENTRY,
+		(entry) =>
+			(entry.type === "custom" && entry.customType === GOAL_REPLACEMENT_ENTRY) ||
+			(entry.type === "compaction" && entry.goalArchive !== undefined),
 	);
 	const activeEntries = hasGoalReplacements ? buildContextEntries(pathEntries) : pathEntries;
 	if (pathEntries.length > 0 && pathEntries[pathEntries.length - 1].type === "compaction") {

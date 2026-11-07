@@ -458,7 +458,13 @@ export function buildContextEntries(
 	byId?: Map<string, SessionEntry>,
 ): SessionEntry[] {
 	const path = buildSessionPath(entries, leafId, byId);
-	if (path.some((entry) => entry.type === "custom" && entry.customType === GOAL_REPLACEMENT_ENTRY)) {
+	if (
+		path.some(
+			(entry) =>
+				(entry.type === "custom" && entry.customType === GOAL_REPLACEMENT_ENTRY) ||
+				(entry.type === "compaction" && entry.goalArchive !== undefined),
+		)
+	) {
 		return projectGoalEntries(path);
 	}
 	let compaction: CompactionEntry | null = null;
