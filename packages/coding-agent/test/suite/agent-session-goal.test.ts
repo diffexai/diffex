@@ -462,7 +462,7 @@ describe("experimental goal mode", () => {
 		expect(requests[1].messages.map(getMessageText).join("\n")).not.toContain("Context usage: approximately");
 		expect(archiveId).toMatch(/^ctx-\d+$/);
 		expect(resultFor(requests[2].messages, "compact")).toMatch(
-			new RegExp(`^\\[context b\\d+\\]\\s+Compacted into ${archiveId}\\.$`),
+			new RegExp(`^\\[context b\\d+\\]\\s+Compacted into ${archiveId}\\. Visible block IDs reassigned;`),
 		);
 		expect(requests[2].messages.map(getMessageText).join("\n")).toContain(
 			"Decision: the release remains blocked by the blue gate.",
