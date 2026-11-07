@@ -42,7 +42,7 @@ it("rejects a recovery suggestion after a concurrent context change", async () =
 	expect(readGoalArchives(harness.sessionManager.getBranch()).size).toBe(0);
 });
 
-it("rejects removed block IDs after a successful compaction instead of selecting replacement content", async () => {
+it("selects replacement content using its reassigned header after compaction", async () => {
 	const harness = await createHarness({
 		models: [{ id: "goal", contextWindow: 50_000 }],
 		settings: { compaction: { enabled: false, reserveTokens: 0 } },
@@ -53,7 +53,8 @@ it("rejects removed block IDs after a successful compaction instead of selecting
 	await harness.session.prompt("current ".repeat(10_000));
 	await harness.session.setGoalModeEnabled(true);
 	let oldId = "";
-	let error = "";
+	let receipt = "";
+	let replacementId = "";
 	harness.setResponses([
 		(context) => {
 			oldId = liveIds(context)[0];
@@ -62,22 +63,26 @@ it("rejects removed block IDs after a successful compaction instead of selecting
 				{ stopReason: "toolUse" },
 			);
 		},
-		fauxAssistantMessage("Earlier observations completed."),
+		fauxAssistantMessage(`Earlier observations completed. ${"record ".repeat(2_000)}`),
 		(context) => {
 			expect(toolResult(context, "compact").isError).toBe(false);
+			const index = context.messages.findIndex((message) => getMessageText(message).startsWith("[ctx-0001]"));
+			replacementId = getMessageText(context.messages[index - 1]).match(/\[context (b\d+)\]/)![1];
 			return fauxAssistantMessage(
-				fauxToolCall("compact_block", { start_id: oldId, end_id: oldId }, { id: "stale" }),
+				fauxToolCall("compact_block", { start_id: replacementId, end_id: replacementId }, { id: "replacement" }),
 				{ stopReason: "toolUse" },
 			);
 		},
+		fauxAssistantMessage("Earlier observations completed."),
 		(context) => {
-			error = getMessageText(toolResult(context, "stale"));
+			receipt = getMessageText(toolResult(context, "replacement"));
 			return fauxAssistantMessage("Received.");
 		},
 	]);
 	await harness.session.prompt("Compact earlier observations.");
-	expect(error).toContain(`Unknown or stale block ID: ${oldId}`);
-	expect(readGoalArchives(harness.sessionManager.getBranch()).size).toBe(1);
+	expect(replacementId).toBe(oldId);
+	expect(receipt).toContain("Compacted into ctx-0002");
+	expect(readGoalArchives(harness.sessionManager.getBranch()).get("ctx-0002")?.references).toEqual(["ctx-0001"]);
 });
 
 afterEach(async () => {

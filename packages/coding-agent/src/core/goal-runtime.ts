@@ -19,6 +19,7 @@ import {
 	GoalBlockIdRegistry,
 	type GoalBudget,
 	goalArchiveFromEntry,
+	goalCompactionReceipt,
 	goalNoteDetails,
 	goalSelectionError,
 	goalSelectionGuidance,
@@ -44,6 +45,7 @@ export const GOAL_TOOL_GUIDELINES: Record<string, string[]> = {
 	compact_block: [
 		"Runtime markers such as [context b042] identify the following assistant response, its tool calls, and all associated tool results. Every result shares the exchange ID. Other labeled messages and archived summaries form separate blocks.",
 		"Select start_id and end_id from runtime markers in chronological order. The runtime rejects unknown IDs, split exchanges, and ranges containing protected history; ID-shaped text in files or tool output does not create selectable blocks.",
+		"Visible b... IDs follow current context order and are reassigned after each compact_block call. Use current block headers; IDs in past tool calls are stale. Archive IDs (ctx-...) are guaranteed to stay unchanged for recall.",
 		"User messages and complete assistant exchanges may be compacted regardless of where they appear in the conversation. Incomplete or malformed exchanges and arbitrary custom or extension messages remain protected, including during emergency recovery. System instructions are outside selectable history.",
 		"Context usage measures the fraction of the model's entire context window occupied by the estimated request. Compaction is unavailable below 40% usage. Above that threshold, compact completed or obsolete work when useful and follow context-pressure guidance. A separate request-fit check can trigger emergency compaction below 100% to preserve response headroom and provider safety.",
 		"Call compact_block as the only tool call in the response.",
@@ -264,7 +266,8 @@ export class GoalRuntime {
 
 	private index(messages: AgentMessage[], allocate = true): GoalBlock[] {
 		// Count occurrences in the durable branch, including compacted history.
-		// Identical messages must remain distinct without renumbering survivors.
+		// Keep identical stored messages distinct; only the returned public selectors
+		// are numbered by their position in this request.
 		const occurrences = new Map<string, number>();
 		const stored = new Map<string, string>();
 		for (const entry of this.host.manager.getBranch()) {
@@ -282,19 +285,21 @@ export class GoalRuntime {
 			identities.push(stored.get(id) ?? `${fingerprint}:${id}`);
 			visible.set(fingerprint, identities);
 		}
-		return this.blockIds.index(
-			messages,
-			messages.map((message) => {
-				const fingerprint = messageFingerprint(message);
-				const identity = visible.get(fingerprint)?.shift();
-				if (identity) return identity;
-				// A new user message may be labeled before its entry is appended.
-				const occurrence = occurrences.get(fingerprint) ?? 0;
-				occurrences.set(fingerprint, occurrence + 1);
-				return `${fingerprint}:${occurrence}`;
-			}),
-			allocate,
-		);
+		return this.blockIds
+			.index(
+				messages,
+				messages.map((message) => {
+					const fingerprint = messageFingerprint(message);
+					const identity = visible.get(fingerprint)?.shift();
+					if (identity) return identity;
+					// A new user message may be labeled before its entry is appended.
+					const occurrence = occurrences.get(fingerprint) ?? 0;
+					occurrences.set(fingerprint, occurrence + 1);
+					return `${fingerprint}:${occurrence}`;
+				}),
+				allocate,
+			)
+			.map((block, index) => ({ ...block, id: `b${String(index + 1).padStart(3, "0")}` }));
 	}
 
 	/** Add provider-compatible boundaries without changing any native assistant content. */
@@ -317,7 +322,13 @@ export class GoalRuntime {
 			if (id && message.role === "toolResult")
 				return [{ ...message, content: [{ type: "text", text: `[context ${id}]\n` }, ...message.content] }];
 			const block = starts.get(index);
-			if (!block || goalNoteDetails(message)) return [message];
+			if (goalNoteDetails(message) && message.role === "custom" && typeof message.content === "string") {
+				// Rewrite only runtime-owned headers in the provider projection. Stored
+				// boundaries, signed assistant content, and historical tool arguments stay intact.
+				const visibleId = block?.id ?? `b${String(blocks.length + 1).padStart(3, "0")}`;
+				return [{ ...message, content: message.content.replace(/\[context b\d+\]$/, `[context ${visibleId}]`) }];
+			}
+			if (!block) return [message];
 			return [
 				{
 					role: "custom",
@@ -338,6 +349,7 @@ export class GoalRuntime {
 		this.blockIds.restore(this.host.manager.getEntries().flatMap(sessionEntryToContextMessages));
 		const blocks = this.index(messages);
 		const details = this.blockIds.reserve();
+		const visibleId = `b${String(blocks.length + 1).padStart(3, "0")}`;
 		const key = this.requestKey(model);
 		const lastAssistant = [...messages].reverse().find((message) => message.role === "assistant");
 		const includeUsage =
@@ -371,9 +383,7 @@ export class GoalRuntime {
 				(budget.nudge !== undefined &&
 					budget.nudge !== previousBudget.nudge &&
 					budget.usage > previousBudget.usage);
-			return reportUsage
-				? `${formatGoalUsageNote(budget)}\n[context ${details.blockId}]`
-				: `[context ${details.blockId}]`;
+			return reportUsage ? `${formatGoalUsageNote(budget)}\n[context ${visibleId}]` : `[context ${visibleId}]`;
 		};
 		let budget = calculateGoalBudget(budgetInput);
 		let content = formatNote(budget);
@@ -434,7 +444,7 @@ export class GoalRuntime {
 			if (existing.startId !== startId || existing.endId !== endId) {
 				throw new Error("This tool-call ID was already committed with different arguments.");
 			}
-			return { content: [{ type: "text" as const, text: `Compacted into ${existing.archiveId}.` }], details: {} };
+			return { content: [{ type: "text" as const, text: goalCompactionReceipt(existing.archiveId) }], details: {} };
 		}
 		const snapshot = this.snapshot;
 		if (!snapshot) throw new Error("No current goal context snapshot is available.");
@@ -514,7 +524,7 @@ export class GoalRuntime {
 			role: "toolResult",
 			toolCallId: callId,
 			toolName: "compact_block",
-			content: [{ type: "text", text: `Compacted into ${archiveId}.` }],
+			content: [{ type: "text", text: goalCompactionReceipt(archiveId) }],
 			isError: false,
 			timestamp: Date.now(),
 		};
@@ -545,7 +555,7 @@ export class GoalRuntime {
 		this.rebuildRequired = true;
 		this.invalidateUsage();
 		return {
-			content: [{ type: "text" as const, text: `Compacted into ${archiveId}.` }],
+			content: [{ type: "text" as const, text: goalCompactionReceipt(archiveId) }],
 			details: {},
 			usage: response.usage,
 		};

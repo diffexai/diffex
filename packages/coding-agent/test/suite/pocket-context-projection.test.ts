@@ -56,6 +56,7 @@ describe("Pocket Context projection", () => {
 		const resumed = buildSessionContext(entries).messages;
 		expect(JSON.stringify(resumed)).not.toContain("Original evidence");
 		expect(JSON.stringify(resumed)).toContain("Compacted into ctx-0001.");
+		expect(JSON.stringify(resumed)).toContain("Visible block IDs reassigned; use current block headers.");
 		const compacted = projectGoalEntries([
 			...entries,
 			{
@@ -110,7 +111,7 @@ describe("Pocket Context projection", () => {
 		).toThrow(/cycle/i);
 	});
 
-	it("keeps live block IDs stable across removal of earlier blocks", () => {
+	it("keeps internal block identities stable across removal of earlier blocks", () => {
 		const registry = new GoalBlockIdRegistry();
 		const messages: AgentMessage[] = [
 			{ role: "user", content: "First", timestamp: 1 },

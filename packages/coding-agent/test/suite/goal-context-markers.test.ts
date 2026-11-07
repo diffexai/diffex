@@ -7,7 +7,7 @@ import { createTestResourceLoader } from "../extension-test-utils.ts";
 import { goalNotes, toolResult } from "./goal-harness.ts";
 import { createHarness, getMessageText } from "./harness.ts";
 
-it("assigns distinct stable markers to identical stored messages", async () => {
+it("assigns distinct positional markers to identical stored messages after compaction", async () => {
 	const manager = SessionManager.inMemory();
 	const userIds: string[] = [];
 	for (const answer of ["First observation", "Second observation"]) {
@@ -33,14 +33,16 @@ it("assigns distinct stable markers to identical stored messages", async () => {
 		expect(new Set(markers).size).toBe(markers.length);
 		manager.appendCompaction("Earlier observation archived.", userIds[1], 1_000);
 		harness.session.agent.state.messages = manager.buildSessionContext().messages;
+		let retainedMarker = "";
 		harness.setResponses([
 			(context) => {
 				const retained = context.messages.findIndex((message) => getMessageText(message) === "Inspect again");
-				expect(getMessageText(context.messages[retained - 1])).toBe(`[context ${markers[2]}]`);
+				retainedMarker = getMessageText(context.messages[retained - 1]);
 				return fauxAssistantMessage("Continued");
 			},
 		]);
 		await harness.session.prompt("Continue after compaction");
+		expect(retainedMarker).toBe("[context b002]");
 	} finally {
 		await harness.cleanup();
 	}

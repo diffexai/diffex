@@ -53,6 +53,11 @@ export interface GoalArchive {
 	usage?: Usage;
 }
 
+/** Identical guidance for successful execution, idempotent retries, and crash replay. */
+export function goalCompactionReceipt(archiveId: string): string {
+	return `Compacted into ${archiveId}. Visible block IDs reassigned; use current block headers. IDs in past tool calls are stale. Archive IDs are unchanged.`;
+}
+
 function isStringArray(value: unknown): value is string[] {
 	return Array.isArray(value) && value.every((item) => typeof item === "string" && item.length > 0);
 }
@@ -255,7 +260,7 @@ export function projectGoalEntries(path: readonly SessionEntry[]): SessionEntry[
 					role: "toolResult",
 					toolCallId: archive.toolCallId,
 					toolName: "compact_block",
-					content: [{ type: "text", text: `Compacted into ${archive.archiveId}.` }],
+					content: [{ type: "text", text: goalCompactionReceipt(archive.archiveId) }],
 					isError: false,
 					timestamp: new Date(entry.timestamp).getTime(),
 				},
@@ -390,7 +395,7 @@ export function indexGoalBlocks(messages: readonly AgentMessage[]): GoalBlock[] 
 	return blocks;
 }
 
-/** Retain public IDs while the underlying stored message identities remain unchanged. */
+/** Retain internal identities independently of the positional selectors shown to the model. */
 export class GoalBlockIdRegistry {
 	private readonly ids = new Map<string, string>();
 	private nextId = 1;
