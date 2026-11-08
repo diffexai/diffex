@@ -1,12 +1,15 @@
+import { type Context, fauxAssistantMessage, fauxToolCall } from "@diffexai/diffex-ai";
 import type { Container, EditorComponent } from "@diffexai/diffex-tui";
 import { visibleWidth } from "@diffexai/diffex-tui";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import type { AgentSessionRuntime } from "../../src/core/agent-session-runtime.ts";
+import { createSpawnAgentTool } from "../../src/core/tools/subagents.ts";
 import { InteractiveMode } from "../../src/modes/interactive/interactive-mode.ts";
 import { initTheme } from "../../src/modes/interactive/theme/theme.ts";
 import { stripAnsi } from "../../src/utils/ansi.ts";
+import { createTestExtensionsResult, createTestResourceLoader } from "../extension-test-utils.ts";
 import { goalControls } from "./goal-harness.ts";
-import { createHarness, type Harness } from "./harness.ts";
+import { createHarness, type Harness, type HarnessOptions } from "./harness.ts";
 
 type InteractiveState = {
 	defaultEditor: { onSubmit?: (text: string) => Promise<void> };
@@ -28,8 +31,8 @@ describe("interactive /goal", () => {
 		while (harnesses.length) await harnesses.pop()?.cleanup();
 	});
 
-	async function setup(tuiMode: "regular" | "fullscreen") {
-		const harness = await createHarness();
+	async function setup(tuiMode: "regular" | "fullscreen", options: HarnessOptions = {}) {
+		const harness = await createHarness(options);
 		harnesses.push(harness);
 		const runtime = {
 			session: harness.session,
@@ -71,6 +74,71 @@ describe("interactive /goal", () => {
 						.join("\n"),
 				),
 			).not.toContain("Goal");
+		},
+	);
+
+	it.each(["default", "custom", "extension"] as const)(
+		"restricts subagent spawning only while /goal is enabled with %s prompts",
+		async (promptSource) => {
+			const spawned: string[] = [];
+			const extensionsResult = await createTestExtensionsResult([
+				(extension) => {
+					extension.registerTool(createSpawnAgentTool((name) => spawned.push(name)));
+					if (promptSource === "extension") {
+						extension.on("before_agent_start", () => ({ systemPrompt: "Extension prompt." }));
+					}
+				},
+			]);
+			const resourceLoader = createTestResourceLoader({ extensionsResult });
+			if (promptSource === "custom") resourceLoader.getSystemPrompt = () => "Custom prompt.";
+			const { harness, state } = await setup("regular", { resourceLoader });
+			const prompts: Array<string | undefined> = [];
+			const schemas: unknown[] = [];
+			const capture = (context: Context) => {
+				prompts.push(context.systemPrompt);
+				schemas.push(structuredClone(context.tools?.find((tool) => tool.name === "spawn_agent")?.parameters));
+				return fauxAssistantMessage("Done.");
+			};
+			harness.setResponses([
+				capture,
+				(context) => {
+					capture(context);
+					return fauxAssistantMessage(
+						[
+							fauxToolCall("spawn_agent", { name: "frontend", task: "Inspect the frontend." }),
+							fauxToolCall("spawn_agent", { name: "backend", task: "Inspect the backend." }),
+						],
+						{ stopReason: "toolUse" },
+					);
+				},
+				capture,
+				capture,
+			]);
+			await harness.session.prompt("Review the frontend and backend.");
+			await state.defaultEditor.onSubmit?.("/goal");
+			await harness.session.prompt("Use two subagents: one to inspect the frontend and one to inspect the backend.");
+			await state.defaultEditor.onSubmit?.("/goal");
+			await harness.session.prompt("Continue the review.");
+
+			expect(prompts).toHaveLength(4);
+			for (const prompt of [prompts[0], prompts[3]]) {
+				expect(prompt).not.toContain("Do not spawn subagents on your own initiative.");
+			}
+			for (const prompt of [prompts[1], prompts[2]]) {
+				expect(prompt).toContain("Do not spawn subagents on your own initiative.");
+				expect(prompt).toContain("Only call spawn_agent when the user explicitly instructs you");
+				expect(prompt).toContain("Follow the user's specified subagent count and purpose for each subagent.");
+				expect(prompt).toContain("infer the missing details from the conversation context");
+			}
+			if (promptSource !== "default") {
+				for (const prompt of prompts) {
+					expect(prompt).toContain(promptSource === "custom" ? "Custom prompt." : "Extension prompt.");
+				}
+			}
+			expect(spawned).toEqual(["frontend", "backend"]);
+			expect(schemas[0]).toBeDefined();
+			for (const schema of schemas) expect(schema).toEqual(schemas[0]);
+			expect(harness.getPendingResponseCount()).toBe(0);
 		},
 	);
 

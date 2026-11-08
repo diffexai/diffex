@@ -1997,6 +1997,11 @@ export class AgentSession {
 		if (this._goalModeEnabled) {
 			systemPrompt +=
 				"\n\nPersisted plans and checklist snapshots in conversation history are historical evidence, not an authoritative active checklist in goal mode.";
+			systemPrompt +=
+				"\n\nGoal mode subagents:\n" +
+				"Do not spawn subagents on your own initiative. Only call spawn_agent when the user explicitly instructs you to use subagents or delegate work to them.\n" +
+				"Enabling /goal, task complexity, or opportunities for parallel work do not authorize subagent spawning.\n" +
+				"Follow the user's specified subagent count and purpose for each subagent. If the user requests subagents but omits the count or any purposes, infer the missing details from the conversation context and proceed within that request.";
 		}
 		// A custom prompt or per-turn extension override still needs the active
 		// context tools' contract, without replacing any of the supplied instructions.
