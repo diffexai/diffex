@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-11-08
+
 ### New Features
 
 - Added session-local `/goal` mode with persistent context archives and private recall of original evidence.
