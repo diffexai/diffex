@@ -64,4 +64,5 @@ if [[ "$NO_ENV" == "true" ]]; then
   echo "Running without API keys..."
 fi
 
-exec "$REPO_ROOT/node_modules/.bin/tsx" --tsconfig "$REPO_ROOT/tsconfig.json" "$REPO_ROOT/packages/coding-agent/src/cli.ts" ${ARGS[@]+"${ARGS[@]}"}
+export TSX_TSCONFIG_PATH="$REPO_ROOT/tsconfig.json"
+exec node --import "$REPO_ROOT/node_modules/tsx/dist/loader.mjs" "$REPO_ROOT/packages/coding-agent/src/cli.ts" ${ARGS[@]+"${ARGS[@]}"}

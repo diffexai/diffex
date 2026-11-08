@@ -59,13 +59,14 @@ if ($noEnv) {
 	Write-Host "Running without API keys..."
 }
 
-$tsxBin = Join-Path $repoRoot "node_modules/.bin/tsx.cmd"
-if (-not (Test-Path -LiteralPath $tsxBin)) {
-		throw "tsx not found at $tsxBin. Run npm install from the repository root first."
+$tsxLoader = Join-Path $repoRoot "node_modules/tsx/dist/loader.mjs"
+if (-not (Test-Path -LiteralPath $tsxLoader)) {
+		throw "tsx not found at $tsxLoader. Run npm install from the repository root first."
 }
 
 $cliPath = Join-Path $repoRoot "packages/coding-agent/src/cli.ts"
-& $tsxBin $cliPath @forwardArgs
+$env:TSX_TSCONFIG_PATH = Join-Path $repoRoot "tsconfig.json"
+& node --import $tsxLoader $cliPath @forwardArgs
 $exitCode = $LASTEXITCODE
 if ($exitCode -ne 0) {
 	exit $exitCode
