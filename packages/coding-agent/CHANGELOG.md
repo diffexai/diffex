@@ -2,6 +2,35 @@
 
 ## [Unreleased]
 
+### New Features
+
+- Added session-local `/goal` mode with persistent context archives and private recall of original evidence.
+  See [Goal mode](README.md#goal-mode) and [Planning and recall](docs/goal-recall.md) ([#312](https://github.com/diffexai/diffex/pull/312)).
+- Added selective compaction with historical summaries that preserve observations, actions, decisions, and verification limits without reviving old plans.
+  See [Planning and recall](docs/goal-recall.md) ([#317](https://github.com/diffexai/diffex/pull/317), [#319](https://github.com/diffexai/diffex/pull/319)).
+- Goal mode delegates to subagents only when explicitly requested by the user ([#322](https://github.com/diffexai/diffex/pull/322)).
+
+### Added
+
+- Added `/goal` controls, footer status, and SDK session configuration with branch-local persistence across resume, forks, and tree navigation ([#312](https://github.com/diffexai/diffex/pull/312)).
+- Added `compact_block` and `query_block` tools with durable original evidence, branch-scoped archive discovery, bounded private recall, and cancellation-safe recovery.
+  See [Planning and recall](docs/goal-recall.md) ([#312](https://github.com/diffexai/diffex/pull/312)).
+- Exported shared context estimation and provider safety-reserve helpers from the AI toolkit for consistent request budgets.
+
+### Changed
+
+- Goal mode suspends harness evolution and hides `update_plan` without changing global preferences; leaving goal mode restores configured planning and evolution behavior ([#312](https://github.com/diffexai/diffex/pull/312)).
+- Reduced repeated goal context-usage notes to every other completed tool batch while reporting higher pressure tiers immediately ([#312](https://github.com/diffexai/diffex/pull/312)).
+- Goal compaction now uses a four-section historical evidence outline and can summarize user messages and the latest complete tool exchange while preserving custom instructions and malformed exchanges ([#317](https://github.com/diffexai/diffex/pull/317), [#319](https://github.com/diffexai/diffex/pull/319)).
+- Required explicit user direction before goal mode spawns subagents, while allowing omitted counts and purposes to be inferred within that request ([#322](https://github.com/diffexai/diffex/pull/322)).
+
+### Fixed
+
+- Preserved protected context and archive provenance during emergency goal recovery, and allowed summary generation to use the model's available context and output capacity ([#316](https://github.com/diffexai/diffex/pull/316)).
+- Rejected oversized, truncated, empty, cancelled, failed, or tool-producing summaries before committing an archive ([#312](https://github.com/diffexai/diffex/pull/312)).
+- Added bounded retries for transient registry failures during pnpm release acceptance ([#312](https://github.com/diffexai/diffex/pull/312)).
+- Fixed development launchers to start without tsx IPC sockets and preserve the caller's working directory ([#321](https://github.com/diffexai/diffex/pull/321)).
+
 ## [0.4.1] - 2026-10-29
 
 ### New Features

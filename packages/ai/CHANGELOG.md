@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Exported `CONTEXT_SAFETY_TOKENS` and `estimateContextTokens` so context management can share provider request estimates and safety reserves.
+
 ## [0.4.1] - 2026-10-29
 
 ### Breaking Changes
