@@ -1302,8 +1302,7 @@ describe("Interactive transcript layout", () => {
 
 		await handleEvent.call(context, { type: "agent_end", messages: [toolMessage], willRetry: false });
 
-		expect(context.clearStatusIndicator).toHaveBeenCalledOnce();
-		expect(context.clearStatusIndicator).toHaveBeenCalledWith("working");
+		expect(context.clearStatusIndicator).not.toHaveBeenCalled();
 	});
 
 	test("restores a user dock when text follows an empty cumulative tool update", async () => {

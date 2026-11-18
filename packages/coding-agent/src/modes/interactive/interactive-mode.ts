@@ -3737,10 +3737,6 @@ export class InteractiveMode {
 			}
 
 			case "agent_end":
-				if (this.settingsManager.getShowTerminalProgress()) {
-					this.ui.terminal.setProgress(false);
-				}
-				this.clearStatusIndicator("working");
 				if (this.streamingComponent) {
 					this.chatContainer.removeChild(this.streamingComponent);
 					this.streamingComponent = undefined;
@@ -3761,6 +3757,14 @@ export class InteractiveMode {
 				break;
 
 			case "agent_settled":
+				// A settlement hook can start another run before this event reaches the UI.
+				if (!this.session.isStreaming) {
+					if (this.settingsManager.getShowTerminalProgress()) {
+						this.ui.terminal.setProgress(false);
+					}
+					this.clearStatusIndicator("working");
+					this.ui.requestRender();
+				}
 				await this.checkShutdownRequested();
 				if (planHandoffSettlementGuards.get(event)?.() !== false) {
 					this.handleSettledPlanHandoff(event.planHandoff);
@@ -3786,7 +3790,7 @@ export class InteractiveMode {
 				break;
 
 			case "subagent_wait_end":
-				if (this.settingsManager.getShowTerminalProgress()) {
+				if (!this.session.isStreaming && this.settingsManager.getShowTerminalProgress()) {
 					this.ui.terminal.setProgress(false);
 				}
 				this.clearStatusIndicator("subagentWait");
