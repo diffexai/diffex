@@ -115,7 +115,7 @@ describe("InteractiveMode subagent coordination", () => {
 		{
 			terminalProgressEnabled: true,
 			workingVisible: true,
-			expectedProgressCalls: [[false], [true]],
+			expectedProgressCalls: [[true]],
 			expectedWorkingIndicator: true,
 		},
 		{
@@ -127,7 +127,7 @@ describe("InteractiveMode subagent coordination", () => {
 		{
 			terminalProgressEnabled: true,
 			workingVisible: false,
-			expectedProgressCalls: [[false], [true]],
+			expectedProgressCalls: [[true]],
 			expectedWorkingIndicator: false,
 		},
 	])(
